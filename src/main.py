@@ -4,3 +4,5 @@
 # imports
 import curses
 import os
+
+# print("senko test")

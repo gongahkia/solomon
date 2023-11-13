@@ -32,3 +32,7 @@ curses.nocbreak()
 screen.keypad(False)
 curses.echo()
 curses.endwin()
+
+# FUA add code inside to instantiate screen and everything, for reading through a json and presenting qns
+def cycle(filename:str) -> None:
+    pass

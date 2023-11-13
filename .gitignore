@@ -1,20 +1,2 @@
-# SPDX-License-Identifier: Apache-2.0
-
-.DS_Store
-.coverage
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-.venv/
-__pycache__/
-*.egg-info/
-build/
-dist/
-htmlcov/
-solomon-data/
-solomon-journal/
-site/
-*.db
-*.sqlite
-*.sqlite3
-.playwright-cli/
+__pycache__
+.mypy_cache

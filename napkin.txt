@@ -1,0 +1,13 @@
+~ethos
+* functional programming
+* all data to be represented in data structures
+* all data transformed through explicit returns in functions
+* clean, readable code
+
+~FUA
+* file format for flash cards
+* render front-end in curses cli
+* learn how spaced repetition systems work, implement it in the program
+* vim binds for flash cards
+* allow creating, editing, deleting and reading flash cards
+* shell-integration to run the command anywhere from the CLI

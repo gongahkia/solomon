@@ -33,6 +33,36 @@ screen.keypad(False)
 curses.echo()
 curses.endwin()
 
-# FUA add code inside to instantiate screen and everything, for reading through a json and presenting qns
-def cycle(filename:str) -> None:
+
+# FUA destructures a senko file into a parsable dictionary
+def read_sko(filename:str) -> {}:
     pass
+
+# FUA add code inside to instantiate screen and everything, for reading through a json and presenting qns
+def render_sko(sko_contents:{}) -> None:
+    pass
+
+# FUA adds days from card_difficulty from sko_contents to a date, convert to int using format learnt in is111 lab 2, return date in string format for easy checking
+def add_days(date:str, days_add:int) -> str:
+    pass
+
+# FUA provides the frontend for editing flashcards in curses cli, returns the edited dictionary
+def edit_sko(sko_contents:{}) -> {}:
+    pass
+
+# FUA add flashcards to an existing senko dictionary and return the edited dictionary
+def add_sko(sko_contents:{}) -> {}:
+    pass
+
+# FUA delete flashcards from an existing senko dictionary and return the edited dictionary
+def delete_sko(sko_contents:{}) -> {}:
+    pass
+
+# FUA checks the validity of a senko file, for each value
+def check_sko(filename:str) -> bool:
+    pass
+
+# FUA writes the inputted dictionary to the Senko file for saving
+def write_sko(filename:str, sko_contents:{}) -> None:
+    pass
+

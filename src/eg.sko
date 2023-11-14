@@ -1,0 +1,44 @@
+{
+    "set_1": [
+        {
+            "card_name": "apple",
+            "card_info": "a kind of fruit",
+            "card_add_info": "I like to eat apples and other fruits."
+        },
+        {
+            "card_name": "bannana",
+            "card_info": "another kind of fruit",
+            "card_add_info": "i like to eat bannanas and other bullshit."
+        },
+        {
+            "card_name": "C",
+            "card_info": "a type of programming language",
+            "card_add_info": "i like to use statically typed programming languages."
+        }
+    ],
+
+    "you_can_call_a_set_whatever_you_want": [
+        {
+            "card_name": "a set can have",
+            "card_info": "a card can have any length of info",
+            "card_add_info": "this can also be empty as below"
+        },
+        {
+            "card_name": "prime",
+            "card_info": "look below look below",
+            "card_add_info": None
+        }
+    ],
+
+    "set_3": {
+        {
+            "card_name": "empty sets can also exist as below",
+            "card_info": "nothing",
+            "card_add_info": 1000
+        }
+    }
+
+    "set_4": {
+
+    }
+}

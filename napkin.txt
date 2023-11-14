@@ -5,8 +5,6 @@
 * clean, readable code
 
 ~FUA
-* edit the card_challenge to an additional field of date that card needs to be tested, edit this in README.md, eg.sko and doc/quickstart.md
-* file format for flash cards as json, prepare sample file
 * render front-end in curses cli
 * separate each portion of rendering (file selection, rendering a file, selecting mode, editing file, making cards) into diff functions
 * add nice visual response kickback upon selecting items, everything responds and bounces one pixel

@@ -14,11 +14,12 @@ Senko files follow the below structure.
 
 * One senko file can contain multiple flashcard sets. 
 * Each set contains one or more flashcards.
-* Each flashcard has the fields `card_name`, `card_info`, `card_add_info` and `card_challenge`.
-    * `card_name`: string; editable by user at sko file instantiation and through editing cards
-    * `card_info`: string; editable by user at sko file instantiation and through editing cards
-    * `card_add_info`: string; editable by user at sko file instantiation and through editing cards
+* Each flashcard has the fields `card_name`, `card_info`, `card_add_info`, `card_challenge` and `card_date`
+    * `card_name`: str; editable by user at sko file instantiation and through editing cards
+    * `card_info`: str; editable by user at sko file instantiation and through editing cards
+    * `card_add_info`: str; editable by user at sko file instantiation and through editing cards
     * `card_challenge`: int; editable by user at sko file instntiation and not editable after; represents the number of days between card recurring in user's pool
+    * `card_date`: str; editable by user at sko file instantiation and not editable after; represents the next date for card to be tested
 
 ```txt
 {
@@ -28,6 +29,7 @@ Senko files follow the below structure.
             "card_info": "",
             "card_add_info": "",
             "card_challenge": 0
+            "card_date": ""
         },
         {
             etc...
@@ -49,13 +51,15 @@ An example Senko file.
             "card_name": "становиться",
             "card_info": "stanovit'sya",
             "card_add_info": "become",
-            "card_challenge": 1
+            "card_challenge": 1,
+            "card_date": "20/1/2023"
         },
         {
             "card_name": "Спасибо",
             "card_info": "Spasibo",
             "card_add_info": "thank you",
-            "card_challenge": 0
+            "card_challenge": 0,
+            "card_date": "25/1/2023"
         }
     ],
 
@@ -64,13 +68,15 @@ An example Senko file.
             "card_name": "なる",
             "card_info": "na ru",
             "card_add_info": "become",
-            "card_challenge": 5
+            "card_challenge": 5,
+            "card_date": "02/02/2023"
         },
         {
             "card_name": "ありがとう",
             "card_info": "a ri ga tou",
             "card_add_info": "thank you",
             "card_challenge": 2
+            "card_date": "12/02/2023"
         }
     ]
 }

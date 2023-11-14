@@ -33,9 +33,16 @@ screen.keypad(False)
 curses.echo()
 curses.endwin()
 
+# FUA returns a filename as a string to open
+def select_sko_file() -> str:
+    pass
 
 # FUA destructures a senko file into a parsable dictionary
 def read_sko(filename:str) -> {}:
+    pass
+
+# FUA reads through the file, creates a curses frontend for users to select which card set they want
+def select_flashcard_set(file_contents:{}) -> {}:
     pass
 
 # FUA add code inside to instantiate screen and everything, for reading through a json and presenting qns
@@ -58,7 +65,7 @@ def add_sko(sko_contents:{}) -> {}:
 def delete_sko(sko_contents:{}) -> {}:
     pass
 
-# FUA checks the validity of a senko file, for each value
+# FUA checks the validity of a senko file, for each value, and checks whether a set is empty, if so warn the user accordingly
 def check_sko(filename:str) -> bool:
     pass
 

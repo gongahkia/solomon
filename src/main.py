@@ -3,8 +3,10 @@
 
 # imports
 import curses
+import json
 import os
 
+"""
 # print("senko test")
 screen = curses.initscr()
 screen.keypad(True)
@@ -32,14 +34,25 @@ curses.nocbreak()
 screen.keypad(False)
 curses.echo()
 curses.endwin()
+"""
 
-# FUA returns a filename as a string to open
+# makes the senko file directory in ~/.config folder
+def make_senko_dir() -> None:
+    os.system("mkdir ~/.config/senko")
+
+# FUA returns a filename as a string to open using curses CLI --> DEBUG WHY NO WORK
 def select_sko_file() -> str:
-    pass
+    file_path:str = "~/.config/senko/"
+    make_senko_dir()
+    valid_array:[str] = [file_name for file_name in os.listdir(file_path) if file_name.split(".")[1] == "sko"]
+    print(valid_array)
 
-# FUA destructures a senko file into a parsable dictionary
+# destructures a .sko file into a python dictionary
 def read_sko(filename:str) -> {}:
-    pass
+    fhand = open(filename,"r")
+    sko_contents:{str:[]}= json.loads(fhand.read())
+    fhand.close()
+    return sko_contents
 
 # FUA reads through the file, creates a curses frontend for users to select which card set they want
 def select_flashcard_set(file_contents:{}) -> {}:
@@ -73,3 +86,6 @@ def check_sko(filename:str) -> bool:
 def write_sko(filename:str, sko_contents:{}) -> None:
     pass
 
+make_senko_dir()
+read_sko("eg.sko")
+select_sko_file()

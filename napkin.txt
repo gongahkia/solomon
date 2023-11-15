@@ -6,6 +6,7 @@
 
 ~FUA
 * render front-end in curses cli
+* allow additional config options in a senko config file within ~/.config/senko
 * separate each portion of rendering (file selection, rendering a file, selecting mode, editing file, making cards) into diff functions
 * add nice visual response kickback upon selecting items, everything responds and bounces one pixel
 * learn how spaced repetition systems work, implement it in the program

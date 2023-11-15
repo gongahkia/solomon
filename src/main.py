@@ -36,20 +36,46 @@ curses.echo()
 curses.endwin()
 """
 
-# makes the senko file directory in ~/.config folder
-def make_senko_dir() -> None:
-    os.system("mkdir ~/.config/senko")
-
-# FUA returns a filename as a string to open using curses CLI --> DEBUG WHY NO WORK
+# returns a filename as a string to open, renders in curses CLI
 def select_sko_file() -> str:
-    file_path:str = "~/.config/senko/"
-    make_senko_dir()
+
+    file_path:str = os.path.expanduser("~/.config/senko")
     valid_array:[str] = [file_name for file_name in os.listdir(file_path) if file_name.split(".")[1] == "sko"]
-    print(valid_array)
+
+    screen = curses.initscr()
+    screen.keypad(True)
+    curses.cbreak()
+    curses.curs_set(0)
+    if curses.has_colors():
+        curses.start_color()
+        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+
+    while True:
+        screen.erase()
+        coords:{str:int}= {"x":0, "y":2}
+        counter:int = 1
+        screen.addstr(0, 0, "Type in a valid number", curses.color_pair(3))
+        for file_name in valid_array:
+            screen.addstr(coords["y"], coords["x"], f"{counter} | {file_name}")
+            coords["y"] += 1
+            counter += 1
+        keypress = chr(screen.getch())
+        if not keypress.isnumeric() or int(keypress) > len(valid_array) or int(keypress) < 1:
+            continue
+        else:
+            screen.erase()
+            screen.addstr(0,0,"Loading your senko set...", curses.color_pair(2))
+            screen.refresh()
+            screen.keypad(False)
+            curses.echo()
+            curses.endwin()
+            return valid_array[int(keypress) - 1]
 
 # destructures a .sko file into a python dictionary
 def read_sko(filename:str) -> {}:
-    fhand = open(filename,"r")
+    file_path:str = os.path.expanduser(f"~/.config/senko/{filename}")
+    fhand = open(file_path,"r")
     sko_contents:{str:[]}= json.loads(fhand.read())
     fhand.close()
     return sko_contents
@@ -86,6 +112,4 @@ def check_sko(filename:str) -> bool:
 def write_sko(filename:str, sko_contents:{}) -> None:
     pass
 
-make_senko_dir()
-read_sko("eg.sko")
-select_sko_file()
+print(read_sko(select_sko_file()))

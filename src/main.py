@@ -81,7 +81,7 @@ def read_sko(filename:str) -> {}:
     return sko_contents
 
 # reads through the file and allows users to select which card set they want
-def select_flashcard_set(file_contents:{}) -> (str,{}):
+def select_flashcard_set(file_contents:{}) -> (str,[]):
 
     name_array:[str] = [set_name for set_name in file_contents]
 
@@ -149,8 +149,22 @@ def delete_sko(sko_contents:{}) -> {}:
 def check_sko(filename:str) -> bool:
     pass
 
-# FUA writes the inputted dictionary to the Senko file for saving
-def write_sko(filename:str, sko_contents:{}) -> None:
-    pass
+# updates the overall senko file's dictionary which can then be written to the file using write_sko(), this should update the existing key
+def update_sko_allsets(sko_all_sets:{}, sko_setname:str, sko_setcontents:[]) -> {}:
+    sko_all_sets[sko_setname] = sko_setcontents
+    return sko_all_sets
 
-print(select_flashcard_set(read_sko(select_sko_file())))
+# writes the inputted dictionary to the Senko file for saving
+def write_sko(filename:str, sko_contents:{}) -> None:
+    fhand = open(filename,"w")
+    fhand.write(json.dumps(sko_contents))
+    fhand.close()
+    return None
+
+sko_filename:str = select_sko_file()
+sko_all_sets:{} = read_sko(sko_filename)
+sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
+sko_setname:str = sko_setname_setcontents[0]
+sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
+
+# write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, sko_setcontents))

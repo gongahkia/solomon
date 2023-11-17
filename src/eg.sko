@@ -4,7 +4,7 @@
             "card_name": "apple",
             "card_info": "a kind of fruit",
             "card_add_info": "I like to eat apples and other fruits.",
-            "card_date": "02/02/2023"
+            "card_date": "17/11/2023"
         },
         {
             "card_name": "banana",
@@ -16,7 +16,7 @@
             "card_name": "C",
             "card_info": "a type of programming language",
             "card_add_info": "I like to use statically typed programming languages.",
-            "card_date": "02/02/2023"
+            "card_date": "17/11/2023"
         }
     ],
 

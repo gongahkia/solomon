@@ -66,7 +66,7 @@ def select_sko_file() -> str:
             continue
         else:
             screen.erase()
-            screen.addstr(0,0,"Loading your senko set...", curses.color_pair(2))
+            screen.addstr(0,0,"No valid senko (.sko) files found.", curses.color_pair(2))
             screen.refresh()
             screen.keypad(False)
             curses.echo()
@@ -116,37 +116,82 @@ def select_flashcard_set(file_contents:{}) -> (str,[]):
             curses.endwin()
             return (name_array[int(keypress) - 1], file_contents[name_array[int(keypress) - 1]])
 
-# FUA CONTINUE ADDING CODE HERE AND REVIEW BELOW CODE renders relevant card information, returns the keypress 
+# renders relevant card information, returns the difficulty
 def render_sko_card(card:{}) -> str:
-    card["card_name"]
-    card["card_info"]
-    card["card_add_info"]
-    card["card_date"]
 
-# FUA CONTINUE ADDING CODE HERE AND REVIEW BELOW CODE add code inside to instantiate screen and everything, for reading through a json and presenting qns, takes in input for difficulty of each card
-def render_sko_loop(sko_setname:str, sko_setcontents:[]) -> {}:
+    screen = curses.initscr()
+    screen.keypad(True)
+    curses.cbreak()
+    curses.curs_set(0)
 
-    today:str = "{date.today().split("-")[2]}/{date.today().split("-")[1]}/{date.today().split("-")[0]}"
+    if curses.has_colors():
+        curses.start_color()
+        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
 
     while True:
+        screen.erase()
+        screen.addstr(0, 0, card["card_name"])
+        screen.addstr(2, 0, "[S]how card", curses.color_pair(3))
 
+        keypress = chr(screen.getch())
+
+        if not keypress == "s":
+            continue
+        else:
+            break
+
+    while True:
+        screen.erase()
+
+        screen.addstr(0, 0, card["card_name"])
+        screen.addstr(1, 0, card["card_info"])
+        screen.addstr(2, 0, card["card_add_info"])
+        screen.addstr(5, 0, "[Q] Easy", curses.color_pair(2))
+        screen.addstr(6, 0, "[W] Medium", curses.color_pair(5))
+        screen.addstr(7, 0, "[E] Hard", curses.color_pair(1))
+
+        keypress_choose = chr(screen.getch())
+        difficulty:str = ""
+
+        match keypress_choose:
+            case "q":
+                difficulty = "easy"
+                break
+            case "w":
+                difficulty = "medium"
+                break
+            case "e":
+                difficulty = "hard"
+                break
+            case _:
+                continue
+
+    screen.erase()
+    screen.refresh()
+    screen.keypad(False)
+    curses.echo()
+    curses.endwin()
+    return difficulty
+
+# runs whenever a card set is run
+def render_sko_loop(sko_setname:str, sko_setcontents:[]) -> {}:
+    today:str = date.today().strftime("%d/%m/%Y")
+    while True:
         date_array:[str] = [card["card_date"] for card in sko_setcontents]
-
         if today not in date_array:
             return (sko_setname, sko_setcontents)
-
         for card in sko_setcontents:
             if card["card_date"] == today:
-                keypress:str = render_sko_card(card)
-                match keypress:
-                    # easy difficlty
-                    case "q":
+                difficulty:str = render_sko_card(card)
+                match difficulty: # edit below to change how often the card should be shown
+                    case "easy":
                         card["card_date"] = add_days(card["card_date"], 3)
-                    # medium difficulty
-                    case "w":
+                    case "medium":
                         card["card_date"] = add_days(card["card_date"], 2)
-                    # hard difficulty
-                    case "e":
+                    case "hard":
                         card["card_date"] = add_days(card["card_date"], 0)
 
 # adds days to sko_contents to a date
@@ -163,11 +208,15 @@ def add_days(date:str, days_add:int) -> str:
         new_day_str:str = f"0{new_day}"
     return f"{new_day_str}/{new_month_str}/{new_year}"
 
+# FUA provides the frontend for choosing what mode of senko you want to use, use, add, edit existing, delete cards, include running check_sko() for valid or invalid files
+def menu_sko() -> None:
+    pass
+
 # FUA provides the frontend for editing flashcards in curses cli, returns the edited dictionary
 def edit_sko(sko_contents:{}) -> {}:
     pass
 
-# FUA add flashcards to an existing senko dictionary and return the edited dictionary
+# FUA add flashcards to an existing senko dictionary and return the edited dictionary, runs check_sko()
 def add_sko(sko_contents:{}) -> {}:
     pass
 

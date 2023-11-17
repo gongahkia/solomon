@@ -4,21 +4,18 @@
             "card_name": "apple",
             "card_info": "a kind of fruit",
             "card_add_info": "I like to eat apples and other fruits.",
-            "card_challenge": 0,
             "card_date": "02/02/2023"
         },
         {
             "card_name": "banana",
             "card_info": "another kind of fruit",
             "card_add_info": "I like to eat bananas and other fruits.",
-            "card_challenge": 0,
             "card_date": "02/02/2023"
         },
         {
             "card_name": "C",
             "card_info": "a type of programming language",
             "card_add_info": "I like to use statically typed programming languages.",
-            "card_challenge": 0,
             "card_date": "02/02/2023"
         }
     ],
@@ -28,14 +25,12 @@
             "card_name": "a set can have",
             "card_info": "a card can have any length of info",
             "card_add_info": "this can also be empty as below",
-            "card_challenge": 0,
             "card_date": "02/02/2023"
         },
         {
             "card_name": "prime",
             "card_info": "look below look below",
             "card_add_info": null,
-            "card_challenge": 0,
             "card_date": "02/02/2023"
         }
     ],
@@ -45,7 +40,6 @@
             "card_name": "empty sets can also exist as below",
             "card_info": "nothing",
             "card_add_info": 1000,
-            "card_challenge": 0,
             "card_date": "02/02/2023"
         }
     ],

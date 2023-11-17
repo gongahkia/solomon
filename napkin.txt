@@ -6,6 +6,7 @@
 
 ~FUA
 * render front-end in curses cli
+* allow user to quit using q keypress during the file and set selection screen
 * allow additional config options in a senko config file within ~/.config/senko
 * separate each portion of rendering (file selection, rendering a file, selecting mode, editing file, making cards) into diff functions
 * add nice visual response kickback upon selecting items, everything responds and bounces one pixel
@@ -13,3 +14,4 @@
 * vim binds for flash cards
 * allow creating, editing, deleting and reading flash cards
 * shell-integration to run the command anywhere from the CLI
+* in the future implement introducing 3 new words to be learnt

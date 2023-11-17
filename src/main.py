@@ -5,6 +5,7 @@
 import curses
 import json
 import os
+from datetime import date
 
 """
 # print("senko test")
@@ -115,11 +116,40 @@ def select_flashcard_set(file_contents:{}) -> (str,[]):
             curses.endwin()
             return (name_array[int(keypress) - 1], file_contents[name_array[int(keypress) - 1]])
 
-# FUA add code inside to instantiate screen and everything, for reading through a json and presenting qns, takes in input for difficulty of each card
-def render_sko(sko_contents:{}) -> {}:
-    pass
+# FUA CONTINUE ADDING CODE HERE AND REVIEW BELOW CODE renders relevant card information, returns the keypress 
+def render_sko_card(card:{}) -> str:
+    card["card_name"]
+    card["card_info"]
+    card["card_add_info"]
+    card["card_date"]
 
-# adds days from card_difficulty from sko_contents to a date
+# FUA CONTINUE ADDING CODE HERE AND REVIEW BELOW CODE add code inside to instantiate screen and everything, for reading through a json and presenting qns, takes in input for difficulty of each card
+def render_sko_loop(sko_setname:str, sko_setcontents:[]) -> {}:
+
+    today:str = "{date.today().split("-")[2]}/{date.today().split("-")[1]}/{date.today().split("-")[0]}"
+
+    while True:
+
+        date_array:[str] = [card["card_date"] for card in sko_setcontents]
+
+        if today not in date_array:
+            return (sko_setname, sko_setcontents)
+
+        for card in sko_setcontents:
+            if card["card_date"] == today:
+                keypress:str = render_sko_card(card)
+                match keypress:
+                    # easy difficlty
+                    case "q":
+                        card["card_date"] = add_days(card["card_date"], 3)
+                    # medium difficulty
+                    case "w":
+                        card["card_date"] = add_days(card["card_date"], 2)
+                    # hard difficulty
+                    case "e":
+                        card["card_date"] = add_days(card["card_date"], 0)
+
+# adds days to sko_contents to a date
 def add_days(date:str, days_add:int) -> str:
     new_dat:int = int(date.split("/")[0]) + (int(date.split("/")[1]) * 30) + (int(date.split("/")[2]) * 365) + days_add
     new_year:int = new_dat // 365 
@@ -166,5 +196,6 @@ sko_all_sets:{} = read_sko(sko_filename)
 sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
 sko_setname:str = sko_setname_setcontents[0]
 sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
+print(render_sko_loop(sko_setname, sko_setcontents))
 
 # write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, sko_setcontents))

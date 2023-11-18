@@ -60,8 +60,8 @@ def select_sko_file() -> str | None:
     curses.curs_set(0)
     if curses.has_colors():
         curses.start_color()
-        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
         curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
         curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
 
     while True:
@@ -71,7 +71,9 @@ def select_sko_file() -> str | None:
             counter:int = 1
             screen.addstr(0, 0, "Type in a valid number", curses.color_pair(3))
             for file_name in valid_array:
-                screen.addstr(coords["y"], coords["x"], f"{counter} | {file_name}")
+                num_files:int = len(read_sko(file_name))
+                screen.addstr(coords["y"], coords["x"], f"{counter} | {file_name} | ")
+                screen.addstr(coords["y"], len(str(counter)) + len(file_name) + 6, f"{num_files} decks", curses.color_pair(2))
                 coords["y"] += 1
                 counter += 1
             keypress = chr(screen.getch())
@@ -119,18 +121,39 @@ def select_flashcard_set(file_contents:{}) -> (str,[]):
     curses.curs_set(0)
     if curses.has_colors():
         curses.start_color()
-        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
         curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
 
     while True:
         screen.erase()
         coords:{str:int}= {"x":0, "y":2}
         counter:int = 1
         screen.addstr(0, 0, "Type in a valid number", curses.color_pair(3))
+
+        # rendering flashcard options
         for flashcard_set in name_array:
-            screen.addstr(coords["y"], coords["x"], f"{counter} | {flashcard_set}")
-            coords["y"] += 1
-            counter += 1
+            cards_due = cards_due_per_set(file_contents[flashcard_set])
+            match cards_due:
+                case "Empty":
+                    screen.addstr(coords["y"], coords["x"], f"{counter} | {flashcard_set} | ")
+                    screen.addstr(coords["y"], len(str(counter)) + len(flashcard_set) + 6, cards_due, curses.color_pair(5))
+                    coords["y"] += 1
+                    counter += 1
+                    
+                case 0:
+                    screen.addstr(coords["y"], coords["x"], f"{counter} | {flashcard_set} | ")
+                    screen.addstr(coords["y"], len(str(counter)) + len(flashcard_set) + 6, str(cards_due), curses.color_pair(2))
+                    coords["y"] += 1
+                    counter += 1
+
+                case _:
+                    screen.addstr(coords["y"], coords["x"], f"{counter} | {flashcard_set} | ")
+                    screen.addstr(coords["y"], len(str(counter)) + len(flashcard_set) + 6, str(cards_due), curses.color_pair(1))
+                    coords["y"] += 1
+                    counter += 1
+                    
         keypress = chr(screen.getch())
         if not keypress.isnumeric() or int(keypress) > len(name_array) or int(keypress) < 1:
             continue
@@ -300,6 +323,21 @@ def check_future(given_date:str) -> bool:
     tod_dat:int = int(today_str.split("/")[0]) + (int(today_str.split("/")[1]) * 30) + (int(today_str.split("/")[2]) * 365)
     given_dat:int = int(given_date.split("/")[0]) + (int(given_date.split("/")[1]) * 30) + (int(given_date.split("/")[2]) * 365)
     return tod_dat < given_dat
+
+# counts the number of cards due per Senko card set
+def cards_due_per_set(sko_setcontents:[]) -> int | str | None:
+    today_str:str= date.today().strftime("%d/%m/%Y")
+    if len(sko_setcontents) == 0:
+        return "Empty"
+    elif len(sko_setcontents) > 0:
+        count:int = 0
+        date_array:[str] = [card["card_date"] for card in sko_setcontents]
+        for dated in date_array:
+            if check_overdue(dated) or dated == today_str:
+                count += 1
+        return count
+    else:
+        return None
 
 # FUA provides the frontend for editing flashcards in curses cli, returns the edited dictionary
 def edit_sko(sko_contents:{}) -> {}:

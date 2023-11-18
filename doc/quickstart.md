@@ -19,6 +19,7 @@ Senko files follow the below structure.
     * `card_info`: str; editable by user at sko file instantiation and through editing cards
     * `card_add_info`: str; editable by user at sko file instantiation and through editing cards
     * `card_date`: str; editable by user at sko file instantiation and not editable after; represents the next date for card to be tested
+* Senko files with invalid structure are ignored
 
 ```txt
 {

@@ -37,11 +37,22 @@ curses.echo()
 curses.endwin()
 """
 
+# checks the syntax of a senko file
+def check_sko(filename:str) -> bool:
+    try:
+        file_path:str = os.path.expanduser(f"~/.config/senko/{filename}")
+        fhand = open(file_path,"r")
+        sko_contents:{str:[]}= json.loads(fhand.read())
+        fhand.close()
+        return True
+    except:
+        return False
+
 # returns a filename as a string to open, renders in curses CLI
-def select_sko_file() -> str:
+def select_sko_file() -> str | None:
 
     file_path:str = os.path.expanduser("~/.config/senko")
-    valid_array:[str] = [file_name for file_name in os.listdir(file_path) if file_name.split(".")[1] == "sko"]
+    valid_array:[str] = [file_name for file_name in os.listdir(file_path) if file_name.split(".")[1] == "sko" and check_sko(file_name)]
 
     screen = curses.initscr()
     screen.keypad(True)
@@ -51,27 +62,43 @@ def select_sko_file() -> str:
         curses.start_color()
         curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
         curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
 
     while True:
-        screen.erase()
-        coords:{str:int}= {"x":0, "y":2}
-        counter:int = 1
-        screen.addstr(0, 0, "Type in a valid number", curses.color_pair(3))
-        for file_name in valid_array:
-            screen.addstr(coords["y"], coords["x"], f"{counter} | {file_name}")
-            coords["y"] += 1
-            counter += 1
-        keypress = chr(screen.getch())
-        if not keypress.isnumeric() or int(keypress) > len(valid_array) or int(keypress) < 1:
-            continue
+        if not len(valid_array) == 0:
+            screen.erase()
+            coords:{str:int}= {"x":0, "y":2}
+            counter:int = 1
+            screen.addstr(0, 0, "Type in a valid number", curses.color_pair(3))
+            for file_name in valid_array:
+                screen.addstr(coords["y"], coords["x"], f"{counter} | {file_name}")
+                coords["y"] += 1
+                counter += 1
+            keypress = chr(screen.getch())
+            if not keypress.isnumeric() or int(keypress) > len(valid_array) or int(keypress) < 1:
+                continue
+            else:
+                screen.erase()
+                screen.refresh()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                return valid_array[int(keypress) - 1]
         else:
             screen.erase()
-            screen.addstr(0,0,"No valid senko (.sko) files found.", curses.color_pair(2))
-            screen.refresh()
-            screen.keypad(False)
-            curses.echo()
-            curses.endwin()
-            return valid_array[int(keypress) - 1]
+            counter:int = 1
+            screen.addstr(0, 0, "No valid senko (.sko) files found.", curses.color_pair(5))
+            screen.addstr(2, 0, "[Q]uit", curses.color_pair(3))
+            keypress = chr(screen.getch())
+            if not keypress == "q":
+                continue
+            else:
+                screen.erase()
+                screen.refresh()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                return None
 
 # destructures a .sko file into a python dictionary
 def read_sko(filename:str) -> {}:
@@ -145,13 +172,22 @@ def render_sko_card(card:{}) -> str:
 
     while True:
         screen.erase()
+        if card["card_name"]:
+            screen.addstr(0, 0, card["card_name"])
+        else:
+            screen.addstr(0, 0, "")
+        if card["card_info"]:
+            screen.addstr(1, 0, card["card_info"])
+        else:
+            screen.addstr(0, 0, "")
+        if card["card_add_info"]:
+            screen.addstr(2, 0, card["card_add_info"])
+        else:
+            screen.addstr(0, 0, "")
 
-        screen.addstr(0, 0, card["card_name"])
-        screen.addstr(1, 0, card["card_info"])
-        screen.addstr(2, 0, card["card_add_info"])
-        screen.addstr(5, 0, "[Q] Easy", curses.color_pair(2))
-        screen.addstr(6, 0, "[W] Medium", curses.color_pair(5))
-        screen.addstr(7, 0, "[E] Hard", curses.color_pair(1))
+        screen.addstr(4, 0, "[Q] Easy", curses.color_pair(2))
+        screen.addstr(5, 0, "[W] Medium", curses.color_pair(5))
+        screen.addstr(6, 0, "[E] Hard", curses.color_pair(1))
 
         keypress_choose = chr(screen.getch())
         difficulty:str = ""
@@ -177,14 +213,59 @@ def render_sko_card(card:{}) -> str:
     return difficulty
 
 # runs whenever a card set is run
-def render_sko_loop(sko_setname:str, sko_setcontents:[]) -> {}:
-    today:str = date.today().strftime("%d/%m/%Y")
+def render_sko_loop(sko_setname:str, sko_setcontents:[]) -> ():
+    today_str:str= date.today().strftime("%d/%m/%Y")
+
     while True:
+    
+        # empty set
+        if len(sko_setcontents) == 0:
+
+            screen = curses.initscr()
+            screen.keypad(True)
+            curses.noecho()
+            curses.cbreak()
+            curses.curs_set(0)
+
+            if curses.has_colors():
+                curses.start_color()
+                curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+                curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+
+            while True:
+
+                screen.erase()
+                screen.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(5))
+                screen.addstr(2, 0, "[Q]uit", curses.color_pair(3))
+
+                keypress:str = chr(screen.getch())
+
+                if keypress != "q":
+                    continue
+                else:
+                    screen.refresh()
+                    curses.nocbreak()
+                    screen.keypad(False)
+                    curses.echo()
+                    curses.endwin()
+                    return (sko_setname, sko_setcontents)
+
+        # break condition
         date_array:[str] = [card["card_date"] for card in sko_setcontents]
-        if today not in date_array:
+        count:int = 0
+        for dated in date_array:
+            if check_future(dated):
+                count += 1
+        if count == len(date_array):
             return (sko_setname, sko_setcontents)
+
+        # loop content
         for card in sko_setcontents:
-            if card["card_date"] == today:
+
+            if check_overdue(card["card_date"]):
+                card["card_date"] = today_str
+
+            if card["card_date"] == today_str:
                 difficulty:str = render_sko_card(card)
                 match difficulty: # edit below to change how often the card should be shown
                     case "easy":
@@ -195,8 +276,8 @@ def render_sko_loop(sko_setname:str, sko_setcontents:[]) -> {}:
                         card["card_date"] = add_days(card["card_date"], 0)
 
 # adds days to sko_contents to a date
-def add_days(date:str, days_add:int) -> str:
-    new_dat:int = int(date.split("/")[0]) + (int(date.split("/")[1]) * 30) + (int(date.split("/")[2]) * 365) + days_add
+def add_days(given_date:str, days_add:int) -> str:
+    new_dat:int = int(given_date.split("/")[0]) + (int(given_date.split("/")[1]) * 30) + (int(given_date.split("/")[2]) * 365) + days_add
     new_year:int = new_dat // 365 
     new_month:int = (new_dat % 365) // 30
     new_month_str:str = f"{new_month}"
@@ -208,9 +289,17 @@ def add_days(date:str, days_add:int) -> str:
         new_day_str:str = f"0{new_day}"
     return f"{new_day_str}/{new_month_str}/{new_year}"
 
-# FUA provides the frontend for choosing what mode of senko you want to use, use, add, edit existing, delete cards, include running check_sko() for valid or invalid files
-def menu_sko() -> None:
-    pass
+def check_overdue(given_date:str) -> bool:
+    today_str:str= date.today().strftime("%d/%m/%Y")
+    tod_dat:int = int(today_str.split("/")[0]) + (int(today_str.split("/")[1]) * 30) + (int(today_str.split("/")[2]) * 365)
+    given_dat:int = int(given_date.split("/")[0]) + (int(given_date.split("/")[1]) * 30) + (int(given_date.split("/")[2]) * 365)
+    return tod_dat > given_dat
+
+def check_future(given_date:str) -> bool:
+    today_str:str= date.today().strftime("%d/%m/%Y")
+    tod_dat:int = int(today_str.split("/")[0]) + (int(today_str.split("/")[1]) * 30) + (int(today_str.split("/")[2]) * 365)
+    given_dat:int = int(given_date.split("/")[0]) + (int(given_date.split("/")[1]) * 30) + (int(given_date.split("/")[2]) * 365)
+    return tod_dat < given_dat
 
 # FUA provides the frontend for editing flashcards in curses cli, returns the edited dictionary
 def edit_sko(sko_contents:{}) -> {}:
@@ -224,8 +313,8 @@ def add_sko(sko_contents:{}) -> {}:
 def delete_sko(sko_contents:{}) -> {}:
     pass
 
-# FUA checks the validity of a senko file, for each value, and checks whether a set is empty, if so warn the user accordingly
-def check_sko(filename:str) -> bool:
+# FUA provides the frontend for choosing what mode of senko you want to use, use, add, edit existing, delete cards, include running check_sko() for valid or invalid files
+def menu_sko() -> None:
     pass
 
 # updates the overall senko file's dictionary which can then be written to the file using write_sko(), this should update the existing key
@@ -235,7 +324,8 @@ def update_sko_allsets(sko_all_sets:{}, sko_setname:str, sko_setcontents:[]) -> 
 
 # writes the inputted dictionary to the Senko file for saving
 def write_sko(filename:str, sko_contents:{}) -> None:
-    fhand = open(filename,"w")
+    file_path:str = os.path.expanduser(f"~/.config/senko/{filename}")
+    fhand = open(file_path,"w")
     fhand.write(json.dumps(sko_contents))
     fhand.close()
     return None
@@ -245,6 +335,6 @@ sko_all_sets:{} = read_sko(sko_filename)
 sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
 sko_setname:str = sko_setname_setcontents[0]
 sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
-print(render_sko_loop(sko_setname, sko_setcontents))
+write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, render_sko_loop(sko_setname, sko_setcontents)[1]))
 
 # write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, sko_setcontents))

@@ -6,8 +6,8 @@
 
 ~FUA
 * render front-end in curses cli
+* add option to show how many cards in a set are overdue or due today in red next to the file name when rendering the sets
 * allow user to quit using q keypress during the file and set selection screen
-* debug OSX issues with rendering
 * allow additional config options in a senko config file within ~/.config/senko
 * separate each portion of rendering (file selection, rendering a file, selecting mode, editing file, making cards) into diff functions
 * add nice visual response kickback upon selecting items, everything responds and bounces one pixel

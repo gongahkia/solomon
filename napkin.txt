@@ -6,7 +6,6 @@
 
 ~FUA
 * render front-end in curses cli
-* add screen that indicates users are done viewing their senko card deck unless deck was empty to begin with
 * allow user to quit using q keypress during the file and set selection screen
 * allow additional config options in a senko config file within ~/.config/senko
 * separate each portion of rendering (file selection, rendering a file, selecting mode, editing file, making cards) into diff functions

@@ -252,6 +252,7 @@ def render_sko_loop(sko_setname:str, sko_setcontents:[]) -> ():
 
             if curses.has_colors():
                 curses.start_color()
+                curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
                 curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
                 curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
 
@@ -279,8 +280,33 @@ def render_sko_loop(sko_setname:str, sko_setcontents:[]) -> ():
         for dated in date_array:
             if check_future(dated):
                 count += 1
+
         if count == len(date_array):
-            return (sko_setname, sko_setcontents)
+
+            # completed decks screen
+            screen = curses.initscr()
+            screen.keypad(True)
+            curses.noecho()
+            curses.cbreak()
+            curses.curs_set(0)
+
+            while True:
+
+                screen.erase()
+                screen.addstr(0, 0, f"You have finished all {sko_setname} cards for the day! Take a break!", curses.color_pair(2))
+                screen.addstr(2, 0, "[Q]uit", curses.color_pair(3))
+
+                keypress:str = chr(screen.getch())
+
+                if keypress != "q":
+                    continue
+                else:
+                    screen.refresh()
+                    curses.nocbreak()
+                    screen.keypad(False)
+                    curses.echo()
+                    curses.endwin()
+                    return (sko_setname, sko_setcontents)
 
         # loop content
         for card in sko_setcontents:
@@ -339,6 +365,10 @@ def cards_due_per_set(sko_setcontents:[]) -> int | str | None:
     else:
         return None
 
+# FUA provides the frontend for choosing what mode of senko you want to use, use, add, edit existing, delete cards, include running check_sko() for valid or invalid files
+def menu_sko() -> None:
+    pass
+
 # FUA provides the frontend for editing flashcards in curses cli, returns the edited dictionary
 def edit_sko(sko_contents:{}) -> {}:
     pass
@@ -349,10 +379,6 @@ def add_sko(sko_contents:{}) -> {}:
 
 # FUA delete flashcards from an existing senko dictionary and return the edited dictionary
 def delete_sko(sko_contents:{}) -> {}:
-    pass
-
-# FUA provides the frontend for choosing what mode of senko you want to use, use, add, edit existing, delete cards, include running check_sko() for valid or invalid files
-def menu_sko() -> None:
     pass
 
 # updates the overall senko file's dictionary which can then be written to the file using write_sko(), this should update the existing key

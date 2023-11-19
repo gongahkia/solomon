@@ -365,20 +365,163 @@ def cards_due_per_set(sko_setcontents:[]) -> int | str | None:
     else:
         return None
 
-# FUA provides the frontend for choosing what mode of senko you want to use, use, add, edit existing, delete cards, include running check_sko() for valid or invalid files
-def menu_sko() -> None:
+def edit_sko_card(card:{}) -> {}:
+
+    edit_option:str = ""
+    screen = curses.initscr()
+    screen.keypad(True)
+    curses.noecho()
+    curses.cbreak()
+    curses.curs_set(0)
+
+    if curses.has_colors():
+        curses.start_color()
+        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+
+    while True:
+        screen.erase()
+        screen.addstr(0, 0, "Choose which attribute to edit.", curses.color_pair(3))
+        screen.addstr(2,0,f"[N]ame            | {card['card_name']}")
+        screen.addstr(3,0,f"[I]nfo            | {card['card_info']}")
+        screen.addstr(4,0,f"[A]dditional info | {card['card_add_info']}")
+        screen.addstr(5,0,f"Date              | {card['card_date']}", curses.color_pair(1)) # rendered in diff color to ensure it appears uneditable
+
+        keypress:str = chr(screen.getch())
+
+        if keypress == "n" or keypress == "i" or keypress == "a" or keypress == "q":
+            edit_option = keypress
+            break
+        else:
+            continue
+
+    match edit_option:
+
+        case "n":
+
+            card_name_buffer:str = card["card_name"]
+
+            while True:
+
+                screen.erase()
+                screen.addstr(0,0,"Editing card name", curses.color_pair(3))
+                screen.addstr(2,0,f"Name            | {card_name_buffer}_", curses.color_pair(2))
+                screen.addstr(3,0,f"Info            | {card['card_info']}")
+                screen.addstr(4,0,f"Additional info | {card['card_add_info']}")
+                screen.addstr(5,0,f"Date            | {card['card_date']}", curses.color_pair(1))
+                screen.refresh()
+
+                keypress= screen.getch()
+
+                if keypress == curses.KEY_ENTER or keypress == 10 or keypress == 13:
+                    screen.refresh()
+                    card["card_name"] = card_name_buffer
+                    curses.nocbreak()
+                    screen.keypad(False)
+                    curses.echo()
+                    curses.endwin()
+                    return card
+
+                elif keypress == ord("\t") or keypress == 9: # tab
+                    card_name_buffer += "\t"
+
+                elif keypress == curses.KEY_BACKSPACE or keypress == 127:
+                    card_name_buffer = card_name_buffer[:-1]
+                
+                else:
+                    card_name_buffer += chr(keypress)
+
+        case "i":
+
+            card_info_buffer:str = card["card_info"]
+
+            while True:
+
+                screen.erase()
+                screen.addstr(0,0,"Editing card info", curses.color_pair(3))
+                screen.addstr(2,0,f"Name            | {card['card_name']}")
+                screen.addstr(3,0,f"Info            | {card_info_buffer}_", curses.color_pair(2))
+                screen.addstr(4,0,f"Additional info | {card['card_add_info']}")
+                screen.addstr(5,0,f"Date            | {card['card_date']}", curses.color_pair(1))
+                screen.refresh()
+
+                keypress= screen.getch()
+
+                if keypress == curses.KEY_ENTER or keypress == 10 or keypress == 13:
+                    screen.refresh()
+                    card["card_info"] = card_info_buffer
+                    curses.nocbreak()
+                    screen.keypad(False)
+                    curses.echo()
+                    curses.endwin()
+                    return card
+
+                elif keypress == ord("\t") or keypress == 9: # tab
+                    card_info_buffer += "\t"
+
+                elif keypress == curses.KEY_BACKSPACE or keypress == 127:
+                    card_info_buffer = card_info_buffer[:-1]
+                
+                else:
+                    card_info_buffer += chr(keypress)
+
+        case "a":
+
+            card_add_info_buffer:str = card["card_add_info"]
+
+            while True:
+
+                screen.erase()
+                screen.addstr(0,0,"Editing card additional info", curses.color_pair(3))
+                screen.addstr(2,0,f"Name            | {card['card_name']}")
+                screen.addstr(3,0,f"Info            | {card['card_info']}")
+                screen.addstr(4,0,f"Additional info | {card_add_info_buffer}_", curses.color_pair(2))
+                screen.addstr(5,0,f"Date            | {card['card_date']}", curses.color_pair(1))
+                screen.refresh()
+
+                keypress= screen.getch()
+
+                if keypress == curses.KEY_ENTER or keypress == 10 or keypress == 13:
+                    screen.refresh()
+                    card["card_add_info"] = card_add_info_buffer
+                    curses.nocbreak()
+                    screen.keypad(False)
+                    curses.echo()
+                    curses.endwin()
+                    return card
+
+                elif keypress == ord("\t") or keypress == 9: # tab
+                    card_add_info_buffer += "\t"
+
+                elif keypress == curses.KEY_BACKSPACE or keypress == 127:
+                    card_add_info_buffer = card_add_info_buffer[:-1]
+                
+                else:
+                    card_add_info_buffer += chr(keypress)
+
+        case "q":
+            return None
+
+# FUA provides the frontend for editing flashcards in curses cli, returns the edited dictionary and uses edit_sko_card(), function should allow selection of a given card
+def edit_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
     pass
 
-# FUA provides the frontend for editing flashcards in curses cli, returns the edited dictionary
-def edit_sko(sko_contents:{}) -> {}:
+# FUA takes in nothing and returns a new card to be added to the current set, provides a front end for creating a card, in similar vein of editing indivudal card as edit_sko_card()
+def add_sko_card() -> {}:
     pass
 
 # FUA add flashcards to an existing senko dictionary and return the edited dictionary, runs check_sko()
-def add_sko(sko_contents:{}) -> {}:
+def add_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
     pass
 
 # FUA delete flashcards from an existing senko dictionary and return the edited dictionary
-def delete_sko(sko_contents:{}) -> {}:
+def delete_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
+    pass
+
+# FUA provides the frontend for choosing what mode of senko you want to use, use, add, edit existing, delete cards, include running check_sko() for valid or invalid files
+def menu_sko() -> None:
     pass
 
 # updates the overall senko file's dictionary which can then be written to the file using write_sko(), this should update the existing key
@@ -394,11 +537,20 @@ def write_sko(filename:str, sko_contents:{}) -> None:
     fhand.close()
     return None
 
+"""
 sko_filename:str = select_sko_file()
 sko_all_sets:{} = read_sko(sko_filename)
 sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
 sko_setname:str = sko_setname_setcontents[0]
 sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
-write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, render_sko_loop(sko_setname, sko_setcontents)[1]))
+write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, render_sko_loop(sko_setname, sko_setcontents)[1]))"""
+
+eg_card:{} = {
+            "card_name": "apple",
+            "card_info": "a kind of fruit",
+            "card_add_info": "I like to eat apples and other fruits.",
+            "card_date": "17/11/2023"
+        }
+print(edit_sko_card(eg_card))
 
 # write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, sko_setcontents))

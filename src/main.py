@@ -510,9 +510,140 @@ def edit_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
 
 # FUA takes in nothing and returns a new card to be added to the current set, provides a front end for creating a card, in similar vein of editing indivudal card as edit_sko_card()
 def add_sko_card() -> {}:
-    pass
 
-# FUA add flashcards to an existing senko dictionary and return the edited dictionary, runs check_sko()
+    today_str:str= date.today().strftime("%d/%m/%Y")
+    card:{str:str} = {
+            "card_name": "",
+            "card_info": "",
+            "card_add_info": "",
+            "card_date": today_str # add an interesting way to type in dates where it auto adds the / for you and checks validity of date
+        }
+    keypress_buffer:str = ""
+
+    screen = curses.initscr()
+    screen.keypad(True)
+    curses.noecho()
+    curses.cbreak()
+    curses.curs_set(0)
+
+    if curses.has_colors():
+        curses.start_color()
+        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+
+    while True:
+        screen.erase()
+        screen.addstr(0, 0,"Add player name.", curses.color_pair(3))
+        screen.addstr(2,0,f"Name            | {keypress_buffer}_", curses.color_pair(2))
+        screen.addstr(3,0,f"Info            | {card['card_info']}")
+        screen.addstr(4,0,f"Additional info | {card['card_add_info']}")
+        screen.addstr(5,0,f"Date            | {card['card_date']}")
+        screen.refresh()
+
+        keypress = screen.getch()
+
+        if keypress == curses.KEY_ENTER or keypress == 10 or keypress == 13:
+            screen.refresh()
+            card["card_name"] = keypress_buffer
+            break
+
+        elif keypress == ord("\t") or keypress == 9: # tab
+            keypress_buffer += "\t"
+
+        elif keypress == curses.KEY_BACKSPACE or keypress == 127:
+            keypress_buffer = keypress_buffer[:-1]
+        
+        else:
+            keypress_buffer += chr(keypress)
+
+    keypress_buffer = ""
+
+    while True:
+        screen.erase()
+        screen.addstr(0, 0,"Add player name.", curses.color_pair(3))
+        screen.addstr(2,0,f"Name            | {card['card_name']}")
+        screen.addstr(3,0,f"Info            | {keypress_buffer}_", curses.color_pair(2))
+        screen.addstr(4,0,f"Additional info | {card['card_add_info']}")
+        screen.addstr(5,0,f"Date            | {card['card_date']}") 
+        screen.refresh()
+
+        keypress = screen.getch()
+
+        if keypress == curses.KEY_ENTER or keypress == 10 or keypress == 13:
+            screen.refresh()
+            card["card_info"] = keypress_buffer
+            break
+
+        elif keypress == ord("\t") or keypress == 9: # tab
+            keypress_buffer += "\t"
+
+        elif keypress == curses.KEY_BACKSPACE or keypress == 127:
+            keypress_buffer = keypress_buffer[:-1]
+        
+        else:
+            keypress_buffer += chr(keypress)
+
+    keypress_buffer = ""
+
+    while True:
+        screen.erase()
+        screen.addstr(0, 0,"Add player name.", curses.color_pair(3))
+        screen.addstr(2,0,f"Name            | {card['card_name']}")
+        screen.addstr(3,0,f"Info            | {card['card_info']}")
+        screen.addstr(4,0,f"Additional info | {keypress_buffer}_", curses.color_pair(2))
+        screen.addstr(5,0,f"Date            | {card['card_date']}") 
+        screen.refresh()
+
+        keypress = screen.getch()
+
+        if keypress == curses.KEY_ENTER or keypress == 10 or keypress == 13:
+            screen.refresh()
+            card["card_add_info"] = keypress_buffer
+            break
+
+        elif keypress == ord("\t") or keypress == 9: # tab
+            keypress_buffer += "\t"
+
+        elif keypress == curses.KEY_BACKSPACE or keypress == 127:
+            keypress_buffer = keypress_buffer[:-1]
+        
+        else:
+            keypress_buffer += chr(keypress)
+
+    keypress_buffer = today_str
+
+    while True:
+        screen.erase()
+        screen.addstr(0, 0,"Add player name.", curses.color_pair(3))
+        screen.addstr(2,0,f"Name            | {card['card_name']}")
+        screen.addstr(3,0,f"Info            | {card['card_info']}")
+        screen.addstr(4,0,f"Additional info | {card['card_add_info']}")
+        screen.addstr(5,0,f"Date            | {keypress_buffer}_", curses.color_pair(2))
+        screen.refresh()
+
+        keypress = screen.getch()
+
+        if keypress == curses.KEY_ENTER or keypress == 10 or keypress == 13:
+            screen.refresh()
+            card["card_date"] = keypress_buffer
+            curses.nocbreak()
+            screen.keypad(False)
+            curses.echo()
+            curses.endwin()
+            return card
+
+        elif keypress == ord("\t") or keypress == 9: # tab
+            keypress_buffer += "\t"
+
+        elif keypress == curses.KEY_BACKSPACE or keypress == 127:
+            keypress_buffer = keypress_buffer[:-1]
+        
+        else:
+            keypress_buffer += chr(keypress)
+
+# FUA add flashcards to an existing senko dictionary and return the edited dictionary, runs check_sko(), and integrate the add_sko_card() function here
 def add_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
     pass
 
@@ -543,7 +674,7 @@ sko_all_sets:{} = read_sko(sko_filename)
 sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
 sko_setname:str = sko_setname_setcontents[0]
 sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
-write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, render_sko_loop(sko_setname, sko_setcontents)[1]))"""
+write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, render_sko_loop(sko_setname, sko_setcontents)[1]))
 
 eg_card:{} = {
             "card_name": "apple",
@@ -552,5 +683,8 @@ eg_card:{} = {
             "card_date": "17/11/2023"
         }
 print(edit_sko_card(eg_card))
+"""
+
+print(add_sko_card())
 
 # write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, sko_setcontents))

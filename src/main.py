@@ -69,7 +69,7 @@ def select_sko_file() -> str | None:
             screen.erase()
             coords:{str:int}= {"x":0, "y":2}
             counter:int = 1
-            screen.addstr(0, 0, "Type in a valid number", curses.color_pair(3))
+            screen.addstr(0, 0, "Type in a valid number to select Senko file.", curses.color_pair(3))
             for file_name in valid_array:
                 num_files:int = len(read_sko(file_name))
                 screen.addstr(coords["y"], coords["x"], f"{counter} | {file_name} | ")
@@ -130,7 +130,7 @@ def select_flashcard_set(file_contents:{}) -> (str,[]):
         screen.erase()
         coords:{str:int}= {"x":0, "y":2}
         counter:int = 1
-        screen.addstr(0, 0, "Type in a valid number", curses.color_pair(3))
+        screen.addstr(0, 0, "Type in a valid number to select flashcard set.", curses.color_pair(3))
 
         # rendering flashcard options
         for flashcard_set in name_array:
@@ -504,11 +504,7 @@ def edit_sko_card(card:{}) -> {}:
         case "q":
             return None
 
-# FUA provides the frontend for editing flashcards in curses cli, returns the edited dictionary and uses edit_sko_card(), function should allow selection of a given card
-def edit_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
-    pass
-
-# FUA takes in nothing and returns a new card to be added to the current set, provides a front end for creating a card, in similar vein of editing indivudal card as edit_sko_card()
+# takes in nothing and returns a new card to be added to the current set, provides a front end for creating a card
 def add_sko_card() -> {}:
 
     today_str:str= date.today().strftime("%d/%m/%Y")
@@ -643,17 +639,62 @@ def add_sko_card() -> {}:
         else:
             keypress_buffer += chr(keypress)
 
-# FUA add flashcards to an existing senko dictionary and return the edited dictionary, runs check_sko(), and integrate the add_sko_card() function here
-def add_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
-    pass
-
-# FUA delete flashcards from an existing senko dictionary and return the edited dictionary
+# delete flashcards from an existing senko dictionary and return the edited dictionary
 def delete_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
-    pass
 
-# FUA provides the frontend for choosing what mode of senko you want to use, use, add, edit existing, delete cards, include running check_sko() for valid or invalid files
-def menu_sko() -> None:
-    pass
+    screen = curses.initscr()
+    screen.keypad(True)
+    curses.cbreak()
+    curses.curs_set(0)
+
+    if curses.has_colors():
+        curses.start_color()
+        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+
+    if not len(sko_setcontents) == 0:
+
+        while True:
+            screen.erase()
+            y_coord:int = 2
+            screen.addstr(0, 0, f"Type in a valid number to delete card from {sko_setname}.", curses.color_pair(3))
+
+            for card in sko_setcontents:
+                screen.addstr(y_coord, 0, f"{y_coord-1} | {card['card_name']}")
+                y_coord += 1
+
+            keypress = chr(screen.getch())
+            if not keypress.isnumeric() or int(keypress) > len(sko_setcontents) or int(keypress) < 1:
+                continue
+            else:
+                screen.erase()
+                screen.refresh()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                del sko_setcontents[int(keypress)-1]
+                return (sko_setname, sko_setcontents)
+
+    else:
+
+        while True:
+            screen.erase()
+            screen.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(5))
+            screen.addstr(2, 0, "[Q]uit", curses.color_pair(3))
+
+            keypress:str = chr(screen.getch())
+
+            if keypress != "q":
+                continue
+            else:
+                screen.refresh()
+                curses.nocbreak()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                return (sko_setname, sko_setcontents)
 
 # updates the overall senko file's dictionary which can then be written to the file using write_sko(), this should update the existing key
 def update_sko_allsets(sko_all_sets:{}, sko_setname:str, sko_setcontents:[]) -> {}:
@@ -668,14 +709,27 @@ def write_sko(filename:str, sko_contents:{}) -> None:
     fhand.close()
     return None
 
-"""
+# FUA provides the frontend for editing flashcards in curses cli, returns the edited dictionary and uses edit_sko_card(), function should allow selection of a given card
+def edit_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
+    pass
+
+# FUA add flashcards to an existing senko dictionary and return the edited dictionary, runs check_sko(), and integrate the add_sko_card() function here
+def add_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
+    pass
+
+# FUA provides the frontend for choosing what mode of senko you want to use, use, add, edit existing, delete cards, include running check_sko() for valid or invalid files
+def menu_sko() -> None:
+    pass
+
 sko_filename:str = select_sko_file()
 sko_all_sets:{} = read_sko(sko_filename)
 sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
 sko_setname:str = sko_setname_setcontents[0]
 sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
-write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, render_sko_loop(sko_setname, sko_setcontents)[1]))
+# write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, render_sko_loop(sko_setname, sko_setcontents)[1]))
+print(delete_sko_loop(sko_setname, sko_setcontents)[1])
 
+"""
 eg_card:{} = {
             "card_name": "apple",
             "card_info": "a kind of fruit",
@@ -683,8 +737,5 @@ eg_card:{} = {
             "card_date": "17/11/2023"
         }
 print(edit_sko_card(eg_card))
-"""
-
 print(add_sko_card())
-
-# write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, sko_setcontents))
+"""

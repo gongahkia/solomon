@@ -710,8 +710,62 @@ def write_sko(filename:str, sko_contents:{}) -> None:
     return None
 
 # FUA provides the frontend for editing flashcards in curses cli, returns the edited dictionary and uses edit_sko_card(), function should allow selection of a given card
+# FUA debug issues for this
 def edit_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
-    pass
+
+    screen = curses.initscr()
+    screen.keypad(True)
+    curses.cbreak()
+    curses.curs_set(0)
+
+    if curses.has_colors():
+        curses.start_color()
+        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+
+    if not len(sko_setcontents) == 0:
+
+        while True:
+            screen.erase()
+            y_coord:int = 2
+            screen.addstr(0, 0, f"Type in a valid number to edit card from {sko_setname}.", curses.color_pair(3))
+
+            for card in sko_setcontents:
+                screen.addstr(y_coord, 0, f"{y_coord-1} | {card['card_name']}")
+                y_coord += 1
+
+            keypress = chr(screen.getch())
+            if not keypress.isnumeric() or int(keypress) > len(sko_setcontents) or int(keypress) < 1:
+                continue
+            else:
+                screen.erase()
+                screen.refresh()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                sko_setcontents[int(keypress-1)] = edit_sko_card(sko_setcontents[int(keypress)-1])
+                return (sko_setname, sko_setcontents)
+
+    else:
+
+        while True:
+            screen.erase()
+            screen.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(5))
+            screen.addstr(2, 0, "[Q]uit", curses.color_pair(3))
+
+            keypress:str = chr(screen.getch())
+
+            if keypress != "q":
+                continue
+            else:
+                screen.refresh()
+                curses.nocbreak()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                return (sko_setname, sko_setcontents)
 
 # FUA add flashcards to an existing senko dictionary and return the edited dictionary, runs check_sko(), and integrate the add_sko_card() function here
 def add_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
@@ -727,7 +781,8 @@ sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
 sko_setname:str = sko_setname_setcontents[0]
 sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
 # write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, render_sko_loop(sko_setname, sko_setcontents)[1]))
-print(delete_sko_loop(sko_setname, sko_setcontents)[1])
+# print(delete_sko_loop(sko_setname, sko_setcontents)[1])
+print(edit_sko_loop(sko_setname, sko_setcontents)[1])
 
 """
 eg_card:{} = {

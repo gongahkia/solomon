@@ -7,6 +7,7 @@ Senko is a flashcard program for the CLI. It relies on a [spaced repition system
 * run through flashcards
 * add flashcards
 * edit existing cards
+* delete flashcards
 
 Senko config files are stored in `.sko` files, which leached on `.json` for utility.
 

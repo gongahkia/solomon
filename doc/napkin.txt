@@ -1,0 +1,5 @@
+~ethos
+* functional programming
+* all data to be represented in data structures
+* all data transformed through explicit returns in functions
+* clean, readable code

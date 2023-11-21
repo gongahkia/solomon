@@ -7,36 +7,6 @@ import json
 import os
 from datetime import date
 
-"""
-# print("senko test")
-screen = curses.initscr()
-screen.keypad(True)
-curses.noecho()
-curses.cbreak()
-curses.curs_set(0)
-
-if curses.has_colors():
-    curses.start_color()
-    curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
-    curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-    curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-    curses.init_pair(4, curses.COLOR_BLUE, curses.COLOR_BLACK)
-    curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
-    curses.init_pair(6, curses.COLOR_CYAN, curses.COLOR_BLACK)
-    curses.init_pair(7, curses.COLOR_WHITE, curses.COLOR_BLACK)
-
-screen.erase()
-screen.addstr("nice")
-screen.timeout(0)
-screen.refresh()
-curses.napms(1000)
-
-curses.nocbreak()
-screen.keypad(False)
-curses.echo()
-curses.endwin()
-"""
-
 # checks the syntax of a senko file
 def check_sko(filename:str) -> bool:
     try:
@@ -664,9 +634,17 @@ def delete_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
             for card in sko_setcontents:
                 screen.addstr(y_coord, 0, f"{y_coord-1} | {card['card_name']}")
                 y_coord += 1
+            screen.addstr(y_coord + 1, 0, "[Q]uit", curses.color_pair(3))
 
             keypress = chr(screen.getch())
-            if not keypress.isnumeric() or int(keypress) > len(sko_setcontents) or int(keypress) < 1:
+            if keypress == "q":
+                screen.erase()
+                screen.refresh()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                return (sko_setname, sko_setcontents)
+            elif not keypress.isnumeric() or int(keypress) > len(sko_setcontents) or int(keypress) < 1:
                 continue
             else:
                 screen.erase()
@@ -709,8 +687,7 @@ def write_sko(filename:str, sko_contents:{}) -> None:
     fhand.close()
     return None
 
-# FUA provides the frontend for editing flashcards in curses cli, returns the edited dictionary and uses edit_sko_card(), function should allow selection of a given card
-# FUA debug issues for this
+# provides the frontend for editing flashcards in curses cli, returns the edited dictionary and uses edit_sko_card(), function should allow selection of a given card
 def edit_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
 
     screen = curses.initscr()
@@ -745,7 +722,7 @@ def edit_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
                 screen.keypad(False)
                 curses.echo()
                 curses.endwin()
-                sko_setcontents[int(keypress-1)] = edit_sko_card(sko_setcontents[int(keypress)-1])
+                sko_setcontents[int(keypress)-1] = edit_sko_card(sko_setcontents[int(keypress)-1])
                 return (sko_setname, sko_setcontents)
 
     else:
@@ -767,30 +744,181 @@ def edit_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
                 curses.endwin()
                 return (sko_setname, sko_setcontents)
 
-# FUA add flashcards to an existing senko dictionary and return the edited dictionary, runs check_sko(), and integrate the add_sko_card() function here
+# add flashcards to an existing senko dictionary and return the edited dictionary, runs check_sko(), and integrate the add_sko_card() function here
 def add_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
-    pass
 
-# FUA provides the frontend for choosing what mode of senko you want to use, use, add, edit existing, delete cards, include running check_sko() for valid or invalid files
+    screen = curses.initscr()
+    screen.keypad(True)
+    curses.cbreak()
+    curses.curs_set(0)
+
+    if curses.has_colors():
+        curses.start_color()
+        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+
+    if not len(sko_setcontents) == 0:
+
+        while True:
+            screen.erase()
+            y_coord:int = 2
+            screen.addstr(0, 0, f"{sko_setname}")
+
+            for card in sko_setcontents:
+                screen.addstr(y_coord, 0, f"{y_coord-1} | {card['card_name']}")
+                y_coord += 1
+            screen.addstr(y_coord + 1, 0, f"[A]dd card to {sko_setname}", curses.color_pair(3))
+            screen.addstr(y_coord + 2, 0, "[Q]uit", curses.color_pair(3))
+            
+            keypress = chr(screen.getch())
+
+            if keypress == "q":
+                screen.erase()
+                screen.refresh()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                return (sko_setname, sko_setcontents)
+            elif keypress == "a":
+                screen.erase()
+                screen.refresh()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                sko_setcontents.append(add_sko_card())
+                return (sko_setname, sko_setcontents)
+            else:
+                continue
+
+    else:
+
+        while True:
+            screen.erase()
+            screen.addstr(0, 0, f"{sko_setname}")
+            screen.addstr(2, 0, f"{sko_setname} is currently empty.", curses.color_pair(5))
+            screen.addstr(4, 0, f"[A]dd card to {sko_setname}", curses.color_pair(3))
+            screen.addstr(5, 0, "[Q]uit", curses.color_pair(3))
+
+            keypress:str = chr(screen.getch())
+
+            if keypress == "q":
+                screen.erase()
+                screen.refresh()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                return (sko_setname, sko_setcontents)
+            elif keypress == "a":
+                screen.erase()
+                screen.refresh()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                sko_setcontents.append(add_sko_card())
+                return (sko_setname, sko_setcontents)
+            else:
+                continue
+
+# provides the frontend for choosing what mode of senko you want to use, use, add, edit existing, delete cards, include running check_sko() for valid or invalid files
 def menu_sko() -> None:
-    pass
 
-sko_filename:str = select_sko_file()
-sko_all_sets:{} = read_sko(sko_filename)
-sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
-sko_setname:str = sko_setname_setcontents[0]
-sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
-# write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, render_sko_loop(sko_setname, sko_setcontents)[1]))
-# print(delete_sko_loop(sko_setname, sko_setcontents)[1])
-print(edit_sko_loop(sko_setname, sko_setcontents)[1])
+    screen = curses.initscr()
+    screen.keypad(True)
+    curses.cbreak()
+    curses.curs_set(0)
 
-"""
-eg_card:{} = {
-            "card_name": "apple",
-            "card_info": "a kind of fruit",
-            "card_add_info": "I like to eat apples and other fruits.",
-            "card_date": "17/11/2023"
-        }
-print(edit_sko_card(eg_card))
-print(add_sko_card())
-"""
+    if curses.has_colors():
+        curses.start_color()
+        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        curses.init_pair(4, curses.COLOR_BLUE, curses.COLOR_BLACK)
+        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+        curses.init_pair(6, curses.COLOR_CYAN, curses.COLOR_BLACK)
+        curses.init_pair(7, curses.COLOR_WHITE, curses.COLOR_BLACK)
+
+    while True:
+        screen.erase()
+        screen.addstr(0, 0, "Senko flashcards")
+        screen.addstr(2, 0, "[S]ee cards", curses.color_pair(6))
+        screen.addstr(3, 0, "[A]dd cards", curses.color_pair(2))
+        screen.addstr(4, 0, "[A]dd cards", curses.color_pair(4))
+        screen.addstr(5, 0, "[E]dit cards", curses.color_pair(5))
+        screen.addstr(6, 0, "[D]elete cards", curses.color_pair(1))
+        screen.addstr(7, 0, "[Q]uit", curses.color_pair(3))
+        screen.addstr(9, 0, "Spot issues? Ping me on Github @gongahkia.")
+        
+        keypress = chr(screen.getch())
+
+        match keypress:
+
+            case "s":
+                screen.erase()
+                screen.refresh()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                sko_filename:str = select_sko_file()
+                sko_all_sets:{} = read_sko(sko_filename)
+                sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
+                sko_setname:str = sko_setname_setcontents[0]
+                sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
+                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, render_sko_loop(sko_setname, sko_setcontents)[1]))
+                return None
+
+            case "a":
+                screen.erase()
+                screen.refresh()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                sko_filename:str = select_sko_file()
+                sko_all_sets:{} = read_sko(sko_filename)
+                sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
+                sko_setname:str = sko_setname_setcontents[0]
+                sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
+                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, add_sko_loop(sko_setname, sko_setcontents)[1]))
+                return None
+            
+            case "e":
+                screen.erase()
+                screen.refresh()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                sko_filename:str = select_sko_file()
+                sko_all_sets:{} = read_sko(sko_filename)
+                sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
+                sko_setname:str = sko_setname_setcontents[0]
+                sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
+                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, edit_sko_loop(sko_setname, sko_setcontents)[1]))
+                return None
+
+            case "d":
+                screen.erase()
+                screen.refresh()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                sko_filename:str = select_sko_file()
+                sko_all_sets:{} = read_sko(sko_filename)
+                sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
+                sko_setname:str = sko_setname_setcontents[0]
+                sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
+                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, delete_sko_loop(sko_setname, sko_setcontents)[1]))
+                return None
+
+            case "q":
+                screen.erase()
+                screen.refresh()
+                screen.keypad(False)
+                curses.echo()
+                curses.endwin()
+                return None
+
+            case _:
+                continue
+
+menu_sko()

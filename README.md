@@ -1,10 +1,13 @@
 `memorise things fast`
 
-Written in [curses](https://docs.python.org/3/howto/curses.html).
+Written in [curses](https://docs.python.org/3/howto/curses.html). 
+
+## [quickstart](doc/quickstart.md)
 
 ## installation
 
 ```console
 $ git clone https://github.com/gongahkia/senko
 $ cd src && chmod +x senko.sh
+$ ./senko.sh
 ```

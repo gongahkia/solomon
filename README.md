@@ -1,6 +1,6 @@
 ![](https://img.shields.io/badge/senko_1.0-passing-green)
 
-# 閃光
+# せんこ
 
 Memorise things fast.
 

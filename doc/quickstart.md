@@ -1,6 +1,6 @@
 # 閃光 is flash in japanese
 
-Senko is a flashcard program for the CLI. It relies on a [spaced repition system](https://e-student.org/spaced-repetition/) to make concepts stick, similar to [anki](https://ankiweb.net/about). 
+Senko is a flashcard program for the CLI. It relies on a [spaced repetition system](https://e-student.org/spaced-repetition/) to make concepts stick, similar to [anki](https://ankiweb.net/about). 
 
 ## usage
 

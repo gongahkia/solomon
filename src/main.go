@@ -1,4 +1,6 @@
 // FUA
+    // add color
+    // add a number of words completed score tracking system
 	// mimick most to all monkeytype features
 		// track and calculate wpm (update wpm when there's a change)
 		// check correct words
@@ -7,9 +9,9 @@
 	// use a queue for words that need to be cleared?
 	// highscore with past WPM and player name as needed
 	// see if i can still get an audio driver in?
-	// have proper code seperation and ideally functional programming paradigms would be good
 	// add crunchy typing audio like a typewriter perhaps?
-	// generalise current game loop to apply for sentences also
+	// generalise current game loop to apply for sentences also instead of just words
+	// have proper code seperation and ideally functional programming paradigms would be good
 
 package main
 
@@ -24,6 +26,7 @@ import (
 
 func main() {
 
+    fmt.Print("\033[H\033[2J") // ansi escape code to clear screen
 	fmt.Println("monke")
 
 	// --- variable initialization ---
@@ -31,12 +34,16 @@ func main() {
 	var userInputBuffer string
 	var words []string
 	var wordsError error
-	var timeLimit int
+	var totalTimeLimit int
+	var totalNumWords int
+	var completedNumWords int
 
 	// --- value assignment ---
 
 	userInputBuffer = ""
-	timeLimit = 10
+	totalTimeLimit = 60
+	totalNumWords = 50
+	completedNumWords = 0
 
 	/*
 	--- testing out the api calls --- 
@@ -46,9 +53,13 @@ func main() {
 
 	// --- generating words / sentences ---
 
-	words, wordsError = generator.GenerateWords(10)
-	fmt.Println(words) // arrays are printed without commas
-	fmt.Println(wordsError)
+	words, wordsError = generator.GenerateWords(totalNumWords)
+
+    if wordsError != nil {
+        fmt.Println("Monke hit an error when generating words:", wordsError)
+    } else {
+        fmt.Println(words) // arrays are printed without commas
+    }
 
 	// --- main code execution ---
 
@@ -70,6 +81,7 @@ func main() {
 			// --- reading user input ---
 
 			if key == keyboard.KeyEsc { // user presses escape to quit game
+                fmt.Println("\n", completedNumWords, "words typed...")
 				fmt.Println("\nMonke exiting...")
 				stopCh <- true // signal the main loop to stop
 				return
@@ -97,6 +109,7 @@ func main() {
 			if len(userInputBuffer) >= len(words[0]) && words[0] == userInputBuffer[:len(words[0])]{ // word is correctly typed
 				userInputBuffer = userInputBuffer[len(words[0]):] // clears word from userInputBuffer
 			 	words = words[1:] // remove word from word queue
+			 	completedNumWords++ // add to total score
 			}
 
 		}
@@ -113,9 +126,10 @@ func main() {
 				keyboard.Close() // close the keyboard input and restore terminal to normal mode
 				return // exit the program when goroutine terminated
 			default:
-				if numIteration == timeLimit { // exit the program when time limit reached
+				if numIteration == totalTimeLimit { // exit the program when time limit reached
 					keyboard.Close() // close the keyboard input and restore terminal to normal mode
-					fmt.Println("\ntime limit of", timeLimit, "seconds reached, exiting...")
+					fmt.Println("\ntime limit of", totalTimeLimit, "seconds reached, exiting...")
+					fmt.Println("\n", completedNumWords, "words typed...")
 					return
 				}
 				// fmt.Println("\nLoop is running for", numIteration, "seconds...")

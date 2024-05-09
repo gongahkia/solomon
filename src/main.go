@@ -24,6 +24,7 @@ func main() {
 	// --- main code execution ---
 
 	fmt.Println("monke")
-	generator.generateSentences(4)
+	fmt.Println(generator.GenerateWords(10))
+	fmt.Println(generator.GenerateSentences(2))
 
 }

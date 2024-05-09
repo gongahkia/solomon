@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"encoding/json"
 )
@@ -38,7 +37,7 @@ func GenerateSentences(numSentences int) ([]string, error) {
 
 	var tem []string
 	var sentences []string
-	sentenceUrlEndpoint := fmt.Sprintf("https://hipsum.co/api/?type=hipster-latin&sentences=%d", numsentences)
+	sentenceUrlEndpoint := fmt.Sprintf("https://hipsum.co/api/?type=hipster-latin&sentences=%d", numSentences)
 
 	response, err := http.Get(sentenceUrlEndpoint) // sends a http get request through the url
 	if err != nil { // error hit
@@ -53,21 +52,16 @@ func GenerateSentences(numSentences int) ([]string, error) {
 	} else {} // no error
 
 	if err := json.Unmarshal(body, &tem); err != nil {
-
 		return nil, fmt.Errorf("Monke reached an error decoding the JSON response body: %v", err)
-
 	} else { // no error
-
 		fin := strings.Split(tem[0], ".")
 		for _, sentence := range fin {
 			sentence = strings.TrimSpace(sentence) 
 			if len(sentence) > 0 {
-				sentences = append(sentences, sentence)
+				sentences = append(sentences, fmt.Sprintf("%s.", sentence))
 			}
 		}
-
 		return sentences, nil	
-
 	}
 
 } 

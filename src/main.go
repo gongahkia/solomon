@@ -14,6 +14,7 @@ package main
 
 import (
     "fmt"
+	"github.com/gongahkia/monke/lib/generator"
 	// "os"
 	// "log"
 )
@@ -23,6 +24,6 @@ func main() {
 	// --- main code execution ---
 
 	fmt.Println("monke")
-
+	generator.generateSentences(4)
 
 }

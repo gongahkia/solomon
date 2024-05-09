@@ -12,7 +12,9 @@ package main
 
 import (
     "fmt"
+	"time"
 	"github.com/gongahkia/monke/lib/generator"
+	"github.com/eiannone/keyboard"
 	// "os"
 	// "log"
 )
@@ -21,8 +23,13 @@ func main() {
 
 	// --- variable initialization ---
 
+	var userInputBuffer string
 	var words []string
 	var wordsError error
+
+	// --- value assignment ---
+
+	userInputBuffer = ""
 
 	// --- main code execution ---
 
@@ -37,5 +44,52 @@ func main() {
 	words, wordsError = generator.GenerateWords(10)
 	fmt.Println(words) // arrays are printed without commas
 	fmt.Println(wordsError)
+
+	stopCh := make(chan bool) // creates a channel to communicate with the goroutine
+
+	go func() { // begins the user input goroutine
+		for {
+			char, key, err := keyboard.GetSingleKey()
+			if err != nil { // error hit
+				fmt.Println("Error reading input:", err)
+				stopCh <- true // signal the main loop to stop
+				return
+			}
+			if key == keyboard.KeyEsc { // user presses escape to quit game
+				fmt.Println("\nMonke exiting...")
+				stopCh <- true // signal the main loop to stop
+				return
+			} else if key == 127 { // 127 is the universal ansi key code for backspace
+				if len(userInputBuffer) > 0 {
+					userInputBuffer = userInputBuffer[:len(userInputBuffer)-1]
+				}
+				fmt.Print("\033[H\033[2J") // ansi escape code to clear screen
+				fmt.Print(userInputBuffer) 
+			} else if key == keyboard.KeySpace {
+				userInputBuffer += " "
+				fmt.Print("\033[H\033[2J") // ansi escape code to clear screen
+				fmt.Print(userInputBuffer) 
+			} else {
+				userInputBuffer += string(char)
+				fmt.Print("\033[H\033[2J") // ansi escape code to clear screen
+				fmt.Print(userInputBuffer) 
+			}
+		}
+	}()
+
+	// --- update loop that runs every 2 seconds ---
+
+	// numIteration := 0
+
+	for {
+		select {
+		case <-stopCh:
+			return // exit the program
+		default:
+			// numIteration++ 
+			// fmt.Println("\nLoop is running for", numIteration, "seconds...")
+			time.Sleep(1 * time.Second) // delay that effectively restricts the program to running every 2 seconds
+		}
+	}
 
 }

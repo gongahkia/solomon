@@ -1,8 +1,23 @@
-# SPDX-License-Identifier: Apache-2.0
+all:build
+	build
 
-SOLOMON_TEST_LOCAL_MODEL_URL ?= http://127.0.0.1:11434/api/generate
-SOLOMON_TEST_LOCAL_MODEL_NAME ?= qwen2.5-coder:1.5b
+debug:src/main.go
+	@go run src/main.go # meant only for running the main.go file with local go dependancies
 
-.PHONY: demo-local
-demo-local:
-	SOLOMON_TEST_LOCAL_MODEL_URL="$(SOLOMON_TEST_LOCAL_MODEL_URL)" SOLOMON_TEST_LOCAL_MODEL_NAME="$(SOLOMON_TEST_LOCAL_MODEL_NAME)" scripts/demo_local_model.sh
+build:src/main.go
+	@go mod init github.com/gongahkia/monke # initialize go mod to manage dependancies
+	@go mod tidy # add dependancies
+	@go run src/main.go # run go file
+
+config:
+	@echo "installing monke..."
+	@sudo apt upgrade && sudo apt update && sudo apt autoremove
+	@sudo apt install golang
+	@sudo apt install gcc
+	@ sudo apt install libc6-dev libgl1-mesa-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libxxf86vm-dev libasound2-dev pkg-config
+	@echo "installation complete, testing ebiten engine..."
+	@GOOS=windows go run github.com/hajimehoshi/ebiten/v2/examples/rotate@latest 
+	@echo "installation validated"
+
+clean:
+	@rm -rf .git .gitignore README.md

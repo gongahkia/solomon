@@ -1,6 +1,11 @@
 // FUA
     // learn how ebiten api generally works with go
     // work out project structure
+	// call some api to get a string of random words to type
+	// mimick most to all monkeytype features
+	// basic keyboard and punctuation and number inputs, escape escapes the game
+	// highscore with past WPM and player name as needed
+	// if possible, work out how to implement a serverless highscore system
 
 package main
 
@@ -13,15 +18,15 @@ import (
 
 type Game struct{}
 
-func (g *Game) Update() error {
+func (g *Game) Update() error { // pointer receiver function
 	return nil
 }
 
-func (g *Game) Draw(screen *ebiten.Image) {
+func (g *Game) Draw(screen *ebiten.Image) { // pointer receiver function
 	ebitenutil.DebugPrint(screen, "Hello, World!")
 }
 
-func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
+func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) { // pointer receiver function
 	return 320, 240
 }
 

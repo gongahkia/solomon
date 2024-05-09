@@ -23,3 +23,7 @@ config:
 
 clean:
 	@rm -rf .git .gitignore README.md
+
+up:
+	@git pull
+	@git status

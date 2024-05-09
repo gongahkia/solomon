@@ -21,10 +21,23 @@ import (
 
 func main() {
 
+	// --- variable initialization ---
+
+	var words []string
+	var wordsError error
+
 	// --- main code execution ---
 
 	fmt.Println("monke")
+
+	/*
+	--- testing out the api calls --- 
 	fmt.Println(generator.GenerateWords(10))
 	fmt.Println(generator.GenerateSentences(2))
+	*/
+
+	words, wordsError = generator.GenerateWords(10)
+	fmt.Println(words) // arrays are printed without commas
+	fmt.Println(wordsError)
 
 }

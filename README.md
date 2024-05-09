@@ -1,4 +1,6 @@
-`ape brain goes klik klak`
+# `monke`
+
+ape brain goes klik klak
 
 ## installation
 

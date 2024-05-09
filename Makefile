@@ -1,13 +1,13 @@
 all:build
-	build
+	@build
 
 debug:src/main.go
-	@go run src/main.go # meant only for running the main.go file with local go dependancies
+	@echo "debug mode"
+	@go run src/main.go 
 
 build:src/main.go
-	@go mod init github.com/gongahkia/monke # initialize go mod to manage dependancies
-	@go mod tidy # add dependancies
-	@go run src/main.go # run go file
+	@go mod tidy 
+	@go run src/main.go 
 
 config:
 	@echo "installing monke..."
@@ -18,6 +18,8 @@ config:
 	@echo "installation complete, testing ebiten engine..."
 	@GOOS=windows go run github.com/hajimehoshi/ebiten/v2/examples/rotate@latest 
 	@echo "installation validated"
+	@go mod init github.com/gongahkia/monke 
+	@echo "go mod initialized"
 
 clean:
 	@rm -rf .git .gitignore README.md

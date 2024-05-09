@@ -6,43 +6,79 @@
 	// basic keyboard and punctuation and number inputs, escape escapes the game
 	// highscore with past WPM and player name as needed
 	// if possible, work out how to implement a serverless highscore system
+	// add crunchy typing audio like a typewriter perhaps?
 
 package main
 
 import (
     "fmt"
+	"os"
 	"log"
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
 
-type Game struct{}
-
-func (g *Game) Update() error { // pointer receiver function
-	return nil
-}
-
-func (g *Game) Draw(screen *ebiten.Image) { // pointer receiver function
-	ebitenutil.DebugPrint(screen, "Hello, World!")
+type Game struct{
+	TextInput string
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) { // pointer receiver function
 	return 320, 240
 }
 
+func (g *Game) KeyPressed(key ebiten.Key, mod ebiten.ModifierKey, text string) error { // pointer receiver function
+
+	// --- user input ---
+
+	if key == ebiten.KeyEscape {
+		fmt.Println("quitting monke...")
+		return fmt.Errorf("user quit monke")
+	} else if key == ebiten.KeyBackspace && len(g.TextInput) > 0 {
+		g.TextInput = g.TextInput[:len(g.TextInput)-1]
+	} else if key == ebiten.KeyEnter {
+		g.TextInput += "\n"
+	} else if len(text) > 0 {
+		g.TextInput += text
+	} else {}
+
+	return nil
+
+}
+
+func (g *Game) Update() error { // pointer receiver function
+
+// --- update logical state ---
+
+	return nil
+}
+
+func (g *Game) Draw(screen *ebiten.Image) { // pointer receiver function
+
+// --- render graphics ---
+
+	ebitenutil.DebugPrint(screen, "Welcome to MONKE")
+
+}
+
 func main() {
 
-    // --- window initialization ---
 
-	ebiten.SetWindowSize(640, 480)
-	ebiten.SetWindowTitle("Hello, World!")
+// --- window initialization ---
 
-	if err := ebiten.RunGame(&Game{}); err != nil {
+	ebiten.SetFullscreen(true)
+	ebiten.SetWindowTitle("Monke")
+
+// --- default presets ---
+
+	game := &Game{}
+
+	ebiten.SetKeyHandler(func(key ebiten.Key) {
+		game.KeyPressed(key)
+	})
+
+	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err) // error logging
+		os.Exit(1)
 	}
-
-	// --- main code execution ---
-
-	fmt.Println("monke")
 
 }

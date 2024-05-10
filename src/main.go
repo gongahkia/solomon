@@ -16,23 +16,23 @@ import (
 
 func main() {
 
-	var timeLimitSeconds int
+	// var timeLimitSeconds int
 	// var totalNumWords int
-	var totalNumSentences int
-	var overallWordWPM float64
+	// var totalNumSentences int
+	// var overallWordWPM float64
 
-	timeLimitSeconds = 40
+	// timeLimitSeconds = 40
 	// totalNumWords = 100
-	totalNumSentences = 2
+	// totalNumSentences = 2
 
 	// graphics.DrawTitleScreen()
 	// wordsE := event.MonkeTypeWords(timeLimitSeconds, totalNumWords)
 	// overallWordWPM = (float64(wordsE)/float64(timeLimitSeconds)) * 60
 	// fmt.Println("WPM:", overallWordWPM)
 
-	graphics.DrawTitleScreen()
-	sentencesE := event.MonkeTypeSentences(timeLimitSeconds, totalNumSentences)
-	overallWordWPM = (float64(sentencesE)/float64(timeLimitSeconds)) * 60
-	fmt.Println("WPM:", overallWordWPM)
+	// graphics.DrawTitleScreen()
+	// sentencesE := event.MonkeTypeSentences(timeLimitSeconds, totalNumSentences)
+	// overallWordWPM = (float64(sentencesE)/float64(timeLimitSeconds)) * 60
+	// fmt.Println("WPM:", overallWordWPM)
 
 }

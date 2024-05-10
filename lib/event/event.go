@@ -1,8 +1,5 @@
 // fua
 	// use the graphics functions later to display all items and sentences to the screen as opposed to fmt print
-	// show CURRENT WPM as user typing and update when there's a change in wpm 
-	// function should return an OVERALL WPM as an int also
-	// add the utils NumberCorrectWordsIncompletSentence function into sentence here
 
 package event
 

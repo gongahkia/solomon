@@ -16,13 +16,15 @@ func main() {
 	var timeLimit int
 	// var totalNumWords int
 	var totalNumSentences int
+	// var wordWPM int
+	// var sentenceWPM int
 
 	timeLimit = 40
 	// totalNumWords = 10
 	totalNumSentences = 2
 
 	graphics.DrawTitleScreen()
-	// event.MonkeTypeWords(timeLimit, totalNumWords)
-	event.MonkeTypeSentences(timeLimit, totalNumSentences)
+	// wordWPM = event.MonkeTypeWords(timeLimit, totalNumWords)
+	sentenceWPM = event.MonkeTypeSentences(timeLimit, totalNumSentences)
 
 }

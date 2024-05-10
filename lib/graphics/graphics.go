@@ -31,3 +31,60 @@ func DisplayWords(currentAndUpcomingNextWord []string){
 	// fua add further code here later
 
 }
+
+func DisplaySentences(currentSentence string){
+
+	// color initialisation
+
+	/*
+
+	Red := color.New(color.FgRed, color.Bold)
+	Green := color.New(color.FgGreen)
+	Magenta := color.New(color.FgMagenta)
+	Yellow := color.New(color.FgYellow)
+	Blue := color.New(color.FgBlue)
+	Cyan := color.New(color.FgCyan)
+
+	*/
+
+	// fua add further code here later
+
+}
+
+func DisplayWordWPM(wordWPM int){
+
+	// color initialisation
+
+	/*
+
+	Red := color.New(color.FgRed, color.Bold)
+	Green := color.New(color.FgGreen)
+	Magenta := color.New(color.FgMagenta)
+	Yellow := color.New(color.FgYellow)
+	Blue := color.New(color.FgBlue)
+	Cyan := color.New(color.FgCyan)
+
+	*/
+
+	// fua add further code here later
+
+}
+
+func DisplaySentenceWPM(sentenceWPM int){
+
+	// color initialisation
+
+	/*
+
+	Red := color.New(color.FgRed, color.Bold)
+	Green := color.New(color.FgGreen)
+	Magenta := color.New(color.FgMagenta)
+	Yellow := color.New(color.FgYellow)
+	Blue := color.New(color.FgBlue)
+	Cyan := color.New(color.FgCyan)
+
+	*/
+
+	// fua add further code here later
+
+}

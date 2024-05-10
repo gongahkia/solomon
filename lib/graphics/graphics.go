@@ -5,86 +5,40 @@ import (
 	"github.com/fatih/color"
 )
 
-
 func DrawTitleScreen(){
-
 	Magenta := color.New(color.FgMagenta)
 	Magenta.Print("M O N K E")
-
 }
 
 func DisplayWords(currentAndUpcomingNextWord []string){
-
-	// color initialisation
-
-	/*
-
-	Red := color.New(color.FgRed, color.Bold)
-	Green := color.New(color.FgGreen)
-	Magenta := color.New(color.FgMagenta)
-	Yellow := color.New(color.FgYellow)
+	Green := color.New(color.FgGreen, color.Bold)
+	White := color.New(color.FgWhite)
 	Blue := color.New(color.FgBlue)
-	Cyan := color.New(color.FgCyan)
-
-	*/
-
-	// fua add further code here later
-
+	Yellow := color.New(color.FgYellow)
+	White.Print("[")
+	Green.Print(currentAndUpcomingNextWord[0])
+	White.Print("]")
+	Blue.Print("\n", currentAndUpcomingNextWord[1], "\n")
+	Yellow.Print("---\n")
+	White.Print(">")
 }
 
-func DisplaySentences(currentSentence string){
-
-	// color initialisation
-
-	/*
-
-	Red := color.New(color.FgRed, color.Bold)
-	Green := color.New(color.FgGreen)
-	Magenta := color.New(color.FgMagenta)
-	Yellow := color.New(color.FgYellow)
+func DisplaySentences(currentAndUpcomingSentence []string){
+	Green := color.New(color.FgGreen, color.Bold)
+	White := color.New(color.FgWhite)
 	Blue := color.New(color.FgBlue)
-	Cyan := color.New(color.FgCyan)
-
-	*/
-
-	// fua add further code here later
-
+	Yellow := color.New(color.FgYellow)
+	White.Print("[")
+	Green.Print(currentAndUpcomingSentence[0])
+	White.Print("]")
+	Blue.Print("\n", currentAndUpcomingSentence[1], "\n")
+	Yellow.Print("---\n")
+	White.Print(">")
 }
 
-func DisplayWordWPM(wordWPM int){
-
-	// color initialisation
-
-	/*
-
-	Red := color.New(color.FgRed, color.Bold)
-	Green := color.New(color.FgGreen)
+func DisplayWPM(wordWPM float64){
+	Cyan := color.New(color.FgCyan, color.Bold)
 	Magenta := color.New(color.FgMagenta)
-	Yellow := color.New(color.FgYellow)
-	Blue := color.New(color.FgBlue)
-	Cyan := color.New(color.FgCyan)
-
-	*/
-
-	// fua add further code here later
-
-}
-
-func DisplaySentenceWPM(sentenceWPM int){
-
-	// color initialisation
-
-	/*
-
-	Red := color.New(color.FgRed, color.Bold)
-	Green := color.New(color.FgGreen)
-	Magenta := color.New(color.FgMagenta)
-	Yellow := color.New(color.FgYellow)
-	Blue := color.New(color.FgBlue)
-	Cyan := color.New(color.FgCyan)
-
-	*/
-
-	// fua add further code here later
-
+	Cyan.Print("\n","Words Per Minute: ")
+	Magenta.Print(wordWPM, "\n\n")
 }

@@ -1,6 +1,3 @@
-// fua
-	// use the graphics functions later to display all items and sentences to the screen as opposed to fmt print
-
 package event
 
 import (
@@ -9,9 +6,8 @@ import (
 	"strings"
 	"github.com/gongahkia/monke/lib/generator"
 	"github.com/gongahkia/monke/lib/utils"
+	"github.com/gongahkia/monke/lib/graphics"
 	"github.com/eiannone/keyboard"
-	// "os"
-	// "log"
 )
 
 func MonkeTypeWords(totalTimeLimit int, totalNumWords int) int {
@@ -37,7 +33,7 @@ func MonkeTypeWords(totalTimeLimit int, totalNumWords int) int {
     if wordsError != nil {
         fmt.Println("Monke hit an error when generating words:", wordsError)
     } else {
-        fmt.Println(words) // arrays are printed without commas
+        // fmt.Println(words) // arrays are printed without commas
     }
 
 	// --- main code execution ---
@@ -74,18 +70,21 @@ func MonkeTypeWords(totalTimeLimit int, totalNumWords int) int {
 					userInputBuffer = userInputBuffer[:len(userInputBuffer)-1]
 				}
 				utils.ClearScreen()
+				// fmt.Print(currentAndUpcomingNextWord)
+				graphics.DisplayWords(currentAndUpcomingNextWord)
 				fmt.Print(userInputBuffer) 
-				fmt.Print(currentAndUpcomingNextWord)
 			} else if key == keyboard.KeySpace {
 				userInputBuffer += " "
 				utils.ClearScreen()
+				// fmt.Print(currentAndUpcomingNextWord)
+				graphics.DisplayWords(currentAndUpcomingNextWord)
 				fmt.Print(userInputBuffer) 
-				fmt.Print(currentAndUpcomingNextWord)
 			} else {
 				userInputBuffer += string(char)
 				utils.ClearScreen()
+				// fmt.Print(currentAndUpcomingNextWord)
+				graphics.DisplayWords(currentAndUpcomingNextWord)
 				fmt.Print(userInputBuffer) 
-				fmt.Print(currentAndUpcomingNextWord)
 			}
 
 			// --- check userInputBuffer against words queue---
@@ -162,7 +161,7 @@ func MonkeTypeSentences(totalTimeLimit int, totalNumSentences int) int {
     if sentencesError != nil {
         fmt.Println("Monke hit an error when generating sentences:", sentencesError)
     } else {
-        fmt.Println(sentences) // arrays are printed without commas
+        // fmt.Println(sentences) // arrays are printed without commas
     }
 
 	// --- main code execution ---
@@ -175,8 +174,8 @@ func MonkeTypeSentences(totalTimeLimit int, totalNumSentences int) int {
 
 			// --- variable initialization within loop ---
 
-			var currentSentence string
-			currentSentence = sentences[0]
+			var currentAndUpcomingSentence []string
+			currentAndUpcomingSentence = sentences[:2]
 
 			// --- user input validation ---
 
@@ -201,18 +200,21 @@ func MonkeTypeSentences(totalTimeLimit int, totalNumSentences int) int {
 					userInputBuffer = userInputBuffer[:len(userInputBuffer)-1]
 				}
 				utils.ClearScreen()
+				// fmt.Print(currentSentence)
+				graphics.DisplaySentences(currentAndUpcomingSentence)
 				fmt.Print(userInputBuffer) 
-				fmt.Print(currentSentence)
 			} else if key == keyboard.KeySpace {
 				userInputBuffer += " "
 				utils.ClearScreen()
+				// fmt.Print(currentSentence)
+				graphics.DisplaySentences(currentAndUpcomingSentence)
 				fmt.Print(userInputBuffer) 
-				fmt.Print(currentSentence)
 			} else {
 				userInputBuffer += string(char)
 				utils.ClearScreen()
+				// fmt.Print(currentSentence)
+				graphics.DisplaySentences(currentAndUpcomingSentence)
 				fmt.Print(userInputBuffer) 
-				fmt.Print(currentSentence)
 			}
 
 			// --- check userInputBuffer against sentence queue---

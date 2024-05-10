@@ -13,7 +13,16 @@ import (
 
 func main() {
 
+	var timeLimit int
+	// var totalNumWords int
+	var totalNumSentences int
+
+	timeLimit = 40
+	// totalNumWords = 10
+	totalNumSentences = 2
+
 	graphics.DrawTitleScreen()
-	event.MonkeTypeWords()
+	// event.MonkeTypeWords(timeLimit, totalNumWords)
+	event.MonkeTypeSentences(timeLimit, totalNumSentences)
 
 }

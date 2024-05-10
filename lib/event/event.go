@@ -34,7 +34,7 @@ func MonkeTypeWords(totalTimeLimit int, totalNumWords int) int {
         fmt.Println("Monke hit an error when generating words:", wordsError)
     } else {
         // fmt.Println(words) // arrays are printed without commas
-		fmt.Println("[ENTER] to start")
+		fmt.Println("[ANY KEY] to start")
     }
 
 	// --- main code execution ---
@@ -80,6 +80,8 @@ func MonkeTypeWords(totalTimeLimit int, totalNumWords int) int {
 				// fmt.Print(currentAndUpcomingNextWord)
 				graphics.DisplayWords(currentAndUpcomingNextWord)
 				fmt.Print(userInputBuffer) 
+			} else if key == keyboard.KeyEnter {
+				// do nothing		
 			} else {
 				userInputBuffer += string(char)
 				utils.ClearScreen()
@@ -163,7 +165,7 @@ func MonkeTypeSentences(totalTimeLimit int, totalNumSentences int) int {
         fmt.Println("Monke hit an error when generating sentences:", sentencesError)
     } else {
         // fmt.Println(sentences) // arrays are printed without commas
-		fmt.Println("[ENTER] to start")
+		fmt.Println("[ANY KEY] to start")
     }
 
 	// --- main code execution ---
@@ -211,7 +213,9 @@ func MonkeTypeSentences(totalTimeLimit int, totalNumSentences int) int {
 				// fmt.Print(currentSentence)
 				graphics.DisplaySentences(currentAndUpcomingSentence)
 				fmt.Print(userInputBuffer) 
-			} else {
+			} else if key == keyboard.KeyEnter {
+				// do nothing		
+			} else {	
 				userInputBuffer += string(char)
 				utils.ClearScreen()
 				// fmt.Print(currentSentence)
@@ -221,9 +225,8 @@ func MonkeTypeSentences(totalTimeLimit int, totalNumSentences int) int {
 
 			// --- check userInputBuffer against sentence queue---
 
-			if len(userInputBuffer) >= len(sentences[0]) && strings.Trim(sentences[0], " ") == strings.Trim(userInputBuffer[:len(sentences[0])], " "){ // sentence is correctly typed
-				fmt.Println(userInputBuffer)
-				fmt.Println(sentences[0])
+			if len(userInputBuffer) >= len(sentences[0]) && sentences[0] == userInputBuffer[:len(sentences[0])]{ // sentence is correctly typed
+
 				userInputBuffer = userInputBuffer[len(sentences[0]):] // clears typed sentence from userInputBuffer
 				completedNumWordsInSentences += len(strings.Split(sentences[0], " ")) // add words in the sentence
 			 	sentences = sentences[1:] // remove sentence from sentence queue

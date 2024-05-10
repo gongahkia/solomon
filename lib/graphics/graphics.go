@@ -20,7 +20,7 @@ func DisplayWords(currentAndUpcomingNextWord []string){
 	White.Print("]")
 	Blue.Print("\n", currentAndUpcomingNextWord[1], "\n")
 	Yellow.Print("---\n")
-	White.Print(">")
+	White.Print("> ")
 }
 
 func DisplaySentences(currentAndUpcomingSentence []string){
@@ -33,7 +33,7 @@ func DisplaySentences(currentAndUpcomingSentence []string){
 	White.Print("]")
 	Blue.Print("\n", currentAndUpcomingSentence[1], "\n")
 	Yellow.Print("---\n")
-	White.Print(">")
+	White.Print("> ")
 }
 
 func DisplayWPM(wordWPM float64){

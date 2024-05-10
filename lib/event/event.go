@@ -34,6 +34,7 @@ func MonkeTypeWords(totalTimeLimit int, totalNumWords int) int {
         fmt.Println("Monke hit an error when generating words:", wordsError)
     } else {
         // fmt.Println(words) // arrays are printed without commas
+		fmt.Println("[ENTER] to start")
     }
 
 	// --- main code execution ---
@@ -154,14 +155,15 @@ func MonkeTypeSentences(totalTimeLimit int, totalNumSentences int) int {
 	// --- generating words ---
 
 	sentences, sentencesError = generator.GenerateSentences(totalNumSentences)
-
 	totalNumWordsInSentences = utils.TotalNumWords(sentences)
+
 	// fmt.Println(totalNumWordsInSentences)
 
     if sentencesError != nil {
         fmt.Println("Monke hit an error when generating sentences:", sentencesError)
     } else {
         // fmt.Println(sentences) // arrays are printed without commas
+		fmt.Println("[ENTER] to start")
     }
 
 	// --- main code execution ---
@@ -219,10 +221,12 @@ func MonkeTypeSentences(totalTimeLimit int, totalNumSentences int) int {
 
 			// --- check userInputBuffer against sentence queue---
 
-			if len(userInputBuffer) >= len(sentences[0]) && sentences[0] == userInputBuffer[:len(sentences[0])]{ // sentence is correctly typed
+			if len(userInputBuffer) >= len(sentences[0]) && strings.Trim(sentences[0], " ") == strings.Trim(userInputBuffer[:len(sentences[0])], " "){ // sentence is correctly typed
+				fmt.Println(userInputBuffer)
+				fmt.Println(sentences[0])
 				userInputBuffer = userInputBuffer[len(sentences[0]):] // clears typed sentence from userInputBuffer
 				completedNumWordsInSentences += len(strings.Split(sentences[0], " ")) // add words in the sentence
-			 	sentences = sentences[1:] // remove word from word queue
+			 	sentences = sentences[1:] // remove sentence from sentence queue
 			 	completedNumSentences++ // add to total score
 
 				if completedNumSentences == totalNumSentences { // if user finishes typing all sentences

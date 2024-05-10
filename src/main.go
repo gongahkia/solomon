@@ -1,7 +1,3 @@
-// fua
-	// work out why the drawtitlescren is not showing, perhaps need to read user input first
-	// add final selection options here for type words or sentences
-
 package main
 
 import (
@@ -41,7 +37,7 @@ func main() {
 		var timeLimitSeconds int
 		var overallWordWPM float64
 		timeLimitSeconds = 40
-		totalNumSentences = 100
+		totalNumSentences = 30
 
 		sentencesE := event.MonkeTypeSentences(timeLimitSeconds, totalNumSentences)
 		overallWordWPM = (float64(sentencesE)/float64(timeLimitSeconds)) * 60

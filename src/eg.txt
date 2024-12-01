@@ -1,15 +1,15 @@
 ---
-fruits
+TOPIC: fruits
 apple
 a kind of fruit
 i like to eat apples and other fruits
 ---
-fruits
+TOPIC: fruits
 banana
 another kind of fruit
 i like to eat bananas and other fruits
 ---
-fruits
+TOPIC: fruits
 cantaloupe
 yet another kind of fruit
 i have never eaten a cantaloupe before but i have eaten plenty of honeydews

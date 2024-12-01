@@ -12,11 +12,11 @@ Specify your flashcard content within a txt file.
 Cards.py reads simple txt files that follow the below structure.
 
 ---
-<topic_name>
+TOPIC: <topic_name>
 <question_1>
 <multi_line_answer>
 ---
-<topic_name>
+TOPIC: <topic_name>
 <question_2>
 <multi_line_answer>
 ---
@@ -25,7 +25,7 @@ etc...
 An example text input file is as follows.
 
 ---
-IS211: Definition
+TOPIC: IS211 - Definition
 Design thinking steps include...
 Empathize: Discover what people really need
 Define: Create a POV through personas and scenarios
@@ -33,7 +33,7 @@ Ideate: Brainstorm to generate ideas
 Prototype: Make ideas tangible and quick to learn
 Test: Refine prototypes to learn about users
 ---
-IS211: Laboratory Studies
+TOPIC: IS211 - Laboratory Studies
 What is the purpose of a pilot study?
 A dry run before the real study begins
 Helps you fix problems with the study
@@ -68,14 +68,14 @@ def main():
     current_answer = []
     for line in lines:
         line = line.strip()
-        if line.startswith("IS211"):
+        if line.startswith("TOPIC"):
             if current_topic:
                 question_count += 1
-                print(current_topic)
+                print(current_topic.lstrip("TOPIC: "))
                 print(f"📌 Question: {current_question}")
                 input("\n\nPress [Enter] to see the answer")
                 clear_screen()
-                print(current_topic)
+                print(current_topic.lstrip("TOPIC: "))
                 print(f"📌 Question: {current_question}")
                 for answer in current_answer:
                     if answer.strip() == "---":
@@ -94,11 +94,11 @@ def main():
                 current_answer.append(line)
     if current_topic:
         question_count += 1
-        print(current_topic)
+        print(current_topic.lstrip("TOPIC: "))
         print(f"📌 Question: {current_question}")
         input("\n\nPress [Enter] to see the answer")
         clear_screen()
-        print(current_topic)
+        print(current_topic.lstrip("TOPIC: "))
         print(f"📌 Question: {current_question}")
         for answer in current_answer:
             if answer.strip() == "---":

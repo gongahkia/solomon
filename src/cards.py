@@ -93,11 +93,19 @@ def main():
             else:
                 current_answer.append(line)
     if current_topic:
+        question_count += 1
         print(current_topic)
-        print(current_question)
-        input("Press [Enter] to see the answer")
+        print(f"📌 Question: {current_question}")
+        input("\n\nPress [Enter] to see the answer")
+        clear_screen()
+        print(current_topic)
+        print(f"📌 Question: {current_question}")
         for answer in current_answer:
-            print(answer)
+            if answer.strip() == "---":
+                pass
+            else:
+                print(f"📝 Answer: {answer}")
+        input("\nPress [Enter] to continue")
     end_time = time.time()  
     total_elapsed_time = end_time - start_time
     clear_screen()

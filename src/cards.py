@@ -66,16 +66,20 @@ def main():
     current_topic = ""
     current_question = ""
     current_answer = []
+    search_query = "IS211: "
+    total_number_questions = len([line for line in lines if line.startswith(search_query)])
     for line in lines:
         line = line.strip()
-        if line.startswith("TOPIC"):
+        if line.startswith(search_query):
             if current_topic:
                 question_count += 1
-                print(current_topic.lstrip("TOPIC: "))
+                print(current_topic[len(search_query):])
+                print(f"#{question_count}/{total_number_questions}")
                 print(f"📌 Question: {current_question}")
                 input("\n\nPress [Enter] to see the answer")
                 clear_screen()
-                print(current_topic.lstrip("TOPIC: "))
+                print(current_topic[len(search_query):])
+                print(f"#{question_count}/{total_number_questions}")
                 print(f"📌 Question: {current_question}")
                 for answer in current_answer:
                     if answer.strip() == "---":
@@ -94,11 +98,13 @@ def main():
                 current_answer.append(line)
     if current_topic:
         question_count += 1
-        print(current_topic.lstrip("TOPIC: "))
+        print(current_topic[len(search_query):])
+        print(f"#{question_count}/{total_number_questions}")
         print(f"📌 Question: {current_question}")
         input("\n\nPress [Enter] to see the answer")
         clear_screen()
-        print(current_topic.lstrip("TOPIC: "))
+        print(current_topic[len(search_query):])
+        print(f"#{question_count}/{total_number_questions}")
         print(f"📌 Question: {current_question}")
         for answer in current_answer:
             if answer.strip() == "---":

@@ -28,3 +28,11 @@ def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> t
     signal_line = ema(macd_line, signal)
     hist = macd_line - signal_line
     return macd_line, signal_line, hist
+
+
+def bollinger_bands(close: pd.Series, window: int = 20, num_std: float = 2.0) -> tuple[pd.Series, pd.Series, pd.Series]:
+    mid = sma(close, window)
+    std = close.rolling(window=window, min_periods=window).std()
+    upper = mid + (num_std * std)
+    lower = mid - (num_std * std)
+    return lower, mid, upper

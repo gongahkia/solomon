@@ -55,3 +55,9 @@ def rolling_volatility(close: pd.Series, window: int = 20, periods_per_year: int
     rets = close.pct_change()
     vol = rets.rolling(window=window, min_periods=window).std()
     return vol * (periods_per_year**0.5)
+
+
+def max_drawdown(close: pd.Series, window: int = 252) -> pd.Series:
+    roll_max = close.rolling(window=window, min_periods=window).max()
+    dd = (close / roll_max) - 1.0
+    return dd.rolling(window=window, min_periods=window).min()

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from stonks.analysis.indicators import rsi, sma
+from stonks.analysis.indicators import bollinger_bands, rsi, sma
 
 
 @dataclass(frozen=True)
@@ -104,4 +104,41 @@ def sma_cross_strategy(df: pd.DataFrame, fast: int = 20, slow: int = 50) -> Reco
         action="AVOID_OR_HEDGE",
         confidence=0.55,
         rationale=f"Downtrend: SMA{fast} <= SMA{slow}; last={last:.2f}",
+    )
+
+
+def mean_reversion_bb_rsi_strategy(df: pd.DataFrame) -> Recommendation:
+    if df.empty:
+        return Recommendation(action="NO_DATA", confidence=0.0, rationale="No rows")
+    close = df["close"] if "close" in df.columns else None
+    if close is None:
+        return Recommendation(action="NO_DATA", confidence=0.0, rationale="Missing close")
+    if len(close) < 60:
+        return Recommendation(action="INSUFFICIENT_HISTORY", confidence=0.1, rationale="Need >=60 days")
+
+    lower, mid, upper = bollinger_bands(close, window=20, num_std=2.0)
+    rsi14 = rsi(close, 14)
+    last = float(close.iloc[-1])
+
+    lo, mi, up = lower.iloc[-1], mid.iloc[-1], upper.iloc[-1]
+    r = rsi14.iloc[-1]
+    if pd.isna(lo) or pd.isna(up) or pd.isna(r):
+        return Recommendation(action="INSUFFICIENT_HISTORY", confidence=0.1, rationale="Indicators not ready")
+
+    if last < float(lo) and float(r) <= 35:
+        return Recommendation(
+            action="BUY_DCA",
+            confidence=0.6,
+            rationale=f"Price below lower band and RSI {float(r):.1f} low; last={last:.2f}",
+        )
+    if last > float(up) and float(r) >= 65:
+        return Recommendation(
+            action="HOLD_WAIT",
+            confidence=0.6,
+            rationale=f"Price above upper band and RSI {float(r):.1f} high; last={last:.2f}",
+        )
+    return Recommendation(
+        action="HOLD",
+        confidence=0.45,
+        rationale=f"Mean reversion signals neutral; last={last:.2f}, mid={float(mi):.2f}",
     )

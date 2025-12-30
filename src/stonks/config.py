@@ -29,6 +29,10 @@ class DataConfig(BaseModel):
     cache_ttl_seconds: int = Field(default=3600, ge=0)
 
 
+class RiskConfig(BaseModel):
+    max_position_fraction: float = Field(default=0.20, ge=0.0, le=1.0)
+
+
 class TickerOverride(BaseModel):
     data: DataConfig = Field(default_factory=DataConfig)
 
@@ -38,6 +42,7 @@ class AppConfig(BaseModel):
     data: DataConfig = Field(default_factory=DataConfig)
     ticker_overrides: dict[str, TickerOverride] = Field(default_factory=dict)
     strategy: str = Field(default="basic_trend_rsi")
+    risk: RiskConfig = Field(default_factory=RiskConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
 

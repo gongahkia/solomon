@@ -53,12 +53,17 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
                 vol_f = float(vol)
             except Exception:
                 vol_f = float("nan")
-            pos = suggest_position_fraction_by_volatility(vol_f)
+            pos = suggest_position_fraction_by_volatility(
+                vol_f,
+                max_fraction=cfg.risk.max_position_fraction,
+            )
             if pos is not None:
                 rec = Recommendation(
                     action=rec.action,
                     confidence=rec.confidence,
-                    rationale=f"{rec.rationale} | sizing~{pos*100:.0f}% (ann vol {vol_f*100:.0f}%)",
+                    rationale=(
+                        f"{rec.rationale} | sizing~{pos*100:.0f}% (ann vol {vol_f*100:.0f}%, cap {cfg.risk.max_position_fraction*100:.0f}%)"
+                    ),
                 )
         results.append(TickerResult(ticker=series.ticker, last_close=last_close, recommendation=rec))
 

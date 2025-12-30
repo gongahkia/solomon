@@ -16,3 +16,9 @@ def test_suggest_position_fraction_by_volatility_scales_inverse() -> None:
 def test_suggest_position_fraction_by_volatility_invalid() -> None:
     assert suggest_position_fraction_by_volatility(0.0) is None
     assert suggest_position_fraction_by_volatility(-1.0) is None
+
+
+def test_suggest_position_fraction_by_volatility_respects_cap() -> None:
+    # Extremely low vol would imply a huge position; ensure we cap it.
+    capped = suggest_position_fraction_by_volatility(0.01, max_fraction=0.05)
+    assert capped == 0.05

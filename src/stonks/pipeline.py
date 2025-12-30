@@ -52,7 +52,14 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
         last_close = None
         if "close" in df.columns and not df.empty:
             last_close = float(df["close"].iloc[-1])
-        rec = strategy_fn(df)
+        if len(df) < cfg.risk.min_history_days:
+            rec = Recommendation(
+                action="INSUFFICIENT_HISTORY",
+                confidence=0.1,
+                rationale=f"Need >={cfg.risk.min_history_days} rows",
+            )
+        else:
+            rec = strategy_fn(df)
         if "volume" not in df.columns or df.empty:
             if rec.action in {"BUY_DCA", "HOLD_DCA"}:
                 rec = Recommendation(

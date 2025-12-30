@@ -32,6 +32,7 @@ class DataConfig(BaseModel):
 class RiskConfig(BaseModel):
     max_position_fraction: float = Field(default=0.20, ge=0.0, le=1.0)
     max_portfolio_exposure_fraction: float = Field(default=1.00, ge=0.0, le=1.0)
+    min_history_days: int = Field(default=60, ge=1)
 
 
 class TickerOverride(BaseModel):

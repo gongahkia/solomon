@@ -37,6 +37,7 @@ class AppConfig(BaseModel):
     tickers: list[str] = Field(default_factory=lambda: ["AAPL.US", "MSFT.US"])
     data: DataConfig = Field(default_factory=DataConfig)
     ticker_overrides: dict[str, TickerOverride] = Field(default_factory=dict)
+    strategy: str = Field(default="basic_trend_rsi")
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
 

@@ -14,6 +14,11 @@ from stonks.storage import save_last_run
 def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> Path:
     console = console or Console()
 
+    strategies = {
+        "basic_trend_rsi": basic_trend_rsi_strategy,
+    }
+    strategy_fn = strategies.get(cfg.strategy, basic_trend_rsi_strategy)
+
     def provider_for(ticker: str) -> PriceProvider:
         t = normalize_ticker(ticker)
         override = cfg.ticker_overrides.get(t)
@@ -32,7 +37,7 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
         last_close = None
         if "close" in df.columns and not df.empty:
             last_close = float(df["close"].iloc[-1])
-        rec = basic_trend_rsi_strategy(df)
+        rec = strategy_fn(df)
         results.append(TickerResult(ticker=series.ticker, last_close=last_close, recommendation=rec))
 
     report_path = write_text_report(results, out_dir=out_dir)

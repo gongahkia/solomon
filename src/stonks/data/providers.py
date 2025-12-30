@@ -11,7 +11,12 @@ def normalize_ticker(raw: str) -> str:
     raw = raw.strip()
     if not raw:
         raise ValueError("Ticker cannot be empty")
-    return raw.upper()
+    t = raw.upper()
+    # Minimal convenience: if user provides no exchange suffix, default to US.
+    # Example: AAPL -> AAPL.US
+    if "." not in t:
+        t = f"{t}.US"
+    return t
 
 
 @dataclass(frozen=True)

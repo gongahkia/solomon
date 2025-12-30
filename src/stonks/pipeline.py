@@ -4,7 +4,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from stonks.analysis.strategy import basic_trend_rsi_strategy
+from stonks.analysis.strategy import basic_trend_rsi_strategy, sma_cross_strategy
 from stonks.config import AppConfig
 from stonks.data.providers import CsvProvider, PriceProvider, StooqProvider, normalize_ticker
 from stonks.reporting.report import TickerResult, write_text_report
@@ -16,6 +16,7 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
 
     strategies = {
         "basic_trend_rsi": basic_trend_rsi_strategy,
+        "sma_cross": sma_cross_strategy,
     }
     strategy_fn = strategies.get(cfg.strategy, basic_trend_rsi_strategy)
 

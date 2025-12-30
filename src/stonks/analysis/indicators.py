@@ -49,3 +49,9 @@ def atr(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> 
         axis=1,
     ).max(axis=1)
     return tr.rolling(window=window, min_periods=window).mean()
+
+
+def rolling_volatility(close: pd.Series, window: int = 20, periods_per_year: int = 252) -> pd.Series:
+    rets = close.pct_change()
+    vol = rets.rolling(window=window, min_periods=window).std()
+    return vol * (periods_per_year**0.5)

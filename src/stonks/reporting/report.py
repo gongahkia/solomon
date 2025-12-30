@@ -19,7 +19,7 @@ class TickerResult:
     backtest: BacktestMetrics | None = None
 
 
-def write_text_report(results: list[TickerResult], out_dir: Path) -> Path:
+def write_text_report(results: list[TickerResult], out_dir: Path, *, portfolio: BacktestMetrics | None = None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     path = out_dir / f"report_{ts}.txt"
@@ -54,5 +54,18 @@ def write_text_report(results: list[TickerResult], out_dir: Path) -> Path:
 
     console = Console(record=True, width=120)
     console.print(table)
+
+    if portfolio is not None:
+        summary = Table(title="Portfolio Backtest")
+        summary.add_column("CAGR", justify="right")
+        summary.add_column("Sharpe", justify="right")
+        summary.add_column("MaxDD", justify="right")
+        summary.add_row(
+            fmt(portfolio.cagr, pct=True),
+            fmt(portfolio.sharpe, pct=False),
+            fmt(portfolio.max_drawdown, pct=True),
+        )
+        console.print(summary)
+
     path.write_text(console.export_text(), encoding="utf-8")
     return path

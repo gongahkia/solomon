@@ -53,6 +53,7 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
 
     results: list[TickerResult] = []
     per_ticker_fraction: dict[str, float] = {}
+    per_ticker_equity: dict[str, object] = {}
     for ticker in cfg.tickers:
         provider = provider_for_config(cfg, ticker)
         series = provider.fetch_daily(ticker)
@@ -136,6 +137,8 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
 
         bt = walk_forward_backtest(df, strategy_fn=strategy_fn, min_history_rows=cfg.risk.min_history_days)
         metrics = compute_backtest_metrics(bt.equity)
+        if bt.equity is not None and not bt.equity.empty:
+            per_ticker_equity[series.ticker] = bt.equity
 
         results.append(
             TickerResult(
@@ -167,7 +170,21 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
             new_results.append(TickerResult(ticker=r.ticker, last_close=r.last_close, recommendation=rec))
         results = new_results
 
-    report_path = write_text_report(results, out_dir=out_dir)
+    portfolio_metrics = None
+    if per_ticker_equity:
+        import pandas as pd
+
+        rets = []
+        for eq in per_ticker_equity.values():
+            s = eq.pct_change().fillna(0.0)
+            rets.append(s)
+        if rets:
+            rets_df = pd.concat(rets, axis=1).fillna(0.0)
+            port_ret = rets_df.mean(axis=1)
+            port_equity = (1.0 + port_ret).cumprod()
+            portfolio_metrics = compute_backtest_metrics(port_equity)
+
+    report_path = write_text_report(results, out_dir=out_dir, portfolio=portfolio_metrics)
     save_last_run(cfg.tickers, report_path)
     console.print(f"[green]Wrote report[/green] {report_path}")
     return report_path

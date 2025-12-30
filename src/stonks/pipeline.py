@@ -4,6 +4,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from stonks.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
 from stonks.analysis.indicators import atr, rolling_volatility
 from stonks.analysis.risk import (
     scale_fractions_to_portfolio_cap,
@@ -132,7 +133,18 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
                     confidence=rec.confidence,
                     rationale=f"{rec.rationale} | take~{tp:.2f} (3.0x ATR14 {atr_f:.2f})",
                 )
-        results.append(TickerResult(ticker=series.ticker, last_close=last_close, recommendation=rec))
+
+        bt = walk_forward_backtest(df, strategy_fn=strategy_fn, min_history_rows=cfg.risk.min_history_days)
+        metrics = compute_backtest_metrics(bt.equity)
+
+        results.append(
+            TickerResult(
+                ticker=series.ticker,
+                last_close=last_close,
+                recommendation=rec,
+                backtest=metrics,
+            )
+        )
 
     scaled, factor = scale_fractions_to_portfolio_cap(
         per_ticker_fraction,

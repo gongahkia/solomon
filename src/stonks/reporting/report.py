@@ -7,6 +7,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
+from stonks.analysis.backtest import BacktestMetrics
 from stonks.analysis.strategy import Recommendation
 
 
@@ -15,6 +16,7 @@ class TickerResult:
     ticker: str
     last_close: float | None
     recommendation: Recommendation
+    backtest: BacktestMetrics | None = None
 
 
 def write_text_report(results: list[TickerResult], out_dir: Path) -> Path:
@@ -27,7 +29,15 @@ def write_text_report(results: list[TickerResult], out_dir: Path) -> Path:
     table.add_column("Last", justify="right")
     table.add_column("Action", style="magenta")
     table.add_column("Confidence", justify="right")
+    table.add_column("CAGR", justify="right")
+    table.add_column("Sharpe", justify="right")
+    table.add_column("MaxDD", justify="right")
     table.add_column("Rationale")
+
+    def fmt(v: float | None, *, pct: bool = False) -> str:
+        if v is None:
+            return "-"
+        return f"{v*100:.1f}%" if pct else f"{v:.2f}"
 
     for r in results:
         last = "-" if r.last_close is None else f"{r.last_close:.2f}"
@@ -36,6 +46,9 @@ def write_text_report(results: list[TickerResult], out_dir: Path) -> Path:
             last,
             r.recommendation.action,
             f"{r.recommendation.confidence:.2f}",
+            fmt(r.backtest.cagr if r.backtest else None, pct=True),
+            fmt(r.backtest.sharpe if r.backtest else None, pct=False),
+            fmt(r.backtest.max_drawdown if r.backtest else None, pct=True),
             r.recommendation.rationale,
         )
 

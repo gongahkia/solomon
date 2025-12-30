@@ -7,6 +7,10 @@ def sma(series: pd.Series, window: int) -> pd.Series:
     return series.rolling(window=window, min_periods=window).mean()
 
 
+def ema(series: pd.Series, span: int) -> pd.Series:
+    return series.ewm(span=span, adjust=False, min_periods=span).mean()
+
+
 def rsi(close: pd.Series, window: int = 14) -> pd.Series:
     delta = close.diff()
     gain = delta.where(delta > 0, 0.0)

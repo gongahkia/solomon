@@ -36,3 +36,16 @@ def bollinger_bands(close: pd.Series, window: int = 20, num_std: float = 2.0) ->
     upper = mid + (num_std * std)
     lower = mid - (num_std * std)
     return lower, mid, upper
+
+
+def atr(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> pd.Series:
+    prev_close = close.shift(1)
+    tr = pd.concat(
+        [
+            (high - low).abs(),
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    return tr.rolling(window=window, min_periods=window).mean()

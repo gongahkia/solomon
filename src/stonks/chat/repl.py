@@ -14,6 +14,7 @@ from stonks.commands import (
     do_config_show,
     do_config_where,
     do_data_fetch,
+    do_data_verify,
     do_schedule_once,
     do_schedule_start_background,
     do_schedule_status,
@@ -123,13 +124,18 @@ def run_chat(host: str, model: str) -> None:
 
         if cmd == "/data":
             if not args:
-                show_panel("data", "Usage: /data fetch [TICKER1 TICKER2 ...]")
+                show_panel("data", "Usage: /data fetch|verify [TICKER1 TICKER2 ...]")
                 return True
             sub = args[0].lower()
             rest = args[1:]
             if sub == "fetch":
                 fetched = do_data_fetch(rest if rest else None)
                 show_panel("data fetch", f"Fetched {len(fetched)} tickers")
+                return True
+            if sub == "verify":
+                results = do_data_verify(rest if rest else None)
+                body = "\n".join([f"{t}: {s}" for t, s in results.items()])
+                show_panel("data verify", body)
                 return True
             show_panel("data", f"Unknown subcommand: {sub}")
             return True

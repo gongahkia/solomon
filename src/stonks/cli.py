@@ -12,6 +12,7 @@ from stonks.commands import (
     do_config_show,
     do_config_where,
     do_data_fetch,
+    do_data_verify,
     do_schedule_once,
     do_schedule_run,
     do_schedule_status,
@@ -99,6 +100,14 @@ def data_fetch(tickers: list[str] = typer.Argument(None)) -> None:
     """Fetch price data for tickers (populates cache)."""
     fetched = do_data_fetch(tickers if tickers else None)
     Console().print(f"Fetched {len(fetched)} tickers")
+
+
+@data_app.command("verify")
+def data_verify(tickers: list[str] = typer.Argument(None)) -> None:
+    """Verify data provider(s) for tickers."""
+    results = do_data_verify(tickers if tickers else None)
+    for t, status in results.items():
+        Console().print(f"{t}: {status}")
 
 
 def main() -> None:

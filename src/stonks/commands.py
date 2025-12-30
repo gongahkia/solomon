@@ -85,3 +85,24 @@ def do_data_fetch(tickers: list[str] | None) -> list[str]:
         provider.fetch_daily(t)
         fetched.append(t)
     return fetched
+
+
+def do_data_verify(tickers: list[str] | None) -> dict[str, str]:
+    cfg = load_config()
+    use = tickers if tickers else cfg.tickers
+    out: dict[str, str] = {}
+    for t in use:
+        try:
+            override = cfg.ticker_overrides.get(t)
+            data_cfg = override.data if override else cfg.data
+            if data_cfg.provider == "csv":
+                if not data_cfg.csv_path:
+                    raise ValueError("csv_path missing")
+                provider = CsvProvider(data_cfg.csv_path)
+            else:
+                provider = StooqProvider(cache_ttl_seconds=data_cfg.cache_ttl_seconds)
+            series = provider.fetch_daily(t)
+            out[t] = "ok" if not series.df.empty else "no_rows"
+        except Exception as e:
+            out[t] = f"error: {e}"
+    return out

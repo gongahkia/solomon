@@ -19,3 +19,12 @@ def rsi(close: pd.Series, window: int = 14) -> pd.Series:
     avg_loss = loss.rolling(window=window, min_periods=window).mean()
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
+
+
+def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> tuple[pd.Series, pd.Series, pd.Series]:
+    fast_ema = ema(close, fast)
+    slow_ema = ema(close, slow)
+    macd_line = fast_ema - slow_ema
+    signal_line = ema(macd_line, signal)
+    hist = macd_line - signal_line
+    return macd_line, signal_line, hist

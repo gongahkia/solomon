@@ -1,6 +1,8 @@
 from stonks.analysis.risk import (
     scale_fractions_to_portfolio_cap,
+    suggest_stop_loss_price_by_atr,
     suggest_position_fraction_by_volatility,
+    suggest_take_profit_price_by_atr,
 )
 
 
@@ -43,3 +45,13 @@ def test_scale_fractions_to_portfolio_cap_no_scale_when_under_cap() -> None:
     )
     assert factor == 1.0
     assert scaled == {"A": 0.10, "B": 0.10}
+
+
+def test_suggest_stop_loss_price_by_atr() -> None:
+    assert suggest_stop_loss_price_by_atr(100.0, 2.0, multiple=2.0) == 96.0
+    assert suggest_stop_loss_price_by_atr(100.0, 0.0) is None
+
+
+def test_suggest_take_profit_price_by_atr() -> None:
+    assert suggest_take_profit_price_by_atr(100.0, 2.0, multiple=3.0) == 106.0
+    assert suggest_take_profit_price_by_atr(100.0, 0.0) is None

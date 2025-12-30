@@ -4,10 +4,12 @@ from pathlib import Path
 
 from rich.console import Console
 
-from stonks.analysis.indicators import rolling_volatility
+from stonks.analysis.indicators import atr, rolling_volatility
 from stonks.analysis.risk import (
     scale_fractions_to_portfolio_cap,
+    suggest_stop_loss_price_by_atr,
     suggest_position_fraction_by_volatility,
+    suggest_take_profit_price_by_atr,
 )
 from stonks.analysis.strategy import (
     basic_trend_rsi_strategy,
@@ -69,6 +71,21 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
                     rationale=(
                         f"{rec.rationale} | sizing~{pos*100:.0f}% (ann vol {vol_f*100:.0f}%, cap {cfg.risk.max_position_fraction*100:.0f}%)"
                     ),
+                )
+
+        if {"high", "low", "close"}.issubset(set(df.columns)) and not df.empty:
+            last = float(df["close"].iloc[-1])
+            atr14 = atr(df["high"], df["low"], df["close"], window=14).iloc[-1]
+            try:
+                atr_f = float(atr14)
+            except Exception:
+                atr_f = float("nan")
+            sl = suggest_stop_loss_price_by_atr(last, atr_f, multiple=2.0)
+            if sl is not None:
+                rec = Recommendation(
+                    action=rec.action,
+                    confidence=rec.confidence,
+                    rationale=f"{rec.rationale} | stop~{sl:.2f} (2.0x ATR14 {atr_f:.2f})",
                 )
         results.append(TickerResult(ticker=series.ticker, last_close=last_close, recommendation=rec))
 

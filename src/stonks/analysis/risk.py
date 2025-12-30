@@ -47,3 +47,29 @@ def scale_fractions_to_portfolio_cap(
 
     factor = max_portfolio_exposure_fraction / total
     return {k: float(v) * factor for k, v in fractions.items()}, factor
+
+
+def suggest_stop_loss_price_by_atr(
+    last_price: float,
+    atr: float,
+    *,
+    multiple: float = 2.0,
+) -> float | None:
+    if not (math.isfinite(last_price) and math.isfinite(atr)):
+        return None
+    if last_price <= 0 or atr <= 0 or multiple <= 0:
+        return None
+    return max(0.0, last_price - (multiple * atr))
+
+
+def suggest_take_profit_price_by_atr(
+    last_price: float,
+    atr: float,
+    *,
+    multiple: float = 3.0,
+) -> float | None:
+    if not (math.isfinite(last_price) and math.isfinite(atr)):
+        return None
+    if last_price <= 0 or atr <= 0 or multiple <= 0:
+        return None
+    return last_price + (multiple * atr)

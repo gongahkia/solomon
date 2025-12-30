@@ -4,9 +4,12 @@ from pathlib import Path
 
 from rich.console import Console
 
+from stonks.analysis.indicators import rolling_volatility
+from stonks.analysis.risk import suggest_position_fraction_by_volatility
 from stonks.analysis.strategy import (
     basic_trend_rsi_strategy,
     mean_reversion_bb_rsi_strategy,
+    Recommendation,
     sma_cross_strategy,
 )
 from stonks.config import AppConfig
@@ -44,6 +47,19 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
         if "close" in df.columns and not df.empty:
             last_close = float(df["close"].iloc[-1])
         rec = strategy_fn(df)
+        if "close" in df.columns and not df.empty:
+            vol = rolling_volatility(df["close"], window=20).iloc[-1]
+            try:
+                vol_f = float(vol)
+            except Exception:
+                vol_f = float("nan")
+            pos = suggest_position_fraction_by_volatility(vol_f)
+            if pos is not None:
+                rec = Recommendation(
+                    action=rec.action,
+                    confidence=rec.confidence,
+                    rationale=f"{rec.rationale} | sizing~{pos*100:.0f}% (ann vol {vol_f*100:.0f}%)",
+                )
         results.append(TickerResult(ticker=series.ticker, last_close=last_close, recommendation=rec))
 
     report_path = write_text_report(results, out_dir=out_dir)

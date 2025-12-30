@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+import math
+
+
+def clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+def suggest_position_fraction_by_volatility(
+    annualized_volatility: float,
+    *,
+    base_fraction: float = 0.10,
+    reference_volatility: float = 0.20,
+    min_fraction: float = 0.01,
+    max_fraction: float = 0.20,
+) -> float | None:
+    """Suggest a portfolio fraction inversely proportional to volatility.
+
+    Calibrated so that when annualized_volatility == reference_volatility,
+    the suggested fraction is base_fraction.
+
+    Returns None when volatility is non-finite or non-positive.
+    """
+
+    if not math.isfinite(annualized_volatility) or annualized_volatility <= 0:
+        return None
+
+    raw = base_fraction * (reference_volatility / annualized_volatility)
+    return clamp(raw, min_fraction, max_fraction)

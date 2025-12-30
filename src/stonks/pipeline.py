@@ -53,6 +53,24 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
         if "close" in df.columns and not df.empty:
             last_close = float(df["close"].iloc[-1])
         rec = strategy_fn(df)
+        if "volume" not in df.columns or df.empty:
+            if rec.action in {"BUY_DCA", "HOLD_DCA"}:
+                rec = Recommendation(
+                    action="HOLD_WAIT",
+                    confidence=min(0.4, rec.confidence),
+                    rationale=f"{rec.rationale} | volume missing; avoid new buys",
+                )
+        else:
+            try:
+                v_last = float(df["volume"].iloc[-1])
+            except Exception:
+                v_last = 0.0
+            if v_last <= 0 and rec.action in {"BUY_DCA", "HOLD_DCA"}:
+                rec = Recommendation(
+                    action="HOLD_WAIT",
+                    confidence=min(0.4, rec.confidence),
+                    rationale=f"{rec.rationale} | volume insufficient; avoid new buys",
+                )
         if "close" in df.columns and not df.empty:
             vol = rolling_volatility(df["close"], window=20).iloc[-1]
             try:

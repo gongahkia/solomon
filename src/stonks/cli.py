@@ -11,6 +11,7 @@ from stonks.commands import (
     do_config_init,
     do_config_show,
     do_config_where,
+    do_data_fetch,
     do_schedule_once,
     do_schedule_run,
     do_schedule_status,
@@ -20,9 +21,11 @@ from stonks.commands import (
 app = typer.Typer(add_completion=True)
 config_app = typer.Typer()
 schedule_app = typer.Typer()
+data_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
+app.add_typer(data_app, name="data")
 
 
 @app.command()
@@ -89,6 +92,13 @@ def chat() -> None:
     """Start an interactive chat UI using a local model backend."""
     cfg = load_config()
     run_chat(host=cfg.model.host, model=cfg.model.model)
+
+
+@data_app.command("fetch")
+def data_fetch(tickers: list[str] = typer.Argument(None)) -> None:
+    """Fetch price data for tickers (populates cache)."""
+    fetched = do_data_fetch(tickers if tickers else None)
+    Console().print(f"Fetched {len(fetched)} tickers")
 
 
 def main() -> None:

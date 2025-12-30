@@ -13,6 +13,7 @@ from stonks.commands import (
     do_config_init,
     do_config_show,
     do_config_where,
+    do_data_fetch,
     do_schedule_once,
     do_schedule_start_background,
     do_schedule_status,
@@ -80,6 +81,7 @@ def run_chat(host: str, model: str) -> None:
                 "  /config where\n"
                 "  /config show\n"
                 "  /config init [path]\n"
+                "  /data fetch [TICKER1 TICKER2 ...]\n"
                 "  /analyze TICKER1 TICKER2 ...\n"
                 "  /schedule status\n"
                 "  /schedule once [--out-dir DIR]\n"
@@ -117,6 +119,19 @@ def run_chat(host: str, model: str) -> None:
                 return True
             report = do_analyze(args, out_dir=Path("reports"))
             show_panel("analyze", f"Wrote report: {report}")
+            return True
+
+        if cmd == "/data":
+            if not args:
+                show_panel("data", "Usage: /data fetch [TICKER1 TICKER2 ...]")
+                return True
+            sub = args[0].lower()
+            rest = args[1:]
+            if sub == "fetch":
+                fetched = do_data_fetch(rest if rest else None)
+                show_panel("data fetch", f"Fetched {len(fetched)} tickers")
+                return True
+            show_panel("data", f"Unknown subcommand: {sub}")
             return True
 
         if cmd == "/schedule":

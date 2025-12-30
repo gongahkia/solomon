@@ -10,6 +10,7 @@ from stonks import __version__
 from stonks.config import AppConfig, config_path, load_config, save_default_config
 from stonks.pipeline import run_once
 from stonks.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
+from stonks.data.providers import CsvProvider, StooqProvider
 
 
 def do_version() -> str:
@@ -66,3 +67,21 @@ def do_schedule_status() -> ScheduleStatus:
 def do_schedule_start_background(out_dir: Path) -> SchedulerHandle:
     cfg = load_config()
     return start_scheduler_in_thread(cfg, out_dir=out_dir)
+
+
+def do_data_fetch(tickers: list[str] | None) -> list[str]:
+    cfg = load_config()
+    use = tickers if tickers else cfg.tickers
+    fetched: list[str] = []
+    for t in use:
+        override = cfg.ticker_overrides.get(t)
+        data_cfg = override.data if override else cfg.data
+        if data_cfg.provider == "csv":
+            if not data_cfg.csv_path:
+                raise ValueError(f"csv provider requires csv_path for {t}")
+            provider = CsvProvider(data_cfg.csv_path)
+        else:
+            provider = StooqProvider(cache_ttl_seconds=data_cfg.cache_ttl_seconds)
+        provider.fetch_daily(t)
+        fetched.append(t)
+    return fetched

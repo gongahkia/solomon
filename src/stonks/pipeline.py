@@ -81,11 +81,24 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
             except Exception:
                 atr_f = float("nan")
             sl = suggest_stop_loss_price_by_atr(last, atr_f, multiple=2.0)
-            if sl is not None:
+            tp = suggest_take_profit_price_by_atr(last, atr_f, multiple=3.0)
+            if sl is not None and tp is not None:
+                rec = Recommendation(
+                    action=rec.action,
+                    confidence=rec.confidence,
+                    rationale=f"{rec.rationale} | stop~{sl:.2f} (2.0x ATR14 {atr_f:.2f}) | take~{tp:.2f} (3.0x ATR14)",
+                )
+            elif sl is not None:
                 rec = Recommendation(
                     action=rec.action,
                     confidence=rec.confidence,
                     rationale=f"{rec.rationale} | stop~{sl:.2f} (2.0x ATR14 {atr_f:.2f})",
+                )
+            elif tp is not None:
+                rec = Recommendation(
+                    action=rec.action,
+                    confidence=rec.confidence,
+                    rationale=f"{rec.rationale} | take~{tp:.2f} (3.0x ATR14 {atr_f:.2f})",
                 )
         results.append(TickerResult(ticker=series.ticker, last_close=last_close, recommendation=rec))
 

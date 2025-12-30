@@ -26,11 +26,17 @@ class ModelConfig(BaseModel):
 class DataConfig(BaseModel):
     provider: Literal["stooq", "csv"] = "stooq"
     csv_path: str | None = None
+    cache_ttl_seconds: int = Field(default=3600, ge=0)
+
+
+class TickerOverride(BaseModel):
+    data: DataConfig = Field(default_factory=DataConfig)
 
 
 class AppConfig(BaseModel):
     tickers: list[str] = Field(default_factory=lambda: ["AAPL.US", "MSFT.US"])
     data: DataConfig = Field(default_factory=DataConfig)
+    ticker_overrides: dict[str, TickerOverride] = Field(default_factory=dict)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
 

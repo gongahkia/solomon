@@ -6,21 +6,27 @@ from rich.console import Console
 
 from stonks.analysis.strategy import basic_trend_rsi_strategy
 from stonks.config import AppConfig
-from stonks.data.providers import CsvProvider, StooqProvider
+from stonks.data.providers import CsvProvider, PriceProvider, StooqProvider, normalize_ticker
 from stonks.reporting.report import TickerResult, write_text_report
 from stonks.storage import save_last_run
 
 
 def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> Path:
     console = console or Console()
-    provider = (
-        CsvProvider(cfg.data.csv_path)
-        if cfg.data.provider == "csv" and cfg.data.csv_path
-        else StooqProvider()
-    )
+
+    def provider_for(ticker: str) -> PriceProvider:
+        t = normalize_ticker(ticker)
+        override = cfg.ticker_overrides.get(t)
+        data_cfg = override.data if override else cfg.data
+        if data_cfg.provider == "csv":
+            if not data_cfg.csv_path:
+                raise ValueError(f"csv provider requires csv_path for {t}")
+            return CsvProvider(data_cfg.csv_path)
+        return StooqProvider()
 
     results: list[TickerResult] = []
     for ticker in cfg.tickers:
+        provider = provider_for(ticker)
         series = provider.fetch_daily(ticker)
         df = series.df
         last_close = None

@@ -77,6 +77,15 @@ def list_history(limit: int = 20) -> list[RunRecord]:
     return records
 
 
+def get_history_record(index: int, *, limit: int = 2000) -> RunRecord:
+    if index < 0:
+        raise IndexError("index must be >= 0")
+    records = list_history(limit=limit)
+    if index >= len(records):
+        raise IndexError("index out of range")
+    return records[index]
+
+
 def get_last_report_path() -> Path | None:
     state = load_state()
     last = state.get("last_run") if isinstance(state, dict) else None

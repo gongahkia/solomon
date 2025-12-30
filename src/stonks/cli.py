@@ -16,6 +16,7 @@ from stonks.commands import (
     do_data_fetch,
     do_data_verify,
     do_history_list,
+    do_history_show,
     do_report_open,
     do_schedule_once,
     do_schedule_run,
@@ -154,6 +155,18 @@ def history_list(limit: int = typer.Option(20, "--limit", min=1, max=200)) -> No
         return
     for i, r in enumerate(records):
         Console().print(f"{i}: {r.started_at}  {','.join(r.tickers)}  {r.report_path}")
+
+
+@history_app.command("show")
+def history_show(index: int = typer.Argument(..., min=0), limit: int = typer.Option(2000, "--limit", min=1, max=2000)) -> None:
+    """Show details for a prior run by index (within the last --limit entries)."""
+    try:
+        r = do_history_show(index, limit=limit)
+    except IndexError as e:
+        raise typer.Exit(code=2) from e
+    Console().print(f"started_at: {r.started_at}")
+    Console().print(f"tickers: {','.join(r.tickers)}")
+    Console().print(f"report_path: {r.report_path}")
 
 
 def main() -> None:

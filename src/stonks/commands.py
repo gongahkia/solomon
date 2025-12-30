@@ -13,7 +13,7 @@ from stonks.pipeline import STRATEGIES, provider_for_config, run_once
 from stonks.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
 from stonks.data.providers import CsvProvider, StooqProvider
 from stonks.reporting.backtest_report import BacktestRow, write_backtest_report
-from stonks.storage import get_last_report_path, list_history
+from stonks.storage import get_history_record, get_last_report_path, list_history
 
 
 def do_version() -> str:
@@ -76,6 +76,10 @@ def do_report_open() -> Path:
 
 def do_history_list(limit: int = 20):
     return list_history(limit=limit)
+
+
+def do_history_show(index: int, *, limit: int = 2000):
+    return get_history_record(index, limit=limit)
 
 
 def do_schedule_once(out_dir: Path) -> Path:

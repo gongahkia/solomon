@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from stonks.data.cache import default_cache_dir, load_cached_text, save_cached_text
 
@@ -42,6 +44,20 @@ class StooqProvider(PriceProvider):
         cache_ttl_seconds: int = 3600,
     ):
         self._session = session or requests.Session()
+        if session is None:
+            retry = Retry(
+                total=4,
+                connect=4,
+                read=4,
+                status=4,
+                backoff_factor=0.5,
+                status_forcelist=(429, 500, 502, 503, 504),
+                allowed_methods=("GET",),
+                raise_on_status=False,
+            )
+            adapter = HTTPAdapter(max_retries=retry)
+            self._session.mount("http://", adapter)
+            self._session.mount("https://", adapter)
         self._timeout_s = timeout_s
         self._cache_dir = cache_dir or default_cache_dir()
         self._cache_ttl_seconds = cache_ttl_seconds

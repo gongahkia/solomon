@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from rich.console import Console
 
@@ -51,12 +52,24 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
 
     strategy_fn = select_strategy(cfg)
 
+    # Fetch in parallel to reduce wall-clock time for multiple tickers.
+    series_by_ticker: dict[str, object] = {}
+
+    def _fetch(t: str):
+        provider = provider_for_config(cfg, t)
+        return t, provider.fetch_daily(t)
+
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(cfg.tickers)))) as ex:
+        futs = [ex.submit(_fetch, t) for t in cfg.tickers]
+        for fut in as_completed(futs):
+            t, series = fut.result()
+            series_by_ticker[t] = series
+
     results: list[TickerResult] = []
     per_ticker_fraction: dict[str, float] = {}
     per_ticker_equity: dict[str, object] = {}
     for ticker in cfg.tickers:
-        provider = provider_for_config(cfg, ticker)
-        series = provider.fetch_daily(ticker)
+        series = series_by_ticker[ticker]
         df = series.df
         last_close = None
         if "close" in df.columns and not df.empty:

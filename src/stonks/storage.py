@@ -21,6 +21,10 @@ def state_path() -> Path:
     return default_state_dir() / "state.json"
 
 
+def history_path() -> Path:
+    return default_state_dir() / "history.jsonl"
+
+
 def load_state() -> dict:
     path = state_path()
     if not path.exists():
@@ -36,12 +40,41 @@ def save_state(state: dict) -> None:
 
 def save_last_run(tickers: list[str], report_path: Path | None) -> None:
     state = load_state()
-    state["last_run"] = {
+    record = {
         "started_at": datetime.utcnow().isoformat() + "Z",
         "tickers": tickers,
         "report_path": str(report_path) if report_path else None,
     }
+    state["last_run"] = {
+        **record,
+    }
     save_state(state)
+
+    hp = history_path()
+    hp.parent.mkdir(parents=True, exist_ok=True)
+    with hp.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\n")
+
+
+def list_history(limit: int = 20) -> list[RunRecord]:
+    hp = history_path()
+    if not hp.exists():
+        return []
+    lines = hp.read_text(encoding="utf-8").splitlines()
+    records: list[RunRecord] = []
+    for line in lines[-limit:]:
+        try:
+            obj = json.loads(line)
+            records.append(
+                RunRecord(
+                    started_at=str(obj.get("started_at")),
+                    tickers=list(obj.get("tickers") or []),
+                    report_path=obj.get("report_path"),
+                )
+            )
+        except Exception:
+            continue
+    return records
 
 
 def get_last_report_path() -> Path | None:

@@ -15,6 +15,7 @@ from stonks.commands import (
     do_config_where,
     do_data_fetch,
     do_data_verify,
+    do_history_list,
     do_report_open,
     do_schedule_once,
     do_schedule_run,
@@ -27,11 +28,13 @@ config_app = typer.Typer()
 schedule_app = typer.Typer()
 data_app = typer.Typer()
 report_app = typer.Typer()
+history_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(data_app, name="data")
 app.add_typer(report_app, name="report")
+app.add_typer(history_app, name="history")
 
 
 @app.command()
@@ -140,6 +143,17 @@ def report_open() -> None:
         Console().print(str(p))
     except FileNotFoundError as e:
         raise typer.Exit(code=2) from e
+
+
+@history_app.command("list")
+def history_list(limit: int = typer.Option(20, "--limit", min=1, max=200)) -> None:
+    """List recent runs."""
+    records = do_history_list(limit=limit)
+    if not records:
+        Console().print("No history")
+        return
+    for i, r in enumerate(records):
+        Console().print(f"{i}: {r.started_at}  {','.join(r.tickers)}  {r.report_path}")
 
 
 def main() -> None:

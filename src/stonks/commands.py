@@ -13,7 +13,7 @@ from stonks.pipeline import STRATEGIES, provider_for_config, run_once
 from stonks.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
 from stonks.data.providers import CsvProvider, StooqProvider
 from stonks.reporting.backtest_report import BacktestRow, write_backtest_report
-from stonks.storage import get_last_report_path
+from stonks.storage import get_last_report_path, list_history
 
 
 def do_version() -> str:
@@ -72,6 +72,10 @@ def do_report_open() -> Path:
     if p is None:
         raise FileNotFoundError("No last report recorded")
     return p
+
+
+def do_history_list(limit: int = 20):
+    return list_history(limit=limit)
 
 
 def do_schedule_once(out_dir: Path) -> Path:

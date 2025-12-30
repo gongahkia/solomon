@@ -59,7 +59,7 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
         provider = provider_for_config(cfg, t)
         return t, provider.fetch_daily(t)
 
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(cfg.tickers)))) as ex:
+    with ThreadPoolExecutor(max_workers=min(cfg.data.concurrency_limit, max(1, len(cfg.tickers)))) as ex:
         futs = [ex.submit(_fetch, t) for t in cfg.tickers]
         for fut in as_completed(futs):
             t, series = fut.result()

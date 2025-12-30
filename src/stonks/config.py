@@ -27,6 +27,7 @@ class DataConfig(BaseModel):
     provider: Literal["stooq", "csv"] = "stooq"
     csv_path: str | None = None
     cache_ttl_seconds: int = Field(default=3600, ge=0)
+    concurrency_limit: int = Field(default=8, ge=1, le=64)
 
 
 class RiskConfig(BaseModel):

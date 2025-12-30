@@ -13,6 +13,7 @@ from stonks.pipeline import STRATEGIES, provider_for_config, run_once
 from stonks.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
 from stonks.data.providers import CsvProvider, StooqProvider
 from stonks.reporting.backtest_report import BacktestRow, write_backtest_report
+from stonks.storage import get_last_report_path
 
 
 def do_version() -> str:
@@ -64,6 +65,13 @@ def do_backtest(
         rows.append(BacktestRow(ticker=series.ticker, metrics=metrics))
 
     return write_backtest_report(rows, out_dir)
+
+
+def do_report_open() -> Path:
+    p = get_last_report_path()
+    if p is None:
+        raise FileNotFoundError("No last report recorded")
+    return p
 
 
 def do_schedule_once(out_dir: Path) -> Path:

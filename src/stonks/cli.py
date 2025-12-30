@@ -15,6 +15,7 @@ from stonks.commands import (
     do_config_where,
     do_data_fetch,
     do_data_verify,
+    do_report_open,
     do_schedule_once,
     do_schedule_run,
     do_schedule_status,
@@ -25,10 +26,12 @@ app = typer.Typer(add_completion=True)
 config_app = typer.Typer()
 schedule_app = typer.Typer()
 data_app = typer.Typer()
+report_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(data_app, name="data")
+app.add_typer(report_app, name="report")
 
 
 @app.command()
@@ -127,6 +130,16 @@ def data_verify(tickers: list[str] = typer.Argument(None)) -> None:
     results = do_data_verify(tickers if tickers else None)
     for t, status in results.items():
         Console().print(f"{t}: {status}")
+
+
+@report_app.command("open")
+def report_open() -> None:
+    """Print latest report path (if any)."""
+    try:
+        p = do_report_open()
+        Console().print(str(p))
+    except FileNotFoundError as e:
+        raise typer.Exit(code=2) from e
 
 
 def main() -> None:

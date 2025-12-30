@@ -42,3 +42,17 @@ def save_last_run(tickers: list[str], report_path: Path | None) -> None:
         "report_path": str(report_path) if report_path else None,
     }
     save_state(state)
+
+
+def get_last_report_path() -> Path | None:
+    state = load_state()
+    last = state.get("last_run") if isinstance(state, dict) else None
+    if not isinstance(last, dict):
+        return None
+    p = last.get("report_path")
+    if not p:
+        return None
+    try:
+        return Path(p)
+    except Exception:
+        return None

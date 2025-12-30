@@ -28,3 +28,22 @@ def suggest_position_fraction_by_volatility(
 
     raw = base_fraction * (reference_volatility / annualized_volatility)
     return clamp(raw, min_fraction, max_fraction)
+
+
+def scale_fractions_to_portfolio_cap(
+    fractions: dict[str, float],
+    *,
+    max_portfolio_exposure_fraction: float,
+) -> tuple[dict[str, float], float]:
+    if max_portfolio_exposure_fraction <= 0:
+        return {k: 0.0 for k in fractions}, 0.0
+
+    total = sum(max(0.0, float(v)) for v in fractions.values())
+    if total <= 0:
+        return {k: 0.0 for k in fractions}, 0.0
+
+    if total <= max_portfolio_exposure_fraction:
+        return dict(fractions), 1.0
+
+    factor = max_portfolio_exposure_fraction / total
+    return {k: float(v) * factor for k, v in fractions.items()}, factor

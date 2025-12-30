@@ -5,7 +5,10 @@ from pathlib import Path
 from rich.console import Console
 
 from stonks.analysis.indicators import rolling_volatility
-from stonks.analysis.risk import suggest_position_fraction_by_volatility
+from stonks.analysis.risk import (
+    scale_fractions_to_portfolio_cap,
+    suggest_position_fraction_by_volatility,
+)
 from stonks.analysis.strategy import (
     basic_trend_rsi_strategy,
     mean_reversion_bb_rsi_strategy,
@@ -39,6 +42,7 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
         return StooqProvider(cache_ttl_seconds=data_cfg.cache_ttl_seconds)
 
     results: list[TickerResult] = []
+    per_ticker_fraction: dict[str, float] = {}
     for ticker in cfg.tickers:
         provider = provider_for(ticker)
         series = provider.fetch_daily(ticker)
@@ -58,6 +62,7 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
                 max_fraction=cfg.risk.max_position_fraction,
             )
             if pos is not None:
+                per_ticker_fraction[series.ticker] = pos
                 rec = Recommendation(
                     action=rec.action,
                     confidence=rec.confidence,
@@ -66,6 +71,27 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
                     ),
                 )
         results.append(TickerResult(ticker=series.ticker, last_close=last_close, recommendation=rec))
+
+    scaled, factor = scale_fractions_to_portfolio_cap(
+        per_ticker_fraction,
+        max_portfolio_exposure_fraction=cfg.risk.max_portfolio_exposure_fraction,
+    )
+    if factor not in (0.0, 1.0):
+        new_results: list[TickerResult] = []
+        for r in results:
+            frac = scaled.get(r.ticker)
+            if frac is None:
+                new_results.append(r)
+                continue
+            rec = Recommendation(
+                action=r.recommendation.action,
+                confidence=r.recommendation.confidence,
+                rationale=(
+                    f"{r.recommendation.rationale} | portfolio_cap {cfg.risk.max_portfolio_exposure_fraction*100:.0f}% (scaled x{factor:.2f}; now~{frac*100:.0f}%)"
+                ),
+            )
+            new_results.append(TickerResult(ticker=r.ticker, last_close=r.last_close, recommendation=rec))
+        results = new_results
 
     report_path = write_text_report(results, out_dir=out_dir)
     save_last_run(cfg.tickers, report_path)

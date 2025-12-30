@@ -1,4 +1,7 @@
-from stonks.analysis.risk import suggest_position_fraction_by_volatility
+from stonks.analysis.risk import (
+    scale_fractions_to_portfolio_cap,
+    suggest_position_fraction_by_volatility,
+)
 
 
 def test_suggest_position_fraction_by_volatility_scales_inverse() -> None:
@@ -22,3 +25,21 @@ def test_suggest_position_fraction_by_volatility_respects_cap() -> None:
     # Extremely low vol would imply a huge position; ensure we cap it.
     capped = suggest_position_fraction_by_volatility(0.01, max_fraction=0.05)
     assert capped == 0.05
+
+
+def test_scale_fractions_to_portfolio_cap_scales_down() -> None:
+    scaled, factor = scale_fractions_to_portfolio_cap(
+        {"A": 0.20, "B": 0.20, "C": 0.10},
+        max_portfolio_exposure_fraction=0.25,
+    )
+    assert 0 < factor < 1
+    assert abs(sum(scaled.values()) - 0.25) < 1e-9
+
+
+def test_scale_fractions_to_portfolio_cap_no_scale_when_under_cap() -> None:
+    scaled, factor = scale_fractions_to_portfolio_cap(
+        {"A": 0.10, "B": 0.10},
+        max_portfolio_exposure_fraction=0.50,
+    )
+    assert factor == 1.0
+    assert scaled == {"A": 0.10, "B": 0.10}

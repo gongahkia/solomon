@@ -22,7 +22,7 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
             if not data_cfg.csv_path:
                 raise ValueError(f"csv provider requires csv_path for {t}")
             return CsvProvider(data_cfg.csv_path)
-        return StooqProvider()
+        return StooqProvider(cache_ttl_seconds=data_cfg.cache_ttl_seconds)
 
     results: list[TickerResult] = []
     for ticker in cfg.tickers:

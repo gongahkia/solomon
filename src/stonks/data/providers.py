@@ -51,12 +51,15 @@ class StooqProvider(PriceProvider):
         stooq_symbol = normalized.lower()
         url = f"https://stooq.com/q/d/l/?s={stooq_symbol}&i=d"
         cache_key = f"stooq:daily:{stooq_symbol}"
-        text = load_cached_text(self._cache_dir, cache_key, ttl_seconds=self._cache_ttl_seconds)
+        text = None
+        if self._cache_ttl_seconds > 0:
+            text = load_cached_text(self._cache_dir, cache_key, ttl_seconds=self._cache_ttl_seconds)
         if text is None:
             resp = self._session.get(url, timeout=self._timeout_s)
             resp.raise_for_status()
             text = resp.text
-            save_cached_text(self._cache_dir, cache_key, text)
+            if self._cache_ttl_seconds > 0:
+                save_cached_text(self._cache_dir, cache_key, text)
 
         df = pd.read_csv(io.StringIO(text))
         df.columns = [c.strip().lower() for c in df.columns]

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from stonks.analysis.backtest import walk_forward_backtest
+from stonks.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
 from stonks.analysis.strategy import Recommendation
 
 
@@ -22,3 +22,10 @@ def test_walk_forward_backtest_empty() -> None:
 
     out = walk_forward_backtest(pd.DataFrame(), strategy_fn=noop)
     assert out.equity.empty
+
+
+def test_compute_backtest_metrics_basic() -> None:
+    equity = pd.Series([1.0, 1.01, 1.02, 1.03])
+    m = compute_backtest_metrics(equity, periods_per_year=252)
+    assert m.cagr is not None
+    assert m.max_drawdown == 0.0

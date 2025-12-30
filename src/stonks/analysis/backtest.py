@@ -14,6 +14,50 @@ class BacktestSeries:
     position: pd.Series
 
 
+@dataclass(frozen=True)
+class BacktestMetrics:
+    cagr: float | None
+    sharpe: float | None
+    max_drawdown: float | None
+
+
+def _max_drawdown_from_equity(equity: pd.Series) -> float | None:
+    if equity is None or equity.empty:
+        return None
+    roll_max = equity.cummax()
+    dd = (equity / roll_max) - 1.0
+    return float(dd.min())
+
+
+def compute_backtest_metrics(
+    equity: pd.Series,
+    *,
+    periods_per_year: int = 252,
+) -> BacktestMetrics:
+    if equity is None or equity.empty:
+        return BacktestMetrics(cagr=None, sharpe=None, max_drawdown=None)
+
+    total_return = float(equity.iloc[-1] / equity.iloc[0]) if float(equity.iloc[0]) != 0 else float("nan")
+    n = max(1, len(equity) - 1)
+
+    cagr = None
+    if total_return > 0 and periods_per_year > 0:
+        years = n / float(periods_per_year)
+        if years > 0:
+            cagr = total_return ** (1.0 / years) - 1.0
+
+    rets = equity.pct_change().dropna()
+    sharpe = None
+    if not rets.empty:
+        mean = float(rets.mean())
+        std = float(rets.std())
+        if std > 0:
+            sharpe = (mean / std) * (periods_per_year**0.5)
+
+    mdd = _max_drawdown_from_equity(equity)
+    return BacktestMetrics(cagr=cagr, sharpe=sharpe, max_drawdown=mdd)
+
+
 def _action_to_position(action: str) -> float:
     action = (action or "").upper()
     if action in {"BUY_DCA", "HOLD_DCA"}:

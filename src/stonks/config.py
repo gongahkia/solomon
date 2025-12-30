@@ -51,7 +51,22 @@ def load_config() -> AppConfig:
     if not path.exists():
         return AppConfig()
     data = json.loads(path.read_text(encoding="utf-8"))
-    return AppConfig.model_validate(data)
+    cfg = AppConfig.model_validate(data)
+    # Normalize tickers and override keys at the boundary.
+    try:
+        from stonks.data.providers import normalize_ticker
+
+        cfg = cfg.model_copy(
+            update={
+                "tickers": [normalize_ticker(t) for t in cfg.tickers],
+                "ticker_overrides": {
+                    normalize_ticker(k): v for k, v in (cfg.ticker_overrides or {}).items()
+                },
+            }
+        )
+    except Exception:
+        pass
+    return cfg
 
 
 def save_default_config(path: Path | None = None) -> Path:

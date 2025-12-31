@@ -11,10 +11,10 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from rich.console import Console
 
-from stonks.config import AppConfig
-from stonks.pipeline import run_once
-from stonks.scheduler.pidfile import acquire_pid_file
-from stonks.storage import default_state_dir
+from stonks_cli.config import AppConfig
+from stonks_cli.pipeline import run_once
+from stonks_cli.scheduler.pidfile import acquire_pid_file
+from stonks_cli.storage import default_state_dir
 
 
 @dataclass

@@ -9,7 +9,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from stonks.data.cache import default_cache_dir, load_cached_text, save_cached_text
+from stonks_cli.data.cache import default_cache_dir, load_cached_text, save_cached_text
 
 
 def normalize_ticker(raw: str) -> str:

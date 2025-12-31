@@ -10,7 +10,7 @@ class PromptTemplates:
 
 DEFAULT_TEMPLATES = PromptTemplates(
     analysis_question=(
-        "You are Stonks, a local CLI assistant for stock analysis.\n"
+           "You are stonks-cli, a local CLI assistant for stock analysis.\n"
         "Important: You are not a financial advisor. Provide informational guidance only.\n\n"
         "When useful, suggest concrete CLI commands (e.g. /analyze AAPL.US).\n\n"
         "If a prior report is provided, use it as context and cite tickers/actions from it.\n\n"

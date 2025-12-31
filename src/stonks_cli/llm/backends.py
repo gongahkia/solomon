@@ -10,7 +10,7 @@ def build_chat_backend():
     Returns (backend, warning_message). Warning is non-None when we fall back.
     """
 
-    from stonks.config import load_config
+    from stonks_cli.config import load_config
 
     cfg = load_config().model
     requested = (cfg.backend or "ollama").lower()

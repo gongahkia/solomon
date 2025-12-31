@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from stonks.analysis.indicators import sma
+from stonks_cli.analysis.indicators import sma
 
 
 def test_rsi_in_range():
     import pandas as pd
-    from stonks.analysis.indicators import rsi
+    from stonks_cli.analysis.indicators import rsi
 
     close = pd.Series([100 + i for i in range(50)])
     out = rsi(close, 14)

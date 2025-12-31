@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from stonks.chat.dispatch import ChatState, handle_slash_command
+from stonks_cli.chat.dispatch import ChatState, handle_slash_command
 
 
 def test_chat_analyze_command_runs_analysis_offline(monkeypatch, tmp_path):
@@ -37,7 +37,7 @@ def test_chat_analyze_command_runs_analysis_offline(monkeypatch, tmp_path):
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("STONKS_CONFIG", str(cfg_path))
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
 
     panels: list[tuple[str, str]] = []
 

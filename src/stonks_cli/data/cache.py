@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def default_cache_dir() -> Path:
-    return Path.home() / ".cache" / "stonks"
+    return Path.home() / ".cache" / "stonks-cli"
 
 
 def _key_to_name(key: str) -> str:

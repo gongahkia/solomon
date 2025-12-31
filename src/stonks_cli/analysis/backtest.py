@@ -5,7 +5,7 @@ from typing import Callable
 
 import pandas as pd
 
-from stonks.analysis.strategy import Recommendation
+from stonks_cli.analysis.strategy import Recommendation
 
 
 @dataclass(frozen=True)

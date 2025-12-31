@@ -8,7 +8,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 from rich.panel import Panel
 
-from stonks.commands import (
+from stonks_cli.commands import (
     do_analyze,
     do_backtest,
     do_config_init,
@@ -26,16 +26,16 @@ from stonks.commands import (
     do_version,
 )
 
-from stonks.llm.backends import ChatMessage, build_chat_backend
-from stonks.chat.history import append_chat_message, load_chat_history
-from stonks.chat.export import default_transcript_path, write_transcript
-from stonks.chat.prompts import format_analysis_question
-from stonks.chat.dispatch import ChatState, handle_slash_command
-from stonks.storage import get_last_report_path
+from stonks_cli.llm.backends import ChatMessage, build_chat_backend
+from stonks_cli.chat.history import append_chat_message, load_chat_history
+from stonks_cli.chat.export import default_transcript_path, write_transcript
+from stonks_cli.chat.prompts import format_analysis_question
+from stonks_cli.chat.dispatch import ChatState, handle_slash_command
+from stonks_cli.storage import get_last_report_path
 
 
 SYSTEM_PROMPT = (
-    "You are Stonks, a local CLI assistant for stock analysis. "
+    "You are stonks-cli, a local CLI assistant for stock analysis. "
     "Be cautious: you are not a financial advisor. "
     "When you suggest actions, prefer concrete CLI commands like '/analyze AAPL.US'."
 )
@@ -55,7 +55,7 @@ def run_chat() -> None:
     state = ChatState(messages=[ChatMessage(role="system", content=SYSTEM_PROMPT), *restored], scheduler=None)
     backend, warn = build_chat_backend()
 
-    console.print(Panel.fit("Stonks Chat (local model)", title="stonks chat"))
+    console.print(Panel.fit("stonks-cli chat (local model)", title="stonks-cli"))
     console.print("Note: outputs are informational only (not financial advice).")
     if warn:
         console.print(Panel(warn, title="llm backend"))

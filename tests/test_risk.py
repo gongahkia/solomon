@@ -1,4 +1,4 @@
-from stonks.analysis.risk import (
+from stonks_cli.analysis.risk import (
     scale_fractions_to_portfolio_cap,
     suggest_stop_loss_price_by_atr,
     suggest_position_fraction_by_volatility,

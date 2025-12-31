@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from stonks.commands import (
+from stonks_cli.commands import (
     do_analyze,
     do_backtest,
     do_config_init,

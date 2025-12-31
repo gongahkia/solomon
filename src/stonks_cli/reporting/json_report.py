@@ -4,8 +4,8 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from stonks.analysis.backtest import BacktestMetrics
-from stonks.reporting.report import TickerResult
+from stonks_cli.analysis.backtest import BacktestMetrics
+from stonks_cli.reporting.report import TickerResult
 
 
 def _metrics_dict(m: BacktestMetrics | None) -> dict | None:

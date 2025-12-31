@@ -1,7 +1,7 @@
 import pandas as pd
 
-from stonks.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
-from stonks.analysis.strategy import Recommendation
+from stonks_cli.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
+from stonks_cli.analysis.strategy import Recommendation
 
 
 def test_walk_forward_backtest_equity_grows_on_uptrend() -> None:

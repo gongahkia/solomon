@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 def default_config_path() -> Path:
-    return Path.home() / ".config" / "stonks" / "config.json"
+    return Path.home() / ".config" / "stonks-cli" / "config.json"
 
 
 class ScheduleConfig(BaseModel):
@@ -68,7 +68,7 @@ class AppConfig(BaseModel):
 
 
 def config_path() -> Path:
-    env = os.getenv("STONKS_CONFIG")
+    env = os.getenv("STONKS_CLI_CONFIG")
     return Path(env).expanduser() if env else default_config_path()
 
 
@@ -80,7 +80,7 @@ def load_config() -> AppConfig:
     cfg = AppConfig.model_validate(data)
     # Normalize tickers and override keys at the boundary.
     try:
-        from stonks.data.providers import normalize_ticker
+        from stonks_cli.data.providers import normalize_ticker
 
         cfg = cfg.model_copy(
             update={

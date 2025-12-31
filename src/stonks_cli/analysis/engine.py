@@ -4,7 +4,7 @@ from typing import Protocol
 
 import pandas as pd
 
-from stonks.analysis.strategy import Recommendation
+from stonks_cli.analysis.strategy import Recommendation
 
 
 class Strategy(Protocol):

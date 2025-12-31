@@ -4,13 +4,13 @@ import json
 
 import pandas as pd
 
-from stonks.commands import do_analyze_artifacts
+from stonks_cli.commands import do_analyze_artifacts
 
 
 def test_plugin_strategy_is_loaded_and_used(monkeypatch, tmp_path):
     plugin_path = tmp_path / "my_plugin.py"
     plugin_path.write_text(
-        "from stonks.analysis.strategy import Recommendation\n"
+        "from stonks_cli.analysis.strategy import Recommendation\n"
         "def plugin_buy(df):\n"
         "    return Recommendation(action='BUY_DCA', confidence=0.99, rationale='plugin')\n"
         "STONKS_STRATEGIES = {'plugin_buy': plugin_buy}\n",
@@ -47,7 +47,7 @@ def test_plugin_strategy_is_loaded_and_used(monkeypatch, tmp_path):
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("STONKS_CONFIG", str(cfg_path))
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
 
     artifacts = do_analyze_artifacts(None, out_dir=out_dir, json_out=False, sandbox=True)
     report_txt = artifacts.report_path.read_text(encoding="utf-8")

@@ -4,12 +4,12 @@ import json
 
 import pytest
 
-from stonks.config import load_config
+from stonks_cli.config import load_config
 
 
 def test_load_config_defaults_when_missing(monkeypatch, tmp_path):
     cfg_path = tmp_path / "config.json"
-    monkeypatch.setenv("STONKS_CONFIG", str(cfg_path))
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
 
     cfg = load_config()
     assert cfg.tickers
@@ -18,7 +18,7 @@ def test_load_config_defaults_when_missing(monkeypatch, tmp_path):
 
 def test_load_config_validates_cron(monkeypatch, tmp_path):
     cfg_path = tmp_path / "config.json"
-    monkeypatch.setenv("STONKS_CONFIG", str(cfg_path))
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
 
     cfg_path.write_text(
         json.dumps(
@@ -36,7 +36,7 @@ def test_load_config_validates_cron(monkeypatch, tmp_path):
 
 def test_load_config_normalizes_tickers(monkeypatch, tmp_path):
     cfg_path = tmp_path / "config.json"
-    monkeypatch.setenv("STONKS_CONFIG", str(cfg_path))
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
 
     cfg_path.write_text(
         json.dumps(

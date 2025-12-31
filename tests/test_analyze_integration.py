@@ -4,7 +4,7 @@ import json
 
 import pandas as pd
 
-from stonks.commands import do_analyze_artifacts
+from stonks_cli.commands import do_analyze_artifacts
 
 
 def test_analyze_happy_path_with_csv_provider(monkeypatch, tmp_path):
@@ -37,7 +37,7 @@ def test_analyze_happy_path_with_csv_provider(monkeypatch, tmp_path):
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("STONKS_CONFIG", str(cfg_path))
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
 
     artifacts = do_analyze_artifacts(None, out_dir=out_dir, json_out=True)
     assert artifacts.report_path.exists()

@@ -4,7 +4,7 @@ import json
 
 import pandas as pd
 
-from stonks.commands import do_schedule_once
+from stonks_cli.commands import do_schedule_once
 
 
 def test_schedule_once_runs_job(monkeypatch, tmp_path):
@@ -37,7 +37,7 @@ def test_schedule_once_runs_job(monkeypatch, tmp_path):
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("STONKS_CONFIG", str(cfg_path))
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
 
     report_path = do_schedule_once(out_dir=out_dir)
     assert report_path.exists()

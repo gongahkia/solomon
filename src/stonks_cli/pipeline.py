@@ -6,25 +6,25 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from rich.console import Console
 from rich.progress import Progress
 
-from stonks.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
-from stonks.analysis.indicators import atr, rolling_volatility
-from stonks.analysis.risk import (
+from stonks_cli.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
+from stonks_cli.analysis.indicators import atr, rolling_volatility
+from stonks_cli.analysis.risk import (
     scale_fractions_to_portfolio_cap,
     suggest_stop_loss_price_by_atr,
     suggest_position_fraction_by_volatility,
     suggest_take_profit_price_by_atr,
 )
-from stonks.analysis.strategy import (
+from stonks_cli.analysis.strategy import (
     basic_trend_rsi_strategy,
     mean_reversion_bb_rsi_strategy,
     Recommendation,
     sma_cross_strategy,
 )
-from stonks.config import AppConfig
-from stonks.data.providers import CsvProvider, PriceProvider, StooqProvider, normalize_ticker
-from stonks.plugins import registry_for_config
-from stonks.reporting.report import TickerResult, write_text_report
-from stonks.storage import save_last_run
+from stonks_cli.config import AppConfig
+from stonks_cli.data.providers import CsvProvider, PriceProvider, StooqProvider, normalize_ticker
+from stonks_cli.plugins import registry_for_config
+from stonks_cli.reporting.report import TickerResult, write_text_report
+from stonks_cli.storage import save_last_run
 
 
 STRATEGIES = {

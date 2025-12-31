@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from stonks.llm.backends import ChatMessage
+from stonks_cli.llm.backends import ChatMessage
 
 
 def default_transcript_path() -> Path:

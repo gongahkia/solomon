@@ -7,19 +7,19 @@ from pathlib import Path
 
 from apscheduler.triggers.cron import CronTrigger
 
-from stonks import __version__
-from stonks.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
+from stonks_cli import __version__
+from stonks_cli.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
 from rich.console import Console
 
-from stonks.analysis.output import AnalysisArtifacts
-from stonks.config import AppConfig, config_path, load_config, save_config, save_default_config, update_config_field
-from stonks.pipeline import compute_results, provider_for_config, run_once, select_strategy
-from stonks.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
-from stonks.data.providers import CsvProvider, StooqProvider
-from stonks.reporting.backtest_report import BacktestRow, write_backtest_report
-from stonks.reporting.json_report import write_json_report
-from stonks.reporting.report import write_text_report
-from stonks.storage import get_history_record, get_last_report_path, list_history, save_last_run
+from stonks_cli.analysis.output import AnalysisArtifacts
+from stonks_cli.config import AppConfig, config_path, load_config, save_config, save_default_config, update_config_field
+from stonks_cli.pipeline import compute_results, provider_for_config, run_once, select_strategy
+from stonks_cli.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
+from stonks_cli.data.providers import CsvProvider, StooqProvider
+from stonks_cli.reporting.backtest_report import BacktestRow, write_backtest_report
+from stonks_cli.reporting.json_report import write_json_report
+from stonks_cli.reporting.report import write_text_report
+from stonks_cli.storage import get_history_record, get_last_report_path, list_history, save_last_run
 
 
 def do_version() -> str:

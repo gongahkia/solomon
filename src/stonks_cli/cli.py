@@ -7,9 +7,9 @@ from rich.console import Console
 
 from pydantic import ValidationError
 
-from stonks.chat.repl import run_chat
-from stonks.config import load_config
-from stonks.commands import (
+from stonks_cli.chat.repl import run_chat
+from stonks_cli.config import load_config
+from stonks_cli.commands import (
     do_analyze,
     do_analyze_artifacts,
     do_backtest,
@@ -29,8 +29,8 @@ from stonks.commands import (
     do_schedule_status,
     do_version,
 )
-from stonks.errors import ExitCodes, StonksError
-from stonks.logging_utils import LoggingConfig, configure_logging
+from stonks_cli.errors import ExitCodes, StonksError
+from stonks_cli.logging_utils import LoggingConfig, configure_logging
 
 app = typer.Typer(add_completion=True)
 config_app = typer.Typer()

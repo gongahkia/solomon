@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from stonks.analysis.indicators import bollinger_bands, rsi, sma
+from stonks_cli.analysis.indicators import bollinger_bands, rsi, sma
 
 
 @dataclass(frozen=True)

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from stonks.data.providers import StooqProvider
+from stonks_cli.data.providers import StooqProvider
 
 
 @dataclass

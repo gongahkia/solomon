@@ -8,7 +8,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Callable
 
-from stonks.config import AppConfig
+from stonks_cli.config import AppConfig
 
 
 StrategyFn = Callable[[object], object]

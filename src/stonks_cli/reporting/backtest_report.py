@@ -7,7 +7,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
-from stonks.analysis.backtest import BacktestMetrics
+from stonks_cli.analysis.backtest import BacktestMetrics
 
 
 @dataclass(frozen=True)

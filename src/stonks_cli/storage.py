@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def default_state_dir() -> Path:
-    return Path.home() / ".local" / "share" / "stonks"
+    return Path.home() / ".local" / "share" / "stonks-cli"
 
 
 @dataclass(frozen=True)

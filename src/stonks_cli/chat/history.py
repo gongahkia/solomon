@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from stonks.llm.backends import ChatMessage
-from stonks.storage import default_state_dir
+from stonks_cli.llm.backends import ChatMessage
+from stonks_cli.storage import default_state_dir
 
 
 @dataclass(frozen=True)

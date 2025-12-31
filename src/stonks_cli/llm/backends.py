@@ -274,13 +274,18 @@ class LlamaCppBackend:
             return
         if not self._model_path:
             raise ValueError("llama.cpp backend requires config.model.path (GGUF file path)")
+        from pathlib import Path
+
+        p = Path(self._model_path).expanduser()
+        if not p.exists():
+            raise FileNotFoundError(f"GGUF model file not found: {p}")
         try:
             from llama_cpp import Llama  # type: ignore
         except Exception as e:  # pragma: no cover
             raise RuntimeError(
                 "llama.cpp backend requires optional dependency. Install with: pip install -e '.[llama-cpp]'"
             ) from e
-        self._llm = Llama(model_path=self._model_path)
+        self._llm = Llama(model_path=str(p))
 
     def stream_chat(self, messages: list[ChatMessage]) -> Iterable[str]:
         self._ensure_loaded()

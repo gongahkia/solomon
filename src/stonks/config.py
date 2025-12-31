@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 def default_config_path() -> Path:
@@ -14,6 +14,18 @@ def default_config_path() -> Path:
 
 class ScheduleConfig(BaseModel):
     cron: str = Field(default="0 17 * * 1-5", description="Crontab string")
+
+    @field_validator("cron")
+    @classmethod
+    def validate_cron(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("cron must be non-empty")
+        # Best-effort validation for crontab syntax.
+        from apscheduler.triggers.cron import CronTrigger
+
+        CronTrigger.from_crontab(v)
+        return v
     timezone: str = Field(default="local", description="Timezone name or 'local'")
 
 

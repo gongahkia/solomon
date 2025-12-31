@@ -95,8 +95,8 @@ def do_config_set(field_path: str, value) -> str:
     return updated.model_dump_json(indent=2)
 
 
-def do_analyze(tickers: list[str] | None, out_dir: Path) -> Path:
-    artifacts = do_analyze_artifacts(tickers, out_dir=out_dir, json_out=False)
+def do_analyze(tickers: list[str] | None, out_dir: Path, *, sandbox: bool = False) -> Path:
+    artifacts = do_analyze_artifacts(tickers, out_dir=out_dir, json_out=False, sandbox=sandbox)
     return artifacts.report_path
 
 
@@ -105,6 +105,7 @@ def do_analyze_artifacts(
     *,
     out_dir: Path,
     json_out: bool,
+    sandbox: bool = False,
 ) -> AnalysisArtifacts:
     cfg = load_config()
     if tickers:
@@ -119,7 +120,8 @@ def do_analyze_artifacts(
         json_path = out_dir / f"{report_path.stem}.json"
         write_json_report(results, out_path=json_path, portfolio=portfolio)
 
-    save_last_run(cfg.tickers, report_path, json_path=json_path)
+    if not sandbox:
+        save_last_run(cfg.tickers, report_path, json_path=json_path)
 
     return AnalysisArtifacts(report_path=report_path, json_path=json_path, portfolio=portfolio, results=results)
 
@@ -193,9 +195,9 @@ def do_history_show(index: int, *, limit: int = 2000):
     return get_history_record(index, limit=limit)
 
 
-def do_schedule_once(out_dir: Path) -> Path:
+def do_schedule_once(out_dir: Path, *, sandbox: bool = False) -> Path:
     cfg = load_config()
-    return run_once(cfg, out_dir=out_dir)
+    return run_once(cfg, out_dir=out_dir, sandbox=sandbox)
 
 
 def do_schedule_run(out_dir: Path) -> None:

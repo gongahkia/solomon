@@ -206,10 +206,11 @@ def compute_results(cfg: AppConfig, console: Console) -> tuple[list[TickerResult
     return results, portfolio_metrics
 
 
-def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> Path:
+def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None, *, sandbox: bool = False) -> Path:
     console = console or Console()
     results, portfolio_metrics = compute_results(cfg, console)
     report_path = write_text_report(results, out_dir=out_dir, portfolio=portfolio_metrics)
-    save_last_run(cfg.tickers, report_path)
+    if not sandbox:
+        save_last_run(cfg.tickers, report_path)
     console.print(f"[green]Wrote report[/green] {report_path}")
     return report_path

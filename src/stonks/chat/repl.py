@@ -26,7 +26,7 @@ from stonks.commands import (
     do_version,
 )
 
-from stonks.llm.backends import ChatMessage, OllamaBackend
+from stonks.llm.backends import ChatMessage, build_chat_backend
 from stonks.chat.history import append_chat_message, load_chat_history
 from stonks.chat.export import default_transcript_path, write_transcript
 
@@ -44,7 +44,7 @@ SYSTEM_PROMPT = (
 )
 
 
-def run_chat(host: str, model: str) -> None:
+def run_chat() -> None:
     console = Console()
     kb = KeyBindings()
 
@@ -56,9 +56,11 @@ def run_chat(host: str, model: str) -> None:
     session = PromptSession()
     restored = load_chat_history(limit=50)
     state = ChatState(messages=[ChatMessage(role="system", content=SYSTEM_PROMPT), *restored], scheduler=None)
-    backend = OllamaBackend(host=host, model=model)
+    backend, warn = build_chat_backend()
 
     console.print(Panel.fit("Stonks Chat (local model)", title="stonks chat"))
+    if warn:
+        console.print(Panel(warn, title="llm backend"))
 
     def show_panel(title: str, body: str) -> None:
         console.print(Panel(body, title=title))

@@ -4,6 +4,34 @@ from dataclasses import dataclass
 from typing import Iterable, Protocol
 
 
+def build_chat_backend():
+    """Build the configured chat backend.
+
+    Returns (backend, warning_message). Warning is non-None when we fall back.
+    """
+
+    from stonks.config import load_config
+
+    cfg = load_config().model
+    requested = (cfg.backend or "ollama").lower()
+
+    if requested == "transformers":
+        try:
+            path = cfg.path or cfg.model
+            return TransformersBackend(model_path=path), None
+        except Exception as e:
+            return OllamaBackend(host=cfg.host, model=cfg.model), f"transformers unavailable: {e}; falling back to ollama"
+
+    if requested == "onnx":
+        try:
+            path = cfg.path or cfg.model
+            return OnnxBackend(model_path=path), None
+        except Exception as e:
+            return OllamaBackend(host=cfg.host, model=cfg.model), f"onnx unavailable: {e}; falling back to ollama"
+
+    return OllamaBackend(host=cfg.host, model=cfg.model), None
+
+
 @dataclass(frozen=True)
 class ChatMessage:
     role: str

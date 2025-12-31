@@ -128,8 +128,7 @@ def schedule_status() -> None:
 @app.command()
 def chat() -> None:
     """Start an interactive chat UI using a local model backend."""
-    cfg = load_config()
-    run_chat(host=cfg.model.host, model=cfg.model.model)
+    run_chat()
 
 
 @llm_app.command("check")

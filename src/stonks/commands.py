@@ -7,10 +7,12 @@ from pathlib import Path
 from apscheduler.triggers.cron import CronTrigger
 
 from stonks import __version__
+from stonks.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
 from stonks.config import AppConfig, config_path, load_config, save_default_config
-from stonks.pipeline import run_once
+from stonks.pipeline import STRATEGIES, provider_for_config, run_once
 from stonks.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
 from stonks.data.providers import CsvProvider, StooqProvider
+from stonks.reporting.backtest_report import BacktestRow, write_backtest_report
 
 
 def do_version() -> str:
@@ -35,6 +37,33 @@ def do_analyze(tickers: list[str] | None, out_dir: Path) -> Path:
     if tickers:
         cfg = cfg.model_copy(update={"tickers": tickers})
     return run_once(cfg, out_dir=out_dir)
+
+
+def do_backtest(
+    tickers: list[str] | None,
+    *,
+    start: str | None,
+    end: str | None,
+    out_dir: Path,
+) -> Path:
+    cfg = load_config()
+    use = tickers if tickers else cfg.tickers
+    strategy_fn = STRATEGIES.get(cfg.strategy, STRATEGIES["basic_trend_rsi"])
+
+    rows: list[BacktestRow] = []
+    for t in use:
+        provider = provider_for_config(cfg, t)
+        series = provider.fetch_daily(t)
+        df = series.df
+        if start:
+            df = df.loc[start:]
+        if end:
+            df = df.loc[:end]
+        bt = walk_forward_backtest(df, strategy_fn=strategy_fn, min_history_rows=cfg.risk.min_history_days)
+        metrics = compute_backtest_metrics(bt.equity)
+        rows.append(BacktestRow(ticker=series.ticker, metrics=metrics))
+
+    return write_backtest_report(rows, out_dir)
 
 
 def do_schedule_once(out_dir: Path) -> Path:

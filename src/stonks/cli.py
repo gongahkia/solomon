@@ -18,6 +18,7 @@ from stonks.commands import (
     do_data_verify,
     do_history_list,
     do_history_show,
+    do_doctor,
     do_ollama_check,
     do_report_open,
     do_schedule_once,
@@ -46,6 +47,14 @@ app.add_typer(llm_app, name="llm")
 def version() -> None:
     """Print version."""
     Console().print(do_version())
+
+
+@app.command()
+def doctor() -> None:
+    """Diagnose environment (config, data, LLM)."""
+    results = do_doctor()
+    for k, v in results.items():
+        Console().print(f"{k}: {v}")
 
 
 @config_app.command("init")

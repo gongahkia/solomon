@@ -18,6 +18,7 @@ from stonks.commands import (
     do_config_where,
     do_data_fetch,
     do_data_verify,
+    do_doctor,
     do_ollama_check,
     do_report_open,
     do_schedule_once,
@@ -99,6 +100,7 @@ def run_chat() -> None:
                 "  /backtest [TICKER1 TICKER2 ...]\n"
                 "  /report\n"
                 "  /export [path]\n"
+                "  /doctor\n"
                 "  /schedule status\n"
                 "  /schedule once [--out-dir DIR]\n"
                 "  /schedule run [--out-dir DIR]    (runs in background)\n",
@@ -114,6 +116,12 @@ def run_chat() -> None:
                 show_panel("llm check", do_ollama_check())
                 return True
             show_panel("llm", f"Unknown subcommand: {sub}")
+            return True
+
+        if cmd == "/doctor":
+            results = do_doctor()
+            body = "\n".join([f"{k}: {v}" for k, v in results.items()])
+            show_panel("doctor", body)
             return True
 
         if cmd == "/version":

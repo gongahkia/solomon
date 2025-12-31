@@ -49,6 +49,31 @@ def do_ollama_check() -> str:
         return f"error host={host} error={e}"
 
 
+def do_doctor() -> dict[str, str]:
+    cfg = load_config()
+    out: dict[str, str] = {}
+    try:
+        out["config_path"] = str(config_path())
+        out["config_loaded"] = "ok"
+    except Exception as e:
+        out["config_loaded"] = f"error: {e}"
+
+    # Data provider check (best-effort): uses configured provider for first ticker.
+    try:
+        tickers = cfg.tickers or []
+        if not tickers:
+            out["data_provider"] = "skipped (no tickers)"
+        else:
+            provider = provider_for_config(cfg, tickers[0])
+            series = provider.fetch_daily(tickers[0])
+            out["data_provider"] = "ok" if not series.df.empty else "no_rows"
+    except Exception as e:
+        out["data_provider"] = f"error: {e}"
+
+    out["ollama"] = do_ollama_check()
+    return out
+
+
 def do_config_where() -> Path:
     return config_path()
 

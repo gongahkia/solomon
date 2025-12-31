@@ -33,6 +33,7 @@ class ModelConfig(BaseModel):
     backend: Literal["ollama", "transformers", "onnx"] = "ollama"
     model: str = "gemma3"
     host: str = "http://localhost:11434"
+    path: str | None = Field(default=None, description="Local model path (transformers/onnx)")
 
 
 class DataConfig(BaseModel):

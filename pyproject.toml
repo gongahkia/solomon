@@ -20,6 +20,9 @@ dependencies = [
 
 [project.optional-dependencies]
 ollama = ["ollama>=0.3"]
+llama-cpp = ["llama-cpp-python>=0.3"]
+mlx = ["mlx-lm>=0.14"]
+transformers = ["transformers>=4.46", "torch>=2.3"]
 
 [project.scripts]
 stonks-cli = "stonks_cli.cli:main"

@@ -67,3 +67,26 @@ class TransformersBackend:
         if marker in txt:
             txt = txt.split(marker)[-1].strip()
         yield txt
+
+
+class OnnxBackend:
+    def __init__(self, model_path: str):
+        self._model_path = (model_path or "").strip()
+
+    def stream_chat(self, messages: list[ChatMessage]) -> Iterable[str]:
+        if not self._model_path:
+            raise ValueError("ONNX backend requires config.model.path")
+        try:
+            import onnxruntime  # type: ignore  # noqa: F401
+        except Exception as e:  # pragma: no cover
+            raise RuntimeError(
+                "ONNX backend requires optional dependency. Install with: pip install onnxruntime"
+            ) from e
+
+        # Stub: real ONNX text generation requires model-specific tokenization and decoding.
+        prompt = "\n".join([f"{m.role}: {m.content}" for m in messages if m.content])
+        raise NotImplementedError(
+            "ONNX backend wiring is present, but inference is model-specific. "
+            "Provide an ONNX text-generation pipeline or use the Ollama backend. "
+            f"(prompt preview: {prompt[:120]!r})"
+        )

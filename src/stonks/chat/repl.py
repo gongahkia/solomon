@@ -10,6 +10,7 @@ from rich.panel import Panel
 
 from stonks.commands import (
     do_analyze,
+    do_backtest,
     do_config_init,
     do_config_show,
     do_config_where,
@@ -84,6 +85,7 @@ def run_chat(host: str, model: str) -> None:
                 "  /config init [path]\n"
                 "  /data fetch [TICKER1 TICKER2 ...]\n"
                 "  /analyze TICKER1 TICKER2 ...\n"
+                "  /backtest [TICKER1 TICKER2 ...]\n"
                 "  /schedule status\n"
                 "  /schedule once [--out-dir DIR]\n"
                 "  /schedule run [--out-dir DIR]    (runs in background)\n",
@@ -120,6 +122,11 @@ def run_chat(host: str, model: str) -> None:
                 return True
             report = do_analyze(args, out_dir=Path("reports"))
             show_panel("analyze", f"Wrote report: {report}")
+            return True
+
+        if cmd == "/backtest":
+            path = do_backtest(args if args else None, start=None, end=None, out_dir=Path("reports"))
+            show_panel("backtest", f"Wrote backtest: {path}")
             return True
 
         if cmd == "/data":

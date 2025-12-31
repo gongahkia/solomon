@@ -8,12 +8,17 @@ from apscheduler.triggers.cron import CronTrigger
 
 from stonks import __version__
 from stonks.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
+from rich.console import Console
+
+from stonks.analysis.output import AnalysisArtifacts
 from stonks.config import AppConfig, config_path, load_config, save_default_config
-from stonks.pipeline import STRATEGIES, provider_for_config, run_once
+from stonks.pipeline import STRATEGIES, compute_results, provider_for_config
 from stonks.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
 from stonks.data.providers import CsvProvider, StooqProvider
 from stonks.reporting.backtest_report import BacktestRow, write_backtest_report
-from stonks.storage import get_history_record, get_last_report_path, list_history
+from stonks.reporting.json_report import write_json_report
+from stonks.reporting.report import write_text_report
+from stonks.storage import get_history_record, get_last_report_path, list_history, save_last_run
 
 
 def do_version() -> str:
@@ -34,10 +39,32 @@ def do_config_show() -> str:
 
 
 def do_analyze(tickers: list[str] | None, out_dir: Path) -> Path:
+    artifacts = do_analyze_artifacts(tickers, out_dir=out_dir, json_out=False)
+    return artifacts.report_path
+
+
+def do_analyze_artifacts(
+    tickers: list[str] | None,
+    *,
+    out_dir: Path,
+    json_out: bool,
+) -> AnalysisArtifacts:
     cfg = load_config()
     if tickers:
         cfg = cfg.model_copy(update={"tickers": tickers})
-    return run_once(cfg, out_dir=out_dir)
+
+    console = Console()
+    results, portfolio = compute_results(cfg, console)
+    report_path = write_text_report(results, out_dir=out_dir, portfolio=portfolio)
+
+    json_path = None
+    if json_out:
+        json_path = out_dir / f"{report_path.stem}.json"
+        write_json_report(results, out_path=json_path, portfolio=portfolio)
+
+    save_last_run(cfg.tickers, report_path)
+
+    return AnalysisArtifacts(report_path=report_path, json_path=json_path, portfolio=portfolio, results=results)
 
 
 def do_backtest(

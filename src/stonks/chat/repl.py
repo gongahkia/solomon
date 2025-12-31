@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import json
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
@@ -12,6 +13,7 @@ from stonks.commands import (
     do_analyze,
     do_backtest,
     do_config_init,
+    do_config_set,
     do_config_show,
     do_config_where,
     do_data_fetch,
@@ -84,6 +86,7 @@ def run_chat(host: str, model: str) -> None:
                 "  /config where\n"
                 "  /config show\n"
                 "  /config init [path]\n"
+                "  /config set FIELD_PATH JSON_VALUE\n"
                 "  /data fetch [TICKER1 TICKER2 ...]\n"
                 "  /analyze TICKER1 TICKER2 ...\n"
                 "  /backtest [TICKER1 TICKER2 ...]\n"
@@ -114,6 +117,22 @@ def run_chat(host: str, model: str) -> None:
                 p = Path(rest[0]).expanduser() if rest else None
                 out = do_config_init(p)
                 show_panel("config init", f"Created config: {out}")
+                return True
+            if sub == "set":
+                if len(rest) < 2:
+                    show_panel("config set", "Usage: /config set FIELD_PATH JSON_VALUE")
+                    return True
+                field_path = rest[0]
+                raw = " ".join(rest[1:])
+                try:
+                    value = json.loads(raw)
+                except Exception:
+                    value = raw
+                try:
+                    new_cfg = do_config_set(field_path, value)
+                    show_panel("config set", new_cfg)
+                except Exception as e:
+                    show_panel("config set", f"Error: {e}")
                 return True
             show_panel("config", f"Unknown subcommand: {sub}")
             return True

@@ -11,7 +11,7 @@ from stonks.analysis.backtest import compute_backtest_metrics, walk_forward_back
 from rich.console import Console
 
 from stonks.analysis.output import AnalysisArtifacts
-from stonks.config import AppConfig, config_path, load_config, save_default_config
+from stonks.config import AppConfig, config_path, load_config, save_config, save_default_config, update_config_field
 from stonks.pipeline import STRATEGIES, compute_results, provider_for_config, run_once
 from stonks.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
 from stonks.data.providers import CsvProvider, StooqProvider
@@ -36,6 +36,13 @@ def do_config_init(path: Path | None) -> Path:
 def do_config_show() -> str:
     cfg = load_config()
     return cfg.model_dump_json(indent=2)
+
+
+def do_config_set(field_path: str, value) -> str:
+    cfg = load_config()
+    updated = update_config_field(cfg, field_path, value)
+    save_config(updated)
+    return updated.model_dump_json(indent=2)
 
 
 def do_analyze(tickers: list[str] | None, out_dir: Path) -> Path:

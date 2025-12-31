@@ -96,3 +96,31 @@ def save_default_config(path: Path | None = None) -> Path:
     cfg = AppConfig()
     path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
     return path
+
+
+def save_config(cfg: AppConfig, path: Path | None = None) -> Path:
+    path = path or config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+    return path
+
+
+def update_config_field(cfg: AppConfig, dotted_path: str, value) -> AppConfig:
+    """Update a nested config field using a dotted path like 'schedule.cron'."""
+
+    dotted_path = (dotted_path or "").strip()
+    if not dotted_path:
+        raise ValueError("field path must be non-empty")
+
+    data = cfg.model_dump(mode="json")
+    parts = dotted_path.split(".")
+    cur = data
+    for p in parts[:-1]:
+        if not isinstance(cur, dict) or p not in cur:
+            raise KeyError(f"unknown config path: {dotted_path}")
+        cur = cur[p]
+    leaf = parts[-1]
+    if not isinstance(cur, dict) or leaf not in cur:
+        raise KeyError(f"unknown config path: {dotted_path}")
+    cur[leaf] = value
+    return AppConfig.model_validate(data)

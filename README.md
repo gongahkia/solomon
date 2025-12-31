@@ -161,6 +161,14 @@ stonks-cli llm check --backend llama_cpp --path ~/models/model.gguf --offline
 stonks-cli chat --backend llama_cpp
 ```
 
+Or set it in config (persists across runs):
+
+```bash
+stonks-cli config set model.backend "llama_cpp"
+stonks-cli config set model.path "~/models/model.gguf"
+stonks-cli config set model.offline true
+```
+
 ## Stack
 
 * ...

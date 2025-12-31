@@ -218,10 +218,14 @@ def schedule_status() -> None:
 @app.command()
 def chat(
     backend: str | None = typer.Option(None, "--backend", help="Override model.backend (auto/ollama/llama_cpp/mlx/transformers/onnx)"),
+    model: str | None = typer.Option(None, "--model", help="Model name or identifier (backend-specific)"),
+    host: str | None = typer.Option(None, "--host", help="Ollama host URL (when backend=ollama)"),
+    path: str | None = typer.Option(None, "--path", help="Local model path (GGUF file for llama.cpp; dir for mlx/transformers)"),
+    offline: bool | None = typer.Option(None, "--offline/--no-offline", help="Require local files only"),
 ) -> None:
     """Start an interactive chat UI using a local model backend."""
     try:
-        run_chat(backend=backend)
+        run_chat(backend=backend, model=model, host=host, path=path, offline=offline)
     except Exception as e:
         raise _exit_for_error(e)
 

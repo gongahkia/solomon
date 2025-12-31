@@ -26,7 +26,7 @@ from stonks_cli.commands import (
     do_version,
 )
 
-from stonks_cli.llm.backends import ChatMessage, build_chat_backend, build_chat_backend_with_override
+from stonks_cli.llm.backends import ChatMessage, build_chat_backend, build_chat_backend_from_overrides
 from stonks_cli.chat.history import append_chat_message, load_chat_history
 from stonks_cli.chat.export import default_transcript_path, write_transcript
 from stonks_cli.chat.prompts import format_analysis_question
@@ -41,7 +41,14 @@ SYSTEM_PROMPT = (
 )
 
 
-def run_chat(*, backend: str | None = None) -> None:
+def run_chat(
+    *,
+    backend: str | None = None,
+    model: str | None = None,
+    host: str | None = None,
+    path: str | None = None,
+    offline: bool | None = None,
+) -> None:
     console = Console()
     kb = KeyBindings()
 
@@ -53,8 +60,14 @@ def run_chat(*, backend: str | None = None) -> None:
     session = PromptSession()
     restored = load_chat_history(limit=50)
     state = ChatState(messages=[ChatMessage(role="system", content=SYSTEM_PROMPT), *restored], scheduler=None)
-    if backend:
-        backend_obj, selected_backend, warn = build_chat_backend_with_override(backend)
+    if any(v is not None for v in (backend, model, host, path, offline)):
+        backend_obj, selected_backend, warn = build_chat_backend_from_overrides(
+            backend=backend,
+            model=model,
+            host=host,
+            path=path,
+            offline=offline,
+        )
     else:
         backend_obj, selected_backend, warn = build_chat_backend()
 

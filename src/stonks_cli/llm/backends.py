@@ -17,7 +17,48 @@ def build_chat_backend() -> tuple["ChatBackend", str, str | None]:
     from stonks_cli.config import load_config
 
     cfg = load_config().model
-    requested = (cfg.backend or "auto").lower()
+    return _build_from_model_cfg(cfg)
+
+
+def build_chat_backend_from_overrides(
+    *,
+    backend: str | None = None,
+    model: str | None = None,
+    host: str | None = None,
+    path: str | None = None,
+    offline: bool | None = None,
+    max_new_tokens: int | None = None,
+    temperature: float | None = None,
+) -> tuple["ChatBackend", str, str | None]:
+    """Build a backend using config + provided overrides (non-persistent)."""
+
+    from stonks_cli.config import load_config
+
+    cfg = load_config().model
+    updates: dict[str, object] = {}
+    if backend is not None:
+        updates["backend"] = backend
+    if model is not None:
+        updates["model"] = model
+    if host is not None:
+        updates["host"] = host
+    if path is not None:
+        updates["path"] = path
+    if offline is not None:
+        updates["offline"] = offline
+    if max_new_tokens is not None:
+        updates["max_new_tokens"] = max_new_tokens
+    if temperature is not None:
+        updates["temperature"] = temperature
+
+    if updates:
+        cfg = cfg.model_copy(update=updates)
+
+    return _build_from_model_cfg(cfg)
+
+
+def _build_from_model_cfg(cfg) -> tuple["ChatBackend", str, str | None]:
+    requested = (getattr(cfg, "backend", None) or "auto").lower()
 
     selected = _select_backend(requested, offline=bool(getattr(cfg, "offline", False)))
     if selected == "transformers":

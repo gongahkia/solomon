@@ -70,7 +70,15 @@ def do_llm_check(
     use_path = path if path is not None else cfg.path
     use_offline = bool(cfg.offline if offline is None else offline)
 
-    if use_backend in {"ollama", "auto"} and not use_offline:
+    # Match chat backend selection rules.
+    try:
+        from stonks_cli.llm.backends import select_backend
+
+        selected = select_backend(use_backend, offline=use_offline)
+    except Exception:
+        selected = use_backend if use_backend != "auto" else ("ollama" if not use_offline else "transformers")
+
+    if selected == "ollama" and not use_offline:
         # Reuse the existing check, but honor host override.
         try:
             from ollama import Client
@@ -87,68 +95,84 @@ def do_llm_check(
             if items is None and isinstance(models, dict):
                 items = models.get("models")
             n = len(items) if items else 0
-            return f"ok backend=ollama host={use_host} models={n}"
+            extra = f" selected={selected}" if use_backend == "auto" else ""
+            return f"ok backend=ollama host={use_host} models={n}{extra}"
         except Exception as e:
-            return f"error backend=ollama host={use_host} error={e}"
+            extra = f" selected={selected}" if use_backend == "auto" else ""
+            return f"error backend=ollama host={use_host} error={e}{extra}"
 
     # For local backends, validate dependency + local path. Avoid actually loading large models.
-    if use_backend == "llama_cpp" or (use_backend == "auto" and use_offline):
+    if selected == "llama_cpp":
         try:
             import importlib.util
             from pathlib import Path
 
             if importlib.util.find_spec("llama_cpp") is None:
-                return "error backend=llama_cpp error=missing_dependency (install -e '.[llama-cpp]')"
+                extra = f" selected={selected}" if use_backend == "auto" else ""
+                return f"error backend=llama_cpp error=missing_dependency (install -e '.[llama-cpp]'){extra}"
             if not use_path:
-                return "error backend=llama_cpp error=missing_model_path (set model.path to a GGUF file)"
+                extra = f" selected={selected}" if use_backend == "auto" else ""
+                return f"error backend=llama_cpp error=missing_model_path (set model.path to a GGUF file){extra}"
             p = Path(use_path).expanduser()
             if not p.exists():
-                return f"error backend=llama_cpp error=model_not_found path={p}"
-            return f"ok backend=llama_cpp path={p}"
+                extra = f" selected={selected}" if use_backend == "auto" else ""
+                return f"error backend=llama_cpp error=model_not_found path={p}{extra}"
+            extra = f" selected={selected}" if use_backend == "auto" else ""
+            return f"ok backend=llama_cpp path={p}{extra}"
         except Exception as e:
             return f"error backend=llama_cpp error={e}"
 
-    if use_backend == "mlx":
+    if selected == "mlx":
         try:
             import importlib.util
             from pathlib import Path
 
             if importlib.util.find_spec("mlx_lm") is None:
-                return "error backend=mlx error=missing_dependency (install -e '.[mlx]')"
+                extra = f" selected={selected}" if use_backend == "auto" else ""
+                return f"error backend=mlx error=missing_dependency (install -e '.[mlx]'){extra}"
             if use_offline:
                 if not use_path:
-                    return "error backend=mlx error=missing_model_path (set model.path to a local directory)"
+                    extra = f" selected={selected}" if use_backend == "auto" else ""
+                    return f"error backend=mlx error=missing_model_path (set model.path to a local directory){extra}"
                 p = Path(use_path).expanduser()
                 if not p.exists():
-                    return f"error backend=mlx error=model_not_found path={p}"
-            return f"ok backend=mlx model={use_path or use_model} offline={use_offline}"
+                    extra = f" selected={selected}" if use_backend == "auto" else ""
+                    return f"error backend=mlx error=model_not_found path={p}{extra}"
+            extra = f" selected={selected}" if use_backend == "auto" else ""
+            return f"ok backend=mlx model={use_path or use_model} offline={use_offline}{extra}"
         except Exception as e:
             return f"error backend=mlx error={e}"
 
-    if use_backend == "transformers":
+    if selected == "transformers":
         try:
             import importlib.util
             from pathlib import Path
 
             if importlib.util.find_spec("transformers") is None:
-                return "error backend=transformers error=missing_dependency (install -e '.[transformers]')"
+                extra = f" selected={selected}" if use_backend == "auto" else ""
+                return f"error backend=transformers error=missing_dependency (install -e '.[transformers]'){extra}"
             if use_offline:
                 if not use_path:
-                    return "error backend=transformers error=missing_model_path (set model.path to a local directory)"
+                    extra = f" selected={selected}" if use_backend == "auto" else ""
+                    return f"error backend=transformers error=missing_model_path (set model.path to a local directory){extra}"
                 p = Path(use_path).expanduser()
                 if not p.exists():
-                    return f"error backend=transformers error=model_not_found path={p}"
-            return f"ok backend=transformers model={use_path or use_model} offline={use_offline}"
+                    extra = f" selected={selected}" if use_backend == "auto" else ""
+                    return f"error backend=transformers error=model_not_found path={p}{extra}"
+            extra = f" selected={selected}" if use_backend == "auto" else ""
+            return f"ok backend=transformers model={use_path or use_model} offline={use_offline}{extra}"
         except Exception as e:
             return f"error backend=transformers error={e}"
 
-    if use_backend == "onnx":
+    if selected == "onnx":
         try:
             import importlib.util
 
             if importlib.util.find_spec("onnxruntime") is None:
-                return "error backend=onnx error=missing_dependency (pip install onnxruntime)"
-            return "ok backend=onnx"
+                extra = f" selected={selected}" if use_backend == "auto" else ""
+                return f"error backend=onnx error=missing_dependency (pip install onnxruntime){extra}"
+            extra = f" selected={selected}" if use_backend == "auto" else ""
+            return f"ok backend=onnx{extra}"
         except Exception as e:
             return f"error backend=onnx error={e}"
 

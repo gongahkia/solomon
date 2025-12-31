@@ -167,6 +167,12 @@ def supported_backends() -> list[str]:
     return ["auto", "ollama", "llama_cpp", "mlx", "transformers", "onnx"]
 
 
+def select_backend(requested: str | None, *, offline: bool) -> str:
+    """Select a backend key using the same rules as `build_chat_backend()`."""
+
+    return _select_backend((requested or "auto"), offline=offline)
+
+
 @dataclass(frozen=True)
 class ChatMessage:
     role: str

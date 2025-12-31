@@ -250,6 +250,10 @@ class TransformersBackend:
 
         self._tok = AutoTokenizer.from_pretrained(self._model_path, **kwargs)
         self._mdl = AutoModelForCausalLM.from_pretrained(self._model_path, **kwargs)
+        try:
+            self._mdl.eval()
+        except Exception:
+            pass
 
     def stream_chat(self, messages: list[ChatMessage]) -> Iterable[str]:
         self._ensure_loaded()
@@ -259,12 +263,28 @@ class TransformersBackend:
         # Minimal implementation: concatenate messages and generate a single response.
         prompt = _format_messages_as_prompt(messages)
         inputs = self._tok(prompt, return_tensors="pt")
-        out = self._mdl.generate(
-            **inputs,
-            max_new_tokens=self._max_new_tokens,
-            do_sample=self._temperature > 0,
-            temperature=self._temperature,
-        )
+        try:
+            import torch  # type: ignore
+
+            ctx = torch.no_grad()
+        except Exception:  # pragma: no cover
+            ctx = None
+
+        if ctx is None:
+            out = self._mdl.generate(
+                **inputs,
+                max_new_tokens=self._max_new_tokens,
+                do_sample=self._temperature > 0,
+                temperature=self._temperature,
+            )
+        else:
+            with ctx:
+                out = self._mdl.generate(
+                    **inputs,
+                    max_new_tokens=self._max_new_tokens,
+                    do_sample=self._temperature > 0,
+                    temperature=self._temperature,
+                )
         txt = self._tok.decode(out[0], skip_special_tokens=True)
         # Best-effort: return only the tail after the last 'assistant:' marker.
         marker = "assistant:"

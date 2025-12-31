@@ -12,6 +12,8 @@ from rich.console import Console
 
 from stonks.config import AppConfig
 from stonks.pipeline import run_once
+from stonks.scheduler.pidfile import acquire_pid_file
+from stonks.storage import default_state_dir
 
 
 @dataclass
@@ -61,9 +63,13 @@ def build_scheduler(cfg: AppConfig, out_dir: Path, console: Console | None = Non
 
 def run_scheduler(cfg: AppConfig, out_dir: Path) -> None:
     console = Console()
+    pid = acquire_pid_file(default_state_dir() / "scheduler.pid")
     scheduler = build_scheduler(cfg, out_dir=out_dir, console=console)
     console.print(f"[green]Scheduler running[/green] cron='{cfg.schedule.cron}'")
-    scheduler.start()
+    try:
+        scheduler.start()
+    finally:
+        pid.remove()
 
 
 def start_scheduler_in_thread(cfg: AppConfig, out_dir: Path) -> SchedulerHandle:

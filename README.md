@@ -32,6 +32,18 @@ uv pip install -e .
 
 After installing, the CLI is available as `stonks-cli`.
 
+If you see `command not found: stonks-cli`, your virtualenv is not active. Either run:
+
+```bash
+source .venv/bin/activate
+```
+
+or invoke the CLI directly:
+
+```bash
+./.venv/bin/stonks-cli --help
+```
+
 ### Sanity check
 
 ```bash

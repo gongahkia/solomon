@@ -6,8 +6,10 @@ import typer
 from rich.console import Console
 
 from stonks.chat.repl import run_chat
+from stonks.config import load_config
 from stonks.commands import (
     do_analyze,
+    do_backtest,
     do_config_init,
     do_config_show,
     do_config_where,
@@ -62,6 +64,23 @@ def analyze(
 ) -> None:
     """Analyze tickers and write a report."""
     do_analyze(tickers if tickers else None, out_dir=Path(out_dir))
+
+
+@app.command()
+def backtest(
+    tickers: list[str] = typer.Argument(None),
+    start: str | None = typer.Option(None, "--start", help="YYYY-MM-DD"),
+    end: str | None = typer.Option(None, "--end", help="YYYY-MM-DD"),
+    out_dir: str = typer.Option("reports", "--out-dir"),
+) -> None:
+    """Run a simple walk-forward backtest and write a summary report."""
+    path = do_backtest(
+        tickers if tickers else None,
+        start=start,
+        end=end,
+        out_dir=Path(out_dir),
+    )
+    Console().print(f"Wrote backtest: {path}")
 
 
 @schedule_app.command("run")

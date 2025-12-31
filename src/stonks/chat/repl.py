@@ -27,6 +27,7 @@ from stonks.commands import (
 
 from stonks.llm.backends import ChatMessage, OllamaBackend
 from stonks.chat.history import append_chat_message, load_chat_history
+from stonks.chat.export import default_transcript_path, write_transcript
 
 
 @dataclass
@@ -93,6 +94,7 @@ def run_chat(host: str, model: str) -> None:
                 "  /analyze TICKER1 TICKER2 ...\n"
                 "  /backtest [TICKER1 TICKER2 ...]\n"
                 "  /report\n"
+                "  /export [path]\n"
                 "  /schedule status\n"
                 "  /schedule once [--out-dir DIR]\n"
                 "  /schedule run [--out-dir DIR]    (runs in background)\n",
@@ -164,6 +166,15 @@ def run_chat(host: str, model: str) -> None:
                 show_panel("report", body)
             except Exception as e:
                 show_panel("report", f"Error: {e}")
+            return True
+
+        if cmd == "/export":
+            out = Path(args[0]).expanduser() if args else default_transcript_path()
+            try:
+                p = write_transcript(state.messages, out)
+                show_panel("export", f"Wrote transcript: {p}")
+            except Exception as e:
+                show_panel("export", f"Error: {e}")
             return True
 
         if cmd == "/data":

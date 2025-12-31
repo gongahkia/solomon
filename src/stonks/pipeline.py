@@ -4,6 +4,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from rich.console import Console
+from rich.progress import Progress
 
 from stonks.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
 from stonks.analysis.indicators import atr, rolling_volatility
@@ -59,11 +60,14 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
         provider = provider_for_config(cfg, t)
         return t, provider.fetch_daily(t)
 
-    with ThreadPoolExecutor(max_workers=min(cfg.data.concurrency_limit, max(1, len(cfg.tickers)))) as ex:
-        futs = [ex.submit(_fetch, t) for t in cfg.tickers]
-        for fut in as_completed(futs):
-            t, series = fut.result()
-            series_by_ticker[t] = series
+    with Progress(transient=True, console=console) as progress:
+        task = progress.add_task("Fetching prices", total=len(cfg.tickers))
+        with ThreadPoolExecutor(max_workers=min(cfg.data.concurrency_limit, max(1, len(cfg.tickers)))) as ex:
+            futs = [ex.submit(_fetch, t) for t in cfg.tickers]
+            for fut in as_completed(futs):
+                t, series = fut.result()
+                series_by_ticker[t] = series
+                progress.advance(task)
 
     results: list[TickerResult] = []
     per_ticker_fraction: dict[str, float] = {}

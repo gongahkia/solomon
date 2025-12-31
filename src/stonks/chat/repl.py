@@ -16,6 +16,7 @@ from stonks.commands import (
     do_config_where,
     do_data_fetch,
     do_data_verify,
+    do_report_open,
     do_schedule_once,
     do_schedule_start_background,
     do_schedule_status,
@@ -86,6 +87,7 @@ def run_chat(host: str, model: str) -> None:
                 "  /data fetch [TICKER1 TICKER2 ...]\n"
                 "  /analyze TICKER1 TICKER2 ...\n"
                 "  /backtest [TICKER1 TICKER2 ...]\n"
+                "  /report\n"
                 "  /schedule status\n"
                 "  /schedule once [--out-dir DIR]\n"
                 "  /schedule run [--out-dir DIR]    (runs in background)\n",
@@ -127,6 +129,20 @@ def run_chat(host: str, model: str) -> None:
         if cmd == "/backtest":
             path = do_backtest(args if args else None, start=None, end=None, out_dir=Path("reports"))
             show_panel("backtest", f"Wrote backtest: {path}")
+            return True
+
+        if cmd == "/report":
+            try:
+                p = do_report_open()
+                txt = Path(p).read_text(encoding="utf-8")
+                limit = 8000
+                if len(txt) > limit:
+                    body = f"path: {p}\n\n(truncated to last {limit} chars)\n\n" + txt[-limit:]
+                else:
+                    body = f"path: {p}\n\n" + txt
+                show_panel("report", body)
+            except Exception as e:
+                show_panel("report", f"Error: {e}")
             return True
 
         if cmd == "/data":

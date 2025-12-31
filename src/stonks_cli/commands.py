@@ -176,7 +176,7 @@ def do_doctor() -> dict[str, str]:
     except Exception as e:
         out["data_provider"] = f"error: {e}"
 
-    out["ollama"] = do_ollama_check()
+    out["llm"] = do_llm_check()
     return out
 
 

@@ -241,6 +241,11 @@ class TransformersBackend:
 
         kwargs = {}
         if self._offline:
+            from pathlib import Path
+
+            p = Path(self._model_path).expanduser()
+            if not p.exists():
+                raise FileNotFoundError(f"offline=true requires a local model directory, not: {self._model_path}")
             kwargs["local_files_only"] = True
 
         self._tok = AutoTokenizer.from_pretrained(self._model_path, **kwargs)

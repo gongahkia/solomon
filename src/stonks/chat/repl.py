@@ -26,6 +26,7 @@ from stonks.commands import (
 )
 
 from stonks.llm.backends import ChatMessage, OllamaBackend
+from stonks.chat.history import append_chat_message, load_chat_history
 
 
 @dataclass
@@ -51,7 +52,8 @@ def run_chat(host: str, model: str) -> None:
         event.app.exit()
 
     session = PromptSession()
-    state = ChatState(messages=[ChatMessage(role="system", content=SYSTEM_PROMPT)], scheduler=None)
+    restored = load_chat_history(limit=50)
+    state = ChatState(messages=[ChatMessage(role="system", content=SYSTEM_PROMPT), *restored], scheduler=None)
     backend = OllamaBackend(host=host, model=model)
 
     console.print(Panel.fit("Stonks Chat (local model)", title="stonks chat"))
@@ -234,6 +236,7 @@ def run_chat(host: str, model: str) -> None:
             continue
 
         state.messages.append(ChatMessage(role="user", content=user_text))
+        append_chat_message("user", user_text)
         console.print("\n[bold]assistant[/bold]: ", end="")
         try:
             chunks = []
@@ -241,6 +244,8 @@ def run_chat(host: str, model: str) -> None:
                 chunks.append(part)
                 console.print(part, end="")
             console.print()
-            state.messages.append(ChatMessage(role="assistant", content="".join(chunks)))
+            assistant_text = "".join(chunks)
+            state.messages.append(ChatMessage(role="assistant", content=assistant_text))
+            append_chat_message("assistant", assistant_text)
         except Exception as e:
             console.print(f"\n[red]Error:[/red] {e}")

@@ -36,7 +36,7 @@ def build_chat_backend():
         except Exception as e:
             fb = "llama_cpp" if _has_module("llama_cpp") else "ollama"
             warn = f"transformers unavailable: {e}; falling back to {fb}"
-            return build_chat_backend_with_override(fb)
+            return build_chat_backend_with_override(fb, warning=warn)
 
     if selected == "llama_cpp":
         try:

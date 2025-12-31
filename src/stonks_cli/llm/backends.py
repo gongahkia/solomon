@@ -194,7 +194,7 @@ class OllamaBackend:
             from ollama import Client
         except Exception as e:  # pragma: no cover
             raise RuntimeError(
-                "Ollama backend requires optional dependency. Install with: pip install 'stonks[ollama]'"
+                "Ollama backend requires optional dependency. Install with: pip install -e '.[ollama]'"
             ) from e
 
         client = Client(host=self._host)

@@ -161,6 +161,12 @@ def _select_backend(requested: str, *, offline: bool) -> str:
     return "ollama"
 
 
+def supported_backends() -> list[str]:
+    """Return backend keys that this build understands (not necessarily installed)."""
+
+    return ["auto", "ollama", "llama_cpp", "mlx", "transformers", "onnx"]
+
+
 @dataclass(frozen=True)
 class ChatMessage:
     role: str

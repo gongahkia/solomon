@@ -50,6 +50,111 @@ def do_ollama_check() -> str:
         return f"error host={host} error={e}"
 
 
+def do_llm_check(
+    *,
+    backend: str | None = None,
+    model: str | None = None,
+    host: str | None = None,
+    path: str | None = None,
+    offline: bool | None = None,
+) -> str:
+    """Check LLM backend connectivity / availability.
+
+    This is best-effort and intentionally lightweight.
+    """
+
+    cfg = load_config().model
+    use_backend = (backend or cfg.backend or "auto").lower()
+    use_model = model or cfg.model
+    use_host = host or cfg.host
+    use_path = path if path is not None else cfg.path
+    use_offline = bool(cfg.offline if offline is None else offline)
+
+    if use_backend in {"ollama", "auto"} and not use_offline:
+        # Reuse the existing check, but honor host override.
+        try:
+            from ollama import Client
+
+            client = Client(host=use_host)
+            try:
+                models = client.list()  # type: ignore[attr-defined]
+            except AttributeError:
+                import ollama
+
+                models = ollama.list()
+
+            items = getattr(models, "models", None)
+            if items is None and isinstance(models, dict):
+                items = models.get("models")
+            n = len(items) if items else 0
+            return f"ok backend=ollama host={use_host} models={n}"
+        except Exception as e:
+            return f"error backend=ollama host={use_host} error={e}"
+
+    # For local backends, validate dependency + local path. Avoid actually loading large models.
+    if use_backend == "llama_cpp" or (use_backend == "auto" and use_offline):
+        try:
+            import importlib.util
+            from pathlib import Path
+
+            if importlib.util.find_spec("llama_cpp") is None:
+                return "error backend=llama_cpp error=missing_dependency (install -e '.[llama-cpp]')"
+            if not use_path:
+                return "error backend=llama_cpp error=missing_model_path (set model.path to a GGUF file)"
+            p = Path(use_path).expanduser()
+            if not p.exists():
+                return f"error backend=llama_cpp error=model_not_found path={p}"
+            return f"ok backend=llama_cpp path={p}"
+        except Exception as e:
+            return f"error backend=llama_cpp error={e}"
+
+    if use_backend == "mlx":
+        try:
+            import importlib.util
+            from pathlib import Path
+
+            if importlib.util.find_spec("mlx_lm") is None:
+                return "error backend=mlx error=missing_dependency (install -e '.[mlx]')"
+            if use_offline:
+                if not use_path:
+                    return "error backend=mlx error=missing_model_path (set model.path to a local directory)"
+                p = Path(use_path).expanduser()
+                if not p.exists():
+                    return f"error backend=mlx error=model_not_found path={p}"
+            return f"ok backend=mlx model={use_path or use_model} offline={use_offline}"
+        except Exception as e:
+            return f"error backend=mlx error={e}"
+
+    if use_backend == "transformers":
+        try:
+            import importlib.util
+            from pathlib import Path
+
+            if importlib.util.find_spec("transformers") is None:
+                return "error backend=transformers error=missing_dependency (install -e '.[transformers]')"
+            if use_offline:
+                if not use_path:
+                    return "error backend=transformers error=missing_model_path (set model.path to a local directory)"
+                p = Path(use_path).expanduser()
+                if not p.exists():
+                    return f"error backend=transformers error=model_not_found path={p}"
+            return f"ok backend=transformers model={use_path or use_model} offline={use_offline}"
+        except Exception as e:
+            return f"error backend=transformers error={e}"
+
+    if use_backend == "onnx":
+        try:
+            import importlib.util
+
+            if importlib.util.find_spec("onnxruntime") is None:
+                return "error backend=onnx error=missing_dependency (pip install onnxruntime)"
+            return "ok backend=onnx"
+        except Exception as e:
+            return f"error backend=onnx error={e}"
+
+    return f"error backend={use_backend} error=unsupported_backend"
+
+
 def do_doctor() -> dict[str, str]:
     cfg = load_config()
     out: dict[str, str] = {}

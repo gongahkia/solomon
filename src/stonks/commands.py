@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from time import perf_counter
 from pathlib import Path
 
 from apscheduler.triggers.cron import CronTrigger
@@ -121,6 +122,33 @@ def do_analyze_artifacts(
     save_last_run(cfg.tickers, report_path, json_path=json_path)
 
     return AnalysisArtifacts(report_path=report_path, json_path=json_path, portfolio=portfolio, results=results)
+
+
+def do_bench(tickers: list[str] | None, *, iterations: int = 5, warmup: int = 1) -> str:
+    cfg = load_config()
+    if tickers:
+        cfg = cfg.model_copy(update={"tickers": tickers})
+
+    # Avoid mixing benchmark timing with I/O-heavy report generation.
+    console = Console()
+
+    for _ in range(max(0, warmup)):
+        compute_results(cfg, console)
+
+    timings: list[float] = []
+    for _ in range(iterations):
+        start = perf_counter()
+        compute_results(cfg, console)
+        timings.append(perf_counter() - start)
+
+    timings_sorted = sorted(timings)
+    avg = sum(timings) / len(timings)
+    p50 = timings_sorted[len(timings_sorted) // 2]
+    p95 = timings_sorted[max(0, int(len(timings_sorted) * 0.95) - 1)]
+    return (
+        f"benchmark tickers={len(cfg.tickers)} iterations={iterations} "
+        f"avg={avg:.4f}s p50={p50:.4f}s p95={p95:.4f}s"
+    )
 
 
 def do_backtest(

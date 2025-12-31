@@ -13,6 +13,7 @@ from stonks.commands import (
     do_analyze,
     do_analyze_artifacts,
     do_backtest,
+    do_bench,
     do_config_init,
     do_config_show,
     do_config_where,
@@ -154,6 +155,20 @@ def backtest(
             out_dir=Path(out_dir),
         )
         Console().print(f"Wrote backtest: {path}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@app.command()
+def bench(
+    tickers: list[str] = typer.Argument(None),
+    iterations: int = typer.Option(5, "--iterations", min=1, max=50),
+    warmup: int = typer.Option(1, "--warmup", min=0, max=10),
+) -> None:
+    """Run a simple multi-ticker analysis benchmark."""
+    try:
+        summary = do_bench(tickers if tickers else None, iterations=iterations, warmup=warmup)
+        Console().print(summary)
     except Exception as e:
         raise _exit_for_error(e)
 

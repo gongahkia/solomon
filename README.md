@@ -138,6 +138,29 @@ stonks-cli llm check
 stonks-cli chat
 ```
 
+### Optional: local LLM chat (no Ollama service)
+
+`stonks-cli` supports multiple local backends. By default, `model.backend` is set to `auto` and will pick a reasonable backend based on your platform + installed extras.
+
+- macOS Apple Silicon: prefer `mlx` (fastest/easiest local experience)
+- Cross-platform offline: prefer `llama_cpp` with a GGUF model file
+- CUDA-heavy setups: prefer `transformers` (best when running on NVIDIA GPU)
+
+Install an extra for your preferred backend:
+
+```bash
+python -m pip install -e ".[mlx]"           # macOS Apple Silicon (MLX)
+python -m pip install -e ".[llama-cpp]"     # GGUF / llama.cpp (cross-platform)
+python -m pip install -e ".[transformers]"  # transformers + torch
+```
+
+Run with an explicit backend override:
+
+```bash
+stonks-cli llm check --backend llama_cpp --path ~/models/model.gguf --offline
+stonks-cli chat --backend llama_cpp
+```
+
 ## Stack
 
 * ...

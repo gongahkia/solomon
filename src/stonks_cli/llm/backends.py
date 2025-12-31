@@ -334,10 +334,28 @@ class MLXBackend:
         self._mdl, self._tok = load(self._model_path)
 
     def stream_chat(self, messages: list[ChatMessage]) -> Iterable[str]:
-        # Proper generation implemented in a follow-up commit.
         self._ensure_loaded()
+        assert self._tok is not None
+        assert self._mdl is not None
+
+        try:
+            from mlx_lm import generate  # type: ignore
+        except Exception as e:  # pragma: no cover
+            raise RuntimeError("MLX backend requires optional dependency. Install with: pip install -e '.[mlx]'") from e
+
         prompt = _format_messages_as_prompt(messages)
-        yield prompt  # placeholder
+        # Best-effort: mlx-lm APIs vary by version; return a single response chunk.
+        txt = generate(
+            self._mdl,
+            self._tok,
+            prompt=prompt,
+            max_tokens=self._max_new_tokens,
+            temp=self._temperature,
+        )
+        # Some versions return just text, others return a dict.
+        if isinstance(txt, dict):
+            txt = txt.get("text") or ""
+        yield str(txt).strip()
 
 
 def _format_messages_as_prompt(messages: list[ChatMessage]) -> str:

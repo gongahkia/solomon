@@ -77,3 +77,16 @@ def test_load_config_accepts_new_llm_backends(monkeypatch, tmp_path):
     cfg = load_config()
     assert cfg.model.backend == "llama_cpp"
     assert cfg.model.offline is True
+
+
+def test_load_config_rejects_unknown_model_backend(monkeypatch, tmp_path):
+    cfg_path = tmp_path / "config.json"
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
+
+    cfg_path.write_text(
+        json.dumps({"model": {"backend": "not-a-backend"}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(Exception):
+        load_config()

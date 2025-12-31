@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from threading import Thread
+from threading import Lock, Thread
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -28,8 +28,12 @@ class SchedulerHandle:
 
 def build_scheduler(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> BlockingScheduler:
     console = console or Console()
+    run_lock = Lock()
 
     def job() -> None:
+        if not run_lock.acquire(blocking=False):
+            console.print("[yellow]Scheduled run skipped[/yellow] previous run still active")
+            return
         started = datetime.now()
         t0 = perf_counter()
         console.print(f"[cyan]Scheduled run started[/cyan] {started.isoformat()}")
@@ -43,10 +47,15 @@ def build_scheduler(cfg: AppConfig, out_dir: Path, console: Console | None = Non
             dt_s = perf_counter() - t0
             console.print(f"[red]Scheduled run failed[/red] {ended.isoformat()} ({dt_s:.2f}s) error={e}")
             raise
+        finally:
+            try:
+                run_lock.release()
+            except Exception:
+                pass
 
     trigger = CronTrigger.from_crontab(cfg.schedule.cron)
     scheduler = BlockingScheduler()
-    scheduler.add_job(job, trigger)
+    scheduler.add_job(job, trigger, max_instances=1)
     return scheduler
 
 

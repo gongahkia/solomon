@@ -51,7 +51,9 @@ def provider_for_config(cfg: AppConfig, ticker: str) -> PriceProvider:
 def compute_results(cfg: AppConfig, console: Console) -> tuple[list[TickerResult], object | None]:
     strategy_fn = select_strategy(cfg)
 
-
+    tickers = [normalize_ticker(t) for t in (cfg.tickers or [])]
+    if cfg.deterministic:
+        tickers = sorted(tickers)
     # Fetch in parallel to reduce wall-clock time for multiple tickers.
     series_by_ticker: dict[str, object] = {}
 
@@ -60,9 +62,10 @@ def compute_results(cfg: AppConfig, console: Console) -> tuple[list[TickerResult
         return t, provider.fetch_daily(t)
 
     with Progress(transient=True, console=console) as progress:
-        task = progress.add_task("Fetching prices", total=len(cfg.tickers))
-        with ThreadPoolExecutor(max_workers=min(cfg.data.concurrency_limit, max(1, len(cfg.tickers)))) as ex:
-            futs = [ex.submit(_fetch, t) for t in cfg.tickers]
+        task = progress.add_task("Fetching prices", total=len(tickers))
+        max_workers = 1 if cfg.deterministic else min(cfg.data.concurrency_limit, max(1, len(tickers)))
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futs = [ex.submit(_fetch, t) for t in tickers]
             for fut in as_completed(futs):
                 t, series = fut.result()
                 series_by_ticker[t] = series
@@ -71,7 +74,7 @@ def compute_results(cfg: AppConfig, console: Console) -> tuple[list[TickerResult
     results: list[TickerResult] = []
     per_ticker_fraction: dict[str, float] = {}
     per_ticker_equity: dict[str, object] = {}
-    for ticker in cfg.tickers:
+    for ticker in tickers:
         series = series_by_ticker[ticker]
         df = series.df
         last_close = None

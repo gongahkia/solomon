@@ -61,6 +61,8 @@ class AppConfig(BaseModel):
     risk: RiskConfig = Field(default_factory=RiskConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
+    deterministic: bool = Field(default=False, description="Use deterministic execution (stable ordering, no concurrency)")
+    seed: int = Field(default=0, description="Seed value for deterministic mode")
 
 
 def config_path() -> Path:

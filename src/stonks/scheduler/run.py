@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from threading import Thread
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -32,8 +31,18 @@ def build_scheduler(cfg: AppConfig, out_dir: Path, console: Console | None = Non
 
     def job() -> None:
         started = datetime.now()
+        t0 = perf_counter()
         console.print(f"[cyan]Scheduled run started[/cyan] {started.isoformat()}")
-        run_once(cfg, out_dir=out_dir, console=console)
+        try:
+            report_path = run_once(cfg, out_dir=out_dir, console=console)
+            ended = datetime.now()
+            dt_s = perf_counter() - t0
+            console.print(f"[cyan]Scheduled run finished[/cyan] {ended.isoformat()} ({dt_s:.2f}s) report={report_path}")
+        except Exception as e:
+            ended = datetime.now()
+            dt_s = perf_counter() - t0
+            console.print(f"[red]Scheduled run failed[/red] {ended.isoformat()} ({dt_s:.2f}s) error={e}")
+            raise
 
     trigger = CronTrigger.from_crontab(cfg.schedule.cron)
     scheduler = BlockingScheduler()

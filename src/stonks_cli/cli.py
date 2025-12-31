@@ -22,7 +22,7 @@ from stonks_cli.commands import (
     do_history_list,
     do_history_show,
     do_doctor,
-    do_ollama_check,
+    do_llm_check,
     do_report_open,
     do_schedule_once,
     do_schedule_run,
@@ -225,10 +225,24 @@ def chat() -> None:
 
 
 @llm_app.command("check")
-def llm_check() -> None:
-    """Check local LLM backend connectivity (Ollama)."""
+def llm_check(
+    backend: str | None = typer.Option(None, "--backend", help="Backend to check (auto/ollama/llama_cpp/mlx/transformers/onnx)"),
+    model: str | None = typer.Option(None, "--model", help="Model name or identifier (backend-specific)"),
+    host: str | None = typer.Option(None, "--host", help="Ollama host URL (when backend=ollama)"),
+    path: str | None = typer.Option(None, "--path", help="Local model path (GGUF file for llama.cpp; dir for mlx/transformers)"),
+    offline: bool | None = typer.Option(None, "--offline/--no-offline", help="Require local files only"),
+) -> None:
+    """Check LLM backend connectivity / availability."""
     try:
-        Console().print(do_ollama_check())
+        Console().print(
+            do_llm_check(
+                backend=backend,
+                model=model,
+                host=host,
+                path=path,
+                offline=offline,
+            )
+        )
     except Exception as e:
         raise _exit_for_error(e)
 

@@ -23,30 +23,37 @@ from stonks.reporting.report import TickerResult, write_text_report
 from stonks.storage import save_last_run
 
 
+STRATEGIES = {
+    "basic_trend_rsi": basic_trend_rsi_strategy,
+    "sma_cross": sma_cross_strategy,
+    "mean_reversion_bb_rsi": mean_reversion_bb_rsi_strategy,
+}
+
+
+def select_strategy(cfg: AppConfig):
+    return STRATEGIES.get(cfg.strategy, STRATEGIES["basic_trend_rsi"])
+
+
+def provider_for_config(cfg: AppConfig, ticker: str) -> PriceProvider:
+    t = normalize_ticker(ticker)
+    override = cfg.ticker_overrides.get(t)
+    data_cfg = override.data if override else cfg.data
+    if data_cfg.provider == "csv":
+        if not data_cfg.csv_path:
+            raise ValueError(f"csv provider requires csv_path for {t}")
+        return CsvProvider(data_cfg.csv_path)
+    return StooqProvider(cache_ttl_seconds=data_cfg.cache_ttl_seconds)
+
+
 def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> Path:
     console = console or Console()
 
-    strategies = {
-        "basic_trend_rsi": basic_trend_rsi_strategy,
-        "sma_cross": sma_cross_strategy,
-        "mean_reversion_bb_rsi": mean_reversion_bb_rsi_strategy,
-    }
-    strategy_fn = strategies.get(cfg.strategy, basic_trend_rsi_strategy)
-
-    def provider_for(ticker: str) -> PriceProvider:
-        t = normalize_ticker(ticker)
-        override = cfg.ticker_overrides.get(t)
-        data_cfg = override.data if override else cfg.data
-        if data_cfg.provider == "csv":
-            if not data_cfg.csv_path:
-                raise ValueError(f"csv provider requires csv_path for {t}")
-            return CsvProvider(data_cfg.csv_path)
-        return StooqProvider(cache_ttl_seconds=data_cfg.cache_ttl_seconds)
+    strategy_fn = select_strategy(cfg)
 
     results: list[TickerResult] = []
     per_ticker_fraction: dict[str, float] = {}
     for ticker in cfg.tickers:
-        provider = provider_for(ticker)
+        provider = provider_for_config(cfg, ticker)
         series = provider.fetch_daily(ticker)
         df = series.df
         last_close = None

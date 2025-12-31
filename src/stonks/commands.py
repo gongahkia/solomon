@@ -25,6 +25,30 @@ def do_version() -> str:
     return __version__
 
 
+def do_ollama_check() -> str:
+    cfg = load_config()
+    host = cfg.model.host
+    try:
+        from ollama import Client
+
+        client = Client(host=host)
+        try:
+            models = client.list()  # type: ignore[attr-defined]
+        except AttributeError:
+            import ollama
+
+            models = ollama.list()
+
+        # 'models' is often an object with a .models list.
+        items = getattr(models, "models", None)
+        if items is None and isinstance(models, dict):
+            items = models.get("models")
+        n = len(items) if items else 0
+        return f"ok host={host} models={n}"
+    except Exception as e:
+        return f"error host={host} error={e}"
+
+
 def do_config_where() -> Path:
     return config_path()
 

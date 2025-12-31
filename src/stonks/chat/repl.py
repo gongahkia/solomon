@@ -18,6 +18,7 @@ from stonks.commands import (
     do_config_where,
     do_data_fetch,
     do_data_verify,
+    do_ollama_check,
     do_report_open,
     do_schedule_once,
     do_schedule_start_background,
@@ -99,6 +100,17 @@ def run_chat(host: str, model: str) -> None:
                 "  /schedule once [--out-dir DIR]\n"
                 "  /schedule run [--out-dir DIR]    (runs in background)\n",
             )
+            return True
+
+        if cmd == "/llm":
+            if not args:
+                show_panel("llm", "Usage: /llm check")
+                return True
+            sub = args[0].lower()
+            if sub == "check":
+                show_panel("llm check", do_ollama_check())
+                return True
+            show_panel("llm", f"Unknown subcommand: {sub}")
             return True
 
         if cmd == "/version":

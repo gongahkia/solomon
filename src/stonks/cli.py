@@ -18,6 +18,7 @@ from stonks.commands import (
     do_data_verify,
     do_history_list,
     do_history_show,
+    do_ollama_check,
     do_report_open,
     do_schedule_once,
     do_schedule_run,
@@ -31,12 +32,14 @@ schedule_app = typer.Typer()
 data_app = typer.Typer()
 report_app = typer.Typer()
 history_app = typer.Typer()
+llm_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(data_app, name="data")
 app.add_typer(report_app, name="report")
 app.add_typer(history_app, name="history")
+app.add_typer(llm_app, name="llm")
 
 
 @app.command()
@@ -127,6 +130,12 @@ def chat() -> None:
     """Start an interactive chat UI using a local model backend."""
     cfg = load_config()
     run_chat(host=cfg.model.host, model=cfg.model.model)
+
+
+@llm_app.command("check")
+def llm_check() -> None:
+    """Check local LLM backend connectivity (Ollama)."""
+    Console().print(do_ollama_check())
 
 
 @data_app.command("fetch")

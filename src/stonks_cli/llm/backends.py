@@ -325,6 +325,13 @@ class MLXBackend:
             return
         if not self._model_path:
             raise ValueError("MLX backend requires config.model.path")
+        if self._offline:
+            # Enforce local path usage for offline mode (avoid implicit HuggingFace downloads).
+            from pathlib import Path
+
+            p = Path(self._model_path).expanduser()
+            if not p.exists():
+                raise FileNotFoundError(f"offline=true requires a local model directory, not: {self._model_path}")
         try:
             from mlx_lm import load  # type: ignore
         except Exception as e:  # pragma: no cover

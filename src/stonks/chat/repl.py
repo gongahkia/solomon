@@ -254,6 +254,27 @@ def run_chat() -> None:
         if not user_text:
             continue
 
+        # Tool-like intent parsing: allow common commands without leading '/'.
+        lowered = user_text.lower().strip()
+        if not lowered.startswith("/"):
+            if lowered == "help":
+                user_text = "/help"
+            elif lowered in {"exit", "quit"}:
+                user_text = "/exit"
+            elif lowered.startswith("analyze "):
+                user_text = "/analyze " + user_text.split(" ", 1)[1]
+            elif lowered.startswith("backtest"):
+                rest = user_text.split(" ", 1)[1] if " " in user_text else ""
+                user_text = ("/backtest " + rest).strip()
+            elif lowered == "report":
+                user_text = "/report"
+            elif lowered.startswith("schedule status"):
+                user_text = "/schedule status"
+            elif lowered.startswith("schedule once"):
+                user_text = "/schedule once"
+            elif lowered.startswith("llm check"):
+                user_text = "/llm check"
+
         if user_text.startswith("/"):
             try:
                 handle_slash(user_text)

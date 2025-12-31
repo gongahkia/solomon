@@ -48,10 +48,9 @@ def provider_for_config(cfg: AppConfig, ticker: str) -> PriceProvider:
     return StooqProvider(cache_ttl_seconds=data_cfg.cache_ttl_seconds)
 
 
-def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> Path:
-    console = console or Console()
-
+def compute_results(cfg: AppConfig, console: Console) -> tuple[list[TickerResult], object | None]:
     strategy_fn = select_strategy(cfg)
+
 
     # Fetch in parallel to reduce wall-clock time for multiple tickers.
     series_by_ticker: dict[str, object] = {}
@@ -201,6 +200,12 @@ def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> P
             port_equity = (1.0 + port_ret).cumprod()
             portfolio_metrics = compute_backtest_metrics(port_equity)
 
+    return results, portfolio_metrics
+
+
+def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> Path:
+    console = console or Console()
+    results, portfolio_metrics = compute_results(cfg, console)
     report_path = write_text_report(results, out_dir=out_dir, portfolio=portfolio_metrics)
     save_last_run(cfg.tickers, report_path)
     console.print(f"[green]Wrote report[/green] {report_path}")

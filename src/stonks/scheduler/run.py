@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import signal
 from time import perf_counter
 from threading import Lock, Thread
 
@@ -66,9 +67,28 @@ def run_scheduler(cfg: AppConfig, out_dir: Path) -> None:
     pid = acquire_pid_file(default_state_dir() / "scheduler.pid")
     scheduler = build_scheduler(cfg, out_dir=out_dir, console=console)
     console.print(f"[green]Scheduler running[/green] cron='{cfg.schedule.cron}'")
+
+    def _shutdown(signum: int, _frame) -> None:
+        try:
+            name = signal.Signals(signum).name
+        except Exception:
+            name = str(signum)
+        console.print(f"[yellow]Shutting down[/yellow] signal={name}")
+        try:
+            scheduler.shutdown(wait=False)
+        except Exception:
+            pass
+
+    old_int = signal.signal(signal.SIGINT, _shutdown)
+    old_term = signal.signal(signal.SIGTERM, _shutdown)
     try:
         scheduler.start()
     finally:
+        try:
+            signal.signal(signal.SIGINT, old_int)
+            signal.signal(signal.SIGTERM, old_term)
+        except Exception:
+            pass
         pid.remove()
 
 

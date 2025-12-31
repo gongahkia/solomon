@@ -62,7 +62,7 @@ def do_analyze_artifacts(
         json_path = out_dir / f"{report_path.stem}.json"
         write_json_report(results, out_path=json_path, portfolio=portfolio)
 
-    save_last_run(cfg.tickers, report_path)
+    save_last_run(cfg.tickers, report_path, json_path=json_path)
 
     return AnalysisArtifacts(report_path=report_path, json_path=json_path, portfolio=portfolio, results=results)
 

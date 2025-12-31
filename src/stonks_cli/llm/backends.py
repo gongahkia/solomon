@@ -7,7 +7,7 @@ import sys
 from typing import Iterable, Protocol
 
 
-def build_chat_backend():
+def build_chat_backend() -> tuple["ChatBackend", str, str | None]:
     """Build the configured chat backend.
 
     Returns (backend, selected_backend_name, warning_message).
@@ -85,7 +85,7 @@ def build_chat_backend():
     return (OllamaBackend(host=cfg.host, model=cfg.model), "ollama", None)
 
 
-def build_chat_backend_with_override(backend: str, *, warning: str | None = None):
+def build_chat_backend_with_override(backend: str, *, warning: str | None = None) -> tuple["ChatBackend", str, str | None]:
     """Build a backend by explicit name, used for fallbacks."""
 
     from stonks_cli.config import load_config

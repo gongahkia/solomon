@@ -71,5 +71,12 @@ def write_text_report(results: list[TickerResult], out_dir: Path, *, portfolio: 
         )
         console.print(summary)
 
+    console.print("")
+    console.print("Risk Notes & Assumptions")
+    console.print("- This report is for informational purposes only; it is not financial advice.")
+    console.print("- Price data is sourced from the configured provider and may be delayed or incomplete.")
+    console.print("- Backtests are simplified and do not include fees, slippage, taxes, or dividends unless present in the data.")
+    console.print("- Strategy signals and sizing are heuristic and may not generalize to future market conditions.")
+
     path.write_text(console.export_text(), encoding="utf-8")
     return path

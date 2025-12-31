@@ -22,6 +22,7 @@ from stonks.analysis.strategy import (
 )
 from stonks.config import AppConfig
 from stonks.data.providers import CsvProvider, PriceProvider, StooqProvider, normalize_ticker
+from stonks.plugins import registry_for_config
 from stonks.reporting.report import TickerResult, write_text_report
 from stonks.storage import save_last_run
 
@@ -34,7 +35,9 @@ STRATEGIES = {
 
 
 def select_strategy(cfg: AppConfig):
-    return STRATEGIES.get(cfg.strategy, STRATEGIES["basic_trend_rsi"])
+    plugins = registry_for_config(cfg)
+    combined = {**STRATEGIES, **(plugins.strategies or {})}
+    return combined.get(cfg.strategy, combined["basic_trend_rsi"])
 
 
 def provider_for_config(cfg: AppConfig, ticker: str) -> PriceProvider:
@@ -45,6 +48,17 @@ def provider_for_config(cfg: AppConfig, ticker: str) -> PriceProvider:
         if not data_cfg.csv_path:
             raise ValueError(f"csv provider requires csv_path for {t}")
         return CsvProvider(data_cfg.csv_path)
+    if data_cfg.provider == "plugin":
+        if not data_cfg.plugin_name:
+            raise ValueError(f"plugin provider requires plugin_name for {t}")
+        plugins = registry_for_config(cfg)
+        factory = (plugins.provider_factories or {}).get(data_cfg.plugin_name)
+        if factory is None:
+            raise ValueError(f"unknown plugin provider: {data_cfg.plugin_name}")
+        provider = factory(cfg, t)
+        if not hasattr(provider, "fetch_daily"):
+            raise TypeError(f"plugin provider '{data_cfg.plugin_name}' must implement fetch_daily")
+        return provider  # type: ignore[return-value]
     return StooqProvider(cache_ttl_seconds=data_cfg.cache_ttl_seconds)
 
 

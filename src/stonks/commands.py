@@ -13,7 +13,7 @@ from rich.console import Console
 
 from stonks.analysis.output import AnalysisArtifacts
 from stonks.config import AppConfig, config_path, load_config, save_config, save_default_config, update_config_field
-from stonks.pipeline import STRATEGIES, compute_results, provider_for_config, run_once
+from stonks.pipeline import compute_results, provider_for_config, run_once, select_strategy
 from stonks.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
 from stonks.data.providers import CsvProvider, StooqProvider
 from stonks.reporting.backtest_report import BacktestRow, write_backtest_report
@@ -162,7 +162,7 @@ def do_backtest(
 ) -> Path:
     cfg = load_config()
     use = tickers if tickers else cfg.tickers
-    strategy_fn = STRATEGIES.get(cfg.strategy, STRATEGIES["basic_trend_rsi"])
+    strategy_fn = select_strategy(cfg)
 
     rows: list[BacktestRow] = []
     for t in use:

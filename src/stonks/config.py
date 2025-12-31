@@ -37,8 +37,9 @@ class ModelConfig(BaseModel):
 
 
 class DataConfig(BaseModel):
-    provider: Literal["stooq", "csv"] = "stooq"
+    provider: Literal["stooq", "csv", "plugin"] = "stooq"
     csv_path: str | None = None
+    plugin_name: str | None = Field(default=None, description="Provider key when provider='plugin'")
     cache_ttl_seconds: int = Field(default=3600, ge=0)
     concurrency_limit: int = Field(default=8, ge=1, le=64)
 
@@ -57,6 +58,7 @@ class AppConfig(BaseModel):
     tickers: list[str] = Field(default_factory=lambda: ["AAPL.US", "MSFT.US"])
     data: DataConfig = Field(default_factory=DataConfig)
     ticker_overrides: dict[str, TickerOverride] = Field(default_factory=dict)
+    plugins: list[str] = Field(default_factory=list, description="Plugin module names or .py file paths")
     strategy: str = Field(default="basic_trend_rsi")
     risk: RiskConfig = Field(default_factory=RiskConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)

@@ -59,6 +59,7 @@ def run_chat() -> None:
     backend, warn = build_chat_backend()
 
     console.print(Panel.fit("Stonks Chat (local model)", title="stonks chat"))
+    console.print("Note: outputs are informational only (not financial advice).")
     if warn:
         console.print(Panel(warn, title="llm backend"))
 

@@ -283,10 +283,24 @@ class LlamaCppBackend:
         self._llm = Llama(model_path=self._model_path)
 
     def stream_chat(self, messages: list[ChatMessage]) -> Iterable[str]:
-        # Proper streaming + chat formatting implemented in a follow-up commit.
         self._ensure_loaded()
-        prompt = _format_messages_as_prompt(messages)
-        yield prompt  # placeholder
+        assert self._llm is not None
+
+        # llama-cpp-python supports OpenAI-like chat completions for many GGUF chat models.
+        stream = self._llm.create_chat_completion(
+            messages=[{"role": m.role, "content": m.content} for m in messages if (m.content or "").strip()],
+            temperature=self._temperature,
+            max_tokens=self._max_new_tokens,
+            stream=True,
+        )
+        for chunk in stream:
+            try:
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                content = delta.get("content")
+                if content:
+                    yield content
+            except Exception:
+                continue
 
 
 class MLXBackend:

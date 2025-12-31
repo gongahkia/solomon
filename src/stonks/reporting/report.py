@@ -53,6 +53,10 @@ def write_text_report(results: list[TickerResult], out_dir: Path, *, portfolio: 
         )
 
     console = Console(record=True, width=120)
+    console.print("Stonks Report")
+    console.print(f"generated_at: {datetime.now().isoformat()}")
+    console.print(f"tickers: {len(results)}")
+    console.print("")
     console.print(table)
 
     if portfolio is not None:

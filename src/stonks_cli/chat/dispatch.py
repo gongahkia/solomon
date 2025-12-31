@@ -15,7 +15,7 @@ from stonks_cli.commands import (
     do_data_fetch,
     do_data_verify,
     do_doctor,
-    do_ollama_check,
+    do_llm_check,
     do_report_open,
     do_schedule_once,
     do_schedule_start_background,
@@ -92,7 +92,7 @@ def handle_slash_command(
             return True
         sub = args[0].lower()
         if sub == "check":
-            show_panel("llm check", do_ollama_check())
+            show_panel("llm check", do_llm_check())
             return True
         show_panel("llm", f"Unknown subcommand: {sub}")
         return True

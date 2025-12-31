@@ -15,6 +15,10 @@ def test_load_config_defaults_when_missing(monkeypatch, tmp_path):
     assert cfg.tickers
     assert cfg.schedule.cron
 
+    # Model defaults
+    assert cfg.model.backend == "auto"
+    assert cfg.model.max_new_tokens >= 1
+
 
 def test_load_config_validates_cron(monkeypatch, tmp_path):
     cfg_path = tmp_path / "config.json"

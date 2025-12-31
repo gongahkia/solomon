@@ -80,6 +80,7 @@ def handle_slash_command(
             "  /report\n"
             "  /export [path]\n"
             "  /doctor\n"
+            "  /llm check                 (checks configured backend; model.backend defaults to 'auto')\n"
             "  /schedule status\n"
             "  /schedule once [--out-dir DIR]\n"
             "  /schedule run [--out-dir DIR]    (runs in background)\n",

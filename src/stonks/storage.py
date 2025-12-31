@@ -15,6 +15,7 @@ class RunRecord:
     started_at: str
     tickers: list[str]
     report_path: str | None
+    json_path: str | None = None
 
 
 def state_path() -> Path:
@@ -38,12 +39,13 @@ def save_state(state: dict) -> None:
     path.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
-def save_last_run(tickers: list[str], report_path: Path | None) -> None:
+def save_last_run(tickers: list[str], report_path: Path | None, json_path: Path | None = None) -> None:
     state = load_state()
     record = {
         "started_at": datetime.utcnow().isoformat() + "Z",
         "tickers": tickers,
         "report_path": str(report_path) if report_path else None,
+        "json_path": str(json_path) if json_path else None,
     }
     state["last_run"] = {
         **record,
@@ -62,7 +64,8 @@ def list_history(limit: int = 20) -> list[RunRecord]:
         return []
     lines = hp.read_text(encoding="utf-8").splitlines()
     records: list[RunRecord] = []
-    for line in lines[-limit:]:
+    # Newest-first ordering.
+    for line in reversed(lines[-limit:]):
         try:
             obj = json.loads(line)
             records.append(
@@ -70,6 +73,7 @@ def list_history(limit: int = 20) -> list[RunRecord]:
                     started_at=str(obj.get("started_at")),
                     tickers=list(obj.get("tickers") or []),
                     report_path=obj.get("report_path"),
+                    json_path=obj.get("json_path"),
                 )
             )
         except Exception:

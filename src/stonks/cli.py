@@ -9,6 +9,7 @@ from stonks.chat.repl import run_chat
 from stonks.config import load_config
 from stonks.commands import (
     do_analyze,
+    do_analyze_artifacts,
     do_backtest,
     do_config_init,
     do_config_show,
@@ -68,8 +69,15 @@ def config_where() -> None:
 def analyze(
     tickers: list[str] = typer.Argument(None),
     out_dir: str = typer.Option("reports", "--out-dir"),
+    json_out: bool = typer.Option(False, "--json", "--no-json", help="Write JSON output alongside the report"),
 ) -> None:
     """Analyze tickers and write a report."""
+    if json_out:
+        artifacts = do_analyze_artifacts(tickers if tickers else None, out_dir=Path(out_dir), json_out=True)
+        Console().print(f"Wrote report: {artifacts.report_path}")
+        if artifacts.json_path:
+            Console().print(f"Wrote json: {artifacts.json_path}")
+        return
     do_analyze(tickers if tickers else None, out_dir=Path(out_dir))
 
 

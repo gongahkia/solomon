@@ -162,7 +162,7 @@ def history_list(limit: int = typer.Option(20, "--limit", min=1, max=200)) -> No
         Console().print("No history")
         return
     for i, r in enumerate(records):
-        Console().print(f"{i}: {r.started_at}  {','.join(r.tickers)}  {r.report_path}")
+        Console().print(f"{i}: {r.started_at}  {','.join(r.tickers)}  {r.report_path}  {r.json_path}")
 
 
 @history_app.command("show")
@@ -175,6 +175,7 @@ def history_show(index: int = typer.Argument(..., min=0), limit: int = typer.Opt
     Console().print(f"started_at: {r.started_at}")
     Console().print(f"tickers: {','.join(r.tickers)}")
     Console().print(f"report_path: {r.report_path}")
+    Console().print(f"json_path: {r.json_path}")
 
 
 def main() -> None:

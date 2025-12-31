@@ -12,7 +12,7 @@ from rich.console import Console
 
 from stonks.analysis.output import AnalysisArtifacts
 from stonks.config import AppConfig, config_path, load_config, save_default_config
-from stonks.pipeline import STRATEGIES, compute_results, provider_for_config
+from stonks.pipeline import STRATEGIES, compute_results, provider_for_config, run_once
 from stonks.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
 from stonks.data.providers import CsvProvider, StooqProvider
 from stonks.reporting.backtest_report import BacktestRow, write_backtest_report

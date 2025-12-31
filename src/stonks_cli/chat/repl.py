@@ -53,12 +53,14 @@ def run_chat() -> None:
     session = PromptSession()
     restored = load_chat_history(limit=50)
     state = ChatState(messages=[ChatMessage(role="system", content=SYSTEM_PROMPT), *restored], scheduler=None)
-    backend, warn = build_chat_backend()
+    backend, selected_backend, warn = build_chat_backend()
 
     console.print(Panel.fit("stonks-cli chat (local model)", title="stonks-cli"))
     console.print("Note: outputs are informational only (not financial advice).")
     if warn:
         console.print(Panel(warn, title="llm backend"))
+    else:
+        console.print(Panel(f"backend: {selected_backend}", title="llm backend"))
 
     def show_panel(title: str, body: str) -> None:
         console.print(Panel(body, title=title))

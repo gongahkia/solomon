@@ -30,10 +30,17 @@ class ScheduleConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    backend: Literal["ollama", "transformers", "onnx"] = "ollama"
+    backend: Literal["auto", "ollama", "llama_cpp", "mlx", "transformers", "onnx"] = "auto"
     model: str = "gemma3"
     host: str = "http://localhost:11434"
-    path: str | None = Field(default=None, description="Local model path (transformers/onnx)")
+    path: str | None = Field(
+        default=None,
+        description="Local model path (gguf for llama.cpp; directory for transformers/mlx; or explicit model identifier)",
+    )
+
+    offline: bool = Field(default=False, description="Require local files only (no downloads)")
+    max_new_tokens: int = Field(default=256, ge=1, le=4096)
+    temperature: float = Field(default=0.2, ge=0.0, le=2.0)
 
 
 class DataConfig(BaseModel):

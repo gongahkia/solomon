@@ -30,6 +30,8 @@ from stonks.commands import (
 from stonks.llm.backends import ChatMessage, build_chat_backend
 from stonks.chat.history import append_chat_message, load_chat_history
 from stonks.chat.export import default_transcript_path, write_transcript
+from stonks.chat.prompts import format_analysis_question
+from stonks.storage import get_last_report_path
 
 
 @dataclass
@@ -294,6 +296,20 @@ def run_chat() -> None:
         append_chat_message("user", user_text)
         console.print("\n[bold]assistant[/bold]: ", end="")
         try:
+            prior = None
+            try:
+                p = get_last_report_path()
+                if p is not None and p.exists():
+                    prior = p.read_text(encoding="utf-8")
+                    if len(prior) > 4000:
+                        prior = prior[-4000:]
+            except Exception:
+                prior = None
+
+            templated = format_analysis_question(user_text, prior_report=prior)
+            # Replace the latest user message content with templated prompt for the model.
+            state.messages[-1] = ChatMessage(role="user", content=templated)
+
             chunks = []
             for part in backend.stream_chat(state.messages):
                 chunks.append(part)

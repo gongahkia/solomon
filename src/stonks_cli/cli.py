@@ -216,10 +216,12 @@ def schedule_status() -> None:
 
 
 @app.command()
-def chat() -> None:
+def chat(
+    backend: str | None = typer.Option(None, "--backend", help="Override model.backend (auto/ollama/llama_cpp/mlx/transformers/onnx)"),
+) -> None:
     """Start an interactive chat UI using a local model backend."""
     try:
-        run_chat()
+        run_chat(backend=backend)
     except Exception as e:
         raise _exit_for_error(e)
 

@@ -26,7 +26,7 @@ from stonks_cli.commands import (
     do_version,
 )
 
-from stonks_cli.llm.backends import ChatMessage, build_chat_backend
+from stonks_cli.llm.backends import ChatMessage, build_chat_backend, build_chat_backend_with_override
 from stonks_cli.chat.history import append_chat_message, load_chat_history
 from stonks_cli.chat.export import default_transcript_path, write_transcript
 from stonks_cli.chat.prompts import format_analysis_question
@@ -41,7 +41,7 @@ SYSTEM_PROMPT = (
 )
 
 
-def run_chat() -> None:
+def run_chat(*, backend: str | None = None) -> None:
     console = Console()
     kb = KeyBindings()
 
@@ -53,7 +53,10 @@ def run_chat() -> None:
     session = PromptSession()
     restored = load_chat_history(limit=50)
     state = ChatState(messages=[ChatMessage(role="system", content=SYSTEM_PROMPT), *restored], scheduler=None)
-    backend, selected_backend, warn = build_chat_backend()
+    if backend:
+        backend_obj, selected_backend, warn = build_chat_backend_with_override(backend)
+    else:
+        backend_obj, selected_backend, warn = build_chat_backend()
 
     console.print(Panel.fit("stonks-cli chat (local model)", title="stonks-cli"))
     console.print("Note: outputs are informational only (not financial advice).")
@@ -139,7 +142,7 @@ def run_chat() -> None:
             state.messages[-1] = ChatMessage(role="user", content=templated)
 
             chunks = []
-            for part in backend.stream_chat(state.messages):
+            for part in backend_obj.stream_chat(state.messages):
                 chunks.append(part)
                 console.print(part, end="")
             console.print()

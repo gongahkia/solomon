@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Iterable, Protocol
 
 
-def build_chat_backend() -> tuple["ChatBackend", str, str | None]:
+def build_chat_backend() -> tuple["ChatBackend", str, str | None, str | None]:
     """Build the configured chat backend.
 
-    Returns (backend, selected_backend_name, warning_message).
+    Returns (backend, selected_backend_name, selected_model_or_path, warning_message).
     Warning is non-None when we fall back.
     """
 
@@ -30,7 +30,7 @@ def build_chat_backend_from_overrides(
     offline: bool | None = None,
     max_new_tokens: int | None = None,
     temperature: float | None = None,
-) -> tuple["ChatBackend", str, str | None]:
+) -> tuple["ChatBackend", str, str | None, str | None]:
     """Build a backend using config + provided overrides (non-persistent)."""
 
     from stonks_cli.config import load_config
@@ -58,7 +58,7 @@ def build_chat_backend_from_overrides(
     return _build_from_model_cfg(cfg)
 
 
-def _build_from_model_cfg(cfg) -> tuple["ChatBackend", str, str | None]:
+def _build_from_model_cfg(cfg) -> tuple["ChatBackend", str, str | None, str | None]:
     requested = (getattr(cfg, "backend", None) or "auto").lower()
 
     selected = _select_backend(
@@ -78,6 +78,7 @@ def _build_from_model_cfg(cfg) -> tuple["ChatBackend", str, str | None]:
                     temperature=cfg.temperature,
                 ),
                 "transformers",
+                path,
                 None,
             )
         except Exception as e:
@@ -95,6 +96,7 @@ def _build_from_model_cfg(cfg) -> tuple["ChatBackend", str, str | None]:
                     temperature=cfg.temperature,
                 ),
                 "llama_cpp",
+                path,
                 None,
             )
         except Exception as e:
@@ -113,6 +115,7 @@ def _build_from_model_cfg(cfg) -> tuple["ChatBackend", str, str | None]:
                     temperature=cfg.temperature,
                 ),
                 "mlx",
+                path,
                 None,
             )
         except Exception as e:
@@ -123,16 +126,18 @@ def _build_from_model_cfg(cfg) -> tuple["ChatBackend", str, str | None]:
     if selected == "onnx":
         try:
             path = cfg.path or cfg.model
-            return (OnnxBackend(model_path=path), "onnx", None)
+            return (OnnxBackend(model_path=path), "onnx", path, None)
         except Exception as e:
             warn = f"onnx unavailable: {e}; falling back to ollama"
             return build_chat_backend_with_override("ollama", warning=warn)
 
     # Default: ollama.
-    return (OllamaBackend(host=cfg.host, model=cfg.model), "ollama", None)
+    return (OllamaBackend(host=cfg.host, model=cfg.model), "ollama", cfg.model, None)
 
 
-def build_chat_backend_with_override(backend: str, *, warning: str | None = None) -> tuple["ChatBackend", str, str | None]:
+def build_chat_backend_with_override(
+    backend: str, *, warning: str | None = None
+) -> tuple["ChatBackend", str, str | None, str | None]:
     """Build a backend by explicit name, used for fallbacks."""
 
     from stonks_cli.config import load_config
@@ -149,6 +154,7 @@ def build_chat_backend_with_override(backend: str, *, warning: str | None = None
                 temperature=cfg.temperature,
             ),
             "transformers",
+            path,
             warning,
         )
     if b == "llama_cpp":
@@ -159,6 +165,7 @@ def build_chat_backend_with_override(backend: str, *, warning: str | None = None
                 temperature=cfg.temperature,
             ),
             "llama_cpp",
+            cfg.path,
             warning,
         )
     if b == "mlx":
@@ -171,12 +178,13 @@ def build_chat_backend_with_override(backend: str, *, warning: str | None = None
                 temperature=cfg.temperature,
             ),
             "mlx",
+            path,
             warning,
         )
     if b == "onnx":
         path = cfg.path or cfg.model
-        return (OnnxBackend(model_path=path), "onnx", warning)
-    return (OllamaBackend(host=cfg.host, model=cfg.model), "ollama", warning)
+        return (OnnxBackend(model_path=path), "onnx", path, warning)
+    return (OllamaBackend(host=cfg.host, model=cfg.model), "ollama", cfg.model, warning)
 
 
 def _has_module(name: str) -> bool:

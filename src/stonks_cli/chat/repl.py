@@ -70,7 +70,7 @@ def run_chat(
     restored = load_chat_history(limit=50)
     state = ChatState(messages=[ChatMessage(role="system", content=SYSTEM_PROMPT), *restored], scheduler=None)
     if any(v is not None for v in (backend, model, host, path, offline)):
-        backend_obj, selected_backend, warn = build_chat_backend_from_overrides(
+        backend_obj, selected_backend, selected_ref, warn = build_chat_backend_from_overrides(
             backend=backend,
             model=model,
             host=host,
@@ -78,14 +78,17 @@ def run_chat(
             offline=offline,
         )
     else:
-        backend_obj, selected_backend, warn = build_chat_backend()
+        backend_obj, selected_backend, selected_ref, warn = build_chat_backend()
 
     console.print(Panel.fit("stonks-cli chat (local model)", title="stonks-cli"))
     console.print("Note: outputs are informational only (not financial advice).")
     if warn:
         console.print(Panel(warn, title="llm backend"))
     else:
-        console.print(Panel(f"backend: {selected_backend}", title="llm backend"))
+        body = f"backend: {selected_backend}"
+        if (selected_ref or "").strip():
+            body += f"\nmodel/path: {selected_ref}"
+        console.print(Panel(body, title="llm backend"))
 
     def show_panel(title: str, body: str) -> None:
         console.print(Panel(body, title=title))

@@ -548,14 +548,24 @@ class MLXBackend:
             raise RuntimeError("MLX backend requires optional dependency. Install with: pip install -e '.[mlx]'") from e
 
         prompt = _format_messages_as_prompt(messages)
-        # Best-effort: mlx-lm APIs vary by version; return a single response chunk.
-        txt = generate(
-            self._mdl,
-            self._tok,
-            prompt=prompt,
-            max_tokens=self._max_new_tokens,
-            temp=self._temperature,
-        )
+        # Best-effort: mlx-lm APIs vary by version.
+        # Newer versions (e.g. 0.29.x) expect a `sampler=` callable instead of `temp=`.
+        kwargs: dict[str, object] = {"max_tokens": self._max_new_tokens}
+        try:
+            from mlx_lm.sample_utils import make_sampler  # type: ignore
+
+            kwargs["sampler"] = make_sampler(temp=float(self._temperature))
+        except Exception:
+            # Older versions accepted temp directly.
+            kwargs["temp"] = float(self._temperature)
+
+        try:
+            txt = generate(self._mdl, self._tok, prompt=prompt, **kwargs)
+        except TypeError:
+            # Fallback across API differences.
+            kwargs.pop("sampler", None)
+            kwargs["temp"] = float(self._temperature)
+            txt = generate(self._mdl, self._tok, prompt=prompt, **kwargs)
         # Some versions return just text, others return a dict.
         if isinstance(txt, dict):
             txt = txt.get("text") or ""

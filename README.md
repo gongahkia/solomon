@@ -177,6 +177,39 @@ stonks-cli llm check --backend transformers
 stonks-cli llm check --backend llama_cpp --path ~/models/<model>.gguf
 ```
 
+#### macOS: end-to-end smoke test (downloads small models)
+
+If you want an end-to-end proof that **MLX + llama.cpp + Transformers** all run on macOS, use the included smoke-test script.
+
+It will:
+- download small public models (first run only)
+- run a single short prompt through each backend
+- keep all Hugging Face cache data under `.cache/stonks-cli/llm-smoke` so cleanup is easy
+
+Install the optional dependencies (note: `torch` is large):
+
+```bash
+uv pip install -e ".[mlx,llama-cpp,transformers]"
+```
+
+Run the smoke test:
+
+```bash
+python scripts/smoke_llm_backends.py
+```
+
+Uninstall / cleanup:
+
+```bash
+# Remove the downloaded model/cache data used by the smoke test
+rm -rf .cache/stonks-cli/llm-smoke
+
+# Uninstall just the LLM extras from the current environment
+uv pip uninstall -y mlx-lm mlx
+uv pip uninstall -y llama-cpp-python
+uv pip uninstall -y transformers torch
+```
+
 #### MLX setup (online)
 
 ```bash

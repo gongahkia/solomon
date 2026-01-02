@@ -52,6 +52,7 @@ def run_chat(
     host: str | None = None,
     path: str | None = None,
     offline: bool | None = None,
+    out_dir: str = "reports",
 ) -> None:
     # Keep the interactive UI readable when models are downloaded on first use.
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
@@ -143,7 +144,7 @@ def run_chat(
                     except Exception as e:
                         show_panel("export", f"Error: {e}")
                 else:
-                    handle_slash_command(user_text, state=state, show_panel=show_panel, out_dir=Path("reports"))
+                    handle_slash_command(user_text, state=state, show_panel=show_panel, out_dir=Path(out_dir))
             except EOFError:
                 return
             continue

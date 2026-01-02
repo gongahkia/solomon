@@ -222,10 +222,11 @@ def chat(
     host: str | None = typer.Option(None, "--host", help="Ollama host URL (when backend=ollama)"),
     path: str | None = typer.Option(None, "--path", help="Local model path (GGUF file for llama.cpp; dir for mlx/transformers)"),
     offline: bool | None = typer.Option(None, "--offline/--no-offline", help="Require local files only"),
+    out_dir: str = typer.Option("reports", "--out-dir", help="Output directory for /analyze and /backtest commands"),
 ) -> None:
     """Start an interactive chat UI using a local model backend."""
     try:
-        run_chat(backend=backend, model=model, host=host, path=path, offline=offline)
+        run_chat(backend=backend, model=model, host=host, path=path, offline=offline, out_dir=out_dir)
     except Exception as e:
         raise _exit_for_error(e)
 

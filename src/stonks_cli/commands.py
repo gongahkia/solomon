@@ -114,7 +114,7 @@ def do_llm_check(
                 extra = f" selected={selected}" if use_backend == "auto" else ""
                 return f"error backend=llama_cpp error=missing_model_path (set model.path to a GGUF file){extra}"
             p = Path(use_path).expanduser()
-            if not p.exists():
+            if not p.is_file():
                 extra = f" selected={selected}" if use_backend == "auto" else ""
                 return f"error backend=llama_cpp error=model_not_found path={p}{extra}"
             extra = f" selected={selected}" if use_backend == "auto" else ""
@@ -135,7 +135,7 @@ def do_llm_check(
                     extra = f" selected={selected}" if use_backend == "auto" else ""
                     return f"error backend=mlx error=missing_model_path (set model.path to a local directory){extra}"
                 p = Path(use_path).expanduser()
-                if not p.exists():
+                if not p.is_dir():
                     extra = f" selected={selected}" if use_backend == "auto" else ""
                     return f"error backend=mlx error=model_not_found path={p}{extra}"
             extra = f" selected={selected}" if use_backend == "auto" else ""
@@ -156,7 +156,7 @@ def do_llm_check(
                     extra = f" selected={selected}" if use_backend == "auto" else ""
                     return f"error backend=transformers error=missing_model_path (set model.path to a local directory){extra}"
                 p = Path(use_path).expanduser()
-                if not p.exists():
+                if not p.is_dir():
                     extra = f" selected={selected}" if use_backend == "auto" else ""
                     return f"error backend=transformers error=model_not_found path={p}{extra}"
             extra = f" selected={selected}" if use_backend == "auto" else ""

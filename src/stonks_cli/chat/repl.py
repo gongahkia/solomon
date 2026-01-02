@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import json
 
@@ -49,6 +50,11 @@ def run_chat(
     path: str | None = None,
     offline: bool | None = None,
 ) -> None:
+    # Keep the interactive UI readable when models are downloaded on first use.
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
     console = Console()
     kb = KeyBindings()
 

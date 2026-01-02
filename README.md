@@ -154,6 +154,106 @@ python -m pip install -e ".[llama-cpp]"     # GGUF / llama.cpp (cross-platform)
 python -m pip install -e ".[transformers]"  # transformers + torch
 ```
 
+#### Sensible defaults
+
+These are the recommended defaults to get a working setup quickly:
+
+- **MLX (macOS Apple Silicon)**
+	- `model.backend = "mlx"`
+	- `model.model = "mlx-community/Llama-3.2-3B-Instruct-4bit"` (online) OR set `model.path` to a local downloaded directory (offline)
+- **Transformers (cross-platform, best on NVIDIA/CUDA)**
+	- `model.backend = "transformers"`
+	- `model.model = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"` (online) OR set `model.path` to a local downloaded directory (offline)
+- **llama.cpp (cross-platform, offline-friendly)**
+	- `model.backend = "llama_cpp"`
+	- `model.path = "~/models/<model>.gguf"` (GGUF file)
+
+#### Quick checks (should say `ok`)
+
+```bash
+stonks-cli llm check
+stonks-cli llm check --backend mlx
+stonks-cli llm check --backend transformers
+stonks-cli llm check --backend llama_cpp --path ~/models/<model>.gguf
+```
+
+#### MLX setup (online)
+
+```bash
+stonks-cli config set model.backend "mlx"
+stonks-cli config set model.model "mlx-community/Llama-3.2-3B-Instruct-4bit"
+stonks-cli config set model.offline false
+
+stonks-cli llm check
+stonks-cli chat
+```
+
+#### MLX setup (offline)
+
+1) Download the model while you have internet (once), then you can reuse it offline:
+
+```bash
+uv pip install huggingface-hub
+huggingface-cli download mlx-community/Llama-3.2-3B-Instruct-4bit --local-dir ~/models/llama3.2-3b-4bit
+```
+
+2) Point `stonks-cli` at the local folder:
+
+```bash
+stonks-cli config set model.backend "mlx"
+stonks-cli config set model.path "~/models/llama3.2-3b-4bit"
+stonks-cli config set model.offline true
+
+stonks-cli llm check
+stonks-cli chat
+```
+
+#### Transformers setup (online)
+
+```bash
+stonks-cli config set model.backend "transformers"
+stonks-cli config set model.model "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+stonks-cli config set model.offline false
+
+stonks-cli llm check
+stonks-cli chat
+```
+
+#### Transformers setup (offline)
+
+1) Download the model (once):
+
+```bash
+uv pip install huggingface-hub
+huggingface-cli download TinyLlama/TinyLlama-1.1B-Chat-v1.0 --local-dir ~/models/tinyllama
+```
+
+2) Point `stonks-cli` at the local folder:
+
+```bash
+stonks-cli config set model.backend "transformers"
+stonks-cli config set model.path "~/models/tinyllama"
+stonks-cli config set model.offline true
+
+stonks-cli llm check
+stonks-cli chat
+```
+
+#### llama.cpp setup (offline)
+
+1) Download a **GGUF** instruct/chat model file (e.g., from Hugging Face) to `~/models/…/*.gguf`.
+
+2) Configure:
+
+```bash
+stonks-cli config set model.backend "llama_cpp"
+stonks-cli config set model.path "~/models/<your-model>.gguf"
+stonks-cli config set model.offline true
+
+stonks-cli llm check
+stonks-cli chat
+```
+
 Run with an explicit backend override:
 
 ```bash

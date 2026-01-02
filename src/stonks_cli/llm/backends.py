@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import importlib.util
 import platform
 import sys
+from pathlib import Path
 from typing import Iterable, Protocol
 
 
@@ -60,10 +61,15 @@ def build_chat_backend_from_overrides(
 def _build_from_model_cfg(cfg) -> tuple["ChatBackend", str, str | None]:
     requested = (getattr(cfg, "backend", None) or "auto").lower()
 
-    selected = _select_backend(requested, offline=bool(getattr(cfg, "offline", False)))
+    selected = _select_backend(
+        requested,
+        offline=bool(getattr(cfg, "offline", False)),
+        model=str(getattr(cfg, "model", "") or ""),
+        path=(getattr(cfg, "path", None) or None),
+    )
     if selected == "transformers":
         try:
-            path = cfg.path or cfg.model
+            path = _coerce_model_ref("transformers", cfg)
             return (
                 TransformersBackend(
                     model_path=path,
@@ -98,7 +104,7 @@ def _build_from_model_cfg(cfg) -> tuple["ChatBackend", str, str | None]:
 
     if selected == "mlx":
         try:
-            path = cfg.path or cfg.model
+            path = _coerce_model_ref("mlx", cfg)
             return (
                 MLXBackend(
                     model_path=path,
@@ -134,7 +140,7 @@ def build_chat_backend_with_override(backend: str, *, warning: str | None = None
     cfg = load_config().model
     b = (backend or "auto").lower()
     if b == "transformers":
-        path = cfg.path or cfg.model
+        path = _coerce_model_ref("transformers", cfg)
         return (
             TransformersBackend(
                 model_path=path,
@@ -156,7 +162,7 @@ def build_chat_backend_with_override(backend: str, *, warning: str | None = None
             warning,
         )
     if b == "mlx":
-        path = cfg.path or cfg.model
+        path = _coerce_model_ref("mlx", cfg)
         return (
             MLXBackend(
                 model_path=path,
@@ -181,7 +187,40 @@ def _is_macos_arm64() -> bool:
     return sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}
 
 
-def _select_backend(requested: str, *, offline: bool) -> str:
+def _looks_like_hf_repo_id(value: str) -> bool:
+    v = (value or "").strip()
+    # Minimal heuristic: org/repo
+    return "/" in v and " " not in v and not v.startswith("/") and not v.endswith("/")
+
+
+def _is_existing_path(value: str | None) -> bool:
+    if not value:
+        return False
+    try:
+        return Path(value).expanduser().exists()
+    except Exception:
+        return False
+
+
+def _is_existing_dir(value: str | None) -> bool:
+    if not value:
+        return False
+    try:
+        return Path(value).expanduser().is_dir()
+    except Exception:
+        return False
+
+
+def _is_existing_file(value: str | None) -> bool:
+    if not value:
+        return False
+    try:
+        return Path(value).expanduser().is_file()
+    except Exception:
+        return False
+
+
+def _select_backend(requested: str, *, offline: bool, model: str, path: str | None) -> str:
     requested = (requested or "auto").lower()
     if requested not in {"auto", "ollama", "llama_cpp", "mlx", "transformers", "onnx"}:
         requested = "auto"
@@ -189,15 +228,33 @@ def _select_backend(requested: str, *, offline: bool) -> str:
     if requested != "auto":
         return requested
 
-    # Auto defaults by platform; only choose ollama when offline is False.
-    if _is_macos_arm64() and _has_module("mlx_lm"):
-        return "mlx"
-    if _has_module("llama_cpp"):
-        return "llama_cpp"
-    if _has_module("transformers"):
-        return "transformers"
+    # Auto defaults by platform + installed deps, but also require that config is usable.
+    # - For MLX/Transformers: allow HF repo id OR local path; offline requires local path.
+    # - For llama.cpp: requires local GGUF path.
+
+    can_use_mlx = _has_module("mlx_lm") and (_looks_like_hf_repo_id(model) or _is_existing_dir(path))
+    can_use_transformers = _has_module("transformers") and (
+        _looks_like_hf_repo_id(model) or _is_existing_dir(path)
+    )
+    can_use_llama_cpp = _has_module("llama_cpp") and _is_existing_file(path)
+
     if offline:
-        # Nothing usable is installed, but offline forbids remote/daemon approaches.
+        # Offline forbids Ollama + remote downloads.
+        if can_use_mlx and _is_existing_dir(path):
+            return "mlx"
+        if can_use_llama_cpp:
+            return "llama_cpp"
+        if can_use_transformers and _is_existing_dir(path):
+            return "transformers"
+        # If nothing is configured, choose a local backend that can at least emit a helpful config error.
+        return "llama_cpp" if _has_module("llama_cpp") else "transformers"
+
+    # Online / service allowed.
+    if _is_macos_arm64() and can_use_mlx:
+        return "mlx"
+    if can_use_llama_cpp:
+        return "llama_cpp"
+    if can_use_transformers:
         return "transformers"
     return "ollama"
 
@@ -208,10 +265,39 @@ def supported_backends() -> list[str]:
     return ["auto", "ollama", "llama_cpp", "mlx", "transformers", "onnx"]
 
 
-def select_backend(requested: str | None, *, offline: bool) -> str:
+def select_backend(
+    requested: str | None,
+    *,
+    offline: bool,
+    model: str = "",
+    path: str | None = None,
+) -> str:
     """Select a backend key using the same rules as `build_chat_backend()`."""
 
-    return _select_backend((requested or "auto"), offline=offline)
+    return _select_backend((requested or "auto"), offline=offline, model=model, path=path)
+
+
+def _coerce_model_ref(backend: str, cfg) -> str:
+    """Return a model ref for backends that accept either a local path or HF repo id.
+
+    We keep config.model (default "gemma3") for Ollama, but MLX/Transformers need either:
+    - cfg.path (recommended for offline)
+    - cfg.model as HF repo id (org/repo)
+    If neither is usable, pick a sensible public default.
+    """
+
+    if getattr(cfg, "path", None):
+        return str(cfg.path)
+
+    m = str(getattr(cfg, "model", "") or "").strip()
+    if _looks_like_hf_repo_id(m):
+        return m
+
+    if backend == "mlx":
+        return "mlx-community/Llama-3.2-3B-Instruct-4bit"
+    if backend == "transformers":
+        return "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    return m
 
 
 @dataclass(frozen=True)
@@ -268,11 +354,18 @@ class TransformersBackend:
         self._tok = None
         self._mdl = None
 
+        # For Transformers, a local reference must be a directory (not a file).
+        if self._model_path and (not _looks_like_hf_repo_id(self._model_path)) and (not _is_existing_dir(self._model_path)):
+            raise ValueError(
+                "Transformers backend requires config.model.path to be a local model directory, "
+                "or config.model.model as a HuggingFace repo id (org/repo)"
+            )
+
     def _ensure_loaded(self):
         if self._tok is not None and self._mdl is not None:
             return
         if not self._model_path:
-            raise ValueError("Transformers backend requires config.model.path")
+            raise ValueError("Transformers backend requires config.model.path or config.model.model as a HuggingFace repo id (org/repo)")
         try:
             from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
         except Exception as e:  # pragma: no cover
@@ -285,9 +378,16 @@ class TransformersBackend:
             from pathlib import Path
 
             p = Path(self._model_path).expanduser()
-            if not p.exists():
+            if not p.is_dir():
                 raise FileNotFoundError(f"offline=true requires a local model directory, not: {self._model_path}")
             kwargs["local_files_only"] = True
+        else:
+            # Avoid surprising Hugging Face auth errors on non-repo ids like "gemma3".
+            if not _looks_like_hf_repo_id(self._model_path) and not _is_existing_dir(self._model_path):
+                raise ValueError(
+                    "Transformers backend requires either a local model directory (model.path) "
+                    "or a HuggingFace repo id like 'TinyLlama/TinyLlama-1.1B-Chat-v1.0' (model.model)."
+                )
 
         self._tok = AutoTokenizer.from_pretrained(self._model_path, **kwargs)
         self._mdl = AutoModelForCausalLM.from_pretrained(self._model_path, **kwargs)
@@ -403,18 +503,32 @@ class MLXBackend:
         self._tok = None
         self._mdl = None
 
+        # For MLX, a local reference must be a directory (not a file).
+        if self._model_path and (not _looks_like_hf_repo_id(self._model_path)) and (not _is_existing_dir(self._model_path)):
+            raise ValueError(
+                "MLX backend requires config.model.path to be a local model directory, "
+                "or config.model.model as a HuggingFace repo id (org/repo)"
+            )
+
     def _ensure_loaded(self):
         if self._tok is not None and self._mdl is not None:
             return
         if not self._model_path:
-            raise ValueError("MLX backend requires config.model.path")
+            raise ValueError("MLX backend requires config.model.path or config.model.model as a HuggingFace repo id (org/repo)")
         if self._offline:
             # Enforce local path usage for offline mode (avoid implicit HuggingFace downloads).
             from pathlib import Path
 
             p = Path(self._model_path).expanduser()
-            if not p.exists():
+            if not p.is_dir():
                 raise FileNotFoundError(f"offline=true requires a local model directory, not: {self._model_path}")
+        else:
+            # Avoid surprising Hugging Face auth errors on non-repo ids like "gemma3".
+            if not _looks_like_hf_repo_id(self._model_path) and not _is_existing_dir(self._model_path):
+                raise ValueError(
+                    "MLX backend requires either a local model directory (model.path) "
+                    "or a HuggingFace repo id like 'mlx-community/Llama-3.2-3B-Instruct-4bit' (model.model)."
+                )
         try:
             from mlx_lm import load  # type: ignore
         except Exception as e:  # pragma: no cover

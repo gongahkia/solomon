@@ -74,7 +74,7 @@ def do_llm_check(
     try:
         from stonks_cli.llm.backends import select_backend
 
-        selected = select_backend(use_backend, offline=use_offline)
+        selected = select_backend(use_backend, offline=use_offline, model=(use_model or ""), path=use_path)
     except Exception:
         selected = use_backend if use_backend != "auto" else ("ollama" if not use_offline else "transformers")
 

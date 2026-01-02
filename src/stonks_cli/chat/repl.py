@@ -157,13 +157,13 @@ def run_chat(
                 prior = None
 
             templated = format_analysis_question(user_text, prior_report=prior)
-            # Replace the latest user message content with templated prompt for the model.
-            state.messages[-1] = ChatMessage(role="user", content=templated)
+            # Keep raw user text in history; only send a templated message to the model.
+            model_messages = [*state.messages[:-1], ChatMessage(role="user", content=templated)]
 
             chunks = []
-            for part in backend_obj.stream_chat(state.messages):
+            for part in backend_obj.stream_chat(model_messages):
                 chunks.append(part)
-                console.print(part, end="")
+                console.print(part, end="", markup=False, highlight=False, soft_wrap=True)
             console.print()
             assistant_text = "".join(chunks)
             state.messages.append(ChatMessage(role="assistant", content=assistant_text))

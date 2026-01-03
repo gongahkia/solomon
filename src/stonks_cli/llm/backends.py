@@ -471,7 +471,8 @@ class LlamaCppBackend:
             raise RuntimeError(
                 "llama.cpp backend requires optional dependency. Install with: pip install -e '.[llama-cpp]'"
             ) from e
-        self._llm = Llama(model_path=str(p))
+        # Reduce extremely verbose Metal/back-end logs in interactive usage.
+        self._llm = Llama(model_path=str(p), verbose=False)
 
     def stream_chat(self, messages: list[ChatMessage]) -> Iterable[str]:
         self._ensure_loaded()

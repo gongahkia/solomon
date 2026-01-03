@@ -582,9 +582,28 @@ class MLXBackend:
 
 
 def _format_messages_as_prompt(messages: list[ChatMessage]) -> str:
-    # Minimal, backend-agnostic prompt; backends with native chat templates can override.
-    lines = [f"{m.role}: {m.content}" for m in messages if (m.content or "").strip()]
-    return "\n".join(lines) + "\nassistant:"
+    # Backend-agnostic prompt for local models that don't support a native chat template.
+    # Keep it short and structured to reduce prompt echo.
+    max_messages = 30
+    trimmed = [m for m in messages if (m.content or "").strip()]
+    if len(trimmed) > max_messages:
+        trimmed = trimmed[-max_messages:]
+
+    out: list[str] = []
+    for m in trimmed:
+        role = (m.role or "").strip().lower()
+        if role == "system":
+            out.append(f"### System\n{m.content.strip()}\n")
+        elif role == "user":
+            out.append(f"### User\n{m.content.strip()}\n")
+        else:
+            out.append(f"### Assistant\n{m.content.strip()}\n")
+
+    out.append(
+        "### Assistant\n"
+        "Respond with the assistant answer only. Do not repeat the prompt or any '###' blocks.\n"
+    )
+    return "\n".join(out)
 
 
 class OnnxBackend:

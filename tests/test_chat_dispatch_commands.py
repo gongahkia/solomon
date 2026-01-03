@@ -84,3 +84,38 @@ def test_history_shows_messages(monkeypatch):
     body = panels[-1][1]
     assert "[user]" in body
     assert "[assistant]" in body
+
+
+def test_status_shows_llm_and_out_dir(monkeypatch):
+    monkeypatch.setattr(dispatch, "do_llm_check", lambda **kwargs: "ok backend=mlx")
+
+    state = dispatch.ChatState(messages=[ChatMessage(role="system", content="sys")])
+    handled, panels = _run("/status", state=state)
+    assert handled is True
+    assert panels and panels[-1][0] == "status"
+    assert "ok backend=mlx" in panels[-1][1]
+    assert "out_dir" in panels[-1][1]
+
+
+def test_sandbox_slash_variant_is_supported(monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_do_analyze(tickers, out_dir, *, sandbox=False):
+        calls.append({"tickers": tickers, "out_dir": out_dir, "sandbox": sandbox})
+        return Path("reports") / "dummy.txt"
+
+    monkeypatch.setattr(dispatch, "do_analyze", fake_do_analyze)
+
+    state = dispatch.ChatState(messages=[ChatMessage(role="system", content="sys")])
+    handled, panels = _run("/sandbox/analyze AAPL.US", state=state)
+    assert handled is True
+    assert calls and calls[0]["sandbox"] is True
+    assert panels and panels[-1][0] == "analyze"
+
+
+def test_help_mentions_status():
+    state = dispatch.ChatState(messages=[ChatMessage(role="system", content="sys")])
+    handled, panels = _run("/help", state=state)
+    assert handled is True
+    assert panels and panels[-1][0] == "help"
+    assert "/status" in panels[-1][1]

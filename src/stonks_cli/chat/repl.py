@@ -118,6 +118,8 @@ def run_chat(
                 user_text = "/help"
             elif lowered in {"exit", "quit"}:
                 user_text = "/exit"
+            elif lowered == "status":
+                user_text = "/status"
             elif lowered == "clear":
                 user_text = "/clear"
             elif lowered == "reset":

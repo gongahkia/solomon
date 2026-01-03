@@ -89,6 +89,7 @@ def run_chat(
         body = f"backend: {selected_backend}"
         if (selected_ref or "").strip():
             body += f"\nmodel/path: {selected_ref}"
+        body += f"\nout_dir: {out_dir}"
         console.print(Panel(body, title="llm backend"))
 
     def show_panel(title: str, body: str) -> None:

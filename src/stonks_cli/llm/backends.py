@@ -412,6 +412,13 @@ class TransformersBackend:
         # Minimal implementation: concatenate messages and generate a single response.
         prompt = _format_messages_as_prompt(messages)
         inputs = self._tok(prompt, return_tensors="pt")
+        input_len = None
+        try:
+            input_ids = inputs.get("input_ids")
+            if input_ids is not None:
+                input_len = int(input_ids.shape[-1])
+        except Exception:
+            input_len = None
         try:
             import torch  # type: ignore
 
@@ -434,12 +441,16 @@ class TransformersBackend:
                     do_sample=self._temperature > 0,
                     temperature=self._temperature,
                 )
-        txt = self._tok.decode(out[0], skip_special_tokens=True)
-        # Best-effort: return only the tail after the last 'assistant:' marker.
-        marker = "assistant:"
-        if marker in txt:
-            txt = txt.split(marker)[-1].strip()
-        yield txt
+        # Prefer decoding only newly generated tokens to avoid returning the prompt.
+        try:
+            if input_len is not None and input_len > 0:
+                new_tokens = out[0][input_len:]
+                txt = self._tok.decode(new_tokens, skip_special_tokens=True)
+            else:
+                txt = self._tok.decode(out[0], skip_special_tokens=True)
+        except Exception:
+            txt = self._tok.decode(out[0], skip_special_tokens=True)
+        yield _strip_prompt_echo(prompt, txt)
 
 
 class LlamaCppBackend:

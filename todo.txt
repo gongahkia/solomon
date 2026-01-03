@@ -1,0 +1,167 @@
+stonks-cli TODOs (philosophy-aligned)
+Date: 2026-01-04
+
+Project intent (as implemented today)
+- Batteries-included, deterministic-friendly stock analysis CLI.
+- Fetches daily OHLCV (default: Stooq), computes heuristic strategy signals + simple risk hints.
+- Writes human-readable reports (and optional JSON) to reports/, tracks last run + history.
+- Extensible via plugins (strategies + provider factories) and runnable on a schedule.
+
+====================
+P0 — Correctness / Reliability
+====================
+[ ] Fix ScheduleConfig.timezone field indentation bug.
+    - Today: timezone is declared at the wrong indent in src/stonks_cli/config.py, so it is not part of the model.
+    - Desired: schedule.timezone should parse/validate and be usable by scheduler/status.
+
+[ ] Make scheduler timezone actually affect CronTrigger.
+    - build_scheduler() and do_schedule_status() currently use CronTrigger.from_crontab(cfg.schedule.cron) with implicit local tz.
+    - Use cfg.schedule.timezone: support "local" and IANA tz names.
+
+[ ] Fix deprecation warning in state/history timestamps.
+    - src/stonks_cli/storage.py uses datetime.utcnow(); migrate to datetime.now(timezone.utc) and keep ISO8601 with Z.
+
+[ ] Make state/cache/config paths cross-platform.
+    - default_state_dir() uses ~/.local/share (Linux-y) and default_cache_dir() uses ~/.cache.
+    - On macOS, prefer ~/Library/Application Support and ~/Library/Caches.
+    - Suggest adding platformdirs and centralizing dirs in one module.
+
+[ ] Harden CSV provider ticker filtering.
+    - CsvProvider.fetch_daily() compares df["ticker"] to normalized ticker, but normalized adds ".US".
+    - Consider supporting CSVs with raw tickers (AAPL) by normalizing df ticker values too, or configurable mapping.
+
+====================
+P1 — CLI UX (keep it simple)
+====================
+[ ] Add `stonks-cli config set <field> <value>` command (already implemented in commands.py but not wired in cli.py).
+    - Use update_config_field(); support basic JSON parsing for numbers/bools/strings.
+
+[ ] Add `stonks-cli config validate`.
+    - Loads config, prints normalized tickers + effective provider selection; exits non-zero on validation errors.
+
+[ ] Add `stonks-cli report latest --json`.
+    - Today: report open prints last text report path only.
+    - Expand to show last JSON path if available.
+
+[ ] Improve `doctor` output (still no bells/whistles).
+    - Include: resolved config path, cache dir, state dir, provider for first ticker, plugin load status (success/errors).
+
+[ ] Make analyze/backtest accept `--start/--end` consistently.
+    - backtest supports date slicing; analyze does not.
+    - Keep output semantics unchanged (still writes a report), just bound the data window.
+
+====================
+P1 — Data + Caching
+====================
+[ ] Add `stonks-cli data cache-info`.
+    - Print cache dir, entry count, approx size, and example keys.
+
+[ ] Add `stonks-cli data purge` (optionally `--older-than-days`).
+    - Helps keep the tool “batteries-included” and self-maintaining.
+
+[ ] Cache negative/empty responses carefully.
+    - If provider returns no rows / bad data, decide whether to cache (probably short TTL) to avoid repeated calls.
+
+[ ] Provider health checks in data verify.
+    - Expand verify to check: required columns present (close; optionally OHLCV), monotonic index, no obvious NaNs.
+
+[ ] Optional: built-in alternative provider (keep plugin-first).
+    - If adding a new built-in provider, keep it optional via extra deps or a plugin example.
+
+====================
+P1 — Performance (without complexity)
+====================
+[ ] Reduce O(n^2) backtest work.
+    - walk_forward_backtest calls strategy_fn on a growing window for every day, recomputing indicators repeatedly.
+    - Options (choose simplest):
+      - Precompute indicators once and compute signal per day from precomputed series.
+      - Or implement per-strategy vectorized signal generation.
+
+[ ] Avoid duplicate indicator computations in pipeline.
+    - compute_results() computes volatility/ATR from full series; ensure no repeated passes where avoidable.
+
+====================
+P2 — Analysis + Risk Model Tweaks (still heuristic)
+====================
+[ ] Make strategy parameters configurable.
+    - Example: SMA fast/slow lengths; RSI window/thresholds; BB window/std.
+    - Minimal implementation: add optional config.strategy_params dict[str, Any] and pass into strategies.
+
+[ ] Include position sizing as a structured field in JSON.
+    - Today: sizing is appended into rationale text.
+    - Add fields like suggested_position_fraction, stop_loss, take_profit, vol_annualized, atr14.
+
+[ ] Add “data sufficiency” summary per ticker.
+    - Report how many rows used, last date, missing columns; keeps user trust high.
+
+[ ] Backtest realism knobs (still simple).
+    - Add optional fee/slippage assumptions in config (defaults 0).
+    - Keep walk-forward logic the same; just adjust returns.
+
+====================
+P2 — Reporting
+====================
+[ ] Add a stable report filename option.
+    - E.g. --name report_latest.txt or --prefix, useful for scheduler + dashboards.
+
+[ ] Write CSV summary alongside text report (optional flag).
+    - One row per ticker: action/confidence/cagr/sharpe/maxdd.
+
+[ ] Improve report readability for many tickers.
+    - Consider sorting by action/confidence or allow deterministic ordering only.
+
+====================
+P2 — Scheduler
+====================
+[ ] Better scheduler failure behavior.
+    - Today: an exception in job() is re-raised; decide whether scheduler should keep running.
+    - Suggest: catch, log, continue, and optionally track last failure in state.json.
+
+[ ] Add `schedule run --sandbox` parity with `schedule once`.
+
+====================
+P2 — Plugins (extensibility as a first-class feature)
+====================
+[ ] Add `stonks-cli plugins list`.
+    - Show loaded plugin specs, strategies discovered, provider factories discovered.
+
+[ ] Validate plugin return types.
+    - Strategy fns should return Recommendation; provider factories should return an object with fetch_daily().
+
+[ ] Publish an example plugin in asset/ (or examples/).
+    - One simple strategy + one trivial provider factory (e.g., reads local CSV).
+
+====================
+P3 — Docs / Packaging / Quality
+====================
+[ ] Fill README placeholders (Stack / Screenshots / Architecture / Legal).
+    - Keep it short and focused on install + “analyze/backtest/schedule/report/history”.
+
+[ ] Align versioning.
+    - README badge shows 1.0.0, pyproject.toml is 0.1.0. Decide one approach and make it consistent.
+
+[ ] Add a minimal CI workflow.
+    - Run pytest on push/PR for 3.11–3.13 (or whichever you support).
+
+[ ] Add ruff formatting/linting + (optional) mypy.
+    - Goal: keep the CLI stable and refactors safe.
+
+[ ] Add tests for:
+    - schedule timezone support
+    - JSON report schema fields
+    - cache TTL expiry behavior
+    - doctor output keys (smoke)
+
+====================
+Future ideas (only if they fit the “CLI reports” ethos)
+====================
+[ ] Add a "watchlist" mode.
+    - Manage named ticker sets (stored in config) and run analyze on a set.
+
+[ ] Add a simple "signals diff".
+    - Compare latest report vs previous run and highlight changes.
+
+[ ] Add portfolio-aware summary.
+    - You already compute an equal-weight portfolio equity; optionally print it in report header.
+
+[ ] Optional interactive TUI could be added later, but keep core non-interactive and scriptable.

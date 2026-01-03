@@ -13,9 +13,6 @@ A batteries-included stock analysis CLI that writes reports to `reports/`.
 ### Install (recommended)
 
 Using `pip` (editable install for development):
-
-```bash
-python3.11 -m venv .venv
 source .venv/bin/activate
 
 python -m pip install -U pip
@@ -29,13 +26,10 @@ uv venv
 source .venv/bin/activate
 uv pip install -e .
 ```
-
 After installing, the CLI is available as `stonks-cli`.
 
-If you see `command not found: stonks-cli`, your virtualenv is not active. Either run:
 
 ```bash
-source .venv/bin/activate
 ```
 
 or invoke the CLI directly:
@@ -53,9 +47,6 @@ stonks-cli doctor
 ```
 
 ### Configure
-
-Create a default config file:
-
 ```bash
 stonks-cli config init
 stonks-cli config where
@@ -209,21 +200,11 @@ uv pip uninstall -y mlx-lm mlx
 uv pip uninstall -y llama-cpp-python
 uv pip uninstall -y transformers torch
 ```
-
 #### MLX setup (online)
 
 ```bash
-stonks-cli config set model.backend "mlx"
-stonks-cli config set model.model "mlx-community/Llama-3.2-3B-Instruct-4bit"
-stonks-cli config set model.offline false
-
-stonks-cli llm check
 stonks-cli chat
 ```
-
-#### MLX setup (offline)
-
-1) Download the model while you have internet (once), then you can reuse it offline:
 
 ```bash
 uv pip install huggingface-hub

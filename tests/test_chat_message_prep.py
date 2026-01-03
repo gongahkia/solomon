@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from stonks_cli.chat.message_prep import is_slash_only, sanitize_assistant_output, should_template_question
+from stonks_cli.chat.message_prep import (
+    extract_tickers,
+    is_slash_only,
+    sanitize_assistant_output,
+    should_template_question,
+    suggest_cli_commands,
+)
 
 
 def test_should_template_question_greeting_false():
@@ -47,3 +53,18 @@ def test_sanitize_assistant_output_collapses_duplicates_when_allowed():
 def test_is_slash_only():
     assert is_slash_only("/a\n/b\n") is True
     assert is_slash_only("hello\n/a\n") is False
+
+
+def test_extract_tickers_dedupes_and_preserves_order():
+    assert extract_tickers("aapl.us AAPL.US msft.us") == ["AAPL.US", "MSFT.US"]
+
+
+def test_suggest_cli_commands_for_ticker_message():
+    cmds = suggest_cli_commands("give outlook for AAPL.US")
+    assert any(c.startswith("analyze ") for c in cmds)
+    assert any(c.startswith("backtest ") for c in cmds)
+    assert "report" in cmds
+
+
+def test_suggest_cli_commands_skips_slash_commands():
+    assert suggest_cli_commands("/analyze AAPL.US") == []

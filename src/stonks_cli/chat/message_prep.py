@@ -5,6 +5,41 @@ import re
 _TICKER_RE = re.compile(r"\b[A-Z]{1,5}\.[A-Z]{1,5}\b")
 
 
+def extract_tickers(text: str) -> list[str]:
+    t = (text or "").upper()
+    found = _TICKER_RE.findall(t)
+    # Preserve order but de-dupe.
+    out: list[str] = []
+    seen: set[str] = set()
+    for x in found:
+        if x in seen:
+            continue
+        seen.add(x)
+        out.append(x)
+    return out
+
+
+def suggest_cli_commands(user_text: str) -> list[str]:
+    """Return a small list of actionable stonks-cli commands for the given message."""
+
+    t = (user_text or "").strip()
+    if not t or t.lstrip().startswith("/"):
+        return []
+
+    tickers = extract_tickers(t)
+    if not tickers:
+        return []
+
+    joined = " ".join(tickers)
+    return [
+        f"analyze {joined}",
+        f"backtest {joined}",
+        "report",
+        "history 20",
+        "help",
+    ]
+
+
 def should_template_question(user_text: str) -> bool:
     """Return True if we should wrap the user question with analysis context.
 

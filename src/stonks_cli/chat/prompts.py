@@ -10,7 +10,12 @@ class PromptTemplates:
 
 DEFAULT_TEMPLATES = PromptTemplates(
     analysis_question=(
-        "Question:\n{question}\n\n"
+        "User question:\n{question}\n\n"
+        "How to answer (important):\n"
+        "- You do NOT have access to live news, fundamentals, or company financial statements.\n"
+        "- Use stonks-cli's price-based analysis/backtest capabilities instead of asking the user for financials.\n"
+        "- If the question mentions a ticker, suggest the most relevant stonks-cli commands to run (e.g. 'analyze AAPL.US', 'backtest AAPL.US').\n"
+        "- If you need data, ask the user to run the command and paste the report output.\n\n"
         "Context (optional: last report snippet, may be truncated):\n{report}\n"
     )
 )

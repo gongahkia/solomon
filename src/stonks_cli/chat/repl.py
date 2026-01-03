@@ -32,13 +32,15 @@ from stonks_cli.chat.history import append_chat_message, load_chat_history
 from stonks_cli.chat.export import default_transcript_path, write_transcript
 from stonks_cli.chat.prompts import format_analysis_question
 from stonks_cli.chat.dispatch import ChatState, handle_slash_command
-from stonks_cli.chat.message_prep import is_slash_only, sanitize_assistant_output, should_template_question
+from stonks_cli.chat.message_prep import is_slash_only, sanitize_assistant_output, should_template_question, suggest_cli_commands
 from stonks_cli.storage import get_last_report_path
 
 
 SYSTEM_PROMPT = (
     "You are stonks-cli, a local CLI assistant for stock analysis.\n"
     "Important: you are not a financial advisor. Provide informational guidance only.\n\n"
+    "You do not have access to live news, fundamentals, or company financial statements.\n"
+    "Prefer stonks-cli's built-in price-based analysis and backtesting.\n\n"
     "Do not output slash-commands unless the user explicitly asks for a command.\n"
     "If suggesting a command, describe it in words or as a plain example (e.g. 'analyze AAPL.US').\n"
     "Never invent commands (e.g. never output '/sandbox/...').\n\n"
@@ -169,6 +171,13 @@ def run_chat(
         append_chat_message("user", user_text)
         console.print("\nassistant:")
         try:
+            suggestions = suggest_cli_commands(user_text)
+            if suggestions:
+                console.print("suggested commands:")
+                for s in suggestions:
+                    console.print(f"- {s}")
+                console.print()
+
             prior = None
             try:
                 p = get_last_report_path()
@@ -185,8 +194,9 @@ def run_chat(
             model_messages = [*state.messages[:-1], ChatMessage(role="user", content=model_user)]
 
             chunks = []
-            for part in backend_obj.stream_chat(model_messages):
-                chunks.append(part)
+            with console.status("thinking...", spinner="dots"):
+                for part in backend_obj.stream_chat(model_messages):
+                    chunks.append(part)
             assistant_text = "".join(chunks)
             allow_slash = user_text.strip().startswith("/") or should_template_question(user_text)
             assistant_text = sanitize_assistant_output(assistant_text, allow_slash_commands=allow_slash)

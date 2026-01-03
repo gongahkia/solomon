@@ -40,7 +40,7 @@ def suggest_cli_commands(user_text: str) -> list[str]:
     ]
 
 
-def should_template_question(user_text: str) -> bool:
+def should_template_question(user_text: str, *, has_prior_report: bool = False) -> bool:
     """Return True if we should wrap the user question with analysis context.
 
     We only do this for analysis-ish queries; templating everything (e.g. greetings)
@@ -62,6 +62,26 @@ def should_template_question(user_text: str) -> bool:
     # Heuristic: if it mentions tickers or analysis/backtest keywords, add context.
     if _TICKER_RE.search(t):
         return True
+
+    # Follow-up questions that reference prior output.
+    if has_prior_report:
+        followups = {
+            "above",
+            "the above",
+            "that",
+            "that report",
+            "this report",
+            "results",
+            "the results",
+            "summary",
+            "summarize",
+            "thoughts",
+            "interpret",
+            "interpretation",
+            "explain",
+        }
+        if any(f in lower for f in followups):
+            return True
 
     keywords = {
         "analyze",
@@ -98,6 +118,42 @@ def sanitize_assistant_output(text: str, *, allow_slash_commands: bool) -> str:
         return ""
 
     lines = [ln.rstrip() for ln in raw.splitlines()]
+
+    # De-duplicate repeated fenced code blocks (```...```) which some local models
+    # tend to repeat many times.
+    deduped: list[str] = []
+    seen_blocks: set[str] = set()
+    in_block = False
+    block: list[str] = []
+    for ln in lines:
+        if ln.strip().startswith("```"):
+            if not in_block:
+                in_block = True
+                block = [ln]
+                continue
+            # Closing fence
+            block.append(ln)
+            btxt = "\n".join(block).strip()
+            if btxt and btxt not in seen_blocks:
+                seen_blocks.add(btxt)
+                deduped.extend(block)
+            in_block = False
+            block = []
+            continue
+
+        if in_block:
+            block.append(ln)
+        else:
+            deduped.append(ln)
+
+    # If an unterminated code block exists, include it once.
+    if in_block and block:
+        btxt = "\n".join(block).strip()
+        if btxt and btxt not in seen_blocks:
+            seen_blocks.add(btxt)
+            deduped.extend(block)
+
+    lines = deduped
 
     out: list[str] = []
     prev: str | None = None

@@ -37,10 +37,12 @@ from stonks_cli.storage import get_last_report_path
 
 
 SYSTEM_PROMPT = (
-    "You are stonks-cli, a local CLI assistant for stock analysis.\n"
+    "You are stonks-assistant, the assistant inside stonks-cli (a local CLI for stock analysis).\n"
     "Important: you are not a financial advisor. Provide informational guidance only.\n\n"
     "You do not have access to live news, fundamentals, or company financial statements.\n"
     "Prefer stonks-cli's built-in price-based analysis and backtesting.\n\n"
+    "You cannot execute commands yourself; you can only suggest what the user should run.\n"
+    "Avoid repeating the same command or block of text.\n\n"
     "Do not output slash-commands unless the user explicitly asks for a command.\n"
     "If suggesting a command, describe it in words or as a plain example (e.g. 'analyze AAPL.US').\n"
     "Never invent commands (e.g. never output '/sandbox/...').\n\n"
@@ -87,7 +89,7 @@ def run_chat(
     else:
         backend_obj, selected_backend, selected_ref, warn = build_chat_backend()
 
-    console.print(Panel.fit("stonks-cli chat (local model)", title="stonks-cli"))
+    console.print(Panel.fit("stonks-assistant chat (local model)", title="stonks-assistant"))
     console.print("Note: outputs are informational only (not financial advice).")
     if warn:
         console.print(Panel(warn, title="llm backend"))
@@ -189,8 +191,9 @@ def run_chat(
                 prior = None
 
             templated = format_analysis_question(user_text, prior_report=prior)
-            # Keep raw user text in history; only send a templated message to the model.
-            model_user = templated if should_template_question(user_text) else user_text
+            # Keep raw user text in history; only send a templated message to the model when it's
+            # analysis-like or when the user is referencing prior output.
+            model_user = templated if should_template_question(user_text, has_prior_report=bool(prior)) else user_text
             model_messages = [*state.messages[:-1], ChatMessage(role="user", content=model_user)]
 
             chunks = []
@@ -198,7 +201,7 @@ def run_chat(
                 for part in backend_obj.stream_chat(model_messages):
                     chunks.append(part)
             assistant_text = "".join(chunks)
-            allow_slash = user_text.strip().startswith("/") or should_template_question(user_text)
+            allow_slash = user_text.strip().startswith("/") or should_template_question(user_text, has_prior_report=bool(prior))
             assistant_text = sanitize_assistant_output(assistant_text, allow_slash_commands=allow_slash)
 
             if assistant_text:

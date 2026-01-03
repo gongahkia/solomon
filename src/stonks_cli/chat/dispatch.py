@@ -24,9 +24,26 @@ from stonks_cli.commands import (
 )
 
 from stonks_cli.chat.history import clear_chat_history, load_chat_history
+from stonks_cli.chat.history import append_chat_message
+from stonks_cli.llm.backends import ChatMessage
 
 
 PanelCallback = Callable[[str, str], None]
+
+
+def _append_command_context(state: ChatState, *, title: str, body: str, limit: int = 4000) -> None:
+    txt = (body or "").strip()
+    if not txt:
+        return
+    if len(txt) > limit:
+        txt = txt[-limit:]
+        txt = f"(truncated to last {limit} chars)\n\n" + txt
+    content = f"Command output ({title}):\n{txt}"
+    state.messages.append(ChatMessage(role="assistant", content=content))
+    try:
+        append_chat_message("assistant", content)
+    except Exception:
+        pass
 
 
 @dataclass
@@ -215,11 +232,21 @@ def handle_slash_command(
             return True
         report = do_analyze(args, out_dir=out_dir, sandbox=sandbox)
         show_panel("analyze", f"Wrote report: {report}")
+        try:
+            txt = Path(report).read_text(encoding="utf-8")
+            _append_command_context(state, title="analyze", body=txt)
+        except Exception:
+            _append_command_context(state, title="analyze", body=f"Wrote report: {report}")
         return True
 
     if cmd == "/backtest":
         path = do_backtest(args if args else None, start=None, end=None, out_dir=out_dir)
         show_panel("backtest", f"Wrote backtest: {path}")
+        try:
+            txt = Path(path).read_text(encoding="utf-8")
+            _append_command_context(state, title="backtest", body=txt)
+        except Exception:
+            _append_command_context(state, title="backtest", body=f"Wrote backtest: {path}")
         return True
 
     if cmd == "/report":

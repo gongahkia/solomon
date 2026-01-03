@@ -23,6 +23,11 @@ def test_should_template_question_ticker_true():
     assert should_template_question("What about AAPL.US?") is True
 
 
+def test_should_template_question_followup_with_prior_report_true():
+    assert should_template_question("what are your thoughts on the above", has_prior_report=True) is True
+    assert should_template_question("what are your thoughts on the above", has_prior_report=False) is False
+
+
 def test_sanitize_assistant_output_drops_slash_spam_when_not_allowed():
     raw = """hello
 
@@ -48,6 +53,21 @@ def test_sanitize_assistant_output_collapses_duplicates_when_allowed():
 """
     cleaned = sanitize_assistant_output(raw, allow_slash_commands=True)
     assert cleaned.strip() == "/analyze AAPL.US"
+
+
+def test_sanitize_assistant_output_dedupes_repeated_code_blocks():
+    raw = """Here you go:
+
+```
+stonks-cli analyze AAPL.US
+```
+
+```
+stonks-cli analyze AAPL.US
+```
+"""
+    cleaned = sanitize_assistant_output(raw, allow_slash_commands=True)
+    assert cleaned.count("stonks-cli analyze AAPL.US") == 1
 
 
 def test_is_slash_only():

@@ -157,6 +157,8 @@ def run_chat(
                     handle_slash_command(user_text, state=state, show_panel=show_panel, out_dir=Path(out_dir))
             except EOFError:
                 return
+            except Exception as e:
+                show_panel("error", str(e))
             continue
 
         state.messages.append(ChatMessage(role="user", content=user_text))

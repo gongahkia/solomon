@@ -82,7 +82,7 @@ def handle_slash_command(
     if cmd == "/help":
         show_panel(
             "help",
-            "Commands:\n"
+            "Commands (you can also type: help, exit, clear, reset, history):\n"
             "  /help\n"
             "  /exit\n"
             "  /clear                      (clear in-memory chat)\n"

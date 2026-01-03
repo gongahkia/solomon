@@ -10,7 +10,6 @@ class ExitCodes:
     BAD_CONFIG = 10
     NO_DATA = 11
     PROVIDER_ERROR = 12
-    LLM_ERROR = 13
 
 
 @dataclass(frozen=True)
@@ -35,8 +34,3 @@ class NoDataError(StonksError):
 class ProviderError(StonksError):
     def __init__(self, message: str = "Data provider error"):
         super().__init__(message=message, code=ExitCodes.PROVIDER_ERROR)
-
-
-class LLMError(StonksError):
-    def __init__(self, message: str = "LLM backend error"):
-        super().__init__(message=message, code=ExitCodes.LLM_ERROR)

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def default_config_path() -> Path:
@@ -13,6 +13,7 @@ def default_config_path() -> Path:
 
 
 class ScheduleConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     cron: str = Field(default="0 17 * * 1-5", description="Crontab string")
 
     @field_validator("cron")
@@ -30,6 +31,7 @@ class ScheduleConfig(BaseModel):
 
 
 class DataConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     provider: Literal["stooq", "csv", "plugin"] = "stooq"
     csv_path: str | None = None
     plugin_name: str | None = Field(default=None, description="Provider key when provider='plugin'")
@@ -38,16 +40,19 @@ class DataConfig(BaseModel):
 
 
 class RiskConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     max_position_fraction: float = Field(default=0.20, ge=0.0, le=1.0)
     max_portfolio_exposure_fraction: float = Field(default=1.00, ge=0.0, le=1.0)
     min_history_days: int = Field(default=60, ge=1)
 
 
 class TickerOverride(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     data: DataConfig = Field(default_factory=DataConfig)
 
 
 class AppConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     tickers: list[str] = Field(default_factory=lambda: ["AAPL.US", "MSFT.US"])
     data: DataConfig = Field(default_factory=DataConfig)
     ticker_overrides: dict[str, TickerOverride] = Field(default_factory=dict)

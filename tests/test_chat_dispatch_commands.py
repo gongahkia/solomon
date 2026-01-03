@@ -52,3 +52,35 @@ def test_reset_clears_and_calls_clear_history(monkeypatch):
     assert called["n"] == 1
     assert [m.role for m in state.messages] == ["system"]
     assert panels and panels[-1][0] == "reset"
+
+
+def test_sandbox_analyze_alias_sets_sandbox_true(monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_do_analyze(tickers, out_dir, *, sandbox=False):
+        calls.append({"tickers": tickers, "out_dir": out_dir, "sandbox": sandbox})
+        return Path("reports") / "dummy.txt"
+
+    monkeypatch.setattr(dispatch, "do_analyze", fake_do_analyze)
+
+    state = dispatch.ChatState(messages=[ChatMessage(role="system", content="sys")])
+    handled, panels = _run("/sandbox analyze AAPL.US", state=state)
+    assert handled is True
+    assert calls and calls[0]["sandbox"] is True
+    assert panels and panels[-1][0] == "analyze"
+
+
+def test_history_shows_messages(monkeypatch):
+    monkeypatch.setattr(
+        dispatch,
+        "load_chat_history",
+        lambda limit=20: [ChatMessage(role="user", content="u"), ChatMessage(role="assistant", content="a")],
+    )
+
+    state = dispatch.ChatState(messages=[ChatMessage(role="system", content="sys")])
+    handled, panels = _run("/history 2", state=state)
+    assert handled is True
+    assert panels and panels[-1][0] == "history"
+    body = panels[-1][1]
+    assert "[user]" in body
+    assert "[assistant]" in body

@@ -121,6 +121,9 @@ def run_chat(
                 user_text = "/clear"
             elif lowered == "reset":
                 user_text = "/reset"
+            elif lowered == "history" or lowered.startswith("history "):
+                rest = user_text.split(" ", 1)[1] if " " in user_text else ""
+                user_text = ("/history " + rest).strip()
             elif lowered.startswith("analyze "):
                 user_text = "/analyze " + user_text.split(" ", 1)[1]
             elif lowered.startswith("backtest"):

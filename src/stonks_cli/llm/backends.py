@@ -409,8 +409,22 @@ class TransformersBackend:
         assert self._tok is not None
         assert self._mdl is not None
 
-        # Minimal implementation: concatenate messages and generate a single response.
-        prompt = _format_messages_as_prompt(messages)
+        # Prefer model-native chat templates when available.
+        prompt = None
+        try:
+            apply_chat_template = getattr(self._tok, "apply_chat_template", None)
+            if callable(apply_chat_template):
+                prompt = apply_chat_template(
+                    [{"role": m.role, "content": m.content} for m in messages if (m.content or "").strip()],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+        except Exception:
+            prompt = None
+
+        if not prompt:
+            # Fallback: concatenate messages and generate a single response.
+            prompt = _format_messages_as_prompt(messages)
         inputs = self._tok(prompt, return_tensors="pt")
         input_len = None
         try:
@@ -567,7 +581,21 @@ class MLXBackend:
         except Exception as e:  # pragma: no cover
             raise RuntimeError("MLX backend requires optional dependency. Install with: pip install -e '.[mlx]'") from e
 
-        prompt = _format_messages_as_prompt(messages)
+        # Prefer model-native chat templates when available.
+        prompt = None
+        try:
+            apply_chat_template = getattr(self._tok, "apply_chat_template", None)
+            if callable(apply_chat_template):
+                prompt = apply_chat_template(
+                    [{"role": m.role, "content": m.content} for m in messages if (m.content or "").strip()],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+        except Exception:
+            prompt = None
+
+        if not prompt:
+            prompt = _format_messages_as_prompt(messages)
         # Best-effort: mlx-lm APIs vary by version.
         # Newer versions (e.g. 0.29.x) expect a `sampler=` callable instead of `temp=`.
         kwargs: dict[str, object] = {"max_tokens": self._max_new_tokens}

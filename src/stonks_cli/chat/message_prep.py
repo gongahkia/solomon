@@ -89,8 +89,15 @@ def sanitize_assistant_output(text: str, *, allow_slash_commands: bool) -> str:
     if cleaned:
         return cleaned
 
-    # Fallback: keep the first non-empty line to avoid printing nothing.
-    for ln in lines:
-        if ln.strip():
-            return ln.strip()
+    # If we dropped everything (e.g. slash-command-only spam), return empty.
     return ""
+
+
+def is_slash_only(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return False
+    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+    if not lines:
+        return False
+    return all(ln.startswith("/") for ln in lines)

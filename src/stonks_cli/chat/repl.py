@@ -32,7 +32,7 @@ from stonks_cli.chat.history import append_chat_message, load_chat_history
 from stonks_cli.chat.export import default_transcript_path, write_transcript
 from stonks_cli.chat.prompts import format_analysis_question
 from stonks_cli.chat.dispatch import ChatState, handle_slash_command
-from stonks_cli.chat.message_prep import sanitize_assistant_output, should_template_question
+from stonks_cli.chat.message_prep import is_slash_only, sanitize_assistant_output, should_template_question
 from stonks_cli.storage import get_last_report_path
 
 
@@ -71,6 +71,8 @@ def run_chat(
 
     session = PromptSession()
     restored = load_chat_history(limit=50)
+    # Avoid feeding pathological slash-command-only outputs back into the model.
+    restored = [m for m in restored if not (getattr(m, "role", None) == "assistant" and is_slash_only(getattr(m, "content", "")))]
     state = ChatState(messages=[ChatMessage(role="system", content=SYSTEM_PROMPT), *restored], scheduler=None)
     if any(v is not None for v in (backend, model, host, path, offline)):
         backend_obj, selected_backend, selected_ref, warn = build_chat_backend_from_overrides(
@@ -192,7 +194,8 @@ def run_chat(
             if assistant_text:
                 console.print(assistant_text, markup=False, highlight=False, soft_wrap=True)
             console.print()
-            state.messages.append(ChatMessage(role="assistant", content=assistant_text))
-            append_chat_message("assistant", assistant_text)
+            if assistant_text:
+                state.messages.append(ChatMessage(role="assistant", content=assistant_text))
+                append_chat_message("assistant", assistant_text)
         except Exception as e:
             console.print(f"\n[red]Error:[/red] {e}")

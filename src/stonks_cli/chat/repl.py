@@ -117,6 +117,10 @@ def run_chat(
                 user_text = "/help"
             elif lowered in {"exit", "quit"}:
                 user_text = "/exit"
+            elif lowered == "clear":
+                user_text = "/clear"
+            elif lowered == "reset":
+                user_text = "/reset"
             elif lowered.startswith("analyze "):
                 user_text = "/analyze " + user_text.split(" ", 1)[1]
             elif lowered.startswith("backtest"):

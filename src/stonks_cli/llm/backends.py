@@ -606,6 +606,25 @@ def _format_messages_as_prompt(messages: list[ChatMessage]) -> str:
     return "\n".join(out)
 
 
+def _strip_prompt_echo(prompt: str, generated: str) -> str:
+    p = (prompt or "")
+    g = (generated or "")
+    if not p or not g:
+        return g.strip()
+
+    # Best-effort: some backends return "prompt + completion".
+    if g.startswith(p):
+        return g[len(p) :].lstrip().strip()
+
+    # Also handle cases where the model repeats the last assistant header.
+    marker = "### Assistant"
+    if marker in g:
+        tail = g.split(marker)[-1]
+        return tail.strip()
+
+    return g.strip()
+
+
 class OnnxBackend:
     def __init__(self, model_path: str):
         self._model_path = (model_path or "").strip()

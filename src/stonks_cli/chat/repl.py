@@ -32,14 +32,16 @@ from stonks_cli.chat.history import append_chat_message, load_chat_history
 from stonks_cli.chat.export import default_transcript_path, write_transcript
 from stonks_cli.chat.prompts import format_analysis_question
 from stonks_cli.chat.dispatch import ChatState, handle_slash_command
+from stonks_cli.chat.message_prep import sanitize_assistant_output, should_template_question
 from stonks_cli.storage import get_last_report_path
 
 
 SYSTEM_PROMPT = (
     "You are stonks-cli, a local CLI assistant for stock analysis.\n"
     "Important: you are not a financial advisor. Provide informational guidance only.\n\n"
-    "When useful, suggest concrete CLI commands like '/analyze AAPL.US'.\n"
-    "Do not invent commands (e.g. never output '/sandbox/...').\n\n"
+    "Do not output slash-commands unless the user explicitly asks for a command.\n"
+    "If suggesting a command, describe it in words or as a plain example (e.g. 'analyze AAPL.US').\n"
+    "Never invent commands (e.g. never output '/sandbox/...').\n\n"
     "Do not repeat system or user prompt text back to the user.\n"
     "Answer concisely and focus on actionable next steps.\n"
 )
@@ -177,14 +179,19 @@ def run_chat(
 
             templated = format_analysis_question(user_text, prior_report=prior)
             # Keep raw user text in history; only send a templated message to the model.
-            model_messages = [*state.messages[:-1], ChatMessage(role="user", content=templated)]
+            model_user = templated if should_template_question(user_text) else user_text
+            model_messages = [*state.messages[:-1], ChatMessage(role="user", content=model_user)]
 
             chunks = []
             for part in backend_obj.stream_chat(model_messages):
                 chunks.append(part)
-                console.print(part, end="", markup=False, highlight=False, soft_wrap=True)
-            console.print()
             assistant_text = "".join(chunks)
+            allow_slash = user_text.strip().startswith("/") or should_template_question(user_text)
+            assistant_text = sanitize_assistant_output(assistant_text, allow_slash_commands=allow_slash)
+
+            if assistant_text:
+                console.print(assistant_text, markup=False, highlight=False, soft_wrap=True)
+            console.print()
             state.messages.append(ChatMessage(role="assistant", content=assistant_text))
             append_chat_message("assistant", assistant_text)
         except Exception as e:

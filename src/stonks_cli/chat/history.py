@@ -45,3 +45,19 @@ def load_chat_history(limit: int = 50) -> list[ChatMessage]:
         except Exception:
             continue
     return out
+
+
+def clear_chat_history() -> bool:
+    """Delete persisted chat history.
+
+    Returns True if a file was removed.
+    """
+
+    path = chat_history_path()
+    try:
+        if path.exists():
+            path.unlink()
+            return True
+    except Exception:
+        return False
+    return False

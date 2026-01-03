@@ -88,6 +88,7 @@ def handle_slash_command(
             "  /clear                      (clear in-memory chat)\n"
             "  /reset                      (clear in-memory + persisted history)\n"
             "  /history [N]                (show last N messages, default 20)\n"
+            "  /status                     (show backend + output directory)\n"
             "  /version\n"
             "  /config where\n"
             "  /config show\n"
@@ -106,6 +107,11 @@ def handle_slash_command(
             "  /schedule once [--out-dir DIR]\n"
             "  /schedule run [--out-dir DIR]    (runs in background)\n",
         )
+        return True
+
+    if cmd == "/status":
+        llm = do_llm_check()
+        show_panel("status", f"llm: {llm}\nout_dir: {out_dir}")
         return True
 
     if cmd == "/history":

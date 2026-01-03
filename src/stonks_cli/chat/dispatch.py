@@ -23,6 +23,8 @@ from stonks_cli.commands import (
     do_version,
 )
 
+from stonks_cli.chat.history import clear_chat_history
+
 
 PanelCallback = Callable[[str, str], None]
 
@@ -83,6 +85,8 @@ def handle_slash_command(
             "Commands:\n"
             "  /help\n"
             "  /exit\n"
+            "  /clear                      (clear in-memory chat)\n"
+            "  /reset                      (clear in-memory + persisted history)\n"
             "  /version\n"
             "  /config where\n"
             "  /config show\n"
@@ -101,6 +105,28 @@ def handle_slash_command(
             "  /schedule once [--out-dir DIR]\n"
             "  /schedule run [--out-dir DIR]    (runs in background)\n",
         )
+        return True
+
+    if cmd == "/clear":
+        # Keep the system prompt (first message) if present.
+        keep = []
+        if state.messages:
+            first = state.messages[0]
+            if getattr(first, "role", None) == "system":
+                keep = [first]
+        state.messages = keep
+        show_panel("clear", "Cleared in-memory chat context.")
+        return True
+
+    if cmd == "/reset":
+        removed = clear_chat_history()
+        keep = []
+        if state.messages:
+            first = state.messages[0]
+            if getattr(first, "role", None) == "system":
+                keep = [first]
+        state.messages = keep
+        show_panel("reset", "Cleared in-memory context and removed persisted history." if removed else "Cleared in-memory context.")
         return True
 
     if cmd == "/llm":

@@ -23,7 +23,7 @@ from stonks_cli.commands import (
     do_version,
 )
 
-from stonks_cli.chat.history import clear_chat_history
+from stonks_cli.chat.history import clear_chat_history, load_chat_history
 
 
 PanelCallback = Callable[[str, str], None]
@@ -87,6 +87,7 @@ def handle_slash_command(
             "  /exit\n"
             "  /clear                      (clear in-memory chat)\n"
             "  /reset                      (clear in-memory + persisted history)\n"
+            "  /history [N]                (show last N messages, default 20)\n"
             "  /version\n"
             "  /config where\n"
             "  /config show\n"
@@ -105,6 +106,22 @@ def handle_slash_command(
             "  /schedule once [--out-dir DIR]\n"
             "  /schedule run [--out-dir DIR]    (runs in background)\n",
         )
+        return True
+
+    if cmd == "/history":
+        limit = 20
+        if args:
+            try:
+                limit = int(args[0])
+            except Exception:
+                limit = 20
+        limit = max(1, min(200, limit))
+        msgs = load_chat_history(limit=limit)
+        if not msgs:
+            show_panel("history", "(empty)")
+            return True
+        body = "\n\n".join([f"[{m.role}]\n{m.content}" for m in msgs])
+        show_panel("history", body)
         return True
 
     if cmd == "/clear":

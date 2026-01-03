@@ -32,7 +32,14 @@ from stonks_cli.chat.history import append_chat_message, load_chat_history
 from stonks_cli.chat.export import default_transcript_path, write_transcript
 from stonks_cli.chat.prompts import format_analysis_question
 from stonks_cli.chat.dispatch import ChatState, handle_slash_command
-from stonks_cli.chat.message_prep import is_slash_only, sanitize_assistant_output, should_template_question, suggest_cli_commands
+from stonks_cli.chat.message_prep import (
+    extract_tickers,
+    is_slash_only,
+    sanitize_assistant_output,
+    status_for_slash_command,
+    should_template_question,
+    suggest_cli_commands,
+)
 from stonks_cli.storage import get_last_report_path
 
 
@@ -162,7 +169,12 @@ def run_chat(
                     except Exception as e:
                         show_panel("export", f"Error: {e}")
                 else:
-                    handle_slash_command(user_text, state=state, show_panel=show_panel, out_dir=Path(out_dir))
+                    status = status_for_slash_command(user_text)
+                    if status:
+                        with console.status(status, spinner="dots"):
+                            handle_slash_command(user_text, state=state, show_panel=show_panel, out_dir=Path(out_dir))
+                    else:
+                        handle_slash_command(user_text, state=state, show_panel=show_panel, out_dir=Path(out_dir))
             except EOFError:
                 return
             except Exception as e:
@@ -171,7 +183,7 @@ def run_chat(
 
         state.messages.append(ChatMessage(role="user", content=user_text))
         append_chat_message("user", user_text)
-        console.print("\nassistant:")
+        console.print("\nstonks-assistant:")
         try:
             suggestions = suggest_cli_commands(user_text)
             if suggestions:
@@ -190,10 +202,26 @@ def run_chat(
             except Exception:
                 prior = None
 
+            tickers = extract_tickers(user_text)
+            wants_analysis = should_template_question(user_text, has_prior_report=bool(prior))
+            if tickers and wants_analysis and not prior:
+                joined = " ".join(tickers)
+                msg = (
+                    f"I don't have any analysis output yet for {joined}.\n\n"
+                    f"Run: analyze {joined}\n"
+                    f"Optionally: backtest {joined}\n\n"
+                    "Then ask: 'Summarize the report and give a cautious outlook based on it.'"
+                )
+                console.print(msg, markup=False, highlight=False, soft_wrap=True)
+                console.print()
+                state.messages.append(ChatMessage(role="assistant", content=msg))
+                append_chat_message("assistant", msg)
+                continue
+
             templated = format_analysis_question(user_text, prior_report=prior)
             # Keep raw user text in history; only send a templated message to the model when it's
             # analysis-like or when the user is referencing prior output.
-            model_user = templated if should_template_question(user_text, has_prior_report=bool(prior)) else user_text
+            model_user = templated if wants_analysis else user_text
             model_messages = [*state.messages[:-1], ChatMessage(role="user", content=model_user)]
 
             chunks = []
@@ -201,7 +229,7 @@ def run_chat(
                 for part in backend_obj.stream_chat(model_messages):
                     chunks.append(part)
             assistant_text = "".join(chunks)
-            allow_slash = user_text.strip().startswith("/") or should_template_question(user_text, has_prior_report=bool(prior))
+            allow_slash = user_text.strip().startswith("/") or wants_analysis
             assistant_text = sanitize_assistant_output(assistant_text, allow_slash_commands=allow_slash)
 
             if assistant_text:

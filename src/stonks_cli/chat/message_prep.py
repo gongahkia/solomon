@@ -157,6 +157,7 @@ def sanitize_assistant_output(text: str, *, allow_slash_commands: bool) -> str:
 
     out: list[str] = []
     prev: str | None = None
+    seen_counts: dict[str, int] = {}
     for ln in lines:
         s = ln.strip()
         if not s:
@@ -170,15 +171,32 @@ def sanitize_assistant_output(text: str, *, allow_slash_commands: bool) -> str:
         if not allow_slash_commands and s.startswith("/"):
             continue
 
+        # Drop consecutive duplicates.
         if prev is not None and ln == prev:
             continue
+
+        # Drop repeated boilerplate (even if not consecutive).
+        key = s
+        seen_counts[key] = seen_counts.get(key, 0) + 1
+        if seen_counts[key] > 1:
+            lower = key.lower()
+            if lower.startswith("this command will"):
+                continue
+            if lower.startswith("stonks-cli "):
+                continue
+            if len(key) > 40:
+                continue
 
         out.append(ln)
         prev = ln
 
     cleaned = "\n".join(out).strip()
     if cleaned:
-        return cleaned
+        # Drop trailing incomplete backtick fences like "``" which some models emit.
+        cleaned_lines = cleaned.splitlines()
+        while cleaned_lines and cleaned_lines[-1].strip() in {"``", "```"}:
+            cleaned_lines.pop()
+        return "\n".join(cleaned_lines).strip()
 
     # If we dropped everything (e.g. slash-command-only spam), return empty.
     return ""
@@ -192,3 +210,45 @@ def is_slash_only(text: str) -> bool:
     if not lines:
         return False
     return all(ln.startswith("/") for ln in lines)
+
+
+def status_for_slash_command(cmdline: str) -> str | None:
+    """Return a short status message for slow-ish /commands.
+
+    Used to show a spinner like "analyzing..." while the command runs.
+    """
+
+    parts = (cmdline or "").strip().split()
+    if not parts:
+        return None
+    cmd = parts[0].lower()
+    args = [a.lower() for a in parts[1:]]
+
+    if cmd == "/analyze" or cmd.startswith("/sandbox"):
+        # /sandbox analyze ... will get normalized inside dispatch, but we can still
+        # show a helpful status here.
+        if len(args) >= 1 and args[0] in {"analyze", "/analyze"}:
+            return "analyzing..."
+        if cmd == "/analyze":
+            return "analyzing..."
+
+    if cmd == "/backtest":
+        return "backtesting..."
+    if cmd == "/report":
+        return "loading report..."
+    if cmd == "/doctor":
+        return "checking..."
+    if cmd == "/llm" and args[:1] == ["check"]:
+        return "checking llm..."
+    if cmd == "/data" and args[:1] == ["fetch"]:
+        return "fetching data..."
+    if cmd == "/data" and args[:1] == ["verify"]:
+        return "verifying data..."
+    if cmd == "/schedule" and args[:1] == ["status"]:
+        return "checking schedule..."
+    if cmd == "/schedule" and args[:1] == ["once"]:
+        return "running schedule..."
+    if cmd == "/schedule" and args[:1] == ["run"]:
+        return "starting scheduler..."
+
+    return None

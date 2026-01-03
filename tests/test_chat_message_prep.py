@@ -4,6 +4,7 @@ from stonks_cli.chat.message_prep import (
     extract_tickers,
     is_slash_only,
     sanitize_assistant_output,
+    status_for_slash_command,
     should_template_question,
     suggest_cli_commands,
 )
@@ -70,6 +71,26 @@ stonks-cli analyze AAPL.US
     assert cleaned.count("stonks-cli analyze AAPL.US") == 1
 
 
+def test_sanitize_assistant_output_drops_repeated_boilerplate_lines():
+    raw = """This command will analyze the stock's financial data.
+This command will analyze the stock's financial data.
+This command will analyze the stock's financial data.
+"""
+    cleaned = sanitize_assistant_output(raw, allow_slash_commands=True)
+    assert cleaned.count("This command will analyze") == 1
+
+
+def test_sanitize_assistant_output_removes_trailing_incomplete_fence():
+    raw = """Here:
+
+```
+stonks-cli analyze AAPL.US
+```
+```"""
+    cleaned = sanitize_assistant_output(raw, allow_slash_commands=True)
+    assert not cleaned.strip().endswith("```")
+
+
 def test_is_slash_only():
     assert is_slash_only("/a\n/b\n") is True
     assert is_slash_only("hello\n/a\n") is False
@@ -88,3 +109,11 @@ def test_suggest_cli_commands_for_ticker_message():
 
 def test_suggest_cli_commands_skips_slash_commands():
     assert suggest_cli_commands("/analyze AAPL.US") == []
+
+
+def test_status_for_slash_command():
+    assert status_for_slash_command("/analyze AAPL.US") == "analyzing..."
+    assert status_for_slash_command("/backtest AAPL.US") == "backtesting..."
+    assert status_for_slash_command("/data fetch AAPL.US") == "fetching data..."
+    assert status_for_slash_command("/llm check") == "checking llm..."
+    assert status_for_slash_command("/help") is None

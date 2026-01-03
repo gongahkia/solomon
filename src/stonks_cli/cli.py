@@ -7,7 +7,6 @@ from rich.console import Console
 
 from pydantic import ValidationError
 
-from stonks_cli.chat.repl import run_chat
 from stonks_cli.config import load_config
 from stonks_cli.commands import (
     do_analyze,
@@ -22,7 +21,6 @@ from stonks_cli.commands import (
     do_history_list,
     do_history_show,
     do_doctor,
-    do_llm_check,
     do_report_open,
     do_schedule_once,
     do_schedule_run,
@@ -38,14 +36,12 @@ schedule_app = typer.Typer()
 data_app = typer.Typer()
 report_app = typer.Typer()
 history_app = typer.Typer()
-llm_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(data_app, name="data")
 app.add_typer(report_app, name="report")
 app.add_typer(history_app, name="history")
-app.add_typer(llm_app, name="llm")
 
 
 @app.callback()
@@ -82,7 +78,7 @@ def version() -> None:
 
 @app.command()
 def doctor() -> None:
-    """Diagnose environment (config, data, LLM)."""
+    """Diagnose environment (config, data)."""
     try:
         results = do_doctor()
         for k, v in results.items():
@@ -211,45 +207,6 @@ def schedule_status() -> None:
             console.print(f"next: {status.next_run}")
         else:
             console.print(f"next: [red]unavailable[/red] ({status.error})")
-    except Exception as e:
-        raise _exit_for_error(e)
-
-
-@app.command()
-def chat(
-    backend: str | None = typer.Option(None, "--backend", help="Override model.backend (auto/ollama/llama_cpp/mlx/transformers/onnx)"),
-    model: str | None = typer.Option(None, "--model", help="Model name or identifier (backend-specific)"),
-    host: str | None = typer.Option(None, "--host", help="Ollama host URL (when backend=ollama)"),
-    path: str | None = typer.Option(None, "--path", help="Local model path (GGUF file for llama.cpp; dir for mlx/transformers)"),
-    offline: bool | None = typer.Option(None, "--offline/--no-offline", help="Require local files only"),
-    out_dir: str = typer.Option("reports", "--out-dir", help="Output directory for /analyze and /backtest commands"),
-) -> None:
-    """Start an interactive chat UI using a local model backend."""
-    try:
-        run_chat(backend=backend, model=model, host=host, path=path, offline=offline, out_dir=out_dir)
-    except Exception as e:
-        raise _exit_for_error(e)
-
-
-@llm_app.command("check")
-def llm_check(
-    backend: str | None = typer.Option(None, "--backend", help="Backend to check (auto/ollama/llama_cpp/mlx/transformers/onnx)"),
-    model: str | None = typer.Option(None, "--model", help="Model name or identifier (backend-specific)"),
-    host: str | None = typer.Option(None, "--host", help="Ollama host URL (when backend=ollama)"),
-    path: str | None = typer.Option(None, "--path", help="Local model path (GGUF file for llama.cpp; dir for mlx/transformers)"),
-    offline: bool | None = typer.Option(None, "--offline/--no-offline", help="Require local files only"),
-) -> None:
-    """Check LLM backend connectivity / availability."""
-    try:
-        Console().print(
-            do_llm_check(
-                backend=backend,
-                model=model,
-                host=host,
-                path=path,
-                offline=offline,
-            )
-        )
     except Exception as e:
         raise _exit_for_error(e)
 

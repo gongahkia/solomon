@@ -159,7 +159,7 @@ def run_chat(
 
         state.messages.append(ChatMessage(role="user", content=user_text))
         append_chat_message("user", user_text)
-        console.print("\n[bold]assistant[/bold]: ", end="")
+        console.print("\nassistant:")
         try:
             prior = None
             try:

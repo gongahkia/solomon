@@ -145,7 +145,7 @@ def run_chat(
                     # Keep transcript export local to the REPL since it depends on the in-memory message list.
                     parts = user_text.strip().split()
                     args = parts[1:]
-                    out = Path(args[0]).expanduser() if args else default_transcript_path()
+                    out = Path(args[0]).expanduser() if args else default_transcript_path(out_dir)
                     try:
                         p = write_transcript(state.messages, out)
                         show_panel("export", f"Wrote transcript: {p}")

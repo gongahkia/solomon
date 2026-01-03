@@ -589,7 +589,7 @@ class MLXBackend:
         # Some versions return just text, others return a dict.
         if isinstance(txt, dict):
             txt = txt.get("text") or ""
-        yield str(txt).strip()
+        yield _strip_prompt_echo(prompt, str(txt))
 
 
 def _format_messages_as_prompt(messages: list[ChatMessage]) -> str:

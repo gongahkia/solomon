@@ -6,9 +6,9 @@ from pathlib import Path
 from stonks_cli.llm.backends import ChatMessage
 
 
-def default_transcript_path() -> Path:
+def default_transcript_path(out_dir: str | Path = "reports") -> Path:
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    return Path("reports") / f"chat_transcript_{ts}.txt"
+    return Path(out_dir) / f"chat_transcript_{ts}.txt"
 
 
 def write_transcript(messages: list[ChatMessage], out_path: Path) -> Path:

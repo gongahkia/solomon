@@ -52,6 +52,20 @@ def handle_slash_command(
     cmd = parts[0].lower()
     args = parts[1:]
 
+    # Some models may output commands prefixed with /sandbox. Treat these as
+    # aliases rather than "unknown command" to keep the UX resilient.
+    sandbox = False
+    if cmd == "/sandbox":
+        sandbox = True
+        if not args:
+            show_panel("sandbox", "Usage: /sandbox analyze TICKER... | /sandbox backtest [TICKER...]")
+            return True
+        cmd = "/" + args[0].lower().lstrip("/")
+        args = args[1:]
+    elif cmd.startswith("/sandbox/"):
+        sandbox = True
+        cmd = "/" + cmd.split("/sandbox/", 1)[1]
+
     if cmd in {"/exit", "/quit"}:
         if state.scheduler is not None:
             try:
@@ -76,7 +90,9 @@ def handle_slash_command(
             "  /config set FIELD_PATH JSON_VALUE\n"
             "  /data fetch [TICKER1 TICKER2 ...]\n"
             "  /analyze TICKER1 TICKER2 ...\n"
+            "  /sandbox analyze TICKER1 TICKER2 ...   (run without saving last-run history)\n"
             "  /backtest [TICKER1 TICKER2 ...]\n"
+            "  /sandbox backtest [TICKER1 TICKER2 ...]   (alias; currently same output behavior)\n"
             "  /report\n"
             "  /export [path]\n"
             "  /doctor\n"
@@ -148,7 +164,7 @@ def handle_slash_command(
         if not args:
             show_panel("analyze", "Usage: /analyze TICKER1 TICKER2 ...")
             return True
-        report = do_analyze(args, out_dir=out_dir)
+        report = do_analyze(args, out_dir=out_dir, sandbox=sandbox)
         show_panel("analyze", f"Wrote report: {report}")
         return True
 

@@ -34,7 +34,7 @@ class ScheduleConfig(BaseModel):
 
 class DataConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    provider: Literal["stooq", "csv", "plugin"] = "stooq"
+    provider: Literal["stooq", "csv", "plugin", "yfinance"] = "stooq"
     csv_path: str | None = None
     plugin_name: str | None = Field(default=None, description="Provider key when provider='plugin'")
     cache_ttl_seconds: int = Field(default=3600, ge=0)

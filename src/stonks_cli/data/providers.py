@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import importlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -104,6 +105,35 @@ class StooqProvider(PriceProvider):
         if "date" in df.columns:
             df["date"] = pd.to_datetime(df["date"], utc=False)
             df = df.set_index("date").sort_index()
+        return PriceSeries(ticker=normalized, df=df)
+
+
+class YFinanceProvider(PriceProvider):
+    def __init__(self, *, timeout_s: float = 30.0):
+        self._timeout_s = timeout_s
+
+    def fetch_daily(self, ticker: str) -> PriceSeries:
+        normalized = normalize_ticker(ticker)
+        symbol = normalized.split(".")[0]
+        try:
+            yf = importlib.import_module("yfinance")
+        except Exception as e:
+            raise ImportError("yfinance provider requires optional dependency: install stonks-cli[yfinance]") from e
+
+        # yfinance returns a DataFrame indexed by date with OHLCV columns.
+        df = yf.download(symbol, period="max", interval="1d", progress=False)
+        if df is None or getattr(df, "empty", True):
+            return PriceSeries(ticker=normalized, df=pd.DataFrame())
+
+        df = df.copy()
+        df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+        try:
+            df.index = pd.to_datetime(df.index)
+        except Exception:
+            pass
+        keep = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
+        if keep:
+            df = df[keep]
         return PriceSeries(ticker=normalized, df=df)
 
 

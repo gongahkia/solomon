@@ -271,14 +271,7 @@ def do_data_fetch(tickers: list[str] | None) -> list[str]:
     use = tickers if tickers else cfg.tickers
     fetched: list[str] = []
     for t in use:
-        override = cfg.ticker_overrides.get(t)
-        data_cfg = override.data if override else cfg.data
-        if data_cfg.provider == "csv":
-            if not data_cfg.csv_path:
-                raise ValueError(f"csv provider requires csv_path for {t}")
-            provider = CsvProvider(data_cfg.csv_path)
-        else:
-            provider = StooqProvider(cache_ttl_seconds=data_cfg.cache_ttl_seconds)
+        provider = provider_for_config(cfg, t)
         provider.fetch_daily(t)
         fetched.append(t)
     return fetched

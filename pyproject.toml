@@ -18,6 +18,9 @@ dependencies = [
   "uv>=0.9.21",
 ]
 
+[project.optional-dependencies]
+yfinance = ["yfinance>=0.2"]
+
 [project.scripts]
 stonks-cli = "stonks_cli.cli:main"
 

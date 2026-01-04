@@ -20,8 +20,6 @@ P1 — CLI UX (keep it simple)
 ====================
 P1 — Data + Caching
 ====================
-[ ] Optional: built-in alternative provider (keep plugin-first).
-    - If adding a new built-in provider, keep it optional via extra deps or a plugin example.
 
 ====================
 P1 — Performance (without complexity)

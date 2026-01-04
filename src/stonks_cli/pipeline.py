@@ -21,7 +21,7 @@ from stonks_cli.analysis.strategy import (
     sma_cross_strategy,
 )
 from stonks_cli.config import AppConfig
-from stonks_cli.data.providers import CsvProvider, PriceProvider, StooqProvider, normalize_ticker
+from stonks_cli.data.providers import CsvProvider, PriceProvider, StooqProvider, YFinanceProvider, normalize_ticker
 from stonks_cli.plugins import registry_for_config
 from stonks_cli.reporting.report import TickerResult, write_text_report
 from stonks_cli.storage import save_last_run
@@ -59,6 +59,8 @@ def provider_for_config(cfg: AppConfig, ticker: str) -> PriceProvider:
         if not hasattr(provider, "fetch_daily"):
             raise TypeError(f"plugin provider '{data_cfg.plugin_name}' must implement fetch_daily")
         return provider  # type: ignore[return-value]
+    if data_cfg.provider == "yfinance":
+        return YFinanceProvider()
     return StooqProvider(cache_ttl_seconds=data_cfg.cache_ttl_seconds)
 
 

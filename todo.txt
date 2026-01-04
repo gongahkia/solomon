@@ -20,9 +20,6 @@ P1 — CLI UX (keep it simple)
 ====================
 P1 — Data + Caching
 ====================
-[ ] Add `stonks-cli data cache-info`.
-    - Print cache dir, entry count, approx size, and example keys.
-
 [ ] Add `stonks-cli data purge` (optionally `--older-than-days`).
     - Helps keep the tool “batteries-included” and self-maintaining.
 

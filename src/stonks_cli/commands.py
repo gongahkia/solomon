@@ -303,3 +303,26 @@ def do_data_verify(tickers: list[str] | None) -> dict[str, str]:
         except Exception as e:
             out[t] = f"error: {e}"
     return out
+
+
+def do_data_cache_info() -> dict[str, object]:
+    from stonks_cli.paths import default_cache_dir
+
+    cache_dir = default_cache_dir()
+    if not cache_dir.exists():
+        return {"cache_dir": str(cache_dir), "entries": 0, "size_bytes": 0, "examples": []}
+
+    files = [p for p in cache_dir.glob("*.json") if p.is_file()]
+    size_bytes = 0
+    for p in files:
+        try:
+            size_bytes += p.stat().st_size
+        except Exception:
+            continue
+    examples = [p.name for p in sorted(files)[:3]]
+    return {
+        "cache_dir": str(cache_dir),
+        "entries": len(files),
+        "size_bytes": size_bytes,
+        "examples": examples,
+    }

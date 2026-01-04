@@ -9,7 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def default_config_path() -> Path:
-    return Path.home() / ".config" / "stonks-cli" / "config.json"
+    from stonks_cli.paths import default_config_path as _default_config_path
+
+    return _default_config_path()
 
 
 class ScheduleConfig(BaseModel):

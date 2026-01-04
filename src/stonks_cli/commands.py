@@ -326,3 +326,45 @@ def do_data_cache_info() -> dict[str, object]:
         "size_bytes": size_bytes,
         "examples": examples,
     }
+
+
+def do_data_purge(*, older_than_days: int | None = None) -> dict[str, object]:
+    import json
+    import time
+
+    from stonks_cli.paths import default_cache_dir
+
+    cache_dir = default_cache_dir()
+    if not cache_dir.exists():
+        return {"cache_dir": str(cache_dir), "deleted": 0}
+
+    cutoff = None
+    if older_than_days is not None:
+        if older_than_days < 0:
+            raise ValueError("older_than_days must be >= 0")
+        cutoff = time.time() - (older_than_days * 86400)
+
+    deleted = 0
+    for p in cache_dir.glob("*.json"):
+        if not p.is_file():
+            continue
+        should_delete = cutoff is None
+        if cutoff is not None:
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                created_at = float(data.get("created_at", 0))
+            except Exception:
+                try:
+                    created_at = float(p.stat().st_mtime)
+                except Exception:
+                    created_at = 0.0
+            should_delete = created_at <= cutoff
+
+        if should_delete:
+            try:
+                p.unlink(missing_ok=True)
+                deleted += 1
+            except Exception:
+                continue
+
+    return {"cache_dir": str(cache_dir), "deleted": deleted}

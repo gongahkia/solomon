@@ -18,8 +18,9 @@ from stonks_cli.commands import (
     do_config_show,
     do_config_validate,
     do_config_where,
-    do_data_fetch,
     do_data_cache_info,
+    do_data_fetch,
+    do_data_purge,
     do_data_verify,
     do_history_list,
     do_history_show,
@@ -286,6 +287,17 @@ def data_cache_info() -> None:
         examples = list(info.get("examples") or [])
         if examples:
             Console().print(f"examples: {', '.join(str(x) for x in examples)}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@data_app.command("purge")
+def data_purge(older_than_days: int | None = typer.Option(None, "--older-than-days", min=0)) -> None:
+    """Purge cache entries (optionally older than N days)."""
+    try:
+        out = do_data_purge(older_than_days=older_than_days)
+        Console().print(f"cache_dir: {out.get('cache_dir')}")
+        Console().print(f"deleted: {out.get('deleted')}")
     except Exception as e:
         raise _exit_for_error(e)
 

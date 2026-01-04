@@ -8,12 +8,12 @@ from time import perf_counter
 from threading import Lock, Thread
 
 from apscheduler.schedulers.blocking import BlockingScheduler
-from apscheduler.triggers.cron import CronTrigger
 from rich.console import Console
 
 from stonks_cli.config import AppConfig
 from stonks_cli.pipeline import run_once
 from stonks_cli.scheduler.pidfile import acquire_pid_file
+from stonks_cli.scheduler.tz import cron_trigger_from_config, resolve_timezone
 from stonks_cli.storage import default_state_dir
 
 
@@ -32,6 +32,7 @@ class SchedulerHandle:
 def build_scheduler(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> BlockingScheduler:
     console = console or Console()
     run_lock = Lock()
+    tz = resolve_timezone(cfg.schedule.timezone)
 
     def job() -> None:
         if not run_lock.acquire(blocking=False):
@@ -56,8 +57,8 @@ def build_scheduler(cfg: AppConfig, out_dir: Path, console: Console | None = Non
             except Exception:
                 pass
 
-    trigger = CronTrigger.from_crontab(cfg.schedule.cron)
-    scheduler = BlockingScheduler()
+    trigger = cron_trigger_from_config(cfg.schedule.cron, cfg.schedule.timezone)
+    scheduler = BlockingScheduler(timezone=tz)
     scheduler.add_job(job, trigger, max_instances=1)
     return scheduler
 

@@ -15,6 +15,7 @@ from stonks_cli.analysis.output import AnalysisArtifacts
 from stonks_cli.config import AppConfig, config_path, load_config, save_config, save_default_config, update_config_field
 from stonks_cli.pipeline import compute_results, provider_for_config, run_once, select_strategy
 from stonks_cli.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
+from stonks_cli.scheduler.tz import cron_trigger_from_config, resolve_timezone
 from stonks_cli.data.providers import CsvProvider, StooqProvider
 from stonks_cli.reporting.backtest_report import BacktestRow, write_backtest_report
 from stonks_cli.reporting.json_report import write_json_report
@@ -189,8 +190,9 @@ class ScheduleStatus:
 def do_schedule_status() -> ScheduleStatus:
     cfg: AppConfig = load_config()
     try:
-        trigger = CronTrigger.from_crontab(cfg.schedule.cron)
-        next_dt = trigger.get_next_fire_time(None, datetime.now())
+        tz = resolve_timezone(cfg.schedule.timezone)
+        trigger = cron_trigger_from_config(cfg.schedule.cron, cfg.schedule.timezone)
+        next_dt = trigger.get_next_fire_time(None, datetime.now(tz=tz))
         return ScheduleStatus(cron=cfg.schedule.cron, next_run=str(next_dt), error=None)
     except Exception as e:
         return ScheduleStatus(cron=cfg.schedule.cron, next_run=None, error=str(e))

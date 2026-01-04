@@ -36,6 +36,14 @@ def do_doctor() -> dict[str, str]:
     except Exception as e:
         out["config_loaded"] = f"error: {e}"
 
+    try:
+        from stonks_cli.paths import default_cache_dir, default_state_dir
+
+        out["cache_dir"] = str(default_cache_dir())
+        out["state_dir"] = str(default_state_dir())
+    except Exception as e:
+        out["paths"] = f"error: {e}"
+
     # Data provider check (best-effort): uses configured provider for first ticker.
     try:
         tickers = cfg.tickers or []
@@ -45,8 +53,28 @@ def do_doctor() -> dict[str, str]:
             provider = provider_for_config(cfg, tickers[0])
             series = provider.fetch_daily(tickers[0])
             out["data_provider"] = "ok" if not series.df.empty else "no_rows"
+            out["data_provider_type"] = type(provider).__name__
     except Exception as e:
         out["data_provider"] = f"error: {e}"
+
+    # Plugin load status (best-effort): report per-plugin success/errors.
+    try:
+        from stonks_cli.plugins import load_plugins_best_effort
+
+        specs = tuple(cfg.plugins or [])
+        if not specs:
+            out["plugins"] = "skipped (none configured)"
+        else:
+            summary = load_plugins_best_effort(specs)
+            out["plugins_ok"] = str(len(summary.ok))
+            out["plugins_errors"] = str(len(summary.errors))
+            out["plugins_strategies"] = str(len(summary.registry.strategies or {}))
+            out["plugins_provider_factories"] = str(len(summary.registry.provider_factories or {}))
+            if summary.errors:
+                # Keep output compact; CLI prints key/value lines.
+                out["plugins_error_detail"] = "; ".join(f"{k}: {v}" for k, v in summary.errors.items())
+    except Exception as e:
+        out["plugins"] = f"error: {e}"
     return out
 
 

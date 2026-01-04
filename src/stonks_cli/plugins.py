@@ -21,6 +21,13 @@ class PluginRegistry:
     provider_factories: dict[str, ProviderFactory]
 
 
+@dataclass(frozen=True)
+class PluginLoadSummary:
+    registry: PluginRegistry
+    ok: list[str]
+    errors: dict[str, str]
+
+
 def _load_module(spec: str) -> ModuleType:
     s = (spec or "").strip()
     if not s:
@@ -67,6 +74,43 @@ def load_plugins(plugin_specs: tuple[str, ...]) -> PluginRegistry:
                     provider_factories[name] = factory
 
     return PluginRegistry(strategies=strategies, provider_factories=provider_factories)
+
+
+def load_plugins_best_effort(plugin_specs: tuple[str, ...]) -> PluginLoadSummary:
+    strategies: dict[str, StrategyFn] = {}
+    provider_factories: dict[str, ProviderFactory] = {}
+    ok: list[str] = []
+    errors: dict[str, str] = {}
+
+    for spec in plugin_specs:
+        try:
+            module = _load_module(spec)
+            ok.append(spec)
+        except Exception as e:
+            errors[spec] = str(e)
+            continue
+
+        mod_strats = getattr(module, "STONKS_STRATEGIES", None)
+        if isinstance(mod_strats, dict):
+            for name, fn in mod_strats.items():
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                if callable(fn):
+                    strategies[name] = fn
+
+        mod_providers = getattr(module, "STONKS_PROVIDER_FACTORIES", None)
+        if isinstance(mod_providers, dict):
+            for name, factory in mod_providers.items():
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                if callable(factory):
+                    provider_factories[name] = factory
+
+    return PluginLoadSummary(
+        registry=PluginRegistry(strategies=strategies, provider_factories=provider_factories),
+        ok=ok,
+        errors=errors,
+    )
 
 
 def registry_for_config(cfg: AppConfig) -> PluginRegistry:

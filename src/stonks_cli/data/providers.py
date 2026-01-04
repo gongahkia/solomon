@@ -94,7 +94,10 @@ class CsvProvider(PriceProvider):
         df = pd.read_csv(self._path)
         df.columns = [c.strip().lower() for c in df.columns]
         if "ticker" in df.columns:
-            df = df[df["ticker"].astype(str).str.upper() == normalized]
+            want = normalized
+            want_base = normalized.split(".")[0]
+            tickers = df["ticker"].astype(str).str.strip().str.upper()
+            df = df[(tickers == want) | (tickers == want_base)]
         if "date" in df.columns:
             df["date"] = pd.to_datetime(df["date"], utc=False)
             df = df.set_index("date").sort_index()

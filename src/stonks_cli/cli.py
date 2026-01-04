@@ -23,6 +23,7 @@ from stonks_cli.commands import (
     do_history_list,
     do_history_show,
     do_doctor,
+    do_report_latest,
     do_report_open,
     do_schedule_once,
     do_schedule_run,
@@ -270,11 +271,33 @@ def data_verify(tickers: list[str] = typer.Argument(None)) -> None:
 
 
 @report_app.command("open")
-def report_open() -> None:
+def report_open(
+    json_out: bool = typer.Option(False, "--json", help="Also print the latest JSON path if available"),
+) -> None:
     """Print latest report path (if any)."""
     try:
+        if json_out:
+            out = do_report_latest(include_json=True)
+            Console().print(str(out.get("report_path")))
+            if out.get("json_path"):
+                Console().print(str(out.get("json_path")))
+            return
         p = do_report_open()
         Console().print(str(p))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@report_app.command("latest")
+def report_latest(
+    json_out: bool = typer.Option(False, "--json", help="Also print the latest JSON path if available"),
+) -> None:
+    """Print latest report path (and optionally JSON) from state."""
+    try:
+        out = do_report_latest(include_json=json_out)
+        Console().print(str(out.get("report_path")))
+        if json_out and out.get("json_path"):
+            Console().print(str(out.get("json_path")))
     except Exception as e:
         raise _exit_for_error(e)
 

@@ -94,14 +94,23 @@ def get_history_record(index: int, *, limit: int = 2000) -> RunRecord:
 
 
 def get_last_report_path() -> Path | None:
+    last = get_last_run()
+    if last is None or not last.report_path:
+        return None
+    try:
+        return Path(last.report_path)
+    except Exception:
+        return None
+
+
+def get_last_run() -> RunRecord | None:
     state = load_state()
     last = state.get("last_run") if isinstance(state, dict) else None
     if not isinstance(last, dict):
         return None
-    p = last.get("report_path")
-    if not p:
-        return None
-    try:
-        return Path(p)
-    except Exception:
-        return None
+    return RunRecord(
+        started_at=str(last.get("started_at")),
+        tickers=list(last.get("tickers") or []),
+        report_path=last.get("report_path"),
+        json_path=last.get("json_path"),
+    )

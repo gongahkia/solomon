@@ -20,7 +20,7 @@ from stonks_cli.data.providers import CsvProvider, StooqProvider
 from stonks_cli.reporting.backtest_report import BacktestRow, write_backtest_report
 from stonks_cli.reporting.json_report import write_json_report
 from stonks_cli.reporting.report import write_text_report
-from stonks_cli.storage import get_history_record, get_last_report_path, list_history, save_last_run
+from stonks_cli.storage import get_history_record, get_last_report_path, get_last_run, list_history, save_last_run
 
 
 def do_version() -> str:
@@ -176,6 +176,16 @@ def do_report_open() -> Path:
     if p is None:
         raise FileNotFoundError("No last report recorded")
     return p
+
+
+def do_report_latest(*, include_json: bool = False) -> dict[str, str | None]:
+    last = get_last_run()
+    if last is None:
+        raise FileNotFoundError("No last report recorded")
+    return {
+        "report_path": last.report_path,
+        "json_path": last.json_path if include_json else None,
+    }
 
 
 def do_history_list(limit: int = 20):

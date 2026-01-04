@@ -14,6 +14,7 @@ from stonks_cli.commands import (
     do_backtest,
     do_bench,
     do_config_init,
+    do_config_set,
     do_config_show,
     do_config_where,
     do_data_fetch,
@@ -112,6 +113,22 @@ def config_where() -> None:
     """Print config path."""
     try:
         Console().print(str(do_config_where()))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@config_app.command("set")
+def config_set(field: str = typer.Argument(...), value: str = typer.Argument(...)) -> None:
+    """Set a config field value (supports basic JSON parsing)."""
+    try:
+        import json
+
+        parsed = value
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            parsed = value
+        Console().print(do_config_set(field, parsed))
     except Exception as e:
         raise _exit_for_error(e)
 

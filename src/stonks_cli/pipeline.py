@@ -62,7 +62,13 @@ def provider_for_config(cfg: AppConfig, ticker: str) -> PriceProvider:
     return StooqProvider(cache_ttl_seconds=data_cfg.cache_ttl_seconds)
 
 
-def compute_results(cfg: AppConfig, console: Console) -> tuple[list[TickerResult], object | None]:
+def compute_results(
+    cfg: AppConfig,
+    console: Console,
+    *,
+    start: str | None = None,
+    end: str | None = None,
+) -> tuple[list[TickerResult], object | None]:
     strategy_fn = select_strategy(cfg)
 
     tickers = [normalize_ticker(t) for t in (cfg.tickers or [])]
@@ -91,6 +97,10 @@ def compute_results(cfg: AppConfig, console: Console) -> tuple[list[TickerResult
     for ticker in tickers:
         series = series_by_ticker[ticker]
         df = series.df
+        if start:
+            df = df.loc[start:]
+        if end:
+            df = df.loc[:end]
         last_close = None
         if "close" in df.columns and not df.empty:
             last_close = float(df["close"].iloc[-1])

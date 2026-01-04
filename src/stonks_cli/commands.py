@@ -114,8 +114,15 @@ def do_config_validate() -> dict[str, object]:
     }
 
 
-def do_analyze(tickers: list[str] | None, out_dir: Path, *, sandbox: bool = False) -> Path:
-    artifacts = do_analyze_artifacts(tickers, out_dir=out_dir, json_out=False, sandbox=sandbox)
+def do_analyze(
+    tickers: list[str] | None,
+    out_dir: Path,
+    *,
+    start: str | None = None,
+    end: str | None = None,
+    sandbox: bool = False,
+) -> Path:
+    artifacts = do_analyze_artifacts(tickers, out_dir=out_dir, json_out=False, start=start, end=end, sandbox=sandbox)
     return artifacts.report_path
 
 
@@ -124,6 +131,8 @@ def do_analyze_artifacts(
     *,
     out_dir: Path,
     json_out: bool,
+    start: str | None = None,
+    end: str | None = None,
     sandbox: bool = False,
 ) -> AnalysisArtifacts:
     cfg = load_config()
@@ -131,7 +140,7 @@ def do_analyze_artifacts(
         cfg = cfg.model_copy(update={"tickers": tickers})
 
     console = Console()
-    results, portfolio = compute_results(cfg, console)
+    results, portfolio = compute_results(cfg, console, start=start, end=end)
     report_path = write_text_report(results, out_dir=out_dir, portfolio=portfolio)
 
     json_path = None

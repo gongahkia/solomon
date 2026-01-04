@@ -15,9 +15,7 @@ P0 — Correctness / Reliability
 ====================
 P1 — CLI UX (keep it simple)
 ====================
-[ ] Make analyze/backtest accept `--start/--end` consistently.
-    - backtest supports date slicing; analyze does not.
-    - Keep output semantics unchanged (still writes a report), just bound the data window.
+
 
 ====================
 P1 — Data + Caching

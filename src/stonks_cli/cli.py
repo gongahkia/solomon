@@ -157,6 +157,8 @@ def config_validate() -> None:
 @app.command()
 def analyze(
     tickers: list[str] = typer.Argument(None),
+    start: str | None = typer.Option(None, "--start", help="YYYY-MM-DD"),
+    end: str | None = typer.Option(None, "--end", help="YYYY-MM-DD"),
     out_dir: str = typer.Option("reports", "--out-dir"),
     json_out: bool = typer.Option(False, "--json", "--no-json", help="Write JSON output alongside the report"),
     sandbox: bool = typer.Option(False, "--sandbox", help="Run without persisting last-run history"),
@@ -168,13 +170,15 @@ def analyze(
                 tickers if tickers else None,
                 out_dir=Path(out_dir),
                 json_out=True,
+                start=start,
+                end=end,
                 sandbox=sandbox,
             )
             Console().print(f"Wrote report: {artifacts.report_path}")
             if artifacts.json_path:
                 Console().print(f"Wrote json: {artifacts.json_path}")
             return
-        do_analyze(tickers if tickers else None, out_dir=Path(out_dir), sandbox=sandbox)
+        do_analyze(tickers if tickers else None, out_dir=Path(out_dir), start=start, end=end, sandbox=sandbox)
     except Exception as e:
         raise _exit_for_error(e)
 

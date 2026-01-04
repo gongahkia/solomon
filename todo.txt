@@ -10,39 +10,11 @@ Project intent (as implemented today)
 ====================
 P0 — Correctness / Reliability
 ====================
-[ ] Fix ScheduleConfig.timezone field indentation bug.
-    - Today: timezone is declared at the wrong indent in src/stonks_cli/config.py, so it is not part of the model.
-    - Desired: schedule.timezone should parse/validate and be usable by scheduler/status.
 
-[ ] Make scheduler timezone actually affect CronTrigger.
-    - build_scheduler() and do_schedule_status() currently use CronTrigger.from_crontab(cfg.schedule.cron) with implicit local tz.
-    - Use cfg.schedule.timezone: support "local" and IANA tz names.
-
-[ ] Fix deprecation warning in state/history timestamps.
-    - src/stonks_cli/storage.py uses datetime.utcnow(); migrate to datetime.now(timezone.utc) and keep ISO8601 with Z.
-
-[ ] Make state/cache/config paths cross-platform.
-    - default_state_dir() uses ~/.local/share (Linux-y) and default_cache_dir() uses ~/.cache.
-    - On macOS, prefer ~/Library/Application Support and ~/Library/Caches.
-    - Suggest adding platformdirs and centralizing dirs in one module.
-
-[ ] Harden CSV provider ticker filtering.
-    - CsvProvider.fetch_daily() compares df["ticker"] to normalized ticker, but normalized adds ".US".
-    - Consider supporting CSVs with raw tickers (AAPL) by normalizing df ticker values too, or configurable mapping.
 
 ====================
 P1 — CLI UX (keep it simple)
 ====================
-[ ] Add `stonks-cli config set <field> <value>` command (already implemented in commands.py but not wired in cli.py).
-    - Use update_config_field(); support basic JSON parsing for numbers/bools/strings.
-
-[ ] Add `stonks-cli config validate`.
-    - Loads config, prints normalized tickers + effective provider selection; exits non-zero on validation errors.
-
-[ ] Add `stonks-cli report latest --json`.
-    - Today: report open prints last text report path only.
-    - Expand to show last JSON path if available.
-
 [ ] Improve `doctor` output (still no bells/whistles).
     - Include: resolved config path, cache dir, state dir, provider for first ticker, plugin load status (success/errors).
 

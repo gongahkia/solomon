@@ -20,9 +20,6 @@ P1 — CLI UX (keep it simple)
 ====================
 P1 — Data + Caching
 ====================
-[ ] Cache negative/empty responses carefully.
-    - If provider returns no rows / bad data, decide whether to cache (probably short TTL) to avoid repeated calls.
-
 [ ] Provider health checks in data verify.
     - Expand verify to check: required columns present (close; optionally OHLCV), monotonic index, no obvious NaNs.
 

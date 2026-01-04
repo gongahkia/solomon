@@ -70,6 +70,22 @@ def do_config_set(field_path: str, value) -> str:
     return updated.model_dump_json(indent=2)
 
 
+def do_config_validate() -> dict[str, object]:
+    cfg = load_config()
+
+    tickers = list(cfg.tickers or [])
+    providers: dict[str, str] = {}
+    for t in tickers:
+        p = provider_for_config(cfg, t)
+        providers[t] = type(p).__name__
+
+    return {
+        "tickers": tickers,
+        "providers": providers,
+        "strategy": cfg.strategy,
+    }
+
+
 def do_analyze(tickers: list[str] | None, out_dir: Path, *, sandbox: bool = False) -> Path:
     artifacts = do_analyze_artifacts(tickers, out_dir=out_dir, json_out=False, sandbox=sandbox)
     return artifacts.report_path

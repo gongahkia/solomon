@@ -16,6 +16,7 @@ from stonks_cli.commands import (
     do_config_init,
     do_config_set,
     do_config_show,
+    do_config_validate,
     do_config_where,
     do_data_fetch,
     do_data_verify,
@@ -129,6 +130,25 @@ def config_set(field: str = typer.Argument(...), value: str = typer.Argument(...
         except Exception:
             parsed = value
         Console().print(do_config_set(field, parsed))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@config_app.command("validate")
+def config_validate() -> None:
+    """Validate config and show effective provider selection."""
+    try:
+        out = do_config_validate()
+        tickers = list(out.get("tickers") or [])
+        providers = dict(out.get("providers") or {})
+
+        console = Console()
+        for t in tickers:
+            console.print(t)
+        for t in tickers:
+            p = providers.get(t)
+            if p:
+                console.print(f"{t}: {p}")
     except Exception as e:
         raise _exit_for_error(e)
 

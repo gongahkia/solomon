@@ -20,9 +20,6 @@ P1 — CLI UX (keep it simple)
 ====================
 P1 — Data + Caching
 ====================
-[ ] Provider health checks in data verify.
-    - Expand verify to check: required columns present (close; optionally OHLCV), monotonic index, no obvious NaNs.
-
 [ ] Optional: built-in alternative provider (keep plugin-first).
     - If adding a new built-in provider, keep it optional via extra deps or a plugin example.
 
@@ -94,9 +91,6 @@ P3 — Docs / Packaging / Quality
 ====================
 [ ] Fill README placeholders (Stack / Screenshots / Architecture / Legal).
     - Keep it short and focused on install + “analyze/backtest/schedule/report/history”.
-
-[ ] Align versioning.
-    - README badge shows 1.0.0, pyproject.toml is 0.1.0. Decide one approach and make it consistent.
 
 [ ] Add a minimal CI workflow.
     - Run pytest on push/PR for 3.11–3.13 (or whichever you support).

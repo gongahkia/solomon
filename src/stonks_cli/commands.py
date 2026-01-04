@@ -287,6 +287,22 @@ def do_data_fetch(tickers: list[str] | None) -> list[str]:
 def do_data_verify(tickers: list[str] | None) -> dict[str, str]:
     cfg = load_config()
     use = tickers if tickers else cfg.tickers
+    def _health_check(series) -> str:
+        df = series.df
+        if df is None or getattr(df, "empty", True):
+            return "no_rows"
+        missing = [c for c in ["close"] if c not in df.columns]
+        if missing:
+            return f"missing_columns: {','.join(missing)}"
+        if "close" in df.columns and df["close"].isna().any():
+            return "bad_data: close_has_nans"
+        try:
+            if getattr(df.index, "is_monotonic_increasing", True) is False:
+                return "bad_data: index_not_monotonic"
+        except Exception:
+            pass
+        return "ok"
+
     out: dict[str, str] = {}
     for t in use:
         try:
@@ -296,10 +312,12 @@ def do_data_verify(tickers: list[str] | None) -> dict[str, str]:
                 if not data_cfg.csv_path:
                     raise ValueError("csv_path missing")
                 provider = CsvProvider(data_cfg.csv_path)
+            elif data_cfg.provider == "plugin":
+                provider = provider_for_config(cfg, t)
             else:
                 provider = StooqProvider(cache_ttl_seconds=data_cfg.cache_ttl_seconds)
             series = provider.fetch_daily(t)
-            out[t] = "ok" if not series.df.empty else "no_rows"
+            out[t] = _health_check(series)
         except Exception as e:
             out[t] = f"error: {e}"
     return out

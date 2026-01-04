@@ -15,6 +15,7 @@ def default_config_path() -> Path:
 class ScheduleConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     cron: str = Field(default="0 17 * * 1-5", description="Crontab string")
+    timezone: str = Field(default="local", description="Timezone name or 'local'")
 
     @field_validator("cron")
     @classmethod
@@ -27,7 +28,6 @@ class ScheduleConfig(BaseModel):
 
         CronTrigger.from_crontab(v)
         return v
-    timezone: str = Field(default="local", description="Timezone name or 'local'")
 
 
 class DataConfig(BaseModel):

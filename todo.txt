@@ -15,9 +15,6 @@ P0 — Correctness / Reliability
 ====================
 P1 — CLI UX (keep it simple)
 ====================
-[ ] Improve `doctor` output (still no bells/whistles).
-    - Include: resolved config path, cache dir, state dir, provider for first ticker, plugin load status (success/errors).
-
 [ ] Make analyze/backtest accept `--start/--end` consistently.
     - backtest supports date slicing; analyze does not.
     - Keep output semantics unchanged (still writes a report), just bound the data window.

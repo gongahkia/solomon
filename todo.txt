@@ -42,8 +42,7 @@ P2 — Scheduler
 ====================
 P2 — Plugins (extensibility as a first-class feature)
 ====================
-[ ] Publish an example plugin in asset/ (or examples/).
-    - One simple strategy + one trivial provider factory (e.g., reads local CSV).
+
 
 ====================
 P3 — Docs / Packaging / Quality

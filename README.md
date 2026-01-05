@@ -271,8 +271,6 @@ flowchart TD
     schedRun -->|on error| failure
 ```
 
-The core flow is: **config + plugins** → **provider fetch (with cache)** → **strategy + risk** → **(optional) backtest** → **reports + local history**.
-
 ## Legal
 
 `stonks-cli` is provided for educational and informational purposes only.

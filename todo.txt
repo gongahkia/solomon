@@ -24,12 +24,6 @@ P1 — Data + Caching
 ====================
 P1 — Performance (without complexity)
 ====================
-[ ] Reduce O(n^2) backtest work.
-    - walk_forward_backtest calls strategy_fn on a growing window for every day, recomputing indicators repeatedly.
-    - Options (choose simplest):
-      - Precompute indicators once and compute signal per day from precomputed series.
-      - Or implement per-strategy vectorized signal generation.
-
 [ ] Avoid duplicate indicator computations in pipeline.
     - compute_results() computes volatility/ATR from full series; ensure no repeated passes where avoidable.
 

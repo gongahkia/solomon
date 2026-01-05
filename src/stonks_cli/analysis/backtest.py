@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from typing import Callable
 
 import pandas as pd
@@ -92,15 +93,85 @@ def walk_forward_backtest(
     close = df["close"].astype(float)
     rets = close.pct_change().fillna(0.0)
 
-    position = pd.Series(0.0, index=df.index)
-    for i in range(len(df)):
-        if i < min_history_rows:
-            position.iloc[i] = 0.0
-            continue
-        window = df.iloc[: i + 1]
-        rec = strategy_fn(window)
-        position.iloc[i] = _action_to_position(rec.action)
+    position = _vectorized_position_if_supported(df, strategy_fn=strategy_fn, min_history_rows=min_history_rows)
+    if position is None:
+        position = pd.Series(0.0, index=df.index)
+        for i in range(len(df)):
+            if i < min_history_rows:
+                position.iloc[i] = 0.0
+                continue
+            window = df.iloc[: i + 1]
+            rec = strategy_fn(window)
+            position.iloc[i] = _action_to_position(rec.action)
 
     strat_rets = rets * position.shift(1).fillna(0.0)
     equity = (1.0 + strat_rets).cumprod()
     return BacktestSeries(equity=equity, position=position)
+
+
+def _vectorized_position_if_supported(
+    df: pd.DataFrame,
+    *,
+    strategy_fn: Callable[[pd.DataFrame], Recommendation],
+    min_history_rows: int,
+) -> pd.Series | None:
+    """Best-effort vectorized strategy position.
+
+    Safe for built-in strategies that use only rolling/lagged indicators.
+    Falls back to None for unknown/plugin strategies.
+    """
+
+    if df is None or df.empty or "close" not in df.columns:
+        return None
+
+    from stonks_cli.analysis.indicators import bollinger_bands, rsi, sma
+    from stonks_cli.analysis.strategy import (
+        basic_trend_rsi_strategy,
+        mean_reversion_bb_rsi_strategy,
+        sma_cross_strategy,
+    )
+
+    base_fn = strategy_fn
+    kwargs = {}
+    if isinstance(strategy_fn, partial):
+        base_fn = strategy_fn.func
+        kwargs = dict(strategy_fn.keywords or {})
+
+    close = df["close"].astype(float)
+    idx = df.index
+    pos = pd.Series(0.0, index=idx)
+
+    if base_fn is sma_cross_strategy:
+        fast = int(kwargs.get("fast", 20))
+        slow = int(kwargs.get("slow", 50))
+        eff_min = max(min_history_rows, slow + 2)
+        fast_sma = sma(close, fast)
+        slow_sma = sma(close, slow)
+        uptrend = (fast_sma > slow_sma) & fast_sma.notna() & slow_sma.notna()
+        pos.loc[uptrend] = 1.0
+        if eff_min > 0 and len(pos) > 0:
+            pos.iloc[:eff_min] = 0.0
+        return pos
+
+    if base_fn is basic_trend_rsi_strategy:
+        eff_min = max(min_history_rows, 60)
+        sma20 = sma(close, 20)
+        sma50 = sma(close, 50)
+        rsi14 = rsi(close, 14)
+        buy = (sma20 > sma50) & (rsi14 < 70) & sma20.notna() & sma50.notna() & rsi14.notna()
+        pos.loc[buy] = 1.0
+        if eff_min > 0 and len(pos) > 0:
+            pos.iloc[:eff_min] = 0.0
+        return pos
+
+    if base_fn is mean_reversion_bb_rsi_strategy:
+        eff_min = max(min_history_rows, 60)
+        lower, _mid, _upper = bollinger_bands(close, window=20, num_std=2.0)
+        rsi14 = rsi(close, 14)
+        buy = (close < lower) & (rsi14 <= 35) & lower.notna() & rsi14.notna()
+        pos.loc[buy] = 1.0
+        if eff_min > 0 and len(pos) > 0:
+            pos.iloc[:eff_min] = 0.0
+        return pos
+
+    return None

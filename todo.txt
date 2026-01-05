@@ -42,9 +42,6 @@ P2 — Scheduler
 ====================
 P2 — Plugins (extensibility as a first-class feature)
 ====================
-[ ] Validate plugin return types.
-    - Strategy fns should return Recommendation; provider factories should return an object with fetch_daily().
-
 [ ] Publish an example plugin in asset/ (or examples/).
     - One simple strategy + one trivial provider factory (e.g., reads local CSV).
 

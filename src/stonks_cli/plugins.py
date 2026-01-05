@@ -9,10 +9,23 @@ from types import ModuleType
 from typing import Callable
 
 from stonks_cli.config import AppConfig
+from stonks_cli.analysis.strategy import Recommendation
 
 
 StrategyFn = Callable[[object], object]
 ProviderFactory = Callable[[AppConfig, str], object]
+
+
+def _validated_strategy(spec: str, name: str, fn: StrategyFn) -> StrategyFn:
+    def wrapper(df: object) -> Recommendation:
+        out = fn(df)
+        if not isinstance(out, Recommendation):
+            raise TypeError(
+                f"plugin strategy '{name}' from '{spec}' must return Recommendation, got {type(out).__name__}"
+            )
+        return out
+
+    return wrapper
 
 
 @dataclass(frozen=True)
@@ -63,7 +76,7 @@ def load_plugins(plugin_specs: tuple[str, ...]) -> PluginRegistry:
                 if not isinstance(name, str) or not name.strip():
                     continue
                 if callable(fn):
-                    strategies[name] = fn
+                    strategies[name] = _validated_strategy(spec, name, fn)
 
         mod_providers = getattr(module, "STONKS_PROVIDER_FACTORIES", None)
         if isinstance(mod_providers, dict):
@@ -96,7 +109,7 @@ def load_plugins_best_effort(plugin_specs: tuple[str, ...]) -> PluginLoadSummary
                 if not isinstance(name, str) or not name.strip():
                     continue
                 if callable(fn):
-                    strategies[name] = fn
+                    strategies[name] = _validated_strategy(spec, name, fn)
 
         mod_providers = getattr(module, "STONKS_PROVIDER_FACTORIES", None)
         if isinstance(mod_providers, dict):

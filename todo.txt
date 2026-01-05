@@ -52,9 +52,6 @@ P3 — Docs / Packaging / Quality
 ====================
 Future ideas (only if they fit the “CLI reports” ethos)
 ====================
-[ ] Add a "watchlist" mode.
-    - Manage named ticker sets (stored in config) and run analyze on a set.
-
 [ ] Add a simple "signals diff".
     - Compare latest report vs previous run and highlight changes.
 

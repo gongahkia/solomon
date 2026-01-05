@@ -26,6 +26,10 @@ from stonks_cli.commands import (
     do_history_show,
     do_doctor,
     do_plugins_list,
+    do_watchlist_analyze,
+    do_watchlist_list,
+    do_watchlist_remove,
+    do_watchlist_set,
     do_report_latest,
     do_report_open,
     do_schedule_once,
@@ -43,6 +47,7 @@ data_app = typer.Typer()
 report_app = typer.Typer()
 history_app = typer.Typer()
 plugins_app = typer.Typer()
+watchlist_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
@@ -50,6 +55,7 @@ app.add_typer(data_app, name="data")
 app.add_typer(report_app, name="report")
 app.add_typer(history_app, name="history")
 app.add_typer(plugins_app, name="plugins")
+app.add_typer(watchlist_app, name="watchlist")
 
 
 @app.callback()
@@ -91,6 +97,72 @@ def doctor() -> None:
         results = do_doctor()
         for k, v in results.items():
             Console().print(f"{k}: {v}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@watchlist_app.command("list")
+def watchlist_list() -> None:
+    """List configured watchlists."""
+    try:
+        out = do_watchlist_list()
+        console = Console()
+        if not out:
+            console.print("No watchlists configured")
+            return
+        for name in sorted(out.keys()):
+            tickers = out.get(name) or []
+            console.print(f"{name}: {', '.join(tickers) if tickers else '-'}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@watchlist_app.command("set")
+def watchlist_set(name: str = typer.Argument(...), tickers: list[str] = typer.Argument(...)) -> None:
+    """Create/replace a watchlist."""
+    try:
+        do_watchlist_set(name, tickers)
+        Console().print(f"Updated watchlist: {name}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@watchlist_app.command("remove")
+def watchlist_remove(name: str = typer.Argument(...)) -> None:
+    """Remove a watchlist."""
+    try:
+        do_watchlist_remove(name)
+        Console().print(f"Removed watchlist: {name}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@watchlist_app.command("analyze")
+def watchlist_analyze(
+    name: str = typer.Argument(...),
+    start: str | None = typer.Option(None, "--start", help="YYYY-MM-DD"),
+    end: str | None = typer.Option(None, "--end", help="YYYY-MM-DD"),
+    out_dir: str = typer.Option("reports", "--out-dir"),
+    report_name: str | None = typer.Option(None, "--name", help="Stable report filename (e.g. report_latest.txt)"),
+    json_out: bool = typer.Option(False, "--json", "--no-json", help="Write JSON output alongside the report"),
+    csv_out: bool = typer.Option(False, "--csv", "--no-csv", help="Write CSV summary alongside the report"),
+    sandbox: bool = typer.Option(False, "--sandbox", help="Run without persisting last-run history"),
+) -> None:
+    """Analyze a named watchlist."""
+    try:
+        artifacts = do_watchlist_analyze(
+            name,
+            out_dir=Path(out_dir),
+            start=start,
+            end=end,
+            report_name=report_name,
+            json_out=json_out,
+            csv_out=csv_out,
+            sandbox=sandbox,
+        )
+        Console().print(f"Wrote report: {artifacts.report_path}")
+        if artifacts.json_path:
+            Console().print(f"Wrote json: {artifacts.json_path}")
     except Exception as e:
         raise _exit_for_error(e)
 

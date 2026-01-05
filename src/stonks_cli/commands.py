@@ -24,6 +24,69 @@ from stonks_cli.reporting.report import write_text_report
 from stonks_cli.storage import get_history_record, get_last_report_path, get_last_run, list_history, save_last_run
 
 
+def do_watchlist_list() -> dict[str, list[str]]:
+    cfg = load_config()
+    return {k: list(v or []) for k, v in (cfg.watchlists or {}).items()}
+
+
+def do_watchlist_set(name: str, tickers: list[str]) -> dict[str, list[str]]:
+    from stonks_cli.data.providers import normalize_ticker
+
+    n = (name or "").strip()
+    if not n:
+        raise ValueError("watchlist name must be non-empty")
+    cfg = load_config()
+    watchlists = dict(cfg.watchlists or {})
+    watchlists[n] = [normalize_ticker(t) for t in (tickers or [])]
+    cfg = cfg.model_copy(update={"watchlists": watchlists})
+    save_config(cfg)
+    return {k: list(v or []) for k, v in (cfg.watchlists or {}).items()}
+
+
+def do_watchlist_remove(name: str) -> dict[str, list[str]]:
+    n = (name or "").strip()
+    if not n:
+        raise ValueError("watchlist name must be non-empty")
+    cfg = load_config()
+    watchlists = dict(cfg.watchlists or {})
+    if n not in watchlists:
+        raise KeyError(f"watchlist not found: {n}")
+    watchlists.pop(n, None)
+    cfg = cfg.model_copy(update={"watchlists": watchlists})
+    save_config(cfg)
+    return {k: list(v or []) for k, v in (cfg.watchlists or {}).items()}
+
+
+def do_watchlist_analyze(
+    name: str,
+    *,
+    out_dir: Path,
+    start: str | None = None,
+    end: str | None = None,
+    report_name: str | None = None,
+    json_out: bool = False,
+    csv_out: bool = False,
+    sandbox: bool = False,
+) -> AnalysisArtifacts:
+    cfg = load_config()
+    n = (name or "").strip()
+    if not n:
+        raise ValueError("watchlist name must be non-empty")
+    tickers = list((cfg.watchlists or {}).get(n) or [])
+    if not tickers:
+        raise KeyError(f"watchlist not found or empty: {n}")
+    return do_analyze_artifacts(
+        tickers,
+        out_dir=out_dir,
+        json_out=json_out,
+        csv_out=csv_out,
+        start=start,
+        end=end,
+        report_name=report_name,
+        sandbox=sandbox,
+    )
+
+
 def do_plugins_list() -> dict[str, object]:
     cfg = load_config()
     from stonks_cli.plugins import load_plugins_best_effort

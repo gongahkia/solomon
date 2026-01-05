@@ -75,6 +75,10 @@ class AppConfig(BaseModel):
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     deterministic: bool = Field(default=False, description="Use deterministic execution (stable ordering, no concurrency)")
     seed: int = Field(default=0, description="Seed value for deterministic mode")
+    watchlists: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Named ticker sets (e.g. {'tech': ['AAPL.US', 'MSFT.US']})",
+    )
 
 
 def config_path() -> Path:
@@ -92,12 +96,19 @@ def load_config() -> AppConfig:
     try:
         from stonks_cli.data.providers import normalize_ticker
 
+        normalized_watchlists: dict[str, list[str]] = {}
+        for name, tickers in (cfg.watchlists or {}).items():
+            if not isinstance(name, str) or not name.strip():
+                continue
+            normalized_watchlists[name] = [normalize_ticker(t) for t in (tickers or [])]
+
         cfg = cfg.model_copy(
             update={
                 "tickers": [normalize_ticker(t) for t in cfg.tickers],
                 "ticker_overrides": {
                     normalize_ticker(k): v for k, v in (cfg.ticker_overrides or {}).items()
                 },
+                "watchlists": normalized_watchlists,
             }
         )
     except Exception:

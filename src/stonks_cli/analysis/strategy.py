@@ -7,6 +7,25 @@ import pandas as pd
 from stonks_cli.analysis.indicators import bollinger_bands, rsi, sma
 
 
+def sma_col(window: int) -> str:
+    return f"sma_{int(window)}"
+
+
+def rsi_col(window: int) -> str:
+    return f"rsi_{int(window)}"
+
+
+def bb_cols(window: int, num_std: float) -> tuple[str, str, str]:
+    std_s = str(float(num_std)).replace(".", "p")
+    suf = f"{int(window)}_{std_s}"
+    return (f"bb_lower_{suf}", f"bb_mid_{suf}", f"bb_upper_{suf}")
+
+
+_sma_col = sma_col
+_rsi_col = rsi_col
+_bb_cols = bb_cols
+
+
 @dataclass(frozen=True)
 class Recommendation:
     action: str
@@ -14,53 +33,75 @@ class Recommendation:
     rationale: str
 
 
-def basic_trend_rsi_strategy(df: pd.DataFrame) -> Recommendation:
+def basic_trend_rsi_strategy(
+    df: pd.DataFrame,
+    *,
+    sma_fast: int = 20,
+    sma_slow: int = 50,
+    rsi_window: int = 14,
+    rsi_overbought: float = 70,
+    rsi_oversold: float = 30,
+    min_history_days: int = 60,
+) -> Recommendation:
     if df.empty:
         return Recommendation(action="NO_DATA", confidence=0.0, rationale="No rows")
 
     close = df["close"] if "close" in df.columns else None
     if close is None:
         return Recommendation(action="NO_DATA", confidence=0.0, rationale="Missing close")
-    if len(close) < 60:
-        return Recommendation(action="INSUFFICIENT_HISTORY", confidence=0.1, rationale="Need >=60 days")
+    if len(close) < min_history_days:
+        return Recommendation(
+            action="INSUFFICIENT_HISTORY",
+            confidence=0.1,
+            rationale=f"Need >={min_history_days} days",
+        )
 
-    sma20_s = df["sma_20"] if "sma_20" in df.columns else sma(close, 20)
-    sma50_s = df["sma_50"] if "sma_50" in df.columns else sma(close, 50)
-    rsi14_s = df["rsi_14"] if "rsi_14" in df.columns else rsi(close, 14)
-    sma20 = sma20_s.iloc[-1]
-    sma50 = sma50_s.iloc[-1]
-    rsi14 = rsi14_s.iloc[-1]
+    fast_col = sma_col(sma_fast)
+    slow_col = sma_col(sma_slow)
+    rsi_c = rsi_col(rsi_window)
+    sma_fast_s = df[fast_col] if fast_col in df.columns else sma(close, sma_fast)
+    sma_slow_s = df[slow_col] if slow_col in df.columns else sma(close, sma_slow)
+    rsi_s = df[rsi_c] if rsi_c in df.columns else rsi(close, rsi_window)
+    sma_fast_v = sma_fast_s.iloc[-1]
+    sma_slow_v = sma_slow_s.iloc[-1]
+    rsi_v = rsi_s.iloc[-1]
     last = float(close.iloc[-1])
 
-    if pd.isna(sma20) or pd.isna(sma50) or pd.isna(rsi14):
+    if pd.isna(sma_fast_v) or pd.isna(sma_slow_v) or pd.isna(rsi_v):
         return Recommendation(action="INSUFFICIENT_HISTORY", confidence=0.1, rationale="Indicators not ready")
 
-    trend_up = sma20 > sma50
-    overbought = rsi14 >= 70
-    oversold = rsi14 <= 30
+    trend_up = sma_fast_v > sma_slow_v
+    overbought = float(rsi_v) >= float(rsi_overbought)
+    oversold = float(rsi_v) <= float(rsi_oversold)
 
     if trend_up and not overbought:
         return Recommendation(
             action="BUY_DCA",
             confidence=0.65,
-            rationale=f"Uptrend (SMA20 {sma20:.2f} > SMA50 {sma50:.2f}) and RSI {rsi14:.1f} not overbought; last={last:.2f}",
+            rationale=(
+                f"Uptrend (SMA{sma_fast} {float(sma_fast_v):.2f} > SMA{sma_slow} {float(sma_slow_v):.2f}) "
+                f"and RSI{rsi_window} {float(rsi_v):.1f} not overbought; last={last:.2f}"
+            ),
         )
     if trend_up and overbought:
         return Recommendation(
             action="HOLD_WAIT",
             confidence=0.55,
-            rationale=f"Uptrend but RSI {rsi14:.1f} overbought; consider waiting/pacing buys; last={last:.2f}",
+            rationale=f"Uptrend but RSI{rsi_window} {float(rsi_v):.1f} overbought; consider waiting/pacing buys; last={last:.2f}",
         )
     if (not trend_up) and oversold:
         return Recommendation(
             action="WATCH_REVERSAL",
             confidence=0.45,
-            rationale=f"Downtrend but RSI {rsi14:.1f} oversold; watch for reversal; last={last:.2f}",
+            rationale=f"Downtrend but RSI{rsi_window} {float(rsi_v):.1f} oversold; watch for reversal; last={last:.2f}",
         )
     return Recommendation(
         action="AVOID_OR_HEDGE",
         confidence=0.6,
-        rationale=f"Downtrend (SMA20 {sma20:.2f} <= SMA50 {sma50:.2f}); last={last:.2f}",
+        rationale=(
+            f"Downtrend (SMA{sma_fast} {float(sma_fast_v):.2f} <= SMA{sma_slow} {float(sma_slow_v):.2f}); "
+            f"last={last:.2f}"
+        ),
     )
 
 
@@ -73,8 +114,8 @@ def sma_cross_strategy(df: pd.DataFrame, fast: int = 20, slow: int = 50) -> Reco
     if len(close) < (slow + 2):
         return Recommendation(action="INSUFFICIENT_HISTORY", confidence=0.1, rationale=f"Need >={slow+2} days")
 
-    fast_col = f"sma_{fast}"
-    slow_col = f"sma_{slow}"
+    fast_col = sma_col(fast)
+    slow_col = sma_col(slow)
     fast_sma = df[fast_col] if fast_col in df.columns else sma(close, fast)
     slow_sma = df[slow_col] if slow_col in df.columns else sma(close, slow)
     prev_fast, cur_fast = fast_sma.iloc[-2], fast_sma.iloc[-1]
@@ -112,20 +153,35 @@ def sma_cross_strategy(df: pd.DataFrame, fast: int = 20, slow: int = 50) -> Reco
     )
 
 
-def mean_reversion_bb_rsi_strategy(df: pd.DataFrame) -> Recommendation:
+def mean_reversion_bb_rsi_strategy(
+    df: pd.DataFrame,
+    *,
+    bb_window: int = 20,
+    bb_num_std: float = 2.0,
+    rsi_window: int = 14,
+    rsi_low: float = 35,
+    rsi_high: float = 65,
+    min_history_days: int = 60,
+) -> Recommendation:
     if df.empty:
         return Recommendation(action="NO_DATA", confidence=0.0, rationale="No rows")
     close = df["close"] if "close" in df.columns else None
     if close is None:
         return Recommendation(action="NO_DATA", confidence=0.0, rationale="Missing close")
-    if len(close) < 60:
-        return Recommendation(action="INSUFFICIENT_HISTORY", confidence=0.1, rationale="Need >=60 days")
+    if len(close) < min_history_days:
+        return Recommendation(
+            action="INSUFFICIENT_HISTORY",
+            confidence=0.1,
+            rationale=f"Need >={min_history_days} days",
+        )
 
-    if {"bb_lower_20_2", "bb_mid_20_2", "bb_upper_20_2"}.issubset(set(df.columns)):
-        lower, mid, upper = df["bb_lower_20_2"], df["bb_mid_20_2"], df["bb_upper_20_2"]
+    lo_c, mid_c, up_c = bb_cols(bb_window, bb_num_std)
+    if {lo_c, mid_c, up_c}.issubset(set(df.columns)):
+        lower, mid, upper = df[lo_c], df[mid_c], df[up_c]
     else:
-        lower, mid, upper = bollinger_bands(close, window=20, num_std=2.0)
-    rsi14 = df["rsi_14"] if "rsi_14" in df.columns else rsi(close, 14)
+        lower, mid, upper = bollinger_bands(close, window=bb_window, num_std=bb_num_std)
+    rsi_c = rsi_col(rsi_window)
+    rsi14 = df[rsi_c] if rsi_c in df.columns else rsi(close, rsi_window)
     last = float(close.iloc[-1])
 
     lo, mi, up = lower.iloc[-1], mid.iloc[-1], upper.iloc[-1]
@@ -133,17 +189,17 @@ def mean_reversion_bb_rsi_strategy(df: pd.DataFrame) -> Recommendation:
     if pd.isna(lo) or pd.isna(up) or pd.isna(r):
         return Recommendation(action="INSUFFICIENT_HISTORY", confidence=0.1, rationale="Indicators not ready")
 
-    if last < float(lo) and float(r) <= 35:
+    if last < float(lo) and float(r) <= float(rsi_low):
         return Recommendation(
             action="BUY_DCA",
             confidence=0.6,
-            rationale=f"Price below lower band and RSI {float(r):.1f} low; last={last:.2f}",
+            rationale=f"Price below lower band and RSI{rsi_window} {float(r):.1f} low; last={last:.2f}",
         )
-    if last > float(up) and float(r) >= 65:
+    if last > float(up) and float(r) >= float(rsi_high):
         return Recommendation(
             action="HOLD_WAIT",
             confidence=0.6,
-            rationale=f"Price above upper band and RSI {float(r):.1f} high; last={last:.2f}",
+            rationale=f"Price above upper band and RSI{rsi_window} {float(r):.1f} high; last={last:.2f}",
         )
     return Recommendation(
         action="HOLD",

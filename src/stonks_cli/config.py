@@ -60,6 +60,10 @@ class AppConfig(BaseModel):
     ticker_overrides: dict[str, TickerOverride] = Field(default_factory=dict)
     plugins: list[str] = Field(default_factory=list, description="Plugin module names or .py file paths")
     strategy: str = Field(default="basic_trend_rsi")
+    strategy_params: dict[str, object] = Field(
+        default_factory=dict,
+        description="Optional tuning knobs for built-in strategies (e.g. fast/slow windows)",
+    )
     risk: RiskConfig = Field(default_factory=RiskConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     deterministic: bool = Field(default=False, description="Use deterministic execution (stable ordering, no concurrency)")

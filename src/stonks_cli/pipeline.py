@@ -17,8 +17,11 @@ from stonks_cli.analysis.risk import (
 )
 from stonks_cli.analysis.strategy import (
     basic_trend_rsi_strategy,
+    bb_cols,
     mean_reversion_bb_rsi_strategy,
     Recommendation,
+    rsi_col,
+    sma_col,
     sma_cross_strategy,
 )
 from stonks_cli.config import AppConfig
@@ -38,7 +41,51 @@ STRATEGIES = {
 def select_strategy(cfg: AppConfig):
     plugins = registry_for_config(cfg)
     combined = {**STRATEGIES, **(plugins.strategies or {})}
-    return combined.get(cfg.strategy, combined["basic_trend_rsi"])
+    fn = combined.get(cfg.strategy, combined["basic_trend_rsi"])
+
+    # Minimal built-in parameterization via cfg.strategy_params.
+    params = dict(cfg.strategy_params or {})
+    if not params:
+        return fn
+
+    base_fn = fn
+    existing_kwargs = {}
+    if isinstance(fn, partial):
+        base_fn = fn.func
+        existing_kwargs = dict(fn.keywords or {})
+
+    kwargs: dict[str, object] = {}
+    if base_fn is sma_cross_strategy:
+        if "fast" in params:
+            kwargs["fast"] = int(params["fast"])  # type: ignore[arg-type]
+        if "slow" in params:
+            kwargs["slow"] = int(params["slow"])  # type: ignore[arg-type]
+    elif base_fn is basic_trend_rsi_strategy:
+        for k in [
+            "sma_fast",
+            "sma_slow",
+            "rsi_window",
+            "rsi_overbought",
+            "rsi_oversold",
+            "min_history_days",
+        ]:
+            if k in params:
+                kwargs[k] = params[k]
+    elif base_fn is mean_reversion_bb_rsi_strategy:
+        for k in [
+            "bb_window",
+            "bb_num_std",
+            "rsi_window",
+            "rsi_low",
+            "rsi_high",
+            "min_history_days",
+        ]:
+            if k in params:
+                kwargs[k] = params[k]
+
+    if not kwargs:
+        return fn
+    return partial(base_fn, **{**existing_kwargs, **kwargs})
 
 
 def provider_for_config(cfg: AppConfig, ticker: str) -> PriceProvider:
@@ -256,8 +303,8 @@ def _prepare_df_for_strategy(df, strategy_fn):
     if base_fn is sma_cross_strategy:
         fast = int(kwargs.get("fast", 20))
         slow = int(kwargs.get("slow", 50))
-        c_fast = f"sma_{fast}"
-        c_slow = f"sma_{slow}"
+        c_fast = sma_col(fast)
+        c_slow = sma_col(slow)
         if c_fast not in out.columns:
             out[c_fast] = sma(close, fast)
         if c_slow not in out.columns:
@@ -265,26 +312,37 @@ def _prepare_df_for_strategy(df, strategy_fn):
         return out
 
     if base_fn is basic_trend_rsi_strategy:
-        if "sma_20" not in out.columns:
-            out["sma_20"] = sma(close, 20)
-        if "sma_50" not in out.columns:
-            out["sma_50"] = sma(close, 50)
-        if "rsi_14" not in out.columns:
-            out["rsi_14"] = rsi(close, 14)
+        sma_fast = int(kwargs.get("sma_fast", 20))
+        sma_slow = int(kwargs.get("sma_slow", 50))
+        rsi_window = int(kwargs.get("rsi_window", 14))
+        c_fast = sma_col(sma_fast)
+        c_slow = sma_col(sma_slow)
+        c_rsi = rsi_col(rsi_window)
+        if c_fast not in out.columns:
+            out[c_fast] = sma(close, sma_fast)
+        if c_slow not in out.columns:
+            out[c_slow] = sma(close, sma_slow)
+        if c_rsi not in out.columns:
+            out[c_rsi] = rsi(close, rsi_window)
         return out
 
     # mean_reversion_bb_rsi_strategy
-    need_bb = not {"bb_lower_20_2", "bb_mid_20_2", "bb_upper_20_2"}.issubset(set(out.columns))
+    bb_window = int(kwargs.get("bb_window", 20))
+    bb_num_std = float(kwargs.get("bb_num_std", 2.0))
+    rsi_window = int(kwargs.get("rsi_window", 14))
+    lo_c, mid_c, up_c = bb_cols(bb_window, bb_num_std)
+    need_bb = not {lo_c, mid_c, up_c}.issubset(set(out.columns))
     if need_bb:
-        lower, mid, upper = bollinger_bands(close, window=20, num_std=2.0)
-        if "bb_lower_20_2" not in out.columns:
-            out["bb_lower_20_2"] = lower
-        if "bb_mid_20_2" not in out.columns:
-            out["bb_mid_20_2"] = mid
-        if "bb_upper_20_2" not in out.columns:
-            out["bb_upper_20_2"] = upper
-    if "rsi_14" not in out.columns:
-        out["rsi_14"] = rsi(close, 14)
+        lower, mid, upper = bollinger_bands(close, window=bb_window, num_std=bb_num_std)
+        if lo_c not in out.columns:
+            out[lo_c] = lower
+        if mid_c not in out.columns:
+            out[mid_c] = mid
+        if up_c not in out.columns:
+            out[up_c] = upper
+    c_rsi = rsi_col(rsi_window)
+    if c_rsi not in out.columns:
+        out[c_rsi] = rsi(close, rsi_window)
     return out
 
 

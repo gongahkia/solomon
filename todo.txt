@@ -29,10 +29,6 @@ P1 — Performance (without complexity)
 ====================
 P2 — Analysis + Risk Model Tweaks (still heuristic)
 ====================
-[ ] Make strategy parameters configurable.
-    - Example: SMA fast/slow lengths; RSI window/thresholds; BB window/std.
-    - Minimal implementation: add optional config.strategy_params dict[str, Any] and pass into strategies.
-
 [ ] Include position sizing as a structured field in JSON.
     - Today: sizing is appended into rationale text.
     - Add fields like suggested_position_fraction, stop_loss, take_profit, vol_annualized, atr14.

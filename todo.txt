@@ -47,9 +47,6 @@ P2 — Plugins (extensibility as a first-class feature)
 ====================
 P3 — Docs / Packaging / Quality
 ====================
-[ ] Add ruff formatting/linting + (optional) mypy.
-    - Goal: keep the CLI stable and refactors safe.
-
 [ ] Add tests for:
     - schedule timezone support
     - JSON report schema fields

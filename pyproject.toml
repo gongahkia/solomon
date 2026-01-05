@@ -20,9 +20,37 @@ dependencies = [
 
 [project.optional-dependencies]
 yfinance = ["yfinance>=0.2"]
+dev = [
+  "ruff>=0.5",
+  "mypy>=1.10",
+  "pytest>=8.0",
+  "types-requests>=2.32",
+]
 
 [project.scripts]
 stonks-cli = "stonks_cli.cli:main"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+  "E501", # line length handled by formatter
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["stonks_cli"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = false
+ignore_missing_imports = true
 
 [tool.setuptools]
 package-dir = {"" = "src"}

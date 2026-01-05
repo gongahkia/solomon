@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from time import perf_counter
@@ -85,6 +86,78 @@ def do_watchlist_analyze(
         report_name=report_name,
         sandbox=sandbox,
     )
+
+
+def do_signals_diff() -> dict[str, object]:
+    """Compare latest vs previous run using JSON reports.
+
+    Returns a small structured payload suitable for CLI rendering.
+    """
+
+    records = list_history(limit=2)
+    if len(records) < 2:
+        raise FileNotFoundError("Need at least two runs in history")
+
+    latest, prev = records[0], records[1]
+    if not latest.json_path or not prev.json_path:
+        raise FileNotFoundError("Both latest and previous runs must have json_path recorded")
+
+    latest_payload = json.loads(Path(latest.json_path).read_text(encoding="utf-8"))
+    prev_payload = json.loads(Path(prev.json_path).read_text(encoding="utf-8"))
+
+    def _map(payload: dict) -> dict[str, dict[str, object]]:
+        out: dict[str, dict[str, object]] = {}
+        for r in payload.get("results") or []:
+            try:
+                t = str(r.get("ticker"))
+            except Exception:
+                continue
+            out[t] = {
+                "action": r.get("action"),
+                "confidence": r.get("confidence"),
+            }
+        return out
+
+    latest_map = _map(latest_payload)
+    prev_map = _map(prev_payload)
+
+    tickers = sorted(set(latest_map.keys()) | set(prev_map.keys()))
+    changes: list[dict[str, object]] = []
+    for t in tickers:
+        a_new = latest_map.get(t, {}).get("action")
+        a_old = prev_map.get(t, {}).get("action")
+        c_new = latest_map.get(t, {}).get("confidence")
+        c_old = prev_map.get(t, {}).get("confidence")
+
+        if t not in prev_map:
+            changes.append({"ticker": t, "kind": "ADDED", "old": None, "new": a_new, "delta": None})
+            continue
+        if t not in latest_map:
+            changes.append({"ticker": t, "kind": "REMOVED", "old": a_old, "new": None, "delta": None})
+            continue
+
+        try:
+            delta = float(c_new) - float(c_old)
+        except Exception:
+            delta = None
+
+        if a_new != a_old or (delta is not None and abs(delta) >= 1e-9):
+            changes.append(
+                {
+                    "ticker": t,
+                    "kind": "CHANGED" if a_new != a_old else "CONFIDENCE_ONLY",
+                    "old": {"action": a_old, "confidence": c_old},
+                    "new": {"action": a_new, "confidence": c_new},
+                    "delta": delta,
+                }
+            )
+
+    return {
+        "latest": latest.started_at,
+        "previous": prev.started_at,
+        "count": len(changes),
+        "changes": changes,
+    }
 
 
 def do_plugins_list() -> dict[str, object]:

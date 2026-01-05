@@ -52,9 +52,6 @@ P3 — Docs / Packaging / Quality
 ====================
 Future ideas (only if they fit the “CLI reports” ethos)
 ====================
-[ ] Add a simple "signals diff".
-    - Compare latest report vs previous run and highlight changes.
-
 [ ] Add portfolio-aware summary.
     - You already compute an equal-weight portfolio equity; optionally print it in report header.
 

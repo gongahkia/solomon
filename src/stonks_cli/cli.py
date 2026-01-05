@@ -26,6 +26,7 @@ from stonks_cli.commands import (
     do_history_show,
     do_doctor,
     do_plugins_list,
+    do_signals_diff,
     do_watchlist_analyze,
     do_watchlist_list,
     do_watchlist_remove,
@@ -48,6 +49,7 @@ report_app = typer.Typer()
 history_app = typer.Typer()
 plugins_app = typer.Typer()
 watchlist_app = typer.Typer()
+signals_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
@@ -56,6 +58,7 @@ app.add_typer(report_app, name="report")
 app.add_typer(history_app, name="history")
 app.add_typer(plugins_app, name="plugins")
 app.add_typer(watchlist_app, name="watchlist")
+app.add_typer(signals_app, name="signals")
 
 
 @app.callback()
@@ -163,6 +166,59 @@ def watchlist_analyze(
         Console().print(f"Wrote report: {artifacts.report_path}")
         if artifacts.json_path:
             Console().print(f"Wrote json: {artifacts.json_path}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@signals_app.command("diff")
+def signals_diff() -> None:
+    """Compare latest vs previous run and highlight changes."""
+    try:
+        from rich.table import Table
+
+        out = do_signals_diff()
+        changes = list(out.get("changes") or [])
+        if not changes:
+            Console().print("No changes")
+            return
+
+        table = Table(title="Signals Diff")
+        table.add_column("Ticker", style="cyan")
+        table.add_column("Kind")
+        table.add_column("Old")
+        table.add_column("New")
+        table.add_column("Δconf", justify="right")
+
+        for row in changes:
+            t = str(row.get("ticker"))
+            kind = str(row.get("kind"))
+            old = row.get("old")
+            new = row.get("new")
+            delta = row.get("delta")
+
+            def fmt_side(v) -> str:
+                if v is None:
+                    return "-"
+                if isinstance(v, dict):
+                    a = v.get("action")
+                    c = v.get("confidence")
+                    try:
+                        c_f = float(c)
+                        return f"{a} ({c_f:.2f})"
+                    except Exception:
+                        return f"{a}"
+                return str(v)
+
+            d_s = "-"
+            try:
+                if delta is not None:
+                    d_s = f"{float(delta):+.2f}"
+            except Exception:
+                d_s = "-"
+
+            table.add_row(t, kind, fmt_side(old), fmt_side(new), d_s)
+
+        Console().print(table)
     except Exception as e:
         raise _exit_for_error(e)
 

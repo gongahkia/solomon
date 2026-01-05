@@ -60,7 +60,28 @@ def write_text_report(
             return "-"
         return f"{v*100:.1f}%" if pct else f"{v:.2f}"
 
-    for r in results:
+    action_rank = {
+        # Positive actions.
+        "BUY_DCA": 0,
+        # Neutral / watch.
+        "HOLD_WAIT": 10,
+        "WATCH_REVERSAL": 20,
+        # Risk reduction / negative actions.
+        "REDUCE_EXPOSURE": 30,
+        "AVOID_OR_HEDGE": 40,
+        # Data conditions.
+        "INSUFFICIENT_HISTORY": 90,
+        "NO_DATA": 100,
+    }
+
+    def sort_key(r: TickerResult) -> tuple[int, float, str]:
+        return (
+            int(action_rank.get(r.recommendation.action, 50)),
+            -float(r.recommendation.confidence),
+            r.ticker,
+        )
+
+    for r in sorted(results, key=sort_key):
         last = "-" if r.last_close is None else f"{r.last_close:.2f}"
         data_bits = []
         if r.rows_used is not None:

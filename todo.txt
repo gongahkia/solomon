@@ -32,8 +32,7 @@ P2 — Analysis + Risk Model Tweaks (still heuristic)
 ====================
 P2 — Reporting
 ====================
-[ ] Improve report readability for many tickers.
-    - Consider sorting by action/confidence or allow deterministic ordering only.
+
 
 ====================
 P2 — Scheduler

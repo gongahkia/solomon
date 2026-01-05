@@ -9,6 +9,23 @@ from stonks_cli.reporting.report import TickerResult
 def write_csv_summary(results: list[TickerResult], *, out_path: Path) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    action_rank = {
+        "BUY_DCA": 0,
+        "HOLD_WAIT": 10,
+        "WATCH_REVERSAL": 20,
+        "REDUCE_EXPOSURE": 30,
+        "AVOID_OR_HEDGE": 40,
+        "INSUFFICIENT_HISTORY": 90,
+        "NO_DATA": 100,
+    }
+
+    def sort_key(r: TickerResult) -> tuple[int, float, str]:
+        return (
+            int(action_rank.get(r.recommendation.action, 50)),
+            -float(r.recommendation.confidence),
+            r.ticker,
+        )
+
     with out_path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(
             f,
@@ -16,7 +33,7 @@ def write_csv_summary(results: list[TickerResult], *, out_path: Path) -> Path:
             lineterminator="\n",
         )
         writer.writeheader()
-        for r in results:
+        for r in sorted(results, key=sort_key):
             metrics = r.backtest
             writer.writerow(
                 {

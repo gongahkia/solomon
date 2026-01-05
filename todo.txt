@@ -48,7 +48,6 @@ P2 — Plugins (extensibility as a first-class feature)
 P3 — Docs / Packaging / Quality
 ====================
 [ ] Add tests for:
-    - schedule timezone support
     - JSON report schema fields
     - doctor output keys (smoke)
 

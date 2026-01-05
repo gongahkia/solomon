@@ -153,6 +153,19 @@ def compute_results(
             df = df.loc[:end]
 
         df = _prepare_df_for_strategy(df, strategy_fn)
+
+        rows_used = int(len(df))
+        last_date = None
+        if not df.empty:
+            try:
+                last_idx = df.index[-1]
+                # Prefer ISO date for Timestamp-like index.
+                last_date = getattr(last_idx, "date", lambda: last_idx)()
+                last_date = str(last_date)
+            except Exception:
+                last_date = None
+        expected_cols = {"close", "open", "high", "low", "volume"}
+        missing_columns = sorted(expected_cols - set(df.columns))
         last_close = None
         suggested_position_fraction: float | None = None
         vol_annualized: float | None = None
@@ -255,6 +268,9 @@ def compute_results(
                 last_close=last_close,
                 recommendation=rec,
                 backtest=metrics,
+                rows_used=rows_used,
+                last_date=last_date,
+                missing_columns=missing_columns,
                 suggested_position_fraction=suggested_position_fraction,
                 vol_annualized=vol_annualized,
                 atr14=atr14,
@@ -287,6 +303,9 @@ def compute_results(
                     last_close=r.last_close,
                     recommendation=rec,
                     backtest=r.backtest,
+                    rows_used=r.rows_used,
+                    last_date=r.last_date,
+                    missing_columns=r.missing_columns,
                     suggested_position_fraction=r.suggested_position_fraction,
                     vol_annualized=r.vol_annualized,
                     atr14=r.atr14,

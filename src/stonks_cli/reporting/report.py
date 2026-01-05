@@ -17,6 +17,9 @@ class TickerResult:
     last_close: float | None
     recommendation: Recommendation
     backtest: BacktestMetrics | None = None
+    rows_used: int | None = None
+    last_date: str | None = None
+    missing_columns: list[str] | None = None
     suggested_position_fraction: float | None = None
     vol_annualized: float | None = None
     atr14: float | None = None
@@ -37,6 +40,7 @@ def write_text_report(results: list[TickerResult], out_dir: Path, *, portfolio: 
     table.add_column("CAGR", justify="right")
     table.add_column("Sharpe", justify="right")
     table.add_column("MaxDD", justify="right")
+    table.add_column("Data")
     table.add_column("Rationale")
 
     def fmt(v: float | None, *, pct: bool = False) -> str:
@@ -46,6 +50,14 @@ def write_text_report(results: list[TickerResult], out_dir: Path, *, portfolio: 
 
     for r in results:
         last = "-" if r.last_close is None else f"{r.last_close:.2f}"
+        data_bits = []
+        if r.rows_used is not None:
+            data_bits.append(f"n={r.rows_used}")
+        if r.last_date:
+            data_bits.append(f"last={r.last_date}")
+        if r.missing_columns:
+            data_bits.append("miss=" + ",".join(r.missing_columns))
+        data_summary = " ".join(data_bits) if data_bits else "-"
         table.add_row(
             r.ticker,
             last,
@@ -54,6 +66,7 @@ def write_text_report(results: list[TickerResult], out_dir: Path, *, portfolio: 
             fmt(r.backtest.cagr if r.backtest else None, pct=True),
             fmt(r.backtest.sharpe if r.backtest else None, pct=False),
             fmt(r.backtest.max_drawdown if r.backtest else None, pct=True),
+            data_summary,
             r.recommendation.rationale,
         )
 

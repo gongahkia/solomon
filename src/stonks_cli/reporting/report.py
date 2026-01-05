@@ -27,10 +27,22 @@ class TickerResult:
     take_profit: float | None = None
 
 
-def write_text_report(results: list[TickerResult], out_dir: Path, *, portfolio: BacktestMetrics | None = None) -> Path:
+def write_text_report(
+    results: list[TickerResult],
+    out_dir: Path,
+    *,
+    portfolio: BacktestMetrics | None = None,
+    name: str | None = None,
+) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    path = out_dir / f"report_{ts}.txt"
+    if name:
+        n = name
+        if not n.lower().endswith(".txt"):
+            n = f"{n}.txt"
+        path = out_dir / n
+    else:
+        ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        path = out_dir / f"report_{ts}.txt"
 
     table = Table(title="Stonks Report")
     table.add_column("Ticker", style="cyan")

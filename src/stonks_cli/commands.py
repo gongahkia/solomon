@@ -120,9 +120,18 @@ def do_analyze(
     *,
     start: str | None = None,
     end: str | None = None,
+    report_name: str | None = None,
     sandbox: bool = False,
 ) -> Path:
-    artifacts = do_analyze_artifacts(tickers, out_dir=out_dir, json_out=False, start=start, end=end, sandbox=sandbox)
+    artifacts = do_analyze_artifacts(
+        tickers,
+        out_dir=out_dir,
+        json_out=False,
+        start=start,
+        end=end,
+        report_name=report_name,
+        sandbox=sandbox,
+    )
     return artifacts.report_path
 
 
@@ -133,6 +142,7 @@ def do_analyze_artifacts(
     json_out: bool,
     start: str | None = None,
     end: str | None = None,
+    report_name: str | None = None,
     sandbox: bool = False,
 ) -> AnalysisArtifacts:
     cfg = load_config()
@@ -141,7 +151,7 @@ def do_analyze_artifacts(
 
     console = Console()
     results, portfolio = compute_results(cfg, console, start=start, end=end)
-    report_path = write_text_report(results, out_dir=out_dir, portfolio=portfolio)
+    report_path = write_text_report(results, out_dir=out_dir, portfolio=portfolio, name=report_name)
 
     json_path = None
     if json_out:
@@ -239,14 +249,14 @@ def do_history_show(index: int, *, limit: int = 2000):
     return get_history_record(index, limit=limit)
 
 
-def do_schedule_once(out_dir: Path, *, sandbox: bool = False) -> Path:
+def do_schedule_once(out_dir: Path, *, sandbox: bool = False, report_name: str | None = None) -> Path:
     cfg = load_config()
-    return run_once(cfg, out_dir=out_dir, sandbox=sandbox)
+    return run_once(cfg, out_dir=out_dir, sandbox=sandbox, report_name=report_name)
 
 
-def do_schedule_run(out_dir: Path) -> None:
+def do_schedule_run(out_dir: Path, *, report_name: str | None = None) -> None:
     cfg = load_config()
-    run_scheduler(cfg, out_dir=out_dir)
+    run_scheduler(cfg, out_dir=out_dir, report_name=report_name)
 
 
 @dataclass(frozen=True)

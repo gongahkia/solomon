@@ -402,10 +402,17 @@ def _prepare_df_for_strategy(df, strategy_fn):
     return out
 
 
-def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None, *, sandbox: bool = False) -> Path:
+def run_once(
+    cfg: AppConfig,
+    out_dir: Path,
+    console: Console | None = None,
+    *,
+    sandbox: bool = False,
+    report_name: str | None = None,
+) -> Path:
     console = console or Console()
     results, portfolio_metrics = compute_results(cfg, console)
-    report_path = write_text_report(results, out_dir=out_dir, portfolio=portfolio_metrics)
+    report_path = write_text_report(results, out_dir=out_dir, portfolio=portfolio_metrics, name=report_name)
     if not sandbox:
         save_last_run(cfg.tickers, report_path)
     console.print(f"[green]Wrote report[/green] {report_path}")

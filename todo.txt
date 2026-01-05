@@ -32,9 +32,6 @@ P2 — Analysis + Risk Model Tweaks (still heuristic)
 ====================
 P2 — Reporting
 ====================
-[ ] Add a stable report filename option.
-    - E.g. --name report_latest.txt or --prefix, useful for scheduler + dashboards.
-
 [ ] Write CSV summary alongside text report (optional flag).
     - One row per ticker: action/confidence/cagr/sharpe/maxdd.
 

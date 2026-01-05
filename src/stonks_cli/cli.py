@@ -162,6 +162,7 @@ def analyze(
     start: str | None = typer.Option(None, "--start", help="YYYY-MM-DD"),
     end: str | None = typer.Option(None, "--end", help="YYYY-MM-DD"),
     out_dir: str = typer.Option("reports", "--out-dir"),
+    name: str | None = typer.Option(None, "--name", help="Stable report filename (e.g. report_latest.txt)"),
     json_out: bool = typer.Option(False, "--json", "--no-json", help="Write JSON output alongside the report"),
     sandbox: bool = typer.Option(False, "--sandbox", help="Run without persisting last-run history"),
 ) -> None:
@@ -174,13 +175,21 @@ def analyze(
                 json_out=True,
                 start=start,
                 end=end,
+                report_name=name,
                 sandbox=sandbox,
             )
             Console().print(f"Wrote report: {artifacts.report_path}")
             if artifacts.json_path:
                 Console().print(f"Wrote json: {artifacts.json_path}")
             return
-        do_analyze(tickers if tickers else None, out_dir=Path(out_dir), start=start, end=end, sandbox=sandbox)
+        do_analyze(
+            tickers if tickers else None,
+            out_dir=Path(out_dir),
+            start=start,
+            end=end,
+            report_name=name,
+            sandbox=sandbox,
+        )
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -220,10 +229,13 @@ def bench(
 
 
 @schedule_app.command("run")
-def schedule_run(out_dir: str = typer.Option("reports", "--out-dir")) -> None:
+def schedule_run(
+    out_dir: str = typer.Option("reports", "--out-dir"),
+    name: str | None = typer.Option(None, "--name", help="Stable report filename (overwrites each run)"),
+) -> None:
     """Run the cron-like scheduler in the foreground."""
     try:
-        do_schedule_run(out_dir=Path(out_dir))
+        do_schedule_run(out_dir=Path(out_dir), report_name=name)
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -232,10 +244,11 @@ def schedule_run(out_dir: str = typer.Option("reports", "--out-dir")) -> None:
 def schedule_once(
     out_dir: str = typer.Option("reports", "--out-dir"),
     sandbox: bool = typer.Option(False, "--sandbox", help="Run without persisting last-run history"),
+    name: str | None = typer.Option(None, "--name", help="Stable report filename"),
 ) -> None:
     """Run one analysis+report (same as a single scheduled job)."""
     try:
-        do_schedule_once(out_dir=Path(out_dir), sandbox=sandbox)
+        do_schedule_once(out_dir=Path(out_dir), sandbox=sandbox, report_name=name)
     except Exception as e:
         raise _exit_for_error(e)
 

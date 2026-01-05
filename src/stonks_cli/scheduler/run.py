@@ -29,7 +29,13 @@ class SchedulerHandle:
             pass
 
 
-def build_scheduler(cfg: AppConfig, out_dir: Path, console: Console | None = None) -> BlockingScheduler:
+def build_scheduler(
+    cfg: AppConfig,
+    out_dir: Path,
+    console: Console | None = None,
+    *,
+    report_name: str | None = None,
+) -> BlockingScheduler:
     console = console or Console()
     run_lock = Lock()
     tz = resolve_timezone(cfg.schedule.timezone)
@@ -42,7 +48,7 @@ def build_scheduler(cfg: AppConfig, out_dir: Path, console: Console | None = Non
         t0 = perf_counter()
         console.print(f"[cyan]Scheduled run started[/cyan] {started.isoformat()}")
         try:
-            report_path = run_once(cfg, out_dir=out_dir, console=console)
+            report_path = run_once(cfg, out_dir=out_dir, console=console, report_name=report_name)
             ended = datetime.now()
             dt_s = perf_counter() - t0
             console.print(f"[cyan]Scheduled run finished[/cyan] {ended.isoformat()} ({dt_s:.2f}s) report={report_path}")
@@ -63,10 +69,10 @@ def build_scheduler(cfg: AppConfig, out_dir: Path, console: Console | None = Non
     return scheduler
 
 
-def run_scheduler(cfg: AppConfig, out_dir: Path) -> None:
+def run_scheduler(cfg: AppConfig, out_dir: Path, *, report_name: str | None = None) -> None:
     console = Console()
     pid = acquire_pid_file(default_state_dir() / "scheduler.pid")
-    scheduler = build_scheduler(cfg, out_dir=out_dir, console=console)
+    scheduler = build_scheduler(cfg, out_dir=out_dir, console=console, report_name=report_name)
     console.print(f"[green]Scheduler running[/green] cron='{cfg.schedule.cron}'")
 
     def _shutdown(signum: int, _frame) -> None:
@@ -93,9 +99,9 @@ def run_scheduler(cfg: AppConfig, out_dir: Path) -> None:
         pid.remove()
 
 
-def start_scheduler_in_thread(cfg: AppConfig, out_dir: Path) -> SchedulerHandle:
+def start_scheduler_in_thread(cfg: AppConfig, out_dir: Path, *, report_name: str | None = None) -> SchedulerHandle:
     console = Console()
-    scheduler = build_scheduler(cfg, out_dir=out_dir, console=console)
+    scheduler = build_scheduler(cfg, out_dir=out_dir, console=console, report_name=report_name)
 
     def runner() -> None:
         console.print(f"[green]Scheduler running (background)[/green] cron='{cfg.schedule.cron}'")

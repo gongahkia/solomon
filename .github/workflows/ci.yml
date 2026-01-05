@@ -1,118 +1,31 @@
-name: ci
+name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
-permissions:
-  contents: read
-
 jobs:
-  quality:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
-        with:
-          go-version: '1.26.6'
-      - run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - run: go vet ./...
-      - run: go test -race -count=1 -timeout=2m ./...
-      - run: go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
-      - run: $(go env GOPATH)/bin/staticcheck ./...
-      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-      - run: $(go env GOPATH)/bin/govulncheck ./...
-      - run: go install github.com/securego/gosec/v2/cmd/gosec@v2.23.0
-      - run: $(go env GOPATH)/bin/gosec ./...
-      - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
-      - run: $(go env GOPATH)/bin/actionlint
-      - run: shellcheck scripts/*.sh
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@v4
 
-      - run: sudo apt-get update && sudo apt-get install -y expect
-
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          go-version: '1.26.6'
-      - run: make ci
-      - run: make latency-gate
+          python-version: ${{ matrix.python-version }}
+          cache: pip
 
-  macos-integration:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
-        with:
-          go-version: '1.26.6'
-      - run: make ci
-      - run: ./close-enough version
-      - run: |
-          set +e
-          ./close-enough check
-          result_code=$?
-          set -e
-          test "$result_code" -eq 2
-
-  linux-integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - run: sudo apt-get update && sudo apt-get install -y expect fish zsh
-
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
-        with:
-          go-version: '1.26.6'
-      - run: make ci
-      - run: ./close-enough version
-      - run: |
-          set +e
-          ./close-enough check
-          result_code=$?
-          set -e
-          test "$result_code" -eq 2
-
-  shell-integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - run: sudo apt-get update && sudo apt-get install -y expect fish zsh
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
-        with:
-          go-version: '1.26.6'
-      - run: go test -race -count=1 -timeout=2m ./internal/shell
-
-  windows-integration:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
-        with:
-          go-version: '1.26.6'
-      - shell: pwsh
+      - name: Install
         run: |
-          go vet ./...
-          go test -race ./...
-          go build -trimpath -buildvcs=false -mod=readonly -ldflags "-X main.version=dev -X main.commit=unknown" -o close-enough.exe ./cmd/close-enough
-      - shell: pwsh
-        run: |
-          & .\close-enough.exe version
-          if ($LASTEXITCODE -ne 0) { throw "version failed: $LASTEXITCODE" }
-          & .\close-enough.exe check
-          if ($LASTEXITCODE -ne 2) { throw "expected invalid-input exit 2, got $LASTEXITCODE" }
+          python -m pip install -U pip
+          python -m pip install -e .
+          python -m pip install pytest
 
-  race-leak:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - run: sudo apt-get update && sudo apt-get install -y expect
-
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
-        with:
-          go-version: '1.26.6'
-      - run: go test -race -count=1 -timeout=2m ./...
+      - name: Test
+        run: pytest -q

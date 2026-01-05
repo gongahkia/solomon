@@ -107,8 +107,6 @@ def write_text_report(
     console.print("Stonks Report")
     console.print(f"generated_at: {datetime.now().isoformat()}")
     console.print(f"tickers: {len(results)}")
-    console.print("")
-    console.print(table)
 
     if portfolio is not None:
         summary = Table(title="Portfolio Backtest")
@@ -121,6 +119,9 @@ def write_text_report(
             fmt(portfolio.max_drawdown, pct=True),
         )
         console.print(summary)
+
+    console.print("")
+    console.print(table)
 
     console.print("")
     console.print("Risk Notes & Assumptions")

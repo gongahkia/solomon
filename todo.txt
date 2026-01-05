@@ -52,7 +52,4 @@ P3 — Docs / Packaging / Quality
 ====================
 Future ideas (only if they fit the “CLI reports” ethos)
 ====================
-[ ] Add portfolio-aware summary.
-    - You already compute an equal-weight portfolio equity; optionally print it in report header.
-
 [ ] Optional interactive TUI could be added later, but keep core non-interactive and scriptable.

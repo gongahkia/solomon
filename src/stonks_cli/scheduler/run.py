@@ -14,7 +14,7 @@ from stonks_cli.config import AppConfig
 from stonks_cli.pipeline import run_once
 from stonks_cli.scheduler.pidfile import acquire_pid_file
 from stonks_cli.scheduler.tz import cron_trigger_from_config, resolve_timezone
-from stonks_cli.storage import default_state_dir
+from stonks_cli.storage import default_state_dir, save_last_failure
 
 
 @dataclass
@@ -57,7 +57,11 @@ def build_scheduler(
             ended = datetime.now()
             dt_s = perf_counter() - t0
             console.print(f"[red]Scheduled run failed[/red] {ended.isoformat()} ({dt_s:.2f}s) error={e}")
-            raise
+            try:
+                save_last_failure(error=repr(e), where="scheduler")
+            except Exception:
+                pass
+            return
         finally:
             try:
                 run_lock.release()

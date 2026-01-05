@@ -61,6 +61,17 @@ def save_last_run(tickers: list[str], report_path: Path | None, json_path: Path 
         f.write(json.dumps(record) + "\n")
 
 
+def save_last_failure(*, error: str, where: str = "scheduler") -> None:
+    state = load_state()
+    failed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    state["last_failure"] = {
+        "failed_at": failed_at,
+        "where": where,
+        "error": str(error),
+    }
+    save_state(state)
+
+
 def list_history(limit: int = 20) -> list[RunRecord]:
     hp = history_path()
     if not hp.exists():

@@ -37,10 +37,6 @@ P2 — Reporting
 ====================
 P2 — Scheduler
 ====================
-[ ] Better scheduler failure behavior.
-    - Today: an exception in job() is re-raised; decide whether scheduler should keep running.
-    - Suggest: catch, log, continue, and optionally track last failure in state.json.
-
 [ ] Add `schedule run --sandbox` parity with `schedule once`.
 
 ====================

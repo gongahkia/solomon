@@ -164,6 +164,7 @@ def analyze(
     out_dir: str = typer.Option("reports", "--out-dir"),
     name: str | None = typer.Option(None, "--name", help="Stable report filename (e.g. report_latest.txt)"),
     json_out: bool = typer.Option(False, "--json", "--no-json", help="Write JSON output alongside the report"),
+    csv_out: bool = typer.Option(False, "--csv", "--no-csv", help="Write CSV summary alongside the report"),
     sandbox: bool = typer.Option(False, "--sandbox", help="Run without persisting last-run history"),
 ) -> None:
     """Analyze tickers and write a report."""
@@ -173,6 +174,7 @@ def analyze(
                 tickers if tickers else None,
                 out_dir=Path(out_dir),
                 json_out=True,
+                csv_out=csv_out,
                 start=start,
                 end=end,
                 report_name=name,
@@ -188,6 +190,7 @@ def analyze(
             start=start,
             end=end,
             report_name=name,
+            csv_out=csv_out,
             sandbox=sandbox,
         )
     except Exception as e:
@@ -232,10 +235,11 @@ def bench(
 def schedule_run(
     out_dir: str = typer.Option("reports", "--out-dir"),
     name: str | None = typer.Option(None, "--name", help="Stable report filename (overwrites each run)"),
+    csv_out: bool = typer.Option(False, "--csv", "--no-csv", help="Write CSV summary alongside the report"),
 ) -> None:
     """Run the cron-like scheduler in the foreground."""
     try:
-        do_schedule_run(out_dir=Path(out_dir), report_name=name)
+        do_schedule_run(out_dir=Path(out_dir), report_name=name, csv_out=csv_out)
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -245,10 +249,11 @@ def schedule_once(
     out_dir: str = typer.Option("reports", "--out-dir"),
     sandbox: bool = typer.Option(False, "--sandbox", help="Run without persisting last-run history"),
     name: str | None = typer.Option(None, "--name", help="Stable report filename"),
+    csv_out: bool = typer.Option(False, "--csv", "--no-csv", help="Write CSV summary alongside the report"),
 ) -> None:
     """Run one analysis+report (same as a single scheduled job)."""
     try:
-        do_schedule_once(out_dir=Path(out_dir), sandbox=sandbox, report_name=name)
+        do_schedule_once(out_dir=Path(out_dir), sandbox=sandbox, report_name=name, csv_out=csv_out)
     except Exception as e:
         raise _exit_for_error(e)
 

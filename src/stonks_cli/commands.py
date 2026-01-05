@@ -18,6 +18,7 @@ from stonks_cli.scheduler.run import SchedulerHandle, run_scheduler, start_sched
 from stonks_cli.scheduler.tz import cron_trigger_from_config, resolve_timezone
 from stonks_cli.data.providers import CsvProvider, StooqProvider
 from stonks_cli.reporting.backtest_report import BacktestRow, write_backtest_report
+from stonks_cli.reporting.csv_report import write_csv_summary
 from stonks_cli.reporting.json_report import write_json_report
 from stonks_cli.reporting.report import write_text_report
 from stonks_cli.storage import get_history_record, get_last_report_path, get_last_run, list_history, save_last_run
@@ -121,12 +122,14 @@ def do_analyze(
     start: str | None = None,
     end: str | None = None,
     report_name: str | None = None,
+    csv_out: bool = False,
     sandbox: bool = False,
 ) -> Path:
     artifacts = do_analyze_artifacts(
         tickers,
         out_dir=out_dir,
         json_out=False,
+        csv_out=csv_out,
         start=start,
         end=end,
         report_name=report_name,
@@ -140,6 +143,7 @@ def do_analyze_artifacts(
     *,
     out_dir: Path,
     json_out: bool,
+    csv_out: bool = False,
     start: str | None = None,
     end: str | None = None,
     report_name: str | None = None,
@@ -152,6 +156,10 @@ def do_analyze_artifacts(
     console = Console()
     results, portfolio = compute_results(cfg, console, start=start, end=end)
     report_path = write_text_report(results, out_dir=out_dir, portfolio=portfolio, name=report_name)
+
+    if csv_out:
+        csv_path = out_dir / f"{report_path.stem}.csv"
+        write_csv_summary(results, out_path=csv_path)
 
     json_path = None
     if json_out:
@@ -249,14 +257,20 @@ def do_history_show(index: int, *, limit: int = 2000):
     return get_history_record(index, limit=limit)
 
 
-def do_schedule_once(out_dir: Path, *, sandbox: bool = False, report_name: str | None = None) -> Path:
+def do_schedule_once(
+    out_dir: Path,
+    *,
+    sandbox: bool = False,
+    report_name: str | None = None,
+    csv_out: bool = False,
+) -> Path:
     cfg = load_config()
-    return run_once(cfg, out_dir=out_dir, sandbox=sandbox, report_name=report_name)
+    return run_once(cfg, out_dir=out_dir, sandbox=sandbox, report_name=report_name, csv_out=csv_out)
 
 
-def do_schedule_run(out_dir: Path, *, report_name: str | None = None) -> None:
+def do_schedule_run(out_dir: Path, *, report_name: str | None = None, csv_out: bool = False) -> None:
     cfg = load_config()
-    run_scheduler(cfg, out_dir=out_dir, report_name=report_name)
+    run_scheduler(cfg, out_dir=out_dir, report_name=report_name, csv_out=csv_out)
 
 
 @dataclass(frozen=True)

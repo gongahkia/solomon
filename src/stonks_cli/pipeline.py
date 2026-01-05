@@ -27,6 +27,7 @@ from stonks_cli.analysis.strategy import (
 from stonks_cli.config import AppConfig
 from stonks_cli.data.providers import CsvProvider, PriceProvider, StooqProvider, YFinanceProvider, normalize_ticker
 from stonks_cli.plugins import registry_for_config
+from stonks_cli.reporting.csv_report import write_csv_summary
 from stonks_cli.reporting.report import TickerResult, write_text_report
 from stonks_cli.storage import save_last_run
 
@@ -409,10 +410,13 @@ def run_once(
     *,
     sandbox: bool = False,
     report_name: str | None = None,
+    csv_out: bool = False,
 ) -> Path:
     console = console or Console()
     results, portfolio_metrics = compute_results(cfg, console)
     report_path = write_text_report(results, out_dir=out_dir, portfolio=portfolio_metrics, name=report_name)
+    if csv_out:
+        write_csv_summary(results, out_path=out_dir / f"{report_path.stem}.csv")
     if not sandbox:
         save_last_run(cfg.tickers, report_path)
     console.print(f"[green]Wrote report[/green] {report_path}")

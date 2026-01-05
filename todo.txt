@@ -32,9 +32,6 @@ P2 — Analysis + Risk Model Tweaks (still heuristic)
 ====================
 P2 — Reporting
 ====================
-[ ] Write CSV summary alongside text report (optional flag).
-    - One row per ticker: action/confidence/cagr/sharpe/maxdd.
-
 [ ] Improve report readability for many tickers.
     - Consider sorting by action/confidence or allow deterministic ordering only.
 

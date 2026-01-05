@@ -75,6 +75,8 @@ def walk_forward_backtest(
     *,
     strategy_fn: Callable[[pd.DataFrame], Recommendation],
     min_history_rows: int = 60,
+    fee_bps: float = 0.0,
+    slippage_bps: float = 0.0,
 ) -> BacktestSeries:
     """Naive walk-forward backtest.
 
@@ -105,6 +107,12 @@ def walk_forward_backtest(
             position.iloc[i] = _action_to_position(rec.action)
 
     strat_rets = rets * position.shift(1).fillna(0.0)
+
+    total_cost_bps = float(fee_bps) + float(slippage_bps)
+    if total_cost_bps > 0:
+        cost_rate = total_cost_bps / 10000.0
+        turnover = (position - position.shift(1).fillna(0.0)).abs()
+        strat_rets = strat_rets - (turnover * cost_rate)
     equity = (1.0 + strat_rets).cumprod()
     return BacktestSeries(equity=equity, position=position)
 

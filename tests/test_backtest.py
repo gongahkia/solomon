@@ -77,3 +77,17 @@ def test_walk_forward_backtest_sma_cross_matches_naive_non_default_params() -> N
 
     equity_naive = naive(df, 60)
     assert float(out_vec.equity.iloc[-1]) == float(equity_naive.iloc[-1])
+
+
+def test_walk_forward_backtest_applies_fee_and_slippage_costs() -> None:
+    idx = pd.date_range("2025-01-01", periods=120, freq="D")
+    close = pd.Series(range(1, 121), index=idx, dtype=float)
+    df = pd.DataFrame({"close": close})
+
+    def always_buy(_: pd.DataFrame) -> Recommendation:
+        return Recommendation(action="BUY_DCA", confidence=1.0, rationale="")
+
+    no_cost = walk_forward_backtest(df, strategy_fn=always_buy, min_history_rows=10, fee_bps=0.0, slippage_bps=0.0)
+    with_cost = walk_forward_backtest(df, strategy_fn=always_buy, min_history_rows=10, fee_bps=5.0, slippage_bps=5.0)
+
+    assert float(with_cost.equity.iloc[-1]) < float(no_cost.equity.iloc[-1])

@@ -29,10 +29,6 @@ P1 — Performance (without complexity)
 ====================
 P2 — Analysis + Risk Model Tweaks (still heuristic)
 ====================
-[ ] Backtest realism knobs (still simple).
-    - Add optional fee/slippage assumptions in config (defaults 0).
-    - Keep walk-forward logic the same; just adjust returns.
-
 ====================
 P2 — Reporting
 ====================

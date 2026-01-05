@@ -257,7 +257,13 @@ def compute_results(
                     rationale=f"{rec.rationale} | take~{tp:.2f} (3.0x ATR14 {atr_f:.2f})",
                 )
 
-        bt = walk_forward_backtest(df, strategy_fn=strategy_fn, min_history_rows=cfg.risk.min_history_days)
+        bt = walk_forward_backtest(
+            df,
+            strategy_fn=strategy_fn,
+            min_history_rows=cfg.risk.min_history_days,
+            fee_bps=cfg.backtest.fee_bps,
+            slippage_bps=cfg.backtest.slippage_bps,
+        )
         metrics = compute_backtest_metrics(bt.equity)
         if bt.equity is not None and not bt.equity.empty:
             per_ticker_equity[series.ticker] = bt.equity

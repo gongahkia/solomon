@@ -201,7 +201,13 @@ def do_backtest(
             df = df.loc[start:]
         if end:
             df = df.loc[:end]
-        bt = walk_forward_backtest(df, strategy_fn=strategy_fn, min_history_rows=cfg.risk.min_history_days)
+        bt = walk_forward_backtest(
+            df,
+            strategy_fn=strategy_fn,
+            min_history_rows=cfg.risk.min_history_days,
+            fee_bps=cfg.backtest.fee_bps,
+            slippage_bps=cfg.backtest.slippage_bps,
+        )
         metrics = compute_backtest_metrics(bt.equity)
         rows.append(BacktestRow(ticker=series.ticker, metrics=metrics))
 

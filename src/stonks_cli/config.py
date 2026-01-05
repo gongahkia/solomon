@@ -48,6 +48,12 @@ class RiskConfig(BaseModel):
     min_history_days: int = Field(default=60, ge=1)
 
 
+class BacktestConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    fee_bps: float = Field(default=0.0, ge=0.0, description="Per-trade fee in basis points")
+    slippage_bps: float = Field(default=0.0, ge=0.0, description="Per-trade slippage in basis points")
+
+
 class TickerOverride(BaseModel):
     model_config = ConfigDict(extra="ignore")
     data: DataConfig = Field(default_factory=DataConfig)
@@ -65,6 +71,7 @@ class AppConfig(BaseModel):
         description="Optional tuning knobs for built-in strategies (e.g. fast/slow windows)",
     )
     risk: RiskConfig = Field(default_factory=RiskConfig)
+    backtest: BacktestConfig = Field(default_factory=BacktestConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     deterministic: bool = Field(default=False, description="Use deterministic execution (stable ordering, no concurrency)")
     seed: int = Field(default=0, description="Seed value for deterministic mode")

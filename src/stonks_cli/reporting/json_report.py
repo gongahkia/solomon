@@ -32,6 +32,11 @@ def write_json_report(
                 "action": r.recommendation.action,
                 "confidence": r.recommendation.confidence,
                 "rationale": r.recommendation.rationale,
+                "suggested_position_fraction": r.suggested_position_fraction,
+                "vol_annualized": r.vol_annualized,
+                "atr14": r.atr14,
+                "stop_loss": r.stop_loss,
+                "take_profit": r.take_profit,
                 "backtest": _metrics_dict(r.backtest),
             }
             for r in results

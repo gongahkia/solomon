@@ -17,6 +17,11 @@ class TickerResult:
     last_close: float | None
     recommendation: Recommendation
     backtest: BacktestMetrics | None = None
+    suggested_position_fraction: float | None = None
+    vol_annualized: float | None = None
+    atr14: float | None = None
+    stop_loss: float | None = None
+    take_profit: float | None = None
 
 
 def write_text_report(results: list[TickerResult], out_dir: Path, *, portfolio: BacktestMetrics | None = None) -> Path:

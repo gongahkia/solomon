@@ -29,10 +29,6 @@ P1 — Performance (without complexity)
 ====================
 P2 — Analysis + Risk Model Tweaks (still heuristic)
 ====================
-[ ] Include position sizing as a structured field in JSON.
-    - Today: sizing is appended into rationale text.
-    - Add fields like suggested_position_fraction, stop_loss, take_profit, vol_annualized, atr14.
-
 [ ] Add “data sufficiency” summary per ticker.
     - Report how many rows used, last date, missing columns; keeps user trust high.
 

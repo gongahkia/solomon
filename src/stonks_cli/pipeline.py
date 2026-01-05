@@ -154,6 +154,11 @@ def compute_results(
 
         df = _prepare_df_for_strategy(df, strategy_fn)
         last_close = None
+        suggested_position_fraction: float | None = None
+        vol_annualized: float | None = None
+        atr14: float | None = None
+        stop_loss: float | None = None
+        take_profit: float | None = None
         if "close" in df.columns and not df.empty:
             last_close = float(df["close"].iloc[-1])
         if len(df) < cfg.risk.min_history_days:
@@ -188,11 +193,14 @@ def compute_results(
                 vol_f = float(vol)
             except Exception:
                 vol_f = float("nan")
+            if vol_f == vol_f:
+                vol_annualized = vol_f
             pos = suggest_position_fraction_by_volatility(
                 vol_f,
                 max_fraction=cfg.risk.max_position_fraction,
             )
             if pos is not None:
+                suggested_position_fraction = float(pos)
                 per_ticker_fraction[series.ticker] = pos
                 rec = Recommendation(
                     action=rec.action,
@@ -204,13 +212,19 @@ def compute_results(
 
         if {"high", "low", "close"}.issubset(set(df.columns)) and not df.empty:
             last = float(df["close"].iloc[-1])
-            atr14 = atr(df["high"], df["low"], df["close"], window=14).iloc[-1]
+            atr14_s = atr(df["high"], df["low"], df["close"], window=14).iloc[-1]
             try:
-                atr_f = float(atr14)
+                atr_f = float(atr14_s)
             except Exception:
                 atr_f = float("nan")
+            if atr_f == atr_f:
+                atr14 = atr_f
             sl = suggest_stop_loss_price_by_atr(last, atr_f, multiple=2.0)
             tp = suggest_take_profit_price_by_atr(last, atr_f, multiple=3.0)
+            if sl is not None:
+                stop_loss = float(sl)
+            if tp is not None:
+                take_profit = float(tp)
             if sl is not None and tp is not None:
                 rec = Recommendation(
                     action=rec.action,
@@ -241,6 +255,11 @@ def compute_results(
                 last_close=last_close,
                 recommendation=rec,
                 backtest=metrics,
+                suggested_position_fraction=suggested_position_fraction,
+                vol_annualized=vol_annualized,
+                atr14=atr14,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
             )
         )
 
@@ -262,7 +281,19 @@ def compute_results(
                     f"{r.recommendation.rationale} | portfolio_cap {cfg.risk.max_portfolio_exposure_fraction*100:.0f}% (scaled x{factor:.2f}; now~{frac*100:.0f}%)"
                 ),
             )
-            new_results.append(TickerResult(ticker=r.ticker, last_close=r.last_close, recommendation=rec))
+            new_results.append(
+                TickerResult(
+                    ticker=r.ticker,
+                    last_close=r.last_close,
+                    recommendation=rec,
+                    backtest=r.backtest,
+                    suggested_position_fraction=r.suggested_position_fraction,
+                    vol_annualized=r.vol_annualized,
+                    atr14=r.atr14,
+                    stop_loss=r.stop_loss,
+                    take_profit=r.take_profit,
+                )
+            )
         results = new_results
 
     portfolio_metrics = None

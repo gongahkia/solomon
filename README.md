@@ -157,81 +157,64 @@ $ stonks-cli signals diff
 ```mermaid
 flowchart TD
     %% High-level entrypoints
-    subgraph CLI[CLI Entry]
-        cli[stonks-cli (Typer CLI)]
+    subgraph CLI["CLI Entry"]
+        cli["stonks-cli<br/>Typer CLI"]
     end
 
-    subgraph Config[Config & State]
-        cfg[Load config (Pydantic)]
-        cfgfile[(config.json)]
-        state[(state.json)]
-        hist[(history.jsonl)]
+    subgraph Config["Config & State"]
+        cfg["Load config<br/>Pydantic"]
+        cfgfile["config.json"]
+        state["state.json"]
+        hist["history.jsonl"]
     end
 
-    subgraph Plugins[Plugins]
-        plugSpecs[plugin specs from config]
-        plugLoad[Load plugins (best-effort)]
-        stratReg[Strategy registry]
-        provReg[Provider factory registry]
+    subgraph Plugins["Plugins"]
+        plugSpecs["plugin specs<br/>from config"]
+        plugLoad["Load plugins<br/>best-effort"]
+        stratReg["Strategy registry"]
+        provReg["Provider factory<br/>registry"]
     end
 
-    subgraph Pipeline[Analysis Pipeline]
-        selectStrat[Select strategy
-        (built-in or plugin)]
-        tickers[Tickers (normalized)]
-        fetchParallel[Fetch prices in parallel
-        (ThreadPoolExecutor)]
-        prep[_prepare_df_for_strategy
-        (attach indicators)]
-        strat[Run strategy
-        -> Recommendation]
-        risk[Risk sizing & guardrails
-        (volatility, ATR, portfolio cap)]
-        bt[Walk-forward backtest
-        + metrics]
-        results[Per-ticker results]
-        portfolio[Portfolio aggregation
-        (optional equity blend)]
+    subgraph Pipeline["Analysis Pipeline"]
+        selectStrat["Select strategy<br/>built-in or plugin"]
+        tickers["Tickers<br/>normalized"]
+        fetchParallel["Fetch prices in parallel<br/>ThreadPoolExecutor"]
+        prep["_prepare_df_for_strategy<br/>attach indicators"]
+        strat["Run strategy<br/>Recommendation"]
+        risk["Risk sizing & guardrails<br/>volatility, ATR, portfolio cap"]
+        bt["Walk-forward backtest<br/>+ metrics"]
+        results["Per-ticker results"]
+        portfolio["Portfolio aggregation<br/>optional equity blend"]
     end
 
-    subgraph Providers[Data Providers]
-        providerSelect[provider_for_config
-        (per ticker)]
-        stooq[StooqProvider
-        https://stooq.com]
-        yfin[YFinanceProvider (optional)]
-        csv[CsvProvider]
-        cache[(Cache dir
-        text blobs + TTL)]
-        negCache[(Negative cache
-        empty results TTL)]
-        net[(HTTP GET / download)]
-        csvFile[(CSV file)]
-        pxDF[(OHLCV DataFrame)]
+    subgraph Providers["Data Providers"]
+        providerSelect["provider_for_config<br/>per ticker"]
+        stooq["StooqProvider<br/>https://stooq.com"]
+        yfin["YFinanceProvider<br/>optional"]
+        csv["CsvProvider"]
+        cache["Cache dir<br/>text blobs + TTL"]
+        negCache["Negative cache<br/>empty results TTL"]
+        net["HTTP GET / download"]
+        csvFile["CSV file"]
+        pxDF["OHLCV DataFrame"]
     end
 
-    subgraph Reporting[Outputs]
-        textRep[Write text report
-        (Rich-friendly formatting)]
-        jsonRep[Write JSON report
-        (optional)]
-        csvRep[Write CSV summary
-        (optional)]
-        outDir[(reports/)]
+    subgraph Reporting["Outputs"]
+        textRep["Write text report<br/>Rich-friendly formatting"]
+        jsonRep["Write JSON report<br/>optional"]
+        csvRep["Write CSV summary<br/>optional"]
+        outDir["reports/"]
     end
 
-    subgraph Scheduler[Scheduler]
-        cron[APScheduler cron trigger]
-        schedRun[schedule run (foreground)]
-        schedOnce[schedule once (single job)]
-        lock[Run lock
-        prevent overlap]
-        pid[(PID file)]
-        failure[Persist last failure
-        (best-effort)]
+    subgraph Scheduler["Scheduler"]
+        cron["APScheduler cron trigger"]
+        schedRun["schedule run<br/>foreground"]
+        schedOnce["schedule once<br/>single job"]
+        lock["Run lock<br/>prevent overlap"]
+        pid["PID file"]
+        failure["Persist last failure<br/>best-effort"]
     end
 
-    %% CLI command routing
     cli --> cfg
     cfg --> cfgfile
     cfg --> plugSpecs
@@ -239,7 +222,6 @@ flowchart TD
     plugLoad --> stratReg
     plugLoad --> provReg
 
-    %% Analyze / watchlist analyze
     cli -->|analyze / watchlist analyze| tickers
     tickers --> selectStrat
     stratReg --> selectStrat
@@ -247,7 +229,6 @@ flowchart TD
     fetchParallel --> providerSelect
     provReg --> providerSelect
 
-    %% Provider selection and fetching
     providerSelect --> stooq
     providerSelect --> yfin
     providerSelect --> csv
@@ -260,7 +241,6 @@ flowchart TD
     csv --> csvFile
     csvFile --> pxDF
 
-    %% Processing
     pxDF --> prep
     prep --> strat
     strat --> risk
@@ -268,7 +248,6 @@ flowchart TD
     bt --> results
     results --> portfolio
 
-    %% Reporting + state
     results --> textRep
     portfolio --> textRep
     textRep --> outDir
@@ -277,11 +256,10 @@ flowchart TD
     results -->|--csv| csvRep
     csvRep --> outDir
 
-    textRep -->|persist last run (unless --sandbox)| state
-    jsonRep -->|persist json path (when enabled)| state
+    textRep -->|persist last run<br/>unless --sandbox| state
+    jsonRep -->|persist json path<br/>when enabled| state
     state --> hist
 
-    %% Scheduler
     cli -->|schedule status| cron
     cli -->|schedule run| schedRun
     cli -->|schedule once| schedOnce

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import typer
 from rich.console import Console
@@ -33,6 +34,7 @@ from stonks_cli.commands import (
     do_watchlist_set,
     do_report_latest,
     do_report_open,
+    do_report_view,
     do_schedule_once,
     do_schedule_run,
     do_schedule_status,
@@ -510,6 +512,23 @@ def report_latest(
         Console().print(str(out.get("report_path")))
         if json_out and out.get("json_path"):
             Console().print(str(out.get("json_path")))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@report_app.command("view")
+def report_view(path: Path | None = typer.Argument(None)) -> None:
+    """View a report (defaults to latest) in a pager when interactive."""
+    try:
+        out = do_report_view(path)
+        text = str(out.get("text") or "")
+        console = Console()
+        if sys.stdout.isatty():
+            with console.pager():
+                console.print(text, end="")
+            return
+        # Non-interactive: keep it scriptable.
+        sys.stdout.write(text)
     except Exception as e:
         raise _exit_for_error(e)
 

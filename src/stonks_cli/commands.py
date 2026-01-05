@@ -390,6 +390,19 @@ def do_report_open() -> Path:
     return p
 
 
+def do_report_view(path: Path | None = None) -> dict[str, str]:
+    """Return the report path + text for viewing.
+
+    If `path` is None, uses the last recorded report.
+    """
+
+    p = path if path is not None else do_report_open()
+    return {
+        "path": str(p),
+        "text": p.read_text(encoding="utf-8"),
+    }
+
+
 def do_report_latest(*, include_json: bool = False) -> dict[str, str | None]:
     last = get_last_run()
     if last is None:

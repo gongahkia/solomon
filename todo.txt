@@ -52,4 +52,4 @@ P3 — Docs / Packaging / Quality
 ====================
 Future ideas (only if they fit the “CLI reports” ethos)
 ====================
-[ ] Optional interactive TUI could be added later, but keep core non-interactive and scriptable.
+

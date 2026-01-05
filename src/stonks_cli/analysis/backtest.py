@@ -145,8 +145,10 @@ def _vectorized_position_if_supported(
         fast = int(kwargs.get("fast", 20))
         slow = int(kwargs.get("slow", 50))
         eff_min = max(min_history_rows, slow + 2)
-        fast_sma = sma(close, fast)
-        slow_sma = sma(close, slow)
+        fast_col = f"sma_{fast}"
+        slow_col = f"sma_{slow}"
+        fast_sma = df[fast_col] if fast_col in df.columns else sma(close, fast)
+        slow_sma = df[slow_col] if slow_col in df.columns else sma(close, slow)
         uptrend = (fast_sma > slow_sma) & fast_sma.notna() & slow_sma.notna()
         pos.loc[uptrend] = 1.0
         if eff_min > 0 and len(pos) > 0:
@@ -155,9 +157,9 @@ def _vectorized_position_if_supported(
 
     if base_fn is basic_trend_rsi_strategy:
         eff_min = max(min_history_rows, 60)
-        sma20 = sma(close, 20)
-        sma50 = sma(close, 50)
-        rsi14 = rsi(close, 14)
+        sma20 = df["sma_20"] if "sma_20" in df.columns else sma(close, 20)
+        sma50 = df["sma_50"] if "sma_50" in df.columns else sma(close, 50)
+        rsi14 = df["rsi_14"] if "rsi_14" in df.columns else rsi(close, 14)
         buy = (sma20 > sma50) & (rsi14 < 70) & sma20.notna() & sma50.notna() & rsi14.notna()
         pos.loc[buy] = 1.0
         if eff_min > 0 and len(pos) > 0:
@@ -166,8 +168,8 @@ def _vectorized_position_if_supported(
 
     if base_fn is mean_reversion_bb_rsi_strategy:
         eff_min = max(min_history_rows, 60)
-        lower, _mid, _upper = bollinger_bands(close, window=20, num_std=2.0)
-        rsi14 = rsi(close, 14)
+        lower = df["bb_lower_20_2"] if "bb_lower_20_2" in df.columns else bollinger_bands(close, window=20, num_std=2.0)[0]
+        rsi14 = df["rsi_14"] if "rsi_14" in df.columns else rsi(close, 14)
         buy = (close < lower) & (rsi14 <= 35) & lower.notna() & rsi14.notna()
         pos.loc[buy] = 1.0
         if eff_min > 0 and len(pos) > 0:

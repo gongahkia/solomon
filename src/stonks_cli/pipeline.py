@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 
 from rich.console import Console
 from rich.progress import Progress
 
 from stonks_cli.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
-from stonks_cli.analysis.indicators import atr, rolling_volatility
+from stonks_cli.analysis.indicators import atr, bollinger_bands, rolling_volatility, rsi, sma
 from stonks_cli.analysis.risk import (
     scale_fractions_to_portfolio_cap,
     suggest_stop_loss_price_by_atr,
@@ -103,6 +104,8 @@ def compute_results(
             df = df.loc[start:]
         if end:
             df = df.loc[:end]
+
+        df = _prepare_df_for_strategy(df, strategy_fn)
         last_close = None
         if "close" in df.columns and not df.empty:
             last_close = float(df["close"].iloc[-1])
@@ -230,6 +233,59 @@ def compute_results(
             portfolio_metrics = compute_backtest_metrics(port_equity)
 
     return results, portfolio_metrics
+
+
+def _prepare_df_for_strategy(df, strategy_fn):
+    """Attach commonly-used indicator columns once, reused by strategy and backtest."""
+
+    if df is None or getattr(df, "empty", True) or "close" not in df.columns:
+        return df
+
+    base_fn = strategy_fn
+    kwargs = {}
+    if isinstance(strategy_fn, partial):
+        base_fn = strategy_fn.func
+        kwargs = dict(strategy_fn.keywords or {})
+
+    if base_fn not in (basic_trend_rsi_strategy, sma_cross_strategy, mean_reversion_bb_rsi_strategy):
+        return df
+
+    close = df["close"].astype(float)
+    out = df.copy()
+
+    if base_fn is sma_cross_strategy:
+        fast = int(kwargs.get("fast", 20))
+        slow = int(kwargs.get("slow", 50))
+        c_fast = f"sma_{fast}"
+        c_slow = f"sma_{slow}"
+        if c_fast not in out.columns:
+            out[c_fast] = sma(close, fast)
+        if c_slow not in out.columns:
+            out[c_slow] = sma(close, slow)
+        return out
+
+    if base_fn is basic_trend_rsi_strategy:
+        if "sma_20" not in out.columns:
+            out["sma_20"] = sma(close, 20)
+        if "sma_50" not in out.columns:
+            out["sma_50"] = sma(close, 50)
+        if "rsi_14" not in out.columns:
+            out["rsi_14"] = rsi(close, 14)
+        return out
+
+    # mean_reversion_bb_rsi_strategy
+    need_bb = not {"bb_lower_20_2", "bb_mid_20_2", "bb_upper_20_2"}.issubset(set(out.columns))
+    if need_bb:
+        lower, mid, upper = bollinger_bands(close, window=20, num_std=2.0)
+        if "bb_lower_20_2" not in out.columns:
+            out["bb_lower_20_2"] = lower
+        if "bb_mid_20_2" not in out.columns:
+            out["bb_mid_20_2"] = mid
+        if "bb_upper_20_2" not in out.columns:
+            out["bb_upper_20_2"] = upper
+    if "rsi_14" not in out.columns:
+        out["rsi_14"] = rsi(close, 14)
+    return out
 
 
 def run_once(cfg: AppConfig, out_dir: Path, console: Console | None = None, *, sandbox: bool = False) -> Path:

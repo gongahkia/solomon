@@ -24,8 +24,7 @@ P1 — Data + Caching
 ====================
 P1 — Performance (without complexity)
 ====================
-[ ] Avoid duplicate indicator computations in pipeline.
-    - compute_results() computes volatility/ATR from full series; ensure no repeated passes where avoidable.
+
 
 ====================
 P2 — Analysis + Risk Model Tweaks (still heuristic)

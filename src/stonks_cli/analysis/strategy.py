@@ -24,9 +24,12 @@ def basic_trend_rsi_strategy(df: pd.DataFrame) -> Recommendation:
     if len(close) < 60:
         return Recommendation(action="INSUFFICIENT_HISTORY", confidence=0.1, rationale="Need >=60 days")
 
-    sma20 = sma(close, 20).iloc[-1]
-    sma50 = sma(close, 50).iloc[-1]
-    rsi14 = rsi(close, 14).iloc[-1]
+    sma20_s = df["sma_20"] if "sma_20" in df.columns else sma(close, 20)
+    sma50_s = df["sma_50"] if "sma_50" in df.columns else sma(close, 50)
+    rsi14_s = df["rsi_14"] if "rsi_14" in df.columns else rsi(close, 14)
+    sma20 = sma20_s.iloc[-1]
+    sma50 = sma50_s.iloc[-1]
+    rsi14 = rsi14_s.iloc[-1]
     last = float(close.iloc[-1])
 
     if pd.isna(sma20) or pd.isna(sma50) or pd.isna(rsi14):
@@ -70,8 +73,10 @@ def sma_cross_strategy(df: pd.DataFrame, fast: int = 20, slow: int = 50) -> Reco
     if len(close) < (slow + 2):
         return Recommendation(action="INSUFFICIENT_HISTORY", confidence=0.1, rationale=f"Need >={slow+2} days")
 
-    fast_sma = sma(close, fast)
-    slow_sma = sma(close, slow)
+    fast_col = f"sma_{fast}"
+    slow_col = f"sma_{slow}"
+    fast_sma = df[fast_col] if fast_col in df.columns else sma(close, fast)
+    slow_sma = df[slow_col] if slow_col in df.columns else sma(close, slow)
     prev_fast, cur_fast = fast_sma.iloc[-2], fast_sma.iloc[-1]
     prev_slow, cur_slow = slow_sma.iloc[-2], slow_sma.iloc[-1]
     last = float(close.iloc[-1])
@@ -116,8 +121,11 @@ def mean_reversion_bb_rsi_strategy(df: pd.DataFrame) -> Recommendation:
     if len(close) < 60:
         return Recommendation(action="INSUFFICIENT_HISTORY", confidence=0.1, rationale="Need >=60 days")
 
-    lower, mid, upper = bollinger_bands(close, window=20, num_std=2.0)
-    rsi14 = rsi(close, 14)
+    if {"bb_lower_20_2", "bb_mid_20_2", "bb_upper_20_2"}.issubset(set(df.columns)):
+        lower, mid, upper = df["bb_lower_20_2"], df["bb_mid_20_2"], df["bb_upper_20_2"]
+    else:
+        lower, mid, upper = bollinger_bands(close, window=20, num_std=2.0)
+    rsi14 = df["rsi_14"] if "rsi_14" in df.columns else rsi(close, 14)
     last = float(close.iloc[-1])
 
     lo, mi, up = lower.iloc[-1], mid.iloc[-1], upper.iloc[-1]

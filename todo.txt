@@ -47,9 +47,6 @@ P2 — Plugins (extensibility as a first-class feature)
 ====================
 P3 — Docs / Packaging / Quality
 ====================
-[ ] Fill README placeholders (Stack / Screenshots / Architecture / Legal).
-    - Keep it short and focused on install + “analyze/backtest/schedule/report/history”.
-
 [ ] Add a minimal CI workflow.
     - Run pytest on push/PR for 3.11–3.13 (or whichever you support).
 

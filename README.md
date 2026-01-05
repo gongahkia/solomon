@@ -114,9 +114,14 @@ stonks-cli history show 0
 
 ## Stack
 
-* ...
-* ...
-* ...
+- Python 3.11+
+- CLI: Typer
+- Output: Rich tables
+- Data/analysis: pandas + numpy
+- Scheduling: APScheduler (cron triggers)
+- Config: Pydantic v2
+- Paths/state/cache dirs: platformdirs
+- Providers: Stooq (default), optional yfinance
 
 ## Usage
 
@@ -128,18 +133,56 @@ Run `stonks-cli --help` for the full command list.
 
 ## Available Tools
 
-...
+Core commands:
+
+- `analyze`: compute signals + write report(s)
+- `backtest`: walk-forward backtest summary
+- `schedule run|once|status`: run on cron or once
+- `report open|latest`: open/print last report
+- `history list|show`: inspect prior runs
+- `data fetch|verify|cache-info|purge`: provider and cache utilities
+- `plugins list`: show configured plugins and discovered strategies/providers
+
+Optional provider:
+
+- Install yfinance support with `pip install -e ".[yfinance]"` and set `data.provider` to `yfinance`.
 
 ## Screenshots
 
-...
+Example (truncated):
+
+```text
+Stonks Report
+generated_at: 2026-01-04T00:00:00.000000
+tickers: 2
+
+┏━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Ticker  ┃   Last ┃ Action       ┃ Confidence ┃  CAGR ┃ Sharpe ┃ MaxDD ┃ Data                  ┃ Rationale                         ┃
+┡━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+┃ AAPL.US ┃  201.3 ┃ BUY_DCA      ┃       0.65 ┃ 12.1% ┃   0.91 ┃ -8.2% ┃ n=500 last=2026-01-03 ┃ Uptrend ...                        ┃
+┃ MSFT.US ┃  420.1 ┃ HOLD_WAIT    ┃       0.55 ┃  8.4% ┃   0.62 ┃ -9.7% ┃ n=500 last=2026-01-03 ┃ Uptrend but RSI ...               ┃
+└─────────┴────────┴──────────────┴────────────┴───────┴────────┴───────┴───────────────────────┴──────────────────────────────────┘
+```
 
 ## Architecture
 
 ```mermaid
-
+flowchart LR
+	CLI[Typer CLI] --> CMD[commands.py]
+	CMD --> PIPE[pipeline.compute_results]
+	PIPE --> DATA[data providers + cache]
+	PIPE --> ANALYSIS[strategy + indicators + risk hints]
+	PIPE --> REPORT[text/json/csv reports]
+	REPORT --> STATE[state.json + history.jsonl]
 ```
+
+Notes:
+
+- Reports are written to `reports/` by default.
+- `state.json` tracks the last run paths; `history.jsonl` stores a newline-delimited log.
 
 ## Legal
 
-...
+- This project is for informational/educational use.
+- Nothing here is financial advice.
+- Market data can be delayed, incomplete, or incorrect.

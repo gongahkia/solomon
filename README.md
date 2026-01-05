@@ -49,6 +49,42 @@ stonks-cli doctor
 stonks-cli config init
 stonks-cli config where
 stonks-cli config show
+stonks-cli config validate
+```
+
+### Offline demo (recommended for showcasing)
+
+Generate a local OHLCV CSV so you can demo everything without network access:
+
+```bash
+python - <<'PY'
+import pandas as pd
+import numpy as np
+
+np.random.seed(0)
+dates = pd.date_range('2024-01-01', periods=180, freq='D')
+
+def make(ticker, base):
+	close = base + np.cumsum(np.random.normal(0, 0.3, size=len(dates)))
+	return pd.DataFrame({
+		'date': dates,
+		'open': close,
+		'high': close + 0.5,
+		'low': close - 0.5,
+		'close': close,
+		'volume': 1000,
+		'ticker': ticker,
+	})
+
+df = pd.concat([make('AAPL', 100.0), make('MSFT', 200.0)], ignore_index=True)
+df.to_csv('prices.csv', index=False)
+print('Wrote prices.csv')
+PY
+
+stonks-cli config set data.provider '"csv"'
+stonks-cli config set data.csv_path '"./prices.csv"'
+stonks-cli config set tickers '["AAPL","MSFT"]'
+stonks-cli config validate
 ```
 
 ### Analyze (writes a report)
@@ -63,6 +99,18 @@ Write JSON output alongside the text report:
 
 ```bash
 stonks-cli analyze AAPL MSFT --json
+```
+
+Write a CSV summary alongside the report:
+
+```bash
+stonks-cli analyze AAPL MSFT --csv
+```
+
+Use a stable filename (overwrites each run):
+
+```bash
+stonks-cli analyze AAPL MSFT --name report_latest.txt
 ```
 
 Change output directory:
@@ -105,11 +153,42 @@ Print the latest report path:
 stonks-cli report open
 ```
 
+View the latest report in a pager (interactive) or print (when piped):
+
+```bash
+stonks-cli report view
+stonks-cli report view | head
+```
+
+Print the latest report path and JSON (if available):
+
+```bash
+stonks-cli report latest --json
+```
+
 List prior runs:
 
 ```bash
 stonks-cli history list
 stonks-cli history show 0
+```
+
+Compare latest vs previous run (requires two recorded JSON runs):
+
+```bash
+stonks-cli analyze --json --name report_latest.txt
+stonks-cli analyze --json --name report_latest.txt --end 2024-04-15
+stonks-cli signals diff
+```
+
+### Watchlists
+
+Create a named ticker set and analyze it:
+
+```bash
+stonks-cli watchlist set tech AAPL MSFT
+stonks-cli watchlist list
+stonks-cli watchlist analyze tech --json --csv --name report_tech_latest.txt
 ```
 
 ## Stack
@@ -138,10 +217,16 @@ Core commands:
 - `analyze`: compute signals + write report(s)
 - `backtest`: walk-forward backtest summary
 - `schedule run|once|status`: run on cron or once
-- `report open|latest`: open/print last report
+- `report open|latest|view`: open/print/view last report
 - `history list|show`: inspect prior runs
 - `data fetch|verify|cache-info|purge`: provider and cache utilities
 - `plugins list`: show configured plugins and discovered strategies/providers
+- `watchlist list|set|remove|analyze`: manage named ticker sets
+- `signals diff`: compare latest vs previous JSON run
+
+Notes:
+
+- If portfolio metrics are available, the report header includes a "Portfolio Backtest" summary.
 
 Optional provider:
 

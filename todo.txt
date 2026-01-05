@@ -50,7 +50,6 @@ P3 — Docs / Packaging / Quality
 [ ] Add tests for:
     - schedule timezone support
     - JSON report schema fields
-    - cache TTL expiry behavior
     - doctor output keys (smoke)
 
 ====================

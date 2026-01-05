@@ -37,7 +37,7 @@ P2 — Reporting
 ====================
 P2 — Scheduler
 ====================
-[ ] Add `schedule run --sandbox` parity with `schedule once`.
+
 
 ====================
 P2 — Plugins (extensibility as a first-class feature)

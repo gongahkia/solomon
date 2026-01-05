@@ -268,9 +268,15 @@ def do_schedule_once(
     return run_once(cfg, out_dir=out_dir, sandbox=sandbox, report_name=report_name, csv_out=csv_out)
 
 
-def do_schedule_run(out_dir: Path, *, report_name: str | None = None, csv_out: bool = False) -> None:
+def do_schedule_run(
+    out_dir: Path,
+    *,
+    report_name: str | None = None,
+    csv_out: bool = False,
+    sandbox: bool = False,
+) -> None:
     cfg = load_config()
-    run_scheduler(cfg, out_dir=out_dir, report_name=report_name, csv_out=csv_out)
+    run_scheduler(cfg, out_dir=out_dir, report_name=report_name, csv_out=csv_out, sandbox=sandbox)
 
 
 @dataclass(frozen=True)

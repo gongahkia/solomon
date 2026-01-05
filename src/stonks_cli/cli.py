@@ -236,10 +236,11 @@ def schedule_run(
     out_dir: str = typer.Option("reports", "--out-dir"),
     name: str | None = typer.Option(None, "--name", help="Stable report filename (overwrites each run)"),
     csv_out: bool = typer.Option(False, "--csv", "--no-csv", help="Write CSV summary alongside the report"),
+    sandbox: bool = typer.Option(False, "--sandbox", help="Run without persisting last-run history"),
 ) -> None:
     """Run the cron-like scheduler in the foreground."""
     try:
-        do_schedule_run(out_dir=Path(out_dir), report_name=name, csv_out=csv_out)
+        do_schedule_run(out_dir=Path(out_dir), report_name=name, csv_out=csv_out, sandbox=sandbox)
     except Exception as e:
         raise _exit_for_error(e)
 

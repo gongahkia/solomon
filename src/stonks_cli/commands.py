@@ -24,6 +24,21 @@ from stonks_cli.reporting.report import write_text_report
 from stonks_cli.storage import get_history_record, get_last_report_path, get_last_run, list_history, save_last_run
 
 
+def do_plugins_list() -> dict[str, object]:
+    cfg = load_config()
+    from stonks_cli.plugins import load_plugins_best_effort
+
+    specs = tuple(cfg.plugins or [])
+    summary = load_plugins_best_effort(specs)
+    return {
+        "configured": list(specs),
+        "ok": list(summary.ok),
+        "errors": dict(summary.errors),
+        "strategies": sorted((summary.registry.strategies or {}).keys()),
+        "provider_factories": sorted((summary.registry.provider_factories or {}).keys()),
+    }
+
+
 def do_version() -> str:
     return __version__
 

@@ -42,9 +42,6 @@ P2 — Scheduler
 ====================
 P2 — Plugins (extensibility as a first-class feature)
 ====================
-[ ] Add `stonks-cli plugins list`.
-    - Show loaded plugin specs, strategies discovered, provider factories discovered.
-
 [ ] Validate plugin return types.
     - Strategy fns should return Recommendation; provider factories should return an object with fetch_daily().
 

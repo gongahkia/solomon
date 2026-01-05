@@ -25,6 +25,7 @@ from stonks_cli.commands import (
     do_history_list,
     do_history_show,
     do_doctor,
+    do_plugins_list,
     do_report_latest,
     do_report_open,
     do_schedule_once,
@@ -41,12 +42,14 @@ schedule_app = typer.Typer()
 data_app = typer.Typer()
 report_app = typer.Typer()
 history_app = typer.Typer()
+plugins_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(data_app, name="data")
 app.add_typer(report_app, name="report")
 app.add_typer(history_app, name="history")
+app.add_typer(plugins_app, name="plugins")
 
 
 @app.callback()
@@ -88,6 +91,36 @@ def doctor() -> None:
         results = do_doctor()
         for k, v in results.items():
             Console().print(f"{k}: {v}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@plugins_app.command("list")
+def plugins_list() -> None:
+    """Show loaded plugins and discovered strategies/providers."""
+    try:
+        out = do_plugins_list()
+        console = Console()
+
+        configured = list(out.get("configured") or [])
+        ok = set(out.get("ok") or [])
+        errors = dict(out.get("errors") or {})
+
+        if not configured:
+            console.print("No plugins configured")
+        else:
+            for spec in configured:
+                if spec in ok:
+                    console.print(f"ok: {spec}")
+                elif spec in errors:
+                    console.print(f"error: {spec}: {errors[spec]}")
+                else:
+                    console.print(f"unknown: {spec}")
+
+        strategies = list(out.get("strategies") or [])
+        provider_factories = list(out.get("provider_factories") or [])
+        console.print(f"strategies: {', '.join(strategies) if strategies else '-'}")
+        console.print(f"provider_factories: {', '.join(provider_factories) if provider_factories else '-'}")
     except Exception as e:
         raise _exit_for_error(e)
 

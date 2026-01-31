@@ -18,6 +18,7 @@ from stonks_cli.commands import (
     do_chart_compare,
     do_chart_rsi,
     do_config_init,
+    do_earnings,
     do_fundamentals,
     do_insider,
     do_watch,
@@ -268,6 +269,62 @@ def fundamentals(
         table.add_row("52-Week Low", f"${data.get('fifty_two_week_low', 0):.2f}" if data.get("fifty_two_week_low") else "N/A")
 
         console.print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@app.command()
+def earnings(
+    ticker: str = typer.Option(None, "--ticker", help="Show earnings history for specific ticker"),
+    show_next: bool = typer.Option(False, "--next", help="Show only next upcoming earnings date"),
+) -> None:
+    """Display earnings calendar or ticker history (requires yfinance)."""
+    from rich.table import Table
+
+    try:
+        data = do_earnings(ticker=ticker, show_next=show_next)
+        console = Console()
+
+        if data["mode"] == "next":
+            event = data["next_earnings"]
+            days = data["days_until"]
+            console.print(f"[bold]{data['ticker']}[/bold] Next Earnings")
+            console.print(f"Date: {event['report_date']} ({days} days)")
+            console.print(f"Time: {event['report_time']}")
+            if event.get("eps_estimate"):
+                console.print(f"EPS Estimate: ${event['eps_estimate']:.2f}")
+            return
+
+        if data["mode"] == "history":
+            events = data["events"]
+            if not events:
+                console.print(f"[yellow]No earnings history for {data['ticker']}[/yellow]")
+                return
+
+            table = Table(title=f"Earnings History: {data['ticker']}")
+            table.add_column("Date")
+            table.add_column("Time")
+            table.add_column("EPS Est", justify="right")
+            table.add_column("EPS Actual", justify="right")
+            table.add_column("Surprise", justify="right")
+
+            for e in events:
+                eps_est = f"${e['eps_estimate']:.2f}" if e.get("eps_estimate") else "N/A"
+                eps_act = f"${e['eps_actual']:.2f}" if e.get("eps_actual") else "N/A"
+
+                surprise_str = "N/A"
+                if e.get("surprise_pct") is not None:
+                    s = e["surprise_pct"]
+                    color = "green" if s >= 0 else "red"
+                    surprise_str = f"[{color}]{s:+.1f}%[/{color}]"
+
+                table.add_row(e["report_date"], e["report_time"], eps_est, eps_act, surprise_str)
+
+            console.print(table)
+            return
+
+        console.print("[yellow]Use --ticker to show earnings history[/yellow]")
+
     except Exception as e:
         raise _exit_for_error(e)
 

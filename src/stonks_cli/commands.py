@@ -108,6 +108,47 @@ def do_quick(tickers: list[str]) -> list[QuickResult]:
     return results
 
 
+def do_earnings(
+    ticker: str | None = None,
+    show_next: bool = False,
+) -> dict:
+    """Fetch earnings data for a ticker or upcoming calendar."""
+    from datetime import date, timedelta
+    from stonks_cli.data.earnings import fetch_ticker_earnings_history
+
+    if ticker:
+        normalized = normalize_ticker(ticker)
+        base_ticker = normalized.split(".")[0]
+        history = fetch_ticker_earnings_history(base_ticker, quarters=8)
+
+        # Find next earnings
+        today = date.today()
+        future_events = [e for e in history if e.report_date >= today]
+
+        if show_next and future_events:
+            next_event = min(future_events, key=lambda e: e.report_date)
+            days_until = (next_event.report_date - today).days
+            return {
+                "mode": "next",
+                "ticker": base_ticker,
+                "next_earnings": next_event.to_dict(),
+                "days_until": days_until,
+            }
+
+        return {
+            "mode": "history",
+            "ticker": base_ticker,
+            "events": [e.to_dict() for e in history],
+        }
+
+    # Calendar mode - not implemented without scraping
+    return {
+        "mode": "calendar",
+        "message": "Earnings calendar requires --ticker flag",
+        "events": [],
+    }
+
+
 def do_insider(
     ticker: str,
     days: int = 90,

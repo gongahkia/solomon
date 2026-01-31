@@ -1417,5 +1417,43 @@ def alert_list() -> None:
         raise _exit_for_error(e)
 
 
+@alert_app.command("remove")
+def alert_remove(
+    alert_id: str = typer.Argument(..., help="Alert ID (or prefix)"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+) -> None:
+    """Remove an alert."""
+    from stonks_cli.commands import do_alert_remove, do_alert_list
+
+    try:
+        # Resolve prefix
+        alerts = do_alert_list()
+        matches = [a for a in alerts if a["id"].startswith(alert_id)]
+        
+        if len(matches) == 0:
+            Console().print(f"[red]No alert found with ID prefix: {alert_id}[/red]")
+            raise typer.Exit(code=1)
+        
+        if len(matches) > 1:
+            Console().print(f"[red]Multiple alerts match prefix {alert_id}. Be more specific.[/red]")
+            raise typer.Exit(code=1)
+            
+        target = matches[0]
+        
+        if not force:
+            typer.confirm(
+                f"Remove alert {target['id'][:6]} ({target['ticker']} {target['condition_type']} {target['threshold']})?",
+                abort=True
+            )
+
+        if do_alert_remove(target["id"]):
+            Console().print(f"Removed alert: {target['id'][:6]}")
+        else:
+            Console().print(f"[red]Failed to remove alert[/red]")
+            
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

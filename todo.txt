@@ -42,7 +42,7 @@
 
 
 
-Add `stonks alert remove <ALERT_ID>` command that deletes alert and confirms removal
+
 Add `stonks alert disable <ALERT_ID>` and `stonks alert enable <ALERT_ID>` commands to toggle alert enabled status without deleting
 
 # ----------------------------------------------------------------------------

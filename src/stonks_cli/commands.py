@@ -1181,6 +1181,12 @@ def do_alert_list() -> list[dict]:
     return [a.to_dict() for a in load_alerts()]
 
 
+def do_alert_remove(alert_id: str) -> bool:
+    """Remove an alert by ID."""
+    from stonks_cli.alerts.storage import delete_alert
+    return delete_alert(alert_id)
+
+
 def do_sector(sector_name: str) -> dict:
     """Get sector performance compared to SPY."""
     from datetime import date, timedelta

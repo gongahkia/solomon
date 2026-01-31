@@ -63,8 +63,5 @@ def plot_comparison(tickers: list[str], dfs: dict[str, pd.DataFrame], days: int 
     plt.title(f"Performance Comparison - Last {days} Days")
     plt.xlabel("Days")
     plt.ylabel("Change (%)")
-    
-    # Enable color mode for better color support
-    plt.colorless(False)
 
     plt.show()

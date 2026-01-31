@@ -117,10 +117,12 @@ def quick(
     tickers: list[str] = typer.Argument(..., help="Ticker symbol(s) (e.g., AAPL MSFT GOOG)"),
     no_color: bool = typer.Option(False, "--no-color", help="Strip color formatting for piping"),
     spark: bool = typer.Option(False, "--spark", help="Append sparkline of last 20 days"),
+    detailed: bool = typer.Option(False, "--detailed", help="Include fundamental data summary"),
 ) -> None:
     """Quick one-liner analysis for one or more tickers."""
     from stonks_cli.formatting.oneliner import format_quick_summary
     from stonks_cli.formatting.sparkline import generate_sparkline
+    from stonks_cli.formatting.numbers import format_market_cap
 
     try:
         results = do_quick(tickers)
@@ -139,6 +141,29 @@ def quick(
                 sparkline = generate_sparkline(result.prices, width=20)
                 line = f"{line} {sparkline}"
             console.print(line)
+
+            if detailed:
+                # Show fundamental summary
+                try:
+                    from stonks_cli.data.fundamentals import fetch_fundamentals_yahoo
+
+                    base_ticker = result.ticker.split(".")[0]
+                    fundamentals = fetch_fundamentals_yahoo(base_ticker)
+                    if fundamentals:
+                        pe = f"P/E: {fundamentals.pe_ratio:.1f}" if fundamentals.pe_ratio else "P/E: N/A"
+                        mc = f"MCap: {format_market_cap(fundamentals.market_cap)}"
+                        div = f"Div: {fundamentals.dividend_yield*100:.2f}%" if fundamentals.dividend_yield else "Div: N/A"
+                        range_str = ""
+                        if fundamentals.fifty_two_week_low and fundamentals.fifty_two_week_high:
+                            range_str = f"52w: ${fundamentals.fifty_two_week_low:.2f}-${fundamentals.fifty_two_week_high:.2f}"
+                        details = f"  {pe} | {mc} | {div}"
+                        if range_str:
+                            details = f"{details} | {range_str}"
+                        console.print(details, style="dim")
+                except ImportError:
+                    console.print("  [dim](yfinance not installed for fundamentals)[/dim]")
+                except Exception:
+                    pass
     except Exception as e:
         raise _exit_for_error(e)
 

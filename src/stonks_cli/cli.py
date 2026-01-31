@@ -70,6 +70,7 @@ watchlist_app = typer.Typer()
 signals_app = typer.Typer()
 portfolio_app = typer.Typer()
 paper_app = typer.Typer()
+alert_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
@@ -81,6 +82,7 @@ app.add_typer(watchlist_app, name="watchlist")
 app.add_typer(signals_app, name="signals")
 app.add_typer(portfolio_app, name="portfolio")
 app.add_typer(paper_app, name="paper")
+app.add_typer(alert_app, name="alert")
 
 
 @app.callback()
@@ -1330,6 +1332,33 @@ def paper_leaderboard() -> None:
 
         Console().print(table)
 
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@alert_app.command("add")
+def alert_add(
+    ticker: str = typer.Argument(..., help="Ticker symbol"),
+    condition: str = typer.Argument(..., help="Condition type (price-above, price-below, rsi-above, rsi-below)"),
+    threshold: float = typer.Argument(..., help="Threshold value"),
+) -> None:
+    """Add a new alert."""
+    from stonks_cli.commands import do_alert_add
+
+    try:
+        # Normalize condition to use underscores
+        cond_normalized = condition.replace("-", "_")
+        alert = do_alert_add(ticker, cond_normalized, threshold)
+        
+        # Format confirmation message
+        condition_str = cond_normalized.replace("_", " ")
+        msg_val = f"${threshold:.2f}"
+        if "rsi" in cond_normalized:
+            msg_val = f"{threshold:.1f}"
+            
+        Console().print(
+            f"Alert created: {alert['ticker']} {condition_str} {msg_val} (ID: {alert['id'][:6]})"
+        )
     except Exception as e:
         raise _exit_for_error(e)
 

@@ -41,10 +41,6 @@
 
 
 
-Add `stonks alert add <TICKER> price-above <VALUE>` command that creates Alert with condition_type=price_above and saves, confirming with "Alert created: AAPL price above $200.00 (ID: abc123)"
-Add `stonks alert add <TICKER> price-below <VALUE>` command for price_below condition
-Add `stonks alert add <TICKER> rsi-above <VALUE>` command for RSI threshold alerts (e.g., overbought at 70)
-Add `stonks alert add <TICKER> rsi-below <VALUE>` command for RSI threshold alerts (e.g., oversold at 30)
 Add `stonks alert list` command that displays all alerts as Rich table with columns: ID (truncated), Ticker, Condition, Threshold, Status (enabled/triggered), Created
 Add `stonks alert remove <ALERT_ID>` command that deletes alert and confirms removal
 Add `stonks alert disable <ALERT_ID>` and `stonks alert enable <ALERT_ID>` commands to toggle alert enabled status without deleting

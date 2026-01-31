@@ -1144,6 +1144,37 @@ def do_paper_leaderboard() -> dict:
     return calculate_paper_performance(portfolio, initial_cash, prices)
 
 
+    return calculate_paper_performance(portfolio, initial_cash, prices)
+
+
+def do_alert_add(ticker: str, condition: str, threshold: float) -> dict:
+    """Create and save a new alert."""
+    from stonks_cli.alerts.models import Alert
+    from stonks_cli.alerts.storage import save_alert
+
+    # Validate condition?
+    valid_conditions = [
+        "price_above", "price_below",
+        "rsi_above", "rsi_below",
+        "sma_cross_up", "sma_cross_down",
+        # Advanced ones:
+        "golden_cross", "death_cross",
+        "volume_spike", "earnings_soon",
+        "new_high_52w", "new_low_52w"
+    ]
+    if condition not in valid_conditions and not condition.startswith("volume_spike"): # Hack for volume-spike param? No, param passed as threshold usually or separate.
+         # For simple types, direct match.
+         pass
+
+    alert = Alert(
+        ticker=ticker.upper(),
+        condition_type=condition,
+        threshold=threshold
+    )
+    save_alert(alert)
+    return alert.to_dict()
+
+
 def do_sector(sector_name: str) -> dict:
     """Get sector performance compared to SPY."""
     from datetime import date, timedelta

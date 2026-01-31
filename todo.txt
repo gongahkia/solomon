@@ -20,7 +20,7 @@
 
 
 
-Create function `log_transaction(action: str, ticker: str, shares: float, price: float, gain_loss: float = None)` in storage.py that appends JSON line to portfolio_history.jsonl with timestamp
+
 
 # ----------------------------------------------------------------------------
 # PHASE 4C: PAPER TRADING

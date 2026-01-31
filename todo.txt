@@ -12,7 +12,6 @@
 # PHASE 5C: CONDITION-BASED ALERTS (ADVANCED)
 # ----------------------------------------------------------------------------
 
-Add `stonks alert add <TICKER> golden-cross` command that creates alert for 50-day SMA crossing above 200-day SMA
 Add `stonks alert add <TICKER> death-cross` command that creates alert for 50-day SMA crossing below 200-day SMA
 Implement SMA cross detection in check_alert: compute both SMAs, check if fast SMA crossed slow SMA by comparing current and previous day relationship
 Add `stonks alert add <TICKER> volume-spike <MULTIPLIER>` command that triggers when daily volume exceeds N times the 20-day average volume (default 2x)

@@ -108,6 +108,29 @@ def do_quick(tickers: list[str]) -> list[QuickResult]:
     return results
 
 
+def do_chart_compare(tickers: list[str], days: int = 90) -> None:
+    """Fetch data and display a comparison chart for multiple tickers."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from stonks_cli.charts.comparison import plot_comparison
+
+    cfg = load_config()
+    dfs: dict[str, object] = {}
+    normalized_tickers = [normalize_ticker(t) for t in tickers]
+
+    def _fetch(t: str):
+        provider = provider_for_config(cfg, t)
+        return t, provider.fetch_daily(t).df
+
+    max_workers = min(cfg.data.concurrency_limit, max(1, len(normalized_tickers)))
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(_fetch, t) for t in normalized_tickers]
+        for fut in as_completed(futures):
+            ticker, df = fut.result()
+            dfs[ticker] = df
+
+    plot_comparison(normalized_tickers, dfs, days=days)
+
+
 def do_chart(ticker: str, days: int = 90, candle: bool = False, volume: bool = False) -> None:
     """Fetch data and display a price chart for a ticker."""
     cfg = load_config()

@@ -15,6 +15,7 @@ from stonks_cli.commands import (
     do_backtest,
     do_bench,
     do_chart,
+    do_chart_compare,
     do_config_init,
     do_config_set,
     do_config_show,
@@ -149,6 +150,18 @@ def chart(
     """Display an ASCII price chart for a ticker."""
     try:
         do_chart(ticker, days=days, candle=candle, volume=volume)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@app.command("chart-compare")
+def chart_compare(
+    tickers: list[str] = typer.Argument(..., help="Ticker symbols to compare (e.g., AAPL MSFT GOOG)"),
+    days: int = typer.Option(90, "--days", help="Number of days to display"),
+) -> None:
+    """Compare performance of multiple tickers on a normalized chart."""
+    try:
+        do_chart_compare(tickers, days=days)
     except Exception as e:
         raise _exit_for_error(e)
 

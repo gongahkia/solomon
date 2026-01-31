@@ -1396,3 +1396,65 @@ def do_dividend_info(ticker: str) -> dict:
     
     normalized = normalize_ticker(ticker)
     return fetch_dividend_info(normalized)
+
+
+def do_dividend_calendar(days: int = 30) -> list[dict]:
+    """Scan watchlist tickers for upcoming ex-dividend dates.
+    
+    Returns list of dicts with: ticker, ex_date, amount, days_until
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from datetime import date, timedelta
+    from stonks_cli.data.dividends import fetch_dividend_info
+
+    cfg = load_config()
+    
+    # Get all tickers from main list and watchlists
+    tickers = set(cfg.tickers)
+    for wl_tickers in cfg.watchlists.values():
+        tickers.update(wl_tickers)
+    
+    if not tickers:
+        return []
+    
+    today = date.today()
+    end_date = today + timedelta(days=days)
+    
+    results = []
+    
+    def _check_ticker(ticker: str):
+        try:
+            info = fetch_dividend_info(ticker)
+            ex_date_str = info.get("ex_dividend_date")
+            if not ex_date_str:
+                return None
+            
+            ex_date = date.fromisoformat(ex_date_str)
+            if today <= ex_date <= end_date:
+                # Get dividend amount from history if available
+                amount = None
+                history = info.get("dividend_history", [])
+                if history:
+                    amount = history[0].get("amount")
+                
+                return {
+                    "ticker": ticker,
+                    "ex_date": ex_date_str,
+                    "amount": amount,
+                    "days_until": (ex_date - today).days,
+                }
+        except Exception:
+            pass
+        return None
+    
+    max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(_check_ticker, t) for t in tickers]
+        for fut in as_completed(futures):
+            result = fut.result()
+            if result:
+                results.append(result)
+    
+    # Sort by ex_date
+    results.sort(key=lambda x: x["ex_date"])
+    return results

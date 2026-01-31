@@ -1618,5 +1618,51 @@ def dividend_info(
         raise _exit_for_error(e)
 
 
+@dividend_app.command("calendar")
+def dividend_calendar(
+    days: int = typer.Option(30, "--days", "-d", help="Number of days to look ahead"),
+) -> None:
+    """Display upcoming ex-dividend dates from watchlist tickers."""
+    from rich.table import Table
+    from stonks_cli.commands import do_dividend_calendar
+
+    try:
+        results = do_dividend_calendar(days=days)
+        console = Console()
+        
+        if not results:
+            console.print(f"[yellow]No ex-dividend dates found in the next {days} days[/yellow]")
+            return
+        
+        table = Table(title=f"Upcoming Ex-Dividend Dates (Next {days} Days)")
+        table.add_column("Days", justify="right", style="bold")
+        table.add_column("Ex-Date")
+        table.add_column("Ticker", style="cyan")
+        table.add_column("Amount", justify="right")
+        
+        for r in results:
+            days_until = r["days_until"]
+            if days_until == 0:
+                days_str = "[red]TODAY[/red]"
+            elif days_until == 1:
+                days_str = "[yellow]1[/yellow]"
+            else:
+                days_str = str(days_until)
+            
+            amount_str = f"${r['amount']:.4f}" if r.get("amount") else "N/A"
+            
+            table.add_row(
+                days_str,
+                r["ex_date"],
+                r["ticker"],
+                amount_str,
+            )
+        
+        console.print(table)
+        
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

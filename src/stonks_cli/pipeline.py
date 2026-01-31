@@ -119,6 +119,7 @@ def compute_results(
     *,
     start: str | None = None,
     end: str | None = None,
+    benchmark: str | None = None,
 ) -> tuple[list[TickerResult], object | None]:
     strategy_fn = select_strategy(cfg)
 
@@ -141,6 +142,25 @@ def compute_results(
                 t, series = fut.result()
                 series_by_ticker[t] = series
                 progress.advance(task)
+
+    # Fetch benchmark data if specified
+    benchmark_df = None
+    benchmark_ticker = None
+    if benchmark:
+        benchmark_ticker = normalize_ticker(benchmark)
+        try:
+            provider = provider_for_config(cfg, benchmark_ticker)
+            benchmark_series = provider.fetch_daily(benchmark_ticker)
+            benchmark_df = benchmark_series.df
+            if start:
+                benchmark_df = benchmark_df.loc[start:]
+            if end:
+                benchmark_df = benchmark_df.loc[:end]
+            # Rename close to Close for correlation module
+            if "close" in benchmark_df.columns:
+                benchmark_df = benchmark_df.rename(columns={"close": "Close"})
+        except Exception:
+            benchmark_df = None
 
     results: list[TickerResult] = []
     per_ticker_fraction: dict[str, float] = {}
@@ -269,6 +289,17 @@ def compute_results(
         if bt.equity is not None and not bt.equity.empty:
             per_ticker_equity[series.ticker] = bt.equity
 
+        # Compute beta if benchmark data is available
+        beta_value = None
+        if benchmark_df is not None and "close" in df.columns:
+            from stonks_cli.analysis.correlation import compute_beta
+            ticker_df_for_beta = df.copy()
+            if "close" in ticker_df_for_beta.columns:
+                ticker_df_for_beta = ticker_df_for_beta.rename(columns={"close": "Close"})
+            beta_value = compute_beta(ticker_df_for_beta, benchmark_df, days=252)
+            if beta_value != beta_value:  # Check for NaN
+                beta_value = None
+
         results.append(
             TickerResult(
                 ticker=series.ticker,
@@ -283,6 +314,8 @@ def compute_results(
                 atr14=atr14,
                 stop_loss=stop_loss,
                 take_profit=take_profit,
+                beta=beta_value,
+                benchmark=benchmark_ticker,
             )
         )
 
@@ -318,6 +351,8 @@ def compute_results(
                     atr14=r.atr14,
                     stop_loss=r.stop_loss,
                     take_profit=r.take_profit,
+                    beta=r.beta,
+                    benchmark=r.benchmark,
                 )
             )
         results = new_results
@@ -411,9 +446,10 @@ def run_once(
     sandbox: bool = False,
     report_name: str | None = None,
     csv_out: bool = False,
+    benchmark: str | None = None,
 ) -> Path:
     console = console or Console()
-    results, portfolio_metrics = compute_results(cfg, console)
+    results, portfolio_metrics = compute_results(cfg, console, benchmark=benchmark)
     report_path = write_text_report(results, out_dir=out_dir, portfolio=portfolio_metrics, name=report_name)
     if csv_out:
         write_csv_summary(results, out_path=out_dir / f"{report_path.stem}.csv")

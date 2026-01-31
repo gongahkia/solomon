@@ -521,6 +521,7 @@ def do_analyze(
     report_name: str | None = None,
     csv_out: bool = False,
     sandbox: bool = False,
+    benchmark: str | None = None,
 ) -> Path:
     artifacts = do_analyze_artifacts(
         tickers,
@@ -531,6 +532,7 @@ def do_analyze(
         end=end,
         report_name=report_name,
         sandbox=sandbox,
+        benchmark=benchmark,
     )
     return artifacts.report_path
 
@@ -545,13 +547,14 @@ def do_analyze_artifacts(
     end: str | None = None,
     report_name: str | None = None,
     sandbox: bool = False,
+    benchmark: str | None = None,
 ) -> AnalysisArtifacts:
     cfg = load_config()
     if tickers:
         cfg = cfg.model_copy(update={"tickers": tickers})
 
     console = Console()
-    results, portfolio = compute_results(cfg, console, start=start, end=end)
+    results, portfolio = compute_results(cfg, console, start=start, end=end, benchmark=benchmark)
     report_path = write_text_report(results, out_dir=out_dir, portfolio=portfolio, name=report_name)
 
     if csv_out:

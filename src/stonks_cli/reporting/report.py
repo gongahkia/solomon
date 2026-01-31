@@ -25,6 +25,8 @@ class TickerResult:
     atr14: float | None = None
     stop_loss: float | None = None
     take_profit: float | None = None
+    beta: float | None = None
+    benchmark: str | None = None
 
 
 def write_text_report(
@@ -44,11 +46,17 @@ def write_text_report(
         ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         path = out_dir / f"report_{ts}.txt"
 
+    # Check if any result has beta
+    has_beta = any(r.beta is not None for r in results)
+    benchmark_name = next((r.benchmark for r in results if r.benchmark), None)
+
     table = Table(title="Stonks Report")
     table.add_column("Ticker", style="cyan")
     table.add_column("Last", justify="right")
     table.add_column("Action", style="magenta")
     table.add_column("Confidence", justify="right")
+    if has_beta:
+        table.add_column(f"Beta ({benchmark_name})" if benchmark_name else "Beta", justify="right")
     table.add_column("CAGR", justify="right")
     table.add_column("Sharpe", justify="right")
     table.add_column("MaxDD", justify="right")
@@ -91,17 +99,23 @@ def write_text_report(
         if r.missing_columns:
             data_bits.append("miss=" + ",".join(r.missing_columns))
         data_summary = " ".join(data_bits) if data_bits else "-"
-        table.add_row(
+
+        row_values = [
             r.ticker,
             last,
             r.recommendation.action,
             f"{r.recommendation.confidence:.2f}",
+        ]
+        if has_beta:
+            row_values.append(fmt(r.beta, pct=False))
+        row_values.extend([
             fmt(r.backtest.cagr if r.backtest else None, pct=True),
             fmt(r.backtest.sharpe if r.backtest else None, pct=False),
             fmt(r.backtest.max_drawdown if r.backtest else None, pct=True),
             data_summary,
             r.recommendation.rationale,
-        )
+        ])
+        table.add_row(*row_values)
 
     console = Console(record=True, width=120)
     console.print("Stonks Report")

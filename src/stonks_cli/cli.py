@@ -701,6 +701,7 @@ def analyze(
     json_out: bool = typer.Option(False, "--json", "--no-json", help="Write JSON output alongside the report"),
     csv_out: bool = typer.Option(False, "--csv", "--no-csv", help="Write CSV summary alongside the report"),
     sandbox: bool = typer.Option(False, "--sandbox", help="Run without persisting last-run history"),
+    benchmark: str | None = typer.Option(None, "--benchmark", help="Benchmark ticker for beta calculation (e.g., SPY)"),
 ) -> None:
     """Analyze tickers and write a report."""
     try:
@@ -714,6 +715,7 @@ def analyze(
                 end=end,
                 report_name=name,
                 sandbox=sandbox,
+                benchmark=benchmark,
             )
             Console().print(f"Wrote report: {artifacts.report_path}")
             if artifacts.json_path:
@@ -727,6 +729,7 @@ def analyze(
             report_name=name,
             csv_out=csv_out,
             sandbox=sandbox,
+            benchmark=benchmark,
         )
     except Exception as e:
         raise _exit_for_error(e)

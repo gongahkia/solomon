@@ -96,6 +96,27 @@ def check_alert(alert: Alert, df: pd.DataFrame) -> bool:
             return days_until <= days_threshold
         except Exception:
             return False
+    
+    # 52-week high/low detection
+    if alert.condition_type in ("new_high_52w", "new_low_52w"):
+        # Need at least 252 trading days + 1 for current
+        if len(df) < 253:
+            return False
+        
+        # Current price
+        current_price = df["close"].iloc[-1]
+        
+        # Use last 252 days EXCLUDING today for the comparison range
+        historical_closes = df["close"].iloc[-253:-1]
+        
+        if alert.condition_type == "new_high_52w":
+            # Trigger when current price exceeds the 52-week high
+            high_52w = historical_closes.max()
+            return current_price > high_52w
+        elif alert.condition_type == "new_low_52w":
+            # Trigger when current price falls below the 52-week low
+            low_52w = historical_closes.min()
+            return current_price < low_52w
             
     return False
 

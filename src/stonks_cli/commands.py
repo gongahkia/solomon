@@ -1388,3 +1388,11 @@ def do_data_purge(*, older_than_days: int | None = None) -> dict[str, object]:
                 continue
 
     return {"cache_dir": str(cache_dir), "deleted": deleted}
+
+
+def do_dividend_info(ticker: str) -> dict:
+    """Fetch dividend information for a ticker."""
+    from stonks_cli.data.dividends import fetch_dividend_info
+    
+    normalized = normalize_ticker(ticker)
+    return fetch_dividend_info(normalized)

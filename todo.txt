@@ -12,7 +12,6 @@
 # PHASE 6: INCREMENTAL NICHE FEATURES
 # ----------------------------------------------------------------------------
 
-Create function `fetch_dividend_info(ticker: str) -> dict` in new module `src/stonks_cli/data/dividends.py` that extracts from yfinance: dividend_yield, annual_dividend, payout_ratio, ex_dividend_date, next_dividend_date, dividend_history (last 8 quarters)
 Add `stonks dividend <TICKER>` command that displays dividend information as Rich panel: current yield, annual payment, payout ratio, ex-date countdown, and table of recent dividend history with payment dates and amounts
 Add `stonks dividend calendar` command that scans configured watchlist tickers and displays upcoming ex-dividend dates for the next 30 days
 Create function `compute_earnings_implied_move(ticker: str) -> float` in earnings.py that calculates average absolute post-earnings move from historical data

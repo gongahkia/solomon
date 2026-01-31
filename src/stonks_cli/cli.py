@@ -71,6 +71,7 @@ signals_app = typer.Typer()
 portfolio_app = typer.Typer()
 paper_app = typer.Typer()
 alert_app = typer.Typer()
+dividend_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
@@ -83,6 +84,7 @@ app.add_typer(signals_app, name="signals")
 app.add_typer(portfolio_app, name="portfolio")
 app.add_typer(paper_app, name="paper")
 app.add_typer(alert_app, name="alert")
+app.add_typer(dividend_app, name="dividend")
 
 
 @app.callback()
@@ -1541,6 +1543,76 @@ def alert_check() -> None:
         for a in triggered:
             cond = a["condition_type"].replace("_", " ")
             Console().print(f"  • {a['ticker']} {cond} {a['threshold']}")
+            
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@dividend_app.command("info")
+def dividend_info(
+    ticker: str = typer.Argument(..., help="Ticker symbol"),
+) -> None:
+    """Display dividend information for a ticker."""
+    from datetime import date
+    from rich.panel import Panel
+    from rich.table import Table
+    from stonks_cli.commands import do_dividend_info
+
+    try:
+        info = do_dividend_info(ticker)
+        console = Console()
+        
+        # Build info panel content
+        lines = []
+        
+        if info.get("dividend_yield") is not None:
+            lines.append(f"[bold]Dividend Yield:[/bold] {info['dividend_yield']:.2f}%")
+        else:
+            lines.append("[bold]Dividend Yield:[/bold] N/A")
+            
+        if info.get("annual_dividend") is not None:
+            lines.append(f"[bold]Annual Payment:[/bold] ${info['annual_dividend']:.2f}")
+        else:
+            lines.append("[bold]Annual Payment:[/bold] N/A")
+            
+        if info.get("payout_ratio") is not None:
+            lines.append(f"[bold]Payout Ratio:[/bold] {info['payout_ratio']:.1f}%")
+        else:
+            lines.append("[bold]Payout Ratio:[/bold] N/A")
+        
+        # Ex-date countdown
+        if info.get("ex_dividend_date"):
+            try:
+                ex_date = date.fromisoformat(info["ex_dividend_date"])
+                days_until = (ex_date - date.today()).days
+                if days_until >= 0:
+                    lines.append(f"[bold]Ex-Dividend Date:[/bold] {info['ex_dividend_date']} ({days_until} days)")
+                else:
+                    lines.append(f"[bold]Last Ex-Date:[/bold] {info['ex_dividend_date']} ({abs(days_until)} days ago)")
+            except Exception:
+                lines.append(f"[bold]Ex-Dividend Date:[/bold] {info['ex_dividend_date']}")
+        
+        if info.get("next_dividend_date"):
+            lines.append(f"[bold]Next Dividend (est):[/bold] {info['next_dividend_date']}")
+        
+        console.print(Panel("\n".join(lines), title=f"[bold cyan]{info.get('ticker', ticker).upper()} Dividend Info[/bold cyan]"))
+        
+        # History table
+        history = info.get("dividend_history", [])
+        if history:
+            table = Table(title="Dividend History (Last 8)")
+            table.add_column("Ex-Date", style="dim")
+            table.add_column("Amount", justify="right")
+            
+            for h in history:
+                table.add_row(
+                    h.get("ex_date", "N/A"),
+                    f"${h.get('amount', 0):.4f}",
+                )
+            
+            console.print(table)
+        else:
+            console.print("[yellow]No dividend history available[/yellow]")
             
     except Exception as e:
         raise _exit_for_error(e)

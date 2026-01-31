@@ -71,6 +71,31 @@ def check_alert(alert: Alert, df: pd.DataFrame) -> bool:
         multiplier = alert.threshold if alert.threshold > 0 else 2.0
         
         return current_volume > vol_20_avg * multiplier
+    
+    # Earnings soon detection
+    if alert.condition_type == "earnings_soon":
+        from datetime import date, timedelta
+        from stonks_cli.data.earnings import fetch_ticker_earnings_history
+        
+        try:
+            history = fetch_ticker_earnings_history(alert.ticker, quarters=4)
+            if not history:
+                return False
+            
+            today = date.today()
+            days_threshold = int(alert.threshold) if alert.threshold > 0 else 7
+            
+            # Find next upcoming earnings date
+            upcoming = [e for e in history if e.report_date >= today]
+            if not upcoming:
+                return False
+            
+            next_earnings = min(upcoming, key=lambda e: e.report_date)
+            days_until = (next_earnings.report_date - today).days
+            
+            return days_until <= days_threshold
+        except Exception:
+            return False
             
     return False
 

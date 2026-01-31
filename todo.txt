@@ -13,7 +13,7 @@
 # ----------------------------------------------------------------------------
 
 
-Add `--date <YYYY-MM-DD>` flag to `stonks portfolio add` to specify purchase date (defaults to today)
+
 Add `stonks portfolio remove <TICKER> <SHARES> <SALE_PRICE>` command that calls remove_position and displays realized gain/loss with percentage
 Add `stonks portfolio show` command that displays all positions as Rich table with columns: Ticker, Shares, Cost Basis, Current Price, Market Value, Gain/Loss ($), Gain/Loss (%), fetching current prices concurrently
 Add `--total` flag to `stonks portfolio show` that appends summary row showing: Total Cost Basis, Total Market Value, Total Gain/Loss, Overall Return %

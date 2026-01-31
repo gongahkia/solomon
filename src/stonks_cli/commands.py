@@ -1095,6 +1095,55 @@ def do_paper_status() -> dict:
     }
 
 
+def do_paper_leaderboard() -> dict:
+    """Get metrics for leaderboard."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from stonks_cli.portfolio.paper import load_paper_portfolio, calculate_paper_performance, get_paper_history_path
+    
+    portfolio = load_paper_portfolio()
+    cfg = load_config()
+    
+    # Get Initial Cash
+    initial_cash = 0.0
+    h_path = get_paper_history_path()
+    if h_path.exists():
+        with open(h_path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                    if rec.get("action") == "INIT":
+                         initial_cash += rec.get("shares", 0.0)
+                except Exception:
+                    pass
+    if initial_cash == 0:
+        initial_cash = 10000.0
+
+    # Fetch prices
+    tickers = list(set(p.ticker for p in portfolio.positions))
+    prices: dict[str, float] = {}
+    
+    if tickers:
+        def _fetch_price(t: str):
+            try:
+                 provider = provider_for_config(cfg, t)
+                 series = provider.fetch_daily(t)
+                 if not series.df.empty and "close" in series.df.columns:
+                     return t, float(series.df["close"].iloc[-1])
+            except Exception:
+                 pass
+            return t, None
+
+        max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+             futures = [ex.submit(_fetch_price, t) for t in tickers]
+             for fut in as_completed(futures):
+                 t, p = fut.result()
+                 if p is not None:
+                     prices[t] = p
+
+    return calculate_paper_performance(portfolio, initial_cash, prices)
+
+
 def do_sector(sector_name: str) -> dict:
     """Get sector performance compared to SPY."""
     from datetime import date, timedelta

@@ -1308,5 +1308,31 @@ def paper_reset(
     Console().print("[green]Paper portfolio reset successfully.[/green]")
 
 
+@paper_app.command("leaderboard")
+def paper_leaderboard() -> None:
+    """Show paper trading performance metrics."""
+    from stonks_cli.commands import do_paper_leaderboard
+    from rich.table import Table
+
+    try:
+        metrics = do_paper_leaderboard()
+
+        table = Table(title="Performance Metrics")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", justify="right")
+
+        color = "green" if metrics["total_return_pct"] >= 0 else "red"
+        table.add_row("Total Return %", f"[{color}]{metrics['total_return_pct']:+.2f}%[/{color}]")
+        table.add_row("Sharpe Ratio (Trade)", f"{metrics['sharpe_ratio']:.2f}")
+        table.add_row("Max Drawdown", f"{metrics['max_drawdown']*100:.2f}%")
+        table.add_row("Trades", str(metrics['num_trades']))
+        table.add_row("Win Rate", f"{metrics['win_rate']:.1f}%")
+
+        Console().print(table)
+
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

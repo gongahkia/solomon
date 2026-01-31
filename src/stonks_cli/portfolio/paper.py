@@ -171,6 +171,45 @@ def calculate_paper_performance(
     best_trade = max(trades, key=lambda t: t["gain_loss"]) if trades else None
     worst_trade = min(trades, key=lambda t: t["gain_loss"]) if trades else None
 
+    # Sharpe & Max Drawdown (Approximate based on closed trades)
+    sharpe_ratio = 0.0
+    max_drawdown = 0.0
+    
+    if trades:
+        import statistics
+        
+        # Sharpe (Trade-based)
+        pct_returns = []
+        for t in trades:
+            proceeds = t["shares"] * t["price"]
+            gain = t["gain_loss"]
+            cost = proceeds - gain
+            if cost > 0:
+                pct_returns.append(gain / cost)
+        
+        if len(pct_returns) > 1:
+            avg_ret = statistics.mean(pct_returns)
+            std_dev = statistics.stdev(pct_returns)
+            # Simple Sharpe: Avg / StdDev (not annualized)
+            sharpe_ratio = (avg_ret / std_dev) if std_dev > 0 else 0.0
+        elif len(pct_returns) == 1:
+            sharpe_ratio = pct_returns[0] # Not really defined, but return value
+
+        # Max Drawdown (Realized Equity)
+        equity = initial_cash
+        peak = equity
+        
+        # Sort trades by timestamp to be sure (though usually appended)
+        trades_sorted = sorted(trades, key=lambda x: x["timestamp"])
+        
+        for t in trades_sorted:
+            equity += t["gain_loss"]
+            if equity > peak:
+                peak = equity
+            dd = (peak - equity) / peak if peak > 0 else 0.0
+            if dd > max_drawdown:
+                max_drawdown = dd
+
     total_value = portfolio.cash_balance
     if current_prices:
         for p in portfolio.positions:
@@ -190,4 +229,6 @@ def calculate_paper_performance(
         "worst_trade": worst_trade,
         "win_rate": win_rate,
         "num_trades": num_trades,
+        "sharpe_ratio": sharpe_ratio,
+        "max_drawdown": max_drawdown,
     }

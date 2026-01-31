@@ -33,7 +33,7 @@
 
 
 
-Add `stonks paper leaderboard` command that reads paper trading history and displays performance metrics: total return %, Sharpe ratio approximation, max drawdown, number of trades, win rate
+
 
 # ----------------------------------------------------------------------------
 # PHASE 5A: ALERT CONFIGURATION

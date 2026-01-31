@@ -9,12 +9,6 @@
 # ============================================================================
 
 # ----------------------------------------------------------------------------
-# PHASE 3E: SECTOR & CORRELATION
-# ----------------------------------------------------------------------------
-
-Add `stonks sector <SECTOR_NAME>` command that displays performance of sector ETF with comparison to SPY, including: daily change, weekly change, monthly change, YTD change
-
-# ----------------------------------------------------------------------------
 # PHASE 4A: PORTFOLIO STORAGE
 # ----------------------------------------------------------------------------
 

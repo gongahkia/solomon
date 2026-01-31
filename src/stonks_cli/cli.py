@@ -1033,26 +1033,52 @@ def portfolio_remove(
 
 
 @portfolio_app.command("show")
-def portfolio_show() -> None:
+def portfolio_show(
+    total: bool = typer.Option(False, "--total", help="Show portfolio totals"),
+) -> None:
     """Show portfolio positions."""
-    from rich.table import Table
+    from rich.table import Table, Column
 
     try:
-        data = do_portfolio_show(include_total=False)
+        data = do_portfolio_show(include_total=total)
         positions = data["positions"]
+        totals = data["totals"]
 
         if not positions:
             Console().print("[yellow]Portfolio is empty[/yellow]")
             return
 
-        table = Table(title="Portfolio positions")
-        table.add_column("Ticker", style="cyan")
-        table.add_column("Shares", justify="right")
-        table.add_column("Cost Basis", justify="right")
-        table.add_column("Price", justify="right")
-        table.add_column("Value", justify="right")
-        table.add_column("G/L ($)", justify="right")
-        table.add_column("G/L (%)", justify="right")
+        table = Table(title="Portfolio positions", show_footer=total)
+        
+        # Format totals for footer if requested
+        f_ticker = "TOTAL" if total else ""
+        f_shares = ""
+        f_cost_basis = ""
+        f_price = ""
+        f_value = ""
+        f_gl_dollar = ""
+        f_gl_pct = ""
+
+        if totals:
+             t_cb = totals["total_cost_basis"]
+             t_mv = totals["total_market_value"]
+             t_gl = totals["total_gain_loss"]
+             t_ret = totals["total_return_pct"]
+             
+             gl_color = "green" if t_gl >= 0 else "red"
+             
+             f_cost_basis = f"${t_cb:.2f}"
+             f_value = f"${t_mv:.2f}"
+             f_gl_dollar = f"[{gl_color}]${t_gl:.2f}[/{gl_color}]"
+             f_gl_pct = f"[{gl_color}]{t_ret:+.2f}%[/{gl_color}]"
+
+        table.add_column("Ticker", style="cyan", footer=f_ticker)
+        table.add_column("Shares", justify="right", footer=f_shares)
+        table.add_column("Cost Basis", justify="right", footer=f_cost_basis)
+        table.add_column("Price", justify="right", footer=f_price)
+        table.add_column("Value", justify="right", footer=f_value)
+        table.add_column("G/L ($)", justify="right", footer=f_gl_dollar)
+        table.add_column("G/L (%)", justify="right", footer=f_gl_pct)
 
         for p in positions:
             gl_color = "green" if p["gain_loss"] >= 0 else "red"

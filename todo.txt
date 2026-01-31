@@ -12,7 +12,6 @@
 # PHASE 5B: ALERT CHECKING & NOTIFICATION
 # ----------------------------------------------------------------------------
 
-Add `webhook_url` field to config.py AppConfig for alert webhook delivery (optional, None by default)
 Add `stonks alert check` command that runs check_all_alerts(), displays triggered alerts, sends notifications (bell + webhook if configured), and marks alerts as triggered
 Integrate alert checking into existing scheduler: add alert check step after analysis in scheduled runs, calling check_all_alerts and notify functions
 

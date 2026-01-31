@@ -1501,5 +1501,26 @@ def _toggle_alert(alert_id: str, enabled: bool) -> None:
         raise _exit_for_error(e)
 
 
+@alert_app.command("check")
+def alert_check() -> None:
+    """Check all alerts and trigger notifications for conditions met."""
+    from stonks_cli.commands import do_alert_check
+
+    try:
+        triggered = do_alert_check()
+        
+        if not triggered:
+            Console().print("[green]No alerts triggered[/green]")
+            return
+            
+        Console().print(f"[bold red]{len(triggered)} alert(s) triggered![/bold red]")
+        for a in triggered:
+            cond = a["condition_type"].replace("_", " ")
+            Console().print(f"  • {a['ticker']} {cond} {a['threshold']}")
+            
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

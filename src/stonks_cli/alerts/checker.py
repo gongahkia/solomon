@@ -37,7 +37,8 @@ def check_all_alerts() -> list[tuple[Alert, bool]]:
     """Check all enabled alerts."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from stonks_cli.alerts.storage import load_alerts
-    from stonks_cli.config import load_config, provider_for_config
+    from stonks_cli.config import load_config
+    from stonks_cli.pipeline import provider_for_config
     
     alerts = [a for a in load_alerts() if a.enabled]
     if not alerts:

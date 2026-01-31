@@ -1207,6 +1207,39 @@ def do_alert_toggle(alert_id: str, enabled: bool) -> dict | None:
     return target.to_dict()
 
 
+def do_alert_check() -> list[dict]:
+    """Check all alerts, send notifications for triggered ones, and mark as triggered.
+    
+    Returns list of triggered alert dicts.
+    """
+    from datetime import datetime
+    from stonks_cli.alerts.checker import check_all_alerts
+    from stonks_cli.alerts.storage import save_alert
+    from stonks_cli.alerts.notify import notify_terminal_bell, notify_webhook, log_alert_trigger
+
+    cfg = load_config()
+    results = check_all_alerts()
+    triggered = []
+
+    for alert, is_triggered in results:
+        if is_triggered and alert.triggered_at is None:
+            # Mark as triggered
+            alert.triggered_at = datetime.now()
+            save_alert(alert)
+
+            # Send notifications
+            notify_terminal_bell(alert)
+            log_alert_trigger(alert)
+
+            # Send webhook if configured
+            if cfg.webhook_url:
+                notify_webhook(alert, cfg.webhook_url)
+
+            triggered.append(alert.to_dict())
+
+    return triggered
+
+
 def do_sector(sector_name: str) -> dict:
     """Get sector performance compared to SPY."""
     from datetime import date, timedelta

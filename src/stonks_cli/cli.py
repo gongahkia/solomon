@@ -69,6 +69,7 @@ plugins_app = typer.Typer()
 watchlist_app = typer.Typer()
 signals_app = typer.Typer()
 portfolio_app = typer.Typer()
+paper_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
@@ -79,6 +80,7 @@ app.add_typer(plugins_app, name="plugins")
 app.add_typer(watchlist_app, name="watchlist")
 app.add_typer(signals_app, name="signals")
 app.add_typer(portfolio_app, name="portfolio")
+app.add_typer(paper_app, name="paper")
 
 
 @app.callback()
@@ -1178,6 +1180,20 @@ def portfolio_history() -> None:
             )
 
         Console().print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@paper_app.command("init")
+def paper_init(
+    cash: float = typer.Option(10000.0, "--cash", help="Initial cash balance"),
+) -> None:
+    """Initialize paper trading portfolio."""
+    from stonks_cli.portfolio.paper import init_paper_portfolio
+
+    try:
+        p = init_paper_portfolio(starting_cash=cash)
+        Console().print(f"Initialized paper portfolio with ${p.cash_balance:.2f} cash")
     except Exception as e:
         raise _exit_for_error(e)
 

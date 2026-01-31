@@ -27,7 +27,7 @@
 # ----------------------------------------------------------------------------
 
 
-Add `stonks paper init` command with `--cash <AMOUNT>` flag (default 10000) that initializes paper trading portfolio
+
 Add `stonks paper buy <TICKER> <SHARES>` command that checks paper portfolio has sufficient cash, fetches current price, deducts cost from cash_balance, adds Position, and confirms trade with "Bought 10 AAPL @ $182.50 ($1825.00 total). Cash remaining: $8175.00"
 Add `stonks paper sell <TICKER> <SHARES>` command that checks position exists with sufficient shares, fetches current price, adds proceeds to cash_balance, removes/reduces Position, and displays realized gain/loss
 Add `stonks paper status` command that displays paper portfolio summary: cash balance, positions table with current values, total portfolio value, and overall P&L since inception (comparing to initial cash)

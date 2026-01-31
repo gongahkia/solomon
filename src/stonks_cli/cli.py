@@ -111,9 +111,11 @@ def doctor() -> None:
 def quick(
     tickers: list[str] = typer.Argument(..., help="Ticker symbol(s) (e.g., AAPL MSFT GOOG)"),
     no_color: bool = typer.Option(False, "--no-color", help="Strip color formatting for piping"),
+    spark: bool = typer.Option(False, "--spark", help="Append sparkline of last 20 days"),
 ) -> None:
     """Quick one-liner analysis for one or more tickers."""
     from stonks_cli.formatting.oneliner import format_quick_summary
+    from stonks_cli.formatting.sparkline import generate_sparkline
 
     try:
         results = do_quick(tickers)
@@ -128,6 +130,9 @@ def quick(
                 confidence=result.confidence,
                 use_color=not no_color,
             )
+            if spark and result.prices:
+                sparkline = generate_sparkline(result.prices, width=20)
+                line = f"{line} {sparkline}"
             console.print(line)
     except Exception as e:
         raise _exit_for_error(e)

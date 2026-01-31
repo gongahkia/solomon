@@ -33,6 +33,7 @@ class QuickResult:
     change_pct: float | None
     action: str
     confidence: float
+    prices: list[float] | None = None  # Last N closing prices for sparkline
 
 
 def _fetch_quick_single(ticker: str, cfg: AppConfig, strategy_fn) -> QuickResult:
@@ -49,6 +50,7 @@ def _fetch_quick_single(ticker: str, cfg: AppConfig, strategy_fn) -> QuickResult
             change_pct=None,
             action="NO_DATA",
             confidence=0.0,
+            prices=None,
         )
 
     last_close = float(df["close"].iloc[-1])
@@ -58,6 +60,9 @@ def _fetch_quick_single(ticker: str, cfg: AppConfig, strategy_fn) -> QuickResult
         if prev_close != 0:
             change_pct = ((last_close - prev_close) / prev_close) * 100
 
+    # Extract last 20 prices for sparkline
+    prices = df["close"].tail(20).tolist()
+
     if len(df) < cfg.risk.min_history_days:
         return QuickResult(
             ticker=normalized,
@@ -65,6 +70,7 @@ def _fetch_quick_single(ticker: str, cfg: AppConfig, strategy_fn) -> QuickResult
             change_pct=change_pct,
             action="INSUFFICIENT_HISTORY",
             confidence=0.1,
+            prices=prices,
         )
 
     rec = strategy_fn(df)
@@ -74,6 +80,7 @@ def _fetch_quick_single(ticker: str, cfg: AppConfig, strategy_fn) -> QuickResult
         change_pct=change_pct,
         action=rec.action,
         confidence=rec.confidence,
+        prices=prices,
     )
 
 

@@ -1012,6 +1012,89 @@ def do_paper_sell(ticker: str, shares: float) -> dict:
     return paper_sell(normalized, shares, price)
 
 
+def do_paper_status() -> dict:
+    """Get paper portfolio status summary."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from stonks_cli.portfolio.paper import load_paper_portfolio, get_paper_history_path
+
+    portfolio = load_paper_portfolio()
+    cfg = load_config()
+
+    # Fetch prices
+    tickers = list(set(p.ticker for p in portfolio.positions))
+    prices: dict[str, float] = {}
+
+    def _fetch_price(t: str):
+        try:
+             provider = provider_for_config(cfg, t)
+             series = provider.fetch_daily(t)
+             if not series.df.empty and "close" in series.df.columns:
+                 return t, float(series.df["close"].iloc[-1])
+        except Exception:
+             pass
+        return t, None
+
+    max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+         futures = [ex.submit(_fetch_price, t) for t in tickers]
+         for fut in as_completed(futures):
+             t, p = fut.result()
+             if p is not None:
+                 prices[t] = p
+
+    # Calculate Values
+    positions_data = []
+    total_market_value = 0.0
+
+    for pos in portfolio.positions:
+        current_price = prices.get(pos.ticker, pos.cost_basis_per_share)
+        market_value = pos.shares * current_price
+        cost_basis_total = pos.shares * pos.cost_basis_per_share
+        gain_loss = market_value - cost_basis_total
+        pct = (gain_loss / cost_basis_total) * 100 if cost_basis_total > 0 else 0
+
+        positions_data.append({
+            "ticker": pos.ticker,
+            "shares": pos.shares,
+            "cost_basis": pos.cost_basis_per_share,
+            "current_price": current_price,
+            "market_value": market_value,
+            "gain_loss": gain_loss,
+            "gain_loss_pct": pct
+        })
+        total_market_value += market_value
+
+    total_portfolio_value = total_market_value + portfolio.cash_balance
+
+    # Calculate Initial Cash from history
+    initial_cash = 0.0
+    hist_path = get_paper_history_path()
+    if hist_path.exists():
+        with open(hist_path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                    if rec.get("action") == "INIT":
+                         initial_cash += rec.get("shares", 0.0)
+                except Exception:
+                    pass
+
+    if initial_cash == 0:
+        initial_cash = 10000.0  # Fallback
+
+    overall_pl = total_portfolio_value - initial_cash
+    overall_pl_pct = (overall_pl / initial_cash * 100) if initial_cash > 0 else 0
+
+    return {
+        "cash_balance": portfolio.cash_balance,
+        "positions": positions_data,
+        "total_portfolio_value": total_portfolio_value,
+        "initial_cash": initial_cash,
+        "overall_pl": overall_pl,
+        "overall_pl_pct": overall_pl_pct
+    }
+
+
 def do_sector(sector_name: str) -> dict:
     """Get sector performance compared to SPY."""
     from datetime import date, timedelta

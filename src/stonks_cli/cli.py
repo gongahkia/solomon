@@ -1243,5 +1243,46 @@ def paper_sell_cmd(
         raise _exit_for_error(e)
 
 
+@paper_app.command("status")
+def paper_status() -> None:
+    """Show paper portfolio status."""
+    from stonks_cli.commands import do_paper_status
+    from rich.table import Table
+
+    try:
+        status = do_paper_status()
+
+        Console().print(f"Cash Balance: ${status['cash_balance']:.2f}")
+
+        # Positions Table
+        if status["positions"]:
+            table = Table(title="Positions")
+            table.add_column("Ticker", style="cyan")
+            table.add_column("Shares", justify="right")
+            table.add_column("Price", justify="right")
+            table.add_column("Value", justify="right")
+            table.add_column("G/L", justify="right")
+
+            for p in status["positions"]:
+                gl_color = "green" if p["gain_loss"] >= 0 else "red"
+                table.add_row(
+                    p["ticker"],
+                    f"{p['shares']:.2f}",
+                    f"${p['current_price']:.2f}",
+                    f"${p['market_value']:.2f}",
+                    f"[{gl_color}]${p['gain_loss']:.2f} ({p['gain_loss_pct']:+.2f}%)[/{gl_color}]",
+                )
+            Console().print(table)
+        else:
+             Console().print("[yellow]No open positions[/yellow]")
+
+        pl_color = "green" if status["overall_pl"] >= 0 else "red"
+        Console().print(f"Total Portfolio Value: ${status['total_portfolio_value']:.2f}")
+        Console().print(f"Overall P&L: [{pl_color}]${status['overall_pl']:.2f} ({status['overall_pl_pct']:+.2f}%)[/{pl_color}]")
+
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

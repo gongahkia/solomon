@@ -135,4 +135,11 @@ def init_paper_portfolio(starting_cash: float = 10000.0) -> Portfolio:
     """Initialize a new paper trading portfolio."""
     portfolio = Portfolio(cash_balance=starting_cash, positions=[])
     save_paper_portfolio(portfolio)
+
+    # Clear history
+    path_hist = get_paper_history_path()
+    path_hist.write_text("", encoding="utf-8")
+
+    log_paper_transaction("INIT", "CASH", starting_cash, 1.0)
+
     return portfolio

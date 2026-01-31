@@ -79,6 +79,10 @@ class AppConfig(BaseModel):
         default_factory=dict,
         description="Named ticker sets (e.g. {'tech': ['AAPL.US', 'MSFT.US']})",
     )
+    webhook_url: str | None = Field(
+        default=None,
+        description="Optional webhook URL for alert notifications",
+    )
 
 
 def config_path() -> Path:

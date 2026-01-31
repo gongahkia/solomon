@@ -35,9 +35,8 @@ class QuickResult:
     confidence: float
 
 
-def do_quick(ticker: str) -> QuickResult:
-    """Fetch latest price and run strategy for a single ticker."""
-    cfg = load_config()
+def _fetch_quick_single(ticker: str, cfg: AppConfig, strategy_fn) -> QuickResult:
+    """Internal helper to fetch and analyze a single ticker."""
     normalized = normalize_ticker(ticker)
     provider = provider_for_config(cfg, normalized)
     series = provider.fetch_daily(normalized)
@@ -59,7 +58,6 @@ def do_quick(ticker: str) -> QuickResult:
         if prev_close != 0:
             change_pct = ((last_close - prev_close) / prev_close) * 100
 
-    strategy_fn = select_strategy(cfg)
     if len(df) < cfg.risk.min_history_days:
         return QuickResult(
             ticker=normalized,
@@ -77,6 +75,30 @@ def do_quick(ticker: str) -> QuickResult:
         action=rec.action,
         confidence=rec.confidence,
     )
+
+
+def do_quick(tickers: list[str]) -> list[QuickResult]:
+    """Fetch latest price and run strategy for one or more tickers concurrently."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    cfg = load_config()
+    strategy_fn = select_strategy(cfg)
+
+    if len(tickers) == 1:
+        return [_fetch_quick_single(tickers[0], cfg, strategy_fn)]
+
+    results: list[QuickResult] = []
+    max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_fetch_quick_single, t, cfg, strategy_fn): t for t in tickers}
+        for fut in as_completed(futures):
+            results.append(fut.result())
+
+    # Sort results to match input order
+    ticker_order = {normalize_ticker(t): i for i, t in enumerate(tickers)}
+    results.sort(key=lambda r: ticker_order.get(r.ticker, 999))
+    return results
 
 
 def do_watchlist_list() -> dict[str, list[str]]:

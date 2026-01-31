@@ -12,8 +12,6 @@
 # PHASE 1A: INSTANT ONE-LINER MODE                                                                                                                                          
 # ----------------------------------------------------------------------------                                                                                              
 
-Add `--spark` flag to `stonks quick` command that appends a 20-character ASCII sparkline of the last 20 days closing prices to each output line using Unicode block          characters (▁▂▃▄▅▆▇█)                                                                                                                                                       
-Create function `generate_sparkline(prices: list[float], width: int = 20) -> str` in new module `src/stonks_cli/formatting/sparkline.py` that maps price values to 8 Unicode block character levels                                                                                                                                                     
                                                                                                                                                                               
 # ----------------------------------------------------------------------------                                                                                              
 # PHASE 1B: PLOTEXT CHARTS                                                                                                                                                  

@@ -1187,6 +1187,26 @@ def do_alert_remove(alert_id: str) -> bool:
     return delete_alert(alert_id)
 
 
+def do_alert_toggle(alert_id: str, enabled: bool) -> dict | None:
+    """Toggle alert enabled status. Returns updated alert dict or None if not found."""
+    from stonks_cli.alerts.storage import load_alerts, save_alert
+    
+    alerts = load_alerts()
+    # Resolve full ID if prefix
+    # But wait, command layer resolves prefix usually for user interaction.
+    # Here let's assume exact ID or handle prefix if we want logic here.
+    # The remove command resolved prefix in CLI layer. I will do same there.
+    # So here expect exact ID.
+    
+    target = next((a for a in alerts if a.id == alert_id), None)
+    if not target:
+        return None
+        
+    target.enabled = enabled
+    save_alert(target)
+    return target.to_dict()
+
+
 def do_sector(sector_name: str) -> dict:
     """Get sector performance compared to SPY."""
     from datetime import date, timedelta

@@ -1455,5 +1455,51 @@ def alert_remove(
         raise _exit_for_error(e)
 
 
+@alert_app.command("enable")
+def alert_enable(
+    alert_id: str = typer.Argument(..., help="Alert ID (or prefix)"),
+) -> None:
+    """Enable an alert."""
+    _toggle_alert(alert_id, True)
+
+
+@alert_app.command("disable")
+def alert_disable(
+    alert_id: str = typer.Argument(..., help="Alert ID (or prefix)"),
+) -> None:
+    """Disable an alert."""
+    _toggle_alert(alert_id, False)
+
+
+def _toggle_alert(alert_id: str, enabled: bool) -> None:
+    from stonks_cli.commands import do_alert_list, do_alert_toggle
+    
+    try:
+        # Resolve prefix
+        alerts = do_alert_list()
+        matches = [a for a in alerts if a["id"].startswith(alert_id)]
+        
+        if len(matches) == 0:
+            Console().print(f"[red]No alert found with ID prefix: {alert_id}[/red]")
+            raise typer.Exit(code=1)
+        
+        if len(matches) > 1:
+            Console().print(f"[red]Multiple alerts match prefix {alert_id}. Be more specific.[/red]")
+            raise typer.Exit(code=1)
+            
+        target = matches[0]
+        result = do_alert_toggle(target["id"], enabled)
+        
+        if result:
+            status = "enabled" if enabled else "disabled"
+            color = "green" if enabled else "yellow"
+            Console().print(f"Alert {result['id'][:6]} [{color}]{status}[/{color}]")
+        else:
+             Console().print(f"[red]Failed to update alert[/red]")
+
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

@@ -54,6 +54,23 @@ def check_alert(alert: Alert, df: pd.DataFrame) -> bool:
             # Fast SMA crossed below slow SMA
             # Previous: fast >= slow, Current: fast < slow
             return prev_fast >= prev_slow and curr_fast < curr_slow
+    
+    # Volume spike detection
+    if alert.condition_type == "volume_spike":
+        if "volume" not in df.columns:
+            return False
+        if len(df) < 21:
+            return False
+            
+        # Compute 20-day average volume (excluding today)
+        vol_20_avg = df["volume"].iloc[-21:-1].mean()
+        if vol_20_avg <= 0:
+            return False
+            
+        current_volume = df["volume"].iloc[-1]
+        multiplier = alert.threshold if alert.threshold > 0 else 2.0
+        
+        return current_volume > vol_20_avg * multiplier
             
     return False
 

@@ -12,7 +12,6 @@
 # PHASE 5C: CONDITION-BASED ALERTS (ADVANCED)
 # ----------------------------------------------------------------------------
 
-Add `stonks alert add <TICKER> volume-spike <MULTIPLIER>` command that triggers when daily volume exceeds N times the 20-day average volume (default 2x)
 Implement volume spike detection in check_alert: compute 20-day volume SMA, compare latest volume to threshold multiple
 Add `stonks alert add <TICKER> earnings-soon <DAYS>` command that triggers when ticker's next earnings date is within N days
 Implement earnings alert in check_alert by calling fetch_ticker_earnings_history and comparing next earnings date to current date

@@ -11,6 +11,7 @@ dependencies = [
   "numpy>=1.26",
   "pandas>=2.2",
   "platformdirs>=4.2",
+  "plotext>=5.2.8",
   "pydantic>=2.7",
   "requests>=2.32",
   "rich>=13.7",

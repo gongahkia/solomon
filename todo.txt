@@ -40,7 +40,7 @@
 # ----------------------------------------------------------------------------
 
 
-Create new module `src/stonks_cli/alerts/storage.py` with function `get_alerts_path() -> Path` returning platform-appropriate path to alerts.json
+
 Create function `load_alerts() -> list[Alert]` in storage.py that reads and deserializes alerts.json
 Create function `save_alert(alert: Alert) -> None` in storage.py that appends alert to alerts.json
 Create function `delete_alert(alert_id: str) -> bool` in storage.py that removes alert by ID and returns success status

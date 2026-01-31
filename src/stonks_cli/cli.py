@@ -1032,5 +1032,44 @@ def portfolio_remove(
         raise _exit_for_error(e)
 
 
+@portfolio_app.command("show")
+def portfolio_show() -> None:
+    """Show portfolio positions."""
+    from rich.table import Table
+
+    try:
+        data = do_portfolio_show(include_total=False)
+        positions = data["positions"]
+
+        if not positions:
+            Console().print("[yellow]Portfolio is empty[/yellow]")
+            return
+
+        table = Table(title="Portfolio positions")
+        table.add_column("Ticker", style="cyan")
+        table.add_column("Shares", justify="right")
+        table.add_column("Cost Basis", justify="right")
+        table.add_column("Price", justify="right")
+        table.add_column("Value", justify="right")
+        table.add_column("G/L ($)", justify="right")
+        table.add_column("G/L (%)", justify="right")
+
+        for p in positions:
+            gl_color = "green" if p["gain_loss"] >= 0 else "red"
+            table.add_row(
+                p["ticker"],
+                f"{p['shares']:.2f}",
+                f"${p['cost_basis']:.2f}",
+                f"${p['current_price']:.2f}",
+                f"${p['market_value']:.2f}",
+                f"[{gl_color}]${p['gain_loss']:.2f}[/{gl_color}]",
+                f"[{gl_color}]{p['gain_loss_pct']:+.2f}%[/{gl_color}]",
+            )
+
+        Console().print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

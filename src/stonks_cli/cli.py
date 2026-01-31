@@ -27,6 +27,7 @@ from stonks_cli.commands import (
     do_history_show,
     do_doctor,
     do_plugins_list,
+    do_quick,
     do_signals_diff,
     do_watchlist_analyze,
     do_watchlist_list,
@@ -102,6 +103,53 @@ def doctor() -> None:
         results = do_doctor()
         for k, v in results.items():
             Console().print(f"{k}: {v}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@app.command()
+def quick(
+    ticker: str = typer.Argument(..., help="Ticker symbol (e.g., AAPL)"),
+    no_color: bool = typer.Option(False, "--no-color", help="Strip color formatting for piping"),
+) -> None:
+    """Quick one-liner analysis for a ticker."""
+    try:
+        result = do_quick(ticker)
+        console = Console(force_terminal=not no_color, no_color=no_color)
+
+        # Format price
+        price_str = f"${result.price:.2f}" if result.price is not None else "N/A"
+
+        # Format change percentage with color
+        if result.change_pct is not None:
+            sign = "+" if result.change_pct >= 0 else ""
+            if no_color:
+                change_str = f"({sign}{result.change_pct:.2f}%)"
+            else:
+                color = "green" if result.change_pct >= 0 else "red"
+                change_str = f"[{color}]({sign}{result.change_pct:.2f}%)[/{color}]"
+        else:
+            change_str = "(N/A)"
+
+        # Format action with color
+        if no_color:
+            action_str = result.action
+        else:
+            action_colors = {
+                "BUY_DCA": "green",
+                "HOLD_DCA": "green",
+                "HOLD": "yellow",
+                "HOLD_WAIT": "yellow",
+                "WATCH_REVERSAL": "yellow",
+                "AVOID_OR_HEDGE": "red",
+                "REDUCE_EXPOSURE": "red",
+                "NO_DATA": "red",
+                "INSUFFICIENT_HISTORY": "yellow",
+            }
+            color = action_colors.get(result.action, "white")
+            action_str = f"[{color}]{result.action}[/{color}]"
+
+        console.print(f"{result.ticker} {price_str} {change_str} {action_str} [confidence: {result.confidence:.2f}]")
     except Exception as e:
         raise _exit_for_error(e)
 

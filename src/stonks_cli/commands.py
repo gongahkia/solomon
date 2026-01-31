@@ -23,6 +23,60 @@ from stonks_cli.reporting.csv_report import write_csv_summary
 from stonks_cli.reporting.json_report import write_json_report
 from stonks_cli.reporting.report import write_text_report
 from stonks_cli.storage import get_history_record, get_last_report_path, get_last_run, list_history, save_last_run
+from stonks_cli.data.providers import normalize_ticker
+
+
+@dataclass(frozen=True)
+class QuickResult:
+    ticker: str
+    price: float | None
+    change_pct: float | None
+    action: str
+    confidence: float
+
+
+def do_quick(ticker: str) -> QuickResult:
+    """Fetch latest price and run strategy for a single ticker."""
+    cfg = load_config()
+    normalized = normalize_ticker(ticker)
+    provider = provider_for_config(cfg, normalized)
+    series = provider.fetch_daily(normalized)
+    df = series.df
+
+    if df.empty or "close" not in df.columns:
+        return QuickResult(
+            ticker=normalized,
+            price=None,
+            change_pct=None,
+            action="NO_DATA",
+            confidence=0.0,
+        )
+
+    last_close = float(df["close"].iloc[-1])
+    change_pct = None
+    if len(df) >= 2:
+        prev_close = float(df["close"].iloc[-2])
+        if prev_close != 0:
+            change_pct = ((last_close - prev_close) / prev_close) * 100
+
+    strategy_fn = select_strategy(cfg)
+    if len(df) < cfg.risk.min_history_days:
+        return QuickResult(
+            ticker=normalized,
+            price=last_close,
+            change_pct=change_pct,
+            action="INSUFFICIENT_HISTORY",
+            confidence=0.1,
+        )
+
+    rec = strategy_fn(df)
+    return QuickResult(
+        ticker=normalized,
+        price=last_close,
+        change_pct=change_pct,
+        action=rec.action,
+        confidence=rec.confidence,
+    )
 
 
 def do_watchlist_list() -> dict[str, list[str]]:

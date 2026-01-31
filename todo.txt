@@ -17,8 +17,6 @@
 # PHASE 1B: PLOTEXT CHARTS                                                                                                                                                  
 # ----------------------------------------------------------------------------                                                                                              
                                                                                                                                                                             
-Create function `plot_rsi(df: pd.DataFrame, ticker: str, period: int = 14, days: int = 90) -> None` in `src/stonks_cli/charts/indicators.py` that renders RSI as separate    chart with horizontal lines at 30 and 70 levels                                                                                                                             
-Add `stonks chart-rsi <TICKER>` command that displays RSI indicator chart with overbought/oversold zones highlighted                                                        
                                                                                                                                                                               
 # ----------------------------------------------------------------------------                                                                                              
 # PHASE 2: LIGHTWEIGHT TUI (Rich Live)                                                                                                                                      

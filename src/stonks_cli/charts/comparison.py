@@ -19,7 +19,22 @@ def plot_comparison(tickers: list[str], dfs: dict[str, pd.DataFrame], days: int 
     # Clear any previous plot
     plt.clear_figure()
 
-    colors = ["red", "green", "blue", "yellow", "cyan", "magenta", "orange", "white"]
+    # More visually distinct colors using RGB tuples for maximum contrast
+    colors = [
+        (255, 0, 0),      # Bright Red
+        (0, 200, 0),      # Bright Green
+        (0, 100, 255),    # Bright Blue
+        (255, 200, 0),    # Yellow/Gold
+        (0, 255, 255),    # Cyan
+        (255, 0, 255),    # Magenta
+        (255, 128, 0),    # Orange
+        (150, 150, 255),  # Light Purple
+        (255, 100, 150),  # Pink
+        (0, 255, 150),    # Mint Green
+    ]
+    
+    # Different markers for each ticker
+    markers = ["braille", "dot", "hd", "fhd", "braille", "dot", "hd", "fhd"]
 
     for i, ticker in enumerate(tickers):
         df = dfs.get(ticker)
@@ -42,10 +57,14 @@ def plot_comparison(tickers: list[str], dfs: dict[str, pd.DataFrame], days: int 
         pct_changes = [(p / base_price - 1) * 100 for p in prices]
 
         color = colors[i % len(colors)]
-        plt.plot(pct_changes, label=ticker, color=color, marker="braille")
+        marker = markers[i % len(markers)]
+        plt.plot(pct_changes, label=ticker, color=color, marker=marker)
 
     plt.title(f"Performance Comparison - Last {days} Days")
     plt.xlabel("Days")
     plt.ylabel("Change (%)")
+    
+    # Enable color mode for better color support
+    plt.colorless(False)
 
     plt.show()

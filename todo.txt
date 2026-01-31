@@ -1,0 +1,3 @@
+test all functionality
+update README.md and add screenshots
+add github workflow ci/cd push tests

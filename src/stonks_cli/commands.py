@@ -785,6 +785,38 @@ def do_data_cache_info() -> dict[str, object]:
     }
 
 
+def do_correlation(tickers: list[str], days: int = 252) -> dict:
+    """Compute correlation matrix for given tickers."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from stonks_cli.analysis.correlation import compute_correlation_matrix
+
+    cfg = load_config()
+    dfs: dict[str, object] = {}
+    normalized_tickers = [normalize_ticker(t) for t in tickers]
+
+    def _fetch(t: str):
+        provider = provider_for_config(cfg, t)
+        series = provider.fetch_daily(t)
+        # Rename close to Close for correlation module
+        df = series.df.copy()
+        if "close" in df.columns:
+            df = df.rename(columns={"close": "Close"})
+        return t, df
+
+    max_workers = min(cfg.data.concurrency_limit, max(1, len(normalized_tickers)))
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(_fetch, t) for t in normalized_tickers]
+        for fut in as_completed(futures):
+            ticker, df = fut.result()
+            dfs[ticker] = df
+
+    corr_matrix = compute_correlation_matrix(normalized_tickers, dfs, days=days)
+    return {
+        "tickers": normalized_tickers,
+        "matrix": corr_matrix,
+    }
+
+
 def do_data_purge(*, older_than_days: int | None = None) -> dict[str, object]:
     import json
     import time

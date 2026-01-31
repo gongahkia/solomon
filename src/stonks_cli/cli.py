@@ -18,6 +18,7 @@ from stonks_cli.commands import (
     do_chart_compare,
     do_chart_rsi,
     do_config_init,
+    do_correlation,
     do_earnings,
     do_fundamentals,
     do_insider,
@@ -211,6 +212,52 @@ def chart_rsi(
     """Display RSI indicator chart with overbought/oversold zones."""
     try:
         do_chart_rsi(ticker, period=period, days=days)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@app.command()
+def correlation(
+    tickers: list[str] = typer.Argument(..., help="Ticker symbols (e.g., AAPL MSFT GOOG)"),
+    days: int = typer.Option(252, "--days", help="Number of trading days for correlation calculation"),
+) -> None:
+    """Display correlation matrix for multiple tickers."""
+    from rich.table import Table
+
+    try:
+        result = do_correlation(tickers, days=days)
+        console = Console()
+
+        matrix = result["matrix"]
+        ticker_list = result["tickers"]
+
+        if matrix.empty:
+            console.print("[yellow]No correlation data available[/yellow]")
+            return
+
+        table = Table(title=f"Correlation Matrix ({days} days)")
+        table.add_column("", style="bold")
+
+        for t in ticker_list:
+            table.add_column(t, justify="right")
+
+        for row_ticker in ticker_list:
+            row_values = []
+            for col_ticker in ticker_list:
+                val = matrix.loc[row_ticker, col_ticker]
+                # Color based on correlation value
+                if row_ticker == col_ticker:
+                    cell = "[dim]1.00[/dim]"
+                elif val < 0.3:
+                    cell = f"[green]{val:.2f}[/green]"
+                elif val > 0.7:
+                    cell = f"[red]{val:.2f}[/red]"
+                else:
+                    cell = f"[yellow]{val:.2f}[/yellow]"
+                row_values.append(cell)
+            table.add_row(row_ticker, *row_values)
+
+        console.print(table)
     except Exception as e:
         raise _exit_for_error(e)
 

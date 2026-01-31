@@ -14,6 +14,7 @@ from stonks_cli.commands import (
     do_analyze_artifacts,
     do_backtest,
     do_bench,
+    do_chart,
     do_config_init,
     do_config_set,
     do_config_show,
@@ -134,6 +135,18 @@ def quick(
                 sparkline = generate_sparkline(result.prices, width=20)
                 line = f"{line} {sparkline}"
             console.print(line)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@app.command()
+def chart(
+    ticker: str = typer.Argument(..., help="Ticker symbol (e.g., AAPL)"),
+    days: int = typer.Option(90, "--days", help="Number of days to display"),
+) -> None:
+    """Display an ASCII price chart for a ticker."""
+    try:
+        do_chart(ticker, days=days)
     except Exception as e:
         raise _exit_for_error(e)
 

@@ -26,7 +26,7 @@
 # PHASE 4C: PAPER TRADING
 # ----------------------------------------------------------------------------
 
-Create new module `src/stonks_cli/portfolio/paper.py` with function `init_paper_portfolio(starting_cash: float = 10000.0) -> Portfolio` that creates new Portfolio with specified cash balance and empty positions, saved to paper_portfolio.json
+
 Add `stonks paper init` command with `--cash <AMOUNT>` flag (default 10000) that initializes paper trading portfolio
 Add `stonks paper buy <TICKER> <SHARES>` command that checks paper portfolio has sufficient cash, fetches current price, deducts cost from cash_balance, adds Position, and confirms trade with "Bought 10 AAPL @ $182.50 ($1825.00 total). Cash remaining: $8175.00"
 Add `stonks paper sell <TICKER> <SHARES>` command that checks position exists with sufficient shares, fetches current price, adds proceeds to cash_balance, removes/reduces Position, and displays realized gain/loss

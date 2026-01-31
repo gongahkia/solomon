@@ -28,7 +28,7 @@
 
 
 
-Add `stonks paper buy <TICKER> <SHARES>` command that checks paper portfolio has sufficient cash, fetches current price, deducts cost from cash_balance, adds Position, and confirms trade with "Bought 10 AAPL @ $182.50 ($1825.00 total). Cash remaining: $8175.00"
+
 Add `stonks paper sell <TICKER> <SHARES>` command that checks position exists with sufficient shares, fetches current price, adds proceeds to cash_balance, removes/reduces Position, and displays realized gain/loss
 Add `stonks paper status` command that displays paper portfolio summary: cash balance, positions table with current values, total portfolio value, and overall P&L since inception (comparing to initial cash)
 Create function `calculate_paper_performance(portfolio: Portfolio, initial_cash: float) -> dict` in paper.py returning total_value, total_return_pct, best_trade, worst_trade, win_rate from transaction history

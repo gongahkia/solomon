@@ -1198,5 +1198,26 @@ def paper_init(
         raise _exit_for_error(e)
 
 
+@paper_app.command("buy")
+def paper_buy_cmd(
+    ticker: str = typer.Argument(..., help="Ticker symbol"),
+    shares: float = typer.Argument(..., help="Number of shares"),
+) -> None:
+    """Buy shares in paper portfolio."""
+    from stonks_cli.commands import do_paper_buy
+
+    try:
+        res = do_paper_buy(ticker, shares)
+        # Res: ticker, shares, price, total_cost, cash_remaining
+
+        Console().print(
+            f"Bought {res['shares']} {res['ticker']} @ ${res['price']:.2f} "
+            f"(${res['total_cost']:.2f} total). "
+            f"Cash remaining: ${res['cash_remaining']:.2f}"
+        )
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

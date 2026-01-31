@@ -144,10 +144,11 @@ def chart(
     ticker: str = typer.Argument(..., help="Ticker symbol (e.g., AAPL)"),
     days: int = typer.Option(90, "--days", help="Number of days to display"),
     candle: bool = typer.Option(False, "--candle", help="Display candlestick chart instead of line chart"),
+    volume: bool = typer.Option(False, "--volume", help="Include volume subplot below price chart"),
 ) -> None:
     """Display an ASCII price chart for a ticker."""
     try:
-        do_chart(ticker, days=days, candle=candle)
+        do_chart(ticker, days=days, candle=candle, volume=volume)
     except Exception as e:
         raise _exit_for_error(e)
 

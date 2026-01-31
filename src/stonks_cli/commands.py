@@ -108,7 +108,7 @@ def do_quick(tickers: list[str]) -> list[QuickResult]:
     return results
 
 
-def do_chart(ticker: str, days: int = 90, candle: bool = False) -> None:
+def do_chart(ticker: str, days: int = 90, candle: bool = False, volume: bool = False) -> None:
     """Fetch data and display a price chart for a ticker."""
     cfg = load_config()
     normalized = normalize_ticker(ticker)
@@ -119,6 +119,10 @@ def do_chart(ticker: str, days: int = 90, candle: bool = False) -> None:
         from stonks_cli.charts.candlestick import plot_candlestick
 
         plot_candlestick(series.df, normalized, days=days)
+    elif volume:
+        from stonks_cli.charts.price_chart import plot_with_volume
+
+        plot_with_volume(series.df, normalized, days=days)
     else:
         from stonks_cli.charts.price_chart import plot_price_history
 

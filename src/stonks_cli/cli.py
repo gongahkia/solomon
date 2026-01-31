@@ -1339,8 +1339,8 @@ def paper_leaderboard() -> None:
 @alert_app.command("add")
 def alert_add(
     ticker: str = typer.Argument(..., help="Ticker symbol"),
-    condition: str = typer.Argument(..., help="Condition type (price-above, price-below, rsi-above, rsi-below)"),
-    threshold: float = typer.Argument(..., help="Threshold value"),
+    condition: str = typer.Argument(..., help="Condition type (price-above, price-below, rsi-above, rsi-below, golden-cross, death-cross, new-high-52w, new-low-52w)"),
+    threshold: float = typer.Argument(None, help="Threshold value (not required for cross/52w alerts)"),
 ) -> None:
     """Add a new alert."""
     from stonks_cli.commands import do_alert_add
@@ -1348,16 +1348,31 @@ def alert_add(
     try:
         # Normalize condition to use underscores
         cond_normalized = condition.replace("-", "_")
-        alert = do_alert_add(ticker, cond_normalized, threshold)
+        
+        # Conditions that don't require a threshold
+        no_threshold_conditions = {"golden_cross", "death_cross", "new_high_52w", "new_low_52w"}
+        
+        if cond_normalized in no_threshold_conditions:
+            final_threshold = threshold if threshold is not None else 0.0
+        else:
+            if threshold is None:
+                Console().print(f"[red]Threshold required for condition: {condition}[/red]")
+                raise typer.Exit(code=1)
+            final_threshold = threshold
+            
+        alert = do_alert_add(ticker, cond_normalized, final_threshold)
         
         # Format confirmation message
         condition_str = cond_normalized.replace("_", " ")
-        msg_val = f"${threshold:.2f}"
-        if "rsi" in cond_normalized:
-            msg_val = f"{threshold:.1f}"
+        if cond_normalized in no_threshold_conditions:
+            msg_val = ""
+        elif "rsi" in cond_normalized:
+            msg_val = f" {final_threshold:.1f}"
+        else:
+            msg_val = f" ${final_threshold:.2f}"
             
         Console().print(
-            f"Alert created: {alert['ticker']} {condition_str} {msg_val} (ID: {alert['id'][:6]})"
+            f"Alert created: {alert['ticker']} {condition_str}{msg_val} (ID: {alert['id'][:6]})"
         )
     except Exception as e:
         raise _exit_for_error(e)

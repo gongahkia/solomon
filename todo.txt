@@ -9,12 +9,6 @@
 # ============================================================================
 
 # ----------------------------------------------------------------------------
-# PHASE 5B: ALERT CHECKING & NOTIFICATION
-# ----------------------------------------------------------------------------
-
-Integrate alert checking into existing scheduler: add alert check step after analysis in scheduled runs, calling check_all_alerts and notify functions
-
-# ----------------------------------------------------------------------------
 # PHASE 5C: CONDITION-BASED ALERTS (ADVANCED)
 # ----------------------------------------------------------------------------
 

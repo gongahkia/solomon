@@ -32,7 +32,7 @@
 
 
 
-Add `stonks paper reset` command with confirmation prompt that deletes paper_portfolio.json and paper_history.jsonl to start fresh
+
 Add `stonks paper leaderboard` command that reads paper trading history and displays performance metrics: total return %, Sharpe ratio approximation, max drawdown, number of trades, win rate
 
 # ----------------------------------------------------------------------------

@@ -1284,5 +1284,29 @@ def paper_status() -> None:
         raise _exit_for_error(e)
 
 
+@paper_app.command("reset")
+def paper_reset(
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+) -> None:
+    """Reset paper trading portfolio."""
+    from stonks_cli.portfolio.paper import get_paper_portfolio_path, get_paper_history_path
+
+    if not force:
+        typer.confirm(
+            "Are you sure you want to reset your paper portfolio? This will delete all data.",
+            abort=True,
+        )
+
+    p_path = get_paper_portfolio_path()
+    h_path = get_paper_history_path()
+
+    if p_path.exists():
+        p_path.unlink()
+    if h_path.exists():
+        h_path.unlink()
+
+    Console().print("[green]Paper portfolio reset successfully.[/green]")
+
+
 def main() -> None:
     app()

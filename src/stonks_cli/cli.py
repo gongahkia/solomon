@@ -18,6 +18,7 @@ from stonks_cli.commands import (
     do_chart_compare,
     do_chart_rsi,
     do_config_init,
+    do_watch,
     do_config_set,
     do_config_show,
     do_config_validate,
@@ -181,6 +182,18 @@ def chart_rsi(
     """Display RSI indicator chart with overbought/oversold zones."""
     try:
         do_chart_rsi(ticker, period=period, days=days)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@app.command()
+def watch(
+    watchlist: str = typer.Option(None, "--watchlist", help="Start with specific watchlist"),
+    refresh: int = typer.Option(60, "--refresh", help="Refresh interval in seconds"),
+) -> None:
+    """Launch interactive watchlist TUI with live updates."""
+    try:
+        do_watch(watchlist_name=watchlist, refresh_interval=refresh)
     except Exception as e:
         raise _exit_for_error(e)
 

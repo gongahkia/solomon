@@ -108,6 +108,14 @@ def do_quick(tickers: list[str]) -> list[QuickResult]:
     return results
 
 
+def do_watch(watchlist_name: str | None = None, refresh_interval: int = 60) -> None:
+    """Launch the watchlist TUI."""
+    from stonks_cli.tui.watchlist_view import WatchlistTUI
+
+    tui = WatchlistTUI(watchlist_name=watchlist_name, refresh_interval=refresh_interval)
+    tui.run()
+
+
 def do_chart_rsi(ticker: str, period: int = 14, days: int = 90) -> None:
     """Fetch data and display an RSI chart for a ticker."""
     from stonks_cli.charts.indicators import plot_rsi

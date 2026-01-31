@@ -29,7 +29,7 @@
 
 
 
-Add `stonks paper sell <TICKER> <SHARES>` command that checks position exists with sufficient shares, fetches current price, adds proceeds to cash_balance, removes/reduces Position, and displays realized gain/loss
+
 Add `stonks paper status` command that displays paper portfolio summary: cash balance, positions table with current values, total portfolio value, and overall P&L since inception (comparing to initial cash)
 Create function `calculate_paper_performance(portfolio: Portfolio, initial_cash: float) -> dict` in paper.py returning total_value, total_return_pct, best_trade, worst_trade, win_rate from transaction history
 Add `stonks paper reset` command with confirmation prompt that deletes paper_portfolio.json and paper_history.jsonl to start fresh

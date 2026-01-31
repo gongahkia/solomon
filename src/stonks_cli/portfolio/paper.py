@@ -81,6 +81,56 @@ def paper_buy(ticker: str, shares: float, price: float) -> dict:
         "cash_remaining": portfolio.cash_balance
     }
 
+def paper_sell(ticker: str, shares: float, price: float) -> dict:
+    """Sell shares from paper portfolio."""
+    portfolio = load_paper_portfolio()
+    ticker_upper = ticker.upper()
+
+    positions = [p for p in portfolio.positions if p.ticker == ticker_upper]
+    positions.sort(key=lambda p: p.purchase_date)
+
+    total_avail = sum(p.shares for p in positions)
+    if total_avail < shares:
+         raise ValueError(f"Insufficient shares. Have {total_avail}, trying to sell {shares}")
+
+    remaining = shares
+    total_cost_basis = 0.0
+    to_remove = []
+
+    for pos in positions:
+        if remaining <= 0:
+            break
+        if pos.shares <= remaining:
+             total_cost_basis += pos.shares * pos.cost_basis_per_share
+             remaining -= pos.shares
+             to_remove.append(pos)
+        else:
+             total_cost_basis += remaining * pos.cost_basis_per_share
+             pos.shares -= remaining
+             remaining = 0
+
+    for pos in to_remove:
+        portfolio.positions.remove(pos)
+
+    proceeds = shares * price
+    portfolio.cash_balance += proceeds
+
+    realized_gl = proceeds - total_cost_basis
+    gl_pct = (realized_gl / total_cost_basis * 100) if total_cost_basis > 0 else 0.0
+
+    save_paper_portfolio(portfolio)
+    log_paper_transaction("SELL", ticker_upper, shares, price, gain_loss=realized_gl)
+
+    return {
+        "ticker": ticker_upper,
+        "shares": shares,
+        "price": price,
+        "proceeds": proceeds,
+        "gain_loss": realized_gl,
+        "gain_loss_pct": gl_pct,
+        "cash_remaining": portfolio.cash_balance
+    }
+
 def init_paper_portfolio(starting_cash: float = 10000.0) -> Portfolio:
     """Initialize a new paper trading portfolio."""
     portfolio = Portfolio(cash_balance=starting_cash, positions=[])

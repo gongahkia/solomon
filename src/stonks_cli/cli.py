@@ -1219,5 +1219,29 @@ def paper_buy_cmd(
         raise _exit_for_error(e)
 
 
+@paper_app.command("sell")
+def paper_sell_cmd(
+    ticker: str = typer.Argument(..., help="Ticker symbol"),
+    shares: float = typer.Argument(..., help="Number of shares"),
+) -> None:
+    """Sell shares from paper portfolio."""
+    from stonks_cli.commands import do_paper_sell
+
+    try:
+        res = do_paper_sell(ticker, shares)
+        color = "green" if res["gain_loss"] >= 0 else "red"
+
+        Console().print(
+            f"Sold {res['shares']} {res['ticker']} @ ${res['price']:.2f} "
+            f"(${res['proceeds']:.2f} total). "
+            f"Cash remaining: ${res['cash_remaining']:.2f}"
+        )
+        Console().print(
+            f"Realized Gain/Loss: [{color}]${res['gain_loss']:.2f} ({res['gain_loss_pct']:+.2f}%)[/{color}]"
+        )
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

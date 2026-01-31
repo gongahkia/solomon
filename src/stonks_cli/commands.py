@@ -994,6 +994,24 @@ def do_paper_buy(ticker: str, shares: float) -> dict:
     return paper_buy(normalized, shares, price)
 
 
+def do_paper_sell(ticker: str, shares: float) -> dict:
+    """Execute a paper sell order."""
+    from stonks_cli.portfolio.paper import paper_sell
+
+    # Fetch price
+    cfg = load_config()
+    normalized = normalize_ticker(ticker)
+    provider = provider_for_config(cfg, normalized)
+    series = provider.fetch_daily(normalized)
+
+    if series.df.empty or "close" not in series.df.columns:
+        raise ValueError(f"Could not fetch price for {ticker}")
+
+    price = float(series.df["close"].iloc[-1])
+
+    return paper_sell(normalized, shares, price)
+
+
 def do_sector(sector_name: str) -> dict:
     """Get sector performance compared to SPY."""
     from datetime import date, timedelta

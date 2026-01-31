@@ -29,6 +29,31 @@ def check_alert(alert: Alert, df: pd.DataFrame) -> bool:
             return current_rsi > alert.threshold
         elif alert.condition_type == "rsi_below":
             return current_rsi < alert.threshold
+    
+    # SMA cross detection (golden_cross / death_cross)
+    if alert.condition_type in ("golden_cross", "death_cross"):
+        # Need at least 201 days of data for 200-day SMA
+        if len(df) < 201:
+            return False
+            
+        # Calculate SMAs
+        sma_50 = df["close"].rolling(window=50).mean()
+        sma_200 = df["close"].rolling(window=200).mean()
+        
+        # Get current and previous day values
+        curr_fast = sma_50.iloc[-1]
+        curr_slow = sma_200.iloc[-1]
+        prev_fast = sma_50.iloc[-2]
+        prev_slow = sma_200.iloc[-2]
+        
+        if alert.condition_type == "golden_cross":
+            # Fast SMA crossed above slow SMA
+            # Previous: fast <= slow, Current: fast > slow
+            return prev_fast <= prev_slow and curr_fast > curr_slow
+        elif alert.condition_type == "death_cross":
+            # Fast SMA crossed below slow SMA
+            # Previous: fast >= slow, Current: fast < slow
+            return prev_fast >= prev_slow and curr_fast < curr_slow
             
     return False
 

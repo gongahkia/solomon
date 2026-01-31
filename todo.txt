@@ -12,7 +12,6 @@
 # PHASE 5C: CONDITION-BASED ALERTS (ADVANCED)
 # ----------------------------------------------------------------------------
 
-Add `stonks alert add <TICKER> new-high-52w` command that triggers when price exceeds 52-week high
 Add `stonks alert add <TICKER> new-low-52w` command that triggers when price falls below 52-week low
 Implement 52-week high/low detection in check_alert using rolling 252-day max/min of close prices
 

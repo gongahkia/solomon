@@ -1009,5 +1009,28 @@ def portfolio_add(
         raise _exit_for_error(e)
 
 
+@portfolio_app.command("remove")
+def portfolio_remove(
+    ticker: str = typer.Argument(..., help="Ticker symbol"),
+    shares: float = typer.Argument(..., help="Number of shares to sell"),
+    sale_price: float = typer.Argument(..., help="Sale price per share"),
+) -> None:
+    """Remove shares from the portfolio."""
+    try:
+        result = do_portfolio_remove(ticker, shares, sale_price)
+        gain_loss = result["realized_gain_loss"]
+        pct = result["gain_loss_pct"]
+        color = "green" if gain_loss >= 0 else "red"
+
+        Console().print(
+            f"Sold {result['shares_sold']} shares of {result['ticker']} at ${result['sale_price']:.2f}"
+        )
+        Console().print(
+            f"Realized Gain/Loss: [{color}]${gain_loss:.2f} ({pct:+.2f}%)[/{color}]"
+        )
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

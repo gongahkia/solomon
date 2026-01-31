@@ -18,7 +18,7 @@
 
 
 
-Add `stonks portfolio allocation` command that displays pie-chart-style breakdown using Rich table showing each position's percentage of total portfolio value
+
 Add `stonks portfolio history` command that reads from portfolio_history.jsonl (append-only log of all add/remove transactions) and displays transaction history
 Create function `log_transaction(action: str, ticker: str, shares: float, price: float, gain_loss: float = None)` in storage.py that appends JSON line to portfolio_history.jsonl with timestamp
 

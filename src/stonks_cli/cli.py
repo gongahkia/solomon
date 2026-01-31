@@ -1097,5 +1097,37 @@ def portfolio_show(
         raise _exit_for_error(e)
 
 
+@portfolio_app.command("allocation")
+def portfolio_allocation() -> None:
+    """Show portfolio allocation."""
+    from rich.table import Table
+
+    try:
+        data = do_portfolio_allocation()
+        allocations = data.get("allocations", {})
+
+        if not allocations:
+           Console().print("[yellow]Portfolio is empty[/yellow]")
+           return
+
+        # Sort by percentage descending
+        sorted_allocs = sorted(allocations.items(), key=lambda x: x[1], reverse=True)
+
+        table = Table(title="Portfolio Allocation")
+        table.add_column("Asset", style="cyan")
+        table.add_column("Allocation", justify="right")
+        table.add_column("Chart", style="bold")
+
+        for ticker, pct in sorted_allocs:
+            # Simple ascii bar chart
+            bar_len = int(pct / 2)  # 50 chars for 100%
+            bar = "█" * bar_len
+            table.add_row(ticker, f"{pct:.2f}%", f"[blue]{bar}[/blue]")
+
+        Console().print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

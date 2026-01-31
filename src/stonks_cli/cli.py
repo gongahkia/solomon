@@ -1677,5 +1677,52 @@ def dividend_calendar(
         raise _exit_for_error(e)
 
 
+@app.command()
+def movers(
+    sector: bool = typer.Option(False, "--sector", "-s", help="Show sector ETF performance instead of indices"),
+) -> None:
+    """Display daily performance of major indices or sector ETFs."""
+    from rich.table import Table
+    from stonks_cli.commands import do_movers
+
+    try:
+        results = do_movers(sector=sector)
+        console = Console()
+        
+        if not results:
+            console.print("[yellow]No market data available[/yellow]")
+            return
+        
+        title = "Sector Performance" if sector else "Market Movers"
+        table = Table(title=title)
+        table.add_column("Ticker", style="cyan")
+        table.add_column("Name")
+        table.add_column("Price", justify="right")
+        table.add_column("Change", justify="right")
+        table.add_column("%", justify="right")
+        
+        for r in results:
+            pct = r["change_pct"]
+            if pct >= 0:
+                change_str = f"[green]+${r['change']:.2f}[/green]"
+                pct_str = f"[green]+{pct:.2f}%[/green]"
+            else:
+                change_str = f"[red]-${abs(r['change']):.2f}[/red]"
+                pct_str = f"[red]{pct:.2f}%[/red]"
+            
+            table.add_row(
+                r["ticker"],
+                r["name"],
+                f"${r['price']:.2f}",
+                change_str,
+                pct_str,
+            )
+        
+        console.print(table)
+        
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

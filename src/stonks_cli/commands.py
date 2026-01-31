@@ -1458,3 +1458,78 @@ def do_dividend_calendar(days: int = 30) -> list[dict]:
     # Sort by ex_date
     results.sort(key=lambda x: x["ex_date"])
     return results
+
+
+def do_movers(sector: bool = False) -> list[dict]:
+    """Fetch daily performance of major indices or sector ETFs.
+    
+    Args:
+        sector: If True, show sector ETFs instead of indices
+        
+    Returns:
+        List of dicts with: ticker, name, price, change, change_pct
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    if sector:
+        tickers = ["XLK", "XLV", "XLF", "XLE", "XLY", "XLP", "XLI", "XLB", "XLU", "XLRE", "XLC"]
+        names = {
+            "XLK": "Technology",
+            "XLV": "Healthcare",
+            "XLF": "Financials",
+            "XLE": "Energy",
+            "XLY": "Consumer Disc.",
+            "XLP": "Consumer Staples",
+            "XLI": "Industrials",
+            "XLB": "Materials",
+            "XLU": "Utilities",
+            "XLRE": "Real Estate",
+            "XLC": "Communication",
+        }
+    else:
+        tickers = ["SPY", "QQQ", "DIA", "IWM"]
+        names = {
+            "SPY": "S&P 500",
+            "QQQ": "Nasdaq 100",
+            "DIA": "Dow Jones",
+            "IWM": "Russell 2000",
+        }
+    
+    cfg = load_config()
+    results = []
+    
+    def _fetch_ticker(ticker: str):
+        try:
+            from stonks_cli.pipeline import provider_for_config
+            p = provider_for_config(cfg, ticker)
+            s = p.fetch_daily(ticker)
+            if s.df.empty or len(s.df) < 2:
+                return None
+            
+            current = s.df["close"].iloc[-1]
+            previous = s.df["close"].iloc[-2]
+            
+            change = current - previous
+            change_pct = (change / previous) * 100 if previous != 0 else 0
+            
+            return {
+                "ticker": ticker,
+                "name": names.get(ticker, ticker),
+                "price": current,
+                "change": change,
+                "change_pct": change_pct,
+            }
+        except Exception:
+            return None
+    
+    max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_fetch_ticker, t): t for t in tickers}
+        for fut in as_completed(futures):
+            result = fut.result()
+            if result:
+                results.append(result)
+    
+    # Sort by change_pct descending
+    results.sort(key=lambda x: x["change_pct"], reverse=True)
+    return results

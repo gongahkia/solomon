@@ -108,6 +108,20 @@ def do_quick(tickers: list[str]) -> list[QuickResult]:
     return results
 
 
+def do_news(ticker: str, notable_only: bool = False) -> list[dict]:
+    """Fetch news for a ticker."""
+    from stonks_cli.data.news import fetch_news_rss
+
+    normalized = normalize_ticker(ticker)
+    base_ticker = normalized.split(".")[0]
+    items = fetch_news_rss(base_ticker)
+
+    if notable_only:
+        items = [i for i in items if abs(i.sentiment_score) > 0.3]
+
+    return [i.to_dict() for i in items]
+
+
 def do_earnings(
     ticker: str | None = None,
     show_next: bool = False,

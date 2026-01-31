@@ -21,6 +21,7 @@ from stonks_cli.commands import (
     do_earnings,
     do_fundamentals,
     do_insider,
+    do_news,
     do_watch,
     do_config_set,
     do_config_show,
@@ -267,6 +268,51 @@ def fundamentals(
         table.add_row("Beta", format_ratio(data.get("beta")))
         table.add_row("52-Week High", f"${data.get('fifty_two_week_high', 0):.2f}" if data.get("fifty_two_week_high") else "N/A")
         table.add_row("52-Week Low", f"${data.get('fifty_two_week_low', 0):.2f}" if data.get("fifty_two_week_low") else "N/A")
+
+        console.print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@app.command()
+def news(
+    ticker: str = typer.Argument(..., help="Ticker symbol (e.g., AAPL)"),
+    sentiment: bool = typer.Option(False, "--sentiment", help="Show only notable sentiment headlines"),
+) -> None:
+    """Display recent news headlines for a ticker with sentiment."""
+    from rich.table import Table
+
+    try:
+        items = do_news(ticker, notable_only=sentiment)
+        console = Console()
+
+        if not items:
+            console.print(f"[yellow]No news found for {ticker}[/yellow]")
+            return
+
+        table = Table(title=f"News: {ticker}")
+        table.add_column("Date", style="dim", width=12)
+        table.add_column("Source", width=15)
+        table.add_column("Headline")
+        table.add_column("Sent", justify="center", width=6)
+
+        for item in items[:20]:
+            # Date
+            date_str = item["published_date"][:10] if item.get("published_date") else "N/A"
+
+            # Truncate headline
+            headline = item["title"][:80] + "..." if len(item["title"]) > 80 else item["title"]
+
+            # Sentiment indicator
+            score = item.get("sentiment_score", 0)
+            if score > 0.2:
+                sent_str = "[green]+[/green]"
+            elif score < -0.2:
+                sent_str = "[red]-[/red]"
+            else:
+                sent_str = "[dim]o[/dim]"
+
+            table.add_row(date_str, item["source"], headline, sent_str)
 
         console.print(table)
     except Exception as e:

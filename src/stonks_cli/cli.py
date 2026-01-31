@@ -1724,5 +1724,58 @@ def movers(
         raise _exit_for_error(e)
 
 
+@app.command()
+def unusual(
+    threshold: float = typer.Option(2.0, "--threshold", "-t", help="Volume multiple threshold (default 2.0x)"),
+) -> None:
+    """Scan watchlist for unusual volume activity."""
+    from rich.table import Table
+    from stonks_cli.commands import do_unusual
+
+    try:
+        results = do_unusual(threshold=threshold)
+        console = Console()
+        
+        if not results:
+            console.print(f"[green]No unusual volume activity detected (>{threshold}x avg)[/green]")
+            return
+        
+        table = Table(title=f"Unusual Volume Activity (>{threshold}x avg)")
+        table.add_column("Ticker", style="cyan")
+        table.add_column("Volume", justify="right")
+        table.add_column("Avg Vol", justify="right")
+        table.add_column("Multiple", justify="right", style="bold")
+        table.add_column("Price", justify="right")
+        table.add_column("Change", justify="right")
+        
+        def format_volume(vol: float) -> str:
+            if vol >= 1_000_000:
+                return f"{vol/1_000_000:.1f}M"
+            elif vol >= 1_000:
+                return f"{vol/1_000:.1f}K"
+            return str(int(vol))
+        
+        for r in results:
+            pct = r["change_pct"]
+            if pct >= 0:
+                pct_str = f"[green]+{pct:.2f}%[/green]"
+            else:
+                pct_str = f"[red]{pct:.2f}%[/red]"
+            
+            table.add_row(
+                r["ticker"],
+                format_volume(r["current_volume"]),
+                format_volume(r["avg_volume"]),
+                f"{r['multiple']:.1f}x",
+                f"${r['price']:.2f}",
+                pct_str,
+            )
+        
+        console.print(table)
+        
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

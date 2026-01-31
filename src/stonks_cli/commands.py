@@ -1533,3 +1533,29 @@ def do_movers(sector: bool = False) -> list[dict]:
     # Sort by change_pct descending
     results.sort(key=lambda x: x["change_pct"], reverse=True)
     return results
+
+
+def do_unusual(threshold: float = 2.0) -> list[dict]:
+    """Scan watchlist tickers for unusual volume activity.
+    
+    Args:
+        threshold: Multiple of average volume to flag as unusual
+        
+    Returns:
+        List of flagged tickers with volume data
+    """
+    from stonks_cli.analysis.unusual import detect_unusual_volume
+    
+    cfg = load_config()
+    
+    # Get all tickers from main list and watchlists
+    tickers = list(set(cfg.tickers))
+    for wl_tickers in cfg.watchlists.values():
+        tickers.extend(wl_tickers)
+    
+    tickers = list(set(tickers))
+    
+    if not tickers:
+        return []
+    
+    return detect_unusual_volume(tickers, threshold=threshold)

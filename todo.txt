@@ -12,5 +12,4 @@
 # PHASE 6: INCREMENTAL NICHE FEATURES
 # ----------------------------------------------------------------------------
 
-Create function `detect_unusual_volume(tickers: list[str], threshold: float = 2.0) -> list[dict]` in new module `src/stonks_cli/analysis/unusual.py` that identifies tickers with volume > threshold * 20-day average
 Add `stonks unusual` command that scans watchlist for unusual volume activity and displays flagged tickers with volume multiple and price change

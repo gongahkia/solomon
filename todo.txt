@@ -12,9 +12,6 @@
 # PHASE 3E: SECTOR & CORRELATION
 # ----------------------------------------------------------------------------
 
-Add `--benchmark <TICKER>` flag to `stonks analyze` that includes beta vs specified benchmark in output
-Create constant dict `SECTOR_ETFS` in new module `src/stonks_cli/data/sectors.py` mapping sector names to representative ETFs: {"Technology": "XLK", "Healthcare": "XLV", "Financials": "XLF", "Energy": "XLE", ...}
-Create function `identify_sector(ticker: str) -> str | None` in sectors.py that uses yfinance Ticker.info["sector"] to determine ticker's sector
 Add `stonks sector <SECTOR_NAME>` command that displays performance of sector ETF with comparison to SPY, including: daily change, weekly change, monthly change, YTD change
 
 # ----------------------------------------------------------------------------

@@ -788,6 +788,82 @@ def do_data_cache_info() -> dict[str, object]:
     }
 
 
+def do_sector(sector_name: str) -> dict:
+    """Get sector performance compared to SPY."""
+    from datetime import date, timedelta
+    from stonks_cli.data.sectors import SECTOR_ETFS
+
+    cfg = load_config()
+
+    # Find the sector ETF
+    sector_upper = sector_name.title()
+    etf = SECTOR_ETFS.get(sector_upper)
+    if not etf:
+        # Try case-insensitive match
+        for name, ticker in SECTOR_ETFS.items():
+            if name.lower() == sector_name.lower():
+                etf = ticker
+                sector_upper = name
+                break
+    if not etf:
+        raise ValueError(f"Unknown sector: {sector_name}. Available: {', '.join(SECTOR_ETFS.keys())}")
+
+    # Fetch sector ETF and SPY data
+    sector_ticker = normalize_ticker(etf)
+    spy_ticker = normalize_ticker("SPY")
+
+    provider_sector = provider_for_config(cfg, sector_ticker)
+    provider_spy = provider_for_config(cfg, spy_ticker)
+
+    sector_series = provider_sector.fetch_daily(sector_ticker)
+    spy_series = provider_spy.fetch_daily(spy_ticker)
+
+    sector_df = sector_series.df
+    spy_df = spy_series.df
+
+    def _compute_change(df, days: int) -> float | None:
+        if len(df) < days + 1:
+            return None
+        current = float(df["close"].iloc[-1])
+        past = float(df["close"].iloc[-(days + 1)])
+        if past == 0:
+            return None
+        return ((current - past) / past) * 100
+
+    def _compute_ytd(df) -> float | None:
+        if df.empty:
+            return None
+        current = float(df["close"].iloc[-1])
+        # Find first trading day of the year
+        current_year = df.index[-1].year
+        ytd_start = df[df.index.year == current_year]
+        if ytd_start.empty:
+            return None
+        first_close = float(ytd_start["close"].iloc[0])
+        if first_close == 0:
+            return None
+        return ((current - first_close) / first_close) * 100
+
+    result = {
+        "sector": sector_upper,
+        "etf": etf,
+        "sector_performance": {
+            "daily": _compute_change(sector_df, 1),
+            "weekly": _compute_change(sector_df, 5),
+            "monthly": _compute_change(sector_df, 21),
+            "ytd": _compute_ytd(sector_df),
+        },
+        "spy_performance": {
+            "daily": _compute_change(spy_df, 1),
+            "weekly": _compute_change(spy_df, 5),
+            "monthly": _compute_change(spy_df, 21),
+            "ytd": _compute_ytd(spy_df),
+        },
+    }
+
+    return result
+
+
 def do_correlation(tickers: list[str], days: int = 252) -> dict:
     """Compute correlation matrix for given tickers."""
     from concurrent.futures import ThreadPoolExecutor, as_completed

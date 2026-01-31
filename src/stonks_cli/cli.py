@@ -23,6 +23,7 @@ from stonks_cli.commands import (
     do_fundamentals,
     do_insider,
     do_news,
+    do_sector,
     do_watch,
     do_config_set,
     do_config_show,
@@ -256,6 +257,52 @@ def correlation(
                     cell = f"[yellow]{val:.2f}[/yellow]"
                 row_values.append(cell)
             table.add_row(row_ticker, *row_values)
+
+        console.print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@app.command()
+def sector(
+    sector_name: str = typer.Argument(..., help="Sector name (e.g., Technology, Healthcare, Financials)"),
+) -> None:
+    """Display sector ETF performance compared to SPY."""
+    from rich.table import Table
+
+    try:
+        result = do_sector(sector_name)
+        console = Console()
+
+        table = Table(title=f"{result['sector']} ({result['etf']}) vs SPY")
+        table.add_column("Period", style="cyan")
+        table.add_column(result["etf"], justify="right")
+        table.add_column("SPY", justify="right")
+        table.add_column("Relative", justify="right")
+
+        def fmt_pct(val: float | None) -> str:
+            if val is None:
+                return "N/A"
+            color = "green" if val >= 0 else "red"
+            return f"[{color}]{val:+.2f}%[/{color}]"
+
+        def fmt_relative(sector_val: float | None, spy_val: float | None) -> str:
+            if sector_val is None or spy_val is None:
+                return "N/A"
+            diff = sector_val - spy_val
+            color = "green" if diff >= 0 else "red"
+            return f"[{color}]{diff:+.2f}%[/{color}]"
+
+        periods = [("Daily", "daily"), ("Weekly", "weekly"), ("Monthly", "monthly"), ("YTD", "ytd")]
+        for label, key in periods:
+            sector_val = result["sector_performance"][key]
+            spy_val = result["spy_performance"][key]
+            table.add_row(
+                label,
+                fmt_pct(sector_val),
+                fmt_pct(spy_val),
+                fmt_relative(sector_val, spy_val),
+            )
 
         console.print(table)
     except Exception as e:

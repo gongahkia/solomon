@@ -1339,7 +1339,7 @@ def paper_leaderboard() -> None:
 @alert_app.command("add")
 def alert_add(
     ticker: str = typer.Argument(..., help="Ticker symbol"),
-    condition: str = typer.Argument(..., help="Condition type (price-above, price-below, rsi-above, rsi-below, golden-cross, death-cross, new-high-52w, new-low-52w)"),
+    condition: str = typer.Argument(..., help="Condition type (price-above, price-below, rsi-above, rsi-below, golden-cross, death-cross, new-high-52w, new-low-52w, volume-spike, earnings-soon)"),
     threshold: float = typer.Argument(None, help="Threshold value (not required for cross/52w alerts)"),
 ) -> None:
     """Add a new alert."""
@@ -1356,9 +1356,14 @@ def alert_add(
             final_threshold = threshold if threshold is not None else 0.0
         else:
             if threshold is None:
-                Console().print(f"[red]Threshold required for condition: {condition}[/red]")
-                raise typer.Exit(code=1)
-            final_threshold = threshold
+                # Default for volume-spike is 2.0x
+                if cond_normalized == "volume_spike":
+                    final_threshold = 2.0
+                else:
+                    Console().print(f"[red]Threshold required for condition: {condition}[/red]")
+                    raise typer.Exit(code=1)
+            else:
+                final_threshold = threshold
             
         alert = do_alert_add(ticker, cond_normalized, final_threshold)
         
@@ -1368,6 +1373,10 @@ def alert_add(
             msg_val = ""
         elif "rsi" in cond_normalized:
             msg_val = f" {final_threshold:.1f}"
+        elif cond_normalized == "volume_spike":
+            msg_val = f" {final_threshold:.1f}x"
+        elif cond_normalized == "earnings_soon":
+            msg_val = f" {int(final_threshold)} days"
         else:
             msg_val = f" ${final_threshold:.2f}"
             

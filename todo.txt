@@ -12,7 +12,5 @@
 # PHASE 6: INCREMENTAL NICHE FEATURES
 # ----------------------------------------------------------------------------
 
-Add `stonks movers` command that fetches daily performance of major indices (SPY, QQQ, DIA, IWM) and displays as compact table with daily change percentages
-Add `--sector` flag to `stonks movers` that shows sector ETF performance instead of indices (XLK, XLV, XLF, XLE, XLY, XLP, XLI, XLB, XLU, XLRE, XLC)
 Create function `detect_unusual_volume(tickers: list[str], threshold: float = 2.0) -> list[dict]` in new module `src/stonks_cli/analysis/unusual.py` that identifies tickers with volume > threshold * 20-day average
 Add `stonks unusual` command that scans watchlist for unusual volume activity and displays flagged tickers with volume multiple and price change

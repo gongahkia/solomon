@@ -61,6 +61,19 @@ def build_scheduler(
             ended = datetime.now()
             dt_s = perf_counter() - t0
             console.print(f"[cyan]Scheduled run finished[/cyan] {ended.isoformat()} ({dt_s:.2f}s) report={report_path}")
+            
+            # Check alerts after analysis
+            try:
+                from stonks_cli.commands import do_alert_check
+                triggered = do_alert_check()
+                if triggered:
+                    console.print(f"[bold red]{len(triggered)} alert(s) triggered![/bold red]")
+                    for a in triggered:
+                        cond = a["condition_type"].replace("_", " ")
+                        console.print(f"  • {a['ticker']} {cond} {a['threshold']}")
+            except Exception as alert_err:
+                console.print(f"[yellow]Alert check failed:[/yellow] {alert_err}")
+                
         except Exception as e:
             ended = datetime.now()
             dt_s = perf_counter() - t0

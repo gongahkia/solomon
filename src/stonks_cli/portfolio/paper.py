@@ -143,3 +143,51 @@ def init_paper_portfolio(starting_cash: float = 10000.0) -> Portfolio:
     log_paper_transaction("INIT", "CASH", starting_cash, 1.0)
 
     return portfolio
+
+
+def calculate_paper_performance(
+    portfolio: Portfolio,
+    initial_cash: float,
+    current_prices: dict[str, float] | None = None,
+) -> dict:
+    """Calculate performance metrics."""
+    path = get_paper_history_path()
+    trades = []
+    if path.exists():
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                    if rec.get("action") == "SELL" and rec.get("gain_loss") is not None:
+                        trades.append(rec)
+                except Exception:
+                    pass
+
+    # Metrics
+    num_trades = len(trades)
+    winning_trades = [t for t in trades if t["gain_loss"] > 0]
+    win_rate = (len(winning_trades) / num_trades * 100) if num_trades > 0 else 0.0
+
+    best_trade = max(trades, key=lambda t: t["gain_loss"]) if trades else None
+    worst_trade = min(trades, key=lambda t: t["gain_loss"]) if trades else None
+
+    total_value = portfolio.cash_balance
+    if current_prices:
+        for p in portfolio.positions:
+            total_value += p.shares * current_prices.get(p.ticker, p.cost_basis_per_share)
+    else:
+        for p in portfolio.positions:
+            total_value += p.shares * p.cost_basis_per_share
+
+    total_return_pct = (
+        ((total_value - initial_cash) / initial_cash * 100) if initial_cash > 0 else 0.0
+    )
+
+    return {
+        "total_value": total_value,
+        "total_return_pct": total_return_pct,
+        "best_trade": best_trade,
+        "worst_trade": worst_trade,
+        "win_rate": win_rate,
+        "num_trades": num_trades,
+    }

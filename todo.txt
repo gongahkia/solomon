@@ -17,7 +17,7 @@
 
 
 
-Create function `calculate_portfolio_allocation(portfolio: Portfolio, prices: dict[str, float]) -> dict[str, float]` in new module `src/stonks_cli/portfolio/analysis.py` that computes percentage allocation per ticker
+
 Add `stonks portfolio allocation` command that displays pie-chart-style breakdown using Rich table showing each position's percentage of total portfolio value
 Add `stonks portfolio history` command that reads from portfolio_history.jsonl (append-only log of all add/remove transactions) and displays transaction history
 Create function `log_transaction(action: str, ticker: str, shares: float, price: float, gain_loss: float = None)` in storage.py that appends JSON line to portfolio_history.jsonl with timestamp

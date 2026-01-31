@@ -143,10 +143,11 @@ def quick(
 def chart(
     ticker: str = typer.Argument(..., help="Ticker symbol (e.g., AAPL)"),
     days: int = typer.Option(90, "--days", help="Number of days to display"),
+    candle: bool = typer.Option(False, "--candle", help="Display candlestick chart instead of line chart"),
 ) -> None:
     """Display an ASCII price chart for a ticker."""
     try:
-        do_chart(ticker, days=days)
+        do_chart(ticker, days=days, candle=candle)
     except Exception as e:
         raise _exit_for_error(e)
 

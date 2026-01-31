@@ -108,15 +108,21 @@ def do_quick(tickers: list[str]) -> list[QuickResult]:
     return results
 
 
-def do_chart(ticker: str, days: int = 90) -> None:
+def do_chart(ticker: str, days: int = 90, candle: bool = False) -> None:
     """Fetch data and display a price chart for a ticker."""
-    from stonks_cli.charts.price_chart import plot_price_history
-
     cfg = load_config()
     normalized = normalize_ticker(ticker)
     provider = provider_for_config(cfg, normalized)
     series = provider.fetch_daily(normalized)
-    plot_price_history(series.df, normalized, days=days)
+
+    if candle:
+        from stonks_cli.charts.candlestick import plot_candlestick
+
+        plot_candlestick(series.df, normalized, days=days)
+    else:
+        from stonks_cli.charts.price_chart import plot_price_history
+
+        plot_price_history(series.df, normalized, days=days)
 
 
 def do_watchlist_list() -> dict[str, list[str]]:

@@ -41,9 +41,6 @@
 
 
 
-Create function `load_alerts() -> list[Alert]` in storage.py that reads and deserializes alerts.json
-Create function `save_alert(alert: Alert) -> None` in storage.py that appends alert to alerts.json
-Create function `delete_alert(alert_id: str) -> bool` in storage.py that removes alert by ID and returns success status
 Add `stonks alert add <TICKER> price-above <VALUE>` command that creates Alert with condition_type=price_above and saves, confirming with "Alert created: AAPL price above $200.00 (ID: abc123)"
 Add `stonks alert add <TICKER> price-below <VALUE>` command for price_below condition
 Add `stonks alert add <TICKER> rsi-above <VALUE>` command for RSI threshold alerts (e.g., overbought at 70)

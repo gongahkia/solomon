@@ -9,22 +9,10 @@
 # ============================================================================
 
 # ----------------------------------------------------------------------------
-# PHASE 4A: PORTFOLIO STORAGE
-# ----------------------------------------------------------------------------
-
-Create new module `src/stonks_cli/portfolio/models.py` with dataclass `Position` containing fields: ticker, shares, cost_basis_per_share, purchase_date, notes (optional)
-Create dataclass `Portfolio` in models.py containing fields: positions (list[Position]), cash_balance (float), created_at (datetime), updated_at (datetime)
-Create new module `src/stonks_cli/portfolio/storage.py` with function `get_portfolio_path() -> Path` that returns platform-appropriate path using platformdirs: ~/.local/share/stonks-cli/portfolio.json (Linux), ~/Library/Application Support/stonks-cli/portfolio.json (macOS)
-Create function `load_portfolio() -> Portfolio` in storage.py that reads portfolio.json and deserializes to Portfolio dataclass, returning empty Portfolio if file doesn't exist
-Create function `save_portfolio(portfolio: Portfolio) -> None` in storage.py that serializes Portfolio to JSON and writes to portfolio.json with updated_at timestamp
-Create function `add_position(ticker: str, shares: float, cost_basis: float, date: date = None, notes: str = None) -> Position` in storage.py that appends new Position to portfolio and saves, returning the created Position
-Create function `remove_position(ticker: str, shares: float, sale_price: float) -> dict` in storage.py that reduces position shares using FIFO cost basis, removes Position if shares reach zero, and returns dict with realized_gain_loss calculated from cost basis
-
-# ----------------------------------------------------------------------------
 # PHASE 4B: PORTFOLIO COMMANDS
 # ----------------------------------------------------------------------------
 
-Add `stonks portfolio add <TICKER> <SHARES> <COST_BASIS>` command that calls add_position and confirms with "Added 100 shares of AAPL at $150.00 cost basis"
+
 Add `--date <YYYY-MM-DD>` flag to `stonks portfolio add` to specify purchase date (defaults to today)
 Add `stonks portfolio remove <TICKER> <SHARES> <SALE_PRICE>` command that calls remove_position and displays realized gain/loss with percentage
 Add `stonks portfolio show` command that displays all positions as Rich table with columns: Ticker, Shares, Cost Basis, Current Price, Market Value, Gain/Loss ($), Gain/Loss (%), fetching current prices concurrently

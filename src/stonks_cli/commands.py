@@ -788,6 +788,194 @@ def do_data_cache_info() -> dict[str, object]:
     }
 
 
+def do_portfolio_add(
+    ticker: str,
+    shares: float,
+    cost_basis: float,
+    purchase_date: str | None = None,
+    notes: str | None = None,
+) -> dict:
+    """Add a position to the portfolio."""
+    from datetime import date as date_type
+    from stonks_cli.portfolio.storage import add_position
+
+    parsed_date = None
+    if purchase_date:
+        parsed_date = date_type.fromisoformat(purchase_date)
+
+    position = add_position(
+        ticker=ticker,
+        shares=shares,
+        cost_basis=cost_basis,
+        purchase_date=parsed_date,
+        notes=notes,
+    )
+
+    return {
+        "ticker": position.ticker,
+        "shares": position.shares,
+        "cost_basis": position.cost_basis_per_share,
+        "purchase_date": position.purchase_date.isoformat(),
+    }
+
+
+def do_portfolio_remove(ticker: str, shares: float, sale_price: float) -> dict:
+    """Remove shares from a portfolio position."""
+    from stonks_cli.portfolio.storage import remove_position
+
+    return remove_position(ticker, shares, sale_price)
+
+
+def do_portfolio_show(include_total: bool = False) -> dict:
+    """Get portfolio positions with current prices."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from stonks_cli.portfolio.storage import load_portfolio
+
+    cfg = load_config()
+    portfolio = load_portfolio()
+
+    if not portfolio.positions:
+        return {"positions": [], "totals": None}
+
+    # Get unique tickers
+    tickers = list(set(p.ticker for p in portfolio.positions))
+
+    # Fetch current prices concurrently
+    prices: dict[str, float] = {}
+
+    def _fetch_price(t: str) -> tuple[str, float | None]:
+        try:
+            provider = provider_for_config(cfg, t)
+            series = provider.fetch_daily(t)
+            if series.df.empty or "close" not in series.df.columns:
+                return t, None
+            return t, float(series.df["close"].iloc[-1])
+        except Exception:
+            return t, None
+
+    max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(_fetch_price, t) for t in tickers]
+        for fut in as_completed(futures):
+            ticker, price = fut.result()
+            if price is not None:
+                prices[ticker] = price
+
+    # Build position details
+    position_details = []
+    total_cost_basis = 0.0
+    total_market_value = 0.0
+
+    # Aggregate by ticker
+    ticker_agg: dict[str, dict] = {}
+    for pos in portfolio.positions:
+        if pos.ticker not in ticker_agg:
+            ticker_agg[pos.ticker] = {"shares": 0.0, "cost_basis_total": 0.0}
+        ticker_agg[pos.ticker]["shares"] += pos.shares
+        ticker_agg[pos.ticker]["cost_basis_total"] += pos.shares * pos.cost_basis_per_share
+
+    for ticker, agg in ticker_agg.items():
+        shares = agg["shares"]
+        cost_basis_total = agg["cost_basis_total"]
+        avg_cost = cost_basis_total / shares if shares > 0 else 0
+        current_price = prices.get(ticker, 0.0)
+        market_value = shares * current_price
+        gain_loss = market_value - cost_basis_total
+        gain_loss_pct = (gain_loss / cost_basis_total * 100) if cost_basis_total > 0 else 0.0
+
+        position_details.append({
+            "ticker": ticker,
+            "shares": shares,
+            "cost_basis": avg_cost,
+            "current_price": current_price,
+            "market_value": market_value,
+            "gain_loss": gain_loss,
+            "gain_loss_pct": gain_loss_pct,
+        })
+
+        total_cost_basis += cost_basis_total
+        total_market_value += market_value
+
+    totals = None
+    if include_total and total_cost_basis > 0:
+        total_gain_loss = total_market_value - total_cost_basis
+        total_return_pct = (total_gain_loss / total_cost_basis * 100)
+        totals = {
+            "total_cost_basis": total_cost_basis,
+            "total_market_value": total_market_value,
+            "total_gain_loss": total_gain_loss,
+            "total_return_pct": total_return_pct,
+        }
+
+    return {"positions": position_details, "totals": totals}
+
+
+def do_portfolio_allocation() -> dict:
+    """Get portfolio allocation percentages."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from stonks_cli.portfolio.storage import load_portfolio
+    from stonks_cli.portfolio.analysis import calculate_portfolio_allocation
+
+    cfg = load_config()
+    portfolio = load_portfolio()
+
+    if not portfolio.positions:
+        return {"allocations": {}, "total_value": 0.0}
+
+    # Get unique tickers
+    tickers = list(set(p.ticker for p in portfolio.positions))
+
+    # Fetch current prices
+    prices: dict[str, float] = {}
+
+    def _fetch_price(t: str) -> tuple[str, float | None]:
+        try:
+            provider = provider_for_config(cfg, t)
+            series = provider.fetch_daily(t)
+            if series.df.empty or "close" not in series.df.columns:
+                return t, None
+            return t, float(series.df["close"].iloc[-1])
+        except Exception:
+            return t, None
+
+    max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(_fetch_price, t) for t in tickers]
+        for fut in as_completed(futures):
+            ticker, price = fut.result()
+            if price is not None:
+                prices[ticker] = price
+
+    allocations = calculate_portfolio_allocation(portfolio, prices)
+
+    # Calculate total value
+    total_value = portfolio.cash_balance
+    for pos in portfolio.positions:
+        total_value += pos.shares * prices.get(pos.ticker, 0.0)
+
+    return {"allocations": allocations, "total_value": total_value}
+
+
+def do_portfolio_history() -> list[dict]:
+    """Get portfolio transaction history."""
+    import json
+    from stonks_cli.portfolio.storage import get_history_path
+
+    path = get_history_path()
+    if not path.exists():
+        return []
+
+    transactions = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                transactions.append(json.loads(line))
+
+    # Return in reverse chronological order
+    return list(reversed(transactions))
+
+
 def do_sector(sector_name: str) -> dict:
     """Get sector performance compared to SPY."""
     from datetime import date, timedelta

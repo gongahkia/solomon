@@ -23,6 +23,11 @@ from stonks_cli.commands import (
     do_fundamentals,
     do_insider,
     do_news,
+    do_portfolio_add,
+    do_portfolio_allocation,
+    do_portfolio_history,
+    do_portfolio_remove,
+    do_portfolio_show,
     do_sector,
     do_watch,
     do_config_set,
@@ -63,6 +68,7 @@ history_app = typer.Typer()
 plugins_app = typer.Typer()
 watchlist_app = typer.Typer()
 signals_app = typer.Typer()
+portfolio_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
@@ -72,6 +78,7 @@ app.add_typer(history_app, name="history")
 app.add_typer(plugins_app, name="plugins")
 app.add_typer(watchlist_app, name="watchlist")
 app.add_typer(signals_app, name="signals")
+app.add_typer(portfolio_app, name="portfolio")
 
 
 @app.callback()
@@ -978,6 +985,26 @@ def history_show(index: int = typer.Argument(..., min=0), limit: int = typer.Opt
         Console().print(f"tickers: {','.join(r.tickers)}")
         Console().print(f"report_path: {r.report_path}")
         Console().print(f"json_path: {r.json_path}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@portfolio_app.command("add")
+def portfolio_add(
+    ticker: str = typer.Argument(..., help="Ticker symbol"),
+    shares: float = typer.Argument(..., help="Number of shares"),
+    cost_basis: float = typer.Argument(..., help="Cost basis per share"),
+    purchase_date: str = typer.Option(None, "--date", help="Purchase date (YYYY-MM-DD)"),
+    notes: str = typer.Option(None, "--notes", help="Optional notes"),
+) -> None:
+    """Add a position to the portfolio."""
+    try:
+        result = do_portfolio_add(
+            ticker, shares, cost_basis, purchase_date=purchase_date, notes=notes
+        )
+        Console().print(
+            f"Added {result['shares']} shares of {result['ticker']} at ${result['cost_basis']:.2f} cost basis"
+        )
     except Exception as e:
         raise _exit_for_error(e)
 

@@ -1363,5 +1363,59 @@ def alert_add(
         raise _exit_for_error(e)
 
 
+@alert_app.command("list")
+def alert_list() -> None:
+    """List all alerts."""
+    from rich.table import Table
+    from stonks_cli.commands import do_alert_list
+
+    try:
+        alerts = do_alert_list()
+        if not alerts:
+            Console().print("[yellow]No alerts configured[/yellow]")
+            return
+
+        table = Table(title="Active Alerts")
+        table.add_column("ID", style="dim", width=8)
+        table.add_column("Ticker", style="bold")
+        table.add_column("Condition")
+        table.add_column("Threshold", justify="right")
+        table.add_column("Status")
+        table.add_column("Created", style="dim")
+
+        for a in alerts:
+            cond = a["condition_type"].replace("_", " ")
+            thr = a["threshold"]
+            # Formatting threshold based on condition
+            if "rsi" in a["condition_type"]:
+                 val_str = f"{thr:.1f}"
+            else:
+                 val_str = f"${thr:.2f}"
+            
+            status = []
+            if a["enabled"]:
+                status.append("[green]enabled[/green]")
+            else:
+                status.append("[dim]disabled[/dim]")
+            
+            if a.get("triggered_at"):
+                status.append("[red]TRIGGERED[/red]")
+            
+            created = a["created_at"][:10]  # Just date
+
+            table.add_row(
+                a["id"][:6],
+                a["ticker"],
+                cond,
+                val_str,
+                ", ".join(status),
+                created
+            )
+
+        Console().print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

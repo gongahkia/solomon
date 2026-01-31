@@ -1175,6 +1175,12 @@ def do_alert_add(ticker: str, condition: str, threshold: float) -> dict:
     return alert.to_dict()
 
 
+def do_alert_list() -> list[dict]:
+    """Get all alerts."""
+    from stonks_cli.alerts.storage import load_alerts
+    return [a.to_dict() for a in load_alerts()]
+
+
 def do_sector(sector_name: str) -> dict:
     """Get sector performance compared to SPY."""
     from datetime import date, timedelta

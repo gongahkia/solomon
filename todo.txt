@@ -41,7 +41,7 @@
 
 
 
-Add `stonks alert list` command that displays all alerts as Rich table with columns: ID (truncated), Ticker, Condition, Threshold, Status (enabled/triggered), Created
+
 Add `stonks alert remove <ALERT_ID>` command that deletes alert and confirms removal
 Add `stonks alert disable <ALERT_ID>` and `stonks alert enable <ALERT_ID>` commands to toggle alert enabled status without deleting
 

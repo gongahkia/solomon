@@ -22,15 +22,6 @@
 # PHASE 2: LIGHTWEIGHT TUI (Rich Live)                                                                                                                                      
 # ----------------------------------------------------------------------------                                                                                              
                                                                                                                                                                             
-Create new module `src/stonks_cli/tui/watchlist_view.py` with class `WatchlistTUI` that uses Rich Live display to show a table of tickers with columns: Ticker, Price,      Change%, Signal, Confidence, with automatic refresh every 60 seconds                                                                                                        
-Add CLI command `stonks watch` that launches WatchlistTUI displaying all tickers from configured watchlists, updating prices in place without scrolling terminal            
-Implement keyboard handler in WatchlistTUI that listens for 'q' to quit, 'r' to force refresh, 'j/k' or arrow keys to move row selection highlight, and 'enter' to drill    into selected ticker                                                                                                                                                        
-Create method `WatchlistTUI.render_detail_view(ticker: str)` that replaces the table with a detailed single-ticker view showing: current price, daily/weekly/monthly change,latest signal with rationale, key indicators (RSI, SMA status), and mini sparkline                                                                                         
-Add 'b' keyboard shortcut in WatchlistTUI detail view that returns to the main watchlist table view                                                                         
-Implement method `WatchlistTUI.cycle_watchlist()` triggered by 'w' key that cycles through available watchlists, updating the displayed tickers                             
-Add status bar at bottom of WatchlistTUI showing: current watchlist name, last refresh time, keybinding hints "[q]uit [r]efresh [w]atchlist [enter]detail"                  
-Create method `WatchlistTUI.sort_by_column(column: str)` and bind 's' key to cycle sort order: by ticker alphabetically, by change% descending, by confidence descending    
-Add `--watchlist <NAME>` flag to `stonks watch` command to start TUI with specific watchlist instead of default                                                             
                                                                                                                                                                               
 # ----------------------------------------------------------------------------                                                                                              
 # PHASE 3A: FUNDAMENTAL DATA - YAHOO FINANCE                                                                                                                                

@@ -430,11 +430,24 @@ def news(
 def earnings(
     ticker: str = typer.Option(None, "--ticker", help="Show earnings history for specific ticker"),
     show_next: bool = typer.Option(False, "--next", help="Show only next upcoming earnings date"),
+    implied_move: bool = typer.Option(False, "--implied-move", help="Show historically implied earnings move percentage"),
 ) -> None:
     """Display earnings calendar or ticker history (requires yfinance)."""
     from rich.table import Table
 
     try:
+        # Handle implied move flag
+        if implied_move and ticker:
+            from stonks_cli.data.earnings import compute_earnings_implied_move
+            console = Console()
+            move = compute_earnings_implied_move(ticker)
+            if move is not None:
+                console.print(f"[bold]{ticker.upper()}[/bold] Implied Earnings Move: [cyan]{move:.1f}%[/cyan]")
+                console.print("[dim]Based on average absolute post-earnings move from historical data[/dim]")
+            else:
+                console.print(f"[yellow]No implied move data available for {ticker}[/yellow]")
+            return
+        
         data = do_earnings(ticker=ticker, show_next=show_next)
         console = Console()
 

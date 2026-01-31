@@ -12,7 +12,6 @@
 # PHASE 6: INCREMENTAL NICHE FEATURES
 # ----------------------------------------------------------------------------
 
-Create function `compute_earnings_implied_move(ticker: str) -> float` in earnings.py that calculates average absolute post-earnings move from historical data
 Add `--implied-move` flag to `stonks earnings --ticker <TICKER>` that displays the historically implied earnings move percentage
 Add `stonks movers` command that fetches daily performance of major indices (SPY, QQQ, DIA, IWM) and displays as compact table with daily change percentages
 Add `--sector` flag to `stonks movers` that shows sector ETF performance instead of indices (XLK, XLV, XLF, XLE, XLY, XLP, XLI, XLB, XLU, XLRE, XLC)

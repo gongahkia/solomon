@@ -49,9 +49,6 @@
 # PHASE 5B: ALERT CHECKING & NOTIFICATION
 # ----------------------------------------------------------------------------
 
-Create new module `src/stonks_cli/alerts/checker.py` with function `check_alert(alert: Alert, df: pd.DataFrame) -> bool` that evaluates alert condition against latest data, returning True if condition is met
-Implement condition evaluation in check_alert: price_above/below compares latest close to threshold, rsi_above/below computes 14-period RSI and compares to threshold
-Create function `check_all_alerts() -> list[tuple[Alert, bool]]` in checker.py that loads all enabled alerts, fetches required data (batched by ticker), checks each alert, and returns list of (alert, triggered) tuples
 Create function `notify_terminal_bell(alert: Alert) -> None` in new module `src/stonks_cli/alerts/notify.py` that prints alert message to stdout with Rich formatting and sends terminal bell character (\a)
 Create function `log_alert_trigger(alert: Alert) -> None` in notify.py that appends triggered alert to alerts_log.jsonl with timestamp
 Create function `notify_webhook(alert: Alert, webhook_url: str) -> bool` in notify.py that POSTs JSON payload {ticker, condition, threshold, triggered_at, message} to configured webhook URL, returning success status

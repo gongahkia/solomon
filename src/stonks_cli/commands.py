@@ -108,6 +108,28 @@ def do_quick(tickers: list[str]) -> list[QuickResult]:
     return results
 
 
+def do_insider(
+    ticker: str,
+    days: int = 90,
+    buys_only: bool = False,
+    sells_only: bool = False,
+) -> list[dict]:
+    """Fetch insider transactions for a ticker."""
+    from stonks_cli.data.sec_edgar import fetch_insider_transactions
+
+    normalized = normalize_ticker(ticker)
+    base_ticker = normalized.split(".")[0]
+    transactions = fetch_insider_transactions(base_ticker, days=days)
+
+    # Filter if needed
+    if buys_only:
+        transactions = [t for t in transactions if t.transaction_type == "buy"]
+    elif sells_only:
+        transactions = [t for t in transactions if t.transaction_type == "sell"]
+
+    return [t.to_dict() for t in transactions]
+
+
 def do_fundamentals(ticker: str, as_json: bool = False) -> dict | None:
     """Fetch and return fundamental data for a ticker."""
     from stonks_cli.data.fundamentals import fetch_fundamentals_yahoo

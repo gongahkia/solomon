@@ -19,6 +19,7 @@ from stonks_cli.commands import (
     do_chart_rsi,
     do_config_init,
     do_fundamentals,
+    do_insider,
     do_watch,
     do_config_set,
     do_config_show,
@@ -265,6 +266,62 @@ def fundamentals(
         table.add_row("Beta", format_ratio(data.get("beta")))
         table.add_row("52-Week High", f"${data.get('fifty_two_week_high', 0):.2f}" if data.get("fifty_two_week_high") else "N/A")
         table.add_row("52-Week Low", f"${data.get('fifty_two_week_low', 0):.2f}" if data.get("fifty_two_week_low") else "N/A")
+
+        console.print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@app.command()
+def insider(
+    ticker: str = typer.Argument(..., help="Ticker symbol (e.g., AAPL)"),
+    days: int = typer.Option(90, "--days", help="Days to look back"),
+    buys_only: bool = typer.Option(False, "--buys-only", help="Show only buy transactions"),
+    sells_only: bool = typer.Option(False, "--sells-only", help="Show only sell transactions"),
+) -> None:
+    """Display recent insider transactions for a ticker."""
+    from rich.table import Table
+    from stonks_cli.formatting.numbers import format_market_cap
+
+    try:
+        transactions = do_insider(ticker, days=days, buys_only=buys_only, sells_only=sells_only)
+        console = Console()
+
+        if not transactions:
+            console.print(f"[yellow]No insider transactions found for {ticker}[/yellow]")
+            return
+
+        table = Table(title=f"Insider Transactions: {ticker}")
+        table.add_column("Date", style="dim")
+        table.add_column("Insider")
+        table.add_column("Title")
+        table.add_column("Type", style="bold")
+        table.add_column("Shares", justify="right")
+        table.add_column("Price", justify="right")
+        table.add_column("Value", justify="right")
+
+        for t in transactions:
+            trans_type = t["transaction_type"]
+            if trans_type == "buy":
+                type_str = "[green]BUY[/green]"
+            elif trans_type == "sell":
+                type_str = "[red]SELL[/red]"
+            else:
+                type_str = trans_type.upper()
+
+            shares_str = f"{t['shares']:,.0f}"
+            price_str = f"${t['price_per_share']:.2f}" if t.get("price_per_share") else "N/A"
+            value_str = format_market_cap(t.get("total_value"))
+
+            table.add_row(
+                t["filing_date"],
+                t["insider_name"],
+                t["insider_title"],
+                type_str,
+                shares_str,
+                price_str,
+                value_str,
+            )
 
         console.print(table)
     except Exception as e:

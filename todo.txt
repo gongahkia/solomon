@@ -8,8 +8,4 @@
 # Phase 6: Incremental Niche Features
 # ============================================================================
 
-# ----------------------------------------------------------------------------
-# PHASE 6: INCREMENTAL NICHE FEATURES
-# ----------------------------------------------------------------------------
-
-Add `stonks unusual` command that scans watchlist for unusual volume activity and displays flagged tickers with volume multiple and price change
+# All tasks completed! 🎉

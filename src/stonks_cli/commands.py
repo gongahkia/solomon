@@ -131,7 +131,14 @@ def do_chart_compare(tickers: list[str], days: int = 90) -> None:
     plot_comparison(normalized_tickers, dfs, days=days)
 
 
-def do_chart(ticker: str, days: int = 90, candle: bool = False, volume: bool = False) -> None:
+def do_chart(
+    ticker: str,
+    days: int = 90,
+    candle: bool = False,
+    volume: bool = False,
+    sma_periods: list[int] | None = None,
+    show_bb: bool = False,
+) -> None:
     """Fetch data and display a price chart for a ticker."""
     cfg = load_config()
     normalized = normalize_ticker(ticker)
@@ -149,7 +156,7 @@ def do_chart(ticker: str, days: int = 90, candle: bool = False, volume: bool = F
     else:
         from stonks_cli.charts.price_chart import plot_price_history
 
-        plot_price_history(series.df, normalized, days=days)
+        plot_price_history(series.df, normalized, days=days, sma_periods=sma_periods, show_bb=show_bb)
 
 
 def do_watchlist_list() -> dict[str, list[str]]:

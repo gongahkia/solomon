@@ -3,14 +3,24 @@ from __future__ import annotations
 import plotext as plt
 import pandas as pd
 
+from stonks_cli.analysis.indicators import sma, bollinger_bands
 
-def plot_price_history(df: pd.DataFrame, ticker: str, days: int = 90) -> None:
+
+def plot_price_history(
+    df: pd.DataFrame,
+    ticker: str,
+    days: int = 90,
+    sma_periods: list[int] | None = None,
+    show_bb: bool = False,
+) -> None:
     """Plot a line chart of closing prices to the terminal.
 
     Args:
         df: DataFrame with DatetimeIndex and 'close' column
         ticker: Ticker symbol for the chart title
         days: Number of days to display
+        sma_periods: List of SMA periods to overlay (e.g., [20, 50, 200])
+        show_bb: Whether to show Bollinger Bands
     """
     if df.empty or "close" not in df.columns:
         print(f"No data available for {ticker}")
@@ -29,8 +39,27 @@ def plot_price_history(df: pd.DataFrame, ticker: str, days: int = 90) -> None:
     # Clear any previous plot
     plt.clear_figure()
 
-    # Configure the plot
-    plt.plot(prices, marker="braille")
+    # Plot price
+    plt.plot(prices, label="Price", color="white", marker="braille")
+
+    # Plot SMA overlays
+    sma_colors = ["green", "yellow", "red", "cyan", "magenta"]
+    if sma_periods:
+        close_series = data["close"]
+        for i, period in enumerate(sma_periods):
+            sma_values = sma(close_series, period)
+            sma_list = sma_values.tolist()
+            color = sma_colors[i % len(sma_colors)]
+            plt.plot(sma_list, label=f"SMA{period}", color=color)
+
+    # Plot Bollinger Bands
+    if show_bb:
+        close_series = data["close"]
+        lower, mid, upper = bollinger_bands(close_series, window=20, num_std=2.0)
+        plt.plot(lower.tolist(), label="BB Lower", color="blue")
+        plt.plot(mid.tolist(), label="BB Mid", color="cyan")
+        plt.plot(upper.tolist(), label="BB Upper", color="blue")
+
     plt.title(f"{ticker} - Last {len(prices)} Days")
     plt.xlabel("Days")
     plt.ylabel("Price ($)")

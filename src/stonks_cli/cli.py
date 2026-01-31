@@ -146,10 +146,15 @@ def chart(
     days: int = typer.Option(90, "--days", help="Number of days to display"),
     candle: bool = typer.Option(False, "--candle", help="Display candlestick chart instead of line chart"),
     volume: bool = typer.Option(False, "--volume", help="Include volume subplot below price chart"),
+    sma: str = typer.Option(None, "--sma", help="Overlay SMAs (comma-separated periods, e.g., 20,50,200)"),
+    bb: bool = typer.Option(False, "--bb", help="Overlay Bollinger Bands (20-period, 2 std dev)"),
 ) -> None:
     """Display an ASCII price chart for a ticker."""
     try:
-        do_chart(ticker, days=days, candle=candle, volume=volume)
+        sma_periods = None
+        if sma:
+            sma_periods = [int(p.strip()) for p in sma.split(",") if p.strip()]
+        do_chart(ticker, days=days, candle=candle, volume=volume, sma_periods=sma_periods, show_bb=bb)
     except Exception as e:
         raise _exit_for_error(e)
 

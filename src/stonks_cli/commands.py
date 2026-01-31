@@ -108,6 +108,22 @@ def do_quick(tickers: list[str]) -> list[QuickResult]:
     return results
 
 
+def do_fundamentals(ticker: str, as_json: bool = False) -> dict | None:
+    """Fetch and return fundamental data for a ticker."""
+    from stonks_cli.data.fundamentals import fetch_fundamentals_yahoo
+
+    normalized = normalize_ticker(ticker)
+    base_ticker = normalized.split(".")[0]
+    fundamentals = fetch_fundamentals_yahoo(base_ticker)
+
+    if fundamentals is None:
+        return None
+
+    if as_json:
+        return fundamentals.to_dict()
+    return fundamentals.to_dict()
+
+
 def do_watch(watchlist_name: str | None = None, refresh_interval: int = 60) -> None:
     """Launch the watchlist TUI."""
     from stonks_cli.tui.watchlist_view import WatchlistTUI

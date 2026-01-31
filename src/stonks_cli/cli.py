@@ -18,6 +18,7 @@ from stonks_cli.commands import (
     do_chart_compare,
     do_chart_rsi,
     do_config_init,
+    do_fundamentals,
     do_watch,
     do_config_set,
     do_config_show,
@@ -194,6 +195,53 @@ def watch(
     """Launch interactive watchlist TUI with live updates."""
     try:
         do_watch(watchlist_name=watchlist, refresh_interval=refresh)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@app.command()
+def fundamentals(
+    ticker: str = typer.Argument(..., help="Ticker symbol (e.g., AAPL)"),
+    json_out: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Display fundamental data for a ticker (requires yfinance)."""
+    import json
+
+    from rich.table import Table
+
+    from stonks_cli.formatting.numbers import format_market_cap, format_percent, format_ratio
+
+    try:
+        data = do_fundamentals(ticker, as_json=True)
+        console = Console()
+
+        if data is None:
+            console.print(f"[red]No fundamental data available for {ticker}[/red]")
+            return
+
+        if json_out:
+            console.print(json.dumps(data, indent=2))
+            return
+
+        table = Table(title=f"Fundamentals: {ticker}")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", justify="right")
+
+        table.add_row("P/E Ratio", format_ratio(data.get("pe_ratio")))
+        table.add_row("Forward P/E", format_ratio(data.get("forward_pe")))
+        table.add_row("PEG Ratio", format_ratio(data.get("peg_ratio")))
+        table.add_row("Price/Book", format_ratio(data.get("price_to_book")))
+        table.add_row("Market Cap", format_market_cap(data.get("market_cap")))
+        table.add_row("Enterprise Value", format_market_cap(data.get("enterprise_value")))
+        table.add_row("Profit Margin", format_percent(data.get("profit_margin")))
+        table.add_row("Revenue Growth (YoY)", format_percent(data.get("revenue_growth_yoy")))
+        table.add_row("Earnings Growth (YoY)", format_percent(data.get("earnings_growth_yoy")))
+        table.add_row("Dividend Yield", format_percent(data.get("dividend_yield")))
+        table.add_row("Beta", format_ratio(data.get("beta")))
+        table.add_row("52-Week High", f"${data.get('fifty_two_week_high', 0):.2f}" if data.get("fifty_two_week_high") else "N/A")
+        table.add_row("52-Week Low", f"${data.get('fifty_two_week_low', 0):.2f}" if data.get("fifty_two_week_low") else "N/A")
+
+        console.print(table)
     except Exception as e:
         raise _exit_for_error(e)
 

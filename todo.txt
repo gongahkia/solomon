@@ -39,7 +39,7 @@
 # PHASE 5A: ALERT CONFIGURATION
 # ----------------------------------------------------------------------------
 
-Create new module `src/stonks_cli/alerts/models.py` with dataclass `Alert` containing fields: id (uuid), ticker, condition_type (price_above/price_below/rsi_above/rsi_below/sma_cross_up/sma_cross_down), threshold (float), created_at, triggered_at (optional), enabled (bool)
+
 Create new module `src/stonks_cli/alerts/storage.py` with function `get_alerts_path() -> Path` returning platform-appropriate path to alerts.json
 Create function `load_alerts() -> list[Alert]` in storage.py that reads and deserializes alerts.json
 Create function `save_alert(alert: Alert) -> None` in storage.py that appends alert to alerts.json

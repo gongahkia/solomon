@@ -1129,5 +1129,58 @@ def portfolio_allocation() -> None:
         raise _exit_for_error(e)
 
 
+@portfolio_app.command("history")
+def portfolio_history() -> None:
+    """Show portfolio transaction history."""
+    from rich.table import Table
+
+    try:
+        transactions = do_portfolio_history()
+
+        if not transactions:
+           Console().print("[yellow]No transaction history[/yellow]")
+           return
+
+        table = Table(title="Transaction History")
+        table.add_column("Date", style="dim")
+        table.add_column("Action", style="bold")
+        table.add_column("Ticker")
+        table.add_column("Shares", justify="right")
+        table.add_column("Price", justify="right")
+        table.add_column("Value", justify="right")
+        table.add_column("G/L", justify="right")
+
+        for t in transactions:
+            # t has: timestamp, action, ticker, shares, price, gain_loss (optional)
+            action = t["action"].upper()
+            action_color = "green" if action in ("ADD", "BUY") else "red"
+
+            ts = t["timestamp"][:16].replace("T", " ")  # YYYY-MM-DD HH:MM
+            ticker = t["ticker"]
+            shares = t["shares"]
+            price = t["price"]
+            value = shares * price
+            gain_loss = t.get("gain_loss")
+
+            gl_str = "-"
+            if gain_loss is not None:
+                color = "green" if gain_loss >= 0 else "red"
+                gl_str = f"[{color}]${gain_loss:.2f}[/{color}]"
+
+            table.add_row(
+                ts,
+                f"[{action_color}]{action}[/{action_color}]",
+                ticker,
+                f"{shares:.2f}",
+                f"${price:.2f}",
+                f"${value:.2f}",
+                gl_str,
+            )
+
+        Console().print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 def main() -> None:
     app()

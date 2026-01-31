@@ -108,6 +108,17 @@ def do_quick(tickers: list[str]) -> list[QuickResult]:
     return results
 
 
+def do_chart_rsi(ticker: str, period: int = 14, days: int = 90) -> None:
+    """Fetch data and display an RSI chart for a ticker."""
+    from stonks_cli.charts.indicators import plot_rsi
+
+    cfg = load_config()
+    normalized = normalize_ticker(ticker)
+    provider = provider_for_config(cfg, normalized)
+    series = provider.fetch_daily(normalized)
+    plot_rsi(series.df, normalized, period=period, days=days)
+
+
 def do_chart_compare(tickers: list[str], days: int = 90) -> None:
     """Fetch data and display a comparison chart for multiple tickers."""
     from concurrent.futures import ThreadPoolExecutor, as_completed

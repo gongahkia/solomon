@@ -16,6 +16,7 @@ from stonks_cli.commands import (
     do_bench,
     do_chart,
     do_chart_compare,
+    do_chart_rsi,
     do_config_init,
     do_config_set,
     do_config_show,
@@ -167,6 +168,19 @@ def chart_compare(
     """Compare performance of multiple tickers on a normalized chart."""
     try:
         do_chart_compare(tickers, days=days)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@app.command("chart-rsi")
+def chart_rsi(
+    ticker: str = typer.Argument(..., help="Ticker symbol (e.g., AAPL)"),
+    period: int = typer.Option(14, "--period", help="RSI period"),
+    days: int = typer.Option(90, "--days", help="Number of days to display"),
+) -> None:
+    """Display RSI indicator chart with overbought/oversold zones."""
+    try:
+        do_chart_rsi(ticker, period=period, days=days)
     except Exception as e:
         raise _exit_for_error(e)
 

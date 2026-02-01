@@ -5,6 +5,7 @@ from stonks_cli.analysis.indicators import sma
 
 def test_rsi_in_range():
     import pandas as pd
+
     from stonks_cli.analysis.indicators import rsi
 
     close = pd.Series([100 + i for i in range(50)])

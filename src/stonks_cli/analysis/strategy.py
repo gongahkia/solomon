@@ -112,7 +112,7 @@ def sma_cross_strategy(df: pd.DataFrame, fast: int = 20, slow: int = 50) -> Reco
     if close is None:
         return Recommendation(action="NO_DATA", confidence=0.0, rationale="Missing close")
     if len(close) < (slow + 2):
-        return Recommendation(action="INSUFFICIENT_HISTORY", confidence=0.1, rationale=f"Need >={slow+2} days")
+        return Recommendation(action="INSUFFICIENT_HISTORY", confidence=0.1, rationale=f"Need >={slow + 2} days")
 
     fast_col = sma_col(fast)
     slow_col = sma_col(slow)

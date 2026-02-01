@@ -30,7 +30,7 @@ def write_backtest_report(rows: list[BacktestRow], out_dir: Path) -> Path:
     def fmt(v: float | None, *, pct: bool = False) -> str:
         if v is None:
             return "-"
-        return f"{v*100:.1f}%" if pct else f"{v:.2f}"
+        return f"{v * 100:.1f}%" if pct else f"{v:.2f}"
 
     for r in rows:
         table.add_row(

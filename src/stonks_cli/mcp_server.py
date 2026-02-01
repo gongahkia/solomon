@@ -70,6 +70,7 @@ def _default_out_dir() -> Path:
     """Return the default output directory for reports."""
     return Path("reports")
 
+
 # Initialize the MCP server
 mcp = FastMCP(
     "stonks-cli",
@@ -104,10 +105,10 @@ def quick_analysis(tickers: list[str]) -> dict:
     """
     Get quick one-liner analysis for one or more stock tickers.
     Returns price, change percentage, action recommendation, and confidence.
-    
+
     Args:
         tickers: List of ticker symbols (e.g., ["AAPL", "MSFT", "GOOG"])
-    
+
     Returns:
         Dictionary with results for each ticker including price, change_pct,
         action (buy/sell/hold), and confidence score.
@@ -142,7 +143,7 @@ def get_fundamentals(ticker: str) -> dict:
     """
     Get fundamental data for a stock ticker.
     Includes P/E ratio, market cap, revenue, earnings, and other key metrics.
-    
+
     Args:
         ticker: Stock ticker symbol (e.g., "AAPL")
     """
@@ -154,7 +155,7 @@ def get_fundamentals(ticker: str) -> dict:
 def get_news(ticker: str, sentiment_only: bool = False) -> dict:
     """
     Get recent news headlines for a stock ticker.
-    
+
     Args:
         ticker: Stock ticker symbol (e.g., "AAPL")
         sentiment_only: If True, show only notable sentiment headlines
@@ -167,7 +168,7 @@ def get_news(ticker: str, sentiment_only: bool = False) -> dict:
 def get_earnings(ticker: str | None = None, show_next: bool = False) -> dict:
     """
     Get earnings information for a ticker or upcoming earnings calendar.
-    
+
     Args:
         ticker: Stock ticker symbol (optional, shows calendar if not provided)
         show_next: If True, show only the next upcoming earnings date
@@ -185,16 +186,14 @@ def get_insider_transactions(
 ) -> dict:
     """
     Get recent insider transactions for a stock.
-    
+
     Args:
         ticker: Stock ticker symbol (e.g., "AAPL")
         days: Number of days to look back (default: 90)
         buys_only: Show only buy transactions
         sells_only: Show only sell transactions
     """
-    transactions = do_insider(
-        ticker, days=days, buys_only=buys_only, sells_only=sells_only
-    )
+    transactions = do_insider(ticker, days=days, buys_only=buys_only, sells_only=sells_only)
     return {"transactions": _serialize(transactions)}
 
 
@@ -202,7 +201,7 @@ def get_insider_transactions(
 def get_dividend_info(ticker: str) -> dict:
     """
     Get dividend information for a stock ticker.
-    
+
     Args:
         ticker: Stock ticker symbol (e.g., "AAPL")
     """
@@ -214,7 +213,7 @@ def get_dividend_info(ticker: str) -> dict:
 def get_dividend_calendar(days: int = 30) -> dict:
     """
     Scan watchlist tickers for upcoming ex-dividend dates.
-    
+
     Args:
         days: Number of days to look ahead (default: 30)
     """
@@ -226,7 +225,7 @@ def get_dividend_calendar(days: int = 30) -> dict:
 def get_sector_performance(sector_name: str) -> dict:
     """
     Get sector ETF performance compared to SPY.
-    
+
     Args:
         sector_name: Sector name (e.g., "Technology", "Healthcare", "Financials")
     """
@@ -238,7 +237,7 @@ def get_sector_performance(sector_name: str) -> dict:
 def get_correlation_matrix(tickers: list[str], days: int = 252) -> dict:
     """
     Compute correlation matrix for given stock tickers.
-    
+
     Args:
         tickers: List of ticker symbols (e.g., ["AAPL", "MSFT", "GOOG"])
         days: Number of trading days for correlation calculation (default: 252)
@@ -251,7 +250,7 @@ def get_correlation_matrix(tickers: list[str], days: int = 252) -> dict:
 def get_market_movers(sector: bool = False) -> dict:
     """
     Fetch daily performance of major indices or sector ETFs.
-    
+
     Args:
         sector: If True, show sector ETFs instead of major indices
     """
@@ -276,7 +275,7 @@ def get_chart_data(
     """
     Get price chart data for a stock ticker.
     Returns data suitable for visualization.
-    
+
     Args:
         ticker: Stock ticker symbol (e.g., "AAPL")
         days: Number of days to display (default: 90)
@@ -300,7 +299,7 @@ def get_chart_data(
 def get_chart_compare_data(tickers: list[str], days: int = 90) -> dict:
     """
     Get comparison chart data for multiple tickers (normalized).
-    
+
     Args:
         tickers: List of ticker symbols to compare
         days: Number of days to display (default: 90)
@@ -313,7 +312,7 @@ def get_chart_compare_data(tickers: list[str], days: int = 90) -> dict:
 def get_rsi_chart_data(ticker: str, period: int = 14, days: int = 90) -> dict:
     """
     Get RSI indicator chart data with overbought/oversold zones.
-    
+
     Args:
         ticker: Stock ticker symbol (e.g., "AAPL")
         period: RSI period (default: 14)
@@ -337,7 +336,7 @@ def run_analysis(
 ) -> dict:
     """
     Run full technical analysis on tickers.
-    
+
     Args:
         tickers: List of ticker symbols (uses config default if not provided)
         start_date: Start date in YYYY-MM-DD format
@@ -363,7 +362,7 @@ def run_backtest(
 ) -> dict:
     """
     Run backtest simulation on tickers.
-    
+
     Args:
         tickers: List of ticker symbols (uses config default if not provided)
         start_date: Start date in YYYY-MM-DD format
@@ -405,7 +404,7 @@ def list_watchlists() -> dict:
 def create_watchlist(name: str, tickers: list[str]) -> dict:
     """
     Create or update a watchlist.
-    
+
     Args:
         name: Watchlist name
         tickers: List of ticker symbols to include
@@ -418,7 +417,7 @@ def create_watchlist(name: str, tickers: list[str]) -> dict:
 def delete_watchlist(name: str) -> dict:
     """
     Delete a watchlist.
-    
+
     Args:
         name: Watchlist name to delete
     """
@@ -434,7 +433,7 @@ def analyze_watchlist(
 ) -> dict:
     """
     Run analysis on all tickers in a watchlist.
-    
+
     Args:
         name: Watchlist name
         start_date: Start date in YYYY-MM-DD format
@@ -465,7 +464,7 @@ def add_portfolio_position(
 ) -> dict:
     """
     Add a position to your portfolio.
-    
+
     Args:
         ticker: Stock ticker symbol
         shares: Number of shares
@@ -487,7 +486,7 @@ def add_portfolio_position(
 def remove_portfolio_position(ticker: str, shares: float, sale_price: float) -> dict:
     """
     Remove shares from a portfolio position.
-    
+
     Args:
         ticker: Stock ticker symbol
         shares: Number of shares to remove
@@ -527,7 +526,7 @@ def get_portfolio_history() -> dict:
 def paper_buy(ticker: str, shares: float) -> dict:
     """
     Execute a paper (simulated) buy order.
-    
+
     Args:
         ticker: Stock ticker symbol
         shares: Number of shares to buy
@@ -540,7 +539,7 @@ def paper_buy(ticker: str, shares: float) -> dict:
 def paper_sell(ticker: str, shares: float) -> dict:
     """
     Execute a paper (simulated) sell order.
-    
+
     Args:
         ticker: Stock ticker symbol
         shares: Number of shares to sell
@@ -572,7 +571,7 @@ def get_paper_leaderboard() -> dict:
 def create_alert(ticker: str, condition: str, threshold: float) -> dict:
     """
     Create a price alert for a stock.
-    
+
     Args:
         ticker: Stock ticker symbol
         condition: Alert condition ("above", "below", "crosses_above", "crosses_below")
@@ -593,7 +592,7 @@ def list_alerts() -> dict:
 def delete_alert(alert_id: str) -> dict:
     """
     Delete an alert by ID.
-    
+
     Args:
         alert_id: The alert ID to delete
     """
@@ -620,7 +619,7 @@ def check_alerts() -> dict:
 def fetch_data(tickers: list[str] | None = None) -> dict:
     """
     Fetch and cache market data for tickers.
-    
+
     Args:
         tickers: List of ticker symbols (uses config default if not provided)
     """
@@ -633,7 +632,7 @@ def verify_data(tickers: list[str] | None = None) -> dict:
     """
     Verify data health for tickers.
     Checks for gaps, staleness, and data quality issues.
-    
+
     Args:
         tickers: List of ticker symbols (uses config default if not provided)
     """
@@ -683,7 +682,7 @@ def get_latest_report() -> dict:
 def view_report(path: str | None = None) -> dict:
     """
     View a specific report.
-    
+
     Args:
         path: Path to report file (uses latest if not provided)
     """
@@ -695,7 +694,7 @@ def view_report(path: str | None = None) -> dict:
 def list_history(limit: int = 20) -> dict:
     """
     List recent analysis history.
-    
+
     Args:
         limit: Maximum number of history entries to return (default: 20)
     """

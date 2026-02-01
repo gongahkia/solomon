@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import plotext as plt
 import pandas as pd
+import plotext as plt
 
-from stonks_cli.analysis.indicators import sma, bollinger_bands
+from stonks_cli.analysis.indicators import bollinger_bands, sma
 
 
 def plot_price_history(

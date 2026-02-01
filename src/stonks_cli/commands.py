@@ -3,27 +3,24 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from time import perf_counter
 from pathlib import Path
+from time import perf_counter
 
-from apscheduler.triggers.cron import CronTrigger
+from rich.console import Console
 
 from stonks_cli import __version__
 from stonks_cli.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
-from rich.console import Console
-
 from stonks_cli.analysis.output import AnalysisArtifacts
 from stonks_cli.config import AppConfig, config_path, load_config, save_config, save_default_config, update_config_field
+from stonks_cli.data.providers import CsvProvider, StooqProvider, normalize_ticker
 from stonks_cli.pipeline import compute_results, provider_for_config, run_once, select_strategy
-from stonks_cli.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
-from stonks_cli.scheduler.tz import cron_trigger_from_config, resolve_timezone
-from stonks_cli.data.providers import CsvProvider, StooqProvider
 from stonks_cli.reporting.backtest_report import BacktestRow, write_backtest_report
 from stonks_cli.reporting.csv_report import write_csv_summary
 from stonks_cli.reporting.json_report import write_json_report
 from stonks_cli.reporting.report import write_text_report
+from stonks_cli.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
+from stonks_cli.scheduler.tz import cron_trigger_from_config, resolve_timezone
 from stonks_cli.storage import get_history_record, get_last_report_path, get_last_run, list_history, save_last_run
-from stonks_cli.data.providers import normalize_ticker
 
 
 @dataclass(frozen=True)
@@ -127,7 +124,8 @@ def do_earnings(
     show_next: bool = False,
 ) -> dict:
     """Fetch earnings data for a ticker or upcoming calendar."""
-    from datetime import date, timedelta
+    from datetime import date
+
     from stonks_cli.data.earnings import fetch_ticker_earnings_history
 
     if ticker:
@@ -223,6 +221,7 @@ def do_chart_rsi(ticker: str, period: int = 14, days: int = 90) -> None:
 def do_chart_compare(tickers: list[str], days: int = 90) -> None:
     """Fetch data and display a comparison chart for multiple tickers."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
     from stonks_cli.charts.comparison import plot_comparison
 
     cfg = load_config()
@@ -593,10 +592,7 @@ def do_bench(tickers: list[str] | None, *, iterations: int = 5, warmup: int = 1)
     avg = sum(timings) / len(timings)
     p50 = timings_sorted[len(timings_sorted) // 2]
     p95 = timings_sorted[max(0, int(len(timings_sorted) * 0.95) - 1)]
-    return (
-        f"benchmark tickers={len(cfg.tickers)} iterations={iterations} "
-        f"avg={avg:.4f}s p50={p50:.4f}s p95={p95:.4f}s"
-    )
+    return f"benchmark tickers={len(cfg.tickers)} iterations={iterations} avg={avg:.4f}s p50={p50:.4f}s p95={p95:.4f}s"
 
 
 def do_backtest(
@@ -729,6 +725,7 @@ def do_data_fetch(tickers: list[str] | None) -> list[str]:
 def do_data_verify(tickers: list[str] | None) -> dict[str, str]:
     cfg = load_config()
     use = tickers if tickers else cfg.tickers
+
     def _health_check(series) -> str:
         df = series.df
         if df is None or getattr(df, "empty", True):
@@ -797,6 +794,7 @@ def do_portfolio_add(
 ) -> dict:
     """Add a position to the portfolio."""
     from datetime import date as date_type
+
     from stonks_cli.portfolio.storage import add_position
 
     parsed_date = None
@@ -829,6 +827,7 @@ def do_portfolio_remove(ticker: str, shares: float, sale_price: float) -> dict:
 def do_portfolio_show(include_total: bool = False) -> dict:
     """Get portfolio positions with current prices."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
     from stonks_cli.portfolio.storage import load_portfolio
 
     cfg = load_config()
@@ -883,15 +882,17 @@ def do_portfolio_show(include_total: bool = False) -> dict:
         gain_loss = market_value - cost_basis_total
         gain_loss_pct = (gain_loss / cost_basis_total * 100) if cost_basis_total > 0 else 0.0
 
-        position_details.append({
-            "ticker": ticker,
-            "shares": shares,
-            "cost_basis": avg_cost,
-            "current_price": current_price,
-            "market_value": market_value,
-            "gain_loss": gain_loss,
-            "gain_loss_pct": gain_loss_pct,
-        })
+        position_details.append(
+            {
+                "ticker": ticker,
+                "shares": shares,
+                "cost_basis": avg_cost,
+                "current_price": current_price,
+                "market_value": market_value,
+                "gain_loss": gain_loss,
+                "gain_loss_pct": gain_loss_pct,
+            }
+        )
 
         total_cost_basis += cost_basis_total
         total_market_value += market_value
@@ -899,7 +900,7 @@ def do_portfolio_show(include_total: bool = False) -> dict:
     totals = None
     if include_total and total_cost_basis > 0:
         total_gain_loss = total_market_value - total_cost_basis
-        total_return_pct = (total_gain_loss / total_cost_basis * 100)
+        total_return_pct = total_gain_loss / total_cost_basis * 100
         totals = {
             "total_cost_basis": total_cost_basis,
             "total_market_value": total_market_value,
@@ -913,8 +914,9 @@ def do_portfolio_show(include_total: bool = False) -> dict:
 def do_portfolio_allocation() -> dict:
     """Get portfolio allocation percentages."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    from stonks_cli.portfolio.storage import load_portfolio
+
     from stonks_cli.portfolio.analysis import calculate_portfolio_allocation
+    from stonks_cli.portfolio.storage import load_portfolio
 
     cfg = load_config()
     portfolio = load_portfolio()
@@ -959,6 +961,7 @@ def do_portfolio_allocation() -> dict:
 def do_portfolio_history() -> list[dict]:
     """Get portfolio transaction history."""
     import json
+
     from stonks_cli.portfolio.storage import get_history_path
 
     path = get_history_path()
@@ -966,7 +969,7 @@ def do_portfolio_history() -> list[dict]:
         return []
 
     transactions = []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -1015,7 +1018,8 @@ def do_paper_sell(ticker: str, shares: float) -> dict:
 def do_paper_status() -> dict:
     """Get paper portfolio status summary."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    from stonks_cli.portfolio.paper import load_paper_portfolio, get_paper_history_path
+
+    from stonks_cli.portfolio.paper import get_paper_history_path, load_paper_portfolio
 
     portfolio = load_paper_portfolio()
     cfg = load_config()
@@ -1026,21 +1030,21 @@ def do_paper_status() -> dict:
 
     def _fetch_price(t: str):
         try:
-             provider = provider_for_config(cfg, t)
-             series = provider.fetch_daily(t)
-             if not series.df.empty and "close" in series.df.columns:
-                 return t, float(series.df["close"].iloc[-1])
+            provider = provider_for_config(cfg, t)
+            series = provider.fetch_daily(t)
+            if not series.df.empty and "close" in series.df.columns:
+                return t, float(series.df["close"].iloc[-1])
         except Exception:
-             pass
+            pass
         return t, None
 
     max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-         futures = [ex.submit(_fetch_price, t) for t in tickers]
-         for fut in as_completed(futures):
-             t, p = fut.result()
-             if p is not None:
-                 prices[t] = p
+        futures = [ex.submit(_fetch_price, t) for t in tickers]
+        for fut in as_completed(futures):
+            t, p = fut.result()
+            if p is not None:
+                prices[t] = p
 
     # Calculate Values
     positions_data = []
@@ -1053,15 +1057,17 @@ def do_paper_status() -> dict:
         gain_loss = market_value - cost_basis_total
         pct = (gain_loss / cost_basis_total) * 100 if cost_basis_total > 0 else 0
 
-        positions_data.append({
-            "ticker": pos.ticker,
-            "shares": pos.shares,
-            "cost_basis": pos.cost_basis_per_share,
-            "current_price": current_price,
-            "market_value": market_value,
-            "gain_loss": gain_loss,
-            "gain_loss_pct": pct
-        })
+        positions_data.append(
+            {
+                "ticker": pos.ticker,
+                "shares": pos.shares,
+                "cost_basis": pos.cost_basis_per_share,
+                "current_price": current_price,
+                "market_value": market_value,
+                "gain_loss": gain_loss,
+                "gain_loss_pct": pct,
+            }
+        )
         total_market_value += market_value
 
     total_portfolio_value = total_market_value + portfolio.cash_balance
@@ -1070,12 +1076,12 @@ def do_paper_status() -> dict:
     initial_cash = 0.0
     hist_path = get_paper_history_path()
     if hist_path.exists():
-        with open(hist_path, "r", encoding="utf-8") as f:
+        with open(hist_path, encoding="utf-8") as f:
             for line in f:
                 try:
                     rec = json.loads(line)
                     if rec.get("action") == "INIT":
-                         initial_cash += rec.get("shares", 0.0)
+                        initial_cash += rec.get("shares", 0.0)
                 except Exception:
                     pass
 
@@ -1091,28 +1097,29 @@ def do_paper_status() -> dict:
         "total_portfolio_value": total_portfolio_value,
         "initial_cash": initial_cash,
         "overall_pl": overall_pl,
-        "overall_pl_pct": overall_pl_pct
+        "overall_pl_pct": overall_pl_pct,
     }
 
 
 def do_paper_leaderboard() -> dict:
     """Get metrics for leaderboard."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    from stonks_cli.portfolio.paper import load_paper_portfolio, calculate_paper_performance, get_paper_history_path
-    
+
+    from stonks_cli.portfolio.paper import calculate_paper_performance, get_paper_history_path, load_paper_portfolio
+
     portfolio = load_paper_portfolio()
     cfg = load_config()
-    
+
     # Get Initial Cash
     initial_cash = 0.0
     h_path = get_paper_history_path()
     if h_path.exists():
-        with open(h_path, "r", encoding="utf-8") as f:
+        with open(h_path, encoding="utf-8") as f:
             for line in f:
                 try:
                     rec = json.loads(line)
                     if rec.get("action") == "INIT":
-                         initial_cash += rec.get("shares", 0.0)
+                        initial_cash += rec.get("shares", 0.0)
                 except Exception:
                     pass
     if initial_cash == 0:
@@ -1121,28 +1128,28 @@ def do_paper_leaderboard() -> dict:
     # Fetch prices
     tickers = list(set(p.ticker for p in portfolio.positions))
     prices: dict[str, float] = {}
-    
+
     if tickers:
+
         def _fetch_price(t: str):
             try:
-                 provider = provider_for_config(cfg, t)
-                 series = provider.fetch_daily(t)
-                 if not series.df.empty and "close" in series.df.columns:
-                     return t, float(series.df["close"].iloc[-1])
+                provider = provider_for_config(cfg, t)
+                series = provider.fetch_daily(t)
+                if not series.df.empty and "close" in series.df.columns:
+                    return t, float(series.df["close"].iloc[-1])
             except Exception:
-                 pass
+                pass
             return t, None
 
         max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
-             futures = [ex.submit(_fetch_price, t) for t in tickers]
-             for fut in as_completed(futures):
-                 t, p = fut.result()
-                 if p is not None:
-                     prices[t] = p
+            futures = [ex.submit(_fetch_price, t) for t in tickers]
+            for fut in as_completed(futures):
+                t, p = fut.result()
+                if p is not None:
+                    prices[t] = p
 
     return calculate_paper_performance(portfolio, initial_cash, prices)
-
 
     return calculate_paper_performance(portfolio, initial_cash, prices)
 
@@ -1154,23 +1161,27 @@ def do_alert_add(ticker: str, condition: str, threshold: float) -> dict:
 
     # Validate condition?
     valid_conditions = [
-        "price_above", "price_below",
-        "rsi_above", "rsi_below",
-        "sma_cross_up", "sma_cross_down",
+        "price_above",
+        "price_below",
+        "rsi_above",
+        "rsi_below",
+        "sma_cross_up",
+        "sma_cross_down",
         # Advanced ones:
-        "golden_cross", "death_cross",
-        "volume_spike", "earnings_soon",
-        "new_high_52w", "new_low_52w"
+        "golden_cross",
+        "death_cross",
+        "volume_spike",
+        "earnings_soon",
+        "new_high_52w",
+        "new_low_52w",
     ]
-    if condition not in valid_conditions and not condition.startswith("volume_spike"): # Hack for volume-spike param? No, param passed as threshold usually or separate.
-         # For simple types, direct match.
-         pass
+    if condition not in valid_conditions and not condition.startswith(
+        "volume_spike"
+    ):  # Hack for volume-spike param? No, param passed as threshold usually or separate.
+        # For simple types, direct match.
+        pass
 
-    alert = Alert(
-        ticker=ticker.upper(),
-        condition_type=condition,
-        threshold=threshold
-    )
+    alert = Alert(ticker=ticker.upper(), condition_type=condition, threshold=threshold)
     save_alert(alert)
     return alert.to_dict()
 
@@ -1178,30 +1189,32 @@ def do_alert_add(ticker: str, condition: str, threshold: float) -> dict:
 def do_alert_list() -> list[dict]:
     """Get all alerts."""
     from stonks_cli.alerts.storage import load_alerts
+
     return [a.to_dict() for a in load_alerts()]
 
 
 def do_alert_remove(alert_id: str) -> bool:
     """Remove an alert by ID."""
     from stonks_cli.alerts.storage import delete_alert
+
     return delete_alert(alert_id)
 
 
 def do_alert_toggle(alert_id: str, enabled: bool) -> dict | None:
     """Toggle alert enabled status. Returns updated alert dict or None if not found."""
     from stonks_cli.alerts.storage import load_alerts, save_alert
-    
+
     alerts = load_alerts()
     # Resolve full ID if prefix
     # But wait, command layer resolves prefix usually for user interaction.
     # Here let's assume exact ID or handle prefix if we want logic here.
     # The remove command resolved prefix in CLI layer. I will do same there.
     # So here expect exact ID.
-    
+
     target = next((a for a in alerts if a.id == alert_id), None)
     if not target:
         return None
-        
+
     target.enabled = enabled
     save_alert(target)
     return target.to_dict()
@@ -1209,13 +1222,14 @@ def do_alert_toggle(alert_id: str, enabled: bool) -> dict | None:
 
 def do_alert_check() -> list[dict]:
     """Check all alerts, send notifications for triggered ones, and mark as triggered.
-    
+
     Returns list of triggered alert dicts.
     """
     from datetime import datetime
+
     from stonks_cli.alerts.checker import check_all_alerts
+    from stonks_cli.alerts.notify import log_alert_trigger, notify_terminal_bell, notify_webhook
     from stonks_cli.alerts.storage import save_alert
-    from stonks_cli.alerts.notify import notify_terminal_bell, notify_webhook, log_alert_trigger
 
     cfg = load_config()
     results = check_all_alerts()
@@ -1242,7 +1256,6 @@ def do_alert_check() -> list[dict]:
 
 def do_sector(sector_name: str) -> dict:
     """Get sector performance compared to SPY."""
-    from datetime import date, timedelta
     from stonks_cli.data.sectors import SECTOR_ETFS
 
     cfg = load_config()
@@ -1319,6 +1332,7 @@ def do_sector(sector_name: str) -> dict:
 def do_correlation(tickers: list[str], days: int = 252) -> dict:
     """Compute correlation matrix for given tickers."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
     from stonks_cli.analysis.correlation import compute_correlation_matrix
 
     cfg = load_config()
@@ -1393,42 +1407,43 @@ def do_data_purge(*, older_than_days: int | None = None) -> dict[str, object]:
 def do_dividend_info(ticker: str) -> dict:
     """Fetch dividend information for a ticker."""
     from stonks_cli.data.dividends import fetch_dividend_info
-    
+
     normalized = normalize_ticker(ticker)
     return fetch_dividend_info(normalized)
 
 
 def do_dividend_calendar(days: int = 30) -> list[dict]:
     """Scan watchlist tickers for upcoming ex-dividend dates.
-    
+
     Returns list of dicts with: ticker, ex_date, amount, days_until
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from datetime import date, timedelta
+
     from stonks_cli.data.dividends import fetch_dividend_info
 
     cfg = load_config()
-    
+
     # Get all tickers from main list and watchlists
     tickers = set(cfg.tickers)
     for wl_tickers in cfg.watchlists.values():
         tickers.update(wl_tickers)
-    
+
     if not tickers:
         return []
-    
+
     today = date.today()
     end_date = today + timedelta(days=days)
-    
+
     results = []
-    
+
     def _check_ticker(ticker: str):
         try:
             info = fetch_dividend_info(ticker)
             ex_date_str = info.get("ex_dividend_date")
             if not ex_date_str:
                 return None
-            
+
             ex_date = date.fromisoformat(ex_date_str)
             if today <= ex_date <= end_date:
                 # Get dividend amount from history if available
@@ -1436,7 +1451,7 @@ def do_dividend_calendar(days: int = 30) -> list[dict]:
                 history = info.get("dividend_history", [])
                 if history:
                     amount = history[0].get("amount")
-                
+
                 return {
                     "ticker": ticker,
                     "ex_date": ex_date_str,
@@ -1446,7 +1461,7 @@ def do_dividend_calendar(days: int = 30) -> list[dict]:
         except Exception:
             pass
         return None
-    
+
     max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = [ex.submit(_check_ticker, t) for t in tickers]
@@ -1454,7 +1469,7 @@ def do_dividend_calendar(days: int = 30) -> list[dict]:
             result = fut.result()
             if result:
                 results.append(result)
-    
+
     # Sort by ex_date
     results.sort(key=lambda x: x["ex_date"])
     return results
@@ -1462,15 +1477,15 @@ def do_dividend_calendar(days: int = 30) -> list[dict]:
 
 def do_movers(sector: bool = False) -> list[dict]:
     """Fetch daily performance of major indices or sector ETFs.
-    
+
     Args:
         sector: If True, show sector ETFs instead of indices
-        
+
     Returns:
         List of dicts with: ticker, name, price, change, change_pct
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    
+
     if sector:
         tickers = ["XLK", "XLV", "XLF", "XLE", "XLY", "XLP", "XLI", "XLB", "XLU", "XLRE", "XLC"]
         names = {
@@ -1494,24 +1509,25 @@ def do_movers(sector: bool = False) -> list[dict]:
             "DIA": "Dow Jones",
             "IWM": "Russell 2000",
         }
-    
+
     cfg = load_config()
     results = []
-    
+
     def _fetch_ticker(ticker: str):
         try:
             from stonks_cli.pipeline import provider_for_config
+
             p = provider_for_config(cfg, ticker)
             s = p.fetch_daily(ticker)
             if s.df.empty or len(s.df) < 2:
                 return None
-            
+
             current = s.df["close"].iloc[-1]
             previous = s.df["close"].iloc[-2]
-            
+
             change = current - previous
             change_pct = (change / previous) * 100 if previous != 0 else 0
-            
+
             return {
                 "ticker": ticker,
                 "name": names.get(ticker, ticker),
@@ -1521,7 +1537,7 @@ def do_movers(sector: bool = False) -> list[dict]:
             }
         except Exception:
             return None
-    
+
     max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = {ex.submit(_fetch_ticker, t): t for t in tickers}
@@ -1529,7 +1545,7 @@ def do_movers(sector: bool = False) -> list[dict]:
             result = fut.result()
             if result:
                 results.append(result)
-    
+
     # Sort by change_pct descending
     results.sort(key=lambda x: x["change_pct"], reverse=True)
     return results
@@ -1537,25 +1553,25 @@ def do_movers(sector: bool = False) -> list[dict]:
 
 def do_unusual(threshold: float = 2.0) -> list[dict]:
     """Scan watchlist tickers for unusual volume activity.
-    
+
     Args:
         threshold: Multiple of average volume to flag as unusual
-        
+
     Returns:
         List of flagged tickers with volume data
     """
     from stonks_cli.analysis.unusual import detect_unusual_volume
-    
+
     cfg = load_config()
-    
+
     # Get all tickers from main list and watchlists
     tickers = list(set(cfg.tickers))
     for wl_tickers in cfg.watchlists.values():
         tickers.extend(wl_tickers)
-    
+
     tickers = list(set(tickers))
-    
+
     if not tickers:
         return []
-    
+
     return detect_unusual_volume(tickers, threshold=threshold)

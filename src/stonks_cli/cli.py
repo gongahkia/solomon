@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import typer
+from pydantic import ValidationError
 from rich.console import Console
 
-from pydantic import ValidationError
-
-from stonks_cli.config import load_config
 from stonks_cli.commands import (
     do_analyze,
     do_analyze_artifacts,
@@ -18,43 +16,43 @@ from stonks_cli.commands import (
     do_chart_compare,
     do_chart_rsi,
     do_config_init,
+    do_config_set,
+    do_config_show,
+    do_config_validate,
+    do_config_where,
     do_correlation,
+    do_data_cache_info,
+    do_data_fetch,
+    do_data_purge,
+    do_data_verify,
+    do_doctor,
     do_earnings,
     do_fundamentals,
+    do_history_list,
+    do_history_show,
     do_insider,
     do_news,
+    do_plugins_list,
     do_portfolio_add,
     do_portfolio_allocation,
     do_portfolio_history,
     do_portfolio_remove,
     do_portfolio_show,
-    do_sector,
-    do_watch,
-    do_config_set,
-    do_config_show,
-    do_config_validate,
-    do_config_where,
-    do_data_cache_info,
-    do_data_fetch,
-    do_data_purge,
-    do_data_verify,
-    do_history_list,
-    do_history_show,
-    do_doctor,
-    do_plugins_list,
     do_quick,
-    do_signals_diff,
-    do_watchlist_analyze,
-    do_watchlist_list,
-    do_watchlist_remove,
-    do_watchlist_set,
     do_report_latest,
     do_report_open,
     do_report_view,
     do_schedule_once,
     do_schedule_run,
     do_schedule_status,
+    do_sector,
+    do_signals_diff,
     do_version,
+    do_watch,
+    do_watchlist_analyze,
+    do_watchlist_list,
+    do_watchlist_remove,
+    do_watchlist_set,
 )
 from stonks_cli.errors import ExitCodes, StonksError
 from stonks_cli.logging_utils import LoggingConfig, configure_logging
@@ -138,9 +136,9 @@ def quick(
     detailed: bool = typer.Option(False, "--detailed", help="Include fundamental data summary"),
 ) -> None:
     """Quick one-liner analysis for one or more tickers."""
+    from stonks_cli.formatting.numbers import format_market_cap
     from stonks_cli.formatting.oneliner import format_quick_summary
     from stonks_cli.formatting.sparkline import generate_sparkline
-    from stonks_cli.formatting.numbers import format_market_cap
 
     try:
         results = do_quick(tickers)
@@ -170,10 +168,16 @@ def quick(
                     if fundamentals:
                         pe = f"P/E: {fundamentals.pe_ratio:.1f}" if fundamentals.pe_ratio else "P/E: N/A"
                         mc = f"MCap: {format_market_cap(fundamentals.market_cap)}"
-                        div = f"Div: {fundamentals.dividend_yield*100:.2f}%" if fundamentals.dividend_yield else "Div: N/A"
+                        div = (
+                            f"Div: {fundamentals.dividend_yield * 100:.2f}%"
+                            if fundamentals.dividend_yield
+                            else "Div: N/A"
+                        )
                         range_str = ""
                         if fundamentals.fifty_two_week_low and fundamentals.fifty_two_week_high:
-                            range_str = f"52w: ${fundamentals.fifty_two_week_low:.2f}-${fundamentals.fifty_two_week_high:.2f}"
+                            range_str = (
+                                f"52w: ${fundamentals.fifty_two_week_low:.2f}-${fundamentals.fifty_two_week_high:.2f}"
+                            )
                         details = f"  {pe} | {mc} | {div}"
                         if range_str:
                             details = f"{details} | {range_str}"
@@ -373,8 +377,12 @@ def fundamentals(
         table.add_row("Earnings Growth (YoY)", format_percent(data.get("earnings_growth_yoy")))
         table.add_row("Dividend Yield", format_percent(data.get("dividend_yield")))
         table.add_row("Beta", format_ratio(data.get("beta")))
-        table.add_row("52-Week High", f"${data.get('fifty_two_week_high', 0):.2f}" if data.get("fifty_two_week_high") else "N/A")
-        table.add_row("52-Week Low", f"${data.get('fifty_two_week_low', 0):.2f}" if data.get("fifty_two_week_low") else "N/A")
+        table.add_row(
+            "52-Week High", f"${data.get('fifty_two_week_high', 0):.2f}" if data.get("fifty_two_week_high") else "N/A"
+        )
+        table.add_row(
+            "52-Week Low", f"${data.get('fifty_two_week_low', 0):.2f}" if data.get("fifty_two_week_low") else "N/A"
+        )
 
         console.print(table)
     except Exception as e:
@@ -430,7 +438,9 @@ def news(
 def earnings(
     ticker: str = typer.Option(None, "--ticker", help="Show earnings history for specific ticker"),
     show_next: bool = typer.Option(False, "--next", help="Show only next upcoming earnings date"),
-    implied_move: bool = typer.Option(False, "--implied-move", help="Show historically implied earnings move percentage"),
+    implied_move: bool = typer.Option(
+        False, "--implied-move", help="Show historically implied earnings move percentage"
+    ),
 ) -> None:
     """Display earnings calendar or ticker history (requires yfinance)."""
     from rich.table import Table
@@ -439,6 +449,7 @@ def earnings(
         # Handle implied move flag
         if implied_move and ticker:
             from stonks_cli.data.earnings import compute_earnings_implied_move
+
             console = Console()
             move = compute_earnings_implied_move(ticker)
             if move is not None:
@@ -447,7 +458,7 @@ def earnings(
             else:
                 console.print(f"[yellow]No implied move data available for {ticker}[/yellow]")
             return
-        
+
         data = do_earnings(ticker=ticker, show_next=show_next)
         console = Console()
 
@@ -504,6 +515,7 @@ def insider(
 ) -> None:
     """Display recent insider transactions for a ticker."""
     from rich.table import Table
+
     from stonks_cli.formatting.numbers import format_market_cap
 
     try:
@@ -996,7 +1008,9 @@ def history_list(limit: int = typer.Option(20, "--limit", min=1, max=200)) -> No
 
 
 @history_app.command("show")
-def history_show(index: int = typer.Argument(..., min=0), limit: int = typer.Option(2000, "--limit", min=1, max=2000)) -> None:
+def history_show(
+    index: int = typer.Argument(..., min=0), limit: int = typer.Option(2000, "--limit", min=1, max=2000)
+) -> None:
     """Show details for a prior run by index (within the last --limit entries)."""
     try:
         r = do_history_show(index, limit=limit)
@@ -1018,9 +1032,7 @@ def portfolio_add(
 ) -> None:
     """Add a position to the portfolio."""
     try:
-        result = do_portfolio_add(
-            ticker, shares, cost_basis, purchase_date=purchase_date, notes=notes
-        )
+        result = do_portfolio_add(ticker, shares, cost_basis, purchase_date=purchase_date, notes=notes)
         Console().print(
             f"Added {result['shares']} shares of {result['ticker']} at ${result['cost_basis']:.2f} cost basis"
         )
@@ -1041,12 +1053,8 @@ def portfolio_remove(
         pct = result["gain_loss_pct"]
         color = "green" if gain_loss >= 0 else "red"
 
-        Console().print(
-            f"Sold {result['shares_sold']} shares of {result['ticker']} at ${result['sale_price']:.2f}"
-        )
-        Console().print(
-            f"Realized Gain/Loss: [{color}]${gain_loss:.2f} ({pct:+.2f}%)[/{color}]"
-        )
+        Console().print(f"Sold {result['shares_sold']} shares of {result['ticker']} at ${result['sale_price']:.2f}")
+        Console().print(f"Realized Gain/Loss: [{color}]${gain_loss:.2f} ({pct:+.2f}%)[/{color}]")
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -1056,7 +1064,7 @@ def portfolio_show(
     total: bool = typer.Option(False, "--total", help="Show portfolio totals"),
 ) -> None:
     """Show portfolio positions."""
-    from rich.table import Table, Column
+    from rich.table import Table
 
     try:
         data = do_portfolio_show(include_total=total)
@@ -1068,7 +1076,7 @@ def portfolio_show(
             return
 
         table = Table(title="Portfolio positions", show_footer=total)
-        
+
         # Format totals for footer if requested
         f_ticker = "TOTAL" if total else ""
         f_shares = ""
@@ -1079,17 +1087,17 @@ def portfolio_show(
         f_gl_pct = ""
 
         if totals:
-             t_cb = totals["total_cost_basis"]
-             t_mv = totals["total_market_value"]
-             t_gl = totals["total_gain_loss"]
-             t_ret = totals["total_return_pct"]
-             
-             gl_color = "green" if t_gl >= 0 else "red"
-             
-             f_cost_basis = f"${t_cb:.2f}"
-             f_value = f"${t_mv:.2f}"
-             f_gl_dollar = f"[{gl_color}]${t_gl:.2f}[/{gl_color}]"
-             f_gl_pct = f"[{gl_color}]{t_ret:+.2f}%[/{gl_color}]"
+            t_cb = totals["total_cost_basis"]
+            t_mv = totals["total_market_value"]
+            t_gl = totals["total_gain_loss"]
+            t_ret = totals["total_return_pct"]
+
+            gl_color = "green" if t_gl >= 0 else "red"
+
+            f_cost_basis = f"${t_cb:.2f}"
+            f_value = f"${t_mv:.2f}"
+            f_gl_dollar = f"[{gl_color}]${t_gl:.2f}[/{gl_color}]"
+            f_gl_pct = f"[{gl_color}]{t_ret:+.2f}%[/{gl_color}]"
 
         table.add_column("Ticker", style="cyan", footer=f_ticker)
         table.add_column("Shares", justify="right", footer=f_shares)
@@ -1126,8 +1134,8 @@ def portfolio_allocation() -> None:
         allocations = data.get("allocations", {})
 
         if not allocations:
-           Console().print("[yellow]Portfolio is empty[/yellow]")
-           return
+            Console().print("[yellow]Portfolio is empty[/yellow]")
+            return
 
         # Sort by percentage descending
         sorted_allocs = sorted(allocations.items(), key=lambda x: x[1], reverse=True)
@@ -1157,8 +1165,8 @@ def portfolio_history() -> None:
         transactions = do_portfolio_history()
 
         if not transactions:
-           Console().print("[yellow]No transaction history[/yellow]")
-           return
+            Console().print("[yellow]No transaction history[/yellow]")
+            return
 
         table = Table(title="Transaction History")
         table.add_column("Date", style="dim")
@@ -1263,8 +1271,9 @@ def paper_sell_cmd(
 @paper_app.command("status")
 def paper_status() -> None:
     """Show paper portfolio status."""
-    from stonks_cli.commands import do_paper_status
     from rich.table import Table
+
+    from stonks_cli.commands import do_paper_status
 
     try:
         status = do_paper_status()
@@ -1291,11 +1300,13 @@ def paper_status() -> None:
                 )
             Console().print(table)
         else:
-             Console().print("[yellow]No open positions[/yellow]")
+            Console().print("[yellow]No open positions[/yellow]")
 
         pl_color = "green" if status["overall_pl"] >= 0 else "red"
         Console().print(f"Total Portfolio Value: ${status['total_portfolio_value']:.2f}")
-        Console().print(f"Overall P&L: [{pl_color}]${status['overall_pl']:.2f} ({status['overall_pl_pct']:+.2f}%)[/{pl_color}]")
+        Console().print(
+            f"Overall P&L: [{pl_color}]${status['overall_pl']:.2f} ({status['overall_pl_pct']:+.2f}%)[/{pl_color}]"
+        )
 
     except Exception as e:
         raise _exit_for_error(e)
@@ -1306,7 +1317,7 @@ def paper_reset(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Reset paper trading portfolio."""
-    from stonks_cli.portfolio.paper import get_paper_portfolio_path, get_paper_history_path
+    from stonks_cli.portfolio.paper import get_paper_history_path, get_paper_portfolio_path
 
     if not force:
         typer.confirm(
@@ -1328,8 +1339,9 @@ def paper_reset(
 @paper_app.command("leaderboard")
 def paper_leaderboard() -> None:
     """Show paper trading performance metrics."""
-    from stonks_cli.commands import do_paper_leaderboard
     from rich.table import Table
+
+    from stonks_cli.commands import do_paper_leaderboard
 
     try:
         metrics = do_paper_leaderboard()
@@ -1341,8 +1353,8 @@ def paper_leaderboard() -> None:
         color = "green" if metrics["total_return_pct"] >= 0 else "red"
         table.add_row("Total Return %", f"[{color}]{metrics['total_return_pct']:+.2f}%[/{color}]")
         table.add_row("Sharpe Ratio (Trade)", f"{metrics['sharpe_ratio']:.2f}")
-        table.add_row("Max Drawdown", f"{metrics['max_drawdown']*100:.2f}%")
-        table.add_row("Trades", str(metrics['num_trades']))
+        table.add_row("Max Drawdown", f"{metrics['max_drawdown'] * 100:.2f}%")
+        table.add_row("Trades", str(metrics["num_trades"]))
         table.add_row("Win Rate", f"{metrics['win_rate']:.1f}%")
 
         Console().print(table)
@@ -1354,7 +1366,10 @@ def paper_leaderboard() -> None:
 @alert_app.command("add")
 def alert_add(
     ticker: str = typer.Argument(..., help="Ticker symbol"),
-    condition: str = typer.Argument(..., help="Condition type (price-above, price-below, rsi-above, rsi-below, golden-cross, death-cross, new-high-52w, new-low-52w, volume-spike, earnings-soon)"),
+    condition: str = typer.Argument(
+        ...,
+        help="Condition type (price-above, price-below, rsi-above, rsi-below, golden-cross, death-cross, new-high-52w, new-low-52w, volume-spike, earnings-soon)",
+    ),
     threshold: float = typer.Argument(None, help="Threshold value (not required for cross/52w alerts)"),
 ) -> None:
     """Add a new alert."""
@@ -1363,10 +1378,10 @@ def alert_add(
     try:
         # Normalize condition to use underscores
         cond_normalized = condition.replace("-", "_")
-        
+
         # Conditions that don't require a threshold
         no_threshold_conditions = {"golden_cross", "death_cross", "new_high_52w", "new_low_52w"}
-        
+
         if cond_normalized in no_threshold_conditions:
             final_threshold = threshold if threshold is not None else 0.0
         else:
@@ -1379,9 +1394,9 @@ def alert_add(
                     raise typer.Exit(code=1)
             else:
                 final_threshold = threshold
-            
+
         alert = do_alert_add(ticker, cond_normalized, final_threshold)
-        
+
         # Format confirmation message
         condition_str = cond_normalized.replace("_", " ")
         if cond_normalized in no_threshold_conditions:
@@ -1394,10 +1409,8 @@ def alert_add(
             msg_val = f" {int(final_threshold)} days"
         else:
             msg_val = f" ${final_threshold:.2f}"
-            
-        Console().print(
-            f"Alert created: {alert['ticker']} {condition_str}{msg_val} (ID: {alert['id'][:6]})"
-        )
+
+        Console().print(f"Alert created: {alert['ticker']} {condition_str}{msg_val} (ID: {alert['id'][:6]})")
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -1406,6 +1419,7 @@ def alert_add(
 def alert_list() -> None:
     """List all alerts."""
     from rich.table import Table
+
     from stonks_cli.commands import do_alert_list
 
     try:
@@ -1427,29 +1441,22 @@ def alert_list() -> None:
             thr = a["threshold"]
             # Formatting threshold based on condition
             if "rsi" in a["condition_type"]:
-                 val_str = f"{thr:.1f}"
+                val_str = f"{thr:.1f}"
             else:
-                 val_str = f"${thr:.2f}"
-            
+                val_str = f"${thr:.2f}"
+
             status = []
             if a["enabled"]:
                 status.append("[green]enabled[/green]")
             else:
                 status.append("[dim]disabled[/dim]")
-            
+
             if a.get("triggered_at"):
                 status.append("[red]TRIGGERED[/red]")
-            
+
             created = a["created_at"][:10]  # Just date
 
-            table.add_row(
-                a["id"][:6],
-                a["ticker"],
-                cond,
-                val_str,
-                ", ".join(status),
-                created
-            )
+            table.add_row(a["id"][:6], a["ticker"], cond, val_str, ", ".join(status), created)
 
         Console().print(table)
     except Exception as e:
@@ -1462,34 +1469,34 @@ def alert_remove(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove an alert."""
-    from stonks_cli.commands import do_alert_remove, do_alert_list
+    from stonks_cli.commands import do_alert_list, do_alert_remove
 
     try:
         # Resolve prefix
         alerts = do_alert_list()
         matches = [a for a in alerts if a["id"].startswith(alert_id)]
-        
+
         if len(matches) == 0:
             Console().print(f"[red]No alert found with ID prefix: {alert_id}[/red]")
             raise typer.Exit(code=1)
-        
+
         if len(matches) > 1:
             Console().print(f"[red]Multiple alerts match prefix {alert_id}. Be more specific.[/red]")
             raise typer.Exit(code=1)
-            
+
         target = matches[0]
-        
+
         if not force:
             typer.confirm(
                 f"Remove alert {target['id'][:6]} ({target['ticker']} {target['condition_type']} {target['threshold']})?",
-                abort=True
+                abort=True,
             )
 
         if do_alert_remove(target["id"]):
             Console().print(f"Removed alert: {target['id'][:6]}")
         else:
-            Console().print(f"[red]Failed to remove alert[/red]")
-            
+            Console().print("[red]Failed to remove alert[/red]")
+
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -1512,29 +1519,29 @@ def alert_disable(
 
 def _toggle_alert(alert_id: str, enabled: bool) -> None:
     from stonks_cli.commands import do_alert_list, do_alert_toggle
-    
+
     try:
         # Resolve prefix
         alerts = do_alert_list()
         matches = [a for a in alerts if a["id"].startswith(alert_id)]
-        
+
         if len(matches) == 0:
             Console().print(f"[red]No alert found with ID prefix: {alert_id}[/red]")
             raise typer.Exit(code=1)
-        
+
         if len(matches) > 1:
             Console().print(f"[red]Multiple alerts match prefix {alert_id}. Be more specific.[/red]")
             raise typer.Exit(code=1)
-            
+
         target = matches[0]
         result = do_alert_toggle(target["id"], enabled)
-        
+
         if result:
             status = "enabled" if enabled else "disabled"
             color = "green" if enabled else "yellow"
             Console().print(f"Alert {result['id'][:6]} [{color}]{status}[/{color}]")
         else:
-             Console().print(f"[red]Failed to update alert[/red]")
+            Console().print("[red]Failed to update alert[/red]")
 
     except Exception as e:
         raise _exit_for_error(e)
@@ -1547,16 +1554,16 @@ def alert_check() -> None:
 
     try:
         triggered = do_alert_check()
-        
+
         if not triggered:
             Console().print("[green]No alerts triggered[/green]")
             return
-            
+
         Console().print(f"[bold red]{len(triggered)} alert(s) triggered![/bold red]")
         for a in triggered:
             cond = a["condition_type"].replace("_", " ")
             Console().print(f"  • {a['ticker']} {cond} {a['threshold']}")
-            
+
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -1567,32 +1574,34 @@ def dividend_info(
 ) -> None:
     """Display dividend information for a ticker."""
     from datetime import date
+
     from rich.panel import Panel
     from rich.table import Table
+
     from stonks_cli.commands import do_dividend_info
 
     try:
         info = do_dividend_info(ticker)
         console = Console()
-        
+
         # Build info panel content
         lines = []
-        
+
         if info.get("dividend_yield") is not None:
             lines.append(f"[bold]Dividend Yield:[/bold] {info['dividend_yield']:.2f}%")
         else:
             lines.append("[bold]Dividend Yield:[/bold] N/A")
-            
+
         if info.get("annual_dividend") is not None:
             lines.append(f"[bold]Annual Payment:[/bold] ${info['annual_dividend']:.2f}")
         else:
             lines.append("[bold]Annual Payment:[/bold] N/A")
-            
+
         if info.get("payout_ratio") is not None:
             lines.append(f"[bold]Payout Ratio:[/bold] {info['payout_ratio']:.1f}%")
         else:
             lines.append("[bold]Payout Ratio:[/bold] N/A")
-        
+
         # Ex-date countdown
         if info.get("ex_dividend_date"):
             try:
@@ -1604,29 +1613,31 @@ def dividend_info(
                     lines.append(f"[bold]Last Ex-Date:[/bold] {info['ex_dividend_date']} ({abs(days_until)} days ago)")
             except Exception:
                 lines.append(f"[bold]Ex-Dividend Date:[/bold] {info['ex_dividend_date']}")
-        
+
         if info.get("next_dividend_date"):
             lines.append(f"[bold]Next Dividend (est):[/bold] {info['next_dividend_date']}")
-        
-        console.print(Panel("\n".join(lines), title=f"[bold cyan]{info.get('ticker', ticker).upper()} Dividend Info[/bold cyan]"))
-        
+
+        console.print(
+            Panel("\n".join(lines), title=f"[bold cyan]{info.get('ticker', ticker).upper()} Dividend Info[/bold cyan]")
+        )
+
         # History table
         history = info.get("dividend_history", [])
         if history:
             table = Table(title="Dividend History (Last 8)")
             table.add_column("Ex-Date", style="dim")
             table.add_column("Amount", justify="right")
-            
+
             for h in history:
                 table.add_row(
                     h.get("ex_date", "N/A"),
                     f"${h.get('amount', 0):.4f}",
                 )
-            
+
             console.print(table)
         else:
             console.print("[yellow]No dividend history available[/yellow]")
-            
+
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -1637,22 +1648,23 @@ def dividend_calendar(
 ) -> None:
     """Display upcoming ex-dividend dates from watchlist tickers."""
     from rich.table import Table
+
     from stonks_cli.commands import do_dividend_calendar
 
     try:
         results = do_dividend_calendar(days=days)
         console = Console()
-        
+
         if not results:
             console.print(f"[yellow]No ex-dividend dates found in the next {days} days[/yellow]")
             return
-        
+
         table = Table(title=f"Upcoming Ex-Dividend Dates (Next {days} Days)")
         table.add_column("Days", justify="right", style="bold")
         table.add_column("Ex-Date")
         table.add_column("Ticker", style="cyan")
         table.add_column("Amount", justify="right")
-        
+
         for r in results:
             days_until = r["days_until"]
             if days_until == 0:
@@ -1661,18 +1673,18 @@ def dividend_calendar(
                 days_str = "[yellow]1[/yellow]"
             else:
                 days_str = str(days_until)
-            
+
             amount_str = f"${r['amount']:.4f}" if r.get("amount") else "N/A"
-            
+
             table.add_row(
                 days_str,
                 r["ex_date"],
                 r["ticker"],
                 amount_str,
             )
-        
+
         console.print(table)
-        
+
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -1683,16 +1695,17 @@ def movers(
 ) -> None:
     """Display daily performance of major indices or sector ETFs."""
     from rich.table import Table
+
     from stonks_cli.commands import do_movers
 
     try:
         results = do_movers(sector=sector)
         console = Console()
-        
+
         if not results:
             console.print("[yellow]No market data available[/yellow]")
             return
-        
+
         title = "Sector Performance" if sector else "Market Movers"
         table = Table(title=title)
         table.add_column("Ticker", style="cyan")
@@ -1700,7 +1713,7 @@ def movers(
         table.add_column("Price", justify="right")
         table.add_column("Change", justify="right")
         table.add_column("%", justify="right")
-        
+
         for r in results:
             pct = r["change_pct"]
             if pct >= 0:
@@ -1709,7 +1722,7 @@ def movers(
             else:
                 change_str = f"[red]-${abs(r['change']):.2f}[/red]"
                 pct_str = f"[red]{pct:.2f}%[/red]"
-            
+
             table.add_row(
                 r["ticker"],
                 r["name"],
@@ -1717,9 +1730,9 @@ def movers(
                 change_str,
                 pct_str,
             )
-        
+
         console.print(table)
-        
+
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -1730,16 +1743,17 @@ def unusual(
 ) -> None:
     """Scan watchlist for unusual volume activity."""
     from rich.table import Table
+
     from stonks_cli.commands import do_unusual
 
     try:
         results = do_unusual(threshold=threshold)
         console = Console()
-        
+
         if not results:
             console.print(f"[green]No unusual volume activity detected (>{threshold}x avg)[/green]")
             return
-        
+
         table = Table(title=f"Unusual Volume Activity (>{threshold}x avg)")
         table.add_column("Ticker", style="cyan")
         table.add_column("Volume", justify="right")
@@ -1747,21 +1761,21 @@ def unusual(
         table.add_column("Multiple", justify="right", style="bold")
         table.add_column("Price", justify="right")
         table.add_column("Change", justify="right")
-        
+
         def format_volume(vol: float) -> str:
             if vol >= 1_000_000:
-                return f"{vol/1_000_000:.1f}M"
+                return f"{vol / 1_000_000:.1f}M"
             elif vol >= 1_000:
-                return f"{vol/1_000:.1f}K"
+                return f"{vol / 1_000:.1f}K"
             return str(int(vol))
-        
+
         for r in results:
             pct = r["change_pct"]
             if pct >= 0:
                 pct_str = f"[green]+{pct:.2f}%[/green]"
             else:
                 pct_str = f"[red]{pct:.2f}%[/red]"
-            
+
             table.add_row(
                 r["ticker"],
                 format_volume(r["current_volume"]),
@@ -1770,9 +1784,9 @@ def unusual(
                 f"${r['price']:.2f}",
                 pct_str,
             )
-        
+
         console.print(table)
-        
+
     except Exception as e:
         raise _exit_for_error(e)
 

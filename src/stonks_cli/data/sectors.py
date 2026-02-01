@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 SECTOR_ETFS: dict[str, str] = {
     "Technology": "XLK",
     "Healthcare": "XLV",

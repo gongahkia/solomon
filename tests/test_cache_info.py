@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from stonks_cli.commands import do_data_cache_info
 from stonks_cli.data.cache import save_cached_text
 from stonks_cli.paths import default_cache_dir

@@ -2,9 +2,9 @@ import json
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
+from stonks_cli import storage
 from stonks_cli.config import AppConfig
 from stonks_cli.scheduler.run import build_scheduler
-from stonks_cli import storage
 
 
 def test_scheduler_job_failure_is_logged_and_does_not_raise(monkeypatch, tmp_path):

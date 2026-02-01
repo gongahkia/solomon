@@ -66,7 +66,7 @@ def write_text_report(
     def fmt(v: float | None, *, pct: bool = False) -> str:
         if v is None:
             return "-"
-        return f"{v*100:.1f}%" if pct else f"{v:.2f}"
+        return f"{v * 100:.1f}%" if pct else f"{v:.2f}"
 
     action_rank = {
         # Positive actions.
@@ -108,13 +108,15 @@ def write_text_report(
         ]
         if has_beta:
             row_values.append(fmt(r.beta, pct=False))
-        row_values.extend([
-            fmt(r.backtest.cagr if r.backtest else None, pct=True),
-            fmt(r.backtest.sharpe if r.backtest else None, pct=False),
-            fmt(r.backtest.max_drawdown if r.backtest else None, pct=True),
-            data_summary,
-            r.recommendation.rationale,
-        ])
+        row_values.extend(
+            [
+                fmt(r.backtest.cagr if r.backtest else None, pct=True),
+                fmt(r.backtest.sharpe if r.backtest else None, pct=False),
+                fmt(r.backtest.max_drawdown if r.backtest else None, pct=True),
+                data_summary,
+                r.recommendation.rationale,
+            ]
+        )
         table.add_row(*row_values)
 
     console = Console(record=True, width=120)
@@ -141,7 +143,9 @@ def write_text_report(
     console.print("Risk Notes & Assumptions")
     console.print("- This report is for informational purposes only; it is not financial advice.")
     console.print("- Price data is sourced from the configured provider and may be delayed or incomplete.")
-    console.print("- Backtests are simplified and do not include fees, slippage, taxes, or dividends unless present in the data.")
+    console.print(
+        "- Backtests are simplified and do not include fees, slippage, taxes, or dividends unless present in the data."
+    )
     console.print("- Strategy signals and sizing are heuristic and may not generalize to future market conditions.")
 
     path.write_text(console.export_text(), encoding="utf-8")

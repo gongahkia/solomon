@@ -1,14 +1,19 @@
 from __future__ import annotations
+
 import json
 from pathlib import Path
+
 import platformdirs
+
 from stonks_cli.alerts.models import Alert
+
 
 def get_alerts_path() -> Path:
     """Get platform-appropriate path to alerts.json."""
     data_dir = Path(platformdirs.user_data_dir("stonks-cli"))
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir / "alerts.json"
+
 
 def load_alerts() -> list[Alert]:
     """Load alerts from disk."""
@@ -24,11 +29,13 @@ def load_alerts() -> list[Alert]:
     except Exception:
         return []
 
+
 def _save_all_alerts(alerts: list[Alert]) -> None:
     """Internal helper to save list."""
     path = get_alerts_path()
     data = [a.to_dict() for a in alerts]
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
 
 def save_alert(alert: Alert) -> None:
     """Append or update an alert."""
@@ -40,6 +47,7 @@ def save_alert(alert: Alert) -> None:
     else:
         alerts.append(alert)
     _save_all_alerts(alerts)
+
 
 def delete_alert(alert_id: str) -> bool:
     """Remove alert by ID. Returns True if found and removed."""

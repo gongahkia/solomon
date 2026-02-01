@@ -73,7 +73,9 @@ class AppConfig(BaseModel):
     risk: RiskConfig = Field(default_factory=RiskConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
-    deterministic: bool = Field(default=False, description="Use deterministic execution (stable ordering, no concurrency)")
+    deterministic: bool = Field(
+        default=False, description="Use deterministic execution (stable ordering, no concurrency)"
+    )
     seed: int = Field(default=0, description="Seed value for deterministic mode")
     watchlists: dict[str, list[str]] = Field(
         default_factory=dict,
@@ -109,9 +111,7 @@ def load_config() -> AppConfig:
         cfg = cfg.model_copy(
             update={
                 "tickers": [normalize_ticker(t) for t in cfg.tickers],
-                "ticker_overrides": {
-                    normalize_ticker(k): v for k, v in (cfg.ticker_overrides or {}).items()
-                },
+                "ticker_overrides": {normalize_ticker(k): v for k, v in (cfg.ticker_overrides or {}).items()},
                 "watchlists": normalized_watchlists,
             }
         )

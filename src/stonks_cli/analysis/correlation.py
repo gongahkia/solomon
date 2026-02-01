@@ -3,9 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 
-def compute_correlation_matrix(
-    tickers: list[str], dfs: dict[str, pd.DataFrame], days: int = 252
-) -> pd.DataFrame:
+def compute_correlation_matrix(tickers: list[str], dfs: dict[str, pd.DataFrame], days: int = 252) -> pd.DataFrame:
     """Compute pairwise Pearson correlation matrix of daily returns.
 
     Args:
@@ -34,9 +32,7 @@ def compute_correlation_matrix(
     return returns_df.corr(method="pearson")
 
 
-def compute_beta(
-    ticker_df: pd.DataFrame, benchmark_df: pd.DataFrame, days: int = 252
-) -> float:
+def compute_beta(ticker_df: pd.DataFrame, benchmark_df: pd.DataFrame, days: int = 252) -> float:
     """Compute beta coefficient of ticker returns vs benchmark.
 
     Args:
@@ -57,9 +53,7 @@ def compute_beta(
     benchmark_returns = benchmark_close.pct_change().dropna()
 
     # Align the series by index
-    aligned = pd.DataFrame(
-        {"ticker": ticker_returns, "benchmark": benchmark_returns}
-    ).dropna()
+    aligned = pd.DataFrame({"ticker": ticker_returns, "benchmark": benchmark_returns}).dropna()
 
     if len(aligned) < 2:
         return float("nan")

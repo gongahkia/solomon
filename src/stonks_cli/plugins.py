@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from functools import lru_cache
 import importlib
 import importlib.util
+from collections.abc import Callable
+from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from types import ModuleType
-from typing import Callable
 
-from stonks_cli.config import AppConfig
 from stonks_cli.analysis.strategy import Recommendation
-
+from stonks_cli.config import AppConfig
 
 StrategyFn = Callable[[object], object]
 ProviderFactory = Callable[[AppConfig, str], object]

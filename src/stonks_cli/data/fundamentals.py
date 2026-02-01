@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
-import json
 
-from stonks_cli.data.cache import load_cached_text, save_cached_text, default_cache_dir
+from stonks_cli.data.cache import default_cache_dir, load_cached_text, save_cached_text
 
 
 @dataclass(frozen=True)

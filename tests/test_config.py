@@ -51,5 +51,3 @@ def test_load_config_normalizes_tickers(monkeypatch, tmp_path):
     cfg = load_config()
     assert cfg.tickers == ["AAPL.US"]
     assert "MSFT.US" in cfg.ticker_overrides
-
-

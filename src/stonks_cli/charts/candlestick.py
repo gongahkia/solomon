@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import plotext as plt
 import pandas as pd
+import plotext as plt
 
 
 def plot_candlestick(df: pd.DataFrame, ticker: str, days: int = 60) -> None:

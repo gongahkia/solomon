@@ -1,5 +1,6 @@
-import pandas as pd
 from functools import partial
+
+import pandas as pd
 
 from stonks_cli.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
 from stonks_cli.analysis.strategy import Recommendation, sma_cross_strategy

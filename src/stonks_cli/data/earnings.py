@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Any
 
 from stonks_cli.data.cache import default_cache_dir, load_cached_text, save_cached_text

@@ -3,9 +3,7 @@ from __future__ import annotations
 from stonks_cli.portfolio.models import Portfolio
 
 
-def calculate_portfolio_allocation(
-    portfolio: Portfolio, prices: dict[str, float]
-) -> dict[str, float]:
+def calculate_portfolio_allocation(portfolio: Portfolio, prices: dict[str, float]) -> dict[str, float]:
     """Compute percentage allocation per ticker.
 
     Args:

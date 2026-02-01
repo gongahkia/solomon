@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -43,7 +43,7 @@ def save_state(state: dict) -> None:
 
 def save_last_run(tickers: list[str], report_path: Path | None, json_path: Path | None = None) -> None:
     state = load_state()
-    started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    started_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     record = {
         "started_at": started_at,
         "tickers": tickers,
@@ -63,7 +63,7 @@ def save_last_run(tickers: list[str], report_path: Path | None, json_path: Path 
 
 def save_last_failure(*, error: str, where: str = "scheduler") -> None:
     state = load_state()
-    failed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    failed_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     state["last_failure"] = {
         "failed_at": failed_at,
         "where": where,

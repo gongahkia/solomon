@@ -10,5 +10,4 @@ from stonks_cli.analysis.strategy import Recommendation
 class Strategy(Protocol):
     name: str
 
-    def recommend(self, df: pd.DataFrame) -> Recommendation:
-        ...
+    def recommend(self, df: pd.DataFrame) -> Recommendation: ...

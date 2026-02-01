@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import plotext as plt
 import pandas as pd
+import plotext as plt
 
 from stonks_cli.analysis.indicators import rsi
 

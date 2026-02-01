@@ -15,14 +15,14 @@ class DividendEvent:
     ex_date: date
     payment_date: date | None
     amount: float
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "ex_date": self.ex_date.isoformat(),
             "payment_date": self.payment_date.isoformat() if self.payment_date else None,
             "amount": self.amount,
         }
-    
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DividendEvent:
         return cls(
@@ -34,10 +34,10 @@ class DividendEvent:
 
 def fetch_dividend_info(ticker: str) -> dict:
     """Fetch dividend information for a ticker using yfinance.
-    
+
     Args:
         ticker: Stock ticker
-        
+
     Returns:
         Dictionary containing:
         - dividend_yield: Annual dividend yield percentage
@@ -50,22 +50,22 @@ def fetch_dividend_info(ticker: str) -> dict:
     cache_dir = default_cache_dir()
     cache_key = f"dividend_info:{ticker.upper()}"
     ttl_seconds = 24 * 3600  # 24 hours
-    
+
     cached = load_cached_text(cache_dir, cache_key, ttl_seconds=ttl_seconds)
     if cached:
         try:
             return json.loads(cached)
         except Exception:
             pass
-    
+
     try:
         import yfinance as yf
     except ImportError:
         raise ImportError("yfinance required: install stonks-cli[yfinance]")
-    
+
     base_ticker = ticker.split(".")[0]
     stock = yf.Ticker(base_ticker)
-    
+
     result: dict[str, Any] = {
         "ticker": base_ticker,
         "dividend_yield": None,
@@ -75,25 +75,25 @@ def fetch_dividend_info(ticker: str) -> dict:
         "next_dividend_date": None,
         "dividend_history": [],
     }
-    
+
     try:
         info = stock.info or {}
-        
+
         # Dividend yield (as percentage)
         divi_yield = info.get("dividendYield")
         if divi_yield is not None:
             result["dividend_yield"] = float(divi_yield) * 100
-        
+
         # Annual dividend (trailing)
         annual_div = info.get("dividendRate")
         if annual_div is not None:
             result["annual_dividend"] = float(annual_div)
-        
+
         # Payout ratio
         payout = info.get("payoutRatio")
         if payout is not None:
             result["payout_ratio"] = float(payout) * 100
-        
+
         # Ex-dividend date
         ex_date = info.get("exDividendDate")
         if ex_date is not None:
@@ -101,7 +101,7 @@ def fetch_dividend_info(ticker: str) -> dict:
                 result["ex_dividend_date"] = datetime.fromtimestamp(ex_date).date().isoformat()
             elif hasattr(ex_date, "isoformat"):
                 result["ex_dividend_date"] = ex_date.isoformat()
-        
+
         # Get dividend history
         try:
             dividends = stock.dividends
@@ -112,17 +112,19 @@ def fetch_dividend_info(ticker: str) -> dict:
                 for idx, amt in recent.items():
                     try:
                         div_date = idx.date() if hasattr(idx, "date") else idx
-                        history.append({
-                            "ex_date": div_date.isoformat(),
-                            "payment_date": None,  # Not available from this API
-                            "amount": float(amt),
-                        })
+                        history.append(
+                            {
+                                "ex_date": div_date.isoformat(),
+                                "payment_date": None,  # Not available from this API
+                                "amount": float(amt),
+                            }
+                        )
                     except Exception:
                         continue
                 # Reverse to show most recent first
                 history.reverse()
                 result["dividend_history"] = history
-                
+
                 # Estimate next dividend date based on pattern
                 if len(history) >= 2:
                     try:
@@ -131,6 +133,7 @@ def fetch_dividend_info(ticker: str) -> dict:
                         days_between = (last_date - prev_date).days
                         if days_between > 0:
                             from datetime import timedelta
+
                             next_est = last_date + timedelta(days=days_between)
                             if next_est > date.today():
                                 result["next_dividend_date"] = next_est.isoformat()
@@ -138,11 +141,11 @@ def fetch_dividend_info(ticker: str) -> dict:
                         pass
         except Exception:
             pass
-            
+
     except Exception:
         pass
-    
+
     # Cache result
     save_cached_text(cache_dir, cache_key, json.dumps(result))
-    
+
     return result

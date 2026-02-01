@@ -41,6 +41,11 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP"]
 ignore = [
   "E501", # line length handled by formatter
+  "B904", # raise ... from err
+  "E402", # module level import not at top of file
+  "B017", # assert blind exception
+  "B023", # loop variable not bound
+  "B008", # typer.Argument(...) pattern
 ]
 
 [tool.ruff.lint.isort]

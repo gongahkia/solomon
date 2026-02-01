@@ -1,11 +1,14 @@
 from __future__ import annotations
+
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-import uuid
+
 
 @dataclass
 class Alert:
     """Alert definition."""
+
     ticker: str
     condition_type: str
     threshold: float
@@ -22,7 +25,7 @@ class Alert:
             "threshold": self.threshold,
             "created_at": self.created_at.isoformat(),
             "triggered_at": self.triggered_at.isoformat() if self.triggered_at else None,
-            "enabled": self.enabled
+            "enabled": self.enabled,
         }
 
     @classmethod
@@ -34,5 +37,5 @@ class Alert:
             threshold=data["threshold"],
             created_at=datetime.fromisoformat(data["created_at"]),
             triggered_at=datetime.fromisoformat(data["triggered_at"]) if data.get("triggered_at") else None,
-            enabled=data.get("enabled", True)
+            enabled=data.get("enabled", True),
         )

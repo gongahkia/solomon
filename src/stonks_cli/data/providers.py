@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import io
 import importlib
+import io
 from dataclasses import dataclass
 from pathlib import Path
 

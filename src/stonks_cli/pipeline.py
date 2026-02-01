@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
+from pathlib import Path
 
 from rich.console import Console
 from rich.progress import Progress
@@ -11,15 +11,15 @@ from stonks_cli.analysis.backtest import compute_backtest_metrics, walk_forward_
 from stonks_cli.analysis.indicators import atr, bollinger_bands, rolling_volatility, rsi, sma
 from stonks_cli.analysis.risk import (
     scale_fractions_to_portfolio_cap,
-    suggest_stop_loss_price_by_atr,
     suggest_position_fraction_by_volatility,
+    suggest_stop_loss_price_by_atr,
     suggest_take_profit_price_by_atr,
 )
 from stonks_cli.analysis.strategy import (
+    Recommendation,
     basic_trend_rsi_strategy,
     bb_cols,
     mean_reversion_bb_rsi_strategy,
-    Recommendation,
     rsi_col,
     sma_col,
     sma_cross_strategy,
@@ -30,7 +30,6 @@ from stonks_cli.plugins import registry_for_config
 from stonks_cli.reporting.csv_report import write_csv_summary
 from stonks_cli.reporting.report import TickerResult, write_text_report
 from stonks_cli.storage import save_last_run
-
 
 STRATEGIES = {
     "basic_trend_rsi": basic_trend_rsi_strategy,
@@ -240,7 +239,7 @@ def compute_results(
                     action=rec.action,
                     confidence=rec.confidence,
                     rationale=(
-                        f"{rec.rationale} | sizing~{pos*100:.0f}% (ann vol {vol_f*100:.0f}%, cap {cfg.risk.max_position_fraction*100:.0f}%)"
+                        f"{rec.rationale} | sizing~{pos * 100:.0f}% (ann vol {vol_f * 100:.0f}%, cap {cfg.risk.max_position_fraction * 100:.0f}%)"
                     ),
                 )
 
@@ -293,6 +292,7 @@ def compute_results(
         beta_value = None
         if benchmark_df is not None and "close" in df.columns:
             from stonks_cli.analysis.correlation import compute_beta
+
             ticker_df_for_beta = df.copy()
             if "close" in ticker_df_for_beta.columns:
                 ticker_df_for_beta = ticker_df_for_beta.rename(columns={"close": "Close"})
@@ -334,7 +334,7 @@ def compute_results(
                 action=r.recommendation.action,
                 confidence=r.recommendation.confidence,
                 rationale=(
-                    f"{r.recommendation.rationale} | portfolio_cap {cfg.risk.max_portfolio_exposure_fraction*100:.0f}% (scaled x{factor:.2f}; now~{frac*100:.0f}%)"
+                    f"{r.recommendation.rationale} | portfolio_cap {cfg.risk.max_portfolio_exposure_fraction * 100:.0f}% (scaled x{factor:.2f}; now~{frac * 100:.0f}%)"
                 ),
             )
             new_results.append(

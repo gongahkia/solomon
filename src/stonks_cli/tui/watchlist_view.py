@@ -4,20 +4,18 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Callable
 
 from rich.console import Console
-from rich.live import Live
-from rich.table import Table
-from rich.panel import Panel
 from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 
 from stonks_cli.commands import QuickResult, _fetch_quick_single
-from stonks_cli.config import AppConfig, load_config
-from stonks_cli.pipeline import select_strategy
-from stonks_cli.data.providers import normalize_ticker
+from stonks_cli.config import load_config
 from stonks_cli.formatting.sparkline import generate_sparkline
+from stonks_cli.pipeline import select_strategy
 
 
 class WatchlistTUI:

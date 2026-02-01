@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import plotext as plt
 import pandas as pd
+import plotext as plt
 
 
 def plot_comparison(tickers: list[str], dfs: dict[str, pd.DataFrame], days: int = 90) -> None:
@@ -21,18 +21,18 @@ def plot_comparison(tickers: list[str], dfs: dict[str, pd.DataFrame], days: int 
 
     # More visually distinct colors using RGB tuples for maximum contrast
     colors = [
-        (255, 0, 0),      # Bright Red
-        (0, 200, 0),      # Bright Green
-        (0, 100, 255),    # Bright Blue
-        (255, 200, 0),    # Yellow/Gold
-        (0, 255, 255),    # Cyan
-        (255, 0, 255),    # Magenta
-        (255, 128, 0),    # Orange
+        (255, 0, 0),  # Bright Red
+        (0, 200, 0),  # Bright Green
+        (0, 100, 255),  # Bright Blue
+        (255, 200, 0),  # Yellow/Gold
+        (0, 255, 255),  # Cyan
+        (255, 0, 255),  # Magenta
+        (255, 128, 0),  # Orange
         (150, 150, 255),  # Light Purple
         (255, 100, 150),  # Pink
-        (0, 255, 150),    # Mint Green
+        (0, 255, 150),  # Mint Green
     ]
-    
+
     # Different markers for each ticker
     markers = ["braille", "dot", "hd", "fhd", "braille", "dot", "hd", "fhd"]
 

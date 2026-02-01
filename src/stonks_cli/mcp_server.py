@@ -11,7 +11,6 @@ Usage:
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -19,7 +18,6 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from stonks_cli.commands import (
-    QuickResult,
     do_alert_add,
     do_alert_check,
     do_alert_list,
@@ -66,7 +64,11 @@ from stonks_cli.commands import (
     do_watchlist_remove,
     do_watchlist_set,
 )
-from stonks_cli.paths import default_out_dir
+
+
+def _default_out_dir() -> Path:
+    """Return the default output directory for reports."""
+    return Path("reports")
 
 # Initialize the MCP server
 mcp = FastMCP(
@@ -342,7 +344,7 @@ def run_analysis(
         end_date: End date in YYYY-MM-DD format
         benchmark: Benchmark ticker for comparison (e.g., "SPY")
     """
-    out_dir = default_out_dir()
+    out_dir = _default_out_dir()
     result = do_analyze(
         tickers=tickers,
         out_dir=out_dir,
@@ -367,7 +369,7 @@ def run_backtest(
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
     """
-    out_dir = default_out_dir()
+    out_dir = _default_out_dir()
     result = do_backtest(
         tickers=tickers,
         start=start_date,
@@ -438,7 +440,7 @@ def analyze_watchlist(
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
     """
-    out_dir = default_out_dir()
+    out_dir = _default_out_dir()
     result = do_watchlist_analyze(
         name,
         out_dir=out_dir,

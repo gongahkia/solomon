@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 yfinance = ["yfinance>=0.2"]
+mcp = ["mcp[cli]>=1.1.0"]
 dev = [
   "ruff>=0.5",
   "mypy>=1.10",
@@ -30,6 +31,7 @@ dev = [
 
 [project.scripts]
 stonks-cli = "stonks_cli.cli:main"
+stonks-mcp = "stonks_cli.mcp_server:main"
 
 [tool.ruff]
 line-length = 120

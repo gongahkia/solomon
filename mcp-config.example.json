@@ -1,0 +1,15 @@
+{
+    "mcpServers": {
+        "stonks-cli": {
+            "command": "uv",
+            "args": [
+                "run",
+                "--directory",
+                "/path/to/stonks-cli",
+                "--extra",
+                "mcp",
+                "stonks-mcp"
+            ]
+        }
+    }
+}

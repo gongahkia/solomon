@@ -7,7 +7,7 @@
 A [batteries-included](https://en.wikipedia.org/wiki/Batteries_Included) stock analysis [CLI](https://en.wikipedia.org/wiki/Command-line_interface) tool *(now also available via **[MCP server](https://modelcontextprotocol.io/docs/getting-started/intro)**)*.
 
 <div align="center">
-    <img src="./asset/logo/time.png" width="40%">
+    <img src="./asset/logo/time.png" width="30%">
 </div>
 
 ## Stack

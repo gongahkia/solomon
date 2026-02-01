@@ -1,5 +1,6 @@
 [![](https://img.shields.io/badge/stonks_cli_1.0.0-passing-light_green)](https://github.com/gongahkia/stonks-cli/releases/tag/1.0.0)
 [![](https://img.shields.io/badge/stonks_cli_2.0.0-passing-green)](https://github.com/gongahkia/stonks-cli/releases/tag/2.0.0)
+[![CI](https://github.com/gongahkia/stonks-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/gongahkia/stonks-cli/actions/workflows/ci.yml)
 
 # `stonks-cli`
 
@@ -20,8 +21,9 @@ A [batteries-included](https://en.wikipedia.org/wiki/Batteries_Included) stock a
 * *Config*: [Pydantic](https://docs.pydantic.dev/latest/) 
 * *Local Paths*: [platformdirs](https://platformdirs.readthedocs.io)
 * *Data Providers*: [Stooq](https://stooq.com), [yfinance](https://github.com/ranaroussi/yfinance)
+* *AI Integration*: [MCP (Model Context Protocol)](https://modelcontextprotocol.io)
 * *Package*: [setuptools](https://setuptools.pypa.io)
-* *Dev/QA*: [pytest](https://docs.pytest.org), [ruff](https://docs.astral.sh/ruff/), [mypy](https://mypy.readthedocs.io)
+* *Dev/QA*: [pytest](https://docs.pytest.org), [ruff](https://docs.astral.sh/ruff/), [mypy](https://mypy.readthedocs.io), [GitHub Actions](https://github.com/features/actions)
 
 ## Usage
 
@@ -142,6 +144,68 @@ $ stonks-cli watchlist analyze tech --json --csv --name report_tech_latest.txt
 ```console
 $ stonks-cli signals diff
 ```
+
+## MCP Server
+
+`stonks-cli` includes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that allows AI assistants like Claude to directly interact with all stonks-cli functionality.
+
+### Installation
+
+Install with the MCP optional dependency:
+
+```console
+$ pip install -e ".[mcp]"
+# or with uv
+$ uv sync --extra mcp
+```
+
+### Running the MCP Server
+
+```console
+$ stonks-mcp                    # Run via entry point
+$ python -m stonks_cli.mcp_server  # Or run as module
+$ uv run stonks-mcp             # With uv
+```
+
+### Configure for Claude Desktop
+
+Add to your Claude Desktop MCP configuration (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "stonks-cli": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/stonks-cli",
+        "--extra",
+        "mcp",
+        "stonks-mcp"
+      ]
+    }
+  }
+}
+```
+
+### Available MCP Tools
+
+The MCP server exposes 40+ tools including:
+
+| Category | Tools |
+|----------|-------|
+| **Quick Analysis** | `quick_analysis`, `get_version`, `run_doctor` |
+| **Market Data** | `get_fundamentals`, `get_news`, `get_earnings`, `get_insider_transactions`, `get_dividend_info`, `get_sector_performance`, `get_correlation_matrix`, `get_market_movers` |
+| **Charts** | `get_chart_data`, `get_chart_compare_data`, `get_rsi_chart_data` |
+| **Analysis** | `run_analysis`, `run_backtest`, `get_signals_diff` |
+| **Watchlists** | `list_watchlists`, `create_watchlist`, `delete_watchlist`, `analyze_watchlist` |
+| **Portfolio** | `add_portfolio_position`, `remove_portfolio_position`, `get_portfolio`, `get_portfolio_allocation`, `get_portfolio_history` |
+| **Paper Trading** | `paper_buy`, `paper_sell`, `get_paper_status`, `get_paper_leaderboard` |
+| **Alerts** | `create_alert`, `list_alerts`, `delete_alert`, `check_alerts` |
+| **Data** | `fetch_data`, `verify_data`, `get_cache_info` |
+| **Config** | `get_config`, `validate_config` |
+| **Reports** | `get_latest_report`, `view_report`, `list_history` |
 
 ## Screenshots
 

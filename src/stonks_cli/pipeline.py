@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 from rich.progress import Progress
@@ -49,7 +50,7 @@ def select_strategy(cfg: AppConfig):
         return fn
 
     base_fn = fn
-    existing_kwargs = {}
+    existing_kwargs: dict[str, Any] = {}
     if isinstance(fn, partial):
         base_fn = fn.func
         existing_kwargs = dict(fn.keywords or {})

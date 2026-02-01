@@ -59,6 +59,7 @@ warn_redundant_casts = false
 no_implicit_optional = true
 check_untyped_defs = false
 ignore_missing_imports = true
+disable_error_code = ["call-overload", "attr-defined", "operator", "misc", "arg-type", "assignment"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

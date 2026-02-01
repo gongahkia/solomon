@@ -7,7 +7,7 @@
 A [batteries-included](https://en.wikipedia.org/wiki/Batteries_Included) stock analysis [CLI](https://en.wikipedia.org/wiki/Command-line_interface) tool.
 
 <div align="center">
-    <img src="./asset/logo/time.png" width="60%">
+    <img src="./asset/logo/time.png" width="40%">
 </div>
 
 ## Stack

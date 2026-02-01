@@ -12,23 +12,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
-      
+
       - name: Install dependencies
-        run: uv sync --dev
-      
+        run: uv sync --extra dev
+
       - name: Run Ruff linter
         run: uv run ruff check src/ tests/
-      
+
       - name: Run Ruff formatter check
         run: uv run ruff format --check src/ tests/
 
@@ -37,20 +37,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
-      
+
       - name: Install dependencies
-        run: uv sync --dev
-      
+        run: uv sync --extra dev
+
       - name: Run mypy
         run: uv run mypy src/stonks_cli/
 
@@ -61,32 +61,32 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
-      
+
       - name: Install dependencies
-        run: uv sync --dev --extra yfinance
-      
+        run: uv sync --extra dev --extra yfinance
+
       - name: Run tests
         run: uv run pytest tests/ -v --tb=short
-      
+
       - name: Run tests with coverage
         if: matrix.python-version == '3.11'
         run: |
           uv add pytest-cov --dev
           uv run pytest tests/ --cov=src/stonks_cli --cov-report=xml --cov-report=term-missing
-      
+
       - name: Upload coverage reports
         if: matrix.python-version == '3.11'
         uses: codecov/codecov-action@v4
@@ -101,23 +101,23 @@ jobs:
     needs: [lint, typecheck, test]
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
-      
+
       - name: Install build dependencies
         run: uv pip install --system build
-      
+
       - name: Build package
         run: python -m build
-      
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:

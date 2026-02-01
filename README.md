@@ -20,9 +20,38 @@ A [batteries-included](https://en.wikipedia.org/wiki/Batteries_Included) stock a
 * *Scheduling*: [APScheduler](https://apscheduler.readthedocs.io) 
 * *Config*: [Pydantic](https://docs.pydantic.dev/latest/) 
 * *Local Paths*: [platformdirs](https://platformdirs.readthedocs.io)
+* *AI Integration*: [MCP](https://modelcontextprotocol.io)
 * *Data Providers*: [Stooq](https://stooq.com), [yfinance](https://github.com/ranaroussi/yfinance)
 * *Package*: [setuptools](https://setuptools.pypa.io)
 * *Dev/QA*: [pytest](https://docs.pytest.org), [ruff](https://docs.astral.sh/ruff/), [mypy](https://mypy.readthedocs.io)
+* *CI/CD*: [GitHub Actions](https://github.com/features/actions)
+
+## Screenshots
+
+<div align="center">
+    <img src="./asset/reference/0.png" width="45%">
+    <img src="./asset/reference/1.png" width="45%">
+</div>
+
+<div align="center">
+    <img src="./asset/reference/2.png" width="45%">
+    <img src="./asset/reference/3.png" width="45%">
+</div>
+
+<div align="center">
+    <img src="./asset/reference/4.png" width="45%">
+    <img src="./asset/reference/5.png" width="45%">
+</div>
+
+<div align="center">
+    <img src="./asset/reference/6.png" width="45%">
+    <img src="./asset/reference/7.png" width="45%">
+</div>
+
+<div align="center">
+    <img src="./asset/reference/8.png" width="45%">
+    <img src="./asset/reference/9.png" width="45%">
+</div>
 
 ## Usage
 
@@ -39,7 +68,7 @@ $ python3 -m venv .venv && source .venv/bin/activate
 $ python3 -m pip install -U pip && python3 -m pip install -e .
 ```
 
-## Available Commands
+2. Then run the `stonks-cli` CLI client directly with any of the below commands.
 
 ### Sanity check
 
@@ -144,15 +173,36 @@ $ stonks-cli watchlist analyze tech --json --csv --name report_tech_latest.txt
 $ stonks-cli signals diff
 ```
 
-## Screenshots
+3. `stonks-cli` also includes an optional [Model Context Protocol](https://modelcontextprotocol.io) server that allows for [AI Agents](https://modelcontextprotocol.io/docs/agents/) to directly interact with `stonks-cli` tooling.
 
-![](./asset/reference/0.png)  
-![](./asset/reference/1.png)  
-![](./asset/reference/2.png)  
-![](./asset/reference/3.png)  
-![](./asset/reference/4.png)  
-![](./asset/reference/5.png)  
-![](./asset/reference/6.png)  
+4. Run the below to install `stonks-cli`'s MCP functionality.
+
+```console
+$ pip install -e ".[mcp]"
+# or with uv
+$ uv sync --extra mcp
+```
+
+5. Then execute these commands for usage.
+
+```console
+$ stonks-mcp
+$ python -m stonks_cli.mcp_server  
+```
+
+### MCP Commands
+
+* Quick Analysis: `quick_analysis`, `get_version`, `run_doctor`
+* Market Data: `get_fundamentals`, `get_news`, `get_earnings`, `get_insider_transactions`, `get_dividend_info`, `get_sector_performance`, `get_correlation_matrix`, `get_market_movers`
+* Charts: `get_chart_data`, `get_chart_compare_data`, `get_rsi_chart_data`
+* Analysis: `run_analysis`, `run_backtest`, `get_signals_diff`
+* Watchlists: `list_watchlists`, `create_watchlist`, `delete_watchlist`, `analyze_watchlist`
+* Portfolio: `add_portfolio_position`, `remove_portfolio_position`, `get_portfolio`, `get_portfolio_allocation`, `get_portfolio_history`
+* Paper Trading: `paper_buy`, `paper_sell`, `get_paper_status`, `get_paper_leaderboard`
+* Alerts: `create_alert`, `list_alerts`, `delete_alert`, `check_alerts`
+* Data: `fetch_data`, `verify_data`, `get_cache_info`
+* Config: `get_config`, `validate_config`
+* Reports: `get_latest_report`, `view_report`, `list_history`
 
 ## Architecture
 

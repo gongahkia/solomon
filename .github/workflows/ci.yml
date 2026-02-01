@@ -1,4 +1,4 @@
-name: CI
+name: stonks-cli CI/CD on push
 
 on:
   push:

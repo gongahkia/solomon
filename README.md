@@ -209,8 +209,9 @@ $ python -m stonks_cli.mcp_server
 ```mermaid
 flowchart TD
     %% High-level entrypoints
-    subgraph CLI["CLI Entry"]
+    subgraph Interfaces["Interfaces"]
         cli["stonks-cli<br/>Typer CLI"]
+        mcp["stonks-mcp<br/>MCP Server"]
     end
 
     subgraph Config["Config & State"]
@@ -218,6 +219,8 @@ flowchart TD
         cfgfile["config.json"]
         state["state.json"]
         hist["history.jsonl"]
+        portStore["portfolio.json<br/>& history"]
+        alertStore["alerts.json"]
     end
 
     subgraph Plugins["Plugins"]
@@ -236,7 +239,17 @@ flowchart TD
         risk["Risk sizing & guardrails<br/>volatility, ATR, portfolio cap"]
         bt["Walk-forward backtest<br/>+ metrics"]
         results["Per-ticker results"]
-        portfolio["Portfolio aggregation<br/>optional equity blend"]
+        portfolioAgg["Portfolio aggregation<br/>optional equity blend"]
+    end
+
+    subgraph Portfolio["Portfolio & Paper Trading"]
+        portMgr["Portfolio Manager"]
+        paperMgr["Paper Trading Engine"]
+    end
+
+    subgraph Alerts["Alerts System"]
+        alertCheck["Checker<br/>cron/manual"]
+        alertNotifier["Notifier"]
     end
 
     subgraph Providers["Data Providers"]
@@ -267,20 +280,29 @@ flowchart TD
         failure["Persist last failure<br/>best-effort"]
     end
 
+    %% Config connections
     cli --> cfg
+    mcp --> cfg
     cfg --> cfgfile
     cfg --> plugSpecs
     plugSpecs --> plugLoad
     plugLoad --> stratReg
     plugLoad --> provReg
 
-    cli -->|analyze / watchlist analyze| tickers
+    %% CLI/MCP Actions
+    cli -->|analyze| tickers
+    mcp -->|run_analysis| tickers
+    cli -->|watchlist| tickers
+    mcp -->|list_watchlists| cfgfile
+
+    %% Pipeline connections
     tickers --> selectStrat
     stratReg --> selectStrat
     selectStrat --> fetchParallel
     fetchParallel --> providerSelect
     provReg --> providerSelect
 
+    %% Data flow
     providerSelect --> stooq
     providerSelect --> yfin
     providerSelect --> csv
@@ -293,34 +315,51 @@ flowchart TD
     csv --> csvFile
     csvFile --> pxDF
 
+    %% Analysis Logic
     pxDF --> prep
     prep --> strat
     strat --> risk
     risk --> bt
     bt --> results
-    results --> portfolio
+    results --> portfolioAgg
 
+    %% Reporting
     results --> textRep
-    portfolio --> textRep
+    portfolioAgg --> textRep
     textRep --> outDir
     results -->|--json| jsonRep
     jsonRep --> outDir
     results -->|--csv| csvRep
     csvRep --> outDir
 
-    textRep -->|persist last run<br/>unless --sandbox| state
-    jsonRep -->|persist json path<br/>when enabled| state
+    %% State Persistence
+    textRep -->|persist last run| state
+    jsonRep --> state
     state --> hist
 
-    cli -->|schedule status| cron
-    cli -->|schedule run| schedRun
-    cli -->|schedule once| schedOnce
+    %% Portfolio Module
+    cli -->|portfolio| portMgr
+    mcp -->|get_portfolio| portMgr
+    cli -->|paper| paperMgr
+    mcp -->|paper_buy/sell| paperMgr
+    portMgr --> portStore
+    paperMgr --> portStore
+    portMgr -->|fetch price| providerSelect
+
+    %% Alerts Module
+    cli -->|alerts| alertCheck
+    mcp -->|create_alert| alertStore
+    mcp -->|check_alerts| alertCheck
+    alertCheck --> alertStore
+    alertCheck -->|fetch price| providerSelect
+    alertCheck -->|trigger| alertNotifier
+
+    %% Scheduler
+    cli -->|schedule| cron
     schedRun --> pid
     schedRun --> cron
     cron --> lock
-    schedOnce --> lock
-    lock -->|job executes| tickers
-    schedRun -->|on error| failure
+    lock -->|trigger| tickers
 ```
 
 ## Legal

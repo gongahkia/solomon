@@ -501,7 +501,7 @@ def analyze_watchlist(
     )
     return {
         "report_path": str(artifacts.report_path),
-        "json_path": str(artifacts.json_path) if artifacts.json_path else None
+        "json_path": str(artifacts.json_path) if artifacts.json_path else None,
     }
 
 

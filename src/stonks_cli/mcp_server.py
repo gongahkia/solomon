@@ -24,9 +24,6 @@ from stonks_cli.commands import (
     do_alert_remove,
     do_analyze,
     do_backtest,
-    do_chart,
-    do_chart_compare,
-    do_chart_rsi,
     do_config_show,
     do_config_validate,
     do_correlation,
@@ -64,6 +61,9 @@ from stonks_cli.commands import (
     do_watchlist_remove,
     do_watchlist_set,
 )
+from stonks_cli.config import load_config
+from stonks_cli.data.providers import normalize_ticker
+from stonks_cli.pipeline import provider_for_config
 
 
 def _default_out_dir() -> Path:
@@ -101,7 +101,7 @@ def _serialize(obj: Any) -> Any:
 
 
 @mcp.tool()
-def quick_analysis(tickers: list[str]) -> dict:
+def quick_analysis(tickers: list[str]) -> Any:
     """
     Get quick one-liner analysis for one or more stock tickers.
     Returns price, change percentage, action recommendation, and confidence.
@@ -118,13 +118,13 @@ def quick_analysis(tickers: list[str]) -> dict:
 
 
 @mcp.tool()
-def get_version() -> dict:
+def get_version() -> Any:
     """Get the stonks-cli version information."""
     return {"version": do_version()}
 
 
 @mcp.tool()
-def run_doctor() -> dict:
+def run_doctor() -> Any:
     """
     Diagnose the stonks-cli environment.
     Checks configuration, data availability, and system health.
@@ -139,7 +139,7 @@ def run_doctor() -> dict:
 
 
 @mcp.tool()
-def get_fundamentals(ticker: str) -> dict:
+def get_fundamentals(ticker: str) -> Any:
     """
     Get fundamental data for a stock ticker.
     Includes P/E ratio, market cap, revenue, earnings, and other key metrics.
@@ -148,11 +148,11 @@ def get_fundamentals(ticker: str) -> dict:
         ticker: Stock ticker symbol (e.g., "AAPL")
     """
     result = do_fundamentals(ticker, as_json=True)
-    return _serialize(result)
+    return _serialize(result) or {}
 
 
 @mcp.tool()
-def get_news(ticker: str, sentiment_only: bool = False) -> dict:
+def get_news(ticker: str, sentiment_only: bool = False) -> Any:
     """
     Get recent news headlines for a stock ticker.
 
@@ -165,7 +165,7 @@ def get_news(ticker: str, sentiment_only: bool = False) -> dict:
 
 
 @mcp.tool()
-def get_earnings(ticker: str | None = None, show_next: bool = False) -> dict:
+def get_earnings(ticker: str | None = None, show_next: bool = False) -> Any:
     """
     Get earnings information for a ticker or upcoming earnings calendar.
 
@@ -183,7 +183,7 @@ def get_insider_transactions(
     days: int = 90,
     buys_only: bool = False,
     sells_only: bool = False,
-) -> dict:
+) -> Any:
     """
     Get recent insider transactions for a stock.
 
@@ -198,7 +198,7 @@ def get_insider_transactions(
 
 
 @mcp.tool()
-def get_dividend_info(ticker: str) -> dict:
+def get_dividend_info(ticker: str) -> Any:
     """
     Get dividend information for a stock ticker.
 
@@ -210,7 +210,7 @@ def get_dividend_info(ticker: str) -> dict:
 
 
 @mcp.tool()
-def get_dividend_calendar(days: int = 30) -> dict:
+def get_dividend_calendar(days: int = 30) -> Any:
     """
     Scan watchlist tickers for upcoming ex-dividend dates.
 
@@ -222,7 +222,7 @@ def get_dividend_calendar(days: int = 30) -> dict:
 
 
 @mcp.tool()
-def get_sector_performance(sector_name: str) -> dict:
+def get_sector_performance(sector_name: str) -> Any:
     """
     Get sector ETF performance compared to SPY.
 
@@ -234,7 +234,7 @@ def get_sector_performance(sector_name: str) -> dict:
 
 
 @mcp.tool()
-def get_correlation_matrix(tickers: list[str], days: int = 252) -> dict:
+def get_correlation_matrix(tickers: list[str], days: int = 252) -> Any:
     """
     Compute correlation matrix for given stock tickers.
 
@@ -247,7 +247,7 @@ def get_correlation_matrix(tickers: list[str], days: int = 252) -> dict:
 
 
 @mcp.tool()
-def get_market_movers(sector: bool = False) -> dict:
+def get_market_movers(sector: bool = False) -> Any:
     """
     Fetch daily performance of major indices or sector ETFs.
 
@@ -271,7 +271,7 @@ def get_chart_data(
     volume: bool = False,
     sma_periods: list[int] | None = None,
     show_bollinger: bool = False,
-) -> dict:
+) -> Any:
     """
     Get price chart data for a stock ticker.
     Returns data suitable for visualization.
@@ -284,19 +284,34 @@ def get_chart_data(
         sma_periods: List of SMA periods to include (e.g., [20, 50, 200])
         show_bollinger: Include Bollinger Bands data
     """
-    result = do_chart(
-        ticker,
-        days=days,
-        candle=candle,
-        volume=volume,
-        sma_periods=sma_periods,
-        show_bb=show_bollinger,
-    )
-    return _serialize(result)
+    cfg = load_config()
+    normalized = normalize_ticker(ticker)
+    provider = provider_for_config(cfg, normalized)
+    series = provider.fetch_daily(normalized)
+
+    df = series.df.tail(days).copy()
+    if df.empty:
+        return {"error": "No data found"}
+
+    result: dict[str, Any] = {
+        "ticker": normalized,
+        "dates": df.index.strftime("%Y-%m-%d").tolist(),
+        "close": df["close"].tolist(),
+    }
+
+    if candle and "open" in df.columns and "high" in df.columns and "low" in df.columns:
+        result["open"] = df["open"].tolist()
+        result["high"] = df["high"].tolist()
+        result["low"] = df["low"].tolist()
+
+    if volume and "volume" in df.columns:
+        result["volume"] = df["volume"].tolist()
+
+    return result
 
 
 @mcp.tool()
-def get_chart_compare_data(tickers: list[str], days: int = 90) -> dict:
+def get_chart_compare_data(tickers: list[str], days: int = 90) -> Any:
     """
     Get comparison chart data for multiple tickers (normalized).
 
@@ -304,22 +319,60 @@ def get_chart_compare_data(tickers: list[str], days: int = 90) -> dict:
         tickers: List of ticker symbols to compare
         days: Number of days to display (default: 90)
     """
-    result = do_chart_compare(tickers, days=days)
-    return _serialize(result)
+    cfg = load_config()
+    result: dict[str, Any] = {"dates": []}
+
+    first = True
+    for t in tickers:
+        normalized = normalize_ticker(t)
+        provider = provider_for_config(cfg, normalized)
+        df = provider.fetch_daily(normalized).df.tail(days)
+
+        if df.empty:
+            continue
+
+        if first:
+            result["dates"] = df.index.strftime("%Y-%m-%d").tolist()
+            first = False
+
+        # Normalize to percentage change from start
+        start_price = float(df["close"].iloc[0]) if not df.empty else 0
+        if start_price:
+            normalized_px = ((df["close"] - start_price) / start_price) * 100
+            result[normalized] = normalized_px.tolist()
+
+    return result
 
 
 @mcp.tool()
-def get_rsi_chart_data(ticker: str, period: int = 14, days: int = 90) -> dict:
+def get_chart_rsi_data(ticker: str, period: int = 14, days: int = 90) -> Any:
     """
-    Get RSI indicator chart data with overbought/oversold zones.
+    Get RSI indicator chart data.
 
     Args:
         ticker: Stock ticker symbol (e.g., "AAPL")
         period: RSI period (default: 14)
         days: Number of days to display (default: 90)
     """
-    result = do_chart_rsi(ticker, period=period, days=days)
-    return _serialize(result)
+    from stonks_cli.analysis.indicators import rsi
+
+    cfg = load_config()
+    normalized = normalize_ticker(ticker)
+    provider = provider_for_config(cfg, normalized)
+    df = provider.fetch_daily(normalized).df
+
+    if df.empty:
+        return {"error": "No data found"}
+
+    rsi_series = rsi(df["close"], period)
+    df_slice = df.tail(days)
+    rsi_slice = rsi_series.tail(days)
+
+    return {
+        "ticker": normalized,
+        "dates": df_slice.index.strftime("%Y-%m-%d").tolist(),
+        "rsi": rsi_slice.fillna(0).tolist(),
+    }
 
 
 # =============================================================================
@@ -333,7 +386,7 @@ def run_analysis(
     start_date: str | None = None,
     end_date: str | None = None,
     benchmark: str | None = None,
-) -> dict:
+) -> Any:
     """
     Run full technical analysis on tickers.
 
@@ -344,14 +397,14 @@ def run_analysis(
         benchmark: Benchmark ticker for comparison (e.g., "SPY")
     """
     out_dir = _default_out_dir()
-    result = do_analyze(
+    report_path = do_analyze(
         tickers=tickers,
         out_dir=out_dir,
         start=start_date,
         end=end_date,
         benchmark=benchmark,
     )
-    return _serialize(result)
+    return {"report_path": str(report_path)}
 
 
 @mcp.tool()
@@ -359,7 +412,7 @@ def run_backtest(
     tickers: list[str] | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
-) -> dict:
+) -> Any:
     """
     Run backtest simulation on tickers.
 
@@ -369,17 +422,17 @@ def run_backtest(
         end_date: End date in YYYY-MM-DD format
     """
     out_dir = _default_out_dir()
-    result = do_backtest(
+    report_path = do_backtest(
         tickers=tickers,
         start=start_date,
         end=end_date,
         out_dir=out_dir,
     )
-    return _serialize(result)
+    return {"backtest_path": str(report_path)}
 
 
 @mcp.tool()
-def get_signals_diff() -> dict:
+def get_signals_diff() -> Any:
     """
     Compare latest vs previous analysis run.
     Shows changes in signals/recommendations between runs.
@@ -394,14 +447,14 @@ def get_signals_diff() -> dict:
 
 
 @mcp.tool()
-def list_watchlists() -> dict:
+def list_watchlists() -> Any:
     """List all configured watchlists with their tickers."""
     watchlists = do_watchlist_list()
     return {"watchlists": _serialize(watchlists)}
 
 
 @mcp.tool()
-def create_watchlist(name: str, tickers: list[str]) -> dict:
+def create_watchlist(name: str, tickers: list[str]) -> Any:
     """
     Create or update a watchlist.
 
@@ -414,7 +467,7 @@ def create_watchlist(name: str, tickers: list[str]) -> dict:
 
 
 @mcp.tool()
-def delete_watchlist(name: str) -> dict:
+def delete_watchlist(name: str) -> Any:
     """
     Delete a watchlist.
 
@@ -430,7 +483,7 @@ def analyze_watchlist(
     name: str,
     start_date: str | None = None,
     end_date: str | None = None,
-) -> dict:
+) -> Any:
     """
     Run analysis on all tickers in a watchlist.
 
@@ -440,13 +493,16 @@ def analyze_watchlist(
         end_date: End date in YYYY-MM-DD format
     """
     out_dir = _default_out_dir()
-    result = do_watchlist_analyze(
+    artifacts = do_watchlist_analyze(
         name,
         out_dir=out_dir,
         start=start_date,
         end=end_date,
     )
-    return _serialize(result)
+    return {
+        "report_path": str(artifacts.report_path),
+        "json_path": str(artifacts.json_path) if artifacts.json_path else None
+    }
 
 
 # =============================================================================
@@ -461,7 +517,7 @@ def add_portfolio_position(
     cost_basis: float,
     purchase_date: str | None = None,
     notes: str | None = None,
-) -> dict:
+) -> Any:
     """
     Add a position to your portfolio.
 
@@ -483,7 +539,7 @@ def add_portfolio_position(
 
 
 @mcp.tool()
-def remove_portfolio_position(ticker: str, shares: float, sale_price: float) -> dict:
+def remove_portfolio_position(ticker: str, shares: float, sale_price: float) -> Any:
     """
     Remove shares from a portfolio position.
 
@@ -497,21 +553,21 @@ def remove_portfolio_position(ticker: str, shares: float, sale_price: float) -> 
 
 
 @mcp.tool()
-def get_portfolio() -> dict:
+def get_portfolio() -> Any:
     """Get current portfolio positions with current prices and P&L."""
     result = do_portfolio_show(include_total=True)
     return _serialize(result)
 
 
 @mcp.tool()
-def get_portfolio_allocation() -> dict:
+def get_portfolio_allocation() -> Any:
     """Get portfolio allocation percentages by position."""
     result = do_portfolio_allocation()
     return _serialize(result)
 
 
 @mcp.tool()
-def get_portfolio_history() -> dict:
+def get_portfolio_history() -> Any:
     """Get portfolio transaction history."""
     result = do_portfolio_history()
     return {"transactions": _serialize(result)}
@@ -523,7 +579,7 @@ def get_portfolio_history() -> dict:
 
 
 @mcp.tool()
-def paper_buy(ticker: str, shares: float) -> dict:
+def paper_buy(ticker: str, shares: float) -> Any:
     """
     Execute a paper (simulated) buy order.
 
@@ -536,7 +592,7 @@ def paper_buy(ticker: str, shares: float) -> dict:
 
 
 @mcp.tool()
-def paper_sell(ticker: str, shares: float) -> dict:
+def paper_sell(ticker: str, shares: float) -> Any:
     """
     Execute a paper (simulated) sell order.
 
@@ -549,14 +605,14 @@ def paper_sell(ticker: str, shares: float) -> dict:
 
 
 @mcp.tool()
-def get_paper_status() -> dict:
+def get_paper_status() -> Any:
     """Get paper trading portfolio status with P&L summary."""
     result = do_paper_status()
     return _serialize(result)
 
 
 @mcp.tool()
-def get_paper_leaderboard() -> dict:
+def get_paper_leaderboard() -> Any:
     """Get paper trading performance metrics for leaderboard."""
     result = do_paper_leaderboard()
     return _serialize(result)
@@ -568,7 +624,7 @@ def get_paper_leaderboard() -> dict:
 
 
 @mcp.tool()
-def create_alert(ticker: str, condition: str, threshold: float) -> dict:
+def create_alert(ticker: str, condition: str, threshold: float) -> Any:
     """
     Create a price alert for a stock.
 
@@ -582,14 +638,14 @@ def create_alert(ticker: str, condition: str, threshold: float) -> dict:
 
 
 @mcp.tool()
-def list_alerts() -> dict:
+def list_alerts() -> Any:
     """List all configured alerts."""
     alerts = do_alert_list()
     return {"alerts": _serialize(alerts)}
 
 
 @mcp.tool()
-def delete_alert(alert_id: str) -> dict:
+def delete_alert(alert_id: str) -> Any:
     """
     Delete an alert by ID.
 
@@ -601,7 +657,7 @@ def delete_alert(alert_id: str) -> dict:
 
 
 @mcp.tool()
-def check_alerts() -> dict:
+def check_alerts() -> Any:
     """
     Check all alerts and return any that have been triggered.
     Sends notifications for triggered alerts.
@@ -616,7 +672,7 @@ def check_alerts() -> dict:
 
 
 @mcp.tool()
-def fetch_data(tickers: list[str] | None = None) -> dict:
+def fetch_data(tickers: list[str] | None = None) -> Any:
     """
     Fetch and cache market data for tickers.
 
@@ -628,7 +684,7 @@ def fetch_data(tickers: list[str] | None = None) -> dict:
 
 
 @mcp.tool()
-def verify_data(tickers: list[str] | None = None) -> dict:
+def verify_data(tickers: list[str] | None = None) -> Any:
     """
     Verify data health for tickers.
     Checks for gaps, staleness, and data quality issues.
@@ -641,7 +697,7 @@ def verify_data(tickers: list[str] | None = None) -> dict:
 
 
 @mcp.tool()
-def get_cache_info() -> dict:
+def get_cache_info() -> Any:
     """Get information about the data cache (size, entries, etc)."""
     result = do_data_cache_info()
     return _serialize(result)
@@ -653,14 +709,14 @@ def get_cache_info() -> dict:
 
 
 @mcp.tool()
-def get_config() -> dict:
+def get_config() -> Any:
     """Get current stonks-cli configuration."""
     config = do_config_show()
     return {"config": _serialize(config)}
 
 
 @mcp.tool()
-def validate_config() -> dict:
+def validate_config() -> Any:
     """Validate the current configuration file."""
     result = do_config_validate()
     return _serialize(result)
@@ -672,14 +728,14 @@ def validate_config() -> dict:
 
 
 @mcp.tool()
-def get_latest_report() -> dict:
+def get_latest_report() -> Any:
     """Get the most recent analysis report."""
     result = do_report_latest(include_json=True)
     return _serialize(result)
 
 
 @mcp.tool()
-def view_report(path: str | None = None) -> dict:
+def view_report(path: str | None = None) -> Any:
     """
     View a specific report.
 
@@ -691,7 +747,7 @@ def view_report(path: str | None = None) -> dict:
 
 
 @mcp.tool()
-def list_history(limit: int = 20) -> dict:
+def list_history(limit: int = 20) -> Any:
     """
     List recent analysis history.
 
@@ -708,7 +764,7 @@ def list_history(limit: int = 20) -> dict:
 
 
 @mcp.tool()
-def get_schedule_status() -> dict:
+def get_schedule_status() -> Any:
     """Get the current schedule status including next run time."""
     result = do_schedule_status()
     return _serialize(result)
@@ -720,7 +776,7 @@ def get_schedule_status() -> dict:
 
 
 @mcp.tool()
-def list_plugins() -> dict:
+def list_plugins() -> Any:
     """List all available plugins and their status."""
     result = do_plugins_list()
     return {"plugins": _serialize(result)}

@@ -22,7 +22,7 @@ def check_sko(filename:str) -> bool:
 def select_sko_file() -> str | None:
 
     file_path:str = os.path.expanduser("~/.config/senko")
-    valid_array:[str] = [file_name for file_name in os.listdir(file_path) if file_name.split(".")[1] == "sko" and check_sko(file_name)]
+    valid_array:[str] = [file_name for file_name in os.listdir(file_path) if file_name.endswith(".sko") and check_sko(file_name)]
 
     screen = curses.initscr()
     screen.keypad(True)

@@ -263,173 +263,53 @@ def cards_due_per_set(sko_setcontents:[]) -> int | str | None:
         return None
 
 def edit_sko_card(stdscr, card:{}) -> {}:
-    edit_option:str = ""
-    while True:
-        stdscr.erase()
-        stdscr.addstr(0, 0, "Choose which attribute to edit.", curses.color_pair(3))
-        stdscr.addstr(2,0,f"[N]ame            | {card['card_name']}")
-        stdscr.addstr(3,0,f"[I]nfo            | {card['card_info']}")
-        stdscr.addstr(4,0,f"[A]dditional info | {card['card_add_info']}")
-        stdscr.addstr(5,0,f"Date              | {card['card_date']}", curses.color_pair(1))
-        keypress:str = chr(stdscr.getch())
-        if keypress in ("n", "i", "a", "q"):
-            edit_option = keypress
-            break
-    match edit_option:
-        case "n":
-            card_name_buffer:str = card["card_name"]
-            while True:
-                stdscr.erase()
-                stdscr.addstr(0,0,"Editing card name", curses.color_pair(3))
-                stdscr.addstr(2,0,f"Name            | {card_name_buffer}_", curses.color_pair(2))
-                stdscr.addstr(3,0,f"Info            | {card['card_info']}")
-                stdscr.addstr(4,0,f"Additional info | {card['card_add_info']}")
-                stdscr.addstr(5,0,f"Date            | {card['card_date']}", curses.color_pair(1))
-                stdscr.refresh()
-                keypress= stdscr.getch()
-                if keypress in (curses.KEY_ENTER, 10, 13):
-                    card["card_name"] = card_name_buffer
-                    return card
-                elif keypress in (curses.KEY_BACKSPACE, 127):
-                    card_name_buffer = card_name_buffer[:-1]
-                elif 32 <= keypress <= 126:
-                    card_name_buffer += chr(keypress)
-        case "i":
-            card_info_buffer:str = card["card_info"]
-            while True:
-                stdscr.erase()
-                stdscr.addstr(0,0,"Editing card info", curses.color_pair(3))
-                stdscr.addstr(2,0,f"Name            | {card['card_name']}")
-                stdscr.addstr(3,0,f"Info            | {card_info_buffer}_", curses.color_pair(2))
-                stdscr.addstr(4,0,f"Additional info | {card['card_add_info']}")
-                stdscr.addstr(5,0,f"Date            | {card['card_date']}", curses.color_pair(1))
-                stdscr.refresh()
-                keypress= stdscr.getch()
-                if keypress in (curses.KEY_ENTER, 10, 13):
-                    card["card_info"] = card_info_buffer
-                    return card
-                elif keypress in (curses.KEY_BACKSPACE, 127):
-                    card_info_buffer = card_info_buffer[:-1]
-                elif 32 <= keypress <= 126:
-                    card_info_buffer += chr(keypress)
-        case "a":
-            card_add_info_buffer:str = card["card_add_info"]
-            while True:
-                stdscr.erase()
-                stdscr.addstr(0,0,"Editing card additional info", curses.color_pair(3))
-                stdscr.addstr(2,0,f"Name            | {card['card_name']}")
-                stdscr.addstr(3,0,f"Info            | {card['card_info']}")
-                stdscr.addstr(4,0,f"Additional info | {card_add_info_buffer}_", curses.color_pair(2))
-                stdscr.addstr(5,0,f"Date            | {card['card_date']}", curses.color_pair(1))
-                stdscr.refresh()
-                keypress= stdscr.getch()
-                if keypress in (curses.KEY_ENTER, 10, 13):
-                    card["card_add_info"] = card_add_info_buffer
-                    return card
-                elif keypress in (curses.KEY_BACKSPACE, 127):
-                    card_add_info_buffer = card_add_info_buffer[:-1]
-                elif 32 <= keypress <= 126:
-                    card_add_info_buffer += chr(keypress)
-        case "q":
-            return None
+    from tui import form_input
+    result = form_input(stdscr, "Edit card", [("Name", card.get("card_name", "")), ("Info", card.get("card_info", "")), ("Additional info", card.get("card_add_info", ""))])
+    if result is None:
+        return None
+    card["card_name"] = result[0]
+    card["card_info"] = result[1]
+    card["card_add_info"] = result[2]
+    return card
 
 def add_sko_card(stdscr) -> {}:
-    today_str:str= date.today().strftime("%d/%m/%Y")
-    card:{str:str} = {"card_name": "", "card_info": "", "card_add_info": "", "card_date": today_str}
-    keypress_buffer:str = ""
-    while True:
-        stdscr.erase()
-        stdscr.addstr(0, 0,"Add card name.", curses.color_pair(3))
-        stdscr.addstr(2,0,f"Name            | {keypress_buffer}_", curses.color_pair(2))
-        stdscr.addstr(3,0,f"Info            | {card['card_info']}")
-        stdscr.addstr(4,0,f"Additional info | {card['card_add_info']}")
-        stdscr.addstr(5,0,f"Date            | {card['card_date']}")
-        stdscr.refresh()
-        keypress = stdscr.getch()
-        if keypress in (curses.KEY_ENTER, 10, 13):
-            card["card_name"] = keypress_buffer
-            break
-        elif keypress in (curses.KEY_BACKSPACE, 127):
-            keypress_buffer = keypress_buffer[:-1]
-        elif 32 <= keypress <= 126:
-            keypress_buffer += chr(keypress)
-    keypress_buffer = ""
-    while True:
-        stdscr.erase()
-        stdscr.addstr(0, 0,"Add card info.", curses.color_pair(3))
-        stdscr.addstr(2,0,f"Name            | {card['card_name']}")
-        stdscr.addstr(3,0,f"Info            | {keypress_buffer}_", curses.color_pair(2))
-        stdscr.addstr(4,0,f"Additional info | {card['card_add_info']}")
-        stdscr.addstr(5,0,f"Date            | {card['card_date']}")
-        stdscr.refresh()
-        keypress = stdscr.getch()
-        if keypress in (curses.KEY_ENTER, 10, 13):
-            card["card_info"] = keypress_buffer
-            break
-        elif keypress in (curses.KEY_BACKSPACE, 127):
-            keypress_buffer = keypress_buffer[:-1]
-        elif 32 <= keypress <= 126:
-            keypress_buffer += chr(keypress)
-    keypress_buffer = ""
-    while True:
-        stdscr.erase()
-        stdscr.addstr(0, 0,"Add additional info.", curses.color_pair(3))
-        stdscr.addstr(2,0,f"Name            | {card['card_name']}")
-        stdscr.addstr(3,0,f"Info            | {card['card_info']}")
-        stdscr.addstr(4,0,f"Additional info | {keypress_buffer}_", curses.color_pair(2))
-        stdscr.addstr(5,0,f"Date            | {card['card_date']}")
-        stdscr.refresh()
-        keypress = stdscr.getch()
-        if keypress in (curses.KEY_ENTER, 10, 13):
-            card["card_add_info"] = keypress_buffer
-            break
-        elif keypress in (curses.KEY_BACKSPACE, 127):
-            keypress_buffer = keypress_buffer[:-1]
-        elif 32 <= keypress <= 126:
-            keypress_buffer += chr(keypress)
-    keypress_buffer = today_str
-    while True:
-        stdscr.erase()
-        stdscr.addstr(0, 0,"Add card date.", curses.color_pair(3))
-        stdscr.addstr(2,0,f"Name            | {card['card_name']}")
-        stdscr.addstr(3,0,f"Info            | {card['card_info']}")
-        stdscr.addstr(4,0,f"Additional info | {card['card_add_info']}")
-        stdscr.addstr(5,0,f"Date            | {keypress_buffer}_", curses.color_pair(2))
-        stdscr.refresh()
-        keypress = stdscr.getch()
-        if keypress in (curses.KEY_ENTER, 10, 13):
-            card["card_date"] = keypress_buffer
-            return card
-        elif keypress in (curses.KEY_BACKSPACE, 127):
-            keypress_buffer = keypress_buffer[:-1]
-        elif 32 <= keypress <= 126:
-            keypress_buffer += chr(keypress)
+    from tui import form_input
+    from schema import CARD_DEFAULTS
+    result = form_input(stdscr, "Add new card", [("Name", ""), ("Info", ""), ("Additional info", "")])
+    if result is None:
+        return None
+    card = {"card_name": result[0], "card_info": result[1], "card_add_info": result[2], "card_date": date.today().strftime("%d/%m/%Y")}
+    card.update(CARD_DEFAULTS.copy())
+    return card
 
-def delete_sko_loop(stdscr, sko_setname:str, sko_setcontents:[]) -> []:
-    if not len(sko_setcontents) == 0:
-        while True:
+def delete_sko_loop(stdscr, sko_setname:str, sko_setcontents:[], config:dict=None) -> []:
+    from tui import select_from_list, COLORS
+    while True:
+        if not sko_setcontents:
             stdscr.erase()
-            y_coord:int = 2
-            stdscr.addstr(0, 0, f"Type in a valid number to delete card from {sko_setname}.", curses.color_pair(3))
-            for card in sko_setcontents:
-                stdscr.addstr(y_coord, 0, f"{y_coord-1} | {card['card_name']}")
-                y_coord += 1
-            stdscr.addstr(y_coord + 1, 0, "[Q]uit", curses.color_pair(3))
-            keypress = chr(stdscr.getch())
-            if keypress == "q":
-                return (sko_setname, sko_setcontents)
-            elif not keypress.isnumeric() or int(keypress) > len(sko_setcontents) or int(keypress) < 1:
-                continue
-            else:
-                del sko_setcontents[int(keypress)-1]
-                return (sko_setname, sko_setcontents)
-    else:
-        while True:
-            stdscr.erase()
-            stdscr.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(5))
-            stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(3))
-            if chr(stdscr.getch()) == "q":
-                return (sko_setname, sko_setcontents)
+            stdscr.addstr(0, 0, "No cards to delete.", curses.color_pair(COLORS["muted"]))
+            stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(COLORS["prompt"]))
+            stdscr.refresh()
+            stdscr.getch()
+            return (sko_setname, sko_setcontents)
+        items = [(c.get("card_name", "?"), "", 0) for c in sko_setcontents]
+        choice = select_from_list(stdscr, f"Delete cards from {sko_setname}", items, footer="[Enter] Delete  [q] Back")
+        if choice is None:
+            return (sko_setname, sko_setcontents)
+        elif isinstance(choice, tuple):
+            continue
+        else:
+            confirm_delete = True
+            if config and "tui" in config:
+                confirm_delete = config["tui"].get("confirm_delete", True)
+            card_name = sko_setcontents[choice].get("card_name", "?")
+            if confirm_delete:
+                stdscr.erase()
+                stdscr.addstr(0, 0, f"Delete '{card_name}'? [y/n]", curses.color_pair(COLORS["error"]))
+                stdscr.refresh()
+                if chr(stdscr.getch()) != "y":
+                    continue
+            del sko_setcontents[choice]
 
 def update_sko_allsets(sko_all_sets:{}, sko_setname:str, sko_setcontents:[]) -> {}:
     sko_all_sets[sko_setname] = sko_setcontents
@@ -441,60 +321,45 @@ def write_sko(filename:str, sko_contents:{}) -> None:
         json.dump(sko_contents, fhand)
 
 def edit_sko_loop(stdscr, sko_setname:str, sko_setcontents:[]) -> []:
-    if not len(sko_setcontents) == 0:
-        while True:
+    from tui import select_from_list, COLORS
+    while True:
+        if not sko_setcontents:
             stdscr.erase()
-            y_coord:int = 2
-            stdscr.addstr(0, 0, f"Type in a valid number to edit card from {sko_setname}.", curses.color_pair(3))
-            for card in sko_setcontents:
-                stdscr.addstr(y_coord, 0, f"{y_coord-1} | {card['card_name']}")
-                y_coord += 1
-            keypress = chr(stdscr.getch())
-            if not keypress.isnumeric() or int(keypress) > len(sko_setcontents) or int(keypress) < 1:
-                continue
-            else:
-                result = edit_sko_card(stdscr, sko_setcontents[int(keypress)-1])
-                if result is not None:
-                    sko_setcontents[int(keypress)-1] = result
-                return (sko_setname, sko_setcontents)
-    else:
-        while True:
-            stdscr.erase()
-            stdscr.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(5))
-            stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(3))
-            if chr(stdscr.getch()) == "q":
-                return (sko_setname, sko_setcontents)
+            stdscr.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(COLORS["muted"]))
+            stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(COLORS["prompt"]))
+            stdscr.refresh()
+            stdscr.getch()
+            return (sko_setname, sko_setcontents)
+        items = [(c.get("card_name", "?"), c.get("card_info", "")[:40], COLORS["muted"]) for c in sko_setcontents]
+        choice = select_from_list(stdscr, f"Edit cards in {sko_setname}", items, footer="[Enter] Edit  [q] Back")
+        if choice is None:
+            return (sko_setname, sko_setcontents)
+        elif isinstance(choice, tuple):
+            continue
+        else:
+            result = edit_sko_card(stdscr, sko_setcontents[choice])
+            if result is not None:
+                sko_setcontents[choice] = result
 
 def add_sko_loop(stdscr, sko_setname:str, sko_setcontents:[]) -> []:
-    if not len(sko_setcontents) == 0:
-        while True:
-            stdscr.erase()
-            y_coord:int = 2
-            stdscr.addstr(0, 0, f"{sko_setname}")
-            for card in sko_setcontents:
-                stdscr.addstr(y_coord, 0, f"{y_coord-1} | {card['card_name']}")
-                y_coord += 1
-            stdscr.addstr(y_coord + 1, 0, f"[A]dd card to {sko_setname}", curses.color_pair(3))
-            stdscr.addstr(y_coord + 2, 0, "[Q]uit", curses.color_pair(3))
-            keypress = chr(stdscr.getch())
-            if keypress == "q":
-                return (sko_setname, sko_setcontents)
-            elif keypress == "a":
-                sko_setcontents.append(add_sko_card(stdscr))
-                return (sko_setname, sko_setcontents)
-    else:
-        while True:
-            stdscr.erase()
-            stdscr.addstr(0, 0, f"{sko_setname}")
-            stdscr.addstr(2, 0, f"{sko_setname} is currently empty.", curses.color_pair(5))
-            stdscr.addstr(4, 0, f"[A]dd card to {sko_setname}", curses.color_pair(3))
-            stdscr.addstr(5, 0, "[Q]uit", curses.color_pair(3))
-            keypress:str = chr(stdscr.getch())
-            if keypress == "q":
-                return (sko_setname, sko_setcontents)
-            elif keypress == "a":
-                sko_setcontents.append(add_sko_card(stdscr))
-                return (sko_setname, sko_setcontents)
+    from tui import select_from_list, COLORS
+    while True:
+        if sko_setcontents:
+            items = [(c.get("card_name", "?"), "", 0) for c in sko_setcontents]
+        else:
+            items = [("No cards yet.", "Press [a] to add", COLORS["muted"])]
+        choice = select_from_list(stdscr, f"Add cards to {sko_setname}", items, footer="[a] Add card  [q] Back", extra_bindings=[("a", "Add card")])
+        if choice is None:
+            return (sko_setname, sko_setcontents)
+        elif isinstance(choice, tuple):
+            _, key = choice
+            if key == "a":
+                card = add_sko_card(stdscr)
+                if card is not None:
+                    sko_setcontents.append(card)
+            continue
+        else:
+            continue
 
 def _stub_screen(stdscr, label):
     stdscr.erase()

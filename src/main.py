@@ -22,32 +22,58 @@ def check_sko(filename:str) -> bool:
         return False
 
 def select_sko_file(stdscr) -> str | None:
-    file_path:str = os.path.expanduser("~/.config/senko")
-    valid_array:[str] = [file_name for file_name in os.listdir(file_path) if file_name.endswith(".sko") and check_sko(file_name)]
+    from tui import select_from_list, text_input, COLORS
+    from srs import cards_due_count
+    config_dir = os.path.expanduser("~/.config/senko")
     while True:
-        if not len(valid_array) == 0:
-            stdscr.erase()
-            coords:{str:int}= {"x":0, "y":2}
-            counter:int = 1
-            stdscr.addstr(0, 0, "Type in a valid number to select Senko file.", curses.color_pair(3))
-            for file_name in valid_array:
-                num_files:int = len(read_sko(file_name))
-                stdscr.addstr(coords["y"], coords["x"], f"{counter} | {file_name} | ")
-                stdscr.addstr(coords["y"], len(str(counter)) + len(file_name) + 6, f"{num_files} decks", curses.color_pair(2))
-                coords["y"] += 1
-                counter += 1
-            keypress = chr(stdscr.getch())
-            if not keypress.isnumeric() or int(keypress) > len(valid_array) or int(keypress) < 1:
+        valid_array = [f for f in os.listdir(config_dir) if f.endswith(".sko") and check_sko(f)]
+        # compute aggregate stats
+        total_files = len(valid_array)
+        total_cards = 0
+        total_due = 0
+        items = []
+        for fname in valid_array:
+            data = read_sko(fname)
+            n_sets = len(data)
+            n_cards = sum(len(cards) for cards in data.values())
+            n_due = sum(cards_due_count(cards) for cards in data.values())
+            total_cards += n_cards
+            total_due += n_due
+            color = COLORS["error"] if n_due > 0 else COLORS["success"]
+            items.append((f"{fname} | {n_sets} sets | {n_cards} cards", f"{n_due} due", color))
+        header = f"Senko | {total_files} files | {total_cards} cards | {total_due} due today"
+        footer = "[Enter] Open  [n] New file  [d] Delete file  [q] Back"
+        if not items:
+            items = [("No files found.", "Create one with [n]", COLORS["muted"])]
+        choice = select_from_list(stdscr, header, items, footer=footer, extra_bindings=[("n", "New file"), ("d", "Delete file")])
+        if choice is None:
+            return None
+        elif isinstance(choice, tuple):
+            idx, key = choice
+            if key == "n":
+                stdscr.erase()
+                name = text_input(stdscr, "Filename: ", y=0, x=0)
+                if name:
+                    if not name.endswith(".sko"):
+                        name += ".sko"
+                    fpath = os.path.join(config_dir, name)
+                    with open(fpath, "w") as f:
+                        json.dump({}, f)
+                continue
+            elif key == "d" and valid_array and idx is not None and idx < len(valid_array):
+                fname = valid_array[idx]
+                stdscr.erase()
+                stdscr.addstr(0, 0, f"Delete {fname}? [y/n]", curses.color_pair(COLORS["error"]))
+                stdscr.refresh()
+                if chr(stdscr.getch()) == "y":
+                    os.remove(os.path.join(config_dir, fname))
                 continue
             else:
-                return valid_array[int(keypress) - 1]
+                continue
         else:
-            stdscr.erase()
-            stdscr.addstr(0, 0, "No valid senko (.sko) files found.", curses.color_pair(5))
-            stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(3))
-            keypress = chr(stdscr.getch())
-            if keypress == "q":
-                return None
+            if not valid_array:
+                continue
+            return valid_array[choice]
 
 def read_sko(filename:str) -> {}:
     file_path:str = os.path.expanduser(f"~/.config/senko/{filename}")

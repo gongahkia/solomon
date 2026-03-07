@@ -74,7 +74,7 @@ def select_from_list(stdscr, title, items, footer="", y_offset=2, extra_bindings
             show_help(stdscr, default_binds + extra_bindings)
         else:
             try:
-                return (None, chr(key))
+                return (cursor, chr(key))
             except (ValueError, OverflowError):
                 pass
 

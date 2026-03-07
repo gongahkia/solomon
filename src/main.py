@@ -475,6 +475,39 @@ def import_screen(stdscr):
                 stdscr.getch()
             return
 
+def export_screen(stdscr):
+    from tui import text_input, COLORS
+    sko_filename = select_sko_file(stdscr)
+    if not sko_filename:
+        return
+    data = read_sko(sko_filename)
+    n_cards = sum(len(v) for v in data.values())
+    base = os.path.splitext(sko_filename)[0]
+    stdscr.erase()
+    stdscr.addstr(0, 0, f"{sko_filename}: {n_cards} cards", curses.color_pair(COLORS["success"]))
+    stdscr.addstr(2, 0, "[j] JSON  [t] Text  [q] Cancel", curses.color_pair(COLORS["prompt"]))
+    stdscr.refresh()
+    while True:
+        key = chr(stdscr.getch())
+        if key == "q":
+            return
+        elif key in ("j", "t"):
+            ext = ".json" if key == "j" else ".txt"
+            default_path = os.path.expanduser(f"~/Desktop/{base}{ext}")
+            stdscr.erase()
+            path = text_input(stdscr, "Output path: ", initial=default_path, y=0, x=0)
+            if path:
+                from import_export import export_to_json, export_to_txt
+                if key == "j":
+                    export_to_json(data, os.path.expanduser(path))
+                else:
+                    export_to_txt(data, os.path.expanduser(path))
+                stdscr.erase()
+                stdscr.addstr(0, 0, f"Exported {n_cards} cards to {path}", curses.color_pair(COLORS["success"]))
+                stdscr.refresh()
+                stdscr.getch()
+            return
+
 def _menu_dispatch(stdscr, action):
     """shared flow for see/add/edit/delete actions."""
     sko_filename = select_sko_file(stdscr)
@@ -524,7 +557,7 @@ def menu_sko(stdscr) -> None:
             case 2: # import
                 import_screen(stdscr)
             case 3: # export
-                _stub_screen(stdscr, "Export")
+                export_screen(stdscr)
             case 4: # statistics
                 _stub_screen(stdscr, "Statistics")
             case 5: # settings

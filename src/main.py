@@ -402,55 +402,64 @@ def add_sko_loop(stdscr, sko_setname:str, sko_setcontents:[]) -> []:
                 sko_setcontents.append(add_sko_card(stdscr))
                 return (sko_setname, sko_setcontents)
 
+def _stub_screen(stdscr, label):
+    stdscr.erase()
+    stdscr.addstr(0, 0, f"{label} — coming soon.", curses.color_pair(5))
+    stdscr.addstr(2, 0, "Press any key to return.", curses.color_pair(3))
+    stdscr.refresh()
+    stdscr.getch()
+
+def _menu_dispatch(stdscr, action):
+    """shared flow for see/add/edit/delete actions."""
+    sko_filename = select_sko_file(stdscr)
+    if sko_filename is None:
+        return
+    sko_all_sets = read_sko(sko_filename)
+    sko_setname_setcontents = select_flashcard_set(stdscr, sko_all_sets)
+    if sko_setname_setcontents is None:
+        return
+    sko_setname = sko_setname_setcontents[0]
+    sko_setcontents = sko_setname_setcontents[1]
+    match action:
+        case "review":
+            result = render_sko_loop(stdscr, sko_setname, sko_setcontents)
+        case "add":
+            result = add_sko_loop(stdscr, sko_setname, sko_setcontents)
+        case "edit":
+            result = edit_sko_loop(stdscr, sko_setname, sko_setcontents)
+        case "delete":
+            result = delete_sko_loop(stdscr, sko_setname, sko_setcontents)
+    write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, result[1]))
+
 def menu_sko(stdscr) -> None:
+    from tui import select_from_list, COLORS
+    menu_items = [
+        ("Review cards", "", COLORS["accent"]),
+        ("Browse decks", "", COLORS["info"]),
+        ("Import cards", "", COLORS["success"]),
+        ("Export cards", "", COLORS["success"]),
+        ("Statistics", "", COLORS["muted"]),
+        ("Settings", "", COLORS["prompt"]),
+        ("Quit", "", COLORS["error"]),
+    ]
     while True:
-        stdscr.erase()
-        stdscr.addstr(0, 0, "Senko flashcards")
-        stdscr.addstr(2, 0, "[S]ee cards", curses.color_pair(6))
-        stdscr.addstr(3, 0, "[A]dd cards", curses.color_pair(2))
-        stdscr.addstr(4, 0, "[E]dit cards", curses.color_pair(5))
-        stdscr.addstr(5, 0, "[D]elete cards", curses.color_pair(1))
-        stdscr.addstr(6, 0, "[Q]uit", curses.color_pair(3))
-        stdscr.addstr(8, 0, "Spot issues? Ping me on Github @gongahkia.")
-        keypress = chr(stdscr.getch())
-        match keypress:
-            case "s":
-                sko_filename = select_sko_file(stdscr)
-                if sko_filename is None:
-                    continue
-                sko_all_sets = read_sko(sko_filename)
-                sko_setname_setcontents = select_flashcard_set(stdscr, sko_all_sets)
-                sko_setname = sko_setname_setcontents[0]
-                sko_setcontents = sko_setname_setcontents[1]
-                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, render_sko_loop(stdscr, sko_setname, sko_setcontents)[1]))
-            case "a":
-                sko_filename = select_sko_file(stdscr)
-                if sko_filename is None:
-                    continue
-                sko_all_sets = read_sko(sko_filename)
-                sko_setname_setcontents = select_flashcard_set(stdscr, sko_all_sets)
-                sko_setname = sko_setname_setcontents[0]
-                sko_setcontents = sko_setname_setcontents[1]
-                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, add_sko_loop(stdscr, sko_setname, sko_setcontents)[1]))
-            case "e":
-                sko_filename = select_sko_file(stdscr)
-                if sko_filename is None:
-                    continue
-                sko_all_sets = read_sko(sko_filename)
-                sko_setname_setcontents = select_flashcard_set(stdscr, sko_all_sets)
-                sko_setname = sko_setname_setcontents[0]
-                sko_setcontents = sko_setname_setcontents[1]
-                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, edit_sko_loop(stdscr, sko_setname, sko_setcontents)[1]))
-            case "d":
-                sko_filename = select_sko_file(stdscr)
-                if sko_filename is None:
-                    continue
-                sko_all_sets = read_sko(sko_filename)
-                sko_setname_setcontents = select_flashcard_set(stdscr, sko_all_sets)
-                sko_setname = sko_setname_setcontents[0]
-                sko_setcontents = sko_setname_setcontents[1]
-                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, delete_sko_loop(stdscr, sko_setname, sko_setcontents)[1]))
-            case "q":
-                return None
+        choice = select_from_list(stdscr, "Senko flashcards", menu_items, footer="Spot issues? Ping me on Github @gongahkia.")
+        if choice is None or choice == 6: # quit
+            return
+        elif isinstance(choice, tuple):
+            continue
+        match choice:
+            case 0: # review
+                _menu_dispatch(stdscr, "review")
+            case 1: # browse decks
+                _menu_dispatch(stdscr, "review")
+            case 2: # import
+                _stub_screen(stdscr, "Import")
+            case 3: # export
+                _stub_screen(stdscr, "Export")
+            case 4: # statistics
+                _stub_screen(stdscr, "Statistics")
+            case 5: # settings
+                _stub_screen(stdscr, "Settings")
 
 run_app(menu_sko)

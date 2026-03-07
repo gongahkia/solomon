@@ -66,7 +66,7 @@ def main():
     current_topic = ""
     current_question = ""
     current_answer = []
-    search_query = "IS211: "
+    search_query = "TOPIC: "
     total_number_questions = len([line for line in lines if line.startswith(search_query)])
     for line in lines:
         line = line.strip()

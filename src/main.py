@@ -138,68 +138,105 @@ def select_flashcard_set(stdscr, file_contents:{}, filename:str=None) -> (str,[]
             selected = name_array[choice]
             return (selected, file_contents[selected])
 
-def render_sko_card(stdscr, card:{}) -> str:
-    while True:
-        stdscr.erase()
-        stdscr.addstr(0, 0, card["card_name"])
-        stdscr.addstr(2, 0, "[S]how card", curses.color_pair(3))
-        keypress = chr(stdscr.getch())
-        if keypress == "s":
+def render_sko_loop(stdscr, sko_setname:str, sko_setcontents:[], config:dict=None) -> ():
+    import time as _time
+    from srs import cards_due, sm2_review
+    from tui import COLORS
+    if len(sko_setcontents) == 0:
+        while True:
+            stdscr.erase()
+            stdscr.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(COLORS["muted"]))
+            stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(COLORS["prompt"]))
+            if chr(stdscr.getch()) == "q":
+                return (sko_setname, sko_setcontents)
+    due_cards = cards_due(sko_setcontents)
+    if not due_cards:
+        # find earliest future date
+        future_dates = []
+        for c in sko_setcontents:
+            try:
+                future_dates.append(datetime.strptime(c["card_date"], "%d/%m/%Y").date())
+            except (ValueError, KeyError):
+                pass
+        next_date = min(future_dates).strftime("%d/%m/%Y") if future_dates else "N/A"
+        while True:
+            stdscr.erase()
+            stdscr.addstr(0, 0, f"All caught up! {len(sko_setcontents)} cards in deck. Next review: {next_date}", curses.color_pair(COLORS["success"]))
+            stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(COLORS["prompt"]))
+            if chr(stdscr.getch()) == "q":
+                return (sko_setname, sko_setcontents)
+    start_time = _time.time()
+    reviewed = 0
+    total_due = len(due_cards)
+    for card in due_cards:
+        reviewed += 1
+        max_y, max_x = stdscr.getmaxyx()
+        # front screen
+        quit_session = False
+        while True:
+            stdscr.erase()
+            stdscr.addstr(0, 0, sko_setname, curses.color_pair(COLORS["accent"]))
+            progress = f"({reviewed}/{total_due})"
+            try:
+                stdscr.addstr(0, max_x - len(progress) - 1, progress)
+            except curses.error:
+                pass
+            center_y = max_y // 2
+            name = card.get("card_name", "")
+            try:
+                stdscr.addstr(center_y, max(0, (max_x - len(name)) // 2), name, curses.A_BOLD)
+            except curses.error:
+                pass
+            try:
+                stdscr.addstr(max_y - 1, 0, "[Space] Show answer  [q] Quit session"[:max_x-1], curses.color_pair(COLORS["muted"]))
+            except curses.error:
+                pass
+            stdscr.refresh()
+            key = stdscr.getch()
+            if key == ord(" "):
+                break
+            elif key == ord("q"):
+                quit_session = True
+                break
+        if quit_session:
             break
+        # back screen
+        while True:
+            stdscr.erase()
+            stdscr.addstr(0, 0, card.get("card_name", ""), curses.A_BOLD)
+            progress = f"({reviewed}/{total_due})"
+            try:
+                stdscr.addstr(0, max_x - len(progress) - 1, progress)
+            except curses.error:
+                pass
+            info = card.get("card_info", "")
+            if info:
+                stdscr.addstr(2, 0, info[:max_x-1])
+            add_info = card.get("card_add_info", "")
+            if add_info:
+                try:
+                    stdscr.addstr(3, 0, add_info[:max_x-1], curses.color_pair(COLORS["muted"]))
+                except curses.error:
+                    pass
+            try:
+                stdscr.addstr(5, 0, "[1] Again  [2] Hard  [3] Good  [4] Easy"[:max_x-1], curses.color_pair(COLORS["prompt"]))
+            except curses.error:
+                pass
+            stdscr.refresh()
+            key = stdscr.getch()
+            if key in (ord("1"), ord("2"), ord("3"), ord("4")):
+                grade = int(chr(key)) - 1
+                sm2_review(card, grade, config)
+                break
+    # session summary
+    elapsed = _time.time() - start_time
     while True:
         stdscr.erase()
-        if card["card_name"]:
-            stdscr.addstr(0, 0, card["card_name"])
-        if card["card_info"]:
-            stdscr.addstr(1, 0, card["card_info"])
-        if card["card_add_info"]:
-            stdscr.addstr(2, 0, card["card_add_info"])
-        stdscr.addstr(4, 0, "[Q] Easy", curses.color_pair(2))
-        stdscr.addstr(5, 0, "[W] Medium", curses.color_pair(5))
-        stdscr.addstr(6, 0, "[E] Hard", curses.color_pair(1))
-        keypress_choose = chr(stdscr.getch())
-        match keypress_choose:
-            case "q":
-                return "easy"
-            case "w":
-                return "medium"
-            case "e":
-                return "hard"
-
-def render_sko_loop(stdscr, sko_setname:str, sko_setcontents:[]) -> ():
-    today_str:str= date.today().strftime("%d/%m/%Y")
-    while True:
-        if len(sko_setcontents) == 0:
-            while True:
-                stdscr.erase()
-                stdscr.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(5))
-                stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(3))
-                if chr(stdscr.getch()) == "q":
-                    return (sko_setname, sko_setcontents)
-        date_array:[str] = [card["card_date"] for card in sko_setcontents]
-        count:int = 0
-        for dated in date_array:
-            if check_future(dated):
-                count += 1
-        if count == len(date_array):
-            while True:
-                stdscr.erase()
-                stdscr.addstr(0, 0, f"You have finished all {sko_setname} cards for the day! Take a break!", curses.color_pair(2))
-                stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(3))
-                if chr(stdscr.getch()) == "q":
-                    return (sko_setname, sko_setcontents)
-        for card in sko_setcontents:
-            if check_overdue(card["card_date"]):
-                card["card_date"] = today_str
-            if card["card_date"] == today_str:
-                difficulty:str = render_sko_card(stdscr, card)
-                match difficulty:
-                    case "easy":
-                        card["card_date"] = add_days(card["card_date"], 3)
-                    case "medium":
-                        card["card_date"] = add_days(card["card_date"], 2)
-                    case "hard":
-                        card["card_date"] = add_days(card["card_date"], 0)
+        stdscr.addstr(0, 0, f"{reviewed} cards reviewed in {elapsed/60:.1f} min", curses.color_pair(COLORS["success"]))
+        stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(COLORS["prompt"]))
+        stdscr.refresh()
+        if chr(stdscr.getch()) == "q":
+            return (sko_setname, sko_setcontents)
 
 def add_days(given_date:str, days_add:int) -> str:
     dt = datetime.strptime(given_date, "%d/%m/%Y")

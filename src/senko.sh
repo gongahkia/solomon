@@ -10,9 +10,19 @@ else
     echo "Senko config files created."
 fi
 
-# checks for python3.11 interpreter on device 
-if command -v python3.11 &> /dev/null; then 
-    python3.11 main.py
+# find a compatible python3 interpreter (>= 3.10)
+PYTHON=""
+for candidate in python3 python3.13 python3.12 python3.11 python3.10; do
+    if command -v "$candidate" &> /dev/null; then
+        if "$candidate" -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
+            PYTHON="$candidate"
+            break
+        fi
+    fi
+done
+
+if [ -n "$PYTHON" ]; then
+    "$PYTHON" main.py
 else
-    echo "python3.11 not found on device, please install first."
+    echo "No compatible Python found. Senko requires Python >= 3.10."
 fi

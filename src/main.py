@@ -368,6 +368,47 @@ def _stub_screen(stdscr, label):
     stdscr.refresh()
     stdscr.getch()
 
+def config_editor(stdscr, config:dict) -> dict:
+    from tui import select_from_list, text_input, COLORS
+    from config import save_config, reset_config
+    while True:
+        srs = config.get("srs", {})
+        tui = config.get("tui", {})
+        items = [
+            (f"Initial ease: {srs.get('initial_ease', 2.5)}", "SRS", COLORS["accent"]),
+            (f"Minimum ease: {srs.get('minimum_ease', 1.3)}", "SRS", COLORS["accent"]),
+            (f"Easy bonus: {srs.get('easy_bonus', 1.3)}", "SRS", COLORS["accent"]),
+            (f"Hard factor: {srs.get('hard_factor', 0.8)}", "SRS", COLORS["accent"]),
+            (f"Show stats: {tui.get('show_stats', True)}", "TUI", COLORS["info"]),
+            (f"Confirm delete: {tui.get('confirm_delete', True)}", "TUI", COLORS["info"]),
+        ]
+        srs_keys = ["initial_ease", "minimum_ease", "easy_bonus", "hard_factor"]
+        tui_keys = ["show_stats", "confirm_delete"]
+        choice = select_from_list(stdscr, "Settings", items, footer="[Enter] Edit  [r] Reset defaults  [q] Save & back", extra_bindings=[("r", "Reset defaults")])
+        if choice is None:
+            save_config(config)
+            return config
+        elif isinstance(choice, tuple):
+            _, key = choice
+            if key == "r":
+                config = reset_config()
+            continue
+        elif choice < 4: # numeric SRS field
+            k = srs_keys[choice]
+            stdscr.erase()
+            val = text_input(stdscr, f"{k}: ", initial=str(srs.get(k, "")), y=0, x=0)
+            if val is not None:
+                try:
+                    config.setdefault("srs", {})[k] = float(val)
+                except ValueError:
+                    stdscr.erase()
+                    stdscr.addstr(0, 0, "Invalid number.", curses.color_pair(COLORS["error"]))
+                    stdscr.refresh()
+                    stdscr.getch()
+        else: # boolean TUI field
+            k = tui_keys[choice - 4]
+            config.setdefault("tui", {})[k] = not tui.get(k, True)
+
 def _menu_dispatch(stdscr, action):
     """shared flow for see/add/edit/delete actions."""
     sko_filename = select_sko_file(stdscr)
@@ -392,6 +433,8 @@ def _menu_dispatch(stdscr, action):
 
 def menu_sko(stdscr) -> None:
     from tui import select_from_list, COLORS
+    from config import load_config
+    config = load_config()
     menu_items = [
         ("Review cards", "", COLORS["accent"]),
         ("Browse decks", "", COLORS["info"]),
@@ -419,6 +462,6 @@ def menu_sko(stdscr) -> None:
             case 4: # statistics
                 _stub_screen(stdscr, "Statistics")
             case 5: # settings
-                _stub_screen(stdscr, "Settings")
+                config = config_editor(stdscr, config)
 
 run_app(menu_sko)

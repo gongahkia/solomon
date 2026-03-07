@@ -80,32 +80,63 @@ def read_sko(filename:str) -> {}:
     with open(file_path, "r") as fhand:
         return json.load(fhand)
 
-def select_flashcard_set(stdscr, file_contents:{}) -> (str,[]):
-    name_array:[str] = [set_name for set_name in file_contents]
+def select_flashcard_set(stdscr, file_contents:{}, filename:str=None) -> (str,[]):
+    from tui import select_from_list, text_input, COLORS
+    from srs import cards_due_count
     while True:
-        stdscr.erase()
-        coords:{str:int}= {"x":0, "y":2}
-        counter:int = 1
-        stdscr.addstr(0, 0, "Type in a valid number to select flashcard set.", curses.color_pair(3))
-        for flashcard_set in name_array:
-            cards_due = cards_due_per_set(file_contents[flashcard_set])
-            match cards_due:
-                case "Empty":
-                    stdscr.addstr(coords["y"], coords["x"], f"{counter} | {flashcard_set} | ")
-                    stdscr.addstr(coords["y"], len(str(counter)) + len(flashcard_set) + 6, cards_due, curses.color_pair(5))
-                case 0:
-                    stdscr.addstr(coords["y"], coords["x"], f"{counter} | {flashcard_set} | ")
-                    stdscr.addstr(coords["y"], len(str(counter)) + len(flashcard_set) + 6, str(cards_due), curses.color_pair(2))
-                case _:
-                    stdscr.addstr(coords["y"], coords["x"], f"{counter} | {flashcard_set} | ")
-                    stdscr.addstr(coords["y"], len(str(counter)) + len(flashcard_set) + 6, str(cards_due), curses.color_pair(1))
-            coords["y"] += 1
-            counter += 1
-        keypress = chr(stdscr.getch())
-        if not keypress.isnumeric() or int(keypress) > len(name_array) or int(keypress) < 1:
-            continue
+        name_array = list(file_contents.keys())
+        items = []
+        for set_name in name_array:
+            cards = file_contents[set_name]
+            n_cards = len(cards)
+            if n_cards == 0:
+                items.append((f"{set_name} | {n_cards} cards", "Empty", COLORS["muted"]))
+            else:
+                n_due = cards_due_count(cards)
+                color = COLORS["error"] if n_due > 0 else COLORS["success"]
+                items.append((f"{set_name} | {n_cards} cards", f"{n_due} due", color))
+        if not items:
+            items = [("No sets found.", "Create one with [n]", COLORS["muted"])]
+        footer = "[Enter] Open  [n] New set  [r] Rename  [d] Delete  [q] Back"
+        choice = select_from_list(stdscr, "Select flashcard set", items, footer=footer, extra_bindings=[("n", "New set"), ("r", "Rename set"), ("d", "Delete set")])
+        if choice is None:
+            return None
+        elif isinstance(choice, tuple):
+            idx, key = choice
+            if key == "n":
+                stdscr.erase()
+                name = text_input(stdscr, "Set name: ", y=0, x=0)
+                if name and name not in file_contents:
+                    file_contents[name] = []
+                    if filename:
+                        write_sko(filename, file_contents)
+                continue
+            elif key == "r" and name_array and idx is not None and idx < len(name_array):
+                old_name = name_array[idx]
+                stdscr.erase()
+                new_name = text_input(stdscr, "New name: ", initial=old_name, y=0, x=0)
+                if new_name and new_name != old_name:
+                    file_contents[new_name] = file_contents.pop(old_name)
+                    if filename:
+                        write_sko(filename, file_contents)
+                continue
+            elif key == "d" and name_array and idx is not None and idx < len(name_array):
+                set_name = name_array[idx]
+                stdscr.erase()
+                stdscr.addstr(0, 0, f"Delete '{set_name}'? [y/n]", curses.color_pair(COLORS["error"]))
+                stdscr.refresh()
+                if chr(stdscr.getch()) == "y":
+                    del file_contents[set_name]
+                    if filename:
+                        write_sko(filename, file_contents)
+                continue
+            else:
+                continue
         else:
-            return (name_array[int(keypress) - 1], file_contents[name_array[int(keypress) - 1]])
+            if not name_array:
+                continue
+            selected = name_array[choice]
+            return (selected, file_contents[selected])
 
 def render_sko_card(stdscr, card:{}) -> str:
     while True:
@@ -441,7 +472,7 @@ def _menu_dispatch(stdscr, action):
     if sko_filename is None:
         return
     sko_all_sets = read_sko(sko_filename)
-    sko_setname_setcontents = select_flashcard_set(stdscr, sko_all_sets)
+    sko_setname_setcontents = select_flashcard_set(stdscr, sko_all_sets, sko_filename)
     if sko_setname_setcontents is None:
         return
     sko_setname = sko_setname_setcontents[0]

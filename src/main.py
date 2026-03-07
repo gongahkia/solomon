@@ -489,7 +489,7 @@ def add_sko_card() -> {}:
 
     while True:
         screen.erase()
-        screen.addstr(0, 0,"Add player name.", curses.color_pair(3))
+        screen.addstr(0, 0,"Add card name.", curses.color_pair(3))
         screen.addstr(2,0,f"Name            | {keypress_buffer}_", curses.color_pair(2))
         screen.addstr(3,0,f"Info            | {card['card_info']}")
         screen.addstr(4,0,f"Additional info | {card['card_add_info']}")
@@ -516,7 +516,7 @@ def add_sko_card() -> {}:
 
     while True:
         screen.erase()
-        screen.addstr(0, 0,"Add player name.", curses.color_pair(3))
+        screen.addstr(0, 0,"Add card info.", curses.color_pair(3))
         screen.addstr(2,0,f"Name            | {card['card_name']}")
         screen.addstr(3,0,f"Info            | {keypress_buffer}_", curses.color_pair(2))
         screen.addstr(4,0,f"Additional info | {card['card_add_info']}")
@@ -543,7 +543,7 @@ def add_sko_card() -> {}:
 
     while True:
         screen.erase()
-        screen.addstr(0, 0,"Add player name.", curses.color_pair(3))
+        screen.addstr(0, 0,"Add additional info.", curses.color_pair(3))
         screen.addstr(2,0,f"Name            | {card['card_name']}")
         screen.addstr(3,0,f"Info            | {card['card_info']}")
         screen.addstr(4,0,f"Additional info | {keypress_buffer}_", curses.color_pair(2))
@@ -570,7 +570,7 @@ def add_sko_card() -> {}:
 
     while True:
         screen.erase()
-        screen.addstr(0, 0,"Add player name.", curses.color_pair(3))
+        screen.addstr(0, 0,"Add card date.", curses.color_pair(3))
         screen.addstr(2,0,f"Name            | {card['card_name']}")
         screen.addstr(3,0,f"Info            | {card['card_info']}")
         screen.addstr(4,0,f"Additional info | {card['card_add_info']}")

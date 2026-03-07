@@ -15,7 +15,7 @@ def check_sko(filename:str) -> bool:
         sko_contents:{str:[]}= json.loads(fhand.read())
         fhand.close()
         return True
-    except:
+    except (json.JSONDecodeError, IOError, KeyError):
         return False
 
 # returns a filename as a string to open, renders in curses CLI

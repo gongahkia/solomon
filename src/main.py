@@ -598,27 +598,47 @@ def export_screen(stdscr):
                 stdscr.getch()
             return
 
-def _menu_dispatch(stdscr, action):
-    """shared flow for see/add/edit/delete actions."""
-    sko_filename = select_sko_file(stdscr)
-    if sko_filename is None:
-        return
-    sko_all_sets = read_sko(sko_filename)
-    sko_setname_setcontents = select_flashcard_set(stdscr, sko_all_sets, sko_filename)
-    if sko_setname_setcontents is None:
-        return
-    sko_setname = sko_setname_setcontents[0]
-    sko_setcontents = sko_setname_setcontents[1]
-    match action:
-        case "review":
-            result = render_sko_loop(stdscr, sko_setname, sko_setcontents)
-        case "add":
-            result = add_sko_loop(stdscr, sko_setname, sko_setcontents)
-        case "edit":
-            result = edit_sko_loop(stdscr, sko_setname, sko_setcontents)
-        case "delete":
-            result = delete_sko_loop(stdscr, sko_setname, sko_setcontents)
-    write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, result[1]))
+def deck_screen(stdscr, filename:str, config:dict, direct_review:bool=False):
+    from tui import select_from_list, COLORS
+    from schema import migrate_file
+    sko_all_sets = migrate_file(read_sko(filename))
+    while True:
+        sel = select_flashcard_set(stdscr, sko_all_sets, filename)
+        if sel is None:
+            return
+        sko_setname, sko_setcontents = sel
+        if direct_review:
+            result = render_sko_loop(stdscr, sko_setname, sko_setcontents, config)
+            if result:
+                sko_all_sets = update_sko_allsets(sko_all_sets, sko_setname, result[1])
+                write_sko(filename, sko_all_sets)
+            return
+        while True:
+            actions = [
+                ("Review", "", COLORS["accent"]),
+                ("Add cards", "", COLORS["success"]),
+                ("Edit cards", "", COLORS["info"]),
+                ("Delete cards", "", COLORS["error"]),
+                ("Back to sets", "", COLORS["muted"]),
+            ]
+            choice = select_from_list(stdscr, f"{sko_setname}", actions, footer="[Enter] Select  [q] Back")
+            if choice is None or choice == 4:
+                break
+            elif isinstance(choice, tuple):
+                continue
+            match choice:
+                case 0:
+                    result = render_sko_loop(stdscr, sko_setname, sko_setcontents, config)
+                case 1:
+                    result = add_sko_loop(stdscr, sko_setname, sko_setcontents)
+                case 2:
+                    result = edit_sko_loop(stdscr, sko_setname, sko_setcontents)
+                case 3:
+                    result = delete_sko_loop(stdscr, sko_setname, sko_setcontents, config)
+            if result:
+                sko_setname, sko_setcontents = result
+                sko_all_sets = update_sko_allsets(sko_all_sets, sko_setname, sko_setcontents)
+                write_sko(filename, sko_all_sets)
 
 def menu_sko(stdscr) -> None:
     from tui import select_from_list, COLORS
@@ -640,10 +660,14 @@ def menu_sko(stdscr) -> None:
         elif isinstance(choice, tuple):
             continue
         match choice:
-            case 0: # review
-                _menu_dispatch(stdscr, "review")
-            case 1: # browse decks
-                _menu_dispatch(stdscr, "review")
+            case 0: # review — shortcut: file -> set -> review directly
+                f = select_sko_file(stdscr)
+                if f:
+                    deck_screen(stdscr, f, config, direct_review=True)
+            case 1: # browse decks — full deck management
+                f = select_sko_file(stdscr)
+                if f:
+                    deck_screen(stdscr, f, config)
             case 2: # import
                 import_screen(stdscr)
             case 3: # export

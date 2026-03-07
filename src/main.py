@@ -294,31 +294,17 @@ def render_sko_loop(sko_setname:str, sko_setcontents:[]) -> ():
                     case "hard":
                         card["card_date"] = add_days(card["card_date"], 0)
 
-# adds days to sko_contents to a date
+from datetime import datetime, timedelta
+
 def add_days(given_date:str, days_add:int) -> str:
-    new_dat:int = int(given_date.split("/")[0]) + (int(given_date.split("/")[1]) * 30) + (int(given_date.split("/")[2]) * 365) + days_add
-    new_year:int = new_dat // 365 
-    new_month:int = (new_dat % 365) // 30
-    new_month_str:str = f"{new_month}"
-    new_day:int = (new_dat % 365) % 30
-    new_day_str:str = f"{new_day}"
-    if new_month < 10:
-        new_month_str:str = f"0{new_month}"
-    if new_day < 10:
-        new_day_str:str = f"0{new_day}"
-    return f"{new_day_str}/{new_month_str}/{new_year}"
+    dt = datetime.strptime(given_date, "%d/%m/%Y")
+    return (dt + timedelta(days=days_add)).strftime("%d/%m/%Y")
 
 def check_overdue(given_date:str) -> bool:
-    today_str:str= date.today().strftime("%d/%m/%Y")
-    tod_dat:int = int(today_str.split("/")[0]) + (int(today_str.split("/")[1]) * 30) + (int(today_str.split("/")[2]) * 365)
-    given_dat:int = int(given_date.split("/")[0]) + (int(given_date.split("/")[1]) * 30) + (int(given_date.split("/")[2]) * 365)
-    return tod_dat > given_dat
+    return date.today() > datetime.strptime(given_date, "%d/%m/%Y").date()
 
 def check_future(given_date:str) -> bool:
-    today_str:str= date.today().strftime("%d/%m/%Y")
-    tod_dat:int = int(today_str.split("/")[0]) + (int(today_str.split("/")[1]) * 30) + (int(today_str.split("/")[2]) * 365)
-    given_dat:int = int(given_date.split("/")[0]) + (int(given_date.split("/")[1]) * 30) + (int(given_date.split("/")[2]) * 365)
-    return tod_dat < given_dat
+    return date.today() < datetime.strptime(given_date, "%d/%m/%Y").date()
 
 # counts the number of cards due per Senko card set
 def cards_due_per_set(sko_setcontents:[]) -> int | str | None:

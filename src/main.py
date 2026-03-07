@@ -704,7 +704,9 @@ def edit_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
                 screen.keypad(False)
                 curses.echo()
                 curses.endwin()
-                sko_setcontents[int(keypress)-1] = edit_sko_card(sko_setcontents[int(keypress)-1])
+                result = edit_sko_card(sko_setcontents[int(keypress)-1])
+                if result is not None:
+                    sko_setcontents[int(keypress)-1] = result
                 return (sko_setname, sko_setcontents)
 
     else:

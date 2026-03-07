@@ -409,6 +409,72 @@ def config_editor(stdscr, config:dict) -> dict:
             k = tui_keys[choice - 4]
             config.setdefault("tui", {})[k] = not tui.get(k, True)
 
+def import_screen(stdscr):
+    from tui import text_input, COLORS
+    stdscr.erase()
+    filepath = text_input(stdscr, "File path: ", y=0, x=0)
+    if not filepath:
+        return
+    filepath = os.path.expanduser(filepath)
+    if not os.path.isfile(filepath):
+        stdscr.erase()
+        stdscr.addstr(0, 0, "File not found.", curses.color_pair(COLORS["error"]))
+        stdscr.refresh()
+        stdscr.getch()
+        return
+    try:
+        from import_export import import_from_txt, import_from_json
+        if filepath.endswith(".txt"):
+            data = import_from_txt(filepath)
+        elif filepath.endswith(".json") or filepath.endswith(".sko"):
+            data = import_from_json(filepath)
+        else:
+            stdscr.erase()
+            stdscr.addstr(0, 0, "Unsupported file type. Use .txt, .json, or .sko", curses.color_pair(COLORS["error"]))
+            stdscr.refresh()
+            stdscr.getch()
+            return
+    except (ValueError, json.JSONDecodeError) as e:
+        stdscr.erase()
+        stdscr.addstr(0, 0, f"Import error: {e}"[:stdscr.getmaxyx()[1]-1], curses.color_pair(COLORS["error"]))
+        stdscr.refresh()
+        stdscr.getch()
+        return
+    n_cards = sum(len(v) for v in data.values())
+    n_sets = len(data)
+    stdscr.erase()
+    stdscr.addstr(0, 0, f"{n_cards} cards across {n_sets} sets", curses.color_pair(COLORS["success"]))
+    stdscr.addstr(2, 0, "[n] New .sko file  [e] Merge into existing  [q] Cancel", curses.color_pair(COLORS["prompt"]))
+    stdscr.refresh()
+    while True:
+        key = chr(stdscr.getch())
+        if key == "q":
+            return
+        elif key == "n":
+            stdscr.erase()
+            name = text_input(stdscr, "Filename: ", y=0, x=0)
+            if name:
+                if not name.endswith(".sko"):
+                    name += ".sko"
+                write_sko(name, data)
+                stdscr.erase()
+                stdscr.addstr(0, 0, f"Saved to {name}", curses.color_pair(COLORS["success"]))
+                stdscr.refresh()
+                stdscr.getch()
+            return
+        elif key == "e":
+            target = select_sko_file(stdscr)
+            if target:
+                existing = read_sko(target)
+                for set_name, cards in data.items():
+                    existing.setdefault(set_name, []).extend(cards)
+                write_sko(target, existing)
+                stdscr.erase()
+                stdscr.addstr(0, 0, f"Merged into {target}", curses.color_pair(COLORS["success"]))
+                stdscr.refresh()
+                stdscr.getch()
+            return
+
 def _menu_dispatch(stdscr, action):
     """shared flow for see/add/edit/delete actions."""
     sko_filename = select_sko_file(stdscr)
@@ -456,7 +522,7 @@ def menu_sko(stdscr) -> None:
             case 1: # browse decks
                 _menu_dispatch(stdscr, "review")
             case 2: # import
-                _stub_screen(stdscr, "Import")
+                import_screen(stdscr)
             case 3: # export
                 _stub_screen(stdscr, "Export")
             case 4: # statistics

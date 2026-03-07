@@ -9,11 +9,15 @@ from datetime import date
 
 # checks the syntax of a senko file
 def check_sko(filename:str) -> bool:
+    required_keys = ["card_name", "card_info", "card_add_info", "card_date"]
     try:
         file_path:str = os.path.expanduser(f"~/.config/senko/{filename}")
-        fhand = open(file_path,"r")
-        sko_contents:{str:[]}= json.loads(fhand.read())
-        fhand.close()
+        with open(file_path, "r") as fhand:
+            sko_contents = json.load(fhand)
+        for set_cards in sko_contents.values():
+            for card in set_cards:
+                if not all(k in card for k in required_keys):
+                    return False
         return True
     except (json.JSONDecodeError, IOError, KeyError):
         return False

@@ -1,13 +1,12 @@
 # mypy: ignore-errors
 # silence mypy type errors
 
-# imports
 import curses
 import json
 import os
-from datetime import date
+from datetime import date, datetime, timedelta
+from tui import run_app
 
-# checks the syntax of a senko file
 def check_sko(filename:str) -> bool:
     required_keys = ["card_name", "card_info", "card_add_info", "card_date"]
     try:
@@ -22,281 +21,128 @@ def check_sko(filename:str) -> bool:
     except (json.JSONDecodeError, IOError, KeyError):
         return False
 
-# returns a filename as a string to open, renders in curses CLI
-def select_sko_file() -> str | None:
-
+def select_sko_file(stdscr) -> str | None:
     file_path:str = os.path.expanduser("~/.config/senko")
     valid_array:[str] = [file_name for file_name in os.listdir(file_path) if file_name.endswith(".sko") and check_sko(file_name)]
-
-    screen = curses.initscr()
-    screen.keypad(True)
-    curses.cbreak()
-    curses.curs_set(0)
-    if curses.has_colors():
-        curses.start_color()
-        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
-
     while True:
         if not len(valid_array) == 0:
-            screen.erase()
+            stdscr.erase()
             coords:{str:int}= {"x":0, "y":2}
             counter:int = 1
-            screen.addstr(0, 0, "Type in a valid number to select Senko file.", curses.color_pair(3))
+            stdscr.addstr(0, 0, "Type in a valid number to select Senko file.", curses.color_pair(3))
             for file_name in valid_array:
                 num_files:int = len(read_sko(file_name))
-                screen.addstr(coords["y"], coords["x"], f"{counter} | {file_name} | ")
-                screen.addstr(coords["y"], len(str(counter)) + len(file_name) + 6, f"{num_files} decks", curses.color_pair(2))
+                stdscr.addstr(coords["y"], coords["x"], f"{counter} | {file_name} | ")
+                stdscr.addstr(coords["y"], len(str(counter)) + len(file_name) + 6, f"{num_files} decks", curses.color_pair(2))
                 coords["y"] += 1
                 counter += 1
-            keypress = chr(screen.getch())
+            keypress = chr(stdscr.getch())
             if not keypress.isnumeric() or int(keypress) > len(valid_array) or int(keypress) < 1:
                 continue
             else:
-                screen.erase()
-                screen.refresh()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
                 return valid_array[int(keypress) - 1]
         else:
-            screen.erase()
-            counter:int = 1
-            screen.addstr(0, 0, "No valid senko (.sko) files found.", curses.color_pair(5))
-            screen.addstr(2, 0, "[Q]uit", curses.color_pair(3))
-            keypress = chr(screen.getch())
-            if not keypress == "q":
-                continue
-            else:
-                screen.erase()
-                screen.refresh()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
+            stdscr.erase()
+            stdscr.addstr(0, 0, "No valid senko (.sko) files found.", curses.color_pair(5))
+            stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(3))
+            keypress = chr(stdscr.getch())
+            if keypress == "q":
                 return None
 
-# destructures a .sko file into a python dictionary
 def read_sko(filename:str) -> {}:
     file_path:str = os.path.expanduser(f"~/.config/senko/{filename}")
     with open(file_path, "r") as fhand:
         return json.load(fhand)
 
-# reads through the file and allows users to select which card set they want
-def select_flashcard_set(file_contents:{}) -> (str,[]):
-
+def select_flashcard_set(stdscr, file_contents:{}) -> (str,[]):
     name_array:[str] = [set_name for set_name in file_contents]
-
-    screen = curses.initscr()
-    screen.keypad(True)
-    curses.cbreak()
-    curses.curs_set(0)
-    if curses.has_colors():
-        curses.start_color()
-        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
-        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
-
     while True:
-        screen.erase()
+        stdscr.erase()
         coords:{str:int}= {"x":0, "y":2}
         counter:int = 1
-        screen.addstr(0, 0, "Type in a valid number to select flashcard set.", curses.color_pair(3))
-
-        # rendering flashcard options
+        stdscr.addstr(0, 0, "Type in a valid number to select flashcard set.", curses.color_pair(3))
         for flashcard_set in name_array:
             cards_due = cards_due_per_set(file_contents[flashcard_set])
             match cards_due:
                 case "Empty":
-                    screen.addstr(coords["y"], coords["x"], f"{counter} | {flashcard_set} | ")
-                    screen.addstr(coords["y"], len(str(counter)) + len(flashcard_set) + 6, cards_due, curses.color_pair(5))
-                    coords["y"] += 1
-                    counter += 1
-                    
+                    stdscr.addstr(coords["y"], coords["x"], f"{counter} | {flashcard_set} | ")
+                    stdscr.addstr(coords["y"], len(str(counter)) + len(flashcard_set) + 6, cards_due, curses.color_pair(5))
                 case 0:
-                    screen.addstr(coords["y"], coords["x"], f"{counter} | {flashcard_set} | ")
-                    screen.addstr(coords["y"], len(str(counter)) + len(flashcard_set) + 6, str(cards_due), curses.color_pair(2))
-                    coords["y"] += 1
-                    counter += 1
-
+                    stdscr.addstr(coords["y"], coords["x"], f"{counter} | {flashcard_set} | ")
+                    stdscr.addstr(coords["y"], len(str(counter)) + len(flashcard_set) + 6, str(cards_due), curses.color_pair(2))
                 case _:
-                    screen.addstr(coords["y"], coords["x"], f"{counter} | {flashcard_set} | ")
-                    screen.addstr(coords["y"], len(str(counter)) + len(flashcard_set) + 6, str(cards_due), curses.color_pair(1))
-                    coords["y"] += 1
-                    counter += 1
-                    
-        keypress = chr(screen.getch())
+                    stdscr.addstr(coords["y"], coords["x"], f"{counter} | {flashcard_set} | ")
+                    stdscr.addstr(coords["y"], len(str(counter)) + len(flashcard_set) + 6, str(cards_due), curses.color_pair(1))
+            coords["y"] += 1
+            counter += 1
+        keypress = chr(stdscr.getch())
         if not keypress.isnumeric() or int(keypress) > len(name_array) or int(keypress) < 1:
             continue
         else:
-            screen.erase()
-            screen.addstr(0,0,"Loading your senko set...", curses.color_pair(2))
-            screen.refresh()
-            screen.keypad(False)
-            curses.echo()
-            curses.endwin()
             return (name_array[int(keypress) - 1], file_contents[name_array[int(keypress) - 1]])
 
-# renders relevant card information, returns the difficulty
-def render_sko_card(card:{}) -> str:
-
-    screen = curses.initscr()
-    screen.keypad(True)
-    curses.cbreak()
-    curses.curs_set(0)
-
-    if curses.has_colors():
-        curses.start_color()
-        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
-        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
-
+def render_sko_card(stdscr, card:{}) -> str:
     while True:
-        screen.erase()
-        screen.addstr(0, 0, card["card_name"])
-        screen.addstr(2, 0, "[S]how card", curses.color_pair(3))
-
-        keypress = chr(screen.getch())
-
-        if not keypress == "s":
-            continue
-        else:
+        stdscr.erase()
+        stdscr.addstr(0, 0, card["card_name"])
+        stdscr.addstr(2, 0, "[S]how card", curses.color_pair(3))
+        keypress = chr(stdscr.getch())
+        if keypress == "s":
             break
-
     while True:
-        screen.erase()
+        stdscr.erase()
         if card["card_name"]:
-            screen.addstr(0, 0, card["card_name"])
-        else:
-            screen.addstr(0, 0, "")
+            stdscr.addstr(0, 0, card["card_name"])
         if card["card_info"]:
-            screen.addstr(1, 0, card["card_info"])
-        else:
-            screen.addstr(0, 0, "")
+            stdscr.addstr(1, 0, card["card_info"])
         if card["card_add_info"]:
-            screen.addstr(2, 0, card["card_add_info"])
-        else:
-            screen.addstr(0, 0, "")
-
-        screen.addstr(4, 0, "[Q] Easy", curses.color_pair(2))
-        screen.addstr(5, 0, "[W] Medium", curses.color_pair(5))
-        screen.addstr(6, 0, "[E] Hard", curses.color_pair(1))
-
-        keypress_choose = chr(screen.getch())
-        difficulty:str = ""
-
+            stdscr.addstr(2, 0, card["card_add_info"])
+        stdscr.addstr(4, 0, "[Q] Easy", curses.color_pair(2))
+        stdscr.addstr(5, 0, "[W] Medium", curses.color_pair(5))
+        stdscr.addstr(6, 0, "[E] Hard", curses.color_pair(1))
+        keypress_choose = chr(stdscr.getch())
         match keypress_choose:
             case "q":
-                difficulty = "easy"
-                break
+                return "easy"
             case "w":
-                difficulty = "medium"
-                break
+                return "medium"
             case "e":
-                difficulty = "hard"
-                break
-            case _:
-                continue
+                return "hard"
 
-    screen.erase()
-    screen.refresh()
-    screen.keypad(False)
-    curses.echo()
-    curses.endwin()
-    return difficulty
-
-# runs whenever a card set is run
-def render_sko_loop(sko_setname:str, sko_setcontents:[]) -> ():
+def render_sko_loop(stdscr, sko_setname:str, sko_setcontents:[]) -> ():
     today_str:str= date.today().strftime("%d/%m/%Y")
-
     while True:
-    
-        # empty set
         if len(sko_setcontents) == 0:
-
-            screen = curses.initscr()
-            screen.keypad(True)
-            curses.noecho()
-            curses.cbreak()
-            curses.curs_set(0)
-
-            if curses.has_colors():
-                curses.start_color()
-                curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-                curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-                curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
-
             while True:
-
-                screen.erase()
-                screen.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(5))
-                screen.addstr(2, 0, "[Q]uit", curses.color_pair(3))
-
-                keypress:str = chr(screen.getch())
-
-                if keypress != "q":
-                    continue
-                else:
-                    screen.refresh()
-                    curses.nocbreak()
-                    screen.keypad(False)
-                    curses.echo()
-                    curses.endwin()
+                stdscr.erase()
+                stdscr.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(5))
+                stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(3))
+                if chr(stdscr.getch()) == "q":
                     return (sko_setname, sko_setcontents)
-
-        # break condition
         date_array:[str] = [card["card_date"] for card in sko_setcontents]
         count:int = 0
         for dated in date_array:
             if check_future(dated):
                 count += 1
-
         if count == len(date_array):
-
-            # completed decks screen
-            screen = curses.initscr()
-            screen.keypad(True)
-            curses.noecho()
-            curses.cbreak()
-            curses.curs_set(0)
-
             while True:
-
-                screen.erase()
-                screen.addstr(0, 0, f"You have finished all {sko_setname} cards for the day! Take a break!", curses.color_pair(2))
-                screen.addstr(2, 0, "[Q]uit", curses.color_pair(3))
-
-                keypress:str = chr(screen.getch())
-
-                if keypress != "q":
-                    continue
-                else:
-                    screen.refresh()
-                    curses.nocbreak()
-                    screen.keypad(False)
-                    curses.echo()
-                    curses.endwin()
+                stdscr.erase()
+                stdscr.addstr(0, 0, f"You have finished all {sko_setname} cards for the day! Take a break!", curses.color_pair(2))
+                stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(3))
+                if chr(stdscr.getch()) == "q":
                     return (sko_setname, sko_setcontents)
-
-        # loop content
         for card in sko_setcontents:
-
             if check_overdue(card["card_date"]):
                 card["card_date"] = today_str
-
             if card["card_date"] == today_str:
-                difficulty:str = render_sko_card(card)
-                match difficulty: # edit below to change how often the card should be shown
+                difficulty:str = render_sko_card(stdscr, card)
+                match difficulty:
                     case "easy":
                         card["card_date"] = add_days(card["card_date"], 3)
                     case "medium":
                         card["card_date"] = add_days(card["card_date"], 2)
                     case "hard":
                         card["card_date"] = add_days(card["card_date"], 0)
-
-from datetime import datetime, timedelta
 
 def add_days(given_date:str, days_add:int) -> str:
     dt = datetime.strptime(given_date, "%d/%m/%Y")
@@ -308,7 +154,6 @@ def check_overdue(given_date:str) -> bool:
 def check_future(given_date:str) -> bool:
     return date.today() < datetime.strptime(given_date, "%d/%m/%Y").date()
 
-# counts the number of cards due per Senko card set
 def cards_due_per_set(sko_setcontents:[]) -> int | str | None:
     today_str:str= date.today().strftime("%d/%m/%Y")
     if len(sko_setcontents) == 0:
@@ -323,590 +168,289 @@ def cards_due_per_set(sko_setcontents:[]) -> int | str | None:
     else:
         return None
 
-def edit_sko_card(card:{}) -> {}:
-
+def edit_sko_card(stdscr, card:{}) -> {}:
     edit_option:str = ""
-    screen = curses.initscr()
-    screen.keypad(True)
-    curses.noecho()
-    curses.cbreak()
-    curses.curs_set(0)
-
-    if curses.has_colors():
-        curses.start_color()
-        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
-        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
-
     while True:
-        screen.erase()
-        screen.addstr(0, 0, "Choose which attribute to edit.", curses.color_pair(3))
-        screen.addstr(2,0,f"[N]ame            | {card['card_name']}")
-        screen.addstr(3,0,f"[I]nfo            | {card['card_info']}")
-        screen.addstr(4,0,f"[A]dditional info | {card['card_add_info']}")
-        screen.addstr(5,0,f"Date              | {card['card_date']}", curses.color_pair(1)) # rendered in diff color to ensure it appears uneditable
-
-        keypress:str = chr(screen.getch())
-
-        if keypress == "n" or keypress == "i" or keypress == "a" or keypress == "q":
+        stdscr.erase()
+        stdscr.addstr(0, 0, "Choose which attribute to edit.", curses.color_pair(3))
+        stdscr.addstr(2,0,f"[N]ame            | {card['card_name']}")
+        stdscr.addstr(3,0,f"[I]nfo            | {card['card_info']}")
+        stdscr.addstr(4,0,f"[A]dditional info | {card['card_add_info']}")
+        stdscr.addstr(5,0,f"Date              | {card['card_date']}", curses.color_pair(1))
+        keypress:str = chr(stdscr.getch())
+        if keypress in ("n", "i", "a", "q"):
             edit_option = keypress
             break
-        else:
-            continue
-
     match edit_option:
-
         case "n":
-
             card_name_buffer:str = card["card_name"]
-
             while True:
-
-                screen.erase()
-                screen.addstr(0,0,"Editing card name", curses.color_pair(3))
-                screen.addstr(2,0,f"Name            | {card_name_buffer}_", curses.color_pair(2))
-                screen.addstr(3,0,f"Info            | {card['card_info']}")
-                screen.addstr(4,0,f"Additional info | {card['card_add_info']}")
-                screen.addstr(5,0,f"Date            | {card['card_date']}", curses.color_pair(1))
-                screen.refresh()
-
-                keypress= screen.getch()
-
-                if keypress == curses.KEY_ENTER or keypress == 10 or keypress == 13:
-                    screen.refresh()
+                stdscr.erase()
+                stdscr.addstr(0,0,"Editing card name", curses.color_pair(3))
+                stdscr.addstr(2,0,f"Name            | {card_name_buffer}_", curses.color_pair(2))
+                stdscr.addstr(3,0,f"Info            | {card['card_info']}")
+                stdscr.addstr(4,0,f"Additional info | {card['card_add_info']}")
+                stdscr.addstr(5,0,f"Date            | {card['card_date']}", curses.color_pair(1))
+                stdscr.refresh()
+                keypress= stdscr.getch()
+                if keypress in (curses.KEY_ENTER, 10, 13):
                     card["card_name"] = card_name_buffer
-                    curses.nocbreak()
-                    screen.keypad(False)
-                    curses.echo()
-                    curses.endwin()
                     return card
-
-                elif keypress == ord("\t") or keypress == 9: # tab
-                    card_name_buffer += "\t"
-
-                elif keypress == curses.KEY_BACKSPACE or keypress == 127:
+                elif keypress in (curses.KEY_BACKSPACE, 127):
                     card_name_buffer = card_name_buffer[:-1]
-                
-                else:
+                elif 32 <= keypress <= 126:
                     card_name_buffer += chr(keypress)
-
         case "i":
-
             card_info_buffer:str = card["card_info"]
-
             while True:
-
-                screen.erase()
-                screen.addstr(0,0,"Editing card info", curses.color_pair(3))
-                screen.addstr(2,0,f"Name            | {card['card_name']}")
-                screen.addstr(3,0,f"Info            | {card_info_buffer}_", curses.color_pair(2))
-                screen.addstr(4,0,f"Additional info | {card['card_add_info']}")
-                screen.addstr(5,0,f"Date            | {card['card_date']}", curses.color_pair(1))
-                screen.refresh()
-
-                keypress= screen.getch()
-
-                if keypress == curses.KEY_ENTER or keypress == 10 or keypress == 13:
-                    screen.refresh()
+                stdscr.erase()
+                stdscr.addstr(0,0,"Editing card info", curses.color_pair(3))
+                stdscr.addstr(2,0,f"Name            | {card['card_name']}")
+                stdscr.addstr(3,0,f"Info            | {card_info_buffer}_", curses.color_pair(2))
+                stdscr.addstr(4,0,f"Additional info | {card['card_add_info']}")
+                stdscr.addstr(5,0,f"Date            | {card['card_date']}", curses.color_pair(1))
+                stdscr.refresh()
+                keypress= stdscr.getch()
+                if keypress in (curses.KEY_ENTER, 10, 13):
                     card["card_info"] = card_info_buffer
-                    curses.nocbreak()
-                    screen.keypad(False)
-                    curses.echo()
-                    curses.endwin()
                     return card
-
-                elif keypress == ord("\t") or keypress == 9: # tab
-                    card_info_buffer += "\t"
-
-                elif keypress == curses.KEY_BACKSPACE or keypress == 127:
+                elif keypress in (curses.KEY_BACKSPACE, 127):
                     card_info_buffer = card_info_buffer[:-1]
-                
-                else:
+                elif 32 <= keypress <= 126:
                     card_info_buffer += chr(keypress)
-
         case "a":
-
             card_add_info_buffer:str = card["card_add_info"]
-
             while True:
-
-                screen.erase()
-                screen.addstr(0,0,"Editing card additional info", curses.color_pair(3))
-                screen.addstr(2,0,f"Name            | {card['card_name']}")
-                screen.addstr(3,0,f"Info            | {card['card_info']}")
-                screen.addstr(4,0,f"Additional info | {card_add_info_buffer}_", curses.color_pair(2))
-                screen.addstr(5,0,f"Date            | {card['card_date']}", curses.color_pair(1))
-                screen.refresh()
-
-                keypress= screen.getch()
-
-                if keypress == curses.KEY_ENTER or keypress == 10 or keypress == 13:
-                    screen.refresh()
+                stdscr.erase()
+                stdscr.addstr(0,0,"Editing card additional info", curses.color_pair(3))
+                stdscr.addstr(2,0,f"Name            | {card['card_name']}")
+                stdscr.addstr(3,0,f"Info            | {card['card_info']}")
+                stdscr.addstr(4,0,f"Additional info | {card_add_info_buffer}_", curses.color_pair(2))
+                stdscr.addstr(5,0,f"Date            | {card['card_date']}", curses.color_pair(1))
+                stdscr.refresh()
+                keypress= stdscr.getch()
+                if keypress in (curses.KEY_ENTER, 10, 13):
                     card["card_add_info"] = card_add_info_buffer
-                    curses.nocbreak()
-                    screen.keypad(False)
-                    curses.echo()
-                    curses.endwin()
                     return card
-
-                elif keypress == ord("\t") or keypress == 9: # tab
-                    card_add_info_buffer += "\t"
-
-                elif keypress == curses.KEY_BACKSPACE or keypress == 127:
+                elif keypress in (curses.KEY_BACKSPACE, 127):
                     card_add_info_buffer = card_add_info_buffer[:-1]
-                
-                else:
+                elif 32 <= keypress <= 126:
                     card_add_info_buffer += chr(keypress)
-
         case "q":
             return None
 
-# takes in nothing and returns a new card to be added to the current set, provides a front end for creating a card
-def add_sko_card() -> {}:
-
+def add_sko_card(stdscr) -> {}:
     today_str:str= date.today().strftime("%d/%m/%Y")
-    card:{str:str} = {
-            "card_name": "",
-            "card_info": "",
-            "card_add_info": "",
-            "card_date": today_str # add an interesting way to type in dates where it auto adds the / for you and checks validity of date
-        }
+    card:{str:str} = {"card_name": "", "card_info": "", "card_add_info": "", "card_date": today_str}
     keypress_buffer:str = ""
-
-    screen = curses.initscr()
-    screen.keypad(True)
-    curses.noecho()
-    curses.cbreak()
-    curses.curs_set(0)
-
-    if curses.has_colors():
-        curses.start_color()
-        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
-        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
-
     while True:
-        screen.erase()
-        screen.addstr(0, 0,"Add card name.", curses.color_pair(3))
-        screen.addstr(2,0,f"Name            | {keypress_buffer}_", curses.color_pair(2))
-        screen.addstr(3,0,f"Info            | {card['card_info']}")
-        screen.addstr(4,0,f"Additional info | {card['card_add_info']}")
-        screen.addstr(5,0,f"Date            | {card['card_date']}")
-        screen.refresh()
-
-        keypress = screen.getch()
-
-        if keypress == curses.KEY_ENTER or keypress == 10 or keypress == 13:
-            screen.refresh()
+        stdscr.erase()
+        stdscr.addstr(0, 0,"Add card name.", curses.color_pair(3))
+        stdscr.addstr(2,0,f"Name            | {keypress_buffer}_", curses.color_pair(2))
+        stdscr.addstr(3,0,f"Info            | {card['card_info']}")
+        stdscr.addstr(4,0,f"Additional info | {card['card_add_info']}")
+        stdscr.addstr(5,0,f"Date            | {card['card_date']}")
+        stdscr.refresh()
+        keypress = stdscr.getch()
+        if keypress in (curses.KEY_ENTER, 10, 13):
             card["card_name"] = keypress_buffer
             break
-
-        elif keypress == ord("\t") or keypress == 9: # tab
-            keypress_buffer += "\t"
-
-        elif keypress == curses.KEY_BACKSPACE or keypress == 127:
+        elif keypress in (curses.KEY_BACKSPACE, 127):
             keypress_buffer = keypress_buffer[:-1]
-        
-        else:
+        elif 32 <= keypress <= 126:
             keypress_buffer += chr(keypress)
-
     keypress_buffer = ""
-
     while True:
-        screen.erase()
-        screen.addstr(0, 0,"Add card info.", curses.color_pair(3))
-        screen.addstr(2,0,f"Name            | {card['card_name']}")
-        screen.addstr(3,0,f"Info            | {keypress_buffer}_", curses.color_pair(2))
-        screen.addstr(4,0,f"Additional info | {card['card_add_info']}")
-        screen.addstr(5,0,f"Date            | {card['card_date']}") 
-        screen.refresh()
-
-        keypress = screen.getch()
-
-        if keypress == curses.KEY_ENTER or keypress == 10 or keypress == 13:
-            screen.refresh()
+        stdscr.erase()
+        stdscr.addstr(0, 0,"Add card info.", curses.color_pair(3))
+        stdscr.addstr(2,0,f"Name            | {card['card_name']}")
+        stdscr.addstr(3,0,f"Info            | {keypress_buffer}_", curses.color_pair(2))
+        stdscr.addstr(4,0,f"Additional info | {card['card_add_info']}")
+        stdscr.addstr(5,0,f"Date            | {card['card_date']}")
+        stdscr.refresh()
+        keypress = stdscr.getch()
+        if keypress in (curses.KEY_ENTER, 10, 13):
             card["card_info"] = keypress_buffer
             break
-
-        elif keypress == ord("\t") or keypress == 9: # tab
-            keypress_buffer += "\t"
-
-        elif keypress == curses.KEY_BACKSPACE or keypress == 127:
+        elif keypress in (curses.KEY_BACKSPACE, 127):
             keypress_buffer = keypress_buffer[:-1]
-        
-        else:
+        elif 32 <= keypress <= 126:
             keypress_buffer += chr(keypress)
-
     keypress_buffer = ""
-
     while True:
-        screen.erase()
-        screen.addstr(0, 0,"Add additional info.", curses.color_pair(3))
-        screen.addstr(2,0,f"Name            | {card['card_name']}")
-        screen.addstr(3,0,f"Info            | {card['card_info']}")
-        screen.addstr(4,0,f"Additional info | {keypress_buffer}_", curses.color_pair(2))
-        screen.addstr(5,0,f"Date            | {card['card_date']}") 
-        screen.refresh()
-
-        keypress = screen.getch()
-
-        if keypress == curses.KEY_ENTER or keypress == 10 or keypress == 13:
-            screen.refresh()
+        stdscr.erase()
+        stdscr.addstr(0, 0,"Add additional info.", curses.color_pair(3))
+        stdscr.addstr(2,0,f"Name            | {card['card_name']}")
+        stdscr.addstr(3,0,f"Info            | {card['card_info']}")
+        stdscr.addstr(4,0,f"Additional info | {keypress_buffer}_", curses.color_pair(2))
+        stdscr.addstr(5,0,f"Date            | {card['card_date']}")
+        stdscr.refresh()
+        keypress = stdscr.getch()
+        if keypress in (curses.KEY_ENTER, 10, 13):
             card["card_add_info"] = keypress_buffer
             break
-
-        elif keypress == ord("\t") or keypress == 9: # tab
-            keypress_buffer += "\t"
-
-        elif keypress == curses.KEY_BACKSPACE or keypress == 127:
+        elif keypress in (curses.KEY_BACKSPACE, 127):
             keypress_buffer = keypress_buffer[:-1]
-        
-        else:
+        elif 32 <= keypress <= 126:
             keypress_buffer += chr(keypress)
-
     keypress_buffer = today_str
-
     while True:
-        screen.erase()
-        screen.addstr(0, 0,"Add card date.", curses.color_pair(3))
-        screen.addstr(2,0,f"Name            | {card['card_name']}")
-        screen.addstr(3,0,f"Info            | {card['card_info']}")
-        screen.addstr(4,0,f"Additional info | {card['card_add_info']}")
-        screen.addstr(5,0,f"Date            | {keypress_buffer}_", curses.color_pair(2))
-        screen.refresh()
-
-        keypress = screen.getch()
-
-        if keypress == curses.KEY_ENTER or keypress == 10 or keypress == 13:
-            screen.refresh()
+        stdscr.erase()
+        stdscr.addstr(0, 0,"Add card date.", curses.color_pair(3))
+        stdscr.addstr(2,0,f"Name            | {card['card_name']}")
+        stdscr.addstr(3,0,f"Info            | {card['card_info']}")
+        stdscr.addstr(4,0,f"Additional info | {card['card_add_info']}")
+        stdscr.addstr(5,0,f"Date            | {keypress_buffer}_", curses.color_pair(2))
+        stdscr.refresh()
+        keypress = stdscr.getch()
+        if keypress in (curses.KEY_ENTER, 10, 13):
             card["card_date"] = keypress_buffer
-            curses.nocbreak()
-            screen.keypad(False)
-            curses.echo()
-            curses.endwin()
             return card
-
-        elif keypress == ord("\t") or keypress == 9: # tab
-            keypress_buffer += "\t"
-
-        elif keypress == curses.KEY_BACKSPACE or keypress == 127:
+        elif keypress in (curses.KEY_BACKSPACE, 127):
             keypress_buffer = keypress_buffer[:-1]
-        
-        else:
+        elif 32 <= keypress <= 126:
             keypress_buffer += chr(keypress)
 
-# delete flashcards from an existing senko dictionary and return the edited dictionary
-def delete_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
-
-    screen = curses.initscr()
-    screen.keypad(True)
-    curses.cbreak()
-    curses.curs_set(0)
-
-    if curses.has_colors():
-        curses.start_color()
-        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
-        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
-
+def delete_sko_loop(stdscr, sko_setname:str, sko_setcontents:[]) -> []:
     if not len(sko_setcontents) == 0:
-
         while True:
-            screen.erase()
+            stdscr.erase()
             y_coord:int = 2
-            screen.addstr(0, 0, f"Type in a valid number to delete card from {sko_setname}.", curses.color_pair(3))
-
+            stdscr.addstr(0, 0, f"Type in a valid number to delete card from {sko_setname}.", curses.color_pair(3))
             for card in sko_setcontents:
-                screen.addstr(y_coord, 0, f"{y_coord-1} | {card['card_name']}")
+                stdscr.addstr(y_coord, 0, f"{y_coord-1} | {card['card_name']}")
                 y_coord += 1
-            screen.addstr(y_coord + 1, 0, "[Q]uit", curses.color_pair(3))
-
-            keypress = chr(screen.getch())
+            stdscr.addstr(y_coord + 1, 0, "[Q]uit", curses.color_pair(3))
+            keypress = chr(stdscr.getch())
             if keypress == "q":
-                screen.erase()
-                screen.refresh()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
                 return (sko_setname, sko_setcontents)
             elif not keypress.isnumeric() or int(keypress) > len(sko_setcontents) or int(keypress) < 1:
                 continue
             else:
-                screen.erase()
-                screen.refresh()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
                 del sko_setcontents[int(keypress)-1]
                 return (sko_setname, sko_setcontents)
-
     else:
-
         while True:
-            screen.erase()
-            screen.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(5))
-            screen.addstr(2, 0, "[Q]uit", curses.color_pair(3))
-
-            keypress:str = chr(screen.getch())
-
-            if keypress != "q":
-                continue
-            else:
-                screen.refresh()
-                curses.nocbreak()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
+            stdscr.erase()
+            stdscr.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(5))
+            stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(3))
+            if chr(stdscr.getch()) == "q":
                 return (sko_setname, sko_setcontents)
 
-# updates the overall senko file's dictionary which can then be written to the file using write_sko(), this should update the existing key
 def update_sko_allsets(sko_all_sets:{}, sko_setname:str, sko_setcontents:[]) -> {}:
     sko_all_sets[sko_setname] = sko_setcontents
     return sko_all_sets
 
-# writes the inputted dictionary to the Senko file for saving
 def write_sko(filename:str, sko_contents:{}) -> None:
     file_path:str = os.path.expanduser(f"~/.config/senko/{filename}")
     with open(file_path, "w") as fhand:
         json.dump(sko_contents, fhand)
 
-# provides the frontend for editing flashcards in curses cli, returns the edited dictionary and uses edit_sko_card(), function should allow selection of a given card
-def edit_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
-
-    screen = curses.initscr()
-    screen.keypad(True)
-    curses.cbreak()
-    curses.curs_set(0)
-
-    if curses.has_colors():
-        curses.start_color()
-        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
-        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
-
+def edit_sko_loop(stdscr, sko_setname:str, sko_setcontents:[]) -> []:
     if not len(sko_setcontents) == 0:
-
         while True:
-            screen.erase()
+            stdscr.erase()
             y_coord:int = 2
-            screen.addstr(0, 0, f"Type in a valid number to edit card from {sko_setname}.", curses.color_pair(3))
-
+            stdscr.addstr(0, 0, f"Type in a valid number to edit card from {sko_setname}.", curses.color_pair(3))
             for card in sko_setcontents:
-                screen.addstr(y_coord, 0, f"{y_coord-1} | {card['card_name']}")
+                stdscr.addstr(y_coord, 0, f"{y_coord-1} | {card['card_name']}")
                 y_coord += 1
-
-            keypress = chr(screen.getch())
+            keypress = chr(stdscr.getch())
             if not keypress.isnumeric() or int(keypress) > len(sko_setcontents) or int(keypress) < 1:
                 continue
             else:
-                screen.erase()
-                screen.refresh()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
-                result = edit_sko_card(sko_setcontents[int(keypress)-1])
+                result = edit_sko_card(stdscr, sko_setcontents[int(keypress)-1])
                 if result is not None:
                     sko_setcontents[int(keypress)-1] = result
                 return (sko_setname, sko_setcontents)
-
     else:
-
         while True:
-            screen.erase()
-            screen.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(5))
-            screen.addstr(2, 0, "[Q]uit", curses.color_pair(3))
-
-            keypress:str = chr(screen.getch())
-
-            if keypress != "q":
-                continue
-            else:
-                screen.refresh()
-                curses.nocbreak()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
+            stdscr.erase()
+            stdscr.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(5))
+            stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(3))
+            if chr(stdscr.getch()) == "q":
                 return (sko_setname, sko_setcontents)
 
-# add flashcards to an existing senko dictionary and return the edited dictionary, runs check_sko(), and integrate the add_sko_card() function here
-def add_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:
-
-    screen = curses.initscr()
-    screen.keypad(True)
-    curses.cbreak()
-    curses.curs_set(0)
-
-    if curses.has_colors():
-        curses.start_color()
-        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
-        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
-
+def add_sko_loop(stdscr, sko_setname:str, sko_setcontents:[]) -> []:
     if not len(sko_setcontents) == 0:
-
         while True:
-            screen.erase()
+            stdscr.erase()
             y_coord:int = 2
-            screen.addstr(0, 0, f"{sko_setname}")
-
+            stdscr.addstr(0, 0, f"{sko_setname}")
             for card in sko_setcontents:
-                screen.addstr(y_coord, 0, f"{y_coord-1} | {card['card_name']}")
+                stdscr.addstr(y_coord, 0, f"{y_coord-1} | {card['card_name']}")
                 y_coord += 1
-            screen.addstr(y_coord + 1, 0, f"[A]dd card to {sko_setname}", curses.color_pair(3))
-            screen.addstr(y_coord + 2, 0, "[Q]uit", curses.color_pair(3))
-            
-            keypress = chr(screen.getch())
-
+            stdscr.addstr(y_coord + 1, 0, f"[A]dd card to {sko_setname}", curses.color_pair(3))
+            stdscr.addstr(y_coord + 2, 0, "[Q]uit", curses.color_pair(3))
+            keypress = chr(stdscr.getch())
             if keypress == "q":
-                screen.erase()
-                screen.refresh()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
                 return (sko_setname, sko_setcontents)
             elif keypress == "a":
-                screen.erase()
-                screen.refresh()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
-                sko_setcontents.append(add_sko_card())
+                sko_setcontents.append(add_sko_card(stdscr))
                 return (sko_setname, sko_setcontents)
-            else:
-                continue
-
     else:
-
         while True:
-            screen.erase()
-            screen.addstr(0, 0, f"{sko_setname}")
-            screen.addstr(2, 0, f"{sko_setname} is currently empty.", curses.color_pair(5))
-            screen.addstr(4, 0, f"[A]dd card to {sko_setname}", curses.color_pair(3))
-            screen.addstr(5, 0, "[Q]uit", curses.color_pair(3))
-
-            keypress:str = chr(screen.getch())
-
+            stdscr.erase()
+            stdscr.addstr(0, 0, f"{sko_setname}")
+            stdscr.addstr(2, 0, f"{sko_setname} is currently empty.", curses.color_pair(5))
+            stdscr.addstr(4, 0, f"[A]dd card to {sko_setname}", curses.color_pair(3))
+            stdscr.addstr(5, 0, "[Q]uit", curses.color_pair(3))
+            keypress:str = chr(stdscr.getch())
             if keypress == "q":
-                screen.erase()
-                screen.refresh()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
                 return (sko_setname, sko_setcontents)
             elif keypress == "a":
-                screen.erase()
-                screen.refresh()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
-                sko_setcontents.append(add_sko_card())
+                sko_setcontents.append(add_sko_card(stdscr))
                 return (sko_setname, sko_setcontents)
-            else:
-                continue
 
-# provides the frontend for choosing what mode of senko you want to use, use, add, edit existing, delete cards, include running check_sko() for valid or invalid files
-def menu_sko() -> None:
-
-    screen = curses.initscr()
-    screen.keypad(True)
-    curses.cbreak()
-    curses.curs_set(0)
-
-    if curses.has_colors():
-        curses.start_color()
-        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
-        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-        curses.init_pair(4, curses.COLOR_BLUE, curses.COLOR_BLACK)
-        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
-        curses.init_pair(6, curses.COLOR_CYAN, curses.COLOR_BLACK)
-        curses.init_pair(7, curses.COLOR_WHITE, curses.COLOR_BLACK)
-
+def menu_sko(stdscr) -> None:
     while True:
-        screen.erase()
-        screen.addstr(0, 0, "Senko flashcards")
-        screen.addstr(2, 0, "[S]ee cards", curses.color_pair(6))
-        screen.addstr(3, 0, "[A]dd cards", curses.color_pair(2))
-        screen.addstr(4, 0, "[A]dd cards", curses.color_pair(4))
-        screen.addstr(5, 0, "[E]dit cards", curses.color_pair(5))
-        screen.addstr(6, 0, "[D]elete cards", curses.color_pair(1))
-        screen.addstr(7, 0, "[Q]uit", curses.color_pair(3))
-        screen.addstr(9, 0, "Spot issues? Ping me on Github @gongahkia.")
-        
-        keypress = chr(screen.getch())
-
+        stdscr.erase()
+        stdscr.addstr(0, 0, "Senko flashcards")
+        stdscr.addstr(2, 0, "[S]ee cards", curses.color_pair(6))
+        stdscr.addstr(3, 0, "[A]dd cards", curses.color_pair(2))
+        stdscr.addstr(4, 0, "[E]dit cards", curses.color_pair(5))
+        stdscr.addstr(5, 0, "[D]elete cards", curses.color_pair(1))
+        stdscr.addstr(6, 0, "[Q]uit", curses.color_pair(3))
+        stdscr.addstr(8, 0, "Spot issues? Ping me on Github @gongahkia.")
+        keypress = chr(stdscr.getch())
         match keypress:
-
             case "s":
-                screen.erase()
-                screen.refresh()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
-                sko_filename:str = select_sko_file()
-                sko_all_sets:{} = read_sko(sko_filename)
-                sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
-                sko_setname:str = sko_setname_setcontents[0]
-                sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
-                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, render_sko_loop(sko_setname, sko_setcontents)[1]))
-                return None
-
+                sko_filename = select_sko_file(stdscr)
+                if sko_filename is None:
+                    continue
+                sko_all_sets = read_sko(sko_filename)
+                sko_setname_setcontents = select_flashcard_set(stdscr, sko_all_sets)
+                sko_setname = sko_setname_setcontents[0]
+                sko_setcontents = sko_setname_setcontents[1]
+                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, render_sko_loop(stdscr, sko_setname, sko_setcontents)[1]))
             case "a":
-                screen.erase()
-                screen.refresh()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
-                sko_filename:str = select_sko_file()
-                sko_all_sets:{} = read_sko(sko_filename)
-                sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
-                sko_setname:str = sko_setname_setcontents[0]
-                sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
-                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, add_sko_loop(sko_setname, sko_setcontents)[1]))
-                return None
-            
+                sko_filename = select_sko_file(stdscr)
+                if sko_filename is None:
+                    continue
+                sko_all_sets = read_sko(sko_filename)
+                sko_setname_setcontents = select_flashcard_set(stdscr, sko_all_sets)
+                sko_setname = sko_setname_setcontents[0]
+                sko_setcontents = sko_setname_setcontents[1]
+                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, add_sko_loop(stdscr, sko_setname, sko_setcontents)[1]))
             case "e":
-                screen.erase()
-                screen.refresh()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
-                sko_filename:str = select_sko_file()
-                sko_all_sets:{} = read_sko(sko_filename)
-                sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
-                sko_setname:str = sko_setname_setcontents[0]
-                sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
-                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, edit_sko_loop(sko_setname, sko_setcontents)[1]))
-                return None
-
+                sko_filename = select_sko_file(stdscr)
+                if sko_filename is None:
+                    continue
+                sko_all_sets = read_sko(sko_filename)
+                sko_setname_setcontents = select_flashcard_set(stdscr, sko_all_sets)
+                sko_setname = sko_setname_setcontents[0]
+                sko_setcontents = sko_setname_setcontents[1]
+                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, edit_sko_loop(stdscr, sko_setname, sko_setcontents)[1]))
             case "d":
-                screen.erase()
-                screen.refresh()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
-                sko_filename:str = select_sko_file()
-                sko_all_sets:{} = read_sko(sko_filename)
-                sko_setname_setcontents:(str,[]) = select_flashcard_set(sko_all_sets)
-                sko_setname:str = sko_setname_setcontents[0]
-                sko_setcontents:[] = sko_setname_setcontents[1] # this should be the only global copy that is transformed using all functions
-                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, delete_sko_loop(sko_setname, sko_setcontents)[1]))
-                return None
-
+                sko_filename = select_sko_file(stdscr)
+                if sko_filename is None:
+                    continue
+                sko_all_sets = read_sko(sko_filename)
+                sko_setname_setcontents = select_flashcard_set(stdscr, sko_all_sets)
+                sko_setname = sko_setname_setcontents[0]
+                sko_setcontents = sko_setname_setcontents[1]
+                write_sko(sko_filename, update_sko_allsets(sko_all_sets, sko_setname, delete_sko_loop(stdscr, sko_setname, sko_setcontents)[1]))
             case "q":
-                screen.erase()
-                screen.refresh()
-                screen.keypad(False)
-                curses.echo()
-                curses.endwin()
                 return None
 
-            case _:
-                continue
-
-menu_sko()
+run_app(menu_sko)

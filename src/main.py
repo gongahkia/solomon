@@ -409,6 +409,96 @@ def config_editor(stdscr, config:dict) -> dict:
             k = tui_keys[choice - 4]
             config.setdefault("tui", {})[k] = not tui.get(k, True)
 
+def stats_screen(stdscr):
+    from tui import COLORS
+    from srs import cards_due_count
+    from schema import migrate_file
+    config_dir = os.path.expanduser("~/.config/senko")
+    sko_files = [f for f in os.listdir(config_dir) if f.endswith(".sko") and check_sko(f)]
+    if not sko_files:
+        stdscr.erase()
+        stdscr.addstr(0, 0, "No data yet. Create a deck to get started.", curses.color_pair(COLORS["muted"]))
+        stdscr.addstr(2, 0, "[q] Back", curses.color_pair(COLORS["prompt"]))
+        stdscr.refresh()
+        stdscr.getch()
+        return
+    all_cards = []
+    file_stats = []
+    for fname in sko_files:
+        data = read_sko(fname)
+        data = migrate_file(data)
+        cards = [c for s in data.values() for c in s]
+        all_cards.extend(cards)
+        n_total = len(cards)
+        n_due = cards_due_count(cards)
+        file_stats.append((fname, n_total, n_due))
+    # 7-day forecast
+    today = date.today()
+    day_counts = []
+    for d in range(7):
+        target = today + timedelta(days=d)
+        count = 0
+        for c in all_cards:
+            try:
+                cd = datetime.strptime(c["card_date"], "%d/%m/%Y").date()
+                if cd == target:
+                    count += 1
+            except (ValueError, KeyError):
+                if d == 0:
+                    count += 1
+        day_counts.append((target, count))
+    max_count = max((c for _, c in day_counts), default=1) or 1
+    avg_ease = sum(c.get("ease_factor", 2.5) for c in all_cards) / len(all_cards) if all_cards else 0
+    # render
+    while True:
+        stdscr.erase()
+        max_y, max_x = stdscr.getmaxyx()
+        stdscr.addstr(0, 0, "Statistics", curses.color_pair(COLORS["prompt"]))
+        row = 2
+        for fname, n_total, n_due in file_stats:
+            if row >= max_y - 10:
+                break
+            color = COLORS["error"] if n_due > 0 else COLORS["success"]
+            line = f"  {fname}: {n_total} cards, {n_due} due"
+            try:
+                stdscr.addstr(row, 0, line[:max_x-1], curses.color_pair(color))
+            except curses.error:
+                pass
+            row += 1
+        row += 1
+        if row < max_y - 8:
+            try:
+                stdscr.addstr(row, 0, "7-day forecast", curses.color_pair(COLORS["accent"]))
+            except curses.error:
+                pass
+            row += 1
+            bar_width = max(10, max_x - 20)
+            for target, count in day_counts:
+                if row >= max_y - 2:
+                    break
+                label = target.strftime("%a %d/%m")
+                n_blocks = round(count / max_count * bar_width) if count > 0 else 0
+                bar = "█" * n_blocks
+                line = f"  {label}: {bar} {count}"
+                try:
+                    stdscr.addstr(row, 0, line[:max_x-1])
+                except curses.error:
+                    pass
+                row += 1
+        row += 1
+        if row < max_y - 1:
+            try:
+                stdscr.addstr(row, 0, f"  Avg ease: {avg_ease:.2f}  |  Total cards: {len(all_cards)}", curses.color_pair(COLORS["info"]))
+            except curses.error:
+                pass
+        try:
+            stdscr.addstr(max_y - 1, 0, "[q] Back"[:max_x-1], curses.color_pair(COLORS["muted"]))
+        except curses.error:
+            pass
+        stdscr.refresh()
+        if chr(stdscr.getch()) == "q":
+            return
+
 def import_screen(stdscr):
     from tui import text_input, COLORS
     stdscr.erase()
@@ -559,7 +649,7 @@ def menu_sko(stdscr) -> None:
             case 3: # export
                 export_screen(stdscr)
             case 4: # statistics
-                _stub_screen(stdscr, "Statistics")
+                stats_screen(stdscr)
             case 5: # settings
                 config = config_editor(stdscr, config)
 

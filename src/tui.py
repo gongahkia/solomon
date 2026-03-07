@@ -96,3 +96,66 @@ def show_help(stdscr, bindings):
         pass
     stdscr.refresh()
     stdscr.getch()
+
+def text_input(stdscr, prompt, initial="", y=0, x=0):
+    buf = initial
+    while True:
+        stdscr.move(y, x)
+        stdscr.clrtoeol()
+        max_x = stdscr.getmaxyx()[1]
+        display = f"{prompt}{buf}_"
+        try:
+            stdscr.addstr(y, x, display[:max_x-x-1], curses.color_pair(COLORS["success"]))
+        except curses.error:
+            pass
+        stdscr.refresh()
+        key = stdscr.getch()
+        if key in (curses.KEY_ENTER, 10, 13):
+            return buf
+        elif key == 27: # Esc
+            return None
+        elif key in (curses.KEY_BACKSPACE, 127):
+            buf = buf[:-1]
+        elif 32 <= key <= 126:
+            buf += chr(key)
+
+def form_input(stdscr, title, fields):
+    """fields: list of (label, default_value). Returns list of values or None on Esc."""
+    values = [default for _, default in fields]
+    max_label = max(len(label) for label, _ in fields) if fields else 0
+    for active in range(len(fields)):
+        buf = values[active]
+        while True:
+            stdscr.erase()
+            max_y, max_x = stdscr.getmaxyx()
+            stdscr.addstr(0, 0, title[:max_x-1], curses.color_pair(COLORS["prompt"]))
+            for i, (label, _) in enumerate(fields):
+                row = i + 2
+                if row >= max_y - 1:
+                    break
+                padded = f"{label:<{max_label}} | "
+                if i == active:
+                    try:
+                        stdscr.addstr(row, 0, padded[:max_x-1])
+                        val_x = len(padded)
+                        stdscr.addstr(row, val_x, f"{buf}_"[:max_x-val_x-1], curses.color_pair(COLORS["success"]))
+                    except curses.error:
+                        pass
+                else:
+                    line = f"{padded}{values[i]}"
+                    try:
+                        stdscr.addstr(row, 0, line[:max_x-1])
+                    except curses.error:
+                        pass
+            stdscr.refresh()
+            key = stdscr.getch()
+            if key in (curses.KEY_ENTER, 10, 13):
+                values[active] = buf
+                break
+            elif key == 27:
+                return None
+            elif key in (curses.KEY_BACKSPACE, 127):
+                buf = buf[:-1]
+            elif 32 <= key <= 126:
+                buf += chr(key)
+    return values

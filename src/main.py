@@ -75,10 +75,8 @@ def select_sko_file() -> str | None:
 # destructures a .sko file into a python dictionary
 def read_sko(filename:str) -> {}:
     file_path:str = os.path.expanduser(f"~/.config/senko/{filename}")
-    fhand = open(file_path,"r")
-    sko_contents:{str:[]}= json.loads(fhand.read())
-    fhand.close()
-    return sko_contents
+    with open(file_path, "r") as fhand:
+        return json.load(fhand)
 
 # reads through the file and allows users to select which card set they want
 def select_flashcard_set(file_contents:{}) -> (str,[]):
@@ -668,10 +666,8 @@ def update_sko_allsets(sko_all_sets:{}, sko_setname:str, sko_setcontents:[]) -> 
 # writes the inputted dictionary to the Senko file for saving
 def write_sko(filename:str, sko_contents:{}) -> None:
     file_path:str = os.path.expanduser(f"~/.config/senko/{filename}")
-    fhand = open(file_path,"w")
-    fhand.write(json.dumps(sko_contents))
-    fhand.close()
-    return None
+    with open(file_path, "w") as fhand:
+        json.dump(sko_contents, fhand)
 
 # provides the frontend for editing flashcards in curses cli, returns the edited dictionary and uses edit_sko_card(), function should allow selection of a given card
 def edit_sko_loop(sko_setname:str, sko_setcontents:[]) -> []:

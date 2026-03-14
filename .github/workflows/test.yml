@@ -26,6 +26,9 @@ jobs:
           senko create-deck ci-smoke --force
           senko create-set ci-smoke base
           senko add-card ci-smoke base --name "hello" --info "world"
+          senko list-sets ci-smoke
+          senko list-cards ci-smoke --set base
           senko stats --deck ci-smoke
+          senko export-history "$RUNNER_TEMP/history.jsonl"
       - name: Run tests
         run: python -m unittest discover -s tests

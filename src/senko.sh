@@ -22,7 +22,7 @@ for candidate in python3 python3.13 python3.12 python3.11 python3.10; do
 done
 
 if [ -n "$PYTHON" ]; then
-    "$PYTHON" main.py
+    "$PYTHON" main.py "$@"
 else
     echo "No compatible Python found. Senko requires Python >= 3.10."
 fi

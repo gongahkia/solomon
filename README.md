@@ -22,10 +22,12 @@ $ senko
 
 - Versioned `.sko` files with validation and automatic legacy migration.
 - Searchable file, set, and card pickers directly in the TUI with `/`.
+- A dedicated history screen in the TUI for browsing, exporting, archiving, pruning, and rebuilding review logs.
 - Multiline card editing plus duplicate, move, reorder, suspend, reset, and delete actions from one card-management screen.
 - CSV, JSON, and plain-text import/export with field mapping, previews, and whole-set replacement.
 - CLI commands for deck creation, set/card management, headless review, validation, migration, import, export, stats, and history maintenance.
 - Persistent review history with richer stats including retention, review activity, overdue buckets, recent additions, workload, and leech candidates.
+- Headless review now supports undo and leech suspension prompts when recording progress.
 - Safer deck writes with atomic save behavior to reduce corruption risk.
 
 ## cli

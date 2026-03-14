@@ -56,6 +56,16 @@ class DeckScreenTests(unittest.TestCase):
         self.assertEqual(selected, "study.sko")
         self.assertTrue(os.path.exists(storage.sko_path("study.sko")))
 
+    def test_select_sko_file_can_delete_a_deck_after_confirmation(self):
+        storage.write_sko("study.sko", {}, config.load_config())
+        screen = FakeScreen()
+        with patch("deck_screens.select_from_list", side_effect=[(0, "d"), None]), patch(
+            "deck_screens.confirm_prompt", return_value=True
+        ):
+            selected = deck_screens.select_sko_file(screen, config.load_config())
+        self.assertIsNone(selected)
+        self.assertFalse(os.path.exists(storage.sko_path("study.sko")))
+
     def test_select_flashcard_set_can_rename_and_return_the_new_set(self):
         storage.write_sko("study.sko", {"old_set": []}, config.load_config())
         screen = FakeScreen()
@@ -100,6 +110,20 @@ class DeckScreenTests(unittest.TestCase):
         imported = storage.read_sko("study.sko", config.load_config())
         self.assertIn("science", imported)
         self.assertEqual(imported["science"][0]["card_name"], "Atom")
+
+    def test_import_screen_can_replace_duplicate_cards_while_merging(self):
+        storage.write_sko("study.sko", {"science": [new_card("Atom", "Old info")]}, config.load_config())
+        storage.write_sko("source.sko", {"science": [new_card("Atom", "New info")]}, config.load_config())
+        source_path = storage.sko_path("source.sko")
+        screen = FakeScreen([ord("e")])
+        with patch("deck_screens.text_input", return_value=source_path), patch(
+            "deck_screens.select_sko_file", return_value="study.sko"
+        ), patch("deck_screens.wait_for_keys", return_value=ord("p")), patch(
+            "deck_screens.show_message"
+        ), patch("curses.color_pair", return_value=0):
+            deck_screens.import_screen(screen, config.load_config())
+        imported = storage.read_sko("study.sko", config.load_config())
+        self.assertEqual(imported["science"][0]["card_info"], "New info")
 
     def test_export_screen_writes_the_requested_json_file(self):
         storage.write_sko("study.sko", {"science": [new_card("Atom", "Matter")]}, config.load_config())

@@ -1,17 +1,243 @@
-REQUIRED_CARD_KEYS = ["card_name", "card_info", "card_add_info", "card_date", "ease_factor", "interval", "repetitions"]
-CARD_DEFAULTS = {"ease_factor": 2.5, "interval": 0, "repetitions": 0}
+from __future__ import annotations
 
-def validate_card(card:dict) -> bool:
-    return all(k in card for k in REQUIRED_CARD_KEYS)
+from copy import deepcopy
+from datetime import date, datetime
+from uuid import uuid4
 
-def migrate_card(card:dict) -> dict:
-    for k, v in CARD_DEFAULTS.items():
-        if k not in card:
-            card[k] = v
+DATE_FORMAT = "%d/%m/%Y"
+SCHEMA_VERSION = 2
+DOCUMENT_VERSION_KEY = "_schema_version"
+DOCUMENT_SETS_KEY = "sets"
+
+REQUIRED_CARD_KEYS = [
+    "id",
+    "card_name",
+    "card_info",
+    "card_add_info",
+    "card_date",
+    "ease_factor",
+    "interval",
+    "repetitions",
+    "suspended",
+    "tags",
+    "created_at",
+    "updated_at",
+]
+
+
+class SchemaError(ValueError):
+    def __init__(self, errors: list[str]):
+        self.errors = errors
+        message = "; ".join(errors)
+        super().__init__(message)
+
+
+def today_str() -> str:
+    return date.today().strftime(DATE_FORMAT)
+
+
+def timestamp_now() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def card_defaults(config: dict | None = None) -> dict:
+    initial_ease = 2.5
+    if config:
+        initial_ease = config.get("srs", {}).get("initial_ease", initial_ease)
+    return {
+        "ease_factor": float(initial_ease),
+        "interval": 0,
+        "repetitions": 0,
+        "suspended": False,
+        "tags": [],
+    }
+
+
+def new_card(
+    card_name: str = "",
+    card_info: str = "",
+    card_add_info: str = "",
+    tags: list[str] | None = None,
+    config: dict | None = None,
+) -> dict:
+    now = timestamp_now()
+    card = {
+        "id": uuid4().hex,
+        "card_name": card_name,
+        "card_info": card_info,
+        "card_add_info": card_add_info,
+        "card_date": today_str(),
+        "created_at": now,
+        "updated_at": now,
+    }
+    card.update(card_defaults(config))
+    card["tags"] = _normalize_tags(tags or [])
     return card
 
-def migrate_file(sko_contents:dict) -> dict:
-    for set_cards in sko_contents.values():
-        for i, card in enumerate(set_cards):
-            set_cards[i] = migrate_card(card)
-    return sko_contents
+
+def _normalize_tags(tags: list[str] | str | None) -> list[str]:
+    if tags is None:
+        return []
+    if isinstance(tags, str):
+        raw_tags = [part.strip() for part in tags.split(",")]
+    elif isinstance(tags, list):
+        raw_tags = [str(part).strip() for part in tags]
+    else:
+        return []
+    seen = set()
+    result = []
+    for tag in raw_tags:
+        if not tag:
+            continue
+        tag_key = tag.casefold()
+        if tag_key in seen:
+            continue
+        seen.add(tag_key)
+        result.append(tag)
+    return result
+
+
+def _validate_timestamp(value: str) -> bool:
+    try:
+        datetime.fromisoformat(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def validate_card(card: dict) -> list[str]:
+    errors = []
+    if not isinstance(card, dict):
+        return ["Card must be a JSON object."]
+    for key in REQUIRED_CARD_KEYS:
+        if key not in card:
+            errors.append(f"Missing card field '{key}'.")
+    if errors:
+        return errors
+    if not isinstance(card["id"], str) or not card["id"].strip():
+        errors.append("Field 'id' must be a non-empty string.")
+    if not isinstance(card["card_name"], str) or not card["card_name"].strip():
+        errors.append("Field 'card_name' must be a non-empty string.")
+    for key in ("card_info", "card_add_info"):
+        if not isinstance(card[key], str):
+            errors.append(f"Field '{key}' must be a string.")
+    try:
+        datetime.strptime(card["card_date"], DATE_FORMAT)
+    except (TypeError, ValueError):
+        errors.append(f"Field 'card_date' must use {DATE_FORMAT}.")
+    if not isinstance(card["ease_factor"], (int, float)):
+        errors.append("Field 'ease_factor' must be numeric.")
+    if not isinstance(card["interval"], int) or card["interval"] < 0:
+        errors.append("Field 'interval' must be a non-negative integer.")
+    if not isinstance(card["repetitions"], int) or card["repetitions"] < 0:
+        errors.append("Field 'repetitions' must be a non-negative integer.")
+    if not isinstance(card["suspended"], bool):
+        errors.append("Field 'suspended' must be a boolean.")
+    if not isinstance(card["tags"], list) or any(not isinstance(tag, str) for tag in card["tags"]):
+        errors.append("Field 'tags' must be a list of strings.")
+    for key in ("created_at", "updated_at"):
+        if not isinstance(card[key], str) or not _validate_timestamp(card[key]):
+            errors.append(f"Field '{key}' must be an ISO timestamp string.")
+    return errors
+
+
+def touch_card(card: dict) -> dict:
+    card["updated_at"] = timestamp_now()
+    return card
+
+
+def reset_card_progress(card: dict, config: dict | None = None) -> dict:
+    defaults = card_defaults(config)
+    card["ease_factor"] = defaults["ease_factor"]
+    card["interval"] = defaults["interval"]
+    card["repetitions"] = defaults["repetitions"]
+    card["card_date"] = today_str()
+    touch_card(card)
+    return card
+
+
+def migrate_card(card: dict, config: dict | None = None) -> dict:
+    if not isinstance(card, dict):
+        raise SchemaError(["Card must be a JSON object."])
+    migrated = deepcopy(card)
+    defaults = card_defaults(config)
+    now = timestamp_now()
+    migrated.setdefault("id", uuid4().hex)
+    migrated.setdefault("card_name", "")
+    migrated.setdefault("card_info", "")
+    migrated.setdefault("card_add_info", "")
+    migrated.setdefault("card_date", today_str())
+    migrated.setdefault("created_at", now)
+    migrated.setdefault("updated_at", now)
+    for key, value in defaults.items():
+        if key not in migrated:
+            migrated[key] = deepcopy(value)
+    migrated["tags"] = _normalize_tags(migrated.get("tags"))
+    errors = validate_card(migrated)
+    if errors:
+        raise SchemaError(errors)
+    return migrated
+
+
+def normalize_document(raw: dict, config: dict | None = None) -> dict:
+    if not isinstance(raw, dict):
+        raise SchemaError(["Deck document must be a JSON object."])
+    schema_version = raw.get(DOCUMENT_VERSION_KEY)
+    if DOCUMENT_SETS_KEY in raw or schema_version is not None:
+        if schema_version not in (None, SCHEMA_VERSION):
+            raise SchemaError([f"Unsupported schema version '{schema_version}'."])
+        sets = raw.get(DOCUMENT_SETS_KEY)
+        if not isinstance(sets, dict):
+            raise SchemaError([f"Field '{DOCUMENT_SETS_KEY}' must be an object of sets."])
+    else:
+        sets = raw
+    normalized_sets = {}
+    errors = []
+    for set_name, cards in sets.items():
+        if not isinstance(set_name, str) or not set_name.strip():
+            errors.append("Set names must be non-empty strings.")
+            continue
+        if not isinstance(cards, list):
+            errors.append(f"Set '{set_name}' must contain a list of cards.")
+            continue
+        normalized_sets[set_name] = []
+        for index, card in enumerate(cards):
+            try:
+                normalized_sets[set_name].append(migrate_card(card, config))
+            except SchemaError as exc:
+                for err in exc.errors:
+                    errors.append(f"{set_name}[{index}]: {err}")
+    if errors:
+        raise SchemaError(errors)
+    return serialize_document(normalized_sets)
+
+
+def serialize_document(sets: dict, config: dict | None = None) -> dict:
+    if not isinstance(sets, dict):
+        raise SchemaError(["Sets must be a JSON object of set name to card list."])
+    document_sets = {}
+    errors = []
+    for set_name, cards in sets.items():
+        if not isinstance(set_name, str) or not set_name.strip():
+            errors.append("Set names must be non-empty strings.")
+            continue
+        if not isinstance(cards, list):
+            errors.append(f"Set '{set_name}' must contain a list of cards.")
+            continue
+        document_sets[set_name] = []
+        for index, card in enumerate(cards):
+            try:
+                document_sets[set_name].append(migrate_card(card, config))
+            except SchemaError as exc:
+                for err in exc.errors:
+                    errors.append(f"{set_name}[{index}]: {err}")
+    if errors:
+        raise SchemaError(errors)
+    return {
+        DOCUMENT_VERSION_KEY: SCHEMA_VERSION,
+        DOCUMENT_SETS_KEY: document_sets,
+    }
+
+
+def migrate_file(sko_contents: dict, config: dict | None = None) -> dict:
+    return normalize_document(sko_contents, config)[DOCUMENT_SETS_KEY]

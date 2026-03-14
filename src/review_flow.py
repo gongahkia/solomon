@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import curses
-import time
-from copy import deepcopy
 
-from deck_ops import card_detail, card_status, restore_card
-from history import log_review_event, pop_last_review_event
+from deck_ops import card_detail, card_status
+from review_session import (
+    apply_review,
+    next_due_text,
+    review_cards_for_mode,
+    review_summary_lines,
+    start_session,
+    undo_last_review,
+)
 from schema import is_leech, touch_card
-from srs import active_cards, cards_due, cards_due_count, next_review_date, sm2_review
+from srs import active_cards, cards_due
 from tui import COLORS
 
 
@@ -43,7 +48,7 @@ def _review_mode_screen(stdscr, set_name: str, cards: list[dict]) -> str | None:
         _show_message(stdscr, set_name, ["All cards in this set are suspended."], "muted")
         return None
     if not due:
-        next_date = next_review_date(cards)
+        next_date = next_due_text(cards)
         choice = select_from_list(
             stdscr,
             set_name,
@@ -162,52 +167,44 @@ def render_review_session(stdscr, deck_name: str, set_name: str, cards: list[dic
     review_mode = _review_mode_screen(stdscr, set_name, cards)
     if review_mode is None:
         return (set_name, cards)
-    review_cards = cards_due(cards) if review_mode == "due" else active_cards(cards)
+    session = start_session(cards, review_mode)
+    review_cards = session["review_cards"]
     if not review_cards:
         _show_message(
             stdscr,
             set_name,
-            [f"All caught up. Next review: {next_review_date(cards)}"],
+            [f"All caught up. Next review: {next_due_text(cards)}"],
             "success",
         )
         return (set_name, cards)
-    start_time = time.time()
-    history = []
-    session_counts = {0: 0, 1: 0, 2: 0, 3: 0}
     index = 0
     while index < len(review_cards):
         card = review_cards[index]
-        front_key = _draw_card_front(stdscr, set_name, card, index, len(review_cards), bool(history), config)
+        front_key = _draw_card_front(stdscr, set_name, card, index, len(review_cards), bool(session["history"]), config)
         if front_key in (ord("q"), ord("Q")):
             break
-        if front_key in (ord("u"), ord("U")) and history:
-            last = history.pop()
-            restore_card(last["card"], last["snapshot"])
-            pop_last_review_event(deck_name=deck_name, set_name=set_name, card_id=last["card"].get("id"))
-            session_counts[last["grade"]] -= 1
+        if front_key in (ord("u"), ord("U")) and session["history"]:
+            undo_last_review(session, deck_name=deck_name, set_name=set_name)
             index = max(0, index - 1)
             continue
-        before = deepcopy(card)
         back_key = _draw_card_back(stdscr, set_name, card, index, len(review_cards), config)
         if back_key in (ord("q"), ord("Q")):
             break
         grade = int(chr(back_key)) - 1
-        sm2_review(card, grade, config)
-        _maybe_handle_leech(stdscr, card, config)
-        log_review_event(deck_name, set_name, before, card, grade, review_mode)
-        session_counts[grade] += 1
-        history.append({"card": card, "snapshot": before, "grade": grade})
+        apply_review(
+            session,
+            deck_name=deck_name,
+            set_name=set_name,
+            card=card,
+            grade=grade,
+            config=config,
+            leech_handler=lambda card_obj, cfg: _maybe_handle_leech(stdscr, card_obj, cfg),
+        )
         index += 1
-    elapsed = time.time() - start_time
-    reviewed = len(history)
     _show_message(
         stdscr,
         set_name,
-        [
-            f"Reviewed {reviewed} cards in {elapsed / 60:.1f} minutes.",
-            f"Again {session_counts[0]} | Hard {session_counts[1]} | Good {session_counts[2]} | Easy {session_counts[3]}",
-            f"Remaining due today: {cards_due_count(cards)}",
-        ],
+        review_summary_lines(session, cards),
         "success",
     )
     return (set_name, cards)

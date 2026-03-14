@@ -6,46 +6,21 @@ from deck_ops import card_detail, card_status
 from review_session import (
     apply_review,
     next_due_text,
-    review_cards_for_mode,
     review_summary_lines,
     start_session,
     undo_last_review,
 )
+from screen_common import add_line, show_message
 from schema import is_leech, touch_card
 from srs import active_cards, cards_due
-from tui import COLORS
-
-
-def _add_line(stdscr, y: int, x: int, text: str, attr: int = 0) -> None:
-    max_x = stdscr.getmaxyx()[1]
-    if y < 0 or x >= max_x:
-        return
-    try:
-        stdscr.addstr(y, x, text[: max_x - x - 1], attr)
-    except curses.error:
-        pass
-
-
-def _show_message(stdscr, title: str, lines: list[str], color_key: str = "info") -> None:
-    stdscr.erase()
-    _add_line(stdscr, 0, 0, title, curses.color_pair(COLORS[color_key]))
-    for index, line in enumerate(lines, start=2):
-        _add_line(stdscr, index, 0, line)
-    _add_line(stdscr, stdscr.getmaxyx()[0] - 1, 0, "[q] Back", curses.color_pair(COLORS["muted"]))
-    stdscr.refresh()
-    while True:
-        key = stdscr.getch()
-        if key in (ord("q"), ord("Q"), 27, 10, 13):
-            return
+from tui import COLORS, select_from_list
 
 
 def _review_mode_screen(stdscr, set_name: str, cards: list[dict]) -> str | None:
-    from tui import select_from_list
-
     reviewable = active_cards(cards)
     due = cards_due(cards)
     if not reviewable:
-        _show_message(stdscr, set_name, ["All cards in this set are suspended."], "muted")
+        show_message(stdscr, set_name, ["All cards in this set are suspended."], "muted")
         return None
     if not due:
         next_date = next_due_text(cards)
@@ -83,16 +58,16 @@ def _draw_card_front(stdscr, set_name: str, card: dict, index: int, total_cards:
         stdscr.erase()
         max_y, max_x = stdscr.getmaxyx()
         detail, color = card_detail(card, config)
-        _add_line(stdscr, 0, 0, set_name, curses.color_pair(COLORS["accent"]))
-        _add_line(stdscr, 0, max(0, max_x - 12), f"{index + 1}/{total_cards}")
-        _add_line(stdscr, 1, 0, detail, curses.color_pair(color))
+        add_line(stdscr, 0, 0, set_name, curses.color_pair(COLORS["accent"]))
+        add_line(stdscr, 0, max(0, max_x - 12), f"{index + 1}/{total_cards}")
+        add_line(stdscr, 1, 0, detail, curses.color_pair(color))
         center_y = max_y // 2
         name = card.get("card_name", "")
-        _add_line(stdscr, center_y, max(0, (max_x - len(name)) // 2), name, curses.A_BOLD)
+        add_line(stdscr, center_y, max(0, (max_x - len(name)) // 2), name, curses.A_BOLD)
         footer = "[Space] Show answer  [q] Quit session"
         if can_undo:
             footer += "  [u] Undo last"
-        _add_line(stdscr, max_y - 1, 0, footer, curses.color_pair(COLORS["muted"]))
+        add_line(stdscr, max_y - 1, 0, footer, curses.color_pair(COLORS["muted"]))
         stdscr.refresh()
         key = stdscr.getch()
         if key in (ord(" "), 10, 13, ord("q"), ord("Q"), ord("u"), ord("U")):
@@ -103,27 +78,27 @@ def _draw_card_back(stdscr, set_name: str, card: dict, index: int, total_cards: 
     while True:
         stdscr.erase()
         max_y, max_x = stdscr.getmaxyx()
-        _add_line(stdscr, 0, 0, card.get("card_name", ""), curses.A_BOLD)
-        _add_line(stdscr, 0, max(0, max_x - 12), f"{index + 1}/{total_cards}")
+        add_line(stdscr, 0, 0, card.get("card_name", ""), curses.A_BOLD)
+        add_line(stdscr, 0, max(0, max_x - 12), f"{index + 1}/{total_cards}")
         status, color = card_status(card)
         extra = f"{set_name} | {status} | {card.get('state', 'new')}"
         if is_leech(card, config):
             extra += " | leech"
-        _add_line(stdscr, 1, 0, extra, curses.color_pair(color))
+        add_line(stdscr, 1, 0, extra, curses.color_pair(color))
         row = 3
         for line in card.get("card_info", "").splitlines() or [""]:
-            _add_line(stdscr, row, 0, line)
+            add_line(stdscr, row, 0, line)
             row += 1
         add_info = card.get("card_add_info", "")
         if add_info:
             row += 1
             for line in add_info.splitlines():
-                _add_line(stdscr, row, 0, line, curses.color_pair(COLORS["muted"]))
+                add_line(stdscr, row, 0, line, curses.color_pair(COLORS["muted"]))
                 row += 1
         tags = card.get("tags", [])
         if tags:
-            _add_line(stdscr, max_y - 3, 0, f"Tags: {', '.join(tags)}", curses.color_pair(COLORS["muted"]))
-        _add_line(
+            add_line(stdscr, max_y - 3, 0, f"Tags: {', '.join(tags)}", curses.color_pair(COLORS["muted"]))
+        add_line(
             stdscr,
             max_y - 1,
             0,
@@ -141,14 +116,14 @@ def _maybe_handle_leech(stdscr, card: dict, config: dict) -> None:
     if int(card.get("lapses", 0)) != threshold or card.get("suspended"):
         return
     stdscr.erase()
-    _add_line(
+    add_line(
         stdscr,
         0,
         0,
         f"{card.get('card_name', 'Card')} reached the leech threshold ({threshold} lapses).",
         curses.color_pair(COLORS["prompt"]),
     )
-    _add_line(stdscr, 2, 0, "[s] Suspend card  [k] Keep active", curses.color_pair(COLORS["muted"]))
+    add_line(stdscr, 2, 0, "[s] Suspend card  [k] Keep active", curses.color_pair(COLORS["muted"]))
     stdscr.refresh()
     while True:
         key = stdscr.getch()
@@ -162,7 +137,7 @@ def _maybe_handle_leech(stdscr, card: dict, config: dict) -> None:
 
 def render_review_session(stdscr, deck_name: str, set_name: str, cards: list[dict], config: dict) -> tuple[str, list]:
     if not cards:
-        _show_message(stdscr, set_name, ["This set is empty. Add cards before reviewing."], "muted")
+        show_message(stdscr, set_name, ["This set is empty. Add cards before reviewing."], "muted")
         return (set_name, cards)
     review_mode = _review_mode_screen(stdscr, set_name, cards)
     if review_mode is None:
@@ -170,7 +145,7 @@ def render_review_session(stdscr, deck_name: str, set_name: str, cards: list[dic
     session = start_session(cards, review_mode)
     review_cards = session["review_cards"]
     if not review_cards:
-        _show_message(
+        show_message(
             stdscr,
             set_name,
             [f"All caught up. Next review: {next_due_text(cards)}"],
@@ -201,7 +176,7 @@ def render_review_session(stdscr, deck_name: str, set_name: str, cards: list[dic
             leech_handler=lambda card_obj, cfg: _maybe_handle_leech(stdscr, card_obj, cfg),
         )
         index += 1
-    _show_message(
+    show_message(
         stdscr,
         set_name,
         review_summary_lines(session, cards),

@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import config
 import history
+import history_view
 import review_flow
 import stats_view
 import storage
@@ -89,6 +90,27 @@ class TUISmokeTests(unittest.TestCase):
         screen = FakeScreen([ord("j"), ord("k"), ord("q")])
         with patch("curses.color_pair", return_value=0):
             stats_view.show_stats_screen(screen, valid_statuses, config.load_config())
+
+    def test_history_screen_can_export_events(self):
+        card = new_card("Question", "Answer")
+        history.log_review_event("study.sko", "set_a", card, dict(card), 2, "due")
+        export_path = os.path.join(self.tmpdir.name, "history.json")
+        screen = FakeScreen([ord("e"), ord("q")])
+        with patch("curses.color_pair", return_value=0), patch(
+            "history_view.text_input", return_value=export_path
+        ), patch("history_view.show_message"):
+            history_view.show_history_screen(screen, config.load_config())
+        self.assertTrue(os.path.exists(export_path))
+
+    def test_history_screen_can_prune_all_events(self):
+        card = new_card("Question", "Answer")
+        history.log_review_event("study.sko", "set_a", card, dict(card), 2, "due")
+        screen = FakeScreen([ord("p")])
+        with patch("curses.color_pair", return_value=0), patch(
+            "history_view.confirm_prompt", return_value=True
+        ), patch("history_view.show_message"):
+            history_view.show_history_screen(screen, config.load_config())
+        self.assertEqual(history.load_history(), [])
 
 
 if __name__ == "__main__":

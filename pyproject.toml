@@ -44,6 +44,7 @@ py-modules = [
   "import_export",
   "main",
   "review_flow",
+  "review_session",
   "schema",
   "srs",
   "stats_view",

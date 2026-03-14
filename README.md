@@ -24,7 +24,7 @@ $ senko
 - Searchable file, set, and card pickers directly in the TUI with `/`.
 - Multiline card editing plus duplicate, move, reorder, suspend, reset, and delete actions from one card-management screen.
 - CSV, JSON, and plain-text import/export with field mapping, previews, and whole-set replacement.
-- CLI commands for deck creation, set/card management, validation, migration, import, export, and stats.
+- CLI commands for deck creation, set/card management, headless review, validation, migration, import, export, stats, and history maintenance.
 - Persistent review history with richer stats including retention, review activity, overdue buckets, recent additions, workload, and leech candidates.
 - Safer deck writes with atomic save behavior to reduce corruption risk.
 
@@ -35,8 +35,12 @@ $ senko validate
 $ senko create-deck japanese
 $ senko create-set japanese core_2k
 $ senko add-card japanese core_2k --name "ありがとう" --info "thank you" --tags greeting
+$ senko edit-card japanese core_2k "ありがとう" --notes "formal enough for most situations"
+$ senko duplicate-card japanese core_2k "ありがとう" --target-set review
 $ senko move-card japanese core_2k review "ありがとう"
+$ senko review japanese --set review --record-progress
 $ senko stats --deck japanese
+$ senko export-history ~/Desktop/japanese-history.json --deck japanese --format json
 $ senko export japanese --format csv --output ~/Desktop/japanese.csv
 ```
 

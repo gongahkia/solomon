@@ -5,7 +5,7 @@ import time
 from copy import deepcopy
 
 from deck_ops import card_detail, card_status, restore_card
-from history import log_review_event
+from history import log_review_event, pop_last_review_event
 from schema import is_leech, touch_card
 from srs import active_cards, cards_due, cards_due_count, next_review_date, sm2_review
 from tui import COLORS
@@ -183,6 +183,7 @@ def render_review_session(stdscr, deck_name: str, set_name: str, cards: list[dic
         if front_key in (ord("u"), ord("U")) and history:
             last = history.pop()
             restore_card(last["card"], last["snapshot"])
+            pop_last_review_event(deck_name=deck_name, set_name=set_name, card_id=last["card"].get("id"))
             session_counts[last["grade"]] -= 1
             index = max(0, index - 1)
             continue

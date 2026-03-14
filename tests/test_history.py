@@ -62,6 +62,21 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(rebuild_result["events"], 0)
         self.assertEqual(rebuild_result["dropped_lines"], 1)
 
+    def test_pop_last_review_event_removes_only_the_latest_matching_event(self):
+        first_before = new_card("Front", "Back")
+        first_after = dict(first_before)
+        first_after["card_date"] = "15/03/2026"
+        second_before = new_card("Front", "Back again")
+        second_after = dict(second_before)
+        second_after["card_date"] = "16/03/2026"
+        history.log_review_event("deck.sko", "set_a", first_before, first_after, 2, "due")
+        history.log_review_event("deck.sko", "set_a", second_before, second_after, 1, "due")
+        removed = history.pop_last_review_event(deck_name="deck.sko", set_name="set_a", card_id=second_before["id"])
+        self.assertEqual(removed["after"]["card_id"], second_before["id"])
+        remaining = history.load_history(deck_name="deck.sko", set_name="set_a")
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0]["after"]["card_id"], first_before["id"])
+
 
 if __name__ == "__main__":
     unittest.main()

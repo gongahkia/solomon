@@ -1,376 +1,451 @@
 # mypy: ignore-errors
-# silence mypy type errors
+
+from __future__ import annotations
 
 import curses
 import json
 import os
+import time
 from datetime import date, datetime, timedelta
-from tui import run_app
 
-def check_sko(filename:str) -> bool:
-    required_keys = ["card_name", "card_info", "card_add_info", "card_date"]
+from config import load_config, reset_config, save_config
+from import_export import (
+    count_duplicates,
+    export_to_csv,
+    export_to_json,
+    export_to_txt,
+    import_from_csv,
+    import_from_json,
+    import_from_txt,
+    merge_sets,
+)
+from schema import DATE_FORMAT, new_card, reset_card_progress, touch_card
+from srs import active_cards, cards_due, cards_due_count, next_review_date, sm2_review
+from storage import ensure_config_dir, list_sko_files, read_sko, sko_path, write_sko
+from tui import COLORS, form_input, run_app, select_from_list, text_input
+
+
+def add_line(stdscr, y: int, x: int, text: str, attr: int = 0) -> None:
+    max_x = stdscr.getmaxyx()[1]
+    if y < 0 or x >= max_x:
+        return
     try:
-        file_path:str = os.path.expanduser(f"~/.config/senko/{filename}")
-        with open(file_path, "r") as fhand:
-            sko_contents = json.load(fhand)
-        for set_cards in sko_contents.values():
-            for card in set_cards:
-                if not all(k in card for k in required_keys):
-                    return False
-        return True
-    except (json.JSONDecodeError, IOError, KeyError):
-        return False
+        stdscr.addstr(y, x, text[: max_x - x - 1], attr)
+    except curses.error:
+        pass
 
-def select_sko_file(stdscr) -> str | None:
-    from tui import select_from_list, text_input, COLORS
-    from srs import cards_due_count
-    config_dir = os.path.expanduser("~/.config/senko")
+
+def wait_for_q(stdscr) -> None:
     while True:
-        valid_array = [f for f in os.listdir(config_dir) if f.endswith(".sko") and check_sko(f)]
-        # compute aggregate stats
-        total_files = len(valid_array)
-        total_cards = 0
-        total_due = 0
+        key = stdscr.getch()
+        if key in (ord("q"), ord("Q"), 27, 10, 13):
+            return
+
+
+def show_message(stdscr, title: str, lines: list[str], color_key: str = "info") -> None:
+    stdscr.erase()
+    add_line(stdscr, 0, 0, title, curses.color_pair(COLORS[color_key]))
+    for index, line in enumerate(lines, start=2):
+        add_line(stdscr, index, 0, line)
+    add_line(stdscr, stdscr.getmaxyx()[0] - 1, 0, "[q] Back", curses.color_pair(COLORS["muted"]))
+    stdscr.refresh()
+    wait_for_q(stdscr)
+
+
+def confirm_prompt(stdscr, prompt: str, color_key: str = "error") -> bool:
+    stdscr.erase()
+    add_line(stdscr, 0, 0, prompt, curses.color_pair(COLORS[color_key]))
+    add_line(stdscr, 2, 0, "[y] Yes  [n] No", curses.color_pair(COLORS["muted"]))
+    stdscr.refresh()
+    while True:
+        key = stdscr.getch()
+        if key in (ord("y"), ord("Y")):
+            return True
+        if key in (ord("n"), ord("N"), 27):
+            return False
+
+
+def parse_tags(raw_tags: str) -> list[str]:
+    return [tag.strip() for tag in raw_tags.split(",") if tag.strip()]
+
+
+def card_status(card: dict) -> tuple[str, int]:
+    if card.get("suspended"):
+        return ("Suspended", COLORS["muted"])
+    try:
+        card_date = datetime.strptime(card["card_date"], DATE_FORMAT).date()
+    except (TypeError, ValueError, KeyError):
+        return ("Due (invalid date)", COLORS["error"])
+    if card_date <= date.today():
+        return ("Due", COLORS["error"])
+    return (f"Next {card_date.strftime(DATE_FORMAT)}", COLORS["success"])
+
+
+def card_detail(card: dict) -> tuple[str, int]:
+    status, color = card_status(card)
+    tags = f" | tags: {', '.join(card.get('tags', []))}" if card.get("tags") else ""
+    return (f"{status}{tags}", color)
+
+
+def create_sko_file(name: str, config: dict) -> str:
+    if not name.endswith(".sko"):
+        name += ".sko"
+    write_sko(name, {}, config)
+    return name
+
+
+def select_sko_file(stdscr, config: dict) -> str | None:
+    ensure_config_dir()
+    while True:
+        statuses = list_sko_files(config)
+        valid_statuses = [status for status in statuses if status["valid"]]
+        total_cards = sum(sum(len(cards) for cards in status["sets"].values()) for status in valid_statuses)
+        total_due = sum(
+            sum(cards_due_count(cards) for cards in status["sets"].values()) for status in valid_statuses
+        )
         items = []
-        for fname in valid_array:
-            data = read_sko(fname)
-            n_sets = len(data)
-            n_cards = sum(len(cards) for cards in data.values())
-            n_due = sum(cards_due_count(cards) for cards in data.values())
-            total_cards += n_cards
-            total_due += n_due
-            color = COLORS["error"] if n_due > 0 else COLORS["success"]
-            items.append((f"{fname} | {n_sets} sets | {n_cards} cards", f"{n_due} due", color))
-        header = f"Senko | {total_files} files | {total_cards} cards | {total_due} due today"
-        footer = "[Enter] Open  [n] New file  [d] Delete file  [q] Back"
+        for status in statuses:
+            if status["valid"]:
+                n_sets = len(status["sets"])
+                n_cards = sum(len(cards) for cards in status["sets"].values())
+                n_due = sum(cards_due_count(cards) for cards in status["sets"].values())
+                color = COLORS["error"] if n_due > 0 else COLORS["success"]
+                items.append((f"{status['filename']} | {n_sets} sets | {n_cards} cards", f"{n_due} due", color))
+            else:
+                items.append((f"{status['filename']} | invalid deck", status["error"], COLORS["error"]))
+        header = f"Senko | {len(valid_statuses)} valid files | {total_cards} cards | {total_due} due today"
+        footer = "[Enter] Open  [n] New file  [d] Delete file  [/] Filter  [q] Back"
         if not items:
             items = [("No files found.", "Create one with [n]", COLORS["muted"])]
-        choice = select_from_list(stdscr, header, items, footer=footer, extra_bindings=[("n", "New file"), ("d", "Delete file")])
+        choice = select_from_list(
+            stdscr,
+            header,
+            items,
+            footer=footer,
+            extra_bindings=[("n", "New file"), ("d", "Delete file")],
+            searchable=True,
+        )
         if choice is None:
             return None
-        elif isinstance(choice, tuple):
+        if isinstance(choice, tuple):
             idx, key = choice
             if key == "n":
-                stdscr.erase()
                 name = text_input(stdscr, "Filename: ", y=0, x=0)
                 if name:
-                    if not name.endswith(".sko"):
-                        name += ".sko"
-                    fpath = os.path.join(config_dir, name)
-                    with open(fpath, "w") as f:
-                        json.dump({}, f)
+                    create_sko_file(name, config)
                 continue
-            elif key == "d" and valid_array and idx is not None and idx < len(valid_array):
-                fname = valid_array[idx]
-                stdscr.erase()
-                stdscr.addstr(0, 0, f"Delete {fname}? [y/n]", curses.color_pair(COLORS["error"]))
-                stdscr.refresh()
-                if chr(stdscr.getch()) == "y":
-                    os.remove(os.path.join(config_dir, fname))
+            if key == "d" and idx is not None and idx < len(statuses):
+                filename = statuses[idx]["filename"]
+                if confirm_prompt(stdscr, f"Delete {filename}?"):
+                    os.remove(sko_path(filename))
                 continue
-            else:
-                continue
-        else:
-            if not valid_array:
-                continue
-            return valid_array[choice]
+            continue
+        if not statuses:
+            continue
+        selected = statuses[choice]
+        if not selected["valid"]:
+            show_message(stdscr, selected["filename"], [selected["error"]], "error")
+            continue
+        return selected["filename"]
 
-def read_sko(filename:str) -> {}:
-    file_path:str = os.path.expanduser(f"~/.config/senko/{filename}")
-    with open(file_path, "r") as fhand:
-        return json.load(fhand)
 
-def select_flashcard_set(stdscr, file_contents:{}, filename:str=None) -> (str,[]):
-    from tui import select_from_list, text_input, COLORS
-    from srs import cards_due_count
+def select_flashcard_set(stdscr, sets: dict, filename: str, config: dict) -> tuple[str, list] | None:
     while True:
-        name_array = list(file_contents.keys())
+        set_names = list(sets.keys())
         items = []
-        for set_name in name_array:
-            cards = file_contents[set_name]
-            n_cards = len(cards)
-            if n_cards == 0:
-                items.append((f"{set_name} | {n_cards} cards", "Empty", COLORS["muted"]))
-            else:
+        for set_name in set_names:
+            cards = sets[set_name]
+            detail_text = "Empty"
+            color = COLORS["muted"]
+            if cards:
                 n_due = cards_due_count(cards)
+                n_suspended = len([card for card in cards if card.get("suspended")])
+                detail_text = f"{n_due} due | {n_suspended} suspended"
                 color = COLORS["error"] if n_due > 0 else COLORS["success"]
-                items.append((f"{set_name} | {n_cards} cards", f"{n_due} due", color))
+            items.append((f"{set_name} | {len(cards)} cards", detail_text, color))
         if not items:
             items = [("No sets found.", "Create one with [n]", COLORS["muted"])]
-        footer = "[Enter] Open  [n] New set  [r] Rename  [d] Delete  [q] Back"
-        choice = select_from_list(stdscr, "Select flashcard set", items, footer=footer, extra_bindings=[("n", "New set"), ("r", "Rename set"), ("d", "Delete set")])
+        choice = select_from_list(
+            stdscr,
+            "Select flashcard set",
+            items,
+            footer="[Enter] Open  [n] New set  [r] Rename  [d] Delete  [/] Filter  [q] Back",
+            extra_bindings=[("n", "New set"), ("r", "Rename set"), ("d", "Delete set")],
+            searchable=True,
+        )
         if choice is None:
             return None
-        elif isinstance(choice, tuple):
+        if isinstance(choice, tuple):
             idx, key = choice
             if key == "n":
-                stdscr.erase()
                 name = text_input(stdscr, "Set name: ", y=0, x=0)
-                if name and name not in file_contents:
-                    file_contents[name] = []
-                    if filename:
-                        write_sko(filename, file_contents)
+                if name and name not in sets:
+                    sets[name] = []
+                    write_sko(filename, sets, config)
                 continue
-            elif key == "r" and name_array and idx is not None and idx < len(name_array):
-                old_name = name_array[idx]
-                stdscr.erase()
+            if key == "r" and idx is not None and idx < len(set_names):
+                old_name = set_names[idx]
                 new_name = text_input(stdscr, "New name: ", initial=old_name, y=0, x=0)
-                if new_name and new_name != old_name:
-                    file_contents[new_name] = file_contents.pop(old_name)
-                    if filename:
-                        write_sko(filename, file_contents)
+                if new_name and new_name != old_name and new_name not in sets:
+                    sets[new_name] = sets.pop(old_name)
+                    write_sko(filename, sets, config)
                 continue
-            elif key == "d" and name_array and idx is not None and idx < len(name_array):
-                set_name = name_array[idx]
-                stdscr.erase()
-                stdscr.addstr(0, 0, f"Delete '{set_name}'? [y/n]", curses.color_pair(COLORS["error"]))
-                stdscr.refresh()
-                if chr(stdscr.getch()) == "y":
-                    del file_contents[set_name]
-                    if filename:
-                        write_sko(filename, file_contents)
+            if key == "d" and idx is not None and idx < len(set_names):
+                set_name = set_names[idx]
+                if confirm_prompt(stdscr, f"Delete '{set_name}'?"):
+                    del sets[set_name]
+                    write_sko(filename, sets, config)
                 continue
-            else:
-                continue
-        else:
-            if not name_array:
-                continue
-            selected = name_array[choice]
-            return (selected, file_contents[selected])
+            continue
+        if not set_names:
+            continue
+        selected = set_names[choice]
+        return (selected, sets[selected])
 
-def render_sko_loop(stdscr, sko_setname:str, sko_setcontents:[], config:dict=None) -> ():
-    import time as _time
-    from srs import cards_due, sm2_review
-    from tui import COLORS
-    if len(sko_setcontents) == 0:
-        while True:
-            stdscr.erase()
-            stdscr.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(COLORS["muted"]))
-            stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(COLORS["prompt"]))
-            if chr(stdscr.getch()) == "q":
-                return (sko_setname, sko_setcontents)
-    due_cards = cards_due(sko_setcontents)
-    if not due_cards:
-        # find earliest future date
-        future_dates = []
-        for c in sko_setcontents:
-            try:
-                future_dates.append(datetime.strptime(c["card_date"], "%d/%m/%Y").date())
-            except (ValueError, KeyError):
-                pass
-        next_date = min(future_dates).strftime("%d/%m/%Y") if future_dates else "N/A"
-        while True:
-            stdscr.erase()
-            stdscr.addstr(0, 0, f"All caught up! {len(sko_setcontents)} cards in deck. Next review: {next_date}", curses.color_pair(COLORS["success"]))
-            stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(COLORS["prompt"]))
-            if chr(stdscr.getch()) == "q":
-                return (sko_setname, sko_setcontents)
-    start_time = _time.time()
-    reviewed = 0
-    total_due = len(due_cards)
-    for card in due_cards:
-        reviewed += 1
-        max_y, max_x = stdscr.getmaxyx()
-        # front screen
-        quit_session = False
-        while True:
-            stdscr.erase()
-            stdscr.addstr(0, 0, sko_setname, curses.color_pair(COLORS["accent"]))
-            progress = f"({reviewed}/{total_due})"
-            try:
-                stdscr.addstr(0, max_x - len(progress) - 1, progress)
-            except curses.error:
-                pass
-            center_y = max_y // 2
-            name = card.get("card_name", "")
-            try:
-                stdscr.addstr(center_y, max(0, (max_x - len(name)) // 2), name, curses.A_BOLD)
-            except curses.error:
-                pass
-            try:
-                stdscr.addstr(max_y - 1, 0, "[Space] Show answer  [q] Quit session"[:max_x-1], curses.color_pair(COLORS["muted"]))
-            except curses.error:
-                pass
-            stdscr.refresh()
-            key = stdscr.getch()
-            if key == ord(" "):
-                break
-            elif key == ord("q"):
-                quit_session = True
-                break
-        if quit_session:
-            break
-        # back screen
-        while True:
-            stdscr.erase()
-            stdscr.addstr(0, 0, card.get("card_name", ""), curses.A_BOLD)
-            progress = f"({reviewed}/{total_due})"
-            try:
-                stdscr.addstr(0, max_x - len(progress) - 1, progress)
-            except curses.error:
-                pass
-            info = card.get("card_info", "")
-            if info:
-                stdscr.addstr(2, 0, info[:max_x-1])
-            add_info = card.get("card_add_info", "")
-            if add_info:
-                try:
-                    stdscr.addstr(3, 0, add_info[:max_x-1], curses.color_pair(COLORS["muted"]))
-                except curses.error:
-                    pass
-            try:
-                stdscr.addstr(5, 0, "[1] Again  [2] Hard  [3] Good  [4] Easy"[:max_x-1], curses.color_pair(COLORS["prompt"]))
-            except curses.error:
-                pass
-            stdscr.refresh()
-            key = stdscr.getch()
-            if key in (ord("1"), ord("2"), ord("3"), ord("4")):
-                grade = int(chr(key)) - 1
-                sm2_review(card, grade, config)
-                break
-    # session summary
-    elapsed = _time.time() - start_time
+
+def review_mode_screen(stdscr, set_name: str, cards: list[dict]) -> str | None:
+    reviewable = active_cards(cards)
+    due = cards_due(cards)
+    if not reviewable:
+        show_message(stdscr, set_name, ["All cards in this set are suspended."], "muted")
+        return None
+    if not due:
+        next_date = next_review_date(cards)
+        choice = select_from_list(
+            stdscr,
+            set_name,
+            [
+                ("Study all active cards", f"{len(reviewable)} active", COLORS["accent"]),
+                ("Back", f"Next due date: {next_date}", COLORS["muted"]),
+            ],
+            footer="[Enter] Select  [q] Back",
+        )
+        if choice == 0:
+            return "all"
+        return None
+    choice = select_from_list(
+        stdscr,
+        set_name,
+        [
+            ("Review due cards", f"{len(due)} due", COLORS["error"]),
+            ("Study all active cards", f"{len(reviewable)} active", COLORS["accent"]),
+            ("Back", "", COLORS["muted"]),
+        ],
+        footer="[Enter] Select  [q] Back",
+    )
+    if choice == 0:
+        return "due"
+    if choice == 1:
+        return "all"
+    return None
+
+
+def draw_card_front(stdscr, set_name: str, card: dict, reviewed: int, total_cards: int) -> int:
     while True:
         stdscr.erase()
-        stdscr.addstr(0, 0, f"{reviewed} cards reviewed in {elapsed/60:.1f} min", curses.color_pair(COLORS["success"]))
-        stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(COLORS["prompt"]))
+        max_y, max_x = stdscr.getmaxyx()
+        add_line(stdscr, 0, 0, set_name, curses.color_pair(COLORS["accent"]))
+        add_line(stdscr, 0, max(0, max_x - 12), f"{reviewed}/{total_cards}")
+        center_y = max_y // 2
+        name = card.get("card_name", "")
+        add_line(stdscr, center_y, max(0, (max_x - len(name)) // 2), name, curses.A_BOLD)
+        add_line(
+            stdscr,
+            max_y - 1,
+            0,
+            "[Space] Show answer  [q] Quit session",
+            curses.color_pair(COLORS["muted"]),
+        )
         stdscr.refresh()
-        if chr(stdscr.getch()) == "q":
-            return (sko_setname, sko_setcontents)
+        key = stdscr.getch()
+        if key in (ord(" "), ord("\n"), 10, 13):
+            return key
+        if key in (ord("q"), ord("Q")):
+            return key
 
-def add_days(given_date:str, days_add:int) -> str:
-    dt = datetime.strptime(given_date, "%d/%m/%Y")
-    return (dt + timedelta(days=days_add)).strftime("%d/%m/%Y")
 
-def check_overdue(given_date:str) -> bool:
-    return date.today() > datetime.strptime(given_date, "%d/%m/%Y").date()
+def draw_card_back(stdscr, set_name: str, card: dict, reviewed: int, total_cards: int) -> int:
+    while True:
+        stdscr.erase()
+        max_y, max_x = stdscr.getmaxyx()
+        add_line(stdscr, 0, 0, card.get("card_name", ""), curses.A_BOLD)
+        add_line(stdscr, 0, max(0, max_x - 12), f"{reviewed}/{total_cards}")
+        status, _ = card_status(card)
+        add_line(stdscr, 1, 0, f"{set_name} | {status}", curses.color_pair(COLORS["info"]))
+        row = 3
+        for line in card.get("card_info", "").splitlines() or [""]:
+            add_line(stdscr, row, 0, line)
+            row += 1
+        add_info = card.get("card_add_info", "")
+        if add_info:
+            add_line(stdscr, row + 1, 0, add_info, curses.color_pair(COLORS["muted"]))
+        tags = card.get("tags", [])
+        if tags:
+            add_line(stdscr, max_y - 3, 0, f"Tags: {', '.join(tags)}", curses.color_pair(COLORS["muted"]))
+        add_line(
+            stdscr,
+            max_y - 1,
+            0,
+            "[1] Again  [2] Hard  [3] Good  [4] Easy  [q] Quit session",
+            curses.color_pair(COLORS["prompt"]),
+        )
+        stdscr.refresh()
+        key = stdscr.getch()
+        if key in (ord("1"), ord("2"), ord("3"), ord("4"), ord("q"), ord("Q")):
+            return key
 
-def check_future(given_date:str) -> bool:
-    return date.today() < datetime.strptime(given_date, "%d/%m/%Y").date()
 
-def cards_due_per_set(sko_setcontents:[]) -> int | str | None:
-    today_str:str= date.today().strftime("%d/%m/%Y")
-    if len(sko_setcontents) == 0:
-        return "Empty"
-    elif len(sko_setcontents) > 0:
-        count:int = 0
-        date_array:[str] = [card["card_date"] for card in sko_setcontents]
-        for dated in date_array:
-            if check_overdue(dated) or dated == today_str:
-                count += 1
-        return count
-    else:
-        return None
+def render_sko_loop(stdscr, set_name: str, cards: list[dict], config: dict) -> tuple[str, list]:
+    if not cards:
+        show_message(stdscr, set_name, ["This set is empty. Add cards before reviewing."], "muted")
+        return (set_name, cards)
+    review_mode = review_mode_screen(stdscr, set_name, cards)
+    if review_mode is None:
+        return (set_name, cards)
+    review_cards = cards_due(cards) if review_mode == "due" else active_cards(cards)
+    if not review_cards:
+        show_message(
+            stdscr,
+            set_name,
+            [f"All caught up. Next review: {next_review_date(cards)}"],
+            "success",
+        )
+        return (set_name, cards)
+    start_time = time.time()
+    reviewed = 0
+    total_cards = len(review_cards)
+    for card in review_cards:
+        reviewed += 1
+        front_key = draw_card_front(stdscr, set_name, card, reviewed, total_cards)
+        if front_key in (ord("q"), ord("Q")):
+            break
+        back_key = draw_card_back(stdscr, set_name, card, reviewed, total_cards)
+        if back_key in (ord("q"), ord("Q")):
+            break
+        sm2_review(card, int(chr(back_key)) - 1, config)
+    elapsed = time.time() - start_time
+    show_message(
+        stdscr,
+        set_name,
+        [
+            f"Reviewed {reviewed} cards in {elapsed / 60:.1f} minutes.",
+            f"Remaining due today: {cards_due_count(cards)}",
+        ],
+        "success",
+    )
+    return (set_name, cards)
 
-def edit_sko_card(stdscr, card:{}) -> {}:
-    from tui import form_input
-    result = form_input(stdscr, "Edit card", [("Name", card.get("card_name", "")), ("Info", card.get("card_info", "")), ("Additional info", card.get("card_add_info", ""))])
-    if result is None:
+
+def edit_sko_card(stdscr, card: dict) -> dict | None:
+    result = form_input(
+        stdscr,
+        "Edit card",
+        [
+            ("Name", card.get("card_name", "")),
+            ("Info", card.get("card_info", "")),
+            ("Additional info", card.get("card_add_info", "")),
+            ("Tags", ",".join(card.get("tags", []))),
+        ],
+    )
+    if result is None or not result[0].strip():
         return None
     card["card_name"] = result[0]
     card["card_info"] = result[1]
     card["card_add_info"] = result[2]
+    card["tags"] = parse_tags(result[3])
+    touch_card(card)
     return card
 
-def add_sko_card(stdscr) -> {}:
-    from tui import form_input
-    from schema import CARD_DEFAULTS
-    result = form_input(stdscr, "Add new card", [("Name", ""), ("Info", ""), ("Additional info", "")])
-    if result is None:
+
+def add_sko_card(stdscr, config: dict) -> dict | None:
+    result = form_input(
+        stdscr,
+        "Add new card",
+        [
+            ("Name", ""),
+            ("Info", ""),
+            ("Additional info", ""),
+            ("Tags", ""),
+        ],
+    )
+    if result is None or not result[0].strip():
         return None
-    card = {"card_name": result[0], "card_info": result[1], "card_add_info": result[2], "card_date": date.today().strftime("%d/%m/%Y")}
-    card.update(CARD_DEFAULTS.copy())
-    return card
+    return new_card(
+        card_name=result[0],
+        card_info=result[1],
+        card_add_info=result[2],
+        tags=parse_tags(result[3]),
+        config=config,
+    )
 
-def delete_sko_loop(stdscr, sko_setname:str, sko_setcontents:[], config:dict=None) -> []:
-    from tui import select_from_list, COLORS
+
+def manage_cards_loop(stdscr, set_name: str, cards: list[dict], config: dict) -> tuple[str, list]:
     while True:
-        if not sko_setcontents:
-            stdscr.erase()
-            stdscr.addstr(0, 0, "No cards to delete.", curses.color_pair(COLORS["muted"]))
-            stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(COLORS["prompt"]))
-            stdscr.refresh()
-            stdscr.getch()
-            return (sko_setname, sko_setcontents)
-        items = [(c.get("card_name", "?"), "", 0) for c in sko_setcontents]
-        choice = select_from_list(stdscr, f"Delete cards from {sko_setname}", items, footer="[Enter] Delete  [q] Back")
+        if not cards:
+            choice = select_from_list(
+                stdscr,
+                set_name,
+                [("No cards yet.", "Press [a] to add one", COLORS["muted"])],
+                footer="[a] Add card  [q] Back",
+                extra_bindings=[("a", "Add card")],
+            )
+            if isinstance(choice, tuple) and choice[1] == "a":
+                new_entry = add_sko_card(stdscr, config)
+                if new_entry is not None:
+                    cards.append(new_entry)
+                continue
+            return (set_name, cards)
+        items = []
+        for card in cards:
+            detail, color = card_detail(card)
+            items.append((card.get("card_name", "?"), detail, color))
+        choice = select_from_list(
+            stdscr,
+            f"Manage cards in {set_name}",
+            items,
+            footer="[Enter] Open  [a] Add card  [/] Filter  [q] Back",
+            extra_bindings=[("a", "Add card")],
+            searchable=True,
+        )
         if choice is None:
-            return (sko_setname, sko_setcontents)
-        elif isinstance(choice, tuple):
+            return (set_name, cards)
+        if isinstance(choice, tuple):
+            if choice[1] == "a":
+                new_entry = add_sko_card(stdscr, config)
+                if new_entry is not None:
+                    cards.append(new_entry)
             continue
-        else:
-            confirm_delete = True
-            if config and "tui" in config:
-                confirm_delete = config["tui"].get("confirm_delete", True)
-            card_name = sko_setcontents[choice].get("card_name", "?")
-            if confirm_delete:
-                stdscr.erase()
-                stdscr.addstr(0, 0, f"Delete '{card_name}'? [y/n]", curses.color_pair(COLORS["error"]))
-                stdscr.refresh()
-                if chr(stdscr.getch()) != "y":
-                    continue
-            del sko_setcontents[choice]
-
-def update_sko_allsets(sko_all_sets:{}, sko_setname:str, sko_setcontents:[]) -> {}:
-    sko_all_sets[sko_setname] = sko_setcontents
-    return sko_all_sets
-
-def write_sko(filename:str, sko_contents:{}) -> None:
-    file_path:str = os.path.expanduser(f"~/.config/senko/{filename}")
-    with open(file_path, "w") as fhand:
-        json.dump(sko_contents, fhand)
-
-def edit_sko_loop(stdscr, sko_setname:str, sko_setcontents:[]) -> []:
-    from tui import select_from_list, COLORS
-    while True:
-        if not sko_setcontents:
-            stdscr.erase()
-            stdscr.addstr(0, 0, f"{sko_setname} is currently empty. Go make some new cards!", curses.color_pair(COLORS["muted"]))
-            stdscr.addstr(2, 0, "[Q]uit", curses.color_pair(COLORS["prompt"]))
-            stdscr.refresh()
-            stdscr.getch()
-            return (sko_setname, sko_setcontents)
-        items = [(c.get("card_name", "?"), c.get("card_info", "")[:40], COLORS["muted"]) for c in sko_setcontents]
-        choice = select_from_list(stdscr, f"Edit cards in {sko_setname}", items, footer="[Enter] Edit  [q] Back")
-        if choice is None:
-            return (sko_setname, sko_setcontents)
-        elif isinstance(choice, tuple):
+        card = cards[choice]
+        suspend_label = "Unsuspend" if card.get("suspended") else "Suspend"
+        action = select_from_list(
+            stdscr,
+            card.get("card_name", "Card"),
+            [
+                ("Edit", card.get("card_info", "")[:40], COLORS["info"]),
+                (suspend_label, "", COLORS["muted"]),
+                ("Reset progress", f"Interval: {card.get('interval', 0)}", COLORS["prompt"]),
+                ("Delete", "", COLORS["error"]),
+                ("Back", "", COLORS["muted"]),
+            ],
+            footer="[Enter] Select  [q] Back",
+        )
+        if action is None or action == 4:
             continue
-        else:
-            result = edit_sko_card(stdscr, sko_setcontents[choice])
-            if result is not None:
-                sko_setcontents[choice] = result
+        if action == 0:
+            updated = edit_sko_card(stdscr, card)
+            if updated is not None:
+                cards[choice] = updated
+        elif action == 1:
+            card["suspended"] = not card.get("suspended", False)
+            touch_card(card)
+        elif action == 2:
+            reset_card_progress(card, config)
+        elif action == 3:
+            if confirm_prompt(stdscr, f"Delete '{card.get('card_name', '?')}'?"):
+                del cards[choice]
 
-def add_sko_loop(stdscr, sko_setname:str, sko_setcontents:[]) -> []:
-    from tui import select_from_list, COLORS
-    while True:
-        if sko_setcontents:
-            items = [(c.get("card_name", "?"), "", 0) for c in sko_setcontents]
-        else:
-            items = [("No cards yet.", "Press [a] to add", COLORS["muted"])]
-        choice = select_from_list(stdscr, f"Add cards to {sko_setname}", items, footer="[a] Add card  [q] Back", extra_bindings=[("a", "Add card")])
-        if choice is None:
-            return (sko_setname, sko_setcontents)
-        elif isinstance(choice, tuple):
-            _, key = choice
-            if key == "a":
-                card = add_sko_card(stdscr)
-                if card is not None:
-                    sko_setcontents.append(card)
-            continue
-        else:
-            continue
 
-def _stub_screen(stdscr, label):
-    stdscr.erase()
-    stdscr.addstr(0, 0, f"{label} — coming soon.", curses.color_pair(5))
-    stdscr.addstr(2, 0, "Press any key to return.", curses.color_pair(3))
-    stdscr.refresh()
-    stdscr.getch()
-
-def config_editor(stdscr, config:dict) -> dict:
-    from tui import select_from_list, text_input, COLORS
-    from config import save_config, reset_config
+def config_editor(stdscr, config: dict) -> dict:
     while True:
         srs = config.get("srs", {})
         tui = config.get("tui", {})
@@ -382,267 +457,256 @@ def config_editor(stdscr, config:dict) -> dict:
             (f"Show stats: {tui.get('show_stats', True)}", "TUI", COLORS["info"]),
             (f"Confirm delete: {tui.get('confirm_delete', True)}", "TUI", COLORS["info"]),
         ]
-        srs_keys = ["initial_ease", "minimum_ease", "easy_bonus", "hard_factor"]
-        tui_keys = ["show_stats", "confirm_delete"]
-        choice = select_from_list(stdscr, "Settings", items, footer="[Enter] Edit  [r] Reset defaults  [q] Save & back", extra_bindings=[("r", "Reset defaults")])
+        choice = select_from_list(
+            stdscr,
+            "Settings",
+            items,
+            footer="[Enter] Edit  [r] Reset defaults  [q] Save & back",
+            extra_bindings=[("r", "Reset defaults")],
+        )
         if choice is None:
             save_config(config)
             return config
-        elif isinstance(choice, tuple):
-            _, key = choice
-            if key == "r":
+        if isinstance(choice, tuple):
+            if choice[1] == "r":
                 config = reset_config()
             continue
-        elif choice < 4: # numeric SRS field
-            k = srs_keys[choice]
-            stdscr.erase()
-            val = text_input(stdscr, f"{k}: ", initial=str(srs.get(k, "")), y=0, x=0)
-            if val is not None:
+        if choice < 4:
+            keys = ["initial_ease", "minimum_ease", "easy_bonus", "hard_factor"]
+            key = keys[choice]
+            value = text_input(stdscr, f"{key}: ", initial=str(srs.get(key, "")), y=0, x=0)
+            if value is not None:
                 try:
-                    config.setdefault("srs", {})[k] = float(val)
+                    config.setdefault("srs", {})[key] = float(value)
                 except ValueError:
-                    stdscr.erase()
-                    stdscr.addstr(0, 0, "Invalid number.", curses.color_pair(COLORS["error"]))
-                    stdscr.refresh()
-                    stdscr.getch()
-        else: # boolean TUI field
-            k = tui_keys[choice - 4]
-            config.setdefault("tui", {})[k] = not tui.get(k, True)
+                    show_message(stdscr, "Settings", ["Invalid number."], "error")
+        else:
+            keys = ["show_stats", "confirm_delete"]
+            key = keys[choice - 4]
+            config.setdefault("tui", {})[key] = not tui.get(key, True)
 
-def stats_screen(stdscr):
-    from tui import COLORS
-    from srs import cards_due_count
-    from schema import migrate_file
-    config_dir = os.path.expanduser("~/.config/senko")
-    sko_files = [f for f in os.listdir(config_dir) if f.endswith(".sko") and check_sko(f)]
-    if not sko_files:
-        stdscr.erase()
-        stdscr.addstr(0, 0, "No data yet. Create a deck to get started.", curses.color_pair(COLORS["muted"]))
-        stdscr.addstr(2, 0, "[q] Back", curses.color_pair(COLORS["prompt"]))
-        stdscr.refresh()
-        stdscr.getch()
+
+def stats_screen(stdscr, config: dict) -> None:
+    valid_statuses = [status for status in list_sko_files(config) if status["valid"]]
+    if not valid_statuses:
+        show_message(stdscr, "Statistics", ["No valid decks yet. Create one to get started."], "muted")
         return
     all_cards = []
     file_stats = []
-    for fname in sko_files:
-        data = read_sko(fname)
-        data = migrate_file(data)
-        cards = [c for s in data.values() for c in s]
+    for status in valid_statuses:
+        cards = [card for set_cards in status["sets"].values() for card in set_cards]
         all_cards.extend(cards)
-        n_total = len(cards)
-        n_due = cards_due_count(cards)
-        file_stats.append((fname, n_total, n_due))
-    # 7-day forecast
+        file_stats.append(
+            (
+                status["filename"],
+                len(cards),
+                cards_due_count(cards),
+                len([card for card in cards if card.get("suspended")]),
+            )
+        )
     today = date.today()
     day_counts = []
-    for d in range(7):
-        target = today + timedelta(days=d)
+    for offset in range(7):
+        target = today + timedelta(days=offset)
         count = 0
-        for c in all_cards:
+        for card in active_cards(all_cards):
             try:
-                cd = datetime.strptime(c["card_date"], "%d/%m/%Y").date()
-                if cd == target:
+                card_date = datetime.strptime(card["card_date"], DATE_FORMAT).date()
+                if card_date == target:
                     count += 1
-            except (ValueError, KeyError):
-                if d == 0:
+            except (TypeError, ValueError, KeyError):
+                if offset == 0:
                     count += 1
         day_counts.append((target, count))
-    max_count = max((c for _, c in day_counts), default=1) or 1
-    avg_ease = sum(c.get("ease_factor", 2.5) for c in all_cards) / len(all_cards) if all_cards else 0
-    # render
+    avg_ease = sum(card.get("ease_factor", 2.5) for card in all_cards) / len(all_cards)
     while True:
         stdscr.erase()
         max_y, max_x = stdscr.getmaxyx()
-        stdscr.addstr(0, 0, "Statistics", curses.color_pair(COLORS["prompt"]))
+        add_line(stdscr, 0, 0, "Statistics", curses.color_pair(COLORS["prompt"]))
         row = 2
-        for fname, n_total, n_due in file_stats:
+        for filename, total, due, suspended in file_stats:
             if row >= max_y - 10:
                 break
-            color = COLORS["error"] if n_due > 0 else COLORS["success"]
-            line = f"  {fname}: {n_total} cards, {n_due} due"
-            try:
-                stdscr.addstr(row, 0, line[:max_x-1], curses.color_pair(color))
-            except curses.error:
-                pass
+            add_line(
+                stdscr,
+                row,
+                0,
+                f"{filename}: {total} cards | {due} due | {suspended} suspended",
+                curses.color_pair(COLORS["info"]),
+            )
             row += 1
         row += 1
-        if row < max_y - 8:
-            try:
-                stdscr.addstr(row, 0, "7-day forecast", curses.color_pair(COLORS["accent"]))
-            except curses.error:
-                pass
-            row += 1
-            bar_width = max(10, max_x - 20)
-            for target, count in day_counts:
-                if row >= max_y - 2:
-                    break
-                label = target.strftime("%a %d/%m")
-                n_blocks = round(count / max_count * bar_width) if count > 0 else 0
-                bar = "█" * n_blocks
-                line = f"  {label}: {bar} {count}"
-                try:
-                    stdscr.addstr(row, 0, line[:max_x-1])
-                except curses.error:
-                    pass
-                row += 1
+        add_line(stdscr, row, 0, "7-day forecast", curses.color_pair(COLORS["accent"]))
         row += 1
-        if row < max_y - 1:
-            try:
-                stdscr.addstr(row, 0, f"  Avg ease: {avg_ease:.2f}  |  Total cards: {len(all_cards)}", curses.color_pair(COLORS["info"]))
-            except curses.error:
-                pass
-        try:
-            stdscr.addstr(max_y - 1, 0, "[q] Back"[:max_x-1], curses.color_pair(COLORS["muted"]))
-        except curses.error:
-            pass
+        max_count = max((count for _, count in day_counts), default=1) or 1
+        bar_width = max(10, max_x - 20)
+        for target, count in day_counts:
+            if row >= max_y - 2:
+                break
+            blocks = "█" * round(count / max_count * bar_width) if count else ""
+            add_line(stdscr, row, 0, f"{target.strftime('%a %d/%m')}: {blocks} {count}")
+            row += 1
+        add_line(
+            stdscr,
+            max_y - 1,
+            0,
+            f"[q] Back | Avg ease {avg_ease:.2f} | Active cards {len(active_cards(all_cards))}",
+            curses.color_pair(COLORS["muted"]),
+        )
         stdscr.refresh()
-        if chr(stdscr.getch()) == "q":
+        if stdscr.getch() in (ord("q"), ord("Q"), 27):
             return
 
-def import_screen(stdscr):
-    from tui import text_input, COLORS
-    stdscr.erase()
+
+def import_screen(stdscr, config: dict) -> None:
     filepath = text_input(stdscr, "File path: ", y=0, x=0)
     if not filepath:
         return
     filepath = os.path.expanduser(filepath)
     if not os.path.isfile(filepath):
-        stdscr.erase()
-        stdscr.addstr(0, 0, "File not found.", curses.color_pair(COLORS["error"]))
-        stdscr.refresh()
-        stdscr.getch()
+        show_message(stdscr, "Import", ["File not found."], "error")
         return
     try:
-        from import_export import import_from_txt, import_from_json
         if filepath.endswith(".txt"):
-            data = import_from_txt(filepath)
+            data = import_from_txt(filepath, config)
+        elif filepath.endswith(".csv"):
+            data = import_from_csv(filepath, config)
         elif filepath.endswith(".json") or filepath.endswith(".sko"):
-            data = import_from_json(filepath)
+            data = import_from_json(filepath, config)
         else:
-            stdscr.erase()
-            stdscr.addstr(0, 0, "Unsupported file type. Use .txt, .json, or .sko", curses.color_pair(COLORS["error"]))
-            stdscr.refresh()
-            stdscr.getch()
-            return
-    except (ValueError, json.JSONDecodeError) as e:
-        stdscr.erase()
-        stdscr.addstr(0, 0, f"Import error: {e}"[:stdscr.getmaxyx()[1]-1], curses.color_pair(COLORS["error"]))
-        stdscr.refresh()
-        stdscr.getch()
+            raise ValueError("Unsupported file type. Use .txt, .csv, .json, or .sko.")
+    except (ValueError, json.JSONDecodeError) as exc:
+        show_message(stdscr, "Import", [str(exc)], "error")
         return
-    n_cards = sum(len(v) for v in data.values())
+    n_cards = sum(len(cards) for cards in data.values())
     n_sets = len(data)
     stdscr.erase()
-    stdscr.addstr(0, 0, f"{n_cards} cards across {n_sets} sets", curses.color_pair(COLORS["success"]))
-    stdscr.addstr(2, 0, "[n] New .sko file  [e] Merge into existing  [q] Cancel", curses.color_pair(COLORS["prompt"]))
+    add_line(stdscr, 0, 0, f"{n_cards} cards across {n_sets} sets", curses.color_pair(COLORS["success"]))
+    add_line(stdscr, 2, 0, "[n] New .sko file  [e] Merge into existing  [q] Cancel", curses.color_pair(COLORS["prompt"]))
     stdscr.refresh()
     while True:
-        key = chr(stdscr.getch())
-        if key == "q":
+        key = stdscr.getch()
+        if key in (ord("q"), ord("Q"), 27):
             return
-        elif key == "n":
-            stdscr.erase()
+        if key == ord("n"):
             name = text_input(stdscr, "Filename: ", y=0, x=0)
             if name:
-                if not name.endswith(".sko"):
-                    name += ".sko"
-                write_sko(name, data)
-                stdscr.erase()
-                stdscr.addstr(0, 0, f"Saved to {name}", curses.color_pair(COLORS["success"]))
-                stdscr.refresh()
-                stdscr.getch()
+                filename = create_sko_file(name, config)
+                write_sko(filename, data, config)
+                show_message(stdscr, "Import", [f"Saved {n_cards} cards to {filename}."], "success")
             return
-        elif key == "e":
-            target = select_sko_file(stdscr)
-            if target:
-                existing = read_sko(target)
-                for set_name, cards in data.items():
-                    existing.setdefault(set_name, []).extend(cards)
-                write_sko(target, existing)
+        if key == ord("e"):
+            target = select_sko_file(stdscr, config)
+            if not target:
+                return
+            existing = read_sko(target, config)
+            duplicates = count_duplicates(existing, data)
+            strategy = "skip"
+            if duplicates:
                 stdscr.erase()
-                stdscr.addstr(0, 0, f"Merged into {target}", curses.color_pair(COLORS["success"]))
+                add_line(stdscr, 0, 0, f"{duplicates} duplicate card names detected in matching sets.", curses.color_pair(COLORS["prompt"]))
+                add_line(stdscr, 2, 0, "[s] Skip duplicates  [r] Replace duplicates  [k] Keep all", curses.color_pair(COLORS["muted"]))
                 stdscr.refresh()
-                stdscr.getch()
+                while True:
+                    merge_key = stdscr.getch()
+                    if merge_key == ord("s"):
+                        strategy = "skip"
+                        break
+                    if merge_key == ord("r"):
+                        strategy = "replace"
+                        break
+                    if merge_key == ord("k"):
+                        strategy = "keep"
+                        break
+                    if merge_key in (ord("q"), ord("Q"), 27):
+                        return
+            merged, summary = merge_sets(existing, data, strategy)
+            write_sko(target, merged, config)
+            show_message(
+                stdscr,
+                "Import",
+                [
+                    f"Merged into {target}.",
+                    f"Added: {summary['added']}",
+                    f"Replaced: {summary['replaced']}",
+                    f"Skipped: {summary['skipped']}",
+                ],
+                "success",
+            )
             return
 
-def export_screen(stdscr):
-    from tui import text_input, COLORS
-    sko_filename = select_sko_file(stdscr)
-    if not sko_filename:
+
+def export_screen(stdscr, config: dict) -> None:
+    filename = select_sko_file(stdscr, config)
+    if not filename:
         return
-    data = read_sko(sko_filename)
-    n_cards = sum(len(v) for v in data.values())
-    base = os.path.splitext(sko_filename)[0]
+    data = read_sko(filename, config)
+    n_cards = sum(len(cards) for cards in data.values())
+    base = os.path.splitext(filename)[0]
     stdscr.erase()
-    stdscr.addstr(0, 0, f"{sko_filename}: {n_cards} cards", curses.color_pair(COLORS["success"]))
-    stdscr.addstr(2, 0, "[j] JSON  [t] Text  [q] Cancel", curses.color_pair(COLORS["prompt"]))
+    add_line(stdscr, 0, 0, f"{filename}: {n_cards} cards", curses.color_pair(COLORS["success"]))
+    add_line(stdscr, 2, 0, "[j] JSON  [t] Text  [c] CSV  [q] Cancel", curses.color_pair(COLORS["prompt"]))
     stdscr.refresh()
     while True:
-        key = chr(stdscr.getch())
-        if key == "q":
+        key = stdscr.getch()
+        if key in (ord("q"), ord("Q"), 27):
             return
-        elif key in ("j", "t"):
-            ext = ".json" if key == "j" else ".txt"
-            default_path = os.path.expanduser(f"~/Desktop/{base}{ext}")
-            stdscr.erase()
-            path = text_input(stdscr, "Output path: ", initial=default_path, y=0, x=0)
-            if path:
-                from import_export import export_to_json, export_to_txt
-                if key == "j":
-                    export_to_json(data, os.path.expanduser(path))
-                else:
-                    export_to_txt(data, os.path.expanduser(path))
-                stdscr.erase()
-                stdscr.addstr(0, 0, f"Exported {n_cards} cards to {path}", curses.color_pair(COLORS["success"]))
-                stdscr.refresh()
-                stdscr.getch()
+        if key in (ord("j"), ord("t"), ord("c")):
+            ext = ".json" if key == ord("j") else ".txt" if key == ord("t") else ".csv"
+            path = text_input(
+                stdscr,
+                "Output path: ",
+                initial=os.path.expanduser(f"~/Desktop/{base}{ext}"),
+                y=0,
+                x=0,
+            )
+            if not path:
+                return
+            path = os.path.expanduser(path)
+            if key == ord("j"):
+                export_to_json(data, path, config)
+            elif key == ord("t"):
+                export_to_txt(data, path)
+            else:
+                export_to_csv(data, path)
+            show_message(stdscr, "Export", [f"Exported {n_cards} cards to {path}."], "success")
             return
 
-def deck_screen(stdscr, filename:str, config:dict, direct_review:bool=False):
-    from tui import select_from_list, COLORS
-    from schema import migrate_file
-    sko_all_sets = migrate_file(read_sko(filename))
+
+def deck_screen(stdscr, filename: str, config: dict, direct_review: bool = False) -> None:
+    sets = read_sko(filename, config)
     while True:
-        sel = select_flashcard_set(stdscr, sko_all_sets, filename)
-        if sel is None:
+        selection = select_flashcard_set(stdscr, sets, filename, config)
+        if selection is None:
             return
-        sko_setname, sko_setcontents = sel
+        set_name, cards = selection
         if direct_review:
-            result = render_sko_loop(stdscr, sko_setname, sko_setcontents, config)
-            if result:
-                sko_all_sets = update_sko_allsets(sko_all_sets, sko_setname, result[1])
-                write_sko(filename, sko_all_sets)
+            _, cards = render_sko_loop(stdscr, set_name, cards, config)
+            sets[set_name] = cards
+            write_sko(filename, sets, config)
             return
-        while True:
-            actions = [
+        action = select_from_list(
+            stdscr,
+            set_name,
+            [
                 ("Review", "", COLORS["accent"]),
-                ("Add cards", "", COLORS["success"]),
-                ("Edit cards", "", COLORS["info"]),
-                ("Delete cards", "", COLORS["error"]),
+                ("Manage cards", "", COLORS["info"]),
                 ("Back to sets", "", COLORS["muted"]),
-            ]
-            choice = select_from_list(stdscr, f"{sko_setname}", actions, footer="[Enter] Select  [q] Back")
-            if choice is None or choice == 4:
-                break
-            elif isinstance(choice, tuple):
-                continue
-            match choice:
-                case 0:
-                    result = render_sko_loop(stdscr, sko_setname, sko_setcontents, config)
-                case 1:
-                    result = add_sko_loop(stdscr, sko_setname, sko_setcontents)
-                case 2:
-                    result = edit_sko_loop(stdscr, sko_setname, sko_setcontents)
-                case 3:
-                    result = delete_sko_loop(stdscr, sko_setname, sko_setcontents, config)
-            if result:
-                sko_setname, sko_setcontents = result
-                sko_all_sets = update_sko_allsets(sko_all_sets, sko_setname, sko_setcontents)
-                write_sko(filename, sko_all_sets)
+            ],
+            footer="[Enter] Select  [q] Back",
+        )
+        if action is None or action == 2:
+            continue
+        if action == 0:
+            _, cards = render_sko_loop(stdscr, set_name, cards, config)
+        else:
+            _, cards = manage_cards_loop(stdscr, set_name, cards, config)
+        sets[set_name] = cards
+        write_sko(filename, sets, config)
+
 
 def menu_sko(stdscr) -> None:
-    from tui import select_from_list, COLORS
-    from config import load_config
+    ensure_config_dir()
     config = load_config()
     menu_items = [
         ("Review cards", "", COLORS["accent"]),
@@ -654,27 +718,30 @@ def menu_sko(stdscr) -> None:
         ("Quit", "", COLORS["error"]),
     ]
     while True:
-        choice = select_from_list(stdscr, "Senko flashcards", menu_items, footer="Spot issues? Ping me on Github @gongahkia.")
-        if choice is None or choice == 6: # quit
+        choice = select_from_list(
+            stdscr,
+            "Senko flashcards",
+            menu_items,
+            footer="Spot issues? Ping me on Github @gongahkia.",
+        )
+        if choice is None or choice == 6:
             return
-        elif isinstance(choice, tuple):
-            continue
-        match choice:
-            case 0: # review — shortcut: file -> set -> review directly
-                f = select_sko_file(stdscr)
-                if f:
-                    deck_screen(stdscr, f, config, direct_review=True)
-            case 1: # browse decks — full deck management
-                f = select_sko_file(stdscr)
-                if f:
-                    deck_screen(stdscr, f, config)
-            case 2: # import
-                import_screen(stdscr)
-            case 3: # export
-                export_screen(stdscr)
-            case 4: # statistics
-                stats_screen(stdscr)
-            case 5: # settings
-                config = config_editor(stdscr, config)
+        if choice == 0:
+            filename = select_sko_file(stdscr, config)
+            if filename:
+                deck_screen(stdscr, filename, config, direct_review=True)
+        elif choice == 1:
+            filename = select_sko_file(stdscr, config)
+            if filename:
+                deck_screen(stdscr, filename, config)
+        elif choice == 2:
+            import_screen(stdscr, config)
+        elif choice == 3:
+            export_screen(stdscr, config)
+        elif choice == 4:
+            stats_screen(stdscr, config)
+        elif choice == 5:
+            config = config_editor(stdscr, config)
+
 
 run_app(menu_sko)

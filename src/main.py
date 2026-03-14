@@ -16,6 +16,7 @@ from deck_screens import (
     select_sko_file,
     show_message,
 )
+from history_view import show_history_screen
 from review_flow import render_review_session
 from schema import new_card, reset_card_progress, touch_card
 from stats_view import show_stats_screen
@@ -221,6 +222,7 @@ def menu_sko(stdscr) -> None:
             ("browse", ("Browse decks", "", COLORS["info"])),
             ("import", ("Import cards", "", COLORS["success"])),
             ("export", ("Export cards", "", COLORS["success"])),
+            ("history", ("History", "", COLORS["accent"])),
         ]
         if config.get("tui", {}).get("show_stats", True):
             menu_items.append(("stats", ("Statistics", "", COLORS["muted"])))
@@ -253,6 +255,8 @@ def menu_sko(stdscr) -> None:
             import_screen(stdscr, config)
         elif selected_action == "export":
             export_screen(stdscr, config)
+        elif selected_action == "history":
+            show_history_screen(stdscr, config)
         elif selected_action == "stats":
             show_stats_screen(stdscr, [status for status in list_sko_files(config) if status["valid"]], config)
         elif selected_action == "settings":

@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from config import load_config, reset_config, save_config
 from screen_common import show_message
 from tui import COLORS, select_from_list, text_input
 
 
-def config_editor(stdscr, config: dict) -> dict:
+def config_editor(
+    stdscr,
+    config: dict,
+    *,
+    select_list: Callable = select_from_list,
+    text_reader: Callable = text_input,
+    show: Callable = show_message,
+) -> dict:
     field_specs = [
         ("srs", "initial_ease", "float"),
         ("srs", "minimum_ease", "float"),
@@ -28,7 +37,7 @@ def config_editor(stdscr, config: dict) -> dict:
             display = ",".join(str(item) for item in value) if isinstance(value, list) else str(value)
             color = COLORS["accent"] if section == "srs" else COLORS["info"]
             items.append((f"{key}: {display}", section.upper(), color))
-        choice = select_from_list(
+        choice = select_list(
             stdscr,
             "Settings",
             items,
@@ -49,18 +58,18 @@ def config_editor(stdscr, config: dict) -> dict:
             config[section][key] = not bool(current)
             continue
         initial = ",".join(str(item) for item in current) if isinstance(current, list) else str(current)
-        value = text_input(stdscr, f"{key}: ", initial=initial, y=0, x=0)
+        value = text_reader(stdscr, f"{key}: ", initial=initial, y=0, x=0)
         if value is None:
             continue
         if field_type == "float":
             try:
                 config[section][key] = float(value)
             except ValueError:
-                show_message(stdscr, "Settings", ["Invalid number."], "error")
+                show(stdscr, "Settings", ["Invalid number."], "error")
         elif field_type == "int":
             try:
                 config[section][key] = int(value)
             except ValueError:
-                show_message(stdscr, "Settings", ["Invalid integer."], "error")
+                show(stdscr, "Settings", ["Invalid integer."], "error")
         elif field_type == "list":
             config[section][key] = [part.strip() for part in value.split(",") if part.strip()]

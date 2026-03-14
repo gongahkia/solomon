@@ -7,7 +7,7 @@ from copy import deepcopy
 
 from config import load_config
 from deck_ops import restore_card
-from history import log_review_event
+from history import log_review_event, pop_last_review_event
 from schema import touch_card
 from import_export import import_from_csv, import_from_json, import_from_txt
 from srs import active_cards, cards_due, sm2_review
@@ -129,6 +129,7 @@ def main(argv: list[str] | None = None) -> int:
                     if grade == "u" and review_history:
                         last = review_history.pop()
                         restore_card(last["card"], last["snapshot"])
+                        pop_last_review_event(deck_name=deck_name, set_name=set_name, card_id=last["card"].get("id"))
                         session_counts[last["grade"]] -= 1
                         index = max(0, index - 1)
                         clear_screen()

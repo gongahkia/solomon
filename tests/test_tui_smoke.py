@@ -102,6 +102,17 @@ class TUISmokeTests(unittest.TestCase):
             history_view.show_history_screen(screen, config.load_config())
         self.assertTrue(os.path.exists(export_path))
 
+    def test_history_screen_can_show_event_detail(self):
+        card = new_card("Question", "Answer")
+        history.log_review_event("study.sko", "set_a", card, dict(card), 2, "due")
+        screen = FakeScreen([10, ord("q")])
+        with patch("curses.color_pair", return_value=0), patch("history_view.show_message") as show_message:
+            history_view.show_history_screen(screen, config.load_config())
+        self.assertEqual(show_message.call_args[0][1], "History event")
+        detail_lines = show_message.call_args[0][2]
+        self.assertTrue(any(line.startswith("Card id:") for line in detail_lines))
+        self.assertTrue(any(line.startswith("Interval:") for line in detail_lines))
+
     def test_history_screen_can_prune_all_events(self):
         card = new_card("Question", "Answer")
         history.log_review_event("study.sko", "set_a", card, dict(card), 2, "due")

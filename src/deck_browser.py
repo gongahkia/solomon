@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 
 from schema import is_leech
 from screen_common import confirm_prompt, show_message
@@ -16,7 +17,15 @@ def create_sko_file(name: str, config: dict) -> str:
     return name
 
 
-def select_sko_file(stdscr, config: dict) -> str | None:
+def select_sko_file(
+    stdscr,
+    config: dict,
+    *,
+    select_list: Callable = select_from_list,
+    text_reader: Callable = text_input,
+    confirm: Callable = confirm_prompt,
+    show: Callable = show_message,
+) -> str | None:
     ensure_config_dir()
     while True:
         statuses = list_sko_files(config)
@@ -39,7 +48,7 @@ def select_sko_file(stdscr, config: dict) -> str | None:
         footer = "[Enter] Open  [n] New file  [d] Delete  [/] Filter  [q] Back"
         if not items:
             items = [("No files found.", "Create one with [n]", COLORS["muted"])]
-        choice = select_from_list(
+        choice = select_list(
             stdscr,
             header,
             items,
@@ -52,7 +61,7 @@ def select_sko_file(stdscr, config: dict) -> str | None:
         if isinstance(choice, tuple):
             idx, key = choice
             if key == "n":
-                name = text_input(stdscr, "Filename: ", y=0, x=0)
+                name = text_reader(stdscr, "Filename: ", y=0, x=0)
                 if name:
                     create_sko_file(name, config)
                 continue
@@ -60,7 +69,7 @@ def select_sko_file(stdscr, config: dict) -> str | None:
                 filename = statuses[idx]["filename"]
                 should_delete = True
                 if config.get("tui", {}).get("confirm_delete", True):
-                    should_delete = confirm_prompt(stdscr, f"Delete {filename}?")
+                    should_delete = confirm(stdscr, f"Delete {filename}?")
                 if should_delete:
                     os.remove(sko_path(filename))
                 continue
@@ -69,12 +78,21 @@ def select_sko_file(stdscr, config: dict) -> str | None:
             continue
         selected = statuses[choice]
         if not selected["valid"]:
-            show_message(stdscr, selected["filename"], [selected["error"]], "error")
+            show(stdscr, selected["filename"], [selected["error"]], "error")
             continue
         return selected["filename"]
 
 
-def select_flashcard_set(stdscr, sets: dict, filename: str, config: dict) -> tuple[str, list] | None:
+def select_flashcard_set(
+    stdscr,
+    sets: dict,
+    filename: str,
+    config: dict,
+    *,
+    select_list: Callable = select_from_list,
+    text_reader: Callable = text_input,
+    confirm: Callable = confirm_prompt,
+) -> tuple[str, list] | None:
     while True:
         set_names = list(sets.keys())
         items = []
@@ -91,7 +109,7 @@ def select_flashcard_set(stdscr, sets: dict, filename: str, config: dict) -> tup
             items.append((f"{set_name} | {len(cards)} cards", detail_text, color))
         if not items:
             items = [("No sets found.", "Create one with [n]", COLORS["muted"])]
-        choice = select_from_list(
+        choice = select_list(
             stdscr,
             "Select flashcard set",
             items,
@@ -104,14 +122,14 @@ def select_flashcard_set(stdscr, sets: dict, filename: str, config: dict) -> tup
         if isinstance(choice, tuple):
             idx, key = choice
             if key == "n":
-                name = text_input(stdscr, "Set name: ", y=0, x=0)
+                name = text_reader(stdscr, "Set name: ", y=0, x=0)
                 if name and name not in sets:
                     sets[name] = []
                     write_sko(filename, sets, config)
                 continue
             if key == "r" and idx is not None and idx < len(set_names):
                 old_name = set_names[idx]
-                new_name = text_input(stdscr, "New name: ", initial=old_name, y=0, x=0)
+                new_name = text_reader(stdscr, "New name: ", initial=old_name, y=0, x=0)
                 if new_name and new_name != old_name and new_name not in sets:
                     sets[new_name] = sets.pop(old_name)
                     write_sko(filename, sets, config)
@@ -120,7 +138,7 @@ def select_flashcard_set(stdscr, sets: dict, filename: str, config: dict) -> tup
                 set_name = set_names[idx]
                 should_delete = True
                 if config.get("tui", {}).get("confirm_delete", True):
-                    should_delete = confirm_prompt(stdscr, f"Delete '{set_name}'?")
+                    should_delete = confirm(stdscr, f"Delete '{set_name}'?")
                 if should_delete:
                     del sets[set_name]
                     write_sko(filename, sets, config)

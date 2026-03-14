@@ -8,7 +8,7 @@ from schema import DOCUMENT_SETS_KEY, DOCUMENT_VERSION_KEY, SCHEMA_VERSION, Sche
 
 
 class SchemaTests(unittest.TestCase):
-    def test_normalize_legacy_document_adds_v2_metadata(self):
+    def test_normalize_legacy_document_adds_current_metadata(self):
         legacy = {
             "japanese": [
                 {
@@ -27,6 +27,9 @@ class SchemaTests(unittest.TestCase):
         self.assertIn("created_at", card)
         self.assertEqual(card["tags"], [])
         self.assertFalse(card["suspended"])
+        self.assertEqual(card["state"], "new")
+        self.assertEqual(card["lapses"], 0)
+        self.assertEqual(card["good_count"], 0)
 
     def test_normalize_document_rejects_blank_card_names(self):
         with self.assertRaises(SchemaError):
@@ -64,6 +67,8 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(card["ease_factor"], 2.1)
         self.assertEqual(card["interval"], 0)
         self.assertEqual(card["repetitions"], 0)
+        self.assertEqual(card["state"], "new")
+        self.assertEqual(card["step_index"], 0)
 
 
 if __name__ == "__main__":

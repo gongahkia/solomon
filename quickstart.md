@@ -10,7 +10,10 @@ Senko is a flashcard program for the CLI. It relies on a [spaced repetition syst
 * delete flashcards
 * suspend cards temporarily
 * search decks, sets and cards with `/`
+* move, duplicate and reorder cards inside the TUI
+* edit long answers with a multiline editor
 * import and export cards in `.txt`, `.json`, `.sko` and `.csv`
+* validate, migrate, import and export decks from the CLI
 
 Senko config files are stored in versioned `.sko` files that use JSON under the hood.
 
@@ -18,7 +21,7 @@ Senko files follow the below structure.
 
 * One senko file can contain multiple flashcard sets. 
 * Each set contains one or more flashcards.
-* Each flashcard has the fields `id`, `card_name`, `card_info`, `card_add_info`, `card_date`, `ease_factor`, `interval`, `repetitions`, `suspended`, `tags`, `created_at` and `updated_at`
+* Each flashcard has the fields `id`, `card_name`, `card_info`, `card_add_info`, `card_date`, `ease_factor`, `interval`, `repetitions`, `suspended`, `tags`, `created_at`, `updated_at`, `state`, `step_index`, `lapses`, `again_count`, `hard_count`, `good_count` and `easy_count`
 * Legacy decks are migrated automatically when Senko loads them
 * `card_name`: str; editable by user at sko file instantiation and through editing cards
 * `card_info`: str; editable by user at sko file instantiation and through editing cards
@@ -30,7 +33,7 @@ Senko files follow the below structure.
 
 ```txt
 {
-    "_schema_version": 2,
+    "_schema_version": 3,
     "sets": {
         "set_1": [
             {
@@ -45,7 +48,14 @@ Senko files follow the below structure.
                 "suspended": false,
                 "tags": [],
                 "created_at": "",
-                "updated_at": ""
+                "updated_at": "",
+                "state": "new",
+                "step_index": 0,
+                "lapses": 0,
+                "again_count": 0,
+                "hard_count": 0,
+                "good_count": 0,
+                "easy_count": 0
             }
         ]
     }
@@ -56,7 +66,7 @@ An example Senko file.
 
 ```json
 {
-    "_schema_version": 2,
+    "_schema_version": 3,
     "sets": {
         "russian_core_2k": [
             {
@@ -73,9 +83,25 @@ An example Senko file.
                     "verb"
                 ],
                 "created_at": "2026-03-14T09:00:00",
-                "updated_at": "2026-03-14T09:00:00"
+                "updated_at": "2026-03-14T09:00:00",
+                "state": "new",
+                "step_index": 0,
+                "lapses": 0,
+                "again_count": 0,
+                "hard_count": 0,
+                "good_count": 0,
+                "easy_count": 0
             }
         ]
     }
 }
+```
+
+## CLI examples
+
+```console
+$ ./senko.sh validate
+$ ./senko.sh migrate ~/Downloads/legacy.sko --output ~/Desktop/fixed.sko
+$ ./senko.sh import ~/Desktop/cards.csv japanese --strategy keep
+$ ./senko.sh export japanese --format csv --output ~/Desktop/japanese.csv
 ```

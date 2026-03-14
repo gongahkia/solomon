@@ -3,11 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from datetime import datetime
 
+import cards as cards_app
 from analytics import stats_pages
 from config import load_config
-from deck_ops import move_card, parse_tags, toggle_suspend
-from history import load_history
+from deck_ops import duplicate_card, move_card, parse_tags, reorder_card, toggle_suspend
+from history import archive_history, export_history, load_history, prune_history, rebuild_history
 from import_export import (
     export_to_csv,
     export_to_json,
@@ -17,7 +19,7 @@ from import_export import (
     import_from_txt,
     merge_sets,
 )
-from schema import DOCUMENT_SETS_KEY, new_card, normalize_document, reset_card_progress
+from schema import DOCUMENT_SETS_KEY, new_card, normalize_document, reset_card_progress, touch_card
 from storage import ensure_config_dir, list_sko_files, read_sko, sko_path, write_sko
 
 
@@ -39,6 +41,36 @@ def _parse_mapping(entries: list[str]) -> dict:
     return mapping
 
 
+def _parse_timestamp(value: str | None, label: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"Invalid {label} timestamp '{value}'. Use ISO-8601.") from exc
+
+
+def _history_filters(args) -> dict:
+    return {
+        "deck_name": _deck_name(args.deck) if getattr(args, "deck", None) else None,
+        "set_name": getattr(args, "set_name", None),
+        "card_id": getattr(args, "card_id", None),
+        "since": _parse_timestamp(getattr(args, "since", None), "--since"),
+        "before": _parse_timestamp(getattr(args, "before", None), "--before"),
+    }
+
+
+def _history_scope_requested(args) -> bool:
+    return bool(
+        getattr(args, "all", False)
+        or getattr(args, "deck", None)
+        or getattr(args, "set_name", None)
+        or getattr(args, "card_id", None)
+        or getattr(args, "since", None)
+        or getattr(args, "before", None)
+    )
+
+
 def _load_external_data(path: str, config: dict, field_mapping: dict | None = None) -> dict:
     if path.endswith(".txt"):
         return import_from_txt(path, config)
@@ -56,6 +88,12 @@ def _load_managed_deck(deck_name: str, config: dict) -> tuple[str, dict]:
 
 def _save_managed_deck(deck_name: str, sets: dict, config: dict) -> None:
     write_sko(_deck_name(deck_name), sets, config)
+
+
+def _require_set(sets: dict, set_name: str) -> list[dict]:
+    if set_name not in sets:
+        raise ValueError(f"Set not found: {set_name}")
+    return sets[set_name]
 
 
 def _find_card(cards: list[dict], selector: str) -> tuple[int, dict]:
@@ -84,7 +122,7 @@ def cmd_validate(args, config: dict) -> int:
         exit_code = 0
         for path in args.paths:
             try:
-                with open(path, "r") as fhand:
+                with open(path, "r", encoding="utf-8") as fhand:
                     raw = json.load(fhand)
                 sets = normalize_document(raw, config)[DOCUMENT_SETS_KEY]
                 print(f"VALID {path}: {len(sets)} sets")
@@ -104,11 +142,11 @@ def cmd_validate(args, config: dict) -> int:
 
 
 def cmd_migrate(args, config: dict) -> int:
-    with open(args.source, "r") as fhand:
+    with open(args.source, "r", encoding="utf-8") as fhand:
         raw = json.load(fhand)
     document = normalize_document(raw, config)
     destination = args.output or args.source
-    with open(destination, "w") as fhand:
+    with open(destination, "w", encoding="utf-8") as fhand:
         json.dump(document, fhand, indent=2)
     print(f"Migrated {args.source} -> {destination}")
     return 0
@@ -155,15 +193,15 @@ def cmd_list_decks(args, config: dict) -> int:
 
 
 def cmd_list_sets(args, config: dict) -> int:
-    deck_name, sets = _load_managed_deck(args.deck, config)
+    _, sets = _load_managed_deck(args.deck, config)
     for set_name, cards in sets.items():
         print(f"{set_name}\t{len(cards)}")
     return 0
 
 
 def cmd_list_cards(args, config: dict) -> int:
-    deck_name, sets = _load_managed_deck(args.deck, config)
-    target_sets = {args.set_name: sets[args.set_name]} if args.set_name else sets
+    _, sets = _load_managed_deck(args.deck, config)
+    target_sets = {args.set_name: _require_set(sets, args.set_name)} if args.set_name else sets
     for set_name, cards in target_sets.items():
         for card in cards:
             status = "suspended" if card.get("suspended") else card.get("state", "new")
@@ -181,6 +219,18 @@ def cmd_create_deck(args, config: dict) -> int:
     return 0
 
 
+def cmd_delete_deck(args, config: dict) -> int:
+    deck_name = _deck_name(args.deck)
+    path = sko_path(deck_name)
+    if not os.path.exists(path):
+        raise ValueError(f"Deck not found: {deck_name}")
+    if not args.force:
+        raise ValueError("Use --force to delete a deck from disk.")
+    os.remove(path)
+    print(f"Deleted deck {deck_name}")
+    return 0
+
+
 def cmd_create_set(args, config: dict) -> int:
     deck_name, sets = _load_managed_deck(args.deck, config)
     if args.set_name in sets and not args.force:
@@ -188,6 +238,29 @@ def cmd_create_set(args, config: dict) -> int:
     sets.setdefault(args.set_name, [])
     _save_managed_deck(deck_name, sets, config)
     print(f"Created set {args.set_name} in {deck_name}")
+    return 0
+
+
+def cmd_rename_set(args, config: dict) -> int:
+    deck_name, sets = _load_managed_deck(args.deck, config)
+    cards = _require_set(sets, args.set_name)
+    if args.new_name in sets:
+        raise ValueError(f"Set already exists: {args.new_name}")
+    sets[args.new_name] = cards
+    del sets[args.set_name]
+    _save_managed_deck(deck_name, sets, config)
+    print(f"Renamed {args.set_name} to {args.new_name}")
+    return 0
+
+
+def cmd_delete_set(args, config: dict) -> int:
+    deck_name, sets = _load_managed_deck(args.deck, config)
+    cards = _require_set(sets, args.set_name)
+    if cards and not args.force:
+        raise ValueError("Set is not empty; use --force to delete it.")
+    del sets[args.set_name]
+    _save_managed_deck(deck_name, sets, config)
+    print(f"Deleted set {args.set_name} from {deck_name}")
     return 0
 
 
@@ -207,23 +280,89 @@ def cmd_add_card(args, config: dict) -> int:
     return 0
 
 
+def cmd_edit_card(args, config: dict) -> int:
+    deck_name, sets = _load_managed_deck(args.deck, config)
+    cards = _require_set(sets, args.set_name)
+    _, card = _find_card(cards, args.card)
+    changed = False
+    if args.name is not None:
+        if not args.name.strip():
+            raise ValueError("Card name cannot be empty.")
+        card["card_name"] = args.name
+        changed = True
+    if args.info is not None or args.clear_info:
+        card["card_info"] = "" if args.clear_info else args.info
+        changed = True
+    if args.notes is not None or args.clear_notes:
+        card["card_add_info"] = "" if args.clear_notes else args.notes
+        changed = True
+    if args.tags is not None or args.clear_tags:
+        card["tags"] = [] if args.clear_tags else parse_tags(args.tags)
+        changed = True
+    if not changed:
+        raise ValueError("No card updates were provided.")
+    touch_card(card)
+    _save_managed_deck(deck_name, sets, config)
+    print(f"Updated {card.get('card_name')}")
+    return 0
+
+
+def cmd_duplicate_card(args, config: dict) -> int:
+    deck_name, sets = _load_managed_deck(args.deck, config)
+    cards = _require_set(sets, args.set_name)
+    index, card = _find_card(cards, args.card)
+    target_set = args.target_set or args.set_name
+    sets.setdefault(target_set, [])
+    cloned = duplicate_card(card, config)
+    if target_set == args.set_name:
+        cards.insert(index + 1, cloned)
+    else:
+        sets[target_set].append(cloned)
+    _save_managed_deck(deck_name, sets, config)
+    print(f"Duplicated {card.get('card_name')} into {target_set}")
+    return 0
+
+
+def cmd_delete_card(args, config: dict) -> int:
+    deck_name, sets = _load_managed_deck(args.deck, config)
+    cards = _require_set(sets, args.set_name)
+    index, card = _find_card(cards, args.card)
+    del cards[index]
+    _save_managed_deck(deck_name, sets, config)
+    print(f"Deleted {card.get('card_name')}")
+    return 0
+
+
 def cmd_move_card(args, config: dict) -> int:
     deck_name, sets = _load_managed_deck(args.deck, config)
-    if args.source_set not in sets:
-        raise ValueError(f"Set not found: {args.source_set}")
+    cards = _require_set(sets, args.source_set)
     sets.setdefault(args.target_set, [])
-    index, card = _find_card(sets[args.source_set], args.card)
+    index, card = _find_card(cards, args.card)
     move_card(sets, args.source_set, index, args.target_set)
     _save_managed_deck(deck_name, sets, config)
     print(f"Moved {card.get('card_name')} to {args.target_set}")
     return 0
 
 
+def cmd_duplicate_or_move_within_set(args, config: dict) -> int:
+    deck_name, sets = _load_managed_deck(args.deck, config)
+    cards = _require_set(sets, args.set_name)
+    index, card = _find_card(cards, args.card)
+    direction = -1 if args.direction == "up" else 1
+    for _ in range(max(1, args.steps)):
+        next_index = reorder_card(cards, index, direction)
+        if next_index == index:
+            break
+        index = next_index
+    _save_managed_deck(deck_name, sets, config)
+    print(f"Moved {card.get('card_name')} to position {index + 1} in {args.set_name}")
+    return 0
+
+
 def cmd_suspend_card(args, config: dict) -> int:
     deck_name, sets = _load_managed_deck(args.deck, config)
-    if args.set_name not in sets:
-        raise ValueError(f"Set not found: {args.set_name}")
-    _, card = _find_card(sets[args.set_name], args.card)
+    cards = _require_set(sets, args.set_name)
+    _, card = _find_card(cards, args.card)
     desired = not args.resume
     if card.get("suspended") != desired:
         toggle_suspend(card)
@@ -235,12 +374,54 @@ def cmd_suspend_card(args, config: dict) -> int:
 
 def cmd_reset_card(args, config: dict) -> int:
     deck_name, sets = _load_managed_deck(args.deck, config)
-    if args.set_name not in sets:
-        raise ValueError(f"Set not found: {args.set_name}")
-    _, card = _find_card(sets[args.set_name], args.card)
+    cards = _require_set(sets, args.set_name)
+    _, card = _find_card(cards, args.card)
     reset_card_progress(card, config)
     _save_managed_deck(deck_name, sets, config)
     print(f"Reset progress for {card.get('card_name')}")
+    return 0
+
+
+def cmd_review(args, config: dict) -> int:
+    review_argv = [args.deck]
+    if args.set_name:
+        review_argv.extend(["--set", args.set_name])
+    if args.due_only:
+        review_argv.append("--due-only")
+    if args.record_progress:
+        review_argv.append("--record-progress")
+    return cards_app.main(review_argv)
+
+
+def cmd_export_history(args, config: dict) -> int:
+    result = export_history(args.output, format=args.format, **_history_filters(args))
+    print(f"Exported {result['exported']} history events to {result['destination']}")
+    return 0
+
+
+def cmd_archive_history(args, config: dict) -> int:
+    if not _history_scope_requested(args):
+        raise ValueError("Refusing to archive the full history without --all or a filter.")
+    filters = _history_filters(args)
+    result = archive_history(args.output, format=args.format, **filters)
+    print(
+        f"Archived {result['archived']} history events to {result['destination']} "
+        f"with {result['remaining']} remaining."
+    )
+    return 0
+
+
+def cmd_prune_history(args, config: dict) -> int:
+    if not _history_scope_requested(args):
+        raise ValueError("Refusing to prune the full history without --all or a filter.")
+    result = prune_history(**_history_filters(args))
+    print(f"Removed {result['removed']} history events; {result['remaining']} remain.")
+    return 0
+
+
+def cmd_rebuild_history(args, config: dict) -> int:
+    result = rebuild_history()
+    print(f"Rebuilt history with {result['events']} valid events; dropped {result['dropped_lines']} invalid lines.")
     return 0
 
 
@@ -281,7 +462,7 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("--format", choices=["json", "txt", "csv"], default="json")
     export_parser.add_argument("--output", help="Destination path.")
 
-    list_decks_parser = subparsers.add_parser("list-decks", help="List managed Senko decks.")
+    subparsers.add_parser("list-decks", help="List managed Senko decks.")
 
     list_sets_parser = subparsers.add_parser("list-sets", help="List sets in a managed deck.")
     list_sets_parser.add_argument("deck")
@@ -294,10 +475,24 @@ def build_parser() -> argparse.ArgumentParser:
     create_deck_parser.add_argument("deck")
     create_deck_parser.add_argument("--force", action="store_true")
 
+    delete_deck_parser = subparsers.add_parser("delete-deck", help="Delete a managed deck.")
+    delete_deck_parser.add_argument("deck")
+    delete_deck_parser.add_argument("--force", action="store_true")
+
     create_set_parser = subparsers.add_parser("create-set", help="Create a set inside a managed deck.")
     create_set_parser.add_argument("deck")
     create_set_parser.add_argument("set_name")
     create_set_parser.add_argument("--force", action="store_true")
+
+    rename_set_parser = subparsers.add_parser("rename-set", help="Rename a set inside a managed deck.")
+    rename_set_parser.add_argument("deck")
+    rename_set_parser.add_argument("set_name")
+    rename_set_parser.add_argument("new_name")
+
+    delete_set_parser = subparsers.add_parser("delete-set", help="Delete a set from a managed deck.")
+    delete_set_parser.add_argument("deck")
+    delete_set_parser.add_argument("set_name")
+    delete_set_parser.add_argument("--force", action="store_true")
 
     add_card_parser = subparsers.add_parser("add-card", help="Add a card to a managed deck.")
     add_card_parser.add_argument("deck")
@@ -307,11 +502,41 @@ def build_parser() -> argparse.ArgumentParser:
     add_card_parser.add_argument("--notes")
     add_card_parser.add_argument("--tags")
 
+    edit_card_parser = subparsers.add_parser("edit-card", help="Edit a card inside a managed deck.")
+    edit_card_parser.add_argument("deck")
+    edit_card_parser.add_argument("set_name")
+    edit_card_parser.add_argument("card", help="Card id or exact card name.")
+    edit_card_parser.add_argument("--name")
+    edit_card_parser.add_argument("--info")
+    edit_card_parser.add_argument("--notes")
+    edit_card_parser.add_argument("--tags")
+    edit_card_parser.add_argument("--clear-info", action="store_true")
+    edit_card_parser.add_argument("--clear-notes", action="store_true")
+    edit_card_parser.add_argument("--clear-tags", action="store_true")
+
+    duplicate_card_parser = subparsers.add_parser("duplicate-card", help="Duplicate a card within or across sets.")
+    duplicate_card_parser.add_argument("deck")
+    duplicate_card_parser.add_argument("set_name")
+    duplicate_card_parser.add_argument("card", help="Card id or exact card name.")
+    duplicate_card_parser.add_argument("--target-set")
+
+    delete_card_parser = subparsers.add_parser("delete-card", help="Delete a card from a managed deck.")
+    delete_card_parser.add_argument("deck")
+    delete_card_parser.add_argument("set_name")
+    delete_card_parser.add_argument("card", help="Card id or exact card name.")
+
     move_card_parser = subparsers.add_parser("move-card", help="Move a card between sets.")
     move_card_parser.add_argument("deck")
     move_card_parser.add_argument("source_set")
     move_card_parser.add_argument("target_set")
     move_card_parser.add_argument("card", help="Card id or exact card name.")
+
+    reorder_card_parser = subparsers.add_parser("reorder-card", help="Move a card up or down within a set.")
+    reorder_card_parser.add_argument("deck")
+    reorder_card_parser.add_argument("set_name")
+    reorder_card_parser.add_argument("card", help="Card id or exact card name.")
+    reorder_card_parser.add_argument("direction", choices=["up", "down"])
+    reorder_card_parser.add_argument("--steps", type=int, default=1)
 
     suspend_parser = subparsers.add_parser("suspend-card", help="Suspend or resume a card.")
     suspend_parser.add_argument("deck")
@@ -323,6 +548,41 @@ def build_parser() -> argparse.ArgumentParser:
     reset_parser.add_argument("deck")
     reset_parser.add_argument("set_name")
     reset_parser.add_argument("card", help="Card id or exact card name.")
+
+    review_parser = subparsers.add_parser("review", help="Run the lightweight terminal reviewer from the main CLI.")
+    review_parser.add_argument("deck")
+    review_parser.add_argument("--set", dest="set_name")
+    review_parser.add_argument("--due-only", action="store_true")
+    review_parser.add_argument("--record-progress", action="store_true")
+
+    export_history_parser = subparsers.add_parser("export-history", help="Export review history to JSON or JSONL.")
+    export_history_parser.add_argument("output")
+    export_history_parser.add_argument("--format", choices=["json", "jsonl"], default="jsonl")
+    export_history_parser.add_argument("--deck")
+    export_history_parser.add_argument("--set", dest="set_name")
+    export_history_parser.add_argument("--card-id")
+    export_history_parser.add_argument("--since")
+    export_history_parser.add_argument("--before")
+
+    archive_history_parser = subparsers.add_parser("archive-history", help="Move matching review history events to another file.")
+    archive_history_parser.add_argument("output")
+    archive_history_parser.add_argument("--format", choices=["json", "jsonl"], default="jsonl")
+    archive_history_parser.add_argument("--deck")
+    archive_history_parser.add_argument("--set", dest="set_name")
+    archive_history_parser.add_argument("--card-id")
+    archive_history_parser.add_argument("--since")
+    archive_history_parser.add_argument("--before")
+    archive_history_parser.add_argument("--all", action="store_true")
+
+    prune_history_parser = subparsers.add_parser("prune-history", help="Delete matching review history events in place.")
+    prune_history_parser.add_argument("--deck")
+    prune_history_parser.add_argument("--set", dest="set_name")
+    prune_history_parser.add_argument("--card-id")
+    prune_history_parser.add_argument("--since")
+    prune_history_parser.add_argument("--before")
+    prune_history_parser.add_argument("--all", action="store_true")
+
+    subparsers.add_parser("rebuild-history", help="Rewrite history.jsonl while dropping malformed lines.")
 
     stats_parser = subparsers.add_parser("stats", help="Print stats for all decks or a single deck.")
     stats_parser.add_argument("--deck")
@@ -345,11 +605,23 @@ def run_cli(argv: list[str] | None = None) -> int:
         "list-sets": cmd_list_sets,
         "list-cards": cmd_list_cards,
         "create-deck": cmd_create_deck,
+        "delete-deck": cmd_delete_deck,
         "create-set": cmd_create_set,
+        "rename-set": cmd_rename_set,
+        "delete-set": cmd_delete_set,
         "add-card": cmd_add_card,
+        "edit-card": cmd_edit_card,
+        "duplicate-card": cmd_duplicate_card,
+        "delete-card": cmd_delete_card,
         "move-card": cmd_move_card,
+        "reorder-card": cmd_duplicate_or_move_within_set,
         "suspend-card": cmd_suspend_card,
         "reset-card": cmd_reset_card,
+        "review": cmd_review,
+        "export-history": cmd_export_history,
+        "archive-history": cmd_archive_history,
+        "prune-history": cmd_prune_history,
+        "rebuild-history": cmd_rebuild_history,
         "stats": cmd_stats,
     }
     return commands[args.command](args, config)

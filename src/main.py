@@ -7,14 +7,11 @@ import curses
 import json
 import os
 import sys
-import time
-from copy import deepcopy
-from datetime import date, datetime, timedelta
 
 from cli import run_cli
 from config import load_config, reset_config, save_config
+from deck_ops import card_detail, duplicate_card, move_card, parse_tags, reorder_card, toggle_suspend
 from import_export import (
-    count_duplicates,
     export_to_csv,
     export_to_json,
     export_to_txt,
@@ -25,8 +22,10 @@ from import_export import (
     merge_sets,
     preview_import,
 )
-from schema import DATE_FORMAT, is_leech, new_card, reset_card_progress, touch_card
-from srs import active_cards, cards_due, cards_due_count, next_review_date, sm2_review
+from review_flow import render_review_session
+from schema import is_leech, new_card, reset_card_progress, touch_card
+from srs import cards_due_count
+from stats_view import show_stats_screen
 from storage import ensure_config_dir, list_sko_files, read_sko, sko_path, write_sko
 from tui import COLORS, multiline_input, run_app, select_from_list, text_input
 
@@ -64,81 +63,6 @@ def confirm_prompt(stdscr, prompt: str, color_key: str = "error") -> bool:
     add_line(stdscr, 2, 0, "[y] Yes  [n] No", curses.color_pair(COLORS["muted"]))
     stdscr.refresh()
     return wait_for_keys(stdscr, (ord("y"), ord("Y"), ord("n"), ord("N"), 27)) in (ord("y"), ord("Y"))
-
-
-def parse_tags(raw_tags: str) -> list[str]:
-    return [tag.strip() for tag in raw_tags.split(",") if tag.strip()]
-
-
-def restore_card(card: dict, snapshot: dict) -> None:
-    card.clear()
-    card.update(deepcopy(snapshot))
-
-
-def duplicate_card(card: dict, config: dict) -> dict:
-    name = card.get("card_name", "")
-    if not name.endswith(" (copy)"):
-        name = f"{name} (copy)"
-    return new_card(
-        card_name=name,
-        card_info=card.get("card_info", ""),
-        card_add_info=card.get("card_add_info", ""),
-        tags=card.get("tags", []),
-        config=config,
-    )
-
-
-def created_within_days(card: dict, days: int) -> bool:
-    try:
-        created = datetime.fromisoformat(card["created_at"]).date()
-    except (KeyError, TypeError, ValueError):
-        return False
-    return created >= (date.today() - timedelta(days=days))
-
-
-def overdue_days(card: dict) -> int:
-    try:
-        due_date = datetime.strptime(card["card_date"], DATE_FORMAT).date()
-    except (KeyError, TypeError, ValueError):
-        return 0
-    delta = (date.today() - due_date).days
-    return max(0, delta)
-
-
-def grade_counts(cards: list[dict]) -> dict:
-    counts = {"again": 0, "hard": 0, "good": 0, "easy": 0}
-    for card in cards:
-        counts["again"] += int(card.get("again_count", 0))
-        counts["hard"] += int(card.get("hard_count", 0))
-        counts["good"] += int(card.get("good_count", 0))
-        counts["easy"] += int(card.get("easy_count", 0))
-    return counts
-
-
-def card_status(card: dict) -> tuple[str, int]:
-    if card.get("suspended"):
-        return ("Suspended", COLORS["muted"])
-    overdue = overdue_days(card)
-    if overdue:
-        return (f"Overdue {overdue}d", COLORS["error"])
-    try:
-        card_date = datetime.strptime(card["card_date"], DATE_FORMAT).date()
-    except (TypeError, ValueError, KeyError):
-        return ("Due (invalid date)", COLORS["error"])
-    if card_date <= date.today():
-        return ("Due", COLORS["error"])
-    return (f"Next {card_date.strftime(DATE_FORMAT)}", COLORS["success"])
-
-
-def card_detail(card: dict, config: dict) -> tuple[str, int]:
-    status, color = card_status(card)
-    extras = [card.get("state", "new")]
-    if is_leech(card, config):
-        extras.append("leech")
-    tags = card.get("tags", [])
-    if tags:
-        extras.append(f"tags:{','.join(tags)}")
-    return (f"{status} | {' | '.join(extras)}", color)
 
 
 def create_sko_file(name: str, config: dict) -> str:
@@ -262,177 +186,6 @@ def select_flashcard_set(stdscr, sets: dict, filename: str, config: dict) -> tup
             continue
         selected = set_names[choice]
         return (selected, sets[selected])
-
-
-def review_mode_screen(stdscr, set_name: str, cards: list[dict]) -> str | None:
-    reviewable = active_cards(cards)
-    due = cards_due(cards)
-    if not reviewable:
-        show_message(stdscr, set_name, ["All cards in this set are suspended."], "muted")
-        return None
-    if not due:
-        next_date = next_review_date(cards)
-        choice = select_from_list(
-            stdscr,
-            set_name,
-            [
-                ("Study all active cards", f"{len(reviewable)} active", COLORS["accent"]),
-                ("Back", f"Next due date: {next_date}", COLORS["muted"]),
-            ],
-            footer="[Enter] Select  [q] Back",
-        )
-        if choice == 0:
-            return "all"
-        return None
-    choice = select_from_list(
-        stdscr,
-        set_name,
-        [
-            ("Review due cards", f"{len(due)} due", COLORS["error"]),
-            ("Study all active cards", f"{len(reviewable)} active", COLORS["accent"]),
-            ("Back", "", COLORS["muted"]),
-        ],
-        footer="[Enter] Select  [q] Back",
-    )
-    if choice == 0:
-        return "due"
-    if choice == 1:
-        return "all"
-    return None
-
-
-def draw_card_front(stdscr, set_name: str, card: dict, index: int, total_cards: int, can_undo: bool, config: dict) -> int:
-    while True:
-        stdscr.erase()
-        max_y, max_x = stdscr.getmaxyx()
-        detail, color = card_detail(card, config)
-        add_line(stdscr, 0, 0, set_name, curses.color_pair(COLORS["accent"]))
-        add_line(stdscr, 0, max(0, max_x - 12), f"{index + 1}/{total_cards}")
-        add_line(stdscr, 1, 0, detail, curses.color_pair(color))
-        center_y = max_y // 2
-        name = card.get("card_name", "")
-        add_line(stdscr, center_y, max(0, (max_x - len(name)) // 2), name, curses.A_BOLD)
-        footer = "[Space] Show answer  [q] Quit session"
-        if can_undo:
-            footer += "  [u] Undo last"
-        add_line(stdscr, max_y - 1, 0, footer, curses.color_pair(COLORS["muted"]))
-        stdscr.refresh()
-        key = stdscr.getch()
-        if key in (ord(" "), 10, 13, ord("q"), ord("Q"), ord("u"), ord("U")):
-            return key
-
-
-def draw_card_back(stdscr, set_name: str, card: dict, index: int, total_cards: int, config: dict) -> int:
-    while True:
-        stdscr.erase()
-        max_y, max_x = stdscr.getmaxyx()
-        add_line(stdscr, 0, 0, card.get("card_name", ""), curses.A_BOLD)
-        add_line(stdscr, 0, max(0, max_x - 12), f"{index + 1}/{total_cards}")
-        status, color = card_status(card)
-        extra = f"{set_name} | {status} | {card.get('state', 'new')}"
-        if is_leech(card, config):
-            extra += " | leech"
-        add_line(stdscr, 1, 0, extra, curses.color_pair(color))
-        row = 3
-        for line in card.get("card_info", "").splitlines() or [""]:
-            add_line(stdscr, row, 0, line)
-            row += 1
-        add_info = card.get("card_add_info", "")
-        if add_info:
-            row += 1
-            for line in add_info.splitlines():
-                add_line(stdscr, row, 0, line, curses.color_pair(COLORS["muted"]))
-                row += 1
-        tags = card.get("tags", [])
-        if tags:
-            add_line(stdscr, max_y - 3, 0, f"Tags: {', '.join(tags)}", curses.color_pair(COLORS["muted"]))
-        add_line(
-            stdscr,
-            max_y - 1,
-            0,
-            "[1] Again  [2] Hard  [3] Good  [4] Easy  [q] Quit session",
-            curses.color_pair(COLORS["prompt"]),
-        )
-        stdscr.refresh()
-        key = stdscr.getch()
-        if key in (ord("1"), ord("2"), ord("3"), ord("4"), ord("q"), ord("Q")):
-            return key
-
-
-def maybe_handle_leech(stdscr, card: dict, config: dict) -> None:
-    threshold = int(config.get("srs", {}).get("leech_threshold", 8))
-    if int(card.get("lapses", 0)) != threshold or card.get("suspended"):
-        return
-    stdscr.erase()
-    add_line(
-        stdscr,
-        0,
-        0,
-        f"{card.get('card_name', 'Card')} reached the leech threshold ({threshold} lapses).",
-        curses.color_pair(COLORS["prompt"]),
-    )
-    add_line(stdscr, 2, 0, "[s] Suspend card  [k] Keep active", curses.color_pair(COLORS["muted"]))
-    stdscr.refresh()
-    key = wait_for_keys(stdscr, (ord("s"), ord("S"), ord("k"), ord("K"), 27))
-    if key in (ord("s"), ord("S")):
-        card["suspended"] = True
-        touch_card(card)
-
-
-def render_sko_loop(stdscr, set_name: str, cards: list[dict], config: dict) -> tuple[str, list]:
-    if not cards:
-        show_message(stdscr, set_name, ["This set is empty. Add cards before reviewing."], "muted")
-        return (set_name, cards)
-    review_mode = review_mode_screen(stdscr, set_name, cards)
-    if review_mode is None:
-        return (set_name, cards)
-    review_cards = cards_due(cards) if review_mode == "due" else active_cards(cards)
-    if not review_cards:
-        show_message(
-            stdscr,
-            set_name,
-            [f"All caught up. Next review: {next_review_date(cards)}"],
-            "success",
-        )
-        return (set_name, cards)
-    start_time = time.time()
-    history = []
-    session_counts = {0: 0, 1: 0, 2: 0, 3: 0}
-    index = 0
-    while index < len(review_cards):
-        card = review_cards[index]
-        front_key = draw_card_front(stdscr, set_name, card, index, len(review_cards), bool(history), config)
-        if front_key in (ord("q"), ord("Q")):
-            break
-        if front_key in (ord("u"), ord("U")) and history:
-            last = history.pop()
-            restore_card(last["card"], last["snapshot"])
-            session_counts[last["grade"]] -= 1
-            index = max(0, index - 1)
-            continue
-        snapshot = deepcopy(card)
-        back_key = draw_card_back(stdscr, set_name, card, index, len(review_cards), config)
-        if back_key in (ord("q"), ord("Q")):
-            break
-        grade = int(chr(back_key)) - 1
-        sm2_review(card, grade, config)
-        maybe_handle_leech(stdscr, card, config)
-        session_counts[grade] += 1
-        history.append({"card": card, "snapshot": snapshot, "grade": grade})
-        index += 1
-    elapsed = time.time() - start_time
-    reviewed = len(history)
-    show_message(
-        stdscr,
-        set_name,
-        [
-            f"Reviewed {reviewed} cards in {elapsed / 60:.1f} minutes.",
-            f"Again {session_counts[0]} | Hard {session_counts[1]} | Good {session_counts[2]} | Easy {session_counts[3]}",
-            f"Remaining due today: {cards_due_count(cards)}",
-        ],
-        "success",
-    )
-    return (set_name, cards)
 
 
 def edit_card_fields(stdscr, title: str, initial: dict | None, config: dict) -> dict | None:
@@ -571,22 +324,17 @@ def manage_cards_loop(stdscr, sets: dict, set_name: str, config: dict) -> tuple[
         elif action == 2:
             target = choose_target_set(stdscr, sets, set_name)
             if target and target != set_name:
-                sets[target].append(cards.pop(choice))
+                move_card(sets, set_name, choice, target)
                 if not cards:
                     show_message(stdscr, set_name, ["Set is now empty after moving the card."], "muted")
         elif action == 3:
-            if choice > 0:
-                cards[choice - 1], cards[choice] = cards[choice], cards[choice - 1]
-            else:
+            if reorder_card(cards, choice, -1) == choice:
                 show_message(stdscr, set_name, ["Card is already at the top."], "muted")
         elif action == 4:
-            if choice < len(cards) - 1:
-                cards[choice + 1], cards[choice] = cards[choice], cards[choice + 1]
-            else:
+            if reorder_card(cards, choice, 1) == choice:
                 show_message(stdscr, set_name, ["Card is already at the bottom."], "muted")
         elif action == 5:
-            card["suspended"] = not card.get("suspended", False)
-            touch_card(card)
+            toggle_suspend(card)
         elif action == 6:
             reset_card_progress(card, config)
         elif action == 7:
@@ -617,11 +365,9 @@ def config_editor(stdscr, config: dict) -> dict:
         items = []
         for section, key, field_type in field_specs:
             value = config.get(section, {}).get(key)
-            if isinstance(value, list):
-                display = ",".join(str(item) for item in value)
-            else:
-                display = str(value)
-            items.append((f"{key}: {display}", section.upper(), COLORS["accent"] if section == "srs" else COLORS["info"]))
+            display = ",".join(str(item) for item in value) if isinstance(value, list) else str(value)
+            color = COLORS["accent"] if section == "srs" else COLORS["info"]
+            items.append((f"{key}: {display}", section.upper(), color))
         choice = select_from_list(
             stdscr,
             "Settings",
@@ -660,115 +406,6 @@ def config_editor(stdscr, config: dict) -> dict:
             config[section][key] = [part.strip() for part in value.split(",") if part.strip()]
 
 
-def _forecast_counts(cards: list[dict], days: int = 7) -> list[tuple[date, int]]:
-    today = date.today()
-    day_counts = []
-    for offset in range(days):
-        target = today + timedelta(days=offset)
-        count = 0
-        for card in active_cards(cards):
-            try:
-                card_date = datetime.strptime(card["card_date"], DATE_FORMAT).date()
-                if card_date == target:
-                    count += 1
-            except (TypeError, ValueError, KeyError):
-                if offset == 0:
-                    count += 1
-        day_counts.append((target, count))
-    return day_counts
-
-
-def _stats_pages(valid_statuses: list[dict], config: dict) -> list[tuple[str, list[str]]]:
-    all_cards = []
-    set_rows = []
-    for status in valid_statuses:
-        for set_name, cards in status["sets"].items():
-            all_cards.extend(cards)
-            set_rows.append(
-                {
-                    "label": f"{status['filename']}::{set_name}",
-                    "total": len(cards),
-                    "due": cards_due_count(cards),
-                    "overdue": len([card for card in cards if overdue_days(card) > 0]),
-                    "leech": len([card for card in cards if is_leech(card, config)]),
-                    "recent": len([card for card in cards if created_within_days(card, 7)]),
-                }
-            )
-    active = active_cards(all_cards)
-    due = len(cards_due(all_cards))
-    suspended = len([card for card in all_cards if card.get("suspended")])
-    leech = len([card for card in all_cards if is_leech(card, config)])
-    overdue_bucket = {
-        "today": len([card for card in active if overdue_days(card) == 0 and card_status(card)[0].startswith("Due")]),
-        "1-7d": len([card for card in active if 1 <= overdue_days(card) <= 7]),
-        "8-30d": len([card for card in active if 8 <= overdue_days(card) <= 30]),
-        "30+d": len([card for card in active if overdue_days(card) > 30]),
-    }
-    grades = grade_counts(all_cards)
-    total_reviews = sum(grades.values())
-    correct = grades["hard"] + grades["good"] + grades["easy"]
-    retention = (correct / total_reviews * 100) if total_reviews else 0.0
-    recent_cards = len([card for card in all_cards if created_within_days(card, 7)])
-    avg_ease = sum(card.get("ease_factor", 2.5) for card in all_cards) / len(all_cards)
-    forecast = _forecast_counts(all_cards, 7)
-    overview = [
-        f"Deck files: {len(valid_statuses)}",
-        f"Sets: {len(set_rows)}",
-        f"Cards: {len(all_cards)} total | {len(active)} active | {suspended} suspended",
-        f"Due now: {due} | Leech candidates: {leech} | Added in 7d: {recent_cards}",
-        f"Average ease: {avg_ease:.2f} | Retention: {retention:.1f}%",
-        "",
-        f"Grades -> Again {grades['again']} | Hard {grades['hard']} | Good {grades['good']} | Easy {grades['easy']}",
-        "Overdue buckets",
-        f"Due today: {overdue_bucket['today']}",
-        f"1-7 days overdue: {overdue_bucket['1-7d']}",
-        f"8-30 days overdue: {overdue_bucket['8-30d']}",
-        f"30+ days overdue: {overdue_bucket['30+d']}",
-    ]
-    forecast_lines = []
-    max_count = max((count for _, count in forecast), default=1) or 1
-    for target, count in forecast:
-        width = 20
-        blocks = "█" * round(count / max_count * width) if count else ""
-        forecast_lines.append(f"{target.strftime('%a %d/%m')}: {blocks} {count}")
-    workload_lines = []
-    for row in sorted(set_rows, key=lambda item: (-item["due"], -item["overdue"], item["label"]))[:12]:
-        workload_lines.append(
-            f"{row['label']}: {row['due']} due | {row['overdue']} overdue | {row['leech']} leech | {row['recent']} new7d"
-        )
-    if not workload_lines:
-        workload_lines = ["No set data available."]
-    return [
-        ("Overview", overview),
-        ("Forecast", forecast_lines),
-        ("Workload", workload_lines),
-    ]
-
-
-def stats_screen(stdscr, config: dict) -> None:
-    valid_statuses = [status for status in list_sko_files(config) if status["valid"]]
-    if not valid_statuses:
-        show_message(stdscr, "Statistics", ["No valid decks yet. Create one to get started."], "muted")
-        return
-    pages = _stats_pages(valid_statuses, config)
-    page_index = 0
-    while True:
-        stdscr.erase()
-        title, lines = pages[page_index]
-        add_line(stdscr, 0, 0, f"Statistics | {title} ({page_index + 1}/{len(pages)})", curses.color_pair(COLORS["prompt"]))
-        for idx, line in enumerate(lines[: stdscr.getmaxyx()[0] - 3], start=2):
-            add_line(stdscr, idx, 0, line)
-        add_line(stdscr, stdscr.getmaxyx()[0] - 1, 0, "[j/k] Next/prev page  [q] Back", curses.color_pair(COLORS["muted"]))
-        stdscr.refresh()
-        key = stdscr.getch()
-        if key in (ord("q"), ord("Q"), 27):
-            return
-        if key in (ord("j"), curses.KEY_RIGHT):
-            page_index = (page_index + 1) % len(pages)
-        elif key in (ord("k"), curses.KEY_LEFT):
-            page_index = (page_index - 1) % len(pages)
-
-
 def load_csv_headers(filepath: str) -> list[str]:
     with open(filepath, "r", newline="") as fhand:
         reader = csv.DictReader(fhand)
@@ -799,12 +436,11 @@ def csv_mapping_screen(stdscr, filepath: str) -> dict | None:
             current = mapping.get(field, "(unmapped)")
             color = COLORS["error"] if field in missing else COLORS["info"]
             items.append((field, current, color))
-        footer = "[Enter] Edit field  [i] Import  [a] Auto-map  [q] Cancel"
         choice = select_from_list(
             stdscr,
             f"CSV field mapping | missing: {', '.join(missing) or 'none'}",
             items,
-            footer=footer,
+            footer="[Enter] Edit field  [i] Import  [a] Auto-map  [q] Cancel",
             extra_bindings=[("i", "Import"), ("a", "Auto-map")],
         )
         if choice is None:
@@ -988,7 +624,7 @@ def deck_screen(stdscr, filename: str, config: dict, direct_review: bool = False
             return
         set_name, cards = selection
         if direct_review:
-            _, cards = render_sko_loop(stdscr, set_name, cards, config)
+            _, cards = render_review_session(stdscr, filename, set_name, cards, config)
             sets[set_name] = cards
             write_sko(filename, sets, config)
             return
@@ -1005,7 +641,7 @@ def deck_screen(stdscr, filename: str, config: dict, direct_review: bool = False
         if action is None or action == 2:
             continue
         if action == 0:
-            _, cards = render_sko_loop(stdscr, set_name, cards, config)
+            _, cards = render_review_session(stdscr, filename, set_name, cards, config)
             sets[set_name] = cards
         else:
             set_name, sets = manage_cards_loop(stdscr, sets, set_name, config)
@@ -1054,7 +690,7 @@ def menu_sko(stdscr) -> None:
         elif selected_action == "export":
             export_screen(stdscr, config)
         elif selected_action == "stats":
-            stats_screen(stdscr, config)
+            show_stats_screen(stdscr, [status for status in list_sko_files(config) if status["valid"]], config)
         elif selected_action == "settings":
             config = config_editor(stdscr, config)
 

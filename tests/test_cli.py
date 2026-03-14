@@ -1,353 +1,66 @@
-# SPDX-License-Identifier: Apache-2.0
-
-from __future__ import annotations
-
+import io
 import json
-from pathlib import Path
-
-import pytest
-from fastapi import FastAPI
-from typer.testing import CliRunner
-
-from solomon import __version__
-from solomon.api.service import IngestRequest, SolomonService
-from solomon.cli.main import app
-from solomon.config import get_settings
-from solomon.currency.models import KnowledgeKind, SourceKind
-
-runner = CliRunner()
-
-
-def _configure_cli_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("SOLOMON_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("SOLOMON_JOURNAL_DIR", str(tmp_path / "journal"))
-    monkeypatch.setenv("SOLOMON_VERIFICATION_ATTESTATION_KEY", "test-secret")
-    get_settings.cache_clear()
-
-
-def test_cli_version_and_diagnostics(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _configure_cli_store(monkeypatch, tmp_path)
-
-    version = runner.invoke(app, ["--version"])
-    assert version.exit_code == 0
-    assert version.output.strip() == __version__
-
-    diagnostics = runner.invoke(app, ["diagnostics"])
-    assert diagnostics.exit_code == 0
-    payload = json.loads(diagnostics.output)
-
-    assert payload["version"] == __version__
-    assert payload["settings"]["data_dir"] == str(tmp_path / "data")
-    assert payload["settings"]["journal_dir"] == str(tmp_path / "journal")
-    assert payload["boundary"]["importable"] is True
-
-
-def test_cli_mcp_serve_dispatches_stdio(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
-    monkeypatch.setattr("solomon.cli.main.run_stdio_server", lambda: calls.append("stdio"))
-
-    result = runner.invoke(app, ["mcp", "serve"])
-
-    assert result.exit_code == 0
-    assert calls == ["stdio"]
-
-
-def test_cli_mcp_serve_loads_selected_jurisdiction(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _configure_cli_store(monkeypatch, tmp_path)
-    calls: list[object] = []
-    monkeypatch.setattr("solomon.cli.main.run_stdio_server", lambda service: calls.append(service))
-
-    result = runner.invoke(app, ["mcp", "serve", "--jurisdiction", "uk"])
-
-    assert result.exit_code == 0
-    assert len(calls) == 1
-    assert isinstance(calls[0], SolomonService)
-    assert calls[0].boundary.policy.default_source_jurisdiction == "UK"
-    assert calls[0].boundary.policy.default_destination_jurisdiction == "UK"
-
-
-def test_cli_mcp_serve_dispatches_http(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[str, str, int]] = []
-
-    def run_http(*, host: str, port: int) -> None:
-        calls.append(("http", host, port))
-
-    monkeypatch.setattr("solomon.cli.main.run_streamable_http_server", run_http)
-
-    result = runner.invoke(app, ["mcp", "serve", "--http", "--host", "127.0.0.2", "--port", "9000"])
-
-    assert result.exit_code == 0
-    assert calls == [("http", "127.0.0.2", 9000)]
-
-
-def test_cli_mcp_serve_rejects_conflicting_http_modes() -> None:
-    result = runner.invoke(app, ["mcp", "serve", "--http", "--sse"])
-
-    assert result.exit_code != 0
-    assert "mutually exclusive" in result.output
-
-
-def test_cli_help_includes_examples_for_visible_commands() -> None:
-    commands = [
-        ["diagnostics"],
-        ["health"],
-        ["migrate"],
-        ["worker"],
-        ["ingest"],
-        ["recall"],
-        ["preflight"],
-        ["check-currency"],
-        ["impact"],
-        ["get-dependencies"],
-        ["dependency-graph"],
-        ["extract-refs"],
-        ["predict-stale"],
-        ["register-authority-change"],
-        ["add-dependency"],
-        ["suggest-dependencies"],
-        ["dependency-suggestions"],
-        ["confirm-dependency-suggestion"],
-        ["reject-dependency-suggestion"],
-        ["verify-position"],
-        ["why"],
-        ["audit-pack"],
-        ["backup"],
-        ["restore"],
-        ["recovery-drill"],
-        ["mcp", "serve"],
-        ["console", "serve"],
-    ]
-
-    top_level = runner.invoke(app, ["--help"])
-    assert top_level.exit_code == 0
-    assert "Example:" in top_level.output
-
-    for command in commands:
-        result = runner.invoke(app, [*command, "--help"])
-        assert result.exit_code == 0, command
-        assert "Example:" in result.output, command
-
-
-def test_cli_backup_restore_and_recovery_drill(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _configure_cli_store(monkeypatch, tmp_path)
-    monkeypatch.setenv("SOLOMON_BACKUP_PASSPHRASE", "cli-backup-passphrase")
-    SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal").ingest(
-        IngestRequest(
-            kind=KnowledgeKind.POSITION,
-            content="CLI recovery position",
-            source_kind=SourceKind.PARTNER,
-            source_ref="cli-backup-memo",
-        )
-    )
-    archive = tmp_path / "backup.enc"
-
-    backed_up = runner.invoke(app, ["backup", str(archive)])
-    assert backed_up.exit_code == 0, backed_up.output
-    assert "cli-backup-passphrase" not in backed_up.output
-
-    restored_root = tmp_path / "restored"
-    restored = runner.invoke(app, ["restore", str(archive), str(restored_root)])
-    assert restored.exit_code == 0, restored.output
-    assert (restored_root / "data" / "solomon.sqlite3").is_file()
-
-    drill = runner.invoke(app, ["recovery-drill", str(archive)])
-    assert drill.exit_code == 0, drill.output
-    assert json.loads(drill.output)["knowledge_items"] == 1
-
-
-def test_cli_migrate_and_worker_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _configure_cli_store(monkeypatch, tmp_path)
-
-    migrated = runner.invoke(app, ["migrate"])
-    worker = runner.invoke(app, ["worker", "--once"])
-
-    assert migrated.exit_code == 0, migrated.output
-    assert json.loads(migrated.output) == {"backend": "sqlite", "status": "applied"}
-    assert worker.exit_code == 0, worker.output
-    assert json.loads(worker.output) == {"attempted": 0, "failed": 0, "skipped": 0, "succeeded": 0}
-
-
-def test_cli_console_serve_dispatches_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[dict[str, object]] = []
-
-    def run(app_path: str, **kwargs: object) -> None:
-        calls.append({"app_path": app_path, **kwargs})
-
-    monkeypatch.setattr("uvicorn.run", run)
-
-    result = runner.invoke(app, ["console", "serve", "--host", "127.0.0.2", "--port", "8151", "--reload"])
-
-    assert result.exit_code == 0
-    assert calls == [
-        {
-            "app_path": "solomon.console.app:create_console_app",
-            "factory": True,
-            "host": "127.0.0.2",
-            "port": 8151,
-            "reload": True,
-        }
-    ]
-
-
-def test_cli_console_serve_loads_selected_jurisdiction(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _configure_cli_store(monkeypatch, tmp_path)
-    calls: list[dict[str, object]] = []
-
-    def run(application: object, **kwargs: object) -> None:
-        calls.append({"application": application, **kwargs})
-
-    monkeypatch.setattr("uvicorn.run", run)
-
-    result = runner.invoke(app, ["console", "serve", "--jurisdiction", "eu"])
-
-    assert result.exit_code == 0
-    application = calls[0]["application"]
-    assert isinstance(application, FastAPI)
-    service = application.state.service
-    assert isinstance(service, SolomonService)
-    assert service.boundary.policy.default_source_jurisdiction == "EU"
-    assert service.boundary.policy.default_destination_jurisdiction == "EU"
-
-
-def test_cli_ingest_recall_and_why_use_same_local_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _configure_cli_store(monkeypatch, tmp_path)
-
-    ingest = runner.invoke(
-        app,
-        [
-            "ingest",
-            "reg r structure x",
-            "--source-ref",
-            "memo-cli",
-            "--kind",
-            "position",
-            "--source-kind",
-            "partner",
-        ],
-    )
-    assert ingest.exit_code == 0
-    item = json.loads(ingest.output)
-    assert item["id"]
-    assert item["provenance"]["source_ref"] == "memo-cli"
-
-    recall = runner.invoke(app, ["recall", "reg r structure", "--review-mode"])
-    assert recall.exit_code == 0
-    results = json.loads(recall.output)
-    assert results[0]["item"]["id"] == item["id"]
-    assert results[0]["currency_state"] == "Live"
-
-    why = runner.invoke(app, ["why", item["id"]])
-    assert why.exit_code == 0
-    assert item["id"] in why.output
-    assert "credence: FirmAuthoritative" in why.output
-    assert "source: memo-cli" in why.output
-
-
-def test_cli_mcp_aligned_verbs_and_migration_shims(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _configure_cli_store(monkeypatch, tmp_path)
-
-    health = runner.invoke(app, ["health"])
-    assert health.exit_code == 0
-    assert json.loads(health.output)["store"]["ok"] is True
-
-    ingest = runner.invoke(
-        app,
-        [
-            "ingest",
-            "reg r section 12 governs structure x",
-            "--source-ref",
-            "memo-cli-aligned",
-            "--kind",
-            "position",
-            "--source-kind",
-            "partner",
-        ],
-    )
-    assert ingest.exit_code == 0
-    item = json.loads(ingest.output)
-
-    preflight = runner.invoke(app, ["preflight", "reg r section 12"])
-    assert preflight.exit_code == 0
-    preflight_payload = json.loads(preflight.output)
-    assert preflight_payload["items"][0]["item"]["id"] == item["id"]
-    assert preflight_payload["boundary"]["status"] == "passed"
-
-    dependency = runner.invoke(
-        app,
-        [
-            "add-dependency",
-            "--source-id",
-            item["id"],
-            "--target-id",
-            "regulation-r-section-12",
-        ],
-    )
-    assert dependency.exit_code == 0
-
-    check = runner.invoke(app, ["check-currency", item["id"]])
-    show = runner.invoke(app, ["show-currency", item["id"]])
-    assert check.exit_code == 0
-    assert show.exit_code == 0
-    assert json.loads(check.output)["currency_state"] == "Live"
-    assert json.loads(show.output)["currency_state"] == "Live"
-
-    dependencies = runner.invoke(app, ["get-dependencies", item["id"]])
-    assert dependencies.exit_code == 0
-    assert json.loads(dependencies.output)["dependencies"][0]["target_id"] == "regulation-r-section-12"
-
-    impact = runner.invoke(app, ["impact", "regulation-r-section-12"])
-    impact_query = runner.invoke(app, ["impact-query", "regulation-r-section-12"])
-    assert impact.exit_code == 0
-    assert impact_query.exit_code == 0
-    assert json.loads(impact.output)["changed_dependency_id"] == "regulation-r-section-12"
-    assert json.loads(impact_query.output)["changed_dependency_id"] == "regulation-r-section-12"
-
-    verified = runner.invoke(
-        app,
-        ["verify-position", item["id"], "--outcome", "reaffirm", "--by", "Partner A", "--basis", "reviewed memo"],
-    )
-    assert verified.exit_code == 0
-    assert json.loads(verified.output)["verified_by"] == "Partner A"
-
-    pack_dir = tmp_path / "pack"
-    audit_pack = runner.invoke(app, ["audit-pack", item["id"], str(pack_dir)])
-    assert audit_pack.exit_code == 0
-    assert (pack_dir / "manifest.json").exists()
-
-
-def test_cli_dependency_suggestion_queue(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _configure_cli_store(monkeypatch, tmp_path)
-
-    ingest = runner.invoke(
-        app,
-        [
-            "ingest",
-            "This position relies on Regulation R section 12.",
-            "--source-ref",
-            "memo-cli-deps",
-            "--kind",
-            "position",
-            "--source-kind",
-            "partner",
-        ],
-    )
-    assert ingest.exit_code == 0
-    item = json.loads(ingest.output)
-
-    pending = runner.invoke(app, ["dependency-suggestions", "--item-id", item["id"]])
-    assert pending.exit_code == 0
-    suggestions = json.loads(pending.output)
-    assert suggestions[0]["decision"] == "pending"
-    assert suggestions[0]["suggested_edge"]["target_id"] == "regulation-r-section-12"
-
-    confirm = runner.invoke(
-        app,
-        ["confirm-dependency-suggestion", suggestions[0]["id"], "--by", "Partner A"],
-    )
-    assert confirm.exit_code == 0
-    edge = json.loads(confirm.output)
-    assert edge["confidence"] == "human_confirmed"
-
-    confirmed = runner.invoke(app, ["dependency-suggestions", "--item-id", item["id"], "--decision", "confirmed"])
-    assert confirmed.exit_code == 0
-    assert json.loads(confirmed.output)[0]["decision"] == "confirmed"
+import os
+import sys
+import tempfile
+import unittest
+from contextlib import redirect_stdout
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+import cli
+import config
+import storage
+
+
+class CLITests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.original_config_path = config.CONFIG_PATH
+        self.original_storage_dir = storage.CONFIG_DIR
+        config.CONFIG_PATH = os.path.join(self.tmpdir.name, "config.json")
+        storage.CONFIG_DIR = os.path.join(self.tmpdir.name, "decks")
+
+    def tearDown(self):
+        config.CONFIG_PATH = self.original_config_path
+        storage.CONFIG_DIR = self.original_storage_dir
+        self.tmpdir.cleanup()
+
+    def test_import_validate_and_export_workflow(self):
+        source = os.path.join(self.tmpdir.name, "source.txt")
+        with open(source, "w") as fhand:
+            fhand.write("---\nTOPIC: science\nAtom\nSmallest unit of matter\n---\n")
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.run_cli(["import", source, "study_deck"]), 0)
+            self.assertEqual(cli.run_cli(["validate"]), 0)
+            export_path = os.path.join(self.tmpdir.name, "deck.json")
+            self.assertEqual(cli.run_cli(["export", "study_deck", "--format", "json", "--output", export_path]), 0)
+        self.assertTrue(os.path.exists(export_path))
+
+    def test_migrate_rewrites_legacy_document(self):
+        legacy_path = os.path.join(self.tmpdir.name, "legacy.json")
+        migrated_path = os.path.join(self.tmpdir.name, "migrated.json")
+        with open(legacy_path, "w") as fhand:
+            json.dump(
+                {
+                    "history": [
+                        {
+                            "card_name": "Year",
+                            "card_info": "1066",
+                            "card_add_info": "Norman conquest",
+                            "card_date": "14/03/2026",
+                        }
+                    ]
+                },
+                fhand,
+            )
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.run_cli(["migrate", legacy_path, "--output", migrated_path]), 0)
+        with open(migrated_path, "r") as fhand:
+            document = json.load(fhand)
+        self.assertEqual(document["_schema_version"], 3)
+        self.assertIn("sets", document)
+
+
+if __name__ == "__main__":
+    unittest.main()

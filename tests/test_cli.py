@@ -5,11 +5,13 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import cli
 import config
+import history
 import storage
 
 
@@ -96,6 +98,69 @@ class CLITests(unittest.TestCase):
         with redirect_stdout(cards_output):
             self.assertEqual(cli.run_cli(["list-cards", "study", "--set", "set_b"]), 0)
         self.assertIn("Bonjour", cards_output.getvalue())
+
+    def test_cli_supports_edit_duplicate_reorder_and_delete_workflows(self):
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.run_cli(["create-deck", "study"]), 0)
+            self.assertEqual(cli.run_cli(["create-set", "study", "alpha"]), 0)
+            self.assertEqual(cli.run_cli(["add-card", "study", "alpha", "--name", "Hello", "--info", "World"]), 0)
+            self.assertEqual(
+                cli.run_cli(
+                    [
+                        "edit-card",
+                        "study",
+                        "alpha",
+                        "Hello",
+                        "--notes",
+                        "Greeting card",
+                        "--tags",
+                        "english,common",
+                    ]
+                ),
+                0,
+            )
+            self.assertEqual(cli.run_cli(["duplicate-card", "study", "alpha", "Hello"]), 0)
+            self.assertEqual(cli.run_cli(["reorder-card", "study", "alpha", "Hello (copy)", "up"]), 0)
+            self.assertEqual(cli.run_cli(["create-set", "study", "beta"]), 0)
+            self.assertEqual(cli.run_cli(["move-card", "study", "alpha", "beta", "Hello (copy)"]), 0)
+            self.assertEqual(cli.run_cli(["rename-set", "study", "beta", "gamma"]), 0)
+            self.assertEqual(cli.run_cli(["delete-card", "study", "gamma", "Hello (copy)"]), 0)
+            self.assertEqual(cli.run_cli(["delete-set", "study", "gamma"]), 0)
+        deck = storage.read_sko("study.sko", config.load_config())
+        self.assertIn("alpha", deck)
+        self.assertNotIn("gamma", deck)
+        self.assertEqual(len(deck["alpha"]), 1)
+        self.assertEqual(deck["alpha"][0]["card_add_info"], "Greeting card")
+        self.assertEqual(deck["alpha"][0]["tags"], ["english", "common"])
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.run_cli(["delete-deck", "study", "--force"]), 0)
+        self.assertFalse(os.path.exists(storage.sko_path("study.sko")))
+
+    def test_cli_can_review_and_manage_history(self):
+        history_export = os.path.join(self.tmpdir.name, "history.json")
+        history_archive = os.path.join(self.tmpdir.name, "history.jsonl")
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.run_cli(["create-deck", "study"]), 0)
+            self.assertEqual(cli.run_cli(["create-set", "study", "alpha"]), 0)
+            self.assertEqual(cli.run_cli(["add-card", "study", "alpha", "--name", "Hello", "--info", "World"]), 0)
+        with patch("cards.clear_screen"), patch("builtins.input", side_effect=["", "3"]):
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.run_cli(["review", "study", "--record-progress"]), 0)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.run_cli(["export-history", history_export, "--deck", "study", "--format", "json"]), 0)
+        with open(history_export, "r", encoding="utf-8") as fhand:
+            exported = json.load(fhand)
+        self.assertEqual(len(exported), 1)
+        self.assertEqual(exported[0]["deck_name"], "study.sko")
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.run_cli(["archive-history", history_archive, "--deck", "study"]), 0)
+        self.assertEqual(history.load_history(deck_name="study.sko"), [])
+        with open(history.history_path(), "a", encoding="utf-8") as fhand:
+            fhand.write("{bad json}\n")
+        rebuild_output = io.StringIO()
+        with redirect_stdout(rebuild_output):
+            self.assertEqual(cli.run_cli(["rebuild-history"]), 0)
+        self.assertIn("dropped 1 invalid lines", rebuild_output.getvalue())
 
 
 if __name__ == "__main__":

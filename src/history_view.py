@@ -84,7 +84,7 @@ def _prompt_filters(stdscr, filters: dict) -> dict | None:
     }
 
 
-def show_history_screen(stdscr, config: dict) -> None:
+def show_history_screen(stdscr, _config: dict) -> None:
     page_index = 0
     page_size = 5
     selected_index = 0

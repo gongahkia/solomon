@@ -41,6 +41,7 @@ py-modules = [
   "cli_parser",
   "cli_support",
   "config",
+  "deck_browser",
   "deck_ops",
   "deck_screens",
   "history",
@@ -50,9 +51,12 @@ py-modules = [
   "review_flow",
   "review_session",
   "schema",
+  "screen_common",
   "srs",
+  "settings_screen",
   "stats_view",
   "storage",
+  "transfer_screens",
   "tui",
 ]
 

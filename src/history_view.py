@@ -68,9 +68,13 @@ def show_history_screen(stdscr, config: dict) -> None:
     while True:
         events = load_history(**filters)
         if not events:
-            show_message(stdscr, "History", [f"No history for {_filters_label(filters)}."], "muted")
-            filters = {"deck_name": None, "set_name": None, "card_id": None}
-            continue
+            if any(filters.values()):
+                show_message(stdscr, "History", [f"No history for {_filters_label(filters)}. Clearing filters."], "muted")
+                filters = {"deck_name": None, "set_name": None, "card_id": None}
+                page_index = 0
+                continue
+            show_message(stdscr, "History", ["No review history yet."], "muted")
+            return
         page_count = max(1, (len(events) + page_size - 1) // page_size)
         page_index = min(page_index, page_count - 1)
         stdscr.erase()

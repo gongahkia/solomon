@@ -1,26 +1,12 @@
-# 閃光 is flash in japanese
+# `閃光` is flash in japanese
 
-Senko is a flashcard program for the CLI. It relies on a [spaced repetition system](https://e-student.org/spaced-repetition/) to make concepts stick, similar to [anki](https://ankiweb.net/about). 
+`Senko` is a flashcard program for the CLI. It relies on a [spaced repetition system](https://e-student.org/spaced-repetition/) to make concepts stick, similar to [anki](https://ankiweb.net/about). 
 
-## usage
+## Schema
 
-* run through flashcards
-* add flashcards
-* edit existing cards
-* delete flashcards
-* suspend cards temporarily
-* search decks, sets and cards with `/`
-* move, duplicate and reorder cards inside the TUI
-* edit long answers with a multiline editor
-* import and export cards in `.txt`, `.json`, `.sko` and `.csv`
-* create decks and sets, add/edit/move/duplicate/delete cards, and inspect stats from the CLI
-* run headless review sessions from `senko review`
-* export, archive, prune and rebuild review history for history-backed analytics
-* browse and maintain review history directly from the TUI
+`Senko` config files are stored in versioned `.sko` files that use JSON under the hood.
 
-Senko config files are stored in versioned `.sko` files that use JSON under the hood.
-
-Senko files follow the below structure. 
+`Senko` files follow the below structure. 
 
 * One senko file can contain multiple flashcard sets. 
 * Each set contains one or more flashcards.
@@ -65,7 +51,7 @@ Senko files follow the below structure.
 }
 ```
 
-An example Senko file.
+## Example `.sko` file
 
 ```json
 {
@@ -100,7 +86,7 @@ An example Senko file.
 }
 ```
 
-## CLI examples
+## Example `Senko` CLI commands
 
 ```console
 $ senko validate
@@ -118,13 +104,6 @@ $ senko export-history ~/Desktop/japanese-history.json --deck japanese --format 
 $ senko archive-history ~/Desktop/japanese-history.jsonl --deck japanese
 $ senko stats --deck japanese
 $ senko export japanese --format csv --output ~/Desktop/japanese.csv
-```
-
-## Lightweight Review Examples
-
-```console
 $ senko-cards japanese --due-only --record-progress
 $ senko-cards ~/Desktop/external_cards.csv --due-only
 ```
-
-When `--record-progress` is enabled, `senko-cards` also supports undoing the last grade during the session and can suspend leech cards once they hit the configured threshold.

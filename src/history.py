@@ -228,6 +228,23 @@ def rebuild_history() -> dict:
     return {"events": len(events), "dropped_lines": invalid_lines}
 
 
+def pop_last_review_event(
+    *,
+    deck_name: str | None = None,
+    set_name: str | None = None,
+    card_id: str | None = None,
+) -> dict | None:
+    events, _ = _load_all_events()
+    for index in range(len(events) - 1, -1, -1):
+        event = events[index]
+        if _event_matches(event, deck_name=deck_name, set_name=set_name, card_id=card_id):
+            removed = deepcopy(event)
+            del events[index]
+            rewrite_history(events)
+            return removed
+    return None
+
+
 def latest_review_for_card(card_id: str, *, deck_name: str | None = None) -> dict | None:
     latest = None
     for event in load_history(deck_name=deck_name, card_id=card_id):

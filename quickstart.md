@@ -13,7 +13,8 @@ Senko is a flashcard program for the CLI. It relies on a [spaced repetition syst
 * move, duplicate and reorder cards inside the TUI
 * edit long answers with a multiline editor
 * import and export cards in `.txt`, `.json`, `.sko` and `.csv`
-* validate, migrate, import and export decks from the CLI
+* create decks and sets, add/move/suspend/reset cards, and inspect stats from the CLI
+* record review history for history-backed analytics
 
 Senko config files are stored in versioned `.sko` files that use JSON under the hood.
 
@@ -100,8 +101,20 @@ An example Senko file.
 ## CLI examples
 
 ```console
-$ ./senko.sh validate
-$ ./senko.sh migrate ~/Downloads/legacy.sko --output ~/Desktop/fixed.sko
-$ ./senko.sh import ~/Desktop/cards.csv japanese --strategy keep
-$ ./senko.sh export japanese --format csv --output ~/Desktop/japanese.csv
+$ senko validate
+$ senko create-deck japanese
+$ senko create-set japanese core_2k
+$ senko add-card japanese core_2k --name "ありがとう" --info "thank you" --tags greeting
+$ senko move-card japanese core_2k review "ありがとう"
+$ senko suspend-card japanese review "ありがとう"
+$ senko reset-card japanese review "ありがとう"
+$ senko stats --deck japanese
+$ senko export japanese --format csv --output ~/Desktop/japanese.csv
+```
+
+## Lightweight Review Examples
+
+```console
+$ senko-cards japanese --due-only --record-progress
+$ senko-cards ~/Desktop/external_cards.csv --due-only
 ```

@@ -19,9 +19,13 @@ jobs:
         run: python -m pip install .
       - name: Compile sources
         run: python -m compileall src tests
-      - name: Smoke entrypoints
+      - name: Smoke installed entrypoints
         run: |
           senko --help
           senko-cards --help
+          senko create-deck ci-smoke --force
+          senko create-set ci-smoke base
+          senko add-card ci-smoke base --name "hello" --info "world"
+          senko stats --deck ci-smoke
       - name: Run tests
         run: python -m unittest discover -s tests

@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import argparse
 import os
-import time
-from copy import deepcopy
 
 from config import load_config
-from deck_ops import restore_card
-from history import log_review_event, pop_last_review_event
 from schema import touch_card
 from import_export import import_from_csv, import_from_json, import_from_txt
-from srs import active_cards, cards_due, sm2_review
+from review_session import (
+    apply_review,
+    review_mode_from_due_only,
+    reviewed_count,
+    session_elapsed_minutes,
+    start_session,
+    undo_last_review,
+)
+from srs import active_cards, cards_due
 from storage import read_sko, write_sko
 
 
@@ -96,12 +100,11 @@ def main(argv: list[str] | None = None) -> int:
         print("No cards available for review.")
         return 0
     clear_screen()
-    start_time = time.time()
-    session_counts = {0: 0, 1: 0, 2: 0, 3: 0}
     should_stop = False
     set_offset = 0
+    review_mode = review_mode_from_due_only(args.due_only)
+    session = start_session([], review_mode)
     for set_name, cards in review_sets:
-        review_history = []
         index = 0
         while index < len(cards):
             card = cards[index]
@@ -122,15 +125,12 @@ def main(argv: list[str] | None = None) -> int:
             if args.record_progress:
                 while True:
                     prompt = "\nGrade [1-4]"
-                    if review_history:
+                    if session["history"]:
                         prompt += " | [u] Undo last"
                     prompt += " | [q] Quit: "
                     grade = input(prompt).strip().lower()
-                    if grade == "u" and review_history:
-                        last = review_history.pop()
-                        restore_card(last["card"], last["snapshot"])
-                        pop_last_review_event(deck_name=deck_name, set_name=set_name, card_id=last["card"].get("id"))
-                        session_counts[last["grade"]] -= 1
+                    if grade == "u" and session["history"]:
+                        undo_last_review(session, deck_name=deck_name, set_name=set_name)
                         index = max(0, index - 1)
                         clear_screen()
                         break
@@ -138,27 +138,23 @@ def main(argv: list[str] | None = None) -> int:
                         should_stop = True
                         break
                     if grade in {"1", "2", "3", "4"}:
-                        before = deepcopy(card)
                         grade_value = int(grade) - 1
-                        sm2_review(card, grade_value, config)
-                        _maybe_handle_leech(card, config)
-                        log_review_event(
-                            deck_name,
-                            set_name,
-                            before,
-                            card,
-                            grade_value,
-                            "due" if args.due_only else "all",
+                        apply_review(
+                            session,
+                            deck_name=deck_name,
+                            set_name=set_name,
+                            card=card,
+                            grade=grade_value,
+                            config=config,
+                            leech_handler=_maybe_handle_leech,
                         )
-                        session_counts[grade_value] += 1
-                        review_history.append({"card": card, "snapshot": before, "grade": grade_value})
                         index += 1
                         break
                     print("Enter 1, 2, 3, 4, 'u', or 'q'.")
                 if should_stop:
                     clear_screen()
                     break
-                if review_history and review_history[-1]["card"] is not card:
+                if session["history"] and session["history"][-1]["card"] is not card:
                     continue
             else:
                 input("\nPress [Enter] to continue")
@@ -167,17 +163,16 @@ def main(argv: list[str] | None = None) -> int:
         if should_stop:
             break
         set_offset += len(cards)
-    elapsed = time.time() - start_time
     _save_if_needed(deck_name, data, config, args.record_progress)
-    reviewed = sum(session_counts.values()) if args.record_progress else total_cards
-    print(f"Reviewed {reviewed} cards in {elapsed / 60:.2f} minutes.")
+    reviewed = reviewed_count(session) if args.record_progress else total_cards
+    print(f"Reviewed {reviewed} cards in {session_elapsed_minutes(session):.2f} minutes.")
     if args.record_progress:
         print(
             "Again {again} | Hard {hard} | Good {good} | Easy {easy}".format(
-                again=session_counts[0],
-                hard=session_counts[1],
-                good=session_counts[2],
-                easy=session_counts[3],
+                again=session["counts"][0],
+                hard=session["counts"][1],
+                good=session["counts"][2],
+                easy=session["counts"][3],
             )
         )
     if args.record_progress and deck_name:

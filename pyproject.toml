@@ -34,6 +34,8 @@ py-modules = [
   "analytics",
   "cards",
   "cli",
+  "cli_commands",
+  "cli_parser",
   "config",
   "deck_ops",
   "deck_screens",

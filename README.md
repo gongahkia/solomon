@@ -16,3 +16,11 @@ $ git clone https://github.com/gongahkia/senko
 $ cd src && chmod +x senko.sh
 $ ./senko.sh
 ```
+
+## highlights
+
+- Versioned `.sko` files with validation and automatic legacy migration.
+- Searchable file, set, and card pickers directly in the TUI with `/`.
+- Suspend, reset, edit, and delete actions from one card-management screen.
+- CSV, JSON, and plain-text import/export for easier bulk editing.
+- Safer deck writes with atomic save behavior to reduce corruption risk.

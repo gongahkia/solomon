@@ -13,6 +13,7 @@ class SRSTests(unittest.TestCase):
         card = new_card("Front", "Back", config={"srs": {"initial_ease": 2.7}})
         card["interval"] = 10
         card["repetitions"] = 3
+        card["state"] = "review"
         sm2_review(card, 1, {"srs": {"minimum_ease": 1.3, "hard_factor": 0.5}})
         self.assertEqual(card["interval"], 5)
         self.assertEqual(card["repetitions"], 4)
@@ -29,9 +30,28 @@ class SRSTests(unittest.TestCase):
         card = new_card("Front", "Back")
         card["interval"] = 6
         card["repetitions"] = 2
+        card["state"] = "review"
         sm2_review(card, 3, {"srs": {"easy_bonus": 1.5}})
         self.assertGreater(card["interval"], 6)
         self.assertEqual(card["repetitions"], 3)
+
+    def test_again_from_review_enters_relearning_and_counts_lapse(self):
+        card = new_card("Front", "Back")
+        card["interval"] = 12
+        card["repetitions"] = 4
+        card["state"] = "review"
+        sm2_review(card, 0, {"srs": {"relearning_steps": [2, 4]}})
+        self.assertEqual(card["state"], "relearning")
+        self.assertEqual(card["interval"], 2)
+        self.assertEqual(card["lapses"], 1)
+
+    def test_interval_is_capped_by_configured_max_interval(self):
+        card = new_card("Front", "Back")
+        card["interval"] = 100
+        card["repetitions"] = 5
+        card["state"] = "review"
+        sm2_review(card, 3, {"srs": {"max_interval": 30}})
+        self.assertEqual(card["interval"], 30)
 
 
 if __name__ == "__main__":

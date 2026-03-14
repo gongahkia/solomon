@@ -112,6 +112,23 @@ class TUISmokeTests(unittest.TestCase):
             history_view.show_history_screen(screen, config.load_config())
         self.assertEqual(history.load_history(), [])
 
+    def test_history_screen_filters_export_scope_by_deck(self):
+        first = new_card("Question", "Answer")
+        second = new_card("Other", "Back")
+        history.log_review_event("study.sko", "set_a", first, dict(first), 2, "due")
+        history.log_review_event("other.sko", "set_b", second, dict(second), 1, "all")
+        export_path = os.path.join(self.tmpdir.name, "study-history.jsonl")
+        screen = FakeScreen([ord("f"), ord("e"), ord("q")])
+        with patch("curses.color_pair", return_value=0), patch(
+            "history_view.text_input",
+            side_effect=["study", "", "", export_path],
+        ), patch("history_view.show_message"):
+            history_view.show_history_screen(screen, config.load_config())
+        with open(export_path, "r", encoding="utf-8") as fhand:
+            lines = [line for line in fhand.read().splitlines() if line]
+        self.assertEqual(len(lines), 1)
+        self.assertIn("study.sko", lines[0])
+
 
 if __name__ == "__main__":
     unittest.main()

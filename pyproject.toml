@@ -40,6 +40,7 @@ py-modules = [
   "deck_ops",
   "deck_screens",
   "history",
+  "history_view",
   "import_export",
   "main",
   "review_flow",

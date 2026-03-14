@@ -16,6 +16,7 @@ Senko is a flashcard program for the CLI. It relies on a [spaced repetition syst
 * create decks and sets, add/edit/move/duplicate/delete cards, and inspect stats from the CLI
 * run headless review sessions from `senko review`
 * export, archive, prune and rebuild review history for history-backed analytics
+* browse and maintain review history directly from the TUI
 
 Senko config files are stored in versioned `.sko` files that use JSON under the hood.
 
@@ -125,3 +126,5 @@ $ senko export japanese --format csv --output ~/Desktop/japanese.csv
 $ senko-cards japanese --due-only --record-progress
 $ senko-cards ~/Desktop/external_cards.csv --due-only
 ```
+
+When `--record-progress` is enabled, `senko-cards` also supports undoing the last grade during the session and can suspend leech cards once they hit the configured threshold.

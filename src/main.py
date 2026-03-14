@@ -6,21 +6,16 @@ import sys
 
 from cli import run_cli
 from config import load_config
+from deck_browser import select_flashcard_set, select_sko_file
 from deck_ops import card_detail, duplicate_card, move_card, parse_tags, reorder_card, toggle_suspend
-from deck_screens import (
-    config_editor,
-    confirm_prompt,
-    export_screen,
-    import_screen,
-    select_flashcard_set,
-    select_sko_file,
-    show_message,
-)
 from history_view import show_history_screen
 from review_flow import render_review_session
+from screen_common import confirm_prompt, show_message
 from schema import new_card, reset_card_progress, touch_card
+from settings_screen import config_editor
 from stats_view import show_stats_screen
 from storage import ensure_config_dir, list_sko_files, read_sko, write_sko
+from transfer_screens import export_screen, import_screen
 from tui import COLORS, multiline_input, run_app, select_from_list, text_input
 
 

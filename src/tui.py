@@ -1,4 +1,5 @@
 import curses
+import curses.textpad
 
 COLORS = {"error": 1, "success": 2, "prompt": 3, "info": 4, "muted": 5, "accent": 6, "default": 7}
 
@@ -152,6 +153,49 @@ def text_input(stdscr, prompt, initial="", y=0, x=0):
             buf = buf[:-1]
         elif 32 <= key <= 126:
             buf += chr(key)
+
+def multiline_input(stdscr, title, initial="", footer="Ctrl-G save  Esc cancel"):
+    cancelled = False
+
+    def _validator(key):
+        nonlocal cancelled
+        if key == 27:
+            cancelled = True
+            return 7
+        if key == curses.KEY_BACKSPACE:
+            return 8
+        return key
+
+    stdscr.erase()
+    max_y, max_x = stdscr.getmaxyx()
+    try:
+        stdscr.addstr(0, 0, title[:max_x-1], curses.color_pair(COLORS["prompt"]))
+        stdscr.addstr(1, 0, footer[:max_x-1], curses.color_pair(COLORS["muted"]))
+    except curses.error:
+        pass
+    box_top = 3
+    box_height = max(4, max_y - box_top - 2)
+    box_width = max(10, max_x - 2)
+    edit_win = curses.newwin(box_height, box_width, box_top, 1)
+    border_win = curses.newwin(box_height + 2, box_width + 2, box_top - 1, 0)
+    border_win.box()
+    border_win.refresh()
+    lines = initial.splitlines() or [""]
+    for idx, line in enumerate(lines[:box_height]):
+        try:
+            edit_win.addstr(idx, 0, line[:box_width-1])
+        except curses.error:
+            pass
+    edit_win.refresh()
+    curses.curs_set(1)
+    try:
+        editor = curses.textpad.Textbox(edit_win, insert_mode=True)
+        value = editor.edit(_validator).rstrip("\n")
+    finally:
+        curses.curs_set(0)
+    if cancelled:
+        return None
+    return value
 
 def form_input(stdscr, title, fields):
     """fields: list of (label, default_value). Returns list of values or None on Esc."""

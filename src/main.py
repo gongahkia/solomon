@@ -19,7 +19,7 @@ from transfer_screens import export_screen, import_screen
 from tui import COLORS, multiline_input, run_app, select_from_list, text_input
 
 
-def edit_card_fields(stdscr, title: str, initial: dict | None, config: dict) -> dict | None:
+def edit_card_fields(stdscr, title: str, initial: dict | None) -> dict | None:
     initial = initial or {}
     name = text_input(stdscr, "Name: ", initial=initial.get("card_name", ""), y=0, x=0)
     if name is None or not name.strip():
@@ -42,7 +42,7 @@ def edit_card_fields(stdscr, title: str, initial: dict | None, config: dict) -> 
 
 
 def edit_sko_card(stdscr, card: dict, config: dict) -> dict | None:
-    result = edit_card_fields(stdscr, "Edit card", card, config)
+    result = edit_card_fields(stdscr, "Edit card", card)
     if result is None:
         return None
     card["card_name"] = result["card_name"]
@@ -54,7 +54,7 @@ def edit_sko_card(stdscr, card: dict, config: dict) -> dict | None:
 
 
 def add_sko_card(stdscr, config: dict) -> dict | None:
-    result = edit_card_fields(stdscr, "Add new card", None, config)
+    result = edit_card_fields(stdscr, "Add new card", None)
     if result is None:
         return None
     return new_card(

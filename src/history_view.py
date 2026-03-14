@@ -30,14 +30,47 @@ def _format_from_path(path: str) -> str:
     return "json" if path.lower().endswith(".json") else "jsonl"
 
 
+def _filters_label(filters: dict) -> str:
+    parts = []
+    if filters["deck_name"]:
+        parts.append(f"deck={filters['deck_name']}")
+    if filters["set_name"]:
+        parts.append(f"set={filters['set_name']}")
+    if filters["card_id"]:
+        parts.append(f"card={filters['card_id']}")
+    return ", ".join(parts) if parts else "all events"
+
+
+def _prompt_filters(stdscr, filters: dict) -> dict | None:
+    deck_name = text_input(stdscr, "Deck (.sko optional, blank for all): ", initial=filters["deck_name"] or "", y=0, x=0)
+    if deck_name is None:
+        return None
+    set_name = text_input(stdscr, "Set (blank for all): ", initial=filters["set_name"] or "", y=0, x=0)
+    if set_name is None:
+        return None
+    card_id = text_input(stdscr, "Card id (blank for all): ", initial=filters["card_id"] or "", y=0, x=0)
+    if card_id is None:
+        return None
+    normalized_deck = deck_name.strip()
+    if normalized_deck and not normalized_deck.endswith(".sko"):
+        normalized_deck += ".sko"
+    return {
+        "deck_name": normalized_deck or None,
+        "set_name": set_name.strip() or None,
+        "card_id": card_id.strip() or None,
+    }
+
+
 def show_history_screen(stdscr, config: dict) -> None:
     page_index = 0
     page_size = 10
+    filters = {"deck_name": None, "set_name": None, "card_id": None}
     while True:
-        events = load_history()
+        events = load_history(**filters)
         if not events:
-            show_message(stdscr, "History", ["No review history yet."], "muted")
-            return
+            show_message(stdscr, "History", [f"No history for {_filters_label(filters)}."], "muted")
+            filters = {"deck_name": None, "set_name": None, "card_id": None}
+            continue
         page_count = max(1, (len(events) + page_size - 1) // page_size)
         page_index = min(page_index, page_count - 1)
         stdscr.erase()
@@ -45,7 +78,7 @@ def show_history_screen(stdscr, config: dict) -> None:
             stdscr,
             0,
             0,
-            f"History ({page_index + 1}/{page_count}) | {len(events)} events",
+            f"History ({page_index + 1}/{page_count}) | {len(events)} events | {_filters_label(filters)}",
             curses.color_pair(COLORS["prompt"]),
         )
         row = 2
@@ -54,7 +87,7 @@ def show_history_screen(stdscr, config: dict) -> None:
                 break
             add_line(stdscr, row, 0, line)
             row += 1
-        footer = "[j/k] Next/prev  [e] Export  [a] Archive all  [p] Prune all  [r] Rebuild  [q] Back"
+        footer = "[j/k] Next/prev  [f] Filter  [c] Clear  [e] Export  [a] Archive  [p] Prune  [r] Rebuild  [q] Back"
         add_line(stdscr, stdscr.getmaxyx()[0] - 1, 0, footer, curses.color_pair(COLORS["muted"]))
         stdscr.refresh()
         key = stdscr.getch()
@@ -66,6 +99,16 @@ def show_history_screen(stdscr, config: dict) -> None:
         if key in (ord("k"), curses.KEY_LEFT):
             page_index = (page_index - 1) % page_count
             continue
+        if key == ord("f"):
+            updated_filters = _prompt_filters(stdscr, filters)
+            if updated_filters is not None:
+                filters = updated_filters
+                page_index = 0
+            continue
+        if key == ord("c"):
+            filters = {"deck_name": None, "set_name": None, "card_id": None}
+            page_index = 0
+            continue
         if key == ord("e"):
             default_path = os.path.expanduser(
                 f"~/Desktop/senko-history-{datetime.now().strftime('%Y%m%d-%H%M%S')}.jsonl"
@@ -73,7 +116,7 @@ def show_history_screen(stdscr, config: dict) -> None:
             path = text_input(stdscr, "Export path: ", initial=default_path, y=0, x=0)
             if path:
                 path = os.path.expanduser(path)
-                result = export_history(path, format=_format_from_path(path))
+                result = export_history(path, format=_format_from_path(path), **filters)
                 show_message(stdscr, "History", [f"Exported {result['exported']} events to {result['destination']}."], "success")
             continue
         if key == ord("a"):
@@ -81,9 +124,9 @@ def show_history_screen(stdscr, config: dict) -> None:
                 f"~/Desktop/senko-history-archive-{datetime.now().strftime('%Y%m%d-%H%M%S')}.jsonl"
             )
             path = text_input(stdscr, "Archive path: ", initial=default_path, y=0, x=0)
-            if path and confirm_prompt(stdscr, "Archive all history events to this file?"):
+            if path and confirm_prompt(stdscr, f"Archive history for {_filters_label(filters)} to this file?"):
                 path = os.path.expanduser(path)
-                result = archive_history(path, format=_format_from_path(path))
+                result = archive_history(path, format=_format_from_path(path), **filters)
                 show_message(
                     stdscr,
                     "History",
@@ -93,8 +136,8 @@ def show_history_screen(stdscr, config: dict) -> None:
                 page_index = 0
             continue
         if key == ord("p"):
-            if confirm_prompt(stdscr, "Delete all review history events?"):
-                result = prune_history()
+            if confirm_prompt(stdscr, f"Delete history for {_filters_label(filters)}?"):
+                result = prune_history(**filters)
                 show_message(stdscr, "History", [f"Removed {result['removed']} history events."], "success")
                 page_index = 0
             continue

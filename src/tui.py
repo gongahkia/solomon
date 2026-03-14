@@ -20,15 +20,26 @@ def run_app(main_fn):
         main_fn(stdscr)
     curses.wrapper(_wrapper)
 
-def select_from_list(stdscr, title, items, footer="", y_offset=2, extra_bindings=None):
+def _item_matches_query(item, query):
+    if not query:
+        return True
+    main_text, detail_text, _ = item
+    haystack = f"{main_text} {detail_text}".casefold()
+    return query.casefold() in haystack
+
+def select_from_list(stdscr, title, items, footer="", y_offset=2, extra_bindings=None, searchable=False):
     """items: list of (main_text, detail_text, detail_color_pair) tuples.
     Returns int index on Enter, None on q/Esc, or (None, key_char) on unhandled keys."""
     cursor = 0
+    search_query = ""
     while True:
+        indexed_items = [(index, item) for index, item in enumerate(items) if _item_matches_query(item, search_query)]
+        if cursor >= len(indexed_items):
+            cursor = max(0, len(indexed_items) - 1)
         stdscr.erase()
         max_y, max_x = stdscr.getmaxyx()
         stdscr.addstr(0, 0, title[:max_x-1], curses.color_pair(COLORS["prompt"]))
-        visible_height = max_y - y_offset - 2 # reserve 1 for footer
+        visible_height = max_y - y_offset - 3
         if visible_height < 1:
             visible_height = 1
         scroll_offset = 0
@@ -36,11 +47,25 @@ def select_from_list(stdscr, title, items, footer="", y_offset=2, extra_bindings
             scroll_offset = cursor - visible_height + 1
         if cursor < scroll_offset:
             scroll_offset = cursor
-        for i in range(scroll_offset, min(scroll_offset + visible_height, len(items))):
+        if searchable:
+            filter_label = f"Filter: {search_query or '(none)'}"
+            count_label = f"{len(indexed_items)}/{len(items)}"
+            try:
+                stdscr.addstr(1, 0, filter_label[:max_x-1], curses.color_pair(COLORS["muted"]))
+                stdscr.addstr(1, max(0, max_x - len(count_label) - 1), count_label, curses.color_pair(COLORS["muted"]))
+            except curses.error:
+                pass
+        if not indexed_items:
+            try:
+                stdscr.addstr(y_offset, 0, "No matching items.", curses.color_pair(COLORS["error"]))
+            except curses.error:
+                pass
+        for i in range(scroll_offset, min(scroll_offset + visible_height, len(indexed_items))):
             row = y_offset + (i - scroll_offset)
             if row >= max_y - 1:
                 break
-            main_text, detail_text, detail_color = items[i]
+            _, item = indexed_items[i]
+            main_text, detail_text, detail_color = item
             prefix = "> " if i == cursor else "  "
             attr = curses.A_REVERSE if i == cursor else 0
             line = f"{prefix}{main_text}"
@@ -60,21 +85,30 @@ def select_from_list(stdscr, title, items, footer="", y_offset=2, extra_bindings
         stdscr.refresh()
         key = stdscr.getch()
         if key in (ord('j'), curses.KEY_DOWN):
-            if cursor < len(items) - 1:
+            if cursor < len(indexed_items) - 1:
                 cursor += 1
         elif key in (ord('k'), curses.KEY_UP):
             if cursor > 0:
                 cursor -= 1
         elif key in (curses.KEY_ENTER, 10, 13):
-            return cursor
+            if indexed_items:
+                return indexed_items[cursor][0]
         elif key in (ord('q'), 27): # q or Esc
             return None
+        elif searchable and key == ord('/'):
+            query = text_input(stdscr, "Filter: ", initial=search_query, y=0, x=0)
+            if query is not None:
+                search_query = query
+                cursor = 0
         elif key == ord('?') and extra_bindings is not None:
             default_binds = [("j / Down", "Move down"), ("k / Up", "Move up"), ("Enter", "Select"), ("q / Esc", "Go back"), ("?", "Show help")]
+            if searchable:
+                default_binds.append(("/", "Filter items"))
             show_help(stdscr, default_binds + extra_bindings)
         else:
             try:
-                return (cursor, chr(key))
+                selected_idx = indexed_items[cursor][0] if indexed_items else None
+                return (selected_idx, chr(key))
             except (ValueError, OverflowError):
                 pass
 

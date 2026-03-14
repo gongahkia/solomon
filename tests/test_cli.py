@@ -61,6 +61,42 @@ class CLITests(unittest.TestCase):
         self.assertEqual(document["_schema_version"], 3)
         self.assertIn("sets", document)
 
+    def test_cli_can_manage_cards_and_print_stats(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(cli.run_cli(["create-deck", "study"]), 0)
+            self.assertEqual(cli.run_cli(["create-set", "study", "set_a"]), 0)
+            self.assertEqual(
+                cli.run_cli(
+                    [
+                        "add-card",
+                        "study",
+                        "set_a",
+                        "--name",
+                        "Bonjour",
+                        "--info",
+                        "hello",
+                        "--tags",
+                        "french,greeting",
+                    ]
+                ),
+                0,
+            )
+            self.assertEqual(cli.run_cli(["create-set", "study", "set_b"]), 0)
+            self.assertEqual(cli.run_cli(["move-card", "study", "set_a", "set_b", "Bonjour"]), 0)
+            self.assertEqual(cli.run_cli(["suspend-card", "study", "set_b", "Bonjour"]), 0)
+            self.assertEqual(cli.run_cli(["reset-card", "study", "set_b", "Bonjour"]), 0)
+            self.assertEqual(cli.run_cli(["stats", "--deck", "study"]), 0)
+        stdout = output.getvalue()
+        self.assertIn("Created deck study.sko", stdout)
+        self.assertIn("Moved Bonjour to set_b", stdout)
+        self.assertIn("Suspended Bonjour", stdout)
+        self.assertIn("[Overview]", stdout)
+        cards_output = io.StringIO()
+        with redirect_stdout(cards_output):
+            self.assertEqual(cli.run_cli(["list-cards", "study", "--set", "set_b"]), 0)
+        self.assertIn("Bonjour", cards_output.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -865,13 +865,18 @@ def import_screen(stdscr, config: dict) -> None:
     preview = preview_import(data)
     while True:
         stdscr.erase()
+        detailed_preview = config.get("tui", {}).get("show_import_preview", True)
         add_line(stdscr, 0, 0, "Import preview", curses.color_pair(COLORS["success"]))
         add_line(stdscr, 2, 0, f"Sets: {preview['set_count']} | Cards: {preview['card_count']}")
         row = 4
-        for set_name, count in preview["sets"][:10]:
-            add_line(stdscr, row, 0, f"{set_name}: {count} cards")
-            row += 1
-        if filepath.endswith(".csv") and csv_mapping:
+        if detailed_preview:
+            for set_name, count in preview["sets"][:10]:
+                add_line(stdscr, row, 0, f"{set_name}: {count} cards")
+                row += 1
+        else:
+            add_line(stdscr, row, 0, "Detailed import preview is disabled in settings.")
+            row += 2
+        if detailed_preview and filepath.endswith(".csv") and csv_mapping:
             row += 1
             add_line(stdscr, row, 0, "CSV mapping:", curses.color_pair(COLORS["accent"]))
             row += 1
@@ -1010,39 +1015,47 @@ def deck_screen(stdscr, filename: str, config: dict, direct_review: bool = False
 def menu_sko(stdscr) -> None:
     ensure_config_dir()
     config = load_config()
-    menu_items = [
-        ("Review cards", "", COLORS["accent"]),
-        ("Browse decks", "", COLORS["info"]),
-        ("Import cards", "", COLORS["success"]),
-        ("Export cards", "", COLORS["success"]),
-        ("Statistics", "", COLORS["muted"]),
-        ("Settings", "", COLORS["prompt"]),
-        ("Quit", "", COLORS["error"]),
-    ]
     while True:
+        menu_items = [
+            ("review", ("Review cards", "", COLORS["accent"])),
+            ("browse", ("Browse decks", "", COLORS["info"])),
+            ("import", ("Import cards", "", COLORS["success"])),
+            ("export", ("Export cards", "", COLORS["success"])),
+        ]
+        if config.get("tui", {}).get("show_stats", True):
+            menu_items.append(("stats", ("Statistics", "", COLORS["muted"])))
+        menu_items.extend(
+            [
+                ("settings", ("Settings", "", COLORS["prompt"])),
+                ("quit", ("Quit", "", COLORS["error"])),
+            ]
+        )
         choice = select_from_list(
             stdscr,
             "Senko flashcards",
-            menu_items,
+            [item for _, item in menu_items],
             footer="Spot issues? Ping me on Github @gongahkia.",
         )
-        if choice is None or choice == 6:
+        if choice is None:
             return
-        if choice == 0:
+        selected_action = menu_items[choice][0]
+        if selected_action == "quit":
+            return
+        if selected_action == "review":
             filename = select_sko_file(stdscr, config)
             if filename:
                 deck_screen(stdscr, filename, config, direct_review=True)
-        elif choice == 1:
+        elif selected_action == "browse":
             filename = select_sko_file(stdscr, config)
             if filename:
                 deck_screen(stdscr, filename, config)
-        elif choice == 2:
+        elif selected_action == "import":
             import_screen(stdscr, config)
-        elif choice == 3:
+        elif selected_action == "export":
             export_screen(stdscr, config)
-        elif choice == 4:
+        elif selected_action == "stats":
             stats_screen(stdscr, config)
-        elif choice == 5:
+        elif selected_action == "settings":
             config = config_editor(stdscr, config)
 
 

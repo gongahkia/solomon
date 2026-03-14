@@ -5,9 +5,10 @@ from datetime import date, datetime
 from uuid import uuid4
 
 DATE_FORMAT = "%d/%m/%Y"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DOCUMENT_VERSION_KEY = "_schema_version"
 DOCUMENT_SETS_KEY = "sets"
+CARD_STATES = {"new", "review", "relearning"}
 
 REQUIRED_CARD_KEYS = [
     "id",
@@ -22,6 +23,13 @@ REQUIRED_CARD_KEYS = [
     "tags",
     "created_at",
     "updated_at",
+    "state",
+    "step_index",
+    "lapses",
+    "again_count",
+    "hard_count",
+    "good_count",
+    "easy_count",
 ]
 
 
@@ -50,6 +58,13 @@ def card_defaults(config: dict | None = None) -> dict:
         "repetitions": 0,
         "suspended": False,
         "tags": [],
+        "state": "new",
+        "step_index": 0,
+        "lapses": 0,
+        "again_count": 0,
+        "hard_count": 0,
+        "good_count": 0,
+        "easy_count": 0,
     }
 
 
@@ -135,6 +150,13 @@ def validate_card(card: dict) -> list[str]:
         errors.append("Field 'suspended' must be a boolean.")
     if not isinstance(card["tags"], list) or any(not isinstance(tag, str) for tag in card["tags"]):
         errors.append("Field 'tags' must be a list of strings.")
+    if card["state"] not in CARD_STATES:
+        errors.append(f"Field 'state' must be one of {sorted(CARD_STATES)}.")
+    if not isinstance(card["step_index"], int) or card["step_index"] < 0:
+        errors.append("Field 'step_index' must be a non-negative integer.")
+    for key in ("lapses", "again_count", "hard_count", "good_count", "easy_count"):
+        if not isinstance(card[key], int) or card[key] < 0:
+            errors.append(f"Field '{key}' must be a non-negative integer.")
     for key in ("created_at", "updated_at"):
         if not isinstance(card[key], str) or not _validate_timestamp(card[key]):
             errors.append(f"Field '{key}' must be an ISO timestamp string.")
@@ -151,9 +173,36 @@ def reset_card_progress(card: dict, config: dict | None = None) -> dict:
     card["ease_factor"] = defaults["ease_factor"]
     card["interval"] = defaults["interval"]
     card["repetitions"] = defaults["repetitions"]
+    card["state"] = "new"
+    card["step_index"] = 0
     card["card_date"] = today_str()
     touch_card(card)
     return card
+
+
+def record_grade(card: dict, grade: int) -> dict:
+    grade_map = {
+        0: "again_count",
+        1: "hard_count",
+        2: "good_count",
+        3: "easy_count",
+    }
+    key = grade_map[grade]
+    card[key] = int(card.get(key, 0)) + 1
+    return card
+
+
+def is_leech(card: dict, config: dict | None = None) -> bool:
+    threshold = 8
+    if config:
+        threshold = int(config.get("srs", {}).get("leech_threshold", threshold))
+    return int(card.get("lapses", 0)) >= threshold
+
+
+def _default_state(card: dict) -> str:
+    if int(card.get("interval", 0)) > 0 or int(card.get("repetitions", 0)) > 0:
+        return "review"
+    return "new"
 
 
 def migrate_card(card: dict, config: dict | None = None) -> dict:
@@ -172,6 +221,13 @@ def migrate_card(card: dict, config: dict | None = None) -> dict:
     for key, value in defaults.items():
         if key not in migrated:
             migrated[key] = deepcopy(value)
+    migrated.setdefault("state", _default_state(migrated))
+    migrated.setdefault("step_index", 0)
+    migrated.setdefault("lapses", 0)
+    migrated.setdefault("again_count", 0)
+    migrated.setdefault("hard_count", 0)
+    migrated.setdefault("good_count", 0)
+    migrated.setdefault("easy_count", 0)
     migrated["tags"] = _normalize_tags(migrated.get("tags"))
     errors = validate_card(migrated)
     if errors:
@@ -184,7 +240,7 @@ def normalize_document(raw: dict, config: dict | None = None) -> dict:
         raise SchemaError(["Deck document must be a JSON object."])
     schema_version = raw.get(DOCUMENT_VERSION_KEY)
     if DOCUMENT_SETS_KEY in raw or schema_version is not None:
-        if schema_version not in (None, SCHEMA_VERSION):
+        if schema_version not in (None, 2, SCHEMA_VERSION):
             raise SchemaError([f"Unsupported schema version '{schema_version}'."])
         sets = raw.get(DOCUMENT_SETS_KEY)
         if not isinstance(sets, dict):

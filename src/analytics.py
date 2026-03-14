@@ -77,6 +77,19 @@ def forecast_counts(cards: list[dict], days: int = 7) -> list[tuple[date, int]]:
     return day_counts
 
 
+def due_today(cards: list[dict]) -> int:
+    today = date.today()
+    count = 0
+    for card in active_cards(cards):
+        try:
+            card_date = datetime.strptime(card["card_date"], DATE_FORMAT).date()
+            if card_date == today:
+                count += 1
+        except (TypeError, ValueError, KeyError):
+            count += 1
+    return count
+
+
 def retention_percent(events: list[dict]) -> float:
     grades = grade_counts_from_history(events)
     total_reviews = sum(grades.values())
@@ -108,7 +121,7 @@ def stats_pages(valid_statuses: list[dict], history_events: list[dict], config: 
     recent_cards = len([card for card in all_cards if created_within_days(card, 7)])
     due = len(cards_due(all_cards))
     overdue_bucket = {
-        "today": len([card for card in active if overdue_days(card) == 0 and card.get("card_date")]),
+        "today": due_today(all_cards),
         "1-7d": len([card for card in active if 1 <= overdue_days(card) <= 7]),
         "8-30d": len([card for card in active if 8 <= overdue_days(card) <= 30]),
         "30+d": len([card for card in active if overdue_days(card) > 30]),

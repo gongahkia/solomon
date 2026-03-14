@@ -4,7 +4,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from analytics import grade_counts_from_history, review_activity, stats_pages
+from analytics import due_today, grade_counts_from_history, stats_pages
 from schema import new_card
 
 
@@ -36,6 +36,12 @@ class AnalyticsTests(unittest.TestCase):
         titles = [title for title, _ in pages]
         self.assertIn("Review Activity", titles)
         self.assertIn("Overview", titles)
+
+    def test_due_today_excludes_future_cards(self):
+        due_card = new_card("Due", "A")
+        future_card = new_card("Future", "B")
+        future_card["card_date"] = "31/12/2099"
+        self.assertEqual(due_today([due_card, future_card]), 1)
 
 
 if __name__ == "__main__":

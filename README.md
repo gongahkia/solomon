@@ -13,8 +13,9 @@ Written in [curses](https://docs.python.org/3/howto/curses.html).
 
 ```console
 $ git clone https://github.com/gongahkia/senko
-$ cd src && chmod +x senko.sh
-$ ./senko.sh
+$ cd senko
+$ python -m pip install .
+$ senko
 ```
 
 ## highlights
@@ -23,15 +24,25 @@ $ ./senko.sh
 - Searchable file, set, and card pickers directly in the TUI with `/`.
 - Multiline card editing plus duplicate, move, reorder, suspend, reset, and delete actions from one card-management screen.
 - CSV, JSON, and plain-text import/export with field mapping, previews, and whole-set replacement.
-- CLI commands for `validate`, `migrate`, `import`, and `export`.
-- Richer stats including retention, overdue buckets, recent additions, workload, and leech candidates.
+- CLI commands for deck creation, set/card management, validation, migration, import, export, and stats.
+- Persistent review history with richer stats including retention, review activity, overdue buckets, recent additions, workload, and leech candidates.
 - Safer deck writes with atomic save behavior to reduce corruption risk.
 
 ## cli
 
 ```console
-$ ./senko.sh validate
-$ ./senko.sh migrate ~/Downloads/legacy.sko --output ~/Desktop/fixed.sko
-$ ./senko.sh import ~/Desktop/cards.csv japanese --strategy replace
-$ ./senko.sh export japanese --format csv --output ~/Desktop/japanese.csv
+$ senko validate
+$ senko create-deck japanese
+$ senko create-set japanese core_2k
+$ senko add-card japanese core_2k --name "ありがとう" --info "thank you" --tags greeting
+$ senko move-card japanese core_2k review "ありがとう"
+$ senko stats --deck japanese
+$ senko export japanese --format csv --output ~/Desktop/japanese.csv
+```
+
+## lightweight review
+
+```console
+$ senko-cards japanese --due-only --record-progress
+$ senko-cards ~/Desktop/external_cards.csv --due-only
 ```

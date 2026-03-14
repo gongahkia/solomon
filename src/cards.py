@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import os
 import time
+from copy import deepcopy
 
 from config import load_config
+from history import log_review_event
 from import_export import import_from_csv, import_from_json, import_from_txt
 from srs import active_cards, cards_due, sm2_review
 from storage import read_sko, write_sko
@@ -99,7 +101,16 @@ def main(argv: list[str] | None = None) -> int:
                 while True:
                     grade = input("\nGrade [1-4]: ").strip()
                     if grade in {"1", "2", "3", "4"}:
+                        before = deepcopy(card)
                         sm2_review(card, int(grade) - 1, config)
+                        log_review_event(
+                            deck_name,
+                            set_name,
+                            before,
+                            card,
+                            int(grade) - 1,
+                            "due" if args.due_only else "all",
+                        )
                         break
                     print("Enter 1, 2, 3, or 4.")
             else:

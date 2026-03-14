@@ -38,6 +38,34 @@ class CardsTests(unittest.TestCase):
         self.assertEqual(events[0]["session_mode"], "all")
         self.assertEqual(events[0]["grade"], 2)
 
+    def test_record_progress_undo_rewrites_history_and_card_state(self):
+        first = new_card("One", "A")
+        second = new_card("Two", "B")
+        storage.write_sko("study.sko", {"set_a": [first, second]}, config.load_config())
+        inputs = ["", "3", "", "u", "", "4", "", "3"]
+        with patch("cards.clear_screen"), patch("builtins.input", side_effect=inputs):
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(cards.main(["study", "--record-progress"]), 0)
+        events = history.load_history(deck_name="study.sko", set_name="set_a")
+        self.assertEqual(len(events), 2)
+        self.assertEqual([event["grade"] for event in events], [3, 2])
+        saved = storage.read_sko("study.sko", config.load_config())["set_a"]
+        self.assertEqual(saved[0]["easy_count"], 1)
+        self.assertEqual(saved[0]["good_count"], 0)
+
+    def test_leech_prompt_can_suspend_a_card_during_headless_review(self):
+        review_card = new_card("Leech", "Back")
+        review_card["state"] = "review"
+        review_card["interval"] = 6
+        review_card["repetitions"] = 2
+        config.save_config({"srs": {"leech_threshold": 1}})
+        storage.write_sko("study.sko", {"set_a": [review_card]}, config.load_config())
+        with patch("cards.clear_screen"), patch("builtins.input", side_effect=["", "1", "s"]):
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(cards.main(["study", "--record-progress"]), 0)
+        saved = storage.read_sko("study.sko", config.load_config())["set_a"][0]
+        self.assertTrue(saved["suspended"])
+
 
 if __name__ == "__main__":
     unittest.main()

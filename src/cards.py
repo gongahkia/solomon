@@ -6,7 +6,9 @@ import time
 from copy import deepcopy
 
 from config import load_config
+from deck_ops import restore_card
 from history import log_review_event
+from schema import touch_card
 from import_export import import_from_csv, import_from_json, import_from_txt
 from srs import active_cards, cards_due, sm2_review
 from storage import read_sko, write_sko
@@ -52,6 +54,21 @@ def _save_if_needed(deck_name: str | None, data: dict, config: dict, record_prog
         write_sko(deck_name, data, config)
 
 
+def _maybe_handle_leech(card: dict, config: dict) -> None:
+    threshold = int(config.get("srs", {}).get("leech_threshold", 8))
+    if int(card.get("lapses", 0)) != threshold or card.get("suspended"):
+        return
+    while True:
+        choice = input(f"\nLeech threshold reached ({threshold} lapses). Suspend this card? [s/k]: ").strip().lower()
+        if choice == "s":
+            card["suspended"] = True
+            touch_card(card)
+            return
+        if choice in {"k", ""}:
+            return
+        print("Enter 's' to suspend or 'k' to keep the card active.")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -80,17 +97,22 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     clear_screen()
     start_time = time.time()
-    reviewed = 0
+    session_counts = {0: 0, 1: 0, 2: 0, 3: 0}
+    should_stop = False
+    set_offset = 0
     for set_name, cards in review_sets:
-        for card in cards:
-            reviewed += 1
+        review_history = []
+        index = 0
+        while index < len(cards):
+            card = cards[index]
+            position = set_offset + index + 1
             print(set_name)
-            print(f"{reviewed}/{total_cards}")
+            print(f"{position}/{total_cards}")
             print(f"Q: {card.get('card_name', '')}")
             input("\nPress [Enter] to show the answer")
             clear_screen()
             print(set_name)
-            print(f"{reviewed}/{total_cards}")
+            print(f"{position}/{total_cards}")
             print(f"Q: {card.get('card_name', '')}")
             print(f"A: {card.get('card_info', '')}")
             if card.get("card_add_info"):
@@ -99,26 +121,64 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Tags: {', '.join(card['tags'])}")
             if args.record_progress:
                 while True:
-                    grade = input("\nGrade [1-4]: ").strip()
+                    prompt = "\nGrade [1-4]"
+                    if review_history:
+                        prompt += " | [u] Undo last"
+                    prompt += " | [q] Quit: "
+                    grade = input(prompt).strip().lower()
+                    if grade == "u" and review_history:
+                        last = review_history.pop()
+                        restore_card(last["card"], last["snapshot"])
+                        session_counts[last["grade"]] -= 1
+                        index = max(0, index - 1)
+                        clear_screen()
+                        break
+                    if grade == "q":
+                        should_stop = True
+                        break
                     if grade in {"1", "2", "3", "4"}:
                         before = deepcopy(card)
-                        sm2_review(card, int(grade) - 1, config)
+                        grade_value = int(grade) - 1
+                        sm2_review(card, grade_value, config)
+                        _maybe_handle_leech(card, config)
                         log_review_event(
                             deck_name,
                             set_name,
                             before,
                             card,
-                            int(grade) - 1,
+                            grade_value,
                             "due" if args.due_only else "all",
                         )
+                        session_counts[grade_value] += 1
+                        review_history.append({"card": card, "snapshot": before, "grade": grade_value})
+                        index += 1
                         break
-                    print("Enter 1, 2, 3, or 4.")
+                    print("Enter 1, 2, 3, 4, 'u', or 'q'.")
+                if should_stop:
+                    clear_screen()
+                    break
+                if review_history and review_history[-1]["card"] is not card:
+                    continue
             else:
                 input("\nPress [Enter] to continue")
+                index += 1
             clear_screen()
+        if should_stop:
+            break
+        set_offset += len(cards)
     elapsed = time.time() - start_time
     _save_if_needed(deck_name, data, config, args.record_progress)
+    reviewed = sum(session_counts.values()) if args.record_progress else total_cards
     print(f"Reviewed {reviewed} cards in {elapsed / 60:.2f} minutes.")
+    if args.record_progress:
+        print(
+            "Again {again} | Hard {hard} | Good {good} | Easy {easy}".format(
+                again=session_counts[0],
+                hard=session_counts[1],
+                good=session_counts[2],
+                easy=session_counts[3],
+            )
+        )
     if args.record_progress and deck_name:
         print(f"Saved progress to {deck_name}.")
     return 0

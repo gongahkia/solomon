@@ -63,7 +63,8 @@ class MainTUITests(unittest.TestCase):
         ), patch("main.deck_screen") as deck_screen:
             main.menu_sko(self.screen)
         deck_screen.assert_called_once()
-        self.assertFalse(deck_screen.call_args.kwargs["direct_review"])
+        self.assertEqual(deck_screen.call_args.args[:2], (self.screen, "study.sko"))
+        self.assertNotIn("direct_review", deck_screen.call_args.kwargs)
 
     def test_menu_sko_routes_secondary_actions(self):
         action_cases = [
@@ -122,7 +123,8 @@ class MainTUITests(unittest.TestCase):
         with patch("main.select_from_list", side_effect=[0, 1, None]):
             _, updated_sets = main.manage_cards_loop(self.screen, sets, "science", config.load_config())
         self.assertEqual(len(updated_sets["science"]), 2)
-        self.assertEqual(updated_sets["science"][0]["card_name"], updated_sets["science"][1]["card_name"])
+        self.assertEqual(updated_sets["science"][0]["card_name"], "Atom")
+        self.assertEqual(updated_sets["science"][1]["card_name"], "Atom (copy)")
 
     def test_manage_cards_loop_move_action_can_empty_current_set(self):
         card = new_card("Atom", "Matter")

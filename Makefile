@@ -1,28 +1,22 @@
-all:build
+.PHONY: all build server run run-server test clean tidy
 
-debug:src/main.go
-	@echo "debug mode"
-	@go run src/main.go 
+all: build
 
-build:src/main.go
-	@go mod tidy 
-	@go run src/main.go 
+build:
+	@go build -o bin/monke ./cmd/monke
+	@go build -o bin/monke-server ./cmd/monke-server
 
-config:
-	@echo "installing monke's dependancies..."
-	@sudo apt upgrade && sudo apt update && sudo apt autoremove
-	@sudo apt install golang
-	@sudo apt install gcc
-	@echo "installation complete"
-	@go mod init github.com/gongahkia/monke 
-	@echo "go mod initialized"
+run:
+	@go run ./cmd/monke
+
+run-server:
+	@go run ./cmd/monke-server
+
+test:
+	@go test ./internal/...
 
 clean:
-	@rm -rf .git .gitignore README.md
+	@rm -rf bin/
 
-up:
-	@git pull
-	@git status
-
-history:
-	@git log
+tidy:
+	@go mod tidy

@@ -139,7 +139,7 @@ func (e *Engine) NextWord() {
 	}
 	e.start()
 	w := &e.Words[e.WordIdx]
-	for i := e.CharIdx; i < len(w.Chars) {
+	for i := e.CharIdx; i < len(w.Chars); i++ {
 		if w.Chars[i].Status == Upcoming {
 			w.Chars[i].Status = Missed
 		}
@@ -271,7 +271,7 @@ func (e *Engine) Finish() Result {
 	// mark remaining chars in current word as missed
 	if e.WordIdx < len(e.Words) {
 		w := &e.Words[e.WordIdx]
-		for i := e.CharIdx; i < len(w.Chars) {
+		for i := e.CharIdx; i < len(w.Chars); i++ {
 			if w.Chars[i].Status == Upcoming {
 				w.Chars[i].Status = Missed
 			}

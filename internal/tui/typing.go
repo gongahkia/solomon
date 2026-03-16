@@ -63,7 +63,7 @@ func (m TypingModel) Update(msg tea.Msg) (TypingModel, tea.Cmd) {
 			}
 			if time.Now().After(m.deadline) {
 				result := m.engine.Finish()
-				return m, func() tea.Msg { return showResultsMsg{result: result} }
+				return m, func() tea.Msg { return showResultsMsg{result: result, config: m.config} }
 			}
 		}
 		return m, doTick()
@@ -96,7 +96,7 @@ func (m TypingModel) Update(msg tea.Msg) (TypingModel, tea.Cmd) {
 				m.engine.NextWord()
 				if m.config.Mode == "words" && m.engine.Finished {
 					result := m.engine.Finish()
-					return m, func() tea.Msg { return showResultsMsg{result: result} }
+					return m, func() tea.Msg { return showResultsMsg{result: result, config: m.config} }
 				}
 			}
 		default:

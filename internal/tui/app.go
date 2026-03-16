@@ -28,6 +28,8 @@ type AppModel struct {
 	typing   TypingModel
 	results  ResultsModel
 	settings SettingsModel
+	lobby    LobbyModel
+	race     RaceModel
 	cfg      *config.Config
 	store    *store.Store
 	width    int
@@ -54,13 +56,15 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case switchStateMsg:
-		m.state = msg.state
-		if msg.state == stateMenu {
+		switch msg.state {
+		case stateMenu:
 			m.menu = newMenu()
-		}
-		if msg.state == stateSettings {
+		case stateSettings:
 			m.settings = newSettings(m.cfg)
+		case stateLobby:
+			m.lobby = newLobby()
 		}
+		m.state = msg.state
 		return m, nil
 	case startTypingMsg:
 		typing, cmd := newTyping(msg.config)
@@ -69,9 +73,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.typing = typing
 		m.state = stateTyping
 		return m, cmd
+	case startRaceMsg:
+		race, cmd := newRace(msg.client, msg.words)
+		race.width = m.width
+		race.height = m.height
+		m.race = race
+		m.state = stateRace
+		return m, cmd
 	case showResultsMsg:
 		m.results = newResults(msg.result, msg.config)
-		if m.store != nil { // persist result
+		if m.store != nil {
 			tr := store.NewTestResult(
 				msg.result.Mode, msg.config.Param, msg.config.WordList,
 				msg.result.NetWPM, msg.result.RawWPM, msg.result.Accuracy,
@@ -100,6 +111,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.results, cmd = m.results.Update(msg)
 	case stateSettings:
 		m.settings, cmd = m.settings.Update(msg)
+	case stateLobby:
+		m.lobby, cmd = m.lobby.Update(msg)
+	case stateRace:
+		m.race, cmd = m.race.Update(msg)
 	}
 	return m, cmd
 }
@@ -115,6 +130,10 @@ func (m AppModel) View() string {
 		content = m.results.View()
 	case stateSettings:
 		content = m.settings.View()
+	case stateLobby:
+		content = m.lobby.View()
+	case stateRace:
+		content = m.race.View()
 	default:
 		content = th.dim.Render("not implemented yet")
 	}

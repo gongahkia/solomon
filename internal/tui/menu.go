@@ -30,7 +30,7 @@ func newMenu() MenuModel {
 }
 
 var (
-	mainChoices    = []string{"singleplayer", "multiplayer", "quit"}
+	mainChoices    = []string{"singleplayer", "multiplayer", "settings", "quit"}
 	modeChoices    = []string{"time", "words"}
 	timeChoices    = []int{15, 30, 60, 120}
 	wordChoices    = []int{10, 25, 50, 100}
@@ -93,7 +93,9 @@ func (m MenuModel) select_() (MenuModel, tea.Cmd) {
 			m.cursor = 0
 		case 1: // multiplayer
 			return m, func() tea.Msg { return switchStateMsg{state: stateLobby} }
-		case 2: // quit
+		case 2: // settings
+			return m, func() tea.Msg { return switchStateMsg{state: stateSettings} }
+		case 3: // quit
 			return m, tea.Quit
 		}
 	case menuMode:

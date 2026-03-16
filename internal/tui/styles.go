@@ -1,6 +1,9 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/lipgloss"
+	"github.com/gongahkia/monke/internal/config"
+)
 
 type theme struct {
 	correct   lipgloss.Style
@@ -18,20 +21,28 @@ type theme struct {
 	accuracy  lipgloss.Style
 }
 
-var defaultTheme = theme{
-	correct:   lipgloss.NewStyle().Foreground(lipgloss.Color("#a6e3a1")),
-	incorrect: lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8")).Strikethrough(true),
-	extra:     lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8")).Faint(true),
-	upcoming:  lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086")),
-	cursor:    lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4")).Underline(true),
-	title:     lipgloss.NewStyle().Foreground(lipgloss.Color("#cba6f7")).Bold(true),
-	subtitle:  lipgloss.NewStyle().Foreground(lipgloss.Color("#89b4fa")),
-	accent:    lipgloss.NewStyle().Foreground(lipgloss.Color("#f9e2af")),
-	dim:       lipgloss.NewStyle().Foreground(lipgloss.Color("#585b70")),
-	bold:      lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#cdd6f4")),
-	hint:      lipgloss.NewStyle().Foreground(lipgloss.Color("#585b70")).Italic(true),
-	wpm:       lipgloss.NewStyle().Foreground(lipgloss.Color("#f9e2af")).Bold(true),
-	accuracy:  lipgloss.NewStyle().Foreground(lipgloss.Color("#a6e3a1")).Bold(true),
-}
+var th theme
 
-var th = defaultTheme
+func init() { applyTheme("catppuccin") }
+
+func applyTheme(name string) {
+	tc, ok := config.Themes[name]
+	if !ok {
+		tc = config.Themes["catppuccin"]
+	}
+	th = theme{
+		correct:   lipgloss.NewStyle().Foreground(lipgloss.Color(tc.Correct)),
+		incorrect: lipgloss.NewStyle().Foreground(lipgloss.Color(tc.Incorrect)).Strikethrough(true),
+		extra:     lipgloss.NewStyle().Foreground(lipgloss.Color(tc.Extra)).Faint(true),
+		upcoming:  lipgloss.NewStyle().Foreground(lipgloss.Color(tc.Upcoming)),
+		cursor:    lipgloss.NewStyle().Foreground(lipgloss.Color(tc.Cursor)).Underline(true),
+		title:     lipgloss.NewStyle().Foreground(lipgloss.Color(tc.Title)).Bold(true),
+		subtitle:  lipgloss.NewStyle().Foreground(lipgloss.Color(tc.Subtitle)),
+		accent:    lipgloss.NewStyle().Foreground(lipgloss.Color(tc.Accent)),
+		dim:       lipgloss.NewStyle().Foreground(lipgloss.Color(tc.Dim)),
+		bold:      lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(tc.Text)),
+		hint:      lipgloss.NewStyle().Foreground(lipgloss.Color(tc.Dim)).Italic(true),
+		wpm:       lipgloss.NewStyle().Foreground(lipgloss.Color(tc.Accent)).Bold(true),
+		accuracy:  lipgloss.NewStyle().Foreground(lipgloss.Color(tc.Correct)).Bold(true),
+	}
+}

@@ -7,7 +7,9 @@ Ape brain goes ***klik klak***.
 
 ## Stack
 
-* *Script*: [Go](https://go.dev/)
+* *Script*: [Go](https://go.dev/), [Bubbletea](https://github.com/charmbracelet/bubbletea), [Bubbles](https://github.com/charmbracelet/bubbles), [Lipgloss](https://github.com/charmbracelet/lipgloss)
+* *Config*: [TOML](https://github.com/BurntSushi/toml) 
+* *WebSocket*: [nhooyr/websocket](https://github.com/nhooyr/websocket) 
 
 ## Screenshots
 

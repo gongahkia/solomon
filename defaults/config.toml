@@ -1,0 +1,6 @@
+theme = "catppuccin"
+default_mode = "time"
+default_time = 30
+default_words = 25
+word_list = "english_200"
+smooth_caret = false

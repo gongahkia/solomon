@@ -38,9 +38,7 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 				m.cursor--
 			}
 		case "down", "j":
-			if m.cursor < 0 { // only theme for now
-				m.cursor++
-			}
+			// only theme setting for now, cursor stays at 0
 		case "left", "h":
 			if m.cursor == 0 && m.thIdx > 0 {
 				m.thIdx--

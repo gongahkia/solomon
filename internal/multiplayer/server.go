@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"net/http"
 	"sort"
 	"sync"
@@ -161,8 +162,7 @@ func (s *Server) startCountdown(ctx context.Context, room *Room) {
 	// generate words for race
 	words := make([]string, 100)
 	for i := range words {
-		words[i] = s.wordPool[time.Now().UnixNano()%int64(len(s.wordPool))]
-		time.Sleep(time.Nanosecond) // ensure different seed
+		words[i] = s.wordPool[rand.IntN(len(s.wordPool))]
 	}
 	room.mu.Lock()
 	room.Words = words
@@ -198,7 +198,7 @@ func (s *Server) broadcastResults(ctx context.Context, room *Room) {
 		results = append(results, PlayerResult{
 			Name:     p.Name,
 			WPM:      p.Progress.WPM,
-			Accuracy: 0, // client doesn't send accuracy in progress
+			Accuracy: p.Progress.Accuracy,
 		})
 	}
 	room.mu.Unlock()

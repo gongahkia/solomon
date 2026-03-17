@@ -1,18 +1,19 @@
 package config
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/BurntSushi/toml"
 )
 
 type Config struct {
-	Theme        string `json:"theme"`
-	DefaultMode  string `json:"default_mode"`
-	DefaultTime  int    `json:"default_time"`
-	DefaultWords int    `json:"default_words"`
-	WordList     string `json:"word_list"`
-	SmoothCaret  bool   `json:"smooth_caret"`
+	Theme        string `toml:"theme"`
+	DefaultMode  string `toml:"default_mode"`
+	DefaultTime  int    `toml:"default_time"`
+	DefaultWords int    `toml:"default_words"`
+	WordList     string `toml:"word_list"`
+	SmoothCaret  bool   `toml:"smooth_caret"`
 }
 
 func Default() *Config {
@@ -35,19 +36,15 @@ func dir() string {
 }
 
 func Load() (*Config, error) {
-	fp := filepath.Join(dir(), "config.json")
-	raw, err := os.ReadFile(fp)
+	fp := filepath.Join(dir(), "config.toml")
+	cfg := Default()
+	_, err := toml.DecodeFile(fp, cfg)
 	if err != nil {
 		if os.IsNotExist(err) {
-			cfg := Default()
-			_ = cfg.Save() // create default config
+			_ = cfg.Save()
 			return cfg, nil
 		}
-		return nil, err
-	}
-	cfg := Default()
-	if err := json.Unmarshal(raw, cfg); err != nil {
-		return Default(), nil
+		return cfg, nil // bad file, use defaults
 	}
 	return cfg, nil
 }
@@ -57,9 +54,10 @@ func (c *Config) Save() error {
 	if err := os.MkdirAll(d, 0755); err != nil {
 		return err
 	}
-	raw, err := json.MarshalIndent(c, "", "  ")
+	f, err := os.Create(filepath.Join(d, "config.toml"))
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(d, "config.json"), raw, 0644)
+	defer f.Close()
+	return toml.NewEncoder(f).Encode(c)
 }

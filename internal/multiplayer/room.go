@@ -27,12 +27,13 @@ type Player struct {
 }
 
 type Room struct {
-	Code      string
-	State     RoomState
-	Players   map[string]*Player
-	Words     []string
-	CreatedAt time.Time
-	mu        sync.Mutex
+	Code         string
+	State        RoomState
+	Players      map[string]*Player
+	Words        []string
+	CreatedAt    time.Time
+	resultsSent  bool
+	mu           sync.Mutex
 }
 
 func generateCode() string {
@@ -96,11 +97,15 @@ func (r *Room) AllReady() bool {
 func (r *Room) AllFinished() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.resultsSent {
+		return false // already broadcast, prevent double send
+	}
 	for _, p := range r.Players {
 		if !p.Done {
 			return false
 		}
 	}
+	r.resultsSent = true
 	return true
 }
 

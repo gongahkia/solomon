@@ -33,6 +33,7 @@ type ProgressPayload struct {
 	CharsTyped int     `json:"chars_typed"`
 	TotalChars int     `json:"total_chars"`
 	WPM        float64 `json:"wpm"`
+	Accuracy   float64 `json:"accuracy"`
 	Finished   bool    `json:"finished"`
 }
 

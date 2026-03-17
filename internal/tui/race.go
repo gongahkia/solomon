@@ -54,6 +54,7 @@ func (m RaceModel) Update(msg tea.Msg) (RaceModel, tea.Cmd) {
 				CharsTyped: m.engine.CharsTyped(),
 				TotalChars: m.engine.TotalChars(),
 				WPM:        m.engine.CurrentWPM(),
+				Accuracy:   m.engine.CurrentAccuracy(),
 				Finished:   m.engine.Finished,
 			})
 		}
@@ -63,7 +64,7 @@ func (m RaceModel) Update(msg tea.Msg) (RaceModel, tea.Cmd) {
 		switch sm.Type {
 		case multiplayer.MsgProgress:
 			prog, _ := multiplayer.DecodePayload[multiplayer.ProgressPayload](sm)
-			m.players[prog.Name] = prog
+			m.players[prog.PlayerID] = prog
 		case multiplayer.MsgResult:
 			result, _ := multiplayer.DecodePayload[multiplayer.ResultPayload](sm)
 			m.rankings = result.Rankings
@@ -138,14 +139,14 @@ func (m RaceModel) View() string {
 		return b.String()
 	}
 	// player progress bars
-	for name, prog := range m.players {
+	for _, prog := range m.players {
 		pct := 0
 		if prog.TotalChars > 0 {
 			pct = prog.CharsTyped * 100 / prog.TotalChars
 		}
 		bar := progressBar(pct, 100, 30)
 		b.WriteString(fmt.Sprintf("  %s %s %s\n",
-			th.bold.Render(fmt.Sprintf("%-12s", name)),
+			th.bold.Render(fmt.Sprintf("%-12s", prog.Name)),
 			bar,
 			th.dim.Render(fmt.Sprintf("%.0f wpm", prog.WPM)),
 		))

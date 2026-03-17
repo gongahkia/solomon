@@ -11,10 +11,15 @@ Ape brain goes ***klik klak***.
 
 ## Screenshots
 
-![](assets/1.png)
-![](assets/2.png)
-![](assets/3.png)
-![](assets/4.png)
+<div align="center">
+    <img src="./assets/1.png" width="45%">
+    <img src="./assets/4.png" width="45%">
+</div>
+
+<div align="center">
+    <img src="./assets/2.png" width="45%">
+    <img src="./assets/3.png" width="45%">
+</div>
 
 ## Usage
 

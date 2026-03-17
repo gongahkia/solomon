@@ -28,7 +28,7 @@ $ ./bin/monke-server
 
 ## Screenshots
 
-![](assets/img1.png)
-![](assets/img2.png)
-![](assets/img3.png)
-![](assets/img4.png)
+![](assets/1.png)
+![](assets/2.png)
+![](assets/3.png)
+![](assets/4.png)

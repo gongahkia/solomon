@@ -62,13 +62,13 @@ func (m SettingsModel) View() string {
 	var b strings.Builder
 	b.WriteString(th.title.Render("settings") + "\n\n")
 	cursor := th.accent.Render("> ")
-	b.WriteString(fmt.Sprintf("%s%s  %s  %s\n",
+	b.WriteString(fmt.Sprintf("%s%s  %s  %s  %s\n",
 		cursor,
 		th.bold.Render("theme"),
 		th.dim.Render("<"),
 		th.subtitle.Render(m.themes[m.thIdx]),
+		th.dim.Render(">"),
 	))
-	b.WriteString(th.dim.Render("                  >") + "\n\n")
 	b.WriteString(th.hint.Render("h/l or arrows to change  |  esc: back"))
 	return b.String()
 }

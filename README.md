@@ -5,6 +5,17 @@
 
 Ape brain goes ***klik klak***.
 
+## Stack
+
+* *Script*: [Go](https://go.dev/)
+
+## Screenshots
+
+![](assets/1.png)
+![](assets/2.png)
+![](assets/3.png)
+![](assets/4.png)
+
 ## Usage
 
 The below instructions are for locally running `Monke` [singleplayer](#singleplayer) or [multiplayer](#multiplayer) on your machine.
@@ -25,10 +36,3 @@ $ make run-server
 $ ./bin/monke 
 $ ./bin/monke-server 
 ```
-
-## Screenshots
-
-![](assets/1.png)
-![](assets/2.png)
-![](assets/3.png)
-![](assets/4.png)

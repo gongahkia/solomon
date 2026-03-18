@@ -110,6 +110,18 @@ def provider_for_config(cfg: AppConfig, ticker: str) -> PriceProvider:
         return provider  # type: ignore[return-value]
     if data_cfg.provider == "yfinance":
         return YFinanceProvider()
+    if data_cfg.provider == "finnhub":
+        from stonks_cli.data.finnhub import FinnhubProvider
+        return FinnhubProvider(cfg=cfg)
+    if data_cfg.provider == "alpaca":
+        from stonks_cli.data.alpaca import AlpacaProvider
+        return AlpacaProvider(cfg=cfg)
+    if data_cfg.provider == "tiger":
+        from stonks_cli.data.tiger import TigerProvider
+        return TigerProvider(cfg=cfg)
+    if data_cfg.provider == "polymarket":
+        from stonks_cli.data.polymarket import PolymarketProvider
+        return PolymarketProvider(cache_ttl_seconds=data_cfg.cache_ttl_seconds)
     return StooqProvider(cache_ttl_seconds=data_cfg.cache_ttl_seconds)
 
 

@@ -34,7 +34,7 @@ class ScheduleConfig(BaseModel):
 
 class DataConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    provider: Literal["stooq", "csv", "plugin", "yfinance"] = "stooq"
+    provider: Literal["stooq", "csv", "plugin", "yfinance", "tiger", "finnhub", "alpaca", "polymarket"] = "stooq"
     csv_path: str | None = None
     plugin_name: str | None = Field(default=None, description="Provider key when provider='plugin'")
     cache_ttl_seconds: int = Field(default=3600, ge=0)
@@ -58,6 +58,22 @@ class TickerOverride(BaseModel):
     model_config = ConfigDict(extra="ignore")
     data: DataConfig = Field(default_factory=DataConfig)
 
+
+class ApiKeysConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    tiger_id: str | None = None
+    tiger_account: str | None = None
+    tiger_private_key_path: str | None = None
+    finnhub_api_key: str | None = None
+    alpaca_api_key: str | None = None
+    alpaca_secret_key: str | None = None
+    alpaca_paper: bool = True
+
+class TuiConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    refresh_interval: int = Field(default=60, ge=5, le=3600)
+    theme: Literal["dark", "light"] = "dark"
+    default_view: str = "dashboard"
 
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -85,6 +101,8 @@ class AppConfig(BaseModel):
         default=None,
         description="Optional webhook URL for alert notifications",
     )
+    api_keys: ApiKeysConfig = Field(default_factory=ApiKeysConfig)
+    tui: TuiConfig = Field(default_factory=TuiConfig)
 
 
 def config_path() -> Path:

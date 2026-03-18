@@ -327,13 +327,32 @@ def sector(
 
 
 @app.command()
+def tui(
+    watchlist: str = typer.Option(None, "--watchlist", help="Start with specific watchlist"),
+    refresh: int = typer.Option(60, "--refresh", help="Refresh interval in seconds"),
+    view: str = typer.Option("dashboard", "--view", help="Default view (dashboard/watchlist/detail/portfolio/analysis/alerts/settings)"),
+) -> None:
+    """Launch full Textual TUI application."""
+    try:
+        from stonks_cli.tui.app import StonksApp
+        StonksApp(watchlist_name=watchlist, refresh_interval=refresh, default_view=view).run()
+    except ImportError:
+        Console().print("[red]textual not installed. Run: pip install stonks-cli[tui][/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+@app.command()
 def watch(
     watchlist: str = typer.Option(None, "--watchlist", help="Start with specific watchlist"),
     refresh: int = typer.Option(60, "--refresh", help="Refresh interval in seconds"),
 ) -> None:
-    """Launch interactive watchlist TUI with live updates."""
+    """Launch interactive watchlist TUI (alias for tui --view watchlist)."""
     try:
-        do_watch(watchlist_name=watchlist, refresh_interval=refresh)
+        from stonks_cli.tui.app import StonksApp
+        StonksApp(watchlist_name=watchlist, refresh_interval=refresh, default_view="watchlist").run()
+    except ImportError:
+        do_watch(watchlist_name=watchlist, refresh_interval=refresh) # fallback to old Rich TUI
     except Exception as e:
         raise _exit_for_error(e)
 

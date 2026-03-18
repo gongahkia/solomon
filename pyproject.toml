@@ -22,6 +22,12 @@ dependencies = [
 [project.optional-dependencies]
 yfinance = ["yfinance>=0.2"]
 mcp = ["mcp[cli]>=1.1.0"]
+tui = ["textual>=0.89,<1.0"]
+tiger = ["tigeropen>=3.0"]
+polymarket = ["py-clob-client>=0.1"]
+finnhub = ["finnhub-python>=2.4"]
+alpaca = ["alpaca-py>=0.30"]
+all = ["stonks-cli[tui,tiger,polymarket,finnhub,alpaca,yfinance,mcp]"]
 dev = [
   "ruff>=0.5",
   "mypy>=1.10",
@@ -32,6 +38,7 @@ dev = [
 [project.scripts]
 stonks-cli = "stonks_cli.cli:main"
 stonks-mcp = "stonks_cli.mcp_server:main"
+stonks-tui = "stonks_cli.tui.app:main"
 
 [tool.ruff]
 line-length = 120

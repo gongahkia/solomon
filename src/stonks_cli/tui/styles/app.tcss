@@ -1,0 +1,166 @@
+/* stonks-cli design system: Bloomberg density + Apple restraint */
+
+Screen {
+    background: #1a1a2e;
+}
+
+Header {
+    background: #16213e;
+    color: #eaeaea;
+}
+
+Footer {
+    background: #16213e;
+    color: #8b8b8b;
+}
+
+TabbedContent {
+    background: #1a1a2e;
+}
+
+TabPane {
+    background: #1a1a2e;
+    padding: 1;
+}
+
+ContentSwitcher {
+    background: #1a1a2e;
+}
+
+Tabs {
+    background: #16213e;
+}
+
+Tab {
+    color: #8b8b8b;
+    background: #16213e;
+    padding: 0 2;
+}
+
+Tab.-active {
+    color: #eaeaea;
+    text-style: bold underline;
+    background: #1a1a2e;
+}
+
+DataTable {
+    background: #1a1a2e;
+    color: #eaeaea;
+}
+
+DataTable > .datatable--header {
+    background: #16213e;
+    color: #8b8b8b;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: #0f3460;
+    color: #eaeaea;
+}
+
+DataTable > .datatable--even-row {
+    background: #1e1e3a;
+}
+
+Input {
+    background: #16213e;
+    color: #eaeaea;
+    border: tall #0f3460;
+}
+
+Input:focus {
+    border: tall #4ecca3;
+}
+
+Button {
+    background: #0f3460;
+    color: #eaeaea;
+    border: none;
+    min-width: 12;
+}
+
+Button:hover {
+    background: #4ecca3;
+    color: #1a1a2e;
+}
+
+Select {
+    background: #16213e;
+    color: #eaeaea;
+    border: tall #0f3460;
+}
+
+Switch {
+    background: #16213e;
+}
+
+LoadingIndicator {
+    color: #4ecca3;
+}
+
+Static {
+    background: #1a1a2e;
+    color: #eaeaea;
+}
+
+.positive {
+    color: #4ecca3;
+}
+
+.negative {
+    color: #e94560;
+}
+
+.muted {
+    color: #8b8b8b;
+}
+
+.metric-card {
+    background: #16213e;
+    border: tall #0f3460;
+    padding: 1 2;
+    margin: 0 1;
+    height: auto;
+}
+
+.price-card {
+    background: #16213e;
+    border: tall #0f3460;
+    padding: 1 2;
+    margin: 0 1;
+    height: auto;
+}
+
+.screen-widget {
+    height: 100%;
+    width: 100%;
+}
+
+.panel-title {
+    color: #8b8b8b;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.error-message {
+    color: #e94560;
+    text-style: italic;
+}
+
+#dashboard-grid {
+    layout: grid;
+    grid-size: 2 2;
+    grid-gutter: 1;
+}
+
+#dashboard-grid-narrow {
+    layout: vertical;
+}
+
+.dashboard-panel {
+    background: #16213e;
+    border: tall #0f3460;
+    padding: 1;
+    height: 1fr;
+}

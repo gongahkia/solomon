@@ -2,48 +2,46 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widget import Widget
 from textual.widgets import Button, Input, Label, Select, Static
 
 
-class SettingsScreen(Widget):
+class SettingsScreen(Vertical):
     DEFAULT_CLASSES = "screen-widget"
     def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Static("[bold]Settings[/]", classes="panel-title")
-            with Horizontal():
-                yield Label("Provider:")
-                yield Select([
-                    ("stooq", "stooq"), ("yfinance", "yfinance"), ("csv", "csv"),
-                    ("finnhub", "finnhub"), ("alpaca", "alpaca"), ("tiger", "tiger"), ("polymarket", "polymarket"),
-                ], id="set-provider", prompt="provider")
-            with Horizontal():
-                yield Label("Strategy:")
-                yield Select([
-                    ("basic_trend_rsi", "basic_trend_rsi"),
-                    ("sma_cross", "sma_cross"),
-                    ("mean_reversion_bb_rsi", "mean_reversion_bb_rsi"),
-                ], id="set-strategy", prompt="strategy")
-            with Horizontal():
-                yield Label("Cache TTL (s):")
-                yield Input(placeholder="3600", id="set-cache-ttl")
-            with Horizontal():
-                yield Label("TUI Refresh (s):")
-                yield Input(placeholder="60", id="set-tui-refresh")
-            with Horizontal():
-                yield Label("Theme:")
-                yield Select([("dark", "dark"), ("light", "light")], id="set-theme", prompt="theme")
-            with Horizontal():
-                yield Label("Finnhub Key:")
-                yield Input(placeholder="api key", id="set-finnhub-key", password=True)
-            with Horizontal():
-                yield Label("Alpaca Key:")
-                yield Input(placeholder="api key", id="set-alpaca-key", password=True)
-            with Horizontal():
-                yield Label("Alpaca Secret:")
-                yield Input(placeholder="secret", id="set-alpaca-secret", password=True)
-            yield Button("Save", id="set-save")
-            yield Static("", id="set-status")
+        yield Static("[bold]Settings[/]", classes="panel-title")
+        with Horizontal():
+            yield Label("Provider:")
+            yield Select([
+                ("stooq", "stooq"), ("yfinance", "yfinance"), ("csv", "csv"),
+                ("finnhub", "finnhub"), ("alpaca", "alpaca"), ("tiger", "tiger"), ("polymarket", "polymarket"),
+            ], id="set-provider", prompt="provider")
+        with Horizontal():
+            yield Label("Strategy:")
+            yield Select([
+                ("basic_trend_rsi", "basic_trend_rsi"),
+                ("sma_cross", "sma_cross"),
+                ("mean_reversion_bb_rsi", "mean_reversion_bb_rsi"),
+            ], id="set-strategy", prompt="strategy")
+        with Horizontal():
+            yield Label("Cache TTL (s):")
+            yield Input(placeholder="3600", id="set-cache-ttl")
+        with Horizontal():
+            yield Label("TUI Refresh (s):")
+            yield Input(placeholder="60", id="set-tui-refresh")
+        with Horizontal():
+            yield Label("Theme:")
+            yield Select([("dark", "dark"), ("light", "light")], id="set-theme", prompt="theme")
+        with Horizontal():
+            yield Label("Finnhub Key:")
+            yield Input(placeholder="api key", id="set-finnhub-key", password=True)
+        with Horizontal():
+            yield Label("Alpaca Key:")
+            yield Input(placeholder="api key", id="set-alpaca-key", password=True)
+        with Horizontal():
+            yield Label("Alpaca Secret:")
+            yield Input(placeholder="secret", id="set-alpaca-secret", password=True)
+        yield Button("Save", id="set-save")
+        yield Static("", id="set-status")
 
     def on_mount(self) -> None:
         from stonks_cli.config import load_config
@@ -87,6 +85,8 @@ class SettingsScreen(Widget):
             api_keys = cfg.api_keys.model_copy(update={"finnhub_api_key": finnhub_key, "alpaca_api_key": alpaca_key, "alpaca_secret_key": alpaca_secret})
             cfg = cfg.model_copy(update={"data": data, "strategy": strategy, "tui": tui_cfg, "api_keys": api_keys})
             path = save_config(cfg)
+            # apply theme live
+            self.app.theme = "textual-light" if theme == "light" else "textual-dark"
             self.query_one("#set-status").update(f"saved to {path}")
         except Exception as e:
             self.query_one("#set-status").update(f"error: {e}")

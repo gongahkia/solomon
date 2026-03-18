@@ -1,30 +1,43 @@
 from __future__ import annotations
 
+import re
+
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widget import Widget
 from textual.widgets import Input, Static
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
-class DetailScreen(Widget):
+def _strip_ansi(s: str) -> str:
+    return _ANSI_RE.sub("", s)
+
+
+class DetailScreen(Vertical):
     DEFAULT_CLASSES = "screen-widget"
+    DEFAULT_CSS = """
+    #detail-row-top { height: auto; min-height: 18; }
+    #detail-row-bot { height: auto; min-height: 12; }
+    #detail-chart { width: 1fr; min-height: 16; }
+    #detail-fundamentals { width: 1fr; }
+    #detail-indicators { width: 1fr; }
+    #detail-news { width: 1fr; }
+    #detail-backtest { width: 1fr; }
+    """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._ticker = None
 
     def compose(self) -> ComposeResult:
-        with Vertical():
-            with Horizontal():
-                yield Input(placeholder="ticker (e.g. AAPL)", id="detail-ticker-input")
-            yield Static("enter a ticker or select from watchlist", id="detail-header")
-            with Horizontal():
-                yield Static("", id="detail-chart", classes="dashboard-panel")
-                yield Static("", id="detail-fundamentals", classes="dashboard-panel")
-            with Horizontal():
-                yield Static("", id="detail-indicators", classes="dashboard-panel")
-                yield Static("", id="detail-news", classes="dashboard-panel")
-                yield Static("", id="detail-backtest", classes="dashboard-panel")
+        yield Input(placeholder="ticker (e.g. AAPL) — press Enter", id="detail-ticker-input")
+        yield Static("enter a ticker or select from watchlist", id="detail-header")
+        with Horizontal(id="detail-row-top"):
+            yield Static("", id="detail-chart", classes="dashboard-panel")
+            yield Static("", id="detail-fundamentals", classes="dashboard-panel")
+        with Horizontal(id="detail-row-bot"):
+            yield Static("", id="detail-indicators", classes="dashboard-panel")
+            yield Static("", id="detail-news", classes="dashboard-panel")
+            yield Static("", id="detail-backtest", classes="dashboard-panel")
 
     def on_input_submitted(self, event) -> None:
         if event.input.id == "detail-ticker-input" and event.value.strip():
@@ -66,17 +79,31 @@ class DetailScreen(Widget):
         sig_str = f"{rec.action} ({rec.confidence:.2f})" if rec else "INSUFFICIENT_HISTORY"
         header = f"[bold]{normalized}[/]   ${last_close:.2f}   {pct_str}   {sig_str}"
         self.app.call_from_thread(self.query_one("#detail-header").update, header)
-        try: # chart
+        try: # chart via plotext
+            import io as _io
+            import sys as _sys
+
             import plotext as plt
             prices = df["close"].tail(90).tolist()
             plt.clear_figure()
             plt.plot(prices, marker="braille")
             plt.title(f"{normalized} (90d)")
-            plt.plotsize(60, 15)
-            plt.theme("dark")
-            chart_str = plt.build()
+            plt.plotsize(50, 12)
+            plt.theme("clear")
+            # build() may return empty on some versions; capture show() as fallback
+            chart_str = _strip_ansi(plt.build())
+            if not chart_str.strip():
+                old = _sys.stdout
+                _sys.stdout = buf = _io.StringIO()
+                try:
+                    plt.show()
+                    chart_str = _strip_ansi(buf.getvalue())
+                finally:
+                    _sys.stdout = old
         except Exception:
-            chart_str = "plotext unavailable"
+            from stonks_cli.formatting.sparkline import generate_sparkline
+            prices = df["close"].tail(40).tolist()
+            chart_str = generate_sparkline(prices, width=40)
         self.app.call_from_thread(self.query_one("#detail-chart").update, f"[bold]Price Chart[/]\n{chart_str}")
         try: # fundamentals
             from stonks_cli.data.fundamentals import fetch_fundamentals_yahoo
@@ -120,7 +147,7 @@ class DetailScreen(Widget):
             metrics = compute_backtest_metrics(bt.equity)
             lines = ["[bold]Backtest[/]\n"]
             if metrics:
-                for k, v in [("cagr", metrics.cagr), ("sharpe", metrics.sharpe), ("max_dd", metrics.max_drawdown), ("win_rate", metrics.win_rate), ("trades", metrics.total_trades)]:
+                for k, v in [("cagr", metrics.cagr), ("sharpe", metrics.sharpe), ("max_dd", metrics.max_drawdown)]:
                     val = f"{v:.4f}" if isinstance(v, float) else str(v)
                     lines.append(f"  {k}: {val}")
             else:

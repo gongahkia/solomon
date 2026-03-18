@@ -3,23 +3,21 @@ from __future__ import annotations
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widget import Widget
 from textual.widgets import Button, DataTable, Input, Static
 
 
-class PortfolioScreen(Widget):
+class PortfolioScreen(Vertical):
     DEFAULT_CLASSES = "screen-widget"
     def compose(self) -> ComposeResult:
-        with Vertical():
-            yield DataTable(id="pf-table")
-            yield Static("", id="pf-allocation")
-            with Horizontal():
-                yield Input(placeholder="ticker", id="pf-ticker")
-                yield Input(placeholder="shares", id="pf-shares")
-                yield Input(placeholder="price", id="pf-price")
-                yield Button("Buy", id="pf-buy")
-                yield Button("Sell", id="pf-sell")
-            yield Static("", id="pf-status")
+        yield DataTable(id="pf-table")
+        yield Static("", id="pf-allocation")
+        with Horizontal():
+            yield Input(placeholder="ticker", id="pf-ticker")
+            yield Input(placeholder="shares", id="pf-shares")
+            yield Input(placeholder="price", id="pf-price")
+            yield Button("Buy", id="pf-buy")
+            yield Button("Sell", id="pf-sell")
+        yield Static("", id="pf-status")
 
     def on_mount(self) -> None:
         table = self.query_one("#pf-table", DataTable)

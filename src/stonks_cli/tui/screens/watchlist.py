@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from textual import work
 from textual.app import ComposeResult
-from textual.widget import Widget
+from textual.containers import Vertical
 from textual.widgets import DataTable, Select
 
 
-class WatchlistScreen(Widget):
+class WatchlistScreen(Vertical):
     DEFAULT_CLASSES = "screen-widget"
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

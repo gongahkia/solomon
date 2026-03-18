@@ -3,7 +3,6 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widget import Widget
 from textual.widgets import Button, DataTable, Input, Select, Static
 
 ALERT_TYPES = [
@@ -18,18 +17,17 @@ ALERT_TYPES = [
     ("new_low_52w", "new_low_52w"),
 ]
 
-class AlertsScreen(Widget):
+class AlertsScreen(Vertical):
     DEFAULT_CLASSES = "screen-widget"
     BINDINGS = [Binding("d", "delete_alert", "Delete")]
     def compose(self) -> ComposeResult:
-        with Vertical():
-            yield DataTable(id="al-table")
-            with Horizontal():
-                yield Input(placeholder="ticker", id="al-ticker")
-                yield Select(ALERT_TYPES, id="al-type", prompt="type")
-                yield Input(placeholder="threshold", id="al-threshold")
-                yield Button("Add", id="al-add")
-            yield Static("", id="al-status")
+        yield DataTable(id="al-table")
+        with Horizontal():
+            yield Input(placeholder="ticker", id="al-ticker")
+            yield Select(ALERT_TYPES, id="al-type", prompt="type")
+            yield Input(placeholder="threshold", id="al-threshold")
+            yield Button("Add", id="al-add")
+        yield Static("", id="al-status")
 
     def on_mount(self) -> None:
         table = self.query_one("#al-table", DataTable)

@@ -58,6 +58,10 @@ class StonksApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        if self.cfg.tui.theme == "light":
+            self.theme = "textual-light"
+        else:
+            self.theme = "textual-dark"
         if self.default_view != "dashboard":
             self.query_one(TabbedContent).active = self.default_view
         self.set_interval(self.refresh_interval, self.action_refresh_data)

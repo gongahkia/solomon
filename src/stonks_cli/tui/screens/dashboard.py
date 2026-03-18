@@ -3,18 +3,23 @@ from __future__ import annotations
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Container
-from textual.widget import Widget
 from textual.widgets import Static
 
 
-class DashboardScreen(Widget):
+class DashboardScreen(Container):
     DEFAULT_CLASSES = "screen-widget"
+    DEFAULT_CSS = """
+    DashboardScreen {
+        layout: grid;
+        grid-size: 2 2;
+        grid-gutter: 1;
+    }
+    """
     def compose(self) -> ComposeResult:
-        with Container(id="dashboard-grid"):
-            yield Static("Loading...", id="dash-watchlist", classes="dashboard-panel")
-            yield Static("Loading...", id="dash-portfolio", classes="dashboard-panel")
-            yield Static("Loading...", id="dash-alerts", classes="dashboard-panel")
-            yield Static("Loading...", id="dash-movers", classes="dashboard-panel")
+        yield Static("Loading...", id="dash-watchlist", classes="dashboard-panel")
+        yield Static("Loading...", id="dash-portfolio", classes="dashboard-panel")
+        yield Static("Loading...", id="dash-alerts", classes="dashboard-panel")
+        yield Static("Loading...", id="dash-movers", classes="dashboard-panel")
 
     def on_mount(self) -> None:
         self.refresh_data()

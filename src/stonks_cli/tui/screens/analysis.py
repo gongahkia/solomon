@@ -3,7 +3,6 @@ from __future__ import annotations
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widget import Widget
 from textual.widgets import Button, DataTable, Input, LoadingIndicator, Select, Static
 
 STRATEGIES = [
@@ -12,22 +11,31 @@ STRATEGIES = [
     ("mean_reversion_bb_rsi", "mean_reversion_bb_rsi"),
 ]
 
-class AnalysisScreen(Widget):
+class AnalysisScreen(Vertical):
     DEFAULT_CLASSES = "screen-widget"
+    DEFAULT_CSS = """
+    #an-tickers { width: 1fr; }
+    #an-strategy { width: 30; }
+    #an-run { width: 12; }
+    #an-toolbar { height: auto; }
+    """
     def compose(self) -> ComposeResult:
-        with Vertical():
-            with Horizontal():
-                yield Input(placeholder="tickers (comma-separated)", id="an-tickers")
-                yield Select(STRATEGIES, id="an-strategy", prompt="strategy")
-                yield Button("Run", id="an-run")
-            yield LoadingIndicator(id="an-loading")
-            yield DataTable(id="an-results")
-            yield Static("", id="an-status")
+        with Horizontal(id="an-toolbar"):
+            yield Input(placeholder="tickers comma-separated, press Enter to run", id="an-tickers")
+            yield Select(STRATEGIES, id="an-strategy", prompt="strategy", value="basic_trend_rsi")
+            yield Button("Run", id="an-run", variant="primary")
+        yield LoadingIndicator(id="an-loading")
+        yield DataTable(id="an-results")
+        yield Static("", id="an-status")
 
     def on_mount(self) -> None:
         table = self.query_one("#an-results", DataTable)
-        table.add_columns("Ticker", "Signal", "Confidence", "CAGR", "Sharpe", "Max DD", "Win Rate")
+        table.add_columns("Ticker", "Signal", "Confidence", "CAGR", "Sharpe", "Max DD")
         self.query_one("#an-loading").display = False
+
+    def on_input_submitted(self, event) -> None:
+        if event.input.id == "an-tickers":
+            self._run_analysis()
 
     def on_button_pressed(self, event) -> None:
         if event.button.id == "an-run":
@@ -63,8 +71,7 @@ class AnalysisScreen(Widget):
                     cagr = f"{r.backtest.cagr:.4f}" if r.backtest and r.backtest.cagr is not None else "N/A"
                     sharpe = f"{r.backtest.sharpe:.4f}" if r.backtest and r.backtest.sharpe is not None else "N/A"
                     max_dd = f"{r.backtest.max_drawdown:.4f}" if r.backtest and r.backtest.max_drawdown is not None else "N/A"
-                    win_rate = f"{r.backtest.win_rate:.4f}" if r.backtest and r.backtest.win_rate is not None else "N/A"
-                    table.add_row(r.ticker, r.recommendation.action, f"{r.recommendation.confidence:.2f}", cagr, sharpe, max_dd, win_rate)
+                    table.add_row(r.ticker, r.recommendation.action, f"{r.recommendation.confidence:.2f}", cagr, sharpe, max_dd)
                 self.query_one("#an-status").update(f"done — {len(results)} tickers analyzed")
                 self.query_one("#an-loading").display = False
             self.app.call_from_thread(_update)

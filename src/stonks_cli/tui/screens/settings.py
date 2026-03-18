@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
+from textual.widget import Widget
 from textual.widgets import Button, Input, Label, Select, Static
 
 
-class SettingsScreen(Static):
+class SettingsScreen(Widget):
     DEFAULT_CLASSES = "screen-widget"
     def compose(self) -> ComposeResult:
         with Vertical():

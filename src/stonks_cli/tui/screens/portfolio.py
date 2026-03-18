@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
+from textual.widget import Widget
 from textual.widgets import Button, DataTable, Input, Static
-from textual import work
 
 
-class PortfolioScreen(Static):
+class PortfolioScreen(Widget):
     DEFAULT_CLASSES = "screen-widget"
     def compose(self) -> ComposeResult:
         with Vertical():

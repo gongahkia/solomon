@@ -48,7 +48,6 @@ from stonks_cli.commands import (
     do_sector,
     do_signals_diff,
     do_version,
-    do_watch,
     do_watchlist_analyze,
     do_watchlist_list,
     do_watchlist_remove,
@@ -352,7 +351,8 @@ def watch(
         from stonks_cli.tui.app import StonksApp
         StonksApp(watchlist_name=watchlist, refresh_interval=refresh, default_view="watchlist").run()
     except ImportError:
-        do_watch(watchlist_name=watchlist, refresh_interval=refresh) # fallback to old Rich TUI
+        Console().print("[red]textual not installed. Run: pip install stonks-cli[tui][/red]")
+        raise typer.Exit(1)
     except Exception as e:
         raise _exit_for_error(e)
 

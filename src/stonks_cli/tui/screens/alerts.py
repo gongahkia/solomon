@@ -3,6 +3,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.widget import Widget
 from textual.widgets import Button, DataTable, Input, Select, Static
 
 ALERT_TYPES = [
@@ -17,7 +18,7 @@ ALERT_TYPES = [
     ("new_low_52w", "new_low_52w"),
 ]
 
-class AlertsScreen(Static):
+class AlertsScreen(Widget):
     DEFAULT_CLASSES = "screen-widget"
     BINDINGS = [Binding("d", "delete_alert", "Delete")]
     def compose(self) -> ComposeResult:

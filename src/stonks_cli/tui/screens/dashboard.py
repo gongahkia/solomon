@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Container
+from textual.widget import Widget
 from textual.widgets import Static
-from textual import work
 
 
-class DashboardScreen(Static):
+class DashboardScreen(Widget):
     DEFAULT_CLASSES = "screen-widget"
     def compose(self) -> ComposeResult:
         with Container(id="dashboard-grid"):

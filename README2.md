@@ -94,10 +94,10 @@ All implement `PriceProvider.fetch_daily(ticker) -> PriceSeries` from `data/prov
 - Guarded with `ImportError` catch for missing `textual` dep
 - `watch` command becomes alias for `tui --view watchlist`
 
-### `src/stonks_cli/tui/watchlist_view.py`
+### `src/stonks_cli/tui/watchlist_view.py` (DELETED)
 
-- Replaced by Textual watchlist screen; old Rich Live implementation deprecated
-- `do_watch()` in `commands.py` updated to launch `StonksApp(default_view="watchlist")`
+- Removed — replaced entirely by Textual watchlist screen
+- `do_watch()` in `commands.py` now launches `StonksApp(default_view="watchlist")` directly
 
 ---
 

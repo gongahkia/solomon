@@ -200,14 +200,9 @@ def do_fundamentals(ticker: str, as_json: bool = False) -> dict | None:
 
 
 def do_watch(watchlist_name: str | None = None, refresh_interval: int = 60) -> None:
-    """Launch the watchlist TUI. Prefers Textual, falls back to Rich Live."""
-    try:
-        from stonks_cli.tui.app import StonksApp
-        StonksApp(watchlist_name=watchlist_name, refresh_interval=refresh_interval, default_view="watchlist").run()
-    except ImportError:
-        from stonks_cli.tui.watchlist_view import WatchlistTUI
-        tui = WatchlistTUI(watchlist_name=watchlist_name, refresh_interval=refresh_interval)
-        tui.run()
+    """Launch the watchlist TUI via Textual."""
+    from stonks_cli.tui.app import StonksApp
+    StonksApp(watchlist_name=watchlist_name, refresh_interval=refresh_interval, default_view="watchlist").run()
 
 
 def do_chart_rsi(ticker: str, period: int = 14, days: int = 90) -> None:

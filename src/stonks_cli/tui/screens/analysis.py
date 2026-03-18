@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
+from textual.widget import Widget
 from textual.widgets import Button, DataTable, Input, LoadingIndicator, Select, Static
-from textual import work
 
 STRATEGIES = [
     ("basic_trend_rsi", "basic_trend_rsi"),
@@ -11,7 +12,7 @@ STRATEGIES = [
     ("mean_reversion_bb_rsi", "mean_reversion_bb_rsi"),
 ]
 
-class AnalysisScreen(Static):
+class AnalysisScreen(Widget):
     DEFAULT_CLASSES = "screen-widget"
     def compose(self) -> ComposeResult:
         with Vertical():

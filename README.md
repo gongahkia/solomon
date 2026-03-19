@@ -12,19 +12,14 @@ A [batteries-included](https://en.wikipedia.org/wiki/Batteries_Included) stock a
 
 ## Stack
 
-* *Language*: [Python](https://www.python.org) 
-* *CLI Framework*: [Typer](https://typer.tiangolo.com)
-* *TUI*: [Rich](https://rich.readthedocs.io)
-* *Data computation*: [pandas](https://pandas.pydata.org), [NumPy](https://numpy.org)
-* *HTTP Client*: [Requests](https://requests.readthedocs.io)
+* *Script*: [Python](https://www.python.org), [Typer](https://typer.tiangolo.com), [Textual](https://textual.textualize.io/), [Rich](https://rich.readthedocs.io)
+* *Data*: [pandas](https://pandas.pydata.org), [NumPy](https://numpy.org), [Stooq](https://stooq.com), [yfinance](https://github.com/ranaroussi/yfinance), [Tiger Trade SDK](https://developer.tigerbrokers.com.sg/?lang=en_US), [Finnhub REST](https://finnhub.io/docs/api), [Alpaca Markets SDK](https://docs.alpaca.markets/docs/sdks-and-tools), [Polymarket CLOB](https://docs.polymarket.com/trading/overview)
+* *HTTP*: [Requests](https://requests.readthedocs.io)
+* *Config*: [platformdirs](https://platformdirs.readthedocs.io)
+* *AI*: [Pydantic](https://docs.pydantic.dev/latest/), [MCP](https://modelcontextprotocol.io)
 * *Scheduling*: [APScheduler](https://apscheduler.readthedocs.io) 
-* *Config*: [Pydantic](https://docs.pydantic.dev/latest/) 
-* *Local Paths*: [platformdirs](https://platformdirs.readthedocs.io)
-* *AI Integration*: [MCP](https://modelcontextprotocol.io)
-* *Data Providers*: [Stooq](https://stooq.com), [yfinance](https://github.com/ranaroussi/yfinance)
 * *Package*: [setuptools](https://setuptools.pypa.io)
-* *Dev/QA*: [pytest](https://docs.pytest.org), [ruff](https://docs.astral.sh/ruff/), [mypy](https://mypy.readthedocs.io)
-* *CI/CD*: [GitHub Actions](https://github.com/features/actions)
+* *CI/CD*: [pytest](https://docs.pytest.org), [ruff](https://docs.astral.sh/ruff/), [mypy](https://mypy.readthedocs.io), [GitHub Actions](https://github.com/features/actions)
 
 ## Screenshots
 

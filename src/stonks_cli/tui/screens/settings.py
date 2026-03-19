@@ -7,21 +7,35 @@ from textual.widgets import Button, Input, Label, Select, Static
 
 class SettingsScreen(Vertical):
     DEFAULT_CLASSES = "screen-widget"
+
     def compose(self) -> ComposeResult:
         yield Static("[bold]Settings[/]", classes="panel-title")
         with Horizontal():
             yield Label("Provider:")
-            yield Select([
-                ("stooq", "stooq"), ("yfinance", "yfinance"), ("csv", "csv"),
-                ("finnhub", "finnhub"), ("alpaca", "alpaca"), ("tiger", "tiger"), ("polymarket", "polymarket"),
-            ], id="set-provider", prompt="provider")
+            yield Select(
+                [
+                    ("stooq", "stooq"),
+                    ("yfinance", "yfinance"),
+                    ("csv", "csv"),
+                    ("finnhub", "finnhub"),
+                    ("alpaca", "alpaca"),
+                    ("tiger", "tiger"),
+                    ("polymarket", "polymarket"),
+                ],
+                id="set-provider",
+                prompt="provider",
+            )
         with Horizontal():
             yield Label("Strategy:")
-            yield Select([
-                ("basic_trend_rsi", "basic_trend_rsi"),
-                ("sma_cross", "sma_cross"),
-                ("mean_reversion_bb_rsi", "mean_reversion_bb_rsi"),
-            ], id="set-strategy", prompt="strategy")
+            yield Select(
+                [
+                    ("basic_trend_rsi", "basic_trend_rsi"),
+                    ("sma_cross", "sma_cross"),
+                    ("mean_reversion_bb_rsi", "mean_reversion_bb_rsi"),
+                ],
+                id="set-strategy",
+                prompt="strategy",
+            )
         with Horizontal():
             yield Label("Cache TTL (s):")
             yield Input(placeholder="3600", id="set-cache-ttl")
@@ -45,6 +59,7 @@ class SettingsScreen(Vertical):
 
     def on_mount(self) -> None:
         from stonks_cli.config import load_config
+
         cfg = load_config()
         try:
             self.query_one("#set-provider", Select).value = cfg.data.provider
@@ -67,6 +82,7 @@ class SettingsScreen(Vertical):
 
     def _save(self) -> None:
         from stonks_cli.config import load_config, save_config
+
         cfg = load_config()
         try:
             provider_sel = self.query_one("#set-provider", Select)
@@ -82,7 +98,13 @@ class SettingsScreen(Vertical):
             alpaca_secret = self.query_one("#set-alpaca-secret", Input).value or None
             data = cfg.data.model_copy(update={"provider": provider, "cache_ttl_seconds": cache_ttl})
             tui_cfg = cfg.tui.model_copy(update={"refresh_interval": tui_refresh, "theme": theme})
-            api_keys = cfg.api_keys.model_copy(update={"finnhub_api_key": finnhub_key, "alpaca_api_key": alpaca_key, "alpaca_secret_key": alpaca_secret})
+            api_keys = cfg.api_keys.model_copy(
+                update={
+                    "finnhub_api_key": finnhub_key,
+                    "alpaca_api_key": alpaca_key,
+                    "alpaca_secret_key": alpaca_secret,
+                }
+            )
             cfg = cfg.model_copy(update={"data": data, "strategy": strategy, "tui": tui_cfg, "api_keys": api_keys})
             path = save_config(cfg)
             # apply theme live

@@ -15,6 +15,7 @@ class DashboardScreen(Container):
         grid-gutter: 1;
     }
     """
+
     def compose(self) -> ComposeResult:
         yield Static("Loading...", id="dash-watchlist", classes="dashboard-panel")
         yield Static("Loading...", id="dash-portfolio", classes="dashboard-panel")
@@ -31,6 +32,7 @@ class DashboardScreen(Container):
             from stonks_cli.commands import _fetch_quick_single
             from stonks_cli.config import load_config
             from stonks_cli.pipeline import select_strategy
+
             cfg = load_config()
             strategy_fn = select_strategy(cfg)
             tickers = cfg.tickers[:10]
@@ -57,6 +59,7 @@ class DashboardScreen(Container):
         # portfolio snapshot
         try:
             from stonks_cli.portfolio.storage import load_portfolio
+
             portfolio = load_portfolio()
             if portfolio.positions:
                 total_cost = sum(p.shares * p.cost_basis_per_share for p in portfolio.positions)
@@ -70,6 +73,7 @@ class DashboardScreen(Container):
         # alerts
         try:
             from stonks_cli.alerts.storage import load_alerts
+
             alerts = load_alerts()
             triggered = [a for a in alerts if a.triggered_at]
             lines = ["[bold]Recent Alerts[/]\n"]
@@ -82,4 +86,6 @@ class DashboardScreen(Container):
         except Exception as e:
             self.app.call_from_thread(self.query_one("#dash-alerts").update, f"error: {e}")
         # movers placeholder
-        self.app.call_from_thread(self.query_one("#dash-movers").update, "[bold]Market Movers[/]\n\n  run analysis to populate")
+        self.app.call_from_thread(
+            self.query_one("#dash-movers").update, "[bold]Market Movers[/]\n\n  run analysis to populate"
+        )

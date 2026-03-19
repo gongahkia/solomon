@@ -5,6 +5,7 @@ from textual.widgets import Static
 
 class PriceCard(Static):
     """Compact ticker+price+change+sparkline card."""
+
     DEFAULT_CSS = """
     PriceCard {
         background: #16213e;
@@ -14,6 +15,7 @@ class PriceCard(Static):
         min-width: 30;
     }
     """
+
     def __init__(self, ticker="", price=0.0, change_pct=None, sparkline="", **kwargs):
         super().__init__(**kwargs)
         self.ticker = ticker

@@ -8,6 +8,7 @@ from textual.widgets import Button, DataTable, Input, Static
 
 class PortfolioScreen(Vertical):
     DEFAULT_CLASSES = "screen-widget"
+
     def compose(self) -> ComposeResult:
         yield DataTable(id="pf-table")
         yield Static("", id="pf-allocation")
@@ -46,6 +47,7 @@ class PortfolioScreen(Vertical):
     def _do_buy(self, ticker, shares, price):
         try:
             from stonks_cli.portfolio.storage import add_position
+
             add_position(ticker, shares, price)
             self.app.call_from_thread(self.query_one("#pf-status").update, f"bought {shares} {ticker} @ ${price:.2f}")
             self.app.call_from_thread(self._refresh_sync)
@@ -56,9 +58,12 @@ class PortfolioScreen(Vertical):
     def _do_sell(self, ticker, shares, price):
         try:
             from stonks_cli.portfolio.storage import remove_position
+
             result = remove_position(ticker, shares, price)
             gl = result["realized_gain_loss"]
-            self.app.call_from_thread(self.query_one("#pf-status").update, f"sold {shares} {ticker} @ ${price:.2f} | P&L: ${gl:+,.2f}")
+            self.app.call_from_thread(
+                self.query_one("#pf-status").update, f"sold {shares} {ticker} @ ${price:.2f} | P&L: ${gl:+,.2f}"
+            )
             self.app.call_from_thread(self._refresh_sync)
         except Exception as e:
             self.app.call_from_thread(self.query_one("#pf-status").update, f"error: {e}")
@@ -69,6 +74,7 @@ class PortfolioScreen(Vertical):
 
     def _refresh_sync(self) -> None:
         from stonks_cli.portfolio.storage import load_portfolio
+
         portfolio = load_portfolio()
         table = self.query_one("#pf-table", DataTable)
         table.clear()
@@ -78,6 +84,7 @@ class PortfolioScreen(Vertical):
         from stonks_cli.config import load_config
         from stonks_cli.data.providers import normalize_ticker
         from stonks_cli.pipeline import provider_for_config
+
         cfg = load_config()
         prices = {}
         for pos in portfolio.positions:
@@ -104,7 +111,15 @@ class PortfolioScreen(Vertical):
             value = shares * current
             pnl = value - cost
             pnl_pct = (pnl / cost * 100) if cost else 0
-            table.add_row(ticker, f"{shares:.2f}", f"${avg_cost:.2f}", f"${current:.2f}", f"${value:,.2f}", f"${pnl:+,.2f}", f"{pnl_pct:+.2f}%")
+            table.add_row(
+                ticker,
+                f"{shares:.2f}",
+                f"${avg_cost:.2f}",
+                f"${current:.2f}",
+                f"${value:,.2f}",
+                f"${pnl:+,.2f}",
+                f"{pnl_pct:+.2f}%",
+            )
         total = sum(agg[t]["shares"] * prices.get(t, 0) for t in agg)
         if total > 0:
             blocks = "Allocation: "

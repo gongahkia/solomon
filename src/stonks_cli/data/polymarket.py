@@ -20,7 +20,7 @@ def _strip_prefix(ticker: str) -> str:
     t = ticker.strip()
     upper = t.upper()
     if upper.startswith(_PREFIX):
-        return t[len(_PREFIX):]
+        return t[len(_PREFIX) :]
     return t
 
 
@@ -29,7 +29,7 @@ def _normalize_polymarket_ticker(raw: str) -> str:
     if not t:
         raise ValueError("Ticker cannot be empty")
     if t.upper().startswith(_PREFIX):
-        return t.upper() # keep POLYMARKET:<SLUG> form, no .US suffix
+        return t.upper()  # keep POLYMARKET:<SLUG> form, no .US suffix
     return normalize_ticker(t)
 
 
@@ -44,7 +44,10 @@ class PolymarketProvider(PriceProvider):
         self._session = session or requests.Session()
         if session is None:
             retry = Retry(
-                total=4, connect=4, read=4, status=4,
+                total=4,
+                connect=4,
+                read=4,
+                status=4,
                 backoff_factor=0.5,
                 status_forcelist=(429, 500, 502, 503, 504),
                 allowed_methods=("GET",),
@@ -108,7 +111,9 @@ class PolymarketProvider(PriceProvider):
             meta_text = load_cached_text(self._cache_dir, meta_key, ttl_seconds=self._cache_ttl_seconds)
         if meta_text is None:
             resp = self._session.get(
-                _GAMMA_URL, params={"slug": slug}, timeout=self._timeout_s,
+                _GAMMA_URL,
+                params={"slug": slug},
+                timeout=self._timeout_s,
             )
             resp.raise_for_status()
             meta_text = resp.text
@@ -127,7 +132,9 @@ class PolymarketProvider(PriceProvider):
     def fetch_markets(self, query: str) -> list[dict]:
         """Search markets on Polymarket."""
         resp = self._session.get(
-            _GAMMA_URL, params={"_q": query}, timeout=self._timeout_s,
+            _GAMMA_URL,
+            params={"_q": query},
+            timeout=self._timeout_s,
         )
         resp.raise_for_status()
         try:

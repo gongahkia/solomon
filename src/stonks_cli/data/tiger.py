@@ -9,10 +9,13 @@ from stonks_cli.data.providers import PriceProvider, PriceSeries, normalize_tick
 
 class TigerProvider(PriceProvider):
     """Tiger Brokers provider via tigeropen SDK."""
+
     def __init__(self, cfg=None):
         self._client = None
         if cfg is None or cfg.api_keys is None:
-            raise ValueError("TigerProvider requires cfg with api_keys (tiger_id, tiger_account, tiger_private_key_path)")
+            raise ValueError(
+                "TigerProvider requires cfg with api_keys (tiger_id, tiger_account, tiger_private_key_path)"
+            )
         keys = cfg.api_keys
         if not keys.tiger_id or not keys.tiger_account or not keys.tiger_private_key_path:
             raise ValueError("TigerProvider requires tiger_id, tiger_account, and tiger_private_key_path in api_keys")
@@ -39,6 +42,7 @@ class TigerProvider(PriceProvider):
 
     def _read_private_key(self) -> str:
         from pathlib import Path
+
         p = Path(self._private_key_path).expanduser()
         if not p.exists():
             raise FileNotFoundError(f"Tiger RSA private key not found: {p}")
@@ -46,7 +50,7 @@ class TigerProvider(PriceProvider):
 
     def fetch_daily(self, ticker: str) -> PriceSeries:
         normalized = normalize_ticker(ticker)
-        base_ticker = normalized.split(".")[0] # strip exchange suffix for Tiger API
+        base_ticker = normalized.split(".")[0]  # strip exchange suffix for Tiger API
         client = self._get_client()
         try:
             bar_period = importlib.import_module("tigeropen.common.consts").BarPeriod
@@ -63,15 +67,20 @@ class TigerProvider(PriceProvider):
             return PriceSeries(ticker=normalized, df=pd.DataFrame())
         if isinstance(bars, pd.DataFrame):
             df = bars.copy()
-        else: # list of bar objects
-            df = pd.DataFrame([{
-                "date": getattr(b, "time", None),
-                "open": getattr(b, "open", None),
-                "high": getattr(b, "high", None),
-                "low": getattr(b, "low", None),
-                "close": getattr(b, "close", None),
-                "volume": getattr(b, "volume", None),
-            } for b in bars])
+        else:  # list of bar objects
+            df = pd.DataFrame(
+                [
+                    {
+                        "date": getattr(b, "time", None),
+                        "open": getattr(b, "open", None),
+                        "high": getattr(b, "high", None),
+                        "low": getattr(b, "low", None),
+                        "close": getattr(b, "close", None),
+                        "volume": getattr(b, "volume", None),
+                    }
+                    for b in bars
+                ]
+            )
         df.columns = [c.strip().lower() for c in df.columns]
         if "time" in df.columns and "date" not in df.columns:
             df = df.rename(columns={"time": "date"})

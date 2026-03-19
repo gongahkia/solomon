@@ -39,7 +39,9 @@ class _FakeCfg:
     @dataclass
     class _Keys:
         finnhub_api_key: str = "test-key"
+
     api_keys: _Keys = None
+
     def __post_init__(self):
         if self.api_keys is None:
             self.api_keys = self._Keys()
@@ -49,38 +51,46 @@ def _make_provider(text: str, tmp_path, headers: dict | None = None) -> tuple[Fi
     sess = _Session(text, headers)
     cfg = _FakeCfg()
     p = FinnhubProvider(cfg=cfg, cache_ttl_seconds=0)
-    p._session = sess # inject mock session
+    p._session = sess  # inject mock session
     p._cache_dir = tmp_path
     return p, sess
 
 
 def test_fetch_daily_parses_candle_json(tmp_path):
-    payload = json.dumps({
-        "s": "ok",
-        "t": [1704153600, 1704067200], # 2024-01-02, 2024-01-01
-        "o": [10.0, 9.0],
-        "h": [11.0, 10.0],
-        "l": [9.0, 8.0],
-        "c": [10.5, 9.5],
-        "v": [100, 200],
-    })
+    payload = json.dumps(
+        {
+            "s": "ok",
+            "t": [1704153600, 1704067200],  # 2024-01-02, 2024-01-01
+            "o": [10.0, 9.0],
+            "h": [11.0, 10.0],
+            "l": [9.0, 8.0],
+            "c": [10.5, 9.5],
+            "v": [100, 200],
+        }
+    )
     p, sess = _make_provider(payload, tmp_path)
     series = p.fetch_daily("aapl")
-    assert series.ticker == "AAPL.US" # normalize_ticker applied
+    assert series.ticker == "AAPL.US"  # normalize_ticker applied
     assert sess.last_url is not None and "finnhub.io" in sess.last_url
     df = series.df
     assert isinstance(df.index, pd.DatetimeIndex)
-    assert list(df.index) == sorted(df.index) # sorted
+    assert list(df.index) == sorted(df.index)  # sorted
     for col in ("close", "open", "high", "low", "volume"):
         assert col in df.columns
 
 
 def test_fetch_daily_normalize_ticker(tmp_path):
-    payload = json.dumps({
-        "s": "ok",
-        "t": [1704153600],
-        "o": [10.0], "h": [11.0], "l": [9.0], "c": [10.5], "v": [100],
-    })
+    payload = json.dumps(
+        {
+            "s": "ok",
+            "t": [1704153600],
+            "o": [10.0],
+            "h": [11.0],
+            "l": [9.0],
+            "c": [10.5],
+            "v": [100],
+        }
+    )
     p, _ = _make_provider(payload, tmp_path)
     series = p.fetch_daily("AAPL")
     assert series.ticker == "AAPL.US"

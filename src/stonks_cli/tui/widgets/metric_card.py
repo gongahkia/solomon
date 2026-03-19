@@ -5,6 +5,7 @@ from textual.widgets import Static
 
 class MetricCard(Static):
     """Label+value metric display (CAGR, Sharpe, etc.)."""
+
     DEFAULT_CSS = """
     MetricCard {
         background: #16213e;
@@ -14,6 +15,7 @@ class MetricCard(Static):
         min-width: 20;
     }
     """
+
     def __init__(self, label="", value="", **kwargs):
         super().__init__(**kwargs)
         self.label = label

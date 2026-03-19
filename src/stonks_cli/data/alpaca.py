@@ -23,7 +23,7 @@ class AlpacaProvider(PriceProvider):
         self._api_key = api_key or os.environ.get("ALPACA_API_KEY", "")
         self._secret_key = secret_key or os.environ.get("ALPACA_SECRET_KEY", "")
         self._paper = paper
-        self._client = None # lazy-init
+        self._client = None  # lazy-init
 
     def _get_client(self):
         if self._client is not None:
@@ -38,7 +38,7 @@ class AlpacaProvider(PriceProvider):
 
     def fetch_daily(self, ticker: str) -> PriceSeries:
         normalized = normalize_ticker(ticker)
-        base_ticker = normalized.split(".")[0] # strip exchange suffix
+        base_ticker = normalized.split(".")[0]  # strip exchange suffix
         try:
             req_mod = importlib.import_module("alpaca.data.requests")
             tf_mod = importlib.import_module("alpaca.data.timeframe")
@@ -60,14 +60,16 @@ class AlpacaProvider(PriceProvider):
             return PriceSeries(ticker=normalized, df=pd.DataFrame())
         rows = []
         for b in bar_list:
-            rows.append({
-                "date": pd.to_datetime(b.timestamp),
-                "open": float(b.open),
-                "high": float(b.high),
-                "low": float(b.low),
-                "close": float(b.close),
-                "volume": int(b.volume),
-            })
+            rows.append(
+                {
+                    "date": pd.to_datetime(b.timestamp),
+                    "open": float(b.open),
+                    "high": float(b.high),
+                    "low": float(b.low),
+                    "close": float(b.close),
+                    "volume": int(b.volume),
+                }
+            )
         df = pd.DataFrame(rows).set_index("date").sort_index()
         return PriceSeries(ticker=normalized, df=df)
 

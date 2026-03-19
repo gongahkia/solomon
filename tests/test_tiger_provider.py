@@ -12,12 +12,15 @@ import pytest
 class _BarPeriod:
     DAY = "day"
 
+
 class _Language:
     en_US = "en_US"
+
 
 class _FakeConsts:
     BarPeriod = _BarPeriod
     Language = _Language
+
 
 class _FakeConfig:
     def __init__(self, sandbox_debug=False):
@@ -26,8 +29,10 @@ class _FakeConfig:
         self.private_key = None
         self.language = None
 
+
 class _FakeTigerOpenConfig:
     TigerOpenClientConfig = _FakeConfig
+
 
 @dataclass
 class _Bar:
@@ -38,12 +43,15 @@ class _Bar:
     close: float
     volume: int
 
+
 class _FakeQuoteClient:
     def __init__(self, config):
         self._config = config
         self._bars: list[_Bar] | None = None
+
     def get_bars(self, symbols, period, begin_time, end_time, limit):
         return self._bars
+
 
 class _FakeQuoteModule:
     QuoteClient = _FakeQuoteClient
@@ -72,6 +80,7 @@ def _make_cfg(tmp_path):
     """Build a minimal cfg object with api_keys for TigerProvider."""
     key_file = tmp_path / "rsa_key.pem"
     key_file.write_text("-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----")
+
     @dataclass
     class _ApiKeys:
         tiger_id: str = "test_id"
@@ -81,12 +90,15 @@ def _make_cfg(tmp_path):
         alpaca_api_key: str | None = None
         alpaca_secret_key: str | None = None
         alpaca_paper: bool = True
+
     @dataclass
     class _Cfg:
-        api_keys: _ApiKeys = None # type: ignore
+        api_keys: _ApiKeys = None  # type: ignore
+
         def __post_init__(self):
             if self.api_keys is None:
                 self.api_keys = _ApiKeys()
+
     return _Cfg()
 
 
@@ -106,6 +118,7 @@ def _patch_tiger_sdk():
 
 def test_fetch_daily_returns_price_series(tmp_path):
     from stonks_cli.data.tiger import TigerProvider
+
     cfg = _make_cfg(tmp_path)
     provider = TigerProvider(cfg=cfg)
     client = provider._get_client()
@@ -115,7 +128,7 @@ def test_fetch_daily_returns_price_series(tmp_path):
     ]
     provider._client = client
     series = provider.fetch_daily("aapl")
-    assert series.ticker == "AAPL.US" # normalize_ticker applied
+    assert series.ticker == "AAPL.US"  # normalize_ticker applied
     df = series.df
     assert isinstance(df.index, pd.DatetimeIndex)
     assert list(df.index) == sorted(df.index)
@@ -126,6 +139,7 @@ def test_fetch_daily_returns_price_series(tmp_path):
 
 def test_fetch_daily_empty_response(tmp_path):
     from stonks_cli.data.tiger import TigerProvider
+
     cfg = _make_cfg(tmp_path)
     provider = TigerProvider(cfg=cfg)
     client = provider._get_client()
@@ -138,5 +152,6 @@ def test_fetch_daily_empty_response(tmp_path):
 
 def test_missing_config_raises():
     from stonks_cli.data.tiger import TigerProvider
+
     with pytest.raises(ValueError):
         TigerProvider(cfg=None)

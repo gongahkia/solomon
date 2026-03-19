@@ -69,11 +69,13 @@ class ApiKeysConfig(BaseModel):
     alpaca_secret_key: str | None = None
     alpaca_paper: bool = True
 
+
 class TuiConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     refresh_interval: int = Field(default=60, ge=5, le=3600)
     theme: Literal["dark", "light"] = "dark"
     default_view: str = "dashboard"
+
 
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")

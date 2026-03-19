@@ -11,6 +11,7 @@ STRATEGIES = [
     ("mean_reversion_bb_rsi", "mean_reversion_bb_rsi"),
 ]
 
+
 class AnalysisScreen(Vertical):
     DEFAULT_CLASSES = "screen-widget"
     DEFAULT_CSS = """
@@ -19,6 +20,7 @@ class AnalysisScreen(Vertical):
     #an-run { width: 12; }
     #an-toolbar { height: auto; }
     """
+
     def compose(self) -> ComposeResult:
         with Horizontal(id="an-toolbar"):
             yield Input(placeholder="tickers comma-separated, press Enter to run", id="an-tickers")
@@ -52,6 +54,7 @@ class AnalysisScreen(Vertical):
 
             from stonks_cli.config import load_config
             from stonks_cli.pipeline import compute_results
+
             tickers_str = self.query_one("#an-tickers", Input).value.strip()
             sel = self.query_one("#an-strategy", Select)
             strategy = sel.value if sel.value != Select.BLANK else "basic_trend_rsi"
@@ -64,16 +67,24 @@ class AnalysisScreen(Vertical):
             cfg = cfg.model_copy(update={"tickers": tickers, "strategy": strategy})
             console = Console(file=io.StringIO())
             results, portfolio_metrics = compute_results(cfg, console)
+
             def _update():
                 table = self.query_one("#an-results", DataTable)
                 table.clear()
                 for r in results:
                     cagr = f"{r.backtest.cagr:.4f}" if r.backtest and r.backtest.cagr is not None else "N/A"
                     sharpe = f"{r.backtest.sharpe:.4f}" if r.backtest and r.backtest.sharpe is not None else "N/A"
-                    max_dd = f"{r.backtest.max_drawdown:.4f}" if r.backtest and r.backtest.max_drawdown is not None else "N/A"
-                    table.add_row(r.ticker, r.recommendation.action, f"{r.recommendation.confidence:.2f}", cagr, sharpe, max_dd)
+                    max_dd = (
+                        f"{r.backtest.max_drawdown:.4f}"
+                        if r.backtest and r.backtest.max_drawdown is not None
+                        else "N/A"
+                    )
+                    table.add_row(
+                        r.ticker, r.recommendation.action, f"{r.recommendation.confidence:.2f}", cagr, sharpe, max_dd
+                    )
                 self.query_one("#an-status").update(f"done — {len(results)} tickers analyzed")
                 self.query_one("#an-loading").display = False
+
             self.app.call_from_thread(_update)
         except Exception as e:
             self.app.call_from_thread(self.query_one("#an-status").update, f"error: {e}")

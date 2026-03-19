@@ -9,6 +9,7 @@ from textual.widgets import Input, Static
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
+
 def _strip_ansi(s: str) -> str:
     return _ANSI_RE.sub("", s)
 
@@ -24,6 +25,7 @@ class DetailScreen(Vertical):
     #detail-news { width: 1fr; }
     #detail-backtest { width: 1fr; }
     """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._ticker = None
@@ -55,6 +57,7 @@ class DetailScreen(Vertical):
         from stonks_cli.config import load_config
         from stonks_cli.data.providers import normalize_ticker
         from stonks_cli.pipeline import provider_for_config, select_strategy
+
         cfg = load_config()
         normalized = normalize_ticker(ticker)
         try:
@@ -79,11 +82,12 @@ class DetailScreen(Vertical):
         sig_str = f"{rec.action} ({rec.confidence:.2f})" if rec else "INSUFFICIENT_HISTORY"
         header = f"[bold]{normalized}[/]   ${last_close:.2f}   {pct_str}   {sig_str}"
         self.app.call_from_thread(self.query_one("#detail-header").update, header)
-        try: # chart via plotext
+        try:  # chart via plotext
             import io as _io
             import sys as _sys
 
             import plotext as plt
+
             prices = df["close"].tail(90).tolist()
             plt.clear_figure()
             plt.plot(prices, marker="braille")
@@ -102,11 +106,13 @@ class DetailScreen(Vertical):
                     _sys.stdout = old
         except Exception:
             from stonks_cli.formatting.sparkline import generate_sparkline
+
             prices = df["close"].tail(40).tolist()
             chart_str = generate_sparkline(prices, width=40)
         self.app.call_from_thread(self.query_one("#detail-chart").update, f"[bold]Price Chart[/]\n{chart_str}")
-        try: # fundamentals
+        try:  # fundamentals
             from stonks_cli.data.fundamentals import fetch_fundamentals_yahoo
+
             base = normalized.split(".")[0]
             fund = fetch_fundamentals_yahoo(base)
             if fund:
@@ -119,30 +125,44 @@ class DetailScreen(Vertical):
         except Exception:
             fund_str = "[bold]Fundamentals[/]\n  requires yfinance"
         self.app.call_from_thread(self.query_one("#detail-fundamentals").update, fund_str)
-        try: # indicators
+        try:  # indicators
             from stonks_cli.analysis.indicators import bollinger_bands, rsi, sma
+
             close = df["close"].astype(float)
             rsi_val = rsi(close, 14).iloc[-1]
             sma_20 = sma(close, 20).iloc[-1]
             sma_50 = sma(close, 50).iloc[-1]
             lower, mid, upper = bollinger_bands(close)
-            lines = ["[bold]Indicators[/]\n", f"  RSI(14): {rsi_val:.2f}", f"  SMA(20): {sma_20:.2f}", f"  SMA(50): {sma_50:.2f}", f"  BB upper: {float(upper.iloc[-1]):.2f}", f"  BB mid:   {float(mid.iloc[-1]):.2f}", f"  BB lower: {float(lower.iloc[-1]):.2f}"]
+            lines = [
+                "[bold]Indicators[/]\n",
+                f"  RSI(14): {rsi_val:.2f}",
+                f"  SMA(20): {sma_20:.2f}",
+                f"  SMA(50): {sma_50:.2f}",
+                f"  BB upper: {float(upper.iloc[-1]):.2f}",
+                f"  BB mid:   {float(mid.iloc[-1]):.2f}",
+                f"  BB lower: {float(lower.iloc[-1]):.2f}",
+            ]
             self.app.call_from_thread(self.query_one("#detail-indicators").update, "\n".join(lines))
         except Exception as e:
             self.app.call_from_thread(self.query_one("#detail-indicators").update, f"[bold]Indicators[/]\n  error: {e}")
-        try: # news
+        try:  # news
             from stonks_cli.data.news import fetch_news_rss
+
             base = normalized.split(".")[0]
             items = fetch_news_rss(base)
             lines = ["[bold]News[/]\n"]
             for item in items[:5]:
                 title = item.get("title", "")[:60]
                 lines.append(f"  {title}")
-            self.app.call_from_thread(self.query_one("#detail-news").update, "\n".join(lines) if len(lines) > 1 else "[bold]News[/]\n  no news")
+            self.app.call_from_thread(
+                self.query_one("#detail-news").update,
+                "\n".join(lines) if len(lines) > 1 else "[bold]News[/]\n  no news",
+            )
         except Exception:
             self.app.call_from_thread(self.query_one("#detail-news").update, "[bold]News[/]\n  unavailable")
-        try: # backtest
+        try:  # backtest
             from stonks_cli.analysis.backtest import compute_backtest_metrics, walk_forward_backtest
+
             bt = walk_forward_backtest(df, strategy_fn=strategy_fn, min_history_rows=cfg.risk.min_history_days)
             metrics = compute_backtest_metrics(bt.equity)
             lines = ["[bold]Backtest[/]\n"]

@@ -8,6 +8,7 @@ from textual.widgets import DataTable, Select
 
 class WatchlistScreen(Vertical):
     DEFAULT_CLASSES = "screen-widget"
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._results = []
@@ -22,6 +23,7 @@ class WatchlistScreen(Vertical):
         table.cursor_type = "row"
         # populate watchlist selector
         from stonks_cli.config import load_config
+
         cfg = load_config()
         wl = cfg.watchlists or {}
         options = [(name, name) for name in sorted(wl.keys())]
@@ -47,6 +49,7 @@ class WatchlistScreen(Vertical):
         from stonks_cli.config import load_config
         from stonks_cli.formatting.sparkline import generate_sparkline
         from stonks_cli.pipeline import select_strategy
+
         cfg = load_config()
         strategy_fn = select_strategy(cfg)
         sel = self.query_one("#wl-select", Select)
@@ -66,6 +69,7 @@ class WatchlistScreen(Vertical):
                     pass
         results.sort(key=lambda r: r.ticker)
         self._results = results
+
         def _update():
             table = self.query_one("#wl-table", DataTable)
             table.clear()
@@ -78,4 +82,5 @@ class WatchlistScreen(Vertical):
                     change_str = "N/A"
                 spark = generate_sparkline(r.prices, width=15) if r.prices else ""
                 table.add_row(r.ticker, price_str, change_str, r.action, f"{r.confidence:.2f}", spark, key=r.ticker)
+
         self.app.call_from_thread(_update)

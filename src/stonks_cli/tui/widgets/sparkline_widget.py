@@ -7,6 +7,7 @@ from stonks_cli.formatting.sparkline import generate_sparkline
 
 class SparklineWidget(Static):
     """Color-coded sparkline widget."""
+
     def __init__(self, prices=None, width=20, **kwargs):
         super().__init__(**kwargs)
         self.prices = prices or []

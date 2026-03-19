@@ -18,28 +18,36 @@ class _MockBar:
     close: float
     volume: int
 
+
 class _MockBarsResponse:
     def __init__(self, data: dict):
         self.data = data
 
+
 class _MockClient:
     def __init__(self, api_key, secret_key):
         self.bars_to_return: _MockBarsResponse | None = None
+
     def get_stock_bars(self, request):
         return self.bars_to_return
+
     def get_stock_latest_quote(self, request):
         return {}
+
 
 class _MockStockBarsRequest:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
+
 class _MockStockLatestQuoteRequest:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
+
 class _MockTimeFrame:
     Day = "Day"
+
 
 def _install_fake_alpaca():
     """inject fake alpaca modules into sys.modules so AlpacaProvider can import them."""
@@ -60,6 +68,7 @@ def _install_fake_alpaca():
     sys.modules["alpaca.data.requests"] = req_mod
     sys.modules["alpaca.data.timeframe"] = tf_mod
 
+
 _install_fake_alpaca()
 
 from stonks_cli.data.alpaca import AlpacaProvider  # noqa: E402
@@ -74,13 +83,14 @@ def test_fetch_daily_returns_price_series_with_correct_columns():
     ]
     client.bars_to_return = _MockBarsResponse({"AAPL": bars})
     series = provider.fetch_daily("aapl")
-    assert series.ticker == "AAPL.US" # normalize_ticker applied
+    assert series.ticker == "AAPL.US"  # normalize_ticker applied
     df = series.df
     assert isinstance(df.index, pd.DatetimeIndex)
-    assert list(df.index) == sorted(df.index) # sorted
+    assert list(df.index) == sorted(df.index)  # sorted
     for col in ("open", "high", "low", "close", "volume"):
         assert col in df.columns
     assert float(df.loc[pd.Timestamp("2025-01-02"), "close"]) == 9.5
+
 
 def test_empty_response_returns_empty_dataframe():
     provider = AlpacaProvider()
@@ -89,6 +99,7 @@ def test_empty_response_returns_empty_dataframe():
     series = provider.fetch_daily("MSFT")
     assert series.ticker == "MSFT.US"
     assert series.df.empty
+
 
 def test_normalize_ticker_applied():
     provider = AlpacaProvider()

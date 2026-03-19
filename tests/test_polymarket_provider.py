@@ -11,12 +11,14 @@ from stonks_cli.data.polymarket import PolymarketProvider
 @dataclass
 class _Resp:
     text: str
+
     def raise_for_status(self) -> None:
         return None
 
 
 class _Session:
     """Mock session that routes by URL prefix."""
+
     def __init__(self, gamma_text: str, clob_text: str):
         self._gamma_text = gamma_text
         self._clob_text = clob_text
@@ -26,7 +28,7 @@ class _Session:
         self.last_url = url
         if "gamma-api" in url:
             return _Resp(text=self._gamma_text)
-        return _Resp(text=self._clob_text) # clob
+        return _Resp(text=self._clob_text)  # clob
 
 
 def _make_gamma(condition_id: str = "0xabc123") -> str:
@@ -54,7 +56,7 @@ def test_prefix_stripped(tmp_path):
     sess = _Session(_make_gamma(), _make_history())
     p = PolymarketProvider(session=sess, cache_dir=tmp_path, cache_ttl_seconds=0)
     series = p.fetch_daily("POLYMARKET:test-market")
-    assert series.ticker == "POLYMARKET:TEST-MARKET" # normalized upper, no .US
+    assert series.ticker == "POLYMARKET:TEST-MARKET"  # normalized upper, no .US
     assert sess.last_url is not None
 
 
@@ -90,7 +92,7 @@ def test_close_values_between_0_and_1(tmp_path):
 
 
 def test_dates_sorted(tmp_path):
-    prices = [(1700172800, 0.7), (1700000000, 0.3), (1700086400, 0.5)] # out of order
+    prices = [(1700172800, 0.7), (1700000000, 0.3), (1700086400, 0.5)]  # out of order
     sess = _Session(_make_gamma(), _make_history(prices))
     p = PolymarketProvider(session=sess, cache_dir=tmp_path, cache_ttl_seconds=0)
     series = p.fetch_daily("POLYMARKET:sort-test")

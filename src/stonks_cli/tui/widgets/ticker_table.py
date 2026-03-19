@@ -5,6 +5,7 @@ from textual.widgets import DataTable
 
 class TickerTable(DataTable):
     """Reusable DataTable with standard ticker columns."""
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -24,6 +25,7 @@ class TickerTable(DataTable):
         """Load QuickResult list into table."""
         self.clear()
         from stonks_cli.formatting.sparkline import generate_sparkline
+
         for r in results:
             price_str = f"${r.price:.2f}" if r.price else "N/A"
             if r.change_pct is not None:

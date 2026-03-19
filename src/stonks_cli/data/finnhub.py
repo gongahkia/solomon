@@ -17,15 +17,17 @@ _BASE = "https://finnhub.io/api/v1"
 
 class FinnhubProvider(PriceProvider):
     def __init__(self, cfg=None, cache_ttl_seconds: int = 3600):
-        self._api_key = (
-            getattr(getattr(cfg, "api_keys", None), "finnhub_api_key", None)
-            or os.environ.get("FINNHUB_API_KEY")
+        self._api_key = getattr(getattr(cfg, "api_keys", None), "finnhub_api_key", None) or os.environ.get(
+            "FINNHUB_API_KEY"
         )
         if not self._api_key:
             raise ValueError("finnhub api key required via cfg.api_keys.finnhub_api_key or FINNHUB_API_KEY env")
         self._session = requests.Session()
         retry = Retry(
-            total=4, connect=4, read=4, status=4,
+            total=4,
+            connect=4,
+            read=4,
+            status=4,
             backoff_factor=0.5,
             status_forcelist=(429, 500, 502, 503, 504),
             allowed_methods=("GET",),
@@ -39,7 +41,7 @@ class FinnhubProvider(PriceProvider):
         self._timeout_s = 20.0
 
     def _headers(self) -> dict[str, str]:
-        return {"X-Finnhub-Token": self._api_key}
+        return {"X-Finnhub-Token": str(self._api_key)}
 
     def _check_rate_limit(self, resp: requests.Response) -> None:
         remaining = resp.headers.get("X-Ratelimit-Remaining")
@@ -54,9 +56,9 @@ class FinnhubProvider(PriceProvider):
 
     def fetch_daily(self, ticker: str) -> PriceSeries:
         normalized = normalize_ticker(ticker)
-        base_ticker = normalized.split(".")[0] # strip exchange suffix for Finnhub
+        base_ticker = normalized.split(".")[0]  # strip exchange suffix for Finnhub
         now = int(time.time())
-        unix_from = now - 365 * 24 * 3600 # 1 year back
+        unix_from = now - 365 * 24 * 3600  # 1 year back
         unix_to = now
         cache_key = f"finnhub:daily:{base_ticker}"
         neg_cache_key = f"{cache_key}:neg"
@@ -85,13 +87,16 @@ class FinnhubProvider(PriceProvider):
             return PriceSeries(ticker=normalized, df=pd.DataFrame())
         if self._cache_ttl > 0 and text is not None:
             save_cached_text(self._cache_dir, cache_key, text)
-        df = pd.DataFrame({
-            "open": data["o"],
-            "high": data["h"],
-            "low": data["l"],
-            "close": data["c"],
-            "volume": data["v"],
-        }, index=pd.to_datetime(data["t"], unit="s", utc=False))
+        df = pd.DataFrame(
+            {
+                "open": data["o"],
+                "high": data["h"],
+                "low": data["l"],
+                "close": data["c"],
+                "volume": data["v"],
+            },
+            index=pd.to_datetime(data["t"], unit="s", utc=False),
+        )
         df.index.name = "date"
         df = df.sort_index()
         return PriceSeries(ticker=normalized, df=df)

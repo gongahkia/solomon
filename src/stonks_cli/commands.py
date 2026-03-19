@@ -202,6 +202,7 @@ def do_fundamentals(ticker: str, as_json: bool = False) -> dict | None:
 def do_watch(watchlist_name: str | None = None, refresh_interval: int = 60) -> None:
     """Launch the watchlist TUI via Textual."""
     from stonks_cli.tui.app import StonksApp
+
     StonksApp(watchlist_name=watchlist_name, refresh_interval=refresh_interval, default_view="watchlist").run()
 
 

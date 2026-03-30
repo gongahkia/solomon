@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from stonks_cli.alerts.models import Alert
+from stonks_cli.logging_utils import log_suppressed_exception
 
 
 def check_alert(alert: Alert, df: pd.DataFrame) -> bool:
@@ -98,7 +99,12 @@ def check_alert(alert: Alert, df: pd.DataFrame) -> bool:
             days_until = (next_earnings.report_date - today).days
 
             return days_until <= days_threshold
-        except Exception:
+        except Exception as e:
+            log_suppressed_exception(
+                context="alerts.check_alert.earnings_soon",
+                error=e,
+                ticker=alert.ticker,
+            )
             return False
 
     # 52-week high/low detection
@@ -150,7 +156,8 @@ def check_all_alerts() -> list[tuple[Alert, bool]]:
             # We assume it fetches efficiently
             s = p.fetch_daily(t)
             return t, s.df
-        except Exception:
+        except Exception as e:
+            log_suppressed_exception(context="alerts.check_all_alerts.fetch", error=e, ticker=t)
             return t, pd.DataFrame()
 
     max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
@@ -168,8 +175,13 @@ def check_all_alerts() -> list[tuple[Alert, bool]]:
         if df is not None and not df.empty:
             try:
                 triggered = check_alert(alert, df)
-            except Exception:
-                pass
+            except Exception as e:
+                log_suppressed_exception(
+                    context="alerts.check_all_alerts.evaluate",
+                    error=e,
+                    ticker=alert.ticker,
+                    condition=alert.condition_type,
+                )
         results.append((alert, triggered))
 
     return results

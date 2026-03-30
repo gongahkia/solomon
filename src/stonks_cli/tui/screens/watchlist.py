@@ -5,6 +5,8 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import DataTable, Select
 
+from stonks_cli.logging_utils import log_suppressed_exception
+
 
 class WatchlistScreen(Vertical):
     DEFAULT_CLASSES = "screen-widget"
@@ -65,8 +67,12 @@ class WatchlistScreen(Vertical):
             for fut in as_completed(futs):
                 try:
                     results.append(fut.result())
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_suppressed_exception(
+                        context="tui.watchlist.refresh_data.fetch_ticker",
+                        error=e,
+                        ticker=futs.get(fut),
+                    )
         results.sort(key=lambda r: r.ticker)
         self._results = results
 

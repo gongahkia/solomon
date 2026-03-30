@@ -4,9 +4,15 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Input, Label, Select, Static
 
+from stonks_cli.logging_utils import log_suppressed_exception, track_event
+
 
 class SettingsScreen(Vertical):
     DEFAULT_CLASSES = "screen-widget"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._refresh_noop_logged = False
 
     def compose(self) -> ComposeResult:
         yield Static("[bold]Settings[/]", classes="panel-title")
@@ -73,8 +79,8 @@ class SettingsScreen(Vertical):
                 self.query_one("#set-alpaca-key", Input).value = cfg.api_keys.alpaca_api_key
             if cfg.api_keys.alpaca_secret_key:
                 self.query_one("#set-alpaca-secret", Input).value = cfg.api_keys.alpaca_secret_key
-        except Exception:
-            pass
+        except Exception as e:
+            log_suppressed_exception(context="tui.settings.on_mount", error=e)
 
     def on_button_pressed(self, event) -> None:
         if event.button.id == "set-save":
@@ -114,4 +120,6 @@ class SettingsScreen(Vertical):
             self.query_one("#set-status").update(f"error: {e}")
 
     def refresh_data(self) -> None:
-        pass
+        if not self._refresh_noop_logged:
+            track_event("tui.settings.refresh_data.noop")
+            self._refresh_noop_logged = True

@@ -5,6 +5,8 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Input, LoadingIndicator, Select, Static
 
+from stonks_cli.logging_utils import track_event
+
 STRATEGIES = [
     ("basic_trend_rsi", "basic_trend_rsi"),
     ("sma_cross", "sma_cross"),
@@ -20,6 +22,10 @@ class AnalysisScreen(Vertical):
     #an-run { width: 12; }
     #an-toolbar { height: auto; }
     """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._refresh_noop_logged = False
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="an-toolbar"):
@@ -91,4 +97,6 @@ class AnalysisScreen(Vertical):
             self.app.call_from_thread(setattr, self.query_one("#an-loading"), "display", False)
 
     def refresh_data(self) -> None:
-        pass
+        if not self._refresh_noop_logged:
+            track_event("tui.analysis.refresh_data.noop")
+            self._refresh_noop_logged = True

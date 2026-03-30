@@ -5,6 +5,8 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Input, Static
 
+from stonks_cli.logging_utils import log_suppressed_exception
+
 
 class PortfolioScreen(Vertical):
     DEFAULT_CLASSES = "screen-widget"
@@ -95,8 +97,12 @@ class PortfolioScreen(Vertical):
                     series = provider.fetch_daily(normalized)
                     if not series.df.empty and "close" in series.df.columns:
                         prices[pos.ticker] = float(series.df["close"].iloc[-1])
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_suppressed_exception(
+                        context="tui.portfolio.refresh_data.fetch_price",
+                        error=e,
+                        ticker=pos.ticker,
+                    )
         agg = {}
         for pos in portfolio.positions:
             if pos.ticker not in agg:

@@ -5,6 +5,8 @@ from textual.app import ComposeResult
 from textual.containers import Container
 from textual.widgets import Static
 
+from stonks_cli.logging_utils import log_suppressed_exception
+
 
 class DashboardScreen(Container):
     DEFAULT_CLASSES = "screen-widget"
@@ -45,8 +47,12 @@ class DashboardScreen(Container):
             for t in tickers[:5]:
                 try:
                     results.append(_fetch_quick_single(t, cfg, strategy_fn))
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_suppressed_exception(
+                        context="tui.dashboard.refresh_data.watchlist_fetch",
+                        error=e,
+                        ticker=t,
+                    )
             results.sort(key=lambda r: abs(r.change_pct or 0), reverse=True)
             lines = ["[bold]Top Movers[/]\n"]
             for r in results[:5]:

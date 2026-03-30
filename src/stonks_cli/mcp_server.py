@@ -37,6 +37,7 @@ from stonks_cli.commands import (
     do_fundamentals,
     do_history_list,
     do_insider,
+    do_market_snapshot,
     do_movers,
     do_news,
     do_paper_buy,
@@ -256,6 +257,24 @@ def get_market_movers(sector: bool = False) -> Any:
     """
     movers = do_movers(sector=sector)
     return {"movers": _serialize(movers)}
+
+
+@mcp.tool()
+def get_market_snapshot(
+    tickers: list[str] | None = None,
+    unusual_threshold: float = 2.0,
+    movers_limit: int = 4,
+) -> Any:
+    """
+    Get an opinionated one-shot market snapshot.
+    Combines per-ticker recommendations, movers, unusual volume, alerts, and data freshness checks.
+    """
+    snapshot = do_market_snapshot(
+        tickers=tickers,
+        unusual_threshold=unusual_threshold,
+        top_movers_limit=movers_limit,
+    )
+    return _serialize(snapshot)
 
 
 # =============================================================================

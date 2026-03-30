@@ -54,7 +54,7 @@ from stonks_cli.commands import (
     do_watchlist_set,
 )
 from stonks_cli.errors import ExitCodes, StonksError
-from stonks_cli.logging_utils import LoggingConfig, configure_logging
+from stonks_cli.logging_utils import LoggingConfig, configure_logging, log_suppressed_exception
 
 app = typer.Typer(add_completion=True)
 config_app = typer.Typer()
@@ -121,8 +121,20 @@ def doctor() -> None:
     """Diagnose environment (config, data)."""
     try:
         results = do_doctor()
-        for k, v in results.items():
-            Console().print(f"{k}: {v}")
+        console = Console()
+        score_raw = results.get("health_score")
+        if score_raw is not None:
+            try:
+                score = int(score_raw)
+            except Exception:
+                score = 0
+            color = "green" if score >= 85 else "yellow" if score >= 60 else "red"
+            console.print(f"health_score: [{color}]{score}[/]")
+
+        for k in sorted(results.keys()):
+            if k == "health_score":
+                continue
+            console.print(f"{k}: {results[k]}")
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -183,8 +195,12 @@ def quick(
                         console.print(details, style="dim")
                 except ImportError:
                     console.print("  [dim](yfinance not installed for fundamentals)[/dim]")
-                except Exception:
-                    pass
+                except Exception as inner_err:
+                    log_suppressed_exception(
+                        context="cli.quick.detailed_fundamentals",
+                        error=inner_err,
+                        ticker=result.ticker,
+                    )
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -1708,6 +1724,105 @@ def dividend_calendar(
             )
 
         console.print(table)
+
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@app.command()
+def snapshot(
+    tickers: list[str] = typer.Argument(None, help="Optional ticker override list"),
+    unusual_threshold: float = typer.Option(2.0, "--unusual-threshold", min=1.0),
+    movers_limit: int = typer.Option(4, "--movers-limit", min=1, max=20),
+    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output"),
+) -> None:
+    """Show one-command market snapshot for configured tickers."""
+    import json
+
+    from rich.table import Table
+
+    from stonks_cli.commands import do_market_snapshot
+
+    try:
+        snapshot_payload = do_market_snapshot(
+            tickers if tickers else None,
+            unusual_threshold=unusual_threshold,
+            top_movers_limit=movers_limit,
+        )
+        console = Console()
+
+        if as_json:
+            console.print(json.dumps(snapshot_payload, indent=2))
+            return
+
+        alerts = snapshot_payload.get("alerts") or {}
+        generated_at = snapshot_payload.get("generated_at")
+        console.print(
+            f"generated_at: {generated_at} | alerts enabled: {alerts.get('enabled', 0)} | triggered: {alerts.get('triggered', 0)}"
+        )
+
+        tickers_table = Table(title="Snapshot Tickers")
+        tickers_table.add_column("Ticker", style="cyan")
+        tickers_table.add_column("Price", justify="right")
+        tickers_table.add_column("Change", justify="right")
+        tickers_table.add_column("Action")
+        tickers_table.add_column("Conf", justify="right")
+        tickers_table.add_column("Freshness", justify="right")
+
+        for row in snapshot_payload.get("tickers") or []:
+            price = row.get("price")
+            change_pct = row.get("change_pct")
+            age_days = row.get("data_age_days")
+            stale = bool(row.get("stale"))
+
+            price_str = "-" if price is None else f"${float(price):.2f}"
+            if change_pct is None:
+                change_str = "-"
+            else:
+                change_f = float(change_pct)
+                if change_f >= 0:
+                    change_str = f"[green]+{change_f:.2f}%[/green]"
+                else:
+                    change_str = f"[red]{change_f:.2f}%[/red]"
+            if age_days is None:
+                fresh_str = "-"
+            else:
+                base = f"{int(age_days)}d"
+                fresh_str = f"[red]{base}[/red]" if stale else base
+
+            tickers_table.add_row(
+                str(row.get("ticker")),
+                price_str,
+                change_str,
+                str(row.get("action")),
+                f"{float(row.get('confidence') or 0.0):.2f}",
+                fresh_str,
+            )
+        console.print(tickers_table)
+
+        movers = snapshot_payload.get("top_movers") or []
+        if movers:
+            movers_table = Table(title="Top Movers")
+            movers_table.add_column("Ticker", style="cyan")
+            movers_table.add_column("Name")
+            movers_table.add_column("%", justify="right")
+            for m in movers:
+                pct = float(m.get("change_pct") or 0.0)
+                pct_str = f"[green]+{pct:.2f}%[/green]" if pct >= 0 else f"[red]{pct:.2f}%[/red]"
+                movers_table.add_row(str(m.get("ticker")), str(m.get("name")), pct_str)
+            console.print(movers_table)
+
+        unusual = snapshot_payload.get("unusual_volume") or []
+        console.print(f"unusual_volume_hits: {len(unusual)} (threshold={unusual_threshold}x)")
+
+        signals = snapshot_payload.get("signals_diff")
+        if signals:
+            console.print(f"signals_diff_changes: {signals.get('count')}")
+        else:
+            console.print("signals_diff_changes: unavailable")
+
+        for note in snapshot_payload.get("notes") or []:
+            console.print(f"[yellow]note:[/yellow] {note}")
 
     except Exception as e:
         raise _exit_for_error(e)

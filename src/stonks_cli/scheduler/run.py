@@ -11,6 +11,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from rich.console import Console
 
 from stonks_cli.config import AppConfig
+from stonks_cli.logging_utils import log_suppressed_exception, track_event
 from stonks_cli.pipeline import run_once
 from stonks_cli.scheduler.pidfile import acquire_pid_file
 from stonks_cli.scheduler.tz import cron_trigger_from_config, resolve_timezone
@@ -25,8 +26,8 @@ class SchedulerHandle:
     def stop(self) -> None:
         try:
             self.scheduler.shutdown(wait=False)
-        except Exception:
-            pass
+        except Exception as e:
+            log_suppressed_exception(context="scheduler.handle.stop", error=e)
 
 
 def build_scheduler(
@@ -48,6 +49,7 @@ def build_scheduler(
             return
         started = datetime.now()
         t0 = perf_counter()
+        track_event("scheduler.job.started", started_at=started.isoformat())
         console.print(f"[cyan]Scheduled run started[/cyan] {started.isoformat()}")
         try:
             report_path = run_once(
@@ -60,6 +62,13 @@ def build_scheduler(
             )
             ended = datetime.now()
             dt_s = perf_counter() - t0
+            track_event(
+                "scheduler.job.finished",
+                started_at=started.isoformat(),
+                ended_at=ended.isoformat(),
+                duration_seconds=round(dt_s, 4),
+                report_path=report_path,
+            )
             console.print(f"[cyan]Scheduled run finished[/cyan] {ended.isoformat()} ({dt_s:.2f}s) report={report_path}")
 
             # Check alerts after analysis
@@ -73,22 +82,32 @@ def build_scheduler(
                         cond = a["condition_type"].replace("_", " ")
                         console.print(f"  • {a['ticker']} {cond} {a['threshold']}")
             except Exception as alert_err:
+                log_suppressed_exception(context="scheduler.job.alert_check", error=alert_err)
                 console.print(f"[yellow]Alert check failed:[/yellow] {alert_err}")
 
         except Exception as e:
             ended = datetime.now()
             dt_s = perf_counter() - t0
+            track_event(
+                "scheduler.job.failed",
+                level=40,
+                started_at=started.isoformat(),
+                ended_at=ended.isoformat(),
+                duration_seconds=round(dt_s, 4),
+                error_type=type(e).__name__,
+                error=str(e),
+            )
             console.print(f"[red]Scheduled run failed[/red] {ended.isoformat()} ({dt_s:.2f}s) error={e}")
             try:
                 save_last_failure(error=repr(e), where="scheduler")
-            except Exception:
-                pass
+            except Exception as save_err:
+                log_suppressed_exception(context="scheduler.job.save_last_failure", error=save_err)
             return
         finally:
             try:
                 run_lock.release()
-            except Exception:
-                pass
+            except Exception as e:
+                log_suppressed_exception(context="scheduler.job.release_lock", error=e)
 
     trigger = cron_trigger_from_config(cfg.schedule.cron, cfg.schedule.timezone)
     scheduler = BlockingScheduler(timezone=tz)
@@ -124,8 +143,8 @@ def run_scheduler(
         console.print(f"[yellow]Shutting down[/yellow] signal={name}")
         try:
             scheduler.shutdown(wait=False)
-        except Exception:
-            pass
+        except Exception as e:
+            log_suppressed_exception(context="scheduler.run.shutdown_handler", error=e)
 
     old_int = signal.signal(signal.SIGINT, _shutdown)
     old_term = signal.signal(signal.SIGTERM, _shutdown)
@@ -135,8 +154,8 @@ def run_scheduler(
         try:
             signal.signal(signal.SIGINT, old_int)
             signal.signal(signal.SIGTERM, old_term)
-        except Exception:
-            pass
+        except Exception as e:
+            log_suppressed_exception(context="scheduler.run.restore_signals", error=e)
         pid.remove()
 
 

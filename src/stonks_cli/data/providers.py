@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import io
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,6 +12,9 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from stonks_cli.data.cache import default_cache_dir, load_cached_text, save_cached_text
+from stonks_cli.logging_utils import log_suppressed_exception
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_ticker(raw: str) -> str:
@@ -80,9 +84,18 @@ class StooqProvider(PriceProvider):
         if self._cache_ttl_seconds > 0:
             text = load_cached_text(self._cache_dir, cache_key, ttl_seconds=self._cache_ttl_seconds)
         if text is None:
-            resp = self._session.get(url, timeout=self._timeout_s)
-            resp.raise_for_status()
-            text = resp.text
+            try:
+                resp = self._session.get(url, timeout=self._timeout_s)
+                resp.raise_for_status()
+                text = resp.text
+            except Exception as e:
+                log_suppressed_exception(
+                    context="provider.stooq.fetch_daily.http",
+                    error=e,
+                    ticker=normalized,
+                    url=url,
+                )
+                raise
 
         df = pd.DataFrame()
         is_negative = False
@@ -90,7 +103,12 @@ class StooqProvider(PriceProvider):
             df = pd.read_csv(io.StringIO(text))
             if df.empty:
                 is_negative = True
-        except Exception:
+        except Exception as e:
+            log_suppressed_exception(
+                context="provider.stooq.fetch_daily.parse_csv",
+                error=e,
+                ticker=normalized,
+            )
             is_negative = True
 
         if is_negative:
@@ -129,8 +147,8 @@ class YFinanceProvider(PriceProvider):
         df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
         try:
             df.index = pd.to_datetime(df.index)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("failed to normalize yfinance index for %s: %s", normalized, e)
         keep = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
         if keep:
             df = df[keep]

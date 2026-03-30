@@ -6,6 +6,7 @@ from pathlib import Path
 import platformdirs
 
 from stonks_cli.alerts.models import Alert
+from stonks_cli.logging_utils import log_suppressed_exception
 
 
 def get_alerts_path() -> Path:
@@ -26,7 +27,8 @@ def load_alerts() -> list[Alert]:
         if not isinstance(data, list):
             return []
         return [Alert.from_dict(d) for d in data]
-    except Exception:
+    except Exception as e:
+        log_suppressed_exception(context="alerts.load_alerts", error=e, path=path)
         return []
 
 

@@ -243,7 +243,7 @@ def do_market_snapshot(
         notes.append("Signal-diff baseline unavailable; run `analyze --json` at least twice.")
 
     generated_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    out = {
+    out: dict[str, object] = {
         "generated_at": generated_at,
         "tickers": [asdict(s) for s in snapshots],
         "top_movers": movers[: max(0, top_movers_limit)],

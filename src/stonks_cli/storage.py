@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from stonks_cli.logging_utils import log_suppressed_exception
+
 
 def default_state_dir() -> Path:
     from stonks_cli.paths import default_state_dir as _default_state_dir
@@ -32,7 +34,11 @@ def load_state() -> dict:
     path = state_path()
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        log_suppressed_exception(context="storage.load_state", error=e, path=path)
+        return {}
 
 
 def save_state(state: dict) -> None:
@@ -90,7 +96,8 @@ def list_history(limit: int = 20) -> list[RunRecord]:
                     json_path=obj.get("json_path"),
                 )
             )
-        except Exception:
+        except Exception as e:
+            log_suppressed_exception(context="storage.list_history.parse_line", error=e)
             continue
     return records
 
@@ -110,7 +117,8 @@ def get_last_report_path() -> Path | None:
         return None
     try:
         return Path(last.report_path)
-    except Exception:
+    except Exception as e:
+        log_suppressed_exception(context="storage.get_last_report_path", error=e, report_path=last.report_path)
         return None
 
 

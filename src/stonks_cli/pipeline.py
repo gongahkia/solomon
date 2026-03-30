@@ -27,6 +27,7 @@ from stonks_cli.analysis.strategy import (
 )
 from stonks_cli.config import AppConfig
 from stonks_cli.data.providers import CsvProvider, PriceProvider, StooqProvider, YFinanceProvider, normalize_ticker
+from stonks_cli.logging_utils import log_suppressed_exception, track_event
 from stonks_cli.plugins import registry_for_config
 from stonks_cli.reporting.csv_report import write_csv_summary
 from stonks_cli.reporting.report import TickerResult, write_text_report
@@ -175,7 +176,10 @@ def compute_results(
             # Rename close to Close for correlation module
             if "close" in benchmark_df.columns:
                 benchmark_df = benchmark_df.rename(columns={"close": "Close"})
-        except Exception:
+        except Exception as e:
+            log_suppressed_exception(
+                context="pipeline.compute_results.fetch_benchmark", error=e, benchmark=benchmark_ticker
+            )
             benchmark_df = None
 
     results: list[TickerResult] = []
@@ -199,7 +203,12 @@ def compute_results(
                 # Prefer ISO date for Timestamp-like index.
                 last_date = getattr(last_idx, "date", lambda: last_idx)()
                 last_date = str(last_date)
-            except Exception:
+            except Exception as e:
+                log_suppressed_exception(
+                    context="pipeline.compute_results.last_date",
+                    error=e,
+                    ticker=series.ticker,
+                )
                 last_date = None
         expected_cols = {"close", "open", "high", "low", "volume"}
         missing_columns = sorted(expected_cols - set(df.columns))
@@ -229,7 +238,12 @@ def compute_results(
         else:
             try:
                 v_last = float(df["volume"].iloc[-1])
-            except Exception:
+            except Exception as e:
+                log_suppressed_exception(
+                    context="pipeline.compute_results.latest_volume",
+                    error=e,
+                    ticker=series.ticker,
+                )
                 v_last = 0.0
             if v_last <= 0 and rec.action in {"BUY_DCA", "HOLD_DCA"}:
                 rec = Recommendation(
@@ -241,7 +255,12 @@ def compute_results(
             vol = rolling_volatility(df["close"], window=20).iloc[-1]
             try:
                 vol_f = float(vol)
-            except Exception:
+            except Exception as e:
+                log_suppressed_exception(
+                    context="pipeline.compute_results.rolling_volatility",
+                    error=e,
+                    ticker=series.ticker,
+                )
                 vol_f = float("nan")
             if vol_f == vol_f:
                 vol_annualized = vol_f
@@ -265,7 +284,8 @@ def compute_results(
             atr14_s = atr(df["high"], df["low"], df["close"], window=14).iloc[-1]
             try:
                 atr_f = float(atr14_s)
-            except Exception:
+            except Exception as e:
+                log_suppressed_exception(context="pipeline.compute_results.atr14", error=e, ticker=series.ticker)
                 atr_f = float("nan")
             if atr_f == atr_f:
                 atr14 = atr_f
@@ -472,5 +492,13 @@ def run_once(
         write_csv_summary(results, out_path=out_dir / f"{report_path.stem}.csv")
     if not sandbox:
         save_last_run(cfg.tickers, report_path)
+    track_event(
+        "pipeline.run_once.completed",
+        tickers=len(results),
+        report_path=report_path,
+        csv_out=csv_out,
+        sandbox=sandbox,
+        benchmark=benchmark,
+    )
     console.print(f"[green]Wrote report[/green] {report_path}")
     return report_path

@@ -5,6 +5,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from stonks_cli.logging_utils import log_suppressed_exception
+
 
 @dataclass(frozen=True)
 class PidFile:
@@ -13,8 +15,8 @@ class PidFile:
     def remove(self) -> None:
         try:
             self.path.unlink(missing_ok=True)
-        except Exception:
-            pass
+        except Exception as e:
+            log_suppressed_exception(context="scheduler.pidfile.remove", error=e, path=self.path)
 
 
 def _pid_is_running(pid: int) -> bool:
@@ -27,7 +29,8 @@ def _pid_is_running(pid: int) -> bool:
     except PermissionError:
         # If we don't have permission to signal it, assume it's running.
         return True
-    except Exception:
+    except Exception as e:
+        log_suppressed_exception(context="scheduler.pidfile._pid_is_running", error=e, pid=pid)
         return False
     return True
 
@@ -54,7 +57,8 @@ def acquire_pid_file(path: Path) -> PidFile:
         try:
             existing = path.read_text(encoding="utf-8").strip()
             existing_pid = int(existing)
-        except Exception:
+        except Exception as e:
+            log_suppressed_exception(context="scheduler.pidfile.parse_existing", error=e, path=path)
             existing_pid = -1
 
         if _pid_is_running(existing_pid):

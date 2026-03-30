@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from stonks_cli.logging_utils import log_suppressed_exception
+
 
 def default_config_path() -> Path:
     from stonks_cli.paths import default_config_path as _default_config_path
@@ -135,8 +137,8 @@ def load_config() -> AppConfig:
                 "watchlists": normalized_watchlists,
             }
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log_suppressed_exception(context="config.normalize_load", error=e, config_path=path)
     return cfg
 
 

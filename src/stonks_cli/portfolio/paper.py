@@ -5,6 +5,7 @@ from pathlib import Path
 
 import platformdirs
 
+from stonks_cli.logging_utils import log_suppressed_exception
 from stonks_cli.portfolio.models import Portfolio
 
 
@@ -171,8 +172,12 @@ def calculate_paper_performance(
                     rec = json.loads(line)
                     if rec.get("action") == "SELL" and rec.get("gain_loss") is not None:
                         trades.append(rec)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_suppressed_exception(
+                        context="portfolio.paper.calculate_paper_performance.parse_history_line",
+                        error=e,
+                        line=line.strip(),
+                    )
 
     # Metrics
     num_trades = len(trades)

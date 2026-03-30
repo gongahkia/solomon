@@ -13,3 +13,5 @@ def test_doctor_output_keys_smoke(monkeypatch, tmp_path):
     assert "config_path" in out
     assert "cache_dir" in out
     assert "state_dir" in out
+    assert "health_score" in out
+    assert "next_steps" in out

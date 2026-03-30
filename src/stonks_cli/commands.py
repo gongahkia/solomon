@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import asdict, dataclass
+from datetime import UTC, date, datetime
 from pathlib import Path
 from time import perf_counter
 
@@ -13,6 +13,7 @@ from stonks_cli.analysis.backtest import compute_backtest_metrics, walk_forward_
 from stonks_cli.analysis.output import AnalysisArtifacts
 from stonks_cli.config import AppConfig, config_path, load_config, save_config, save_default_config, update_config_field
 from stonks_cli.data.providers import CsvProvider, StooqProvider, normalize_ticker
+from stonks_cli.logging_utils import log_suppressed_exception, track_event
 from stonks_cli.pipeline import compute_results, provider_for_config, run_once, select_strategy
 from stonks_cli.reporting.backtest_report import BacktestRow, write_backtest_report
 from stonks_cli.reporting.csv_report import write_csv_summary
@@ -31,6 +32,36 @@ class QuickResult:
     action: str
     confidence: float
     prices: list[float] | None = None  # Last N closing prices for sparkline
+
+
+@dataclass(frozen=True)
+class SnapshotTicker:
+    ticker: str
+    price: float | None
+    change_pct: float | None
+    action: str
+    confidence: float
+    last_data_date: str | None
+    data_age_days: int | None
+    stale: bool
+
+
+def _date_freshness(df) -> tuple[str | None, int | None, bool]:
+    if df is None or getattr(df, "empty", True):
+        return None, None, False
+
+    try:
+        last_idx = df.index[-1]
+        if hasattr(last_idx, "date"):
+            last_dt = last_idx.date()
+        else:
+            last_raw = str(last_idx).split(" ")[0]
+            last_dt = date.fromisoformat(last_raw)
+        age_days = (date.today() - last_dt).days
+        return last_dt.isoformat(), age_days, age_days >= 3
+    except Exception as e:
+        log_suppressed_exception(context="commands.snapshot.date_freshness", error=e)
+        return None, None, False
 
 
 def _fetch_quick_single(ticker: str, cfg: AppConfig, strategy_fn) -> QuickResult:
@@ -103,6 +134,137 @@ def do_quick(tickers: list[str]) -> list[QuickResult]:
     ticker_order = {normalize_ticker(t): i for i, t in enumerate(tickers)}
     results.sort(key=lambda r: ticker_order.get(r.ticker, 999))
     return results
+
+
+def _fetch_snapshot_single(ticker: str, cfg: AppConfig, strategy_fn) -> SnapshotTicker:
+    normalized = normalize_ticker(ticker)
+    provider = provider_for_config(cfg, normalized)
+    series = provider.fetch_daily(normalized)
+    df = series.df
+    last_data_date, age_days, stale = _date_freshness(df)
+
+    if df.empty or "close" not in df.columns:
+        return SnapshotTicker(
+            ticker=normalized,
+            price=None,
+            change_pct=None,
+            action="NO_DATA",
+            confidence=0.0,
+            last_data_date=last_data_date,
+            data_age_days=age_days,
+            stale=stale,
+        )
+
+    last_close = float(df["close"].iloc[-1])
+    change_pct = None
+    if len(df) >= 2:
+        prev_close = float(df["close"].iloc[-2])
+        if prev_close != 0:
+            change_pct = ((last_close - prev_close) / prev_close) * 100
+
+    if len(df) < cfg.risk.min_history_days:
+        return SnapshotTicker(
+            ticker=normalized,
+            price=last_close,
+            change_pct=change_pct,
+            action="INSUFFICIENT_HISTORY",
+            confidence=0.1,
+            last_data_date=last_data_date,
+            data_age_days=age_days,
+            stale=stale,
+        )
+
+    rec = strategy_fn(df)
+    return SnapshotTicker(
+        ticker=normalized,
+        price=last_close,
+        change_pct=change_pct,
+        action=rec.action,
+        confidence=rec.confidence,
+        last_data_date=last_data_date,
+        data_age_days=age_days,
+        stale=stale,
+    )
+
+
+def do_market_snapshot(
+    tickers: list[str] | None = None,
+    *,
+    unusual_threshold: float = 2.0,
+    top_movers_limit: int = 4,
+) -> dict[str, object]:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from stonks_cli.alerts.storage import load_alerts
+
+    cfg = load_config()
+    strategy_fn = select_strategy(cfg)
+    use = [normalize_ticker(t) for t in (tickers if tickers else cfg.tickers)]
+
+    snapshots: list[SnapshotTicker] = []
+    if use:
+        max_workers = min(cfg.data.concurrency_limit, max(1, len(use)))
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = [ex.submit(_fetch_snapshot_single, t, cfg, strategy_fn) for t in use]
+            for fut in as_completed(futures):
+                snapshots.append(fut.result())
+
+    order = {normalize_ticker(t): i for i, t in enumerate(use)}
+    snapshots.sort(key=lambda s: order.get(s.ticker, 999))
+
+    movers = do_movers(sector=False)
+    unusual = do_unusual(threshold=unusual_threshold)
+
+    signals_summary: dict[str, object] | None
+    try:
+        diff = do_signals_diff()
+        signals_summary = {
+            "count": int(diff.get("count") or 0),
+            "latest": diff.get("latest"),
+            "previous": diff.get("previous"),
+        }
+    except Exception as e:
+        log_suppressed_exception(context="commands.snapshot.signals_diff", error=e)
+        signals_summary = None
+
+    alerts = load_alerts()
+    enabled_alerts = [a for a in alerts if a.enabled]
+    triggered_alerts = [a for a in enabled_alerts if a.triggered_at is not None]
+
+    stale_tickers = [s.ticker for s in snapshots if s.stale]
+    notes: list[str] = []
+    if stale_tickers:
+        notes.append(
+            f"Stale market data detected for: {', '.join(stale_tickers)} (last datapoint >= 3 calendar days old)."
+        )
+    if not movers:
+        notes.append("Market movers are unavailable for the current provider configuration.")
+    if signals_summary is None:
+        notes.append("Signal-diff baseline unavailable; run `analyze --json` at least twice.")
+
+    generated_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    out = {
+        "generated_at": generated_at,
+        "tickers": [asdict(s) for s in snapshots],
+        "top_movers": movers[: max(0, top_movers_limit)],
+        "unusual_volume": unusual,
+        "alerts": {
+            "total": len(alerts),
+            "enabled": len(enabled_alerts),
+            "triggered": len(triggered_alerts),
+        },
+        "signals_diff": signals_summary,
+        "stale_tickers": stale_tickers,
+        "notes": notes,
+    }
+    track_event(
+        "commands.market_snapshot.generated",
+        tickers=len(snapshots),
+        stale_tickers=len(stale_tickers),
+        alerts_enabled=len(enabled_alerts),
+        unusual_hits=len(unusual),
+    )
+    return out
 
 
 def do_news(ticker: str, notable_only: bool = False) -> list[dict]:
@@ -471,6 +633,29 @@ def do_doctor() -> dict[str, str]:
                 out["plugins_error_detail"] = "; ".join(f"{k}: {v}" for k, v in summary.errors.items())
     except Exception as e:
         out["plugins"] = f"error: {e}"
+
+    issues: list[str] = []
+    if out.get("config_loaded", "").startswith("error:"):
+        issues.append("Configuration could not be loaded.")
+    if out.get("data_provider", "").startswith("error:"):
+        issues.append("Primary data provider failed during doctor check.")
+    if out.get("data_provider") == "no_rows":
+        issues.append("Provider returned empty dataset for first configured ticker.")
+    if not (cfg.tickers or []):
+        issues.append("No tickers configured.")
+    try:
+        plugin_errors = int(out.get("plugins_errors", "0"))
+        if plugin_errors > 0:
+            issues.append(f"{plugin_errors} configured plugin(s) failed to load.")
+    except Exception:
+        pass
+
+    score = max(0, 100 - (15 * len(issues)))
+    out["health_score"] = str(score)
+    if issues:
+        out["next_steps"] = " | ".join(issues)
+    else:
+        out["next_steps"] = "No blocking issues detected."
     return out
 
 
@@ -566,6 +751,16 @@ def do_analyze_artifacts(
 
     if not sandbox:
         save_last_run(cfg.tickers, report_path, json_path=json_path)
+
+    track_event(
+        "commands.analyze.completed",
+        tickers=len(results),
+        report_path=report_path,
+        json_path=json_path,
+        csv_out=csv_out,
+        sandbox=sandbox,
+        benchmark=benchmark,
+    )
 
     return AnalysisArtifacts(report_path=report_path, json_path=json_path, portfolio=portfolio, results=results)
 
@@ -702,6 +897,7 @@ def do_schedule_status() -> ScheduleStatus:
         next_dt = trigger.get_next_fire_time(None, datetime.now(tz=tz))
         return ScheduleStatus(cron=cfg.schedule.cron, next_run=str(next_dt), error=None)
     except Exception as e:
+        log_suppressed_exception(context="commands.schedule_status", error=e)
         return ScheduleStatus(cron=cfg.schedule.cron, next_run=None, error=str(e))
 
 
@@ -737,8 +933,8 @@ def do_data_verify(tickers: list[str] | None) -> dict[str, str]:
         try:
             if getattr(df.index, "is_monotonic_increasing", True) is False:
                 return "bad_data: index_not_monotonic"
-        except Exception:
-            pass
+        except Exception as e:
+            log_suppressed_exception(context="commands.data_verify.index_monotonic", error=e)
         return "ok"
 
     out: dict[str, str] = {}
@@ -773,7 +969,8 @@ def do_data_cache_info() -> dict[str, object]:
     for p in files:
         try:
             size_bytes += p.stat().st_size
-        except Exception:
+        except Exception as e:
+            log_suppressed_exception(context="commands.data_cache_info.stat", error=e, path=p)
             continue
     examples = [p.name for p in sorted(files)[:3]]
     return {
@@ -848,7 +1045,8 @@ def do_portfolio_show(include_total: bool = False) -> dict:
             if series.df.empty or "close" not in series.df.columns:
                 return t, None
             return t, float(series.df["close"].iloc[-1])
-        except Exception:
+        except Exception as e:
+            log_suppressed_exception(context="commands.portfolio_show.fetch_price", error=e, ticker=t)
             return t, None
 
     max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
@@ -936,7 +1134,8 @@ def do_portfolio_allocation() -> dict:
             if series.df.empty or "close" not in series.df.columns:
                 return t, None
             return t, float(series.df["close"].iloc[-1])
-        except Exception:
+        except Exception as e:
+            log_suppressed_exception(context="commands.portfolio_allocation.fetch_price", error=e, ticker=t)
             return t, None
 
     max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
@@ -1033,8 +1232,8 @@ def do_paper_status() -> dict:
             series = provider.fetch_daily(t)
             if not series.df.empty and "close" in series.df.columns:
                 return t, float(series.df["close"].iloc[-1])
-        except Exception:
-            pass
+        except Exception as e:
+            log_suppressed_exception(context="commands.paper_status.fetch_price", error=e, ticker=t)
         return t, None
 
     max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
@@ -1081,8 +1280,8 @@ def do_paper_status() -> dict:
                     rec = json.loads(line)
                     if rec.get("action") == "INIT":
                         initial_cash += rec.get("shares", 0.0)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_suppressed_exception(context="commands.paper_status.parse_history", error=e)
 
     if initial_cash == 0:
         initial_cash = 10000.0  # Fallback
@@ -1119,8 +1318,8 @@ def do_paper_leaderboard() -> dict:
                     rec = json.loads(line)
                     if rec.get("action") == "INIT":
                         initial_cash += rec.get("shares", 0.0)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_suppressed_exception(context="commands.paper_leaderboard.parse_history", error=e)
     if initial_cash == 0:
         initial_cash = 10000.0
 
@@ -1136,8 +1335,8 @@ def do_paper_leaderboard() -> dict:
                 series = provider.fetch_daily(t)
                 if not series.df.empty and "close" in series.df.columns:
                     return t, float(series.df["close"].iloc[-1])
-            except Exception:
-                pass
+            except Exception as e:
+                log_suppressed_exception(context="commands.paper_leaderboard.fetch_price", error=e, ticker=t)
             return t, None
 
         max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
@@ -1150,38 +1349,37 @@ def do_paper_leaderboard() -> dict:
 
     return calculate_paper_performance(portfolio, initial_cash, prices)
 
-    return calculate_paper_performance(portfolio, initial_cash, prices)
-
 
 def do_alert_add(ticker: str, condition: str, threshold: float) -> dict:
     """Create and save a new alert."""
     from stonks_cli.alerts.models import Alert
     from stonks_cli.alerts.storage import save_alert
 
-    # Validate condition?
-    valid_conditions = [
+    valid_conditions = {
         "price_above",
         "price_below",
         "rsi_above",
         "rsi_below",
         "sma_cross_up",
         "sma_cross_down",
-        # Advanced ones:
         "golden_cross",
         "death_cross",
         "volume_spike",
         "earnings_soon",
         "new_high_52w",
         "new_low_52w",
-    ]
-    if condition not in valid_conditions and not condition.startswith(
-        "volume_spike"
-    ):  # Hack for volume-spike param? No, param passed as threshold usually or separate.
-        # For simple types, direct match.
-        pass
+    }
+    if condition not in valid_conditions:
+        raise ValueError("unknown alert condition. valid values: " + ", ".join(sorted(valid_conditions)))
 
     alert = Alert(ticker=ticker.upper(), condition_type=condition, threshold=threshold)
     save_alert(alert)
+    track_event(
+        "commands.alert.added",
+        ticker=alert.ticker,
+        condition=alert.condition_type,
+        threshold=alert.threshold,
+    )
     return alert.to_dict()
 
 
@@ -1249,6 +1447,12 @@ def do_alert_check() -> list[dict]:
                 notify_webhook(alert, cfg.webhook_url)
 
             triggered.append(alert.to_dict())
+            track_event(
+                "commands.alert.triggered",
+                ticker=alert.ticker,
+                condition=alert.condition_type,
+                threshold=alert.threshold,
+            )
 
     return triggered
 
@@ -1386,10 +1590,12 @@ def do_data_purge(*, older_than_days: int | None = None) -> dict[str, object]:
             try:
                 data = json.loads(p.read_text(encoding="utf-8"))
                 created_at = float(data.get("created_at", 0))
-            except Exception:
+            except Exception as e:
+                log_suppressed_exception(context="commands.data_purge.read_entry", error=e, path=p)
                 try:
                     created_at = float(p.stat().st_mtime)
-                except Exception:
+                except Exception as stat_err:
+                    log_suppressed_exception(context="commands.data_purge.stat_entry", error=stat_err, path=p)
                     created_at = 0.0
             should_delete = created_at <= cutoff
 
@@ -1397,7 +1603,8 @@ def do_data_purge(*, older_than_days: int | None = None) -> dict[str, object]:
             try:
                 p.unlink(missing_ok=True)
                 deleted += 1
-            except Exception:
+            except Exception as e:
+                log_suppressed_exception(context="commands.data_purge.delete_entry", error=e, path=p)
                 continue
 
     return {"cache_dir": str(cache_dir), "deleted": deleted}
@@ -1457,8 +1664,8 @@ def do_dividend_calendar(days: int = 30) -> list[dict]:
                     "amount": amount,
                     "days_until": (ex_date - today).days,
                 }
-        except Exception:
-            pass
+        except Exception as e:
+            log_suppressed_exception(context="commands.dividend_calendar.check_ticker", error=e, ticker=ticker)
         return None
 
     max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))
@@ -1534,7 +1741,8 @@ def do_movers(sector: bool = False) -> list[dict]:
                 "change": change,
                 "change_pct": change_pct,
             }
-        except Exception:
+        except Exception as e:
+            log_suppressed_exception(context="commands.movers.fetch_ticker", error=e, ticker=ticker)
             return None
 
     max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))

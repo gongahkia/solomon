@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from stonks_cli.logging_utils import log_suppressed_exception
+
 
 def detect_unusual_volume(
     tickers: list[str],
@@ -62,8 +64,8 @@ def detect_unusual_volume(
                     "price": current_price,
                     "change_pct": change_pct,
                 }
-        except Exception:
-            pass
+        except Exception as e:
+            log_suppressed_exception(context="analysis.unusual.check_ticker", error=e, ticker=ticker)
         return None
 
     max_workers = min(cfg.data.concurrency_limit, max(1, len(tickers)))

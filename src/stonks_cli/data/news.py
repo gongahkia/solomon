@@ -10,6 +10,7 @@ from urllib.parse import quote
 import requests
 
 from stonks_cli.data.cache import default_cache_dir, load_cached_text, save_cached_text
+from stonks_cli.logging_utils import log_suppressed_exception
 
 
 @dataclass(frozen=True)
@@ -41,8 +42,13 @@ class NewsItem:
         if data.get("published_date"):
             try:
                 pub_date = datetime.fromisoformat(data["published_date"])
-            except Exception:
-                pass
+            except Exception as e:
+                log_suppressed_exception(
+                    context="data.news.NewsItem.from_dict.published_date",
+                    error=e,
+                    published_date=data.get("published_date"),
+                    title=data.get("title"),
+                )
 
         return cls(
             title=data["title"],
@@ -167,8 +173,12 @@ def fetch_news_rss(ticker: str, sources: list[str] | None = None) -> list[NewsIt
         try:
             data = json.loads(cached)
             return [NewsItem.from_dict(n) for n in data]
-        except Exception:
-            pass
+        except Exception as e:
+            log_suppressed_exception(
+                context="data.news.fetch_news_rss.cache_decode",
+                error=e,
+                ticker=ticker,
+            )
 
     items: list[NewsItem] = []
     base_ticker = ticker.split(".")[0].upper()
@@ -198,8 +208,12 @@ def fetch_news_rss(ticker: str, sources: list[str] | None = None) -> list[NewsIt
                             sentiment_score=score_headline_sentiment(title),
                         )
                     )
-    except Exception:
-        pass
+    except Exception as e:
+        log_suppressed_exception(
+            context="data.news.fetch_news_rss.google_news",
+            error=e,
+            ticker=base_ticker,
+        )
 
     # Sort by date descending
     items.sort(key=lambda i: i.published_date or datetime.min, reverse=True)

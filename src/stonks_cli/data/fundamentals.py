@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from stonks_cli.data.cache import default_cache_dir, load_cached_text, save_cached_text
+from stonks_cli.logging_utils import log_suppressed_exception
 
 
 @dataclass(frozen=True)
@@ -95,8 +96,12 @@ def fetch_fundamentals_yahoo(ticker: str) -> Fundamentals | None:
         try:
             data = json.loads(cached)
             return Fundamentals.from_dict(data)
-        except Exception:
-            pass
+        except Exception as e:
+            log_suppressed_exception(
+                context="data.fundamentals.fetch_fundamentals_yahoo.cache_decode",
+                error=e,
+                ticker=ticker,
+            )
 
     try:
         import yfinance as yf
@@ -109,7 +114,12 @@ def fetch_fundamentals_yahoo(ticker: str) -> Fundamentals | None:
 
     try:
         info = stock.info
-    except Exception:
+    except Exception as e:
+        log_suppressed_exception(
+            context="data.fundamentals.fetch_fundamentals_yahoo.stock_info",
+            error=e,
+            ticker=base_ticker,
+        )
         return None
 
     if not info:

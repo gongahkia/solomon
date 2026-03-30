@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Any
 
 from stonks_cli.data.cache import default_cache_dir, load_cached_text, save_cached_text
+from stonks_cli.logging_utils import log_suppressed_exception
 
 
 @dataclass(frozen=True)
@@ -55,8 +56,12 @@ def fetch_dividend_info(ticker: str) -> dict:
     if cached:
         try:
             return json.loads(cached)
-        except Exception:
-            pass
+        except Exception as e:
+            log_suppressed_exception(
+                context="data.dividends.fetch_dividend_info.cache_decode",
+                error=e,
+                ticker=ticker,
+            )
 
     try:
         import yfinance as yf
@@ -119,7 +124,12 @@ def fetch_dividend_info(ticker: str) -> dict:
                                 "amount": float(amt),
                             }
                         )
-                    except Exception:
+                    except Exception as e:
+                        log_suppressed_exception(
+                            context="data.dividends.fetch_dividend_info.parse_dividend_event",
+                            error=e,
+                            ticker=base_ticker,
+                        )
                         continue
                 # Reverse to show most recent first
                 history.reverse()
@@ -137,13 +147,25 @@ def fetch_dividend_info(ticker: str) -> dict:
                             next_est = last_date + timedelta(days=days_between)
                             if next_est > date.today():
                                 result["next_dividend_date"] = next_est.isoformat()
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as e:
+                        log_suppressed_exception(
+                            context="data.dividends.fetch_dividend_info.estimate_next_dividend_date",
+                            error=e,
+                            ticker=base_ticker,
+                        )
+        except Exception as e:
+            log_suppressed_exception(
+                context="data.dividends.fetch_dividend_info.load_dividend_history",
+                error=e,
+                ticker=base_ticker,
+            )
 
-    except Exception:
-        pass
+    except Exception as e:
+        log_suppressed_exception(
+            context="data.dividends.fetch_dividend_info.stock_info",
+            error=e,
+            ticker=base_ticker,
+        )
 
     # Cache result
     save_cached_text(cache_dir, cache_key, json.dumps(result))

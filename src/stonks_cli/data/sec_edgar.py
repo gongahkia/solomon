@@ -9,6 +9,7 @@ from typing import Any
 import requests
 
 from stonks_cli.data.cache import default_cache_dir, load_cached_text, save_cached_text
+from stonks_cli.logging_utils import log_suppressed_exception
 
 
 @dataclass(frozen=True)
@@ -172,8 +173,12 @@ def fetch_insider_transactions(ticker: str, days: int = 90) -> list[InsiderTrans
         try:
             data = json.loads(cached)
             return [InsiderTransaction.from_dict(t) for t in data]
-        except Exception:
-            pass
+        except Exception as e:
+            log_suppressed_exception(
+                context="data.sec_edgar.fetch_insider_transactions.cache_decode",
+                error=e,
+                ticker=ticker,
+            )
 
     # SEC EDGAR full-text search API
     base_url = "https://efts.sec.gov/LATEST/search-index"
@@ -212,12 +217,23 @@ def fetch_insider_transactions(ticker: str, days: int = 90) -> list[InsiderTrans
                         if xml_resp.status_code == 200:
                             parsed = parse_form4_xml(xml_resp.text, ticker.upper())
                             transactions.extend(parsed)
-                    except Exception:
+                    except Exception as e:
+                        log_suppressed_exception(
+                            context="data.sec_edgar.fetch_insider_transactions.fetch_form4",
+                            error=e,
+                            ticker=ticker.upper(),
+                            filing_url=filing_url,
+                        )
                         continue
 
-    except Exception:
+    except Exception as e:
         # Return empty list if API fails
-        pass
+        log_suppressed_exception(
+            context="data.sec_edgar.fetch_insider_transactions.search_api",
+            error=e,
+            ticker=ticker.upper(),
+            days=days,
+        )
 
     # Sort by date descending
     transactions.sort(key=lambda t: t.filing_date, reverse=True)

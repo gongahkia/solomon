@@ -6,6 +6,7 @@ from datetime import date
 from typing import Any
 
 from stonks_cli.data.cache import default_cache_dir, load_cached_text, save_cached_text
+from stonks_cli.logging_utils import log_suppressed_exception
 
 
 @dataclass(frozen=True)
@@ -71,8 +72,12 @@ def fetch_ticker_earnings_history(ticker: str, quarters: int = 8) -> list[Earnin
         try:
             data = json.loads(cached)
             return [EarningsEvent.from_dict(e) for e in data]
-        except Exception:
-            pass
+        except Exception as e:
+            log_suppressed_exception(
+                context="data.earnings.fetch_ticker_earnings_history.cache_decode",
+                error=e,
+                ticker=ticker,
+            )
 
     try:
         import yfinance as yf
@@ -129,11 +134,20 @@ def fetch_ticker_earnings_history(ticker: str, quarters: int = 8) -> list[Earnin
                         surprise_pct=surprise_pct,
                     )
                 )
-            except Exception:
+            except Exception as e:
+                log_suppressed_exception(
+                    context="data.earnings.fetch_ticker_earnings_history.parse_event",
+                    error=e,
+                    ticker=base_ticker,
+                )
                 continue
 
-    except Exception:
-        pass
+    except Exception as e:
+        log_suppressed_exception(
+            context="data.earnings.fetch_ticker_earnings_history.fetch_from_provider",
+            error=e,
+            ticker=base_ticker,
+        )
 
     # Sort by date descending
     events.sort(key=lambda e: e.report_date, reverse=True)
@@ -194,7 +208,13 @@ def calculate_earnings_reaction(
             "same_day_change_pct": same_day_pct,
             "next_day_change_pct": next_day_pct,
         }
-    except Exception:
+    except Exception as e:
+        log_suppressed_exception(
+            context="data.earnings.calculate_earnings_reaction",
+            error=e,
+            ticker=ticker,
+            earnings_date=earnings_date.isoformat(),
+        )
         return {"same_day_change_pct": None, "next_day_change_pct": None}
 
 

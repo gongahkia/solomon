@@ -6,6 +6,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from stonks_cli.logging_utils import log_suppressed_exception
+
 
 def default_cache_dir() -> Path:
     from stonks_cli.paths import default_cache_dir as _default_cache_dir
@@ -37,7 +39,8 @@ def load_cached_text(cache_dir: Path, key: str, ttl_seconds: int) -> str | None:
         if ttl_seconds > 0 and (time.time() - created_at) > ttl_seconds:
             return None
         return payload
-    except Exception:
+    except Exception as e:
+        log_suppressed_exception(context="cache.load_cached_text", error=e, key=key, path=path)
         return None
 
 

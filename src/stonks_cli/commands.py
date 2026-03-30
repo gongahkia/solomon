@@ -315,11 +315,68 @@ def do_earnings(
             "events": [e.to_dict() for e in history],
         }
 
-    # Calendar mode - not implemented without scraping
+    cfg = load_config()
+    raw_tickers: list[str] = list(cfg.tickers)
+    for wl_tickers in (cfg.watchlists or {}).values():
+        raw_tickers.extend(wl_tickers or [])
+
+    unique_bases: list[str] = []
+    seen_bases: set[str] = set()
+    for raw in raw_tickers:
+        try:
+            normalized = normalize_ticker(raw)
+            base = normalized.split(".")[0]
+            if base and base not in seen_bases:
+                seen_bases.add(base)
+                unique_bases.append(base)
+        except Exception as e:
+            log_suppressed_exception(
+                context="commands.earnings.calendar.normalize_ticker",
+                error=e,
+                ticker=raw,
+            )
+
+    today = date.today()
+    upcoming: list[dict[str, object]] = []
+    for base_ticker in unique_bases:
+        try:
+            history = fetch_ticker_earnings_history(base_ticker, quarters=8)
+        except Exception as e:
+            log_suppressed_exception(
+                context="commands.earnings.calendar.fetch_history",
+                error=e,
+                ticker=base_ticker,
+            )
+            continue
+
+        for event in history:
+            if event.report_date < today:
+                continue
+            event_data = event.to_dict()
+            event_data["days_until"] = (event.report_date - today).days
+            upcoming.append(event_data)
+
+    upcoming.sort(
+        key=lambda e: (
+            int(e.get("days_until", 999999)),
+            str(e.get("report_date", "")),
+            str(e.get("ticker", "")),
+        )
+    )
+
+    if show_next and upcoming:
+        next_event = upcoming[0]
+        return {
+            "mode": "next",
+            "ticker": next_event.get("ticker"),
+            "next_earnings": next_event,
+            "days_until": int(next_event.get("days_until", 0)),
+        }
+
     return {
         "mode": "calendar",
-        "message": "Earnings calendar requires --ticker flag",
-        "events": [],
+        "events": upcoming,
+        "tickers_scanned": len(unique_bases),
     }
 
 

@@ -540,7 +540,45 @@ def earnings(
             console.print(table)
             return
 
-        console.print("[yellow]Use --ticker to show earnings history[/yellow]")
+        if data["mode"] == "calendar":
+            events = data.get("events") or []
+            scanned = int(data.get("tickers_scanned") or 0)
+            if not events:
+                if scanned > 0:
+                    console.print(f"[yellow]No upcoming earnings found across {scanned} configured tickers[/yellow]")
+                else:
+                    console.print("[yellow]No configured tickers available for calendar mode[/yellow]")
+                return
+
+            table = Table(title="Upcoming Earnings Calendar")
+            table.add_column("Days", justify="right", style="bold")
+            table.add_column("Date")
+            table.add_column("Ticker", style="cyan")
+            table.add_column("Company")
+            table.add_column("Time")
+            table.add_column("EPS Est", justify="right")
+
+            for e in events:
+                days_until = int(e.get("days_until") or 0)
+                if days_until == 0:
+                    days_str = "[yellow]today[/yellow]"
+                elif days_until < 0:
+                    days_str = str(days_until)
+                else:
+                    days_str = str(days_until)
+                eps_est = f"${e['eps_estimate']:.2f}" if e.get("eps_estimate") is not None else "N/A"
+                table.add_row(
+                    days_str,
+                    str(e.get("report_date") or "N/A"),
+                    str(e.get("ticker") or "N/A"),
+                    str(e.get("company_name") or "N/A"),
+                    str(e.get("report_time") or "unknown"),
+                    eps_est,
+                )
+            console.print(table)
+            return
+
+        console.print("[yellow]No earnings data available[/yellow]")
 
     except Exception as e:
         raise _exit_for_error(e)

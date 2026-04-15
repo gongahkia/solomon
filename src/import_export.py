@@ -32,27 +32,6 @@ CSV_ALIASES = {
 }
 
 
-def import_from_txt(filepath: str, config: dict | None = None) -> dict:
-    with open(filepath, "r") as fhand:
-        content = fhand.read()
-    blocks = content.split("---")
-    result = {}
-    for block in blocks:
-        lines = [line.strip() for line in block.strip().splitlines() if line.strip()]
-        if not lines or not lines[0].startswith("TOPIC: "):
-            continue
-        set_name = lines[0][len("TOPIC: ") :].strip()
-        if not set_name or len(lines) < 2:
-            continue
-        card = new_card(
-            card_name=lines[1],
-            card_info="\n".join(lines[2:]) if len(lines) > 2 else "",
-            config=config,
-        )
-        result.setdefault(set_name, []).append(card)
-    return result
-
-
 def import_from_json(filepath: str, config: dict | None = None) -> dict:
     with open(filepath, "r") as fhand:
         data = json.load(fhand)
@@ -119,22 +98,6 @@ def import_from_csv(filepath: str, config: dict | None = None, field_mapping: di
 def export_to_json(sko_contents: dict, filepath: str, config: dict | None = None) -> None:
     with open(filepath, "w") as fhand:
         json.dump(serialize_document(sko_contents, config), fhand, indent=2)
-
-
-def export_to_txt(sko_contents: dict, filepath: str) -> None:
-    with open(filepath, "w") as fhand:
-        for set_name, cards in sko_contents.items():
-            for card in cards:
-                fhand.write("---\n")
-                fhand.write(f"TOPIC: {set_name}\n")
-                fhand.write(f"{card.get('card_name', '')}\n")
-                info = card.get("card_info", "")
-                if info:
-                    fhand.write(f"{info}\n")
-                add_info = card.get("card_add_info", "")
-                if add_info:
-                    fhand.write(f"{add_info}\n")
-        fhand.write("---\n")
 
 
 def export_to_csv(sko_contents: dict, filepath: str) -> None:

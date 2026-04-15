@@ -98,14 +98,14 @@ class DeckScreenTests(unittest.TestCase):
         self.assertEqual(mapping["set_name"], "set_name")
         self.assertEqual(mapping["card_name"], "card_name")
 
-    def test_import_screen_can_create_a_new_deck_from_text_input(self):
-        txt_path = os.path.join(self.tmpdir.name, "source.txt")
-        with open(txt_path, "w", encoding="utf-8") as fhand:
-            fhand.write("---\nTOPIC: science\nAtom\nSmallest unit of matter\n---\n")
+    def test_import_screen_can_create_a_new_deck_from_csv_input(self):
+        csv_path = os.path.join(self.tmpdir.name, "source.csv")
+        with open(csv_path, "w", encoding="utf-8") as fhand:
+            fhand.write("set_name,card_name,card_info\nscience,Atom,Smallest unit of matter\n")
         screen = FakeScreen([ord("n"), ord("q")])
-        with patch("deck_screens.text_input", side_effect=[txt_path, "study"]), patch(
-            "curses.color_pair", return_value=0
-        ):
+        with patch("deck_screens.text_input", side_effect=[csv_path, "study"]), patch(
+            "deck_screens.csv_mapping_screen", return_value={"set_name": "set_name", "card_name": "card_name", "card_info": "card_info"}
+        ), patch("curses.color_pair", return_value=0):
             deck_screens.import_screen(screen, config.load_config())
         imported = storage.read_sko("study.sko", config.load_config())
         self.assertIn("science", imported)

@@ -10,10 +10,8 @@ from deck_browser import create_sko_file, select_sko_file
 from import_export import (
     export_to_csv,
     export_to_json,
-    export_to_txt,
     import_from_csv,
     import_from_json,
-    import_from_txt,
     infer_csv_mapping,
     merge_sets,
     preview_import,
@@ -118,9 +116,7 @@ def import_screen(
         return
     try:
         csv_mapping = None
-        if filepath.endswith(".txt"):
-            data = import_from_txt(filepath, config)
-        elif filepath.endswith(".csv"):
+        if filepath.endswith(".csv"):
             csv_mapping = mapping_screen(stdscr, filepath)
             if csv_mapping is None:
                 return
@@ -128,7 +124,7 @@ def import_screen(
         elif filepath.endswith(".json") or filepath.endswith(".sko"):
             data = import_from_json(filepath, config)
         else:
-            raise ValueError("Unsupported file type. Use .txt, .csv, .json, or .sko.")
+            raise ValueError("Unsupported file type. Use .csv, .json, or .sko.")
     except (ValueError, json.JSONDecodeError) as exc:
         show(stdscr, "Import", [str(exc)], "error")
         return
@@ -230,14 +226,14 @@ def export_screen(
     base = os.path.splitext(filename)[0]
     stdscr.erase()
     add(stdscr, 0, 0, f"{filename}: {n_cards} cards", curses.color_pair(COLORS["success"]))
-    add(stdscr, 2, 0, "[j] JSON  [t] Text  [c] CSV  [q] Cancel", curses.color_pair(COLORS["prompt"]))
+    add(stdscr, 2, 0, "[j] JSON  [c] CSV  [q] Cancel", curses.color_pair(COLORS["prompt"]))
     stdscr.refresh()
     while True:
         key = stdscr.getch()
         if key in (ord("q"), ord("Q"), 27):
             return
-        if key in (ord("j"), ord("t"), ord("c")):
-            ext = ".json" if key == ord("j") else ".txt" if key == ord("t") else ".csv"
+        if key in (ord("j"), ord("c")):
+            ext = ".json" if key == ord("j") else ".csv"
             path = text_reader(
                 stdscr,
                 "Output path: ",
@@ -250,8 +246,6 @@ def export_screen(
             path = os.path.expanduser(path)
             if key == ord("j"):
                 export_to_json(data, path, config)
-            elif key == ord("t"):
-                export_to_txt(data, path)
             else:
                 export_to_csv(data, path)
             show(stdscr, "Export", [f"Exported {n_cards} cards to {path}."], "success")

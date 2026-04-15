@@ -5,7 +5,7 @@ import os
 
 from config import load_config
 from schema import touch_card
-from import_export import import_from_csv, import_from_json, import_from_txt
+from import_export import import_from_csv, import_from_json
 from review_session import (
     apply_review,
     review_mode_from_due_only,
@@ -24,7 +24,7 @@ def clear_screen() -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Lightweight terminal review for Senko-compatible files.")
-    parser.add_argument("source", help="Managed deck name or input file path (.txt, .csv, .json, .sko).")
+    parser.add_argument("source", help="Managed deck name or input file path (.csv, .json, .sko).")
     parser.add_argument("--set", dest="set_name", help="Only review a single set name.")
     parser.add_argument("--due-only", action="store_true", help="Only review cards due today.")
     parser.add_argument("--record-progress", action="store_true", help="Record grades back to a managed .sko deck.")
@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _managed_deck_name(source: str) -> str | None:
-    if any(source.endswith(ext) for ext in (".txt", ".csv", ".json", ".sko")):
+    if any(source.endswith(ext) for ext in (".csv", ".json", ".sko")):
         if source.endswith(".sko") and not os.path.sep in source:
             return source
         return None
@@ -44,13 +44,11 @@ def load_cards(source: str, config: dict) -> tuple[str | None, dict]:
     if managed_deck:
         return managed_deck, read_sko(managed_deck, config)
     filepath = os.path.expanduser(source)
-    if filepath.endswith(".txt"):
-        return None, import_from_txt(filepath, config)
     if filepath.endswith(".csv"):
         return None, import_from_csv(filepath, config)
     if filepath.endswith(".json") or filepath.endswith(".sko"):
         return None, import_from_json(filepath, config)
-    raise ValueError("Unsupported file type. Use a managed deck name or .txt/.csv/.json/.sko file.")
+    raise ValueError("Unsupported file type. Use a managed deck name or .csv/.json/.sko file.")
 
 
 def _save_if_needed(deck_name: str | None, data: dict, config: dict, record_progress: bool) -> None:

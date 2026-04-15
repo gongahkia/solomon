@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-from import_export import import_from_csv, import_from_json, import_from_txt
+from import_export import import_from_csv, import_from_json
 from storage import read_sko, write_sko
 
 
@@ -56,13 +56,11 @@ def history_scope_requested(args) -> bool:
 
 
 def load_external_data(path: str, config: dict, field_mapping: dict | None = None) -> dict:
-    if path.endswith(".txt"):
-        return import_from_txt(path, config)
     if path.endswith(".csv"):
         return import_from_csv(path, config, field_mapping=field_mapping)
     if path.endswith(".json") or path.endswith(".sko"):
         return import_from_json(path, config)
-    raise ValueError("Unsupported input file type. Use .txt, .csv, .json, or .sko.")
+    raise ValueError("Unsupported input file type. Use .csv, .json, or .sko.")
 
 
 def load_managed_deck(name: str, config: dict) -> tuple[str, dict]:

@@ -29,9 +29,9 @@ class CLITests(unittest.TestCase):
         self.tmpdir.cleanup()
 
     def test_import_validate_and_export_workflow(self):
-        source = os.path.join(self.tmpdir.name, "source.txt")
+        source = os.path.join(self.tmpdir.name, "source.csv")
         with open(source, "w") as fhand:
-            fhand.write("---\nTOPIC: science\nAtom\nSmallest unit of matter\n---\n")
+            fhand.write("set_name,card_name,card_info\nscience,Atom,Smallest unit of matter\n")
         with redirect_stdout(io.StringIO()):
             self.assertEqual(cli.run_cli(["import", source, "study_deck"]), 0)
             self.assertEqual(cli.run_cli(["validate"]), 0)

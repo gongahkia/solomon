@@ -15,14 +15,14 @@ def build_parser() -> argparse.ArgumentParser:
     migrate_parser.add_argument("--output", help="Destination path. Defaults to the source path.")
 
     import_parser = subparsers.add_parser("import", help="Import content into a managed Senko deck.")
-    import_parser.add_argument("source", help="Input file path (.txt, .csv, .json, .sko).")
+    import_parser.add_argument("source", help="Input file path (.csv, .json, .sko).")
     import_parser.add_argument("deck", help="Target deck name under ~/.config/senko.")
     import_parser.add_argument("--strategy", choices=["skip", "replace", "keep", "replace_set"], default="skip")
     import_parser.add_argument("--map", action="append", help="Optional CSV field mapping in target=source format.")
 
     export_parser = subparsers.add_parser("export", help="Export a managed Senko deck.")
     export_parser.add_argument("deck", help="Deck name under ~/.config/senko.")
-    export_parser.add_argument("--format", choices=["json", "txt", "csv"], default="json")
+    export_parser.add_argument("--format", choices=["json", "csv"], default="json")
     export_parser.add_argument("--output", help="Destination path.")
 
     subparsers.add_parser("list-decks", help="List managed Senko decks.")

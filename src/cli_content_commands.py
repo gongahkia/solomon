@@ -13,7 +13,7 @@ from cli_support import (
     require_set,
 )
 from history import load_history
-from import_export import export_to_csv, export_to_json, export_to_txt, merge_sets
+from import_export import export_to_csv, export_to_json, merge_sets
 from schema import DOCUMENT_SETS_KEY, normalize_document
 from storage import ensure_config_dir, list_sko_files, read_sko, sko_path, write_sko
 
@@ -78,8 +78,6 @@ def cmd_export(args, config: dict) -> int:
         output = os.path.expanduser(f"~/Desktop/{base}.{args.format}")
     if args.format == "json":
         export_to_json(data, output, config)
-    elif args.format == "txt":
-        export_to_txt(data, output)
     else:
         export_to_csv(data, output)
     print(f"Exported {managed_name} -> {output}")

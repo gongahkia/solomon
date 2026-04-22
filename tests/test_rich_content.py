@@ -1,9 +1,11 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+import rich_content
 from rich_content import render_rich_text
 
 
@@ -36,6 +38,49 @@ class RichContentTests(unittest.TestCase):
         merged = " ".join(text for line in lines for text, _ in line)
         self.assertIn("Auto-size: 55x33", merged)
         self.assertIn("URL: https://example.com/image.png", merged)
+
+    def test_hides_non_fatal_image_warning_notes_by_default(self):
+        content = "https://example.com/image.png"
+        rich_content.IMAGE_PREVIEW_NOTE_CACHE.clear()
+
+        def _fake_preview(url: str, *, image_width: int, image_height: int, max_width: int):
+            key = (url, image_width, image_height, max_width)
+            rich_content.IMAGE_PREVIEW_NOTE_CACHE[key] = "TLS certificate check failed; preview fetched insecurely"
+            return ["preview"]
+
+        with patch("rich_content._image_preview_from_url", side_effect=_fake_preview):
+            lines = render_rich_text(
+                content,
+                width=120,
+                image_width=55,
+                image_height=33,
+                syntax_highlighting=True,
+                render_latex=True,
+            )
+        merged = " ".join(text for line in lines for text, _ in line)
+        self.assertNotIn("Preview note:", merged)
+
+    def test_can_show_non_fatal_image_warning_notes_when_enabled(self):
+        content = "https://example.com/image.png"
+        rich_content.IMAGE_PREVIEW_NOTE_CACHE.clear()
+
+        def _fake_preview(url: str, *, image_width: int, image_height: int, max_width: int):
+            key = (url, image_width, image_height, max_width)
+            rich_content.IMAGE_PREVIEW_NOTE_CACHE[key] = "TLS certificate check failed; preview fetched insecurely"
+            return ["preview"]
+
+        with patch("rich_content._image_preview_from_url", side_effect=_fake_preview):
+            lines = render_rich_text(
+                content,
+                width=120,
+                image_width=55,
+                image_height=33,
+                syntax_highlighting=True,
+                render_latex=True,
+                show_image_warnings=True,
+            )
+        merged = " ".join(text for line in lines for text, _ in line)
+        self.assertIn("Preview note:", merged)
 
     def test_formats_inline_latex(self):
         content = "Area is given by $\\pi r^2$."

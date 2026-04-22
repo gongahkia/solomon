@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import re
+from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 
 StyledSpan = tuple[str, str]
@@ -109,6 +111,23 @@ LATEX_REPLACEMENTS = {
     r"\right": "",
 }
 
+LATEX_COMMANDS = {
+    "sum": "sum",
+    "prod": "prod",
+    "int": "int",
+    "lim": "lim",
+    "sin": "sin",
+    "cos": "cos",
+    "tan": "tan",
+    "log": "log",
+    "ln": "ln",
+    "cdot": "*",
+    "cdots": "...",
+    "ldots": "...",
+}
+
+IMAGE_PREVIEW_CACHE: dict[tuple[str, int, int, int], list[str] | None] = {}
+
 
 def _is_image_url(url: str) -> bool:
     parsed = urlparse(url)
@@ -170,8 +189,71 @@ def _latex_to_text(content: str) -> str:
         result = result.replace(source, target)
     result = re.sub(r"\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}", r"(\1)/(\2)", result)
     result = re.sub(r"\\sqrt\s*\{([^{}]+)\}", r"sqrt(\1)", result)
+    result = re.sub(
+        r"\\([A-Za-z]+)",
+        lambda match: LATEX_COMMANDS.get(match.group(1), match.group(1)),
+        result,
+    )
+    result = re.sub(r"_\{([^{}]+)\}", r"_(\1)", result)
+    result = re.sub(r"\^\{([^{}]+)\}", r"^(\1)", result)
+    result = re.sub(r"_([A-Za-z0-9]+)", r"_(\1)", result)
+    result = re.sub(r"\^([A-Za-z0-9]+)", r"^(\1)", result)
+    result = result.replace("{", "").replace("}", "")
     result = re.sub(r"\s+", " ", result)
     return result.strip()
+
+
+def _image_preview_placeholder(image_width: int, image_height: int, *, max_width: int) -> list[str]:
+    preview_width = max(14, min(max_width, image_width))
+    preview_height = max(3, min(8, max(3, image_height // 4)))
+    inner_width = max(2, preview_width - 2)
+    top = "+" + "-" * inner_width + "+"
+    middle_rows = []
+    label = " image preview "
+    label = label[:inner_width]
+    label_start = max(0, (inner_width - len(label)) // 2)
+    for row in range(preview_height - 2):
+        if row == (preview_height - 2) // 2:
+            line = " " * label_start + label + " " * max(0, inner_width - label_start - len(label))
+            middle_rows.append("|" + line[:inner_width].ljust(inner_width) + "|")
+        else:
+            middle_rows.append("|" + " " * inner_width + "|")
+    return [top, *middle_rows, top]
+
+
+def _image_preview_from_url(url: str, *, image_width: int, image_height: int, max_width: int) -> list[str] | None:
+    cache_key = (url, image_width, image_height, max_width)
+    if cache_key in IMAGE_PREVIEW_CACHE:
+        return IMAGE_PREVIEW_CACHE[cache_key]
+    try:
+        from PIL import Image
+    except Exception:
+        IMAGE_PREVIEW_CACHE[cache_key] = None
+        return None
+    try:
+        request = Request(url, headers={"User-Agent": "senko/3.0"})
+        with urlopen(request, timeout=2.5) as response:
+            payload = response.read(2_000_000)
+        image = Image.open(io.BytesIO(payload)).convert("L")
+    except Exception:
+        IMAGE_PREVIEW_CACHE[cache_key] = None
+        return None
+    target_width = max(8, min(max_width, image_width))
+    target_height = max(4, min(image_height, 18))
+    if target_height > target_width * 2:
+        target_height = max(4, target_width * 2)
+    image = image.resize((target_width, target_height))
+    ramp = " .:-=+*#%@"
+    lines: list[str] = []
+    for y in range(target_height):
+        row_chars = []
+        for x in range(target_width):
+            pixel = image.getpixel((x, y))
+            index = min(len(ramp) - 1, int((pixel / 255) * (len(ramp) - 1)))
+            row_chars.append(ramp[index])
+        lines.append("".join(row_chars))
+    IMAGE_PREVIEW_CACHE[cache_key] = lines
+    return lines
 
 
 def _wrap_spans(spans: StyledLine, width: int) -> list[StyledLine]:
@@ -371,6 +453,20 @@ def render_rich_text(
                     [(f"Auto-size: {image_width}x{image_height}", "image")],
                 ]
             )
+            preview = _image_preview_from_url(
+                url,
+                image_width=image_width,
+                image_height=image_height,
+                max_width=max(14, min(width, image_width)),
+            )
+            if preview is None:
+                preview = _image_preview_placeholder(
+                    image_width,
+                    image_height,
+                    max_width=max(14, min(width, image_width)),
+                )
+            for preview_line in preview:
+                styled_lines.append([(preview_line, "image")])
             index += 1
             continue
         if stripped.startswith("$$"):

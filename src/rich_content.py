@@ -127,6 +127,24 @@ LATEX_COMMANDS = {
     "ldots": "...",
 }
 
+SUPERSCRIPT_MAP = {
+    "0": "⁰",
+    "1": "¹",
+    "2": "²",
+    "3": "³",
+    "4": "⁴",
+    "5": "⁵",
+    "6": "⁶",
+    "7": "⁷",
+    "8": "⁸",
+    "9": "⁹",
+    "+": "⁺",
+    "-": "⁻",
+    "=": "⁼",
+    "(": "⁽",
+    ")": "⁾",
+}
+
 IMAGE_PREVIEW_CACHE: dict[tuple[str, int, int, int], list[str] | None] = {}
 IMAGE_PREVIEW_ERROR_CACHE: dict[tuple[str, int, int, int], str | None] = {}
 LATEX_PREVIEW_CACHE: dict[tuple[str, int], list[str] | None] = {}
@@ -201,6 +219,11 @@ def _latex_to_text(content: str) -> str:
     result = re.sub(r"\^\{([^{}]+)\}", r"^(\1)", result)
     result = re.sub(r"_([A-Za-z0-9]+)", r"_(\1)", result)
     result = re.sub(r"\^([A-Za-z0-9]+)", r"^(\1)", result)
+    result = re.sub(
+        r"\^\(([\d+\-=()]+)\)",
+        lambda match: "".join(SUPERSCRIPT_MAP.get(char, char) for char in match.group(1)),
+        result,
+    )
     result = result.replace("{", "").replace("}", "")
     result = re.sub(r"\s+", " ", result)
     return result.strip()
@@ -242,6 +265,36 @@ def _image_to_ascii(image, *, max_width: int, max_height: int) -> list[str]:
     return lines
 
 
+def _binary_ascii_from_image(image, *, max_width: int, max_height: int) -> list[str]:
+    target_width = max(12, min(max_width, image.width))
+    target_height = max(4, min(max_height, image.height))
+    image = image.resize((target_width, target_height))
+    matrix = []
+    for y in range(target_height):
+        row = []
+        for x in range(target_width):
+            row.append("█" if image.getpixel((x, y)) < 150 else " ")
+        matrix.append(row)
+    while matrix and not any(cell == "█" for cell in matrix[0]):
+        matrix.pop(0)
+    while matrix and not any(cell == "█" for cell in matrix[-1]):
+        matrix.pop()
+    if not matrix:
+        return []
+    left = 0
+    right = len(matrix[0]) - 1
+    while left <= right and not any(row[left] == "█" for row in matrix):
+        left += 1
+    while right >= left and not any(row[right] == "█" for row in matrix):
+        right -= 1
+    if left > right:
+        return []
+    lines = []
+    for row in matrix:
+        lines.append("".join(row[left : right + 1]).rstrip())
+    return [line for line in lines if line.strip()]
+
+
 def _image_preview_from_url(url: str, *, image_width: int, image_height: int, max_width: int) -> list[str] | None:
     cache_key = (url, image_width, image_height, max_width)
     if cache_key in IMAGE_PREVIEW_CACHE:
@@ -267,9 +320,10 @@ def _image_preview_from_url(url: str, *, image_width: int, image_height: int, ma
         IMAGE_PREVIEW_CACHE[cache_key] = None
         IMAGE_PREVIEW_ERROR_CACHE[cache_key] = f"HTTP {exc.code}"
         return None
-    except URLError:
+    except URLError as exc:
         IMAGE_PREVIEW_CACHE[cache_key] = None
-        IMAGE_PREVIEW_ERROR_CACHE[cache_key] = "Network error"
+        reason = str(getattr(exc, "reason", "") or "").strip()
+        IMAGE_PREVIEW_ERROR_CACHE[cache_key] = f"Network error ({reason})" if reason else "Network error"
         return None
     except Exception:
         IMAGE_PREVIEW_CACHE[cache_key] = None
@@ -312,13 +366,22 @@ def _latex_preview_from_expression(expression: str, *, max_width: int) -> list[s
         )
         canvas.draw()
         width, height = canvas.get_width_height()
-        image = Image.frombuffer("RGBA", (width, height), canvas.buffer_rgba(), "raw", "RGBA", 0, 1).convert("L")
+        rgba = Image.frombuffer("RGBA", (width, height), canvas.buffer_rgba(), "raw", "RGBA", 0, 1)
+        white = Image.new("RGBA", rgba.size, "white")
+        white.alpha_composite(rgba)
+        image = white.convert("L")
         # Crop whitespace around rendered formula.
         inverted = ImageChops.invert(image)
         bbox = inverted.getbbox()
         if bbox:
             image = image.crop(bbox)
-        lines = _image_to_ascii(image, max_width=max(12, max_width), max_height=12)
+        lines = _binary_ascii_from_image(
+            image,
+            max_width=max(24, min(max_width, 56)),
+            max_height=10,
+        )
+        if not lines:
+            return None
     except Exception:
         LATEX_PREVIEW_CACHE[cache_key] = None
         return None

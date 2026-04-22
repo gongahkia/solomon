@@ -49,6 +49,7 @@ class RichContentTests(unittest.TestCase):
         )
         latex_spans = [text for line in lines for text, style in line if style == "latex"]
         self.assertTrue(any("pi" in span for span in latex_spans))
+        self.assertTrue(any("²" in span or "^(" in span for span in latex_spans))
 
     def test_formats_block_latex_without_raw_backslash_commands(self):
         content = "$$\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}$$"

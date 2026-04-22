@@ -27,7 +27,6 @@ classifiers = [
 
 [project.scripts]
 senko = "main:main"
-senko-cards = "cards:main"
 
 [tool.setuptools]
 py-modules = [
@@ -50,6 +49,7 @@ py-modules = [
   "main",
   "review_flow",
   "review_session",
+  "rich_content",
   "schema",
   "screen_common",
   "srs",

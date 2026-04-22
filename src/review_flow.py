@@ -3,10 +3,14 @@ from __future__ import annotations
 import curses
 
 from deck_ops import card_detail, card_status
+from rich_content import render_rich_text
 from review_session import (
     apply_review,
+    downvoted_cards,
+    get_vote,
     next_due_text,
     review_summary_lines,
+    set_vote,
     start_session,
     undo_last_review,
 )
@@ -14,6 +18,61 @@ from screen_common import add_line, show_message
 from schema import is_leech, touch_card
 from srs import active_cards, cards_due
 from tui import COLORS, select_from_list
+
+
+def _style_attr(style: str) -> int:
+    if style == "code_default":
+        style = "default"
+    color_key = style if style in COLORS else "default"
+    return curses.color_pair(COLORS[color_key])
+
+
+def _draw_styled_lines(
+    stdscr,
+    styled_lines: list[list[tuple[str, str]]],
+    *,
+    start_row: int,
+    end_row_exclusive: int,
+    default_style: str = "default",
+) -> tuple[int, bool]:
+    max_x = stdscr.getmaxyx()[1]
+    row = start_row
+    truncated = False
+    for line in styled_lines:
+        if row >= end_row_exclusive:
+            truncated = True
+            break
+        col = 0
+        for text, style in line:
+            if col >= max_x - 1:
+                break
+            if style == "default":
+                style = default_style
+            segment = text[: max_x - col - 1]
+            if not segment:
+                continue
+            try:
+                stdscr.addstr(row, col, segment, _style_attr(style))
+            except curses.error:
+                pass
+            col += len(segment)
+        row += 1
+    if truncated and row < end_row_exclusive:
+        add_line(stdscr, row, 0, "...", curses.color_pair(COLORS["muted"]))
+        row += 1
+    return (row, truncated)
+
+
+def _rich_lines(text: str, config: dict, width: int) -> list[list[tuple[str, str]]]:
+    tui_config = config.get("tui", {})
+    return render_rich_text(
+        text,
+        width=max(1, width),
+        image_width=int(tui_config.get("image_width", 72)),
+        image_height=int(tui_config.get("image_height", 24)),
+        syntax_highlighting=bool(tui_config.get("syntax_highlighting", True)),
+        render_latex=bool(tui_config.get("render_latex", True)),
+    )
 
 
 def _review_mode_screen(stdscr, set_name: str, cards: list[dict]) -> str | None:
@@ -61,9 +120,15 @@ def _draw_card_front(stdscr, set_name: str, card: dict, index: int, total_cards:
         add_line(stdscr, 0, 0, set_name, curses.color_pair(COLORS["accent"]))
         add_line(stdscr, 0, max(0, max_x - 12), f"{index + 1}/{total_cards}")
         add_line(stdscr, 1, 0, detail, curses.color_pair(color))
-        center_y = max_y // 2
-        name = card.get("card_name", "")
-        add_line(stdscr, center_y, max(0, (max_x - len(name)) // 2), name, curses.A_BOLD)
+        content_top = max(3, max_y // 3)
+        question_lines = _rich_lines(card.get("card_name", ""), config, max_x - 1)
+        _draw_styled_lines(
+            stdscr,
+            question_lines,
+            start_row=content_top,
+            end_row_exclusive=max_y - 2,
+            default_style="default",
+        )
         footer = "[Space] Show answer  [q] Quit session"
         if can_undo:
             footer += "  [u] Undo last"
@@ -74,39 +139,77 @@ def _draw_card_front(stdscr, set_name: str, card: dict, index: int, total_cards:
             return key
 
 
-def _draw_card_back(stdscr, set_name: str, card: dict, index: int, total_cards: int, config: dict) -> int:
+def _draw_card_back(stdscr, set_name: str, card: dict, index: int, total_cards: int, config: dict, session: dict) -> int:
+    voting_enabled = bool(config.get("tui", {}).get("enable_card_voting", True))
     while True:
         stdscr.erase()
         max_y, max_x = stdscr.getmaxyx()
-        add_line(stdscr, 0, 0, card.get("card_name", ""), curses.A_BOLD)
+        question_lines = _rich_lines(card.get("card_name", ""), config, max_x - 1)
+        _draw_styled_lines(
+            stdscr,
+            question_lines,
+            start_row=0,
+            end_row_exclusive=1,
+            default_style="default",
+        )
         add_line(stdscr, 0, max(0, max_x - 12), f"{index + 1}/{total_cards}")
         status, color = card_status(card)
         extra = f"{set_name} | {status} | {card.get('state', 'new')}"
         if is_leech(card, config):
             extra += " | leech"
+        if voting_enabled:
+            vote = get_vote(session, card)
+            vote_label = "none"
+            if vote > 0:
+                vote_label = "upvoted"
+            elif vote < 0:
+                vote_label = "downvoted"
+            extra += f" | vote:{vote_label}"
         add_line(stdscr, 1, 0, extra, curses.color_pair(color))
         row = 3
-        for line in card.get("card_info", "").splitlines() or [""]:
-            add_line(stdscr, row, 0, line)
-            row += 1
+        row, _ = _draw_styled_lines(
+            stdscr,
+            _rich_lines(card.get("card_info", ""), config, max_x - 1),
+            start_row=row,
+            end_row_exclusive=max_y - 4,
+            default_style="default",
+        )
         add_info = card.get("card_add_info", "")
         if add_info:
             row += 1
-            for line in add_info.splitlines():
-                add_line(stdscr, row, 0, line, curses.color_pair(COLORS["muted"]))
-                row += 1
+            add_line(stdscr, row, 0, "Notes:", curses.color_pair(COLORS["muted"]))
+            row += 1
+            row, _ = _draw_styled_lines(
+                stdscr,
+                _rich_lines(add_info, config, max_x - 1),
+                start_row=row,
+                end_row_exclusive=max_y - 4,
+                default_style="muted",
+            )
         tags = card.get("tags", [])
         if tags:
             add_line(stdscr, max_y - 3, 0, f"Tags: {', '.join(tags)}", curses.color_pair(COLORS["muted"]))
+        footer = "[1] Again  [2] Hard  [3] Good  [4] Easy  [q] Quit session"
+        if voting_enabled:
+            footer += "  [+] Upvote  [-] Downvote  [0] Clear vote"
         add_line(
             stdscr,
             max_y - 1,
             0,
-            "[1] Again  [2] Hard  [3] Good  [4] Easy  [q] Quit session",
+            footer,
             curses.color_pair(COLORS["prompt"]),
         )
         stdscr.refresh()
         key = stdscr.getch()
+        if voting_enabled and key == ord("+"):
+            set_vote(session, card, 1)
+            continue
+        if voting_enabled and key == ord("-"):
+            set_vote(session, card, -1)
+            continue
+        if voting_enabled and key == ord("0"):
+            set_vote(session, card, 0)
+            continue
         if key in (ord("1"), ord("2"), ord("3"), ord("4"), ord("q"), ord("Q")):
             return key
 
@@ -132,6 +235,125 @@ def _maybe_handle_leech(stdscr, card: dict, config: dict) -> None:
             touch_card(card)
             return
         if key in (ord("k"), ord("K"), 27):
+            return
+
+
+def _unique_cards(cards: list[dict]) -> list[dict]:
+    unique = []
+    seen = set()
+    for card in cards:
+        card_id = str(card.get("id") or id(card))
+        if card_id in seen:
+            continue
+        seen.add(card_id)
+        unique.append(card)
+    return unique
+
+
+def _card_label(card: dict) -> str:
+    name = card.get("card_name", "Card")
+    card_id = card.get("id", "?")
+    return f"{name} ({card_id})"
+
+
+def _select_cards_for_delete(stdscr, set_name: str, downvoted: list[dict]) -> set[str] | None:
+    selected: set[int] = set()
+    cursor = 0
+    while True:
+        stdscr.erase()
+        max_y, max_x = stdscr.getmaxyx()
+        add_line(stdscr, 0, 0, f"Select downvoted cards to delete ({set_name})", curses.color_pair(COLORS["prompt"]))
+        row = 2
+        for index, card in enumerate(downvoted):
+            if row >= max_y - 2:
+                break
+            marker = "[x]" if index in selected else "[ ]"
+            prefix = ">" if index == cursor else " "
+            attr = curses.A_REVERSE if index == cursor else 0
+            add_line(stdscr, row, 0, f"{prefix} {marker} {_card_label(card)}"[: max_x - 1], attr)
+            row += 1
+        footer = "[j/k] Move  [Space] Toggle  [a] Toggle all  [Enter] Confirm  [q] Cancel"
+        add_line(stdscr, max_y - 1, 0, footer, curses.color_pair(COLORS["muted"]))
+        stdscr.refresh()
+        key = stdscr.getch()
+        if key in (ord("q"), ord("Q"), 27):
+            return None
+        if key in (ord("j"), curses.KEY_DOWN) and cursor < len(downvoted) - 1:
+            cursor += 1
+            continue
+        if key in (ord("k"), curses.KEY_UP) and cursor > 0:
+            cursor -= 1
+            continue
+        if key in (ord(" "),):
+            if cursor in selected:
+                selected.remove(cursor)
+            else:
+                selected.add(cursor)
+            continue
+        if key in (ord("a"), ord("A")):
+            if len(selected) == len(downvoted):
+                selected.clear()
+            else:
+                selected = set(range(len(downvoted)))
+            continue
+        if key in (10, 13):
+            return {str(downvoted[index].get("id") or id(downvoted[index])) for index in sorted(selected)}
+
+
+def _remove_cards(cards: list[dict], card_ids: set[str]) -> list[dict]:
+    removed = []
+    kept = []
+    for card in cards:
+        card_id = str(card.get("id") or id(card))
+        if card_id in card_ids:
+            removed.append(card)
+        else:
+            kept.append(card)
+    cards[:] = kept
+    return removed
+
+
+def _finalize_session(stdscr, set_name: str, cards: list[dict], session: dict, config: dict) -> None:
+    downvoted = _unique_cards(downvoted_cards(session))
+    if not downvoted or not bool(config.get("tui", {}).get("enable_card_voting", True)):
+        show_message(stdscr, set_name, review_summary_lines(session, cards), "success")
+        return
+    while True:
+        stdscr.erase()
+        max_y, _ = stdscr.getmaxyx()
+        summary = review_summary_lines(session, cards)
+        add_line(stdscr, 0, 0, set_name, curses.color_pair(COLORS["success"]))
+        row = 2
+        for line in summary:
+            add_line(stdscr, row, 0, line)
+            row += 1
+        row += 1
+        add_line(stdscr, row, 0, "Downvoted cards:", curses.color_pair(COLORS["prompt"]))
+        row += 1
+        for card in downvoted:
+            if row >= max_y - 3:
+                break
+            add_line(stdscr, row, 0, f"- {_card_label(card)}", curses.color_pair(COLORS["muted"]))
+            row += 1
+        footer = "[k] Keep all  [a] Delete all  [s] Select cards  [q] Finish"
+        add_line(stdscr, max_y - 1, 0, footer, curses.color_pair(COLORS["muted"]))
+        stdscr.refresh()
+        key = stdscr.getch()
+        if key in (ord("k"), ord("K"), ord("q"), ord("Q"), 27):
+            show_message(stdscr, set_name, review_summary_lines(session, cards), "success")
+            return
+        if key in (ord("a"), ord("A")):
+            removed = _remove_cards(cards, {str(card.get("id") or id(card)) for card in downvoted})
+            lines = review_summary_lines(session, cards) + [f"Deleted {len(removed)} downvoted cards."]
+            show_message(stdscr, set_name, lines, "success")
+            return
+        if key in (ord("s"), ord("S")):
+            selected = _select_cards_for_delete(stdscr, set_name, downvoted)
+            if selected is None:
+                continue
+            removed = _remove_cards(cards, selected)
+            lines = review_summary_lines(session, cards) + [f"Deleted {len(removed)} selected downvoted cards."]
+            show_message(stdscr, set_name, lines, "success")
             return
 
 
@@ -162,7 +384,7 @@ def render_review_session(stdscr, deck_name: str, set_name: str, cards: list[dic
             undo_last_review(session, deck_name=deck_name, set_name=set_name)
             index = max(0, index - 1)
             continue
-        back_key = _draw_card_back(stdscr, set_name, card, index, len(review_cards), config)
+        back_key = _draw_card_back(stdscr, set_name, card, index, len(review_cards), config, session)
         if back_key in (ord("q"), ord("Q")):
             break
         grade = int(chr(back_key)) - 1
@@ -176,10 +398,5 @@ def render_review_session(stdscr, deck_name: str, set_name: str, cards: list[dic
             leech_handler=lambda card_obj, cfg: _maybe_handle_leech(stdscr, card_obj, cfg),
         )
         index += 1
-    show_message(
-        stdscr,
-        set_name,
-        review_summary_lines(session, cards),
-        "success",
-    )
+    _finalize_session(stdscr, set_name, cards, session, config)
     return (set_name, cards)

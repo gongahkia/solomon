@@ -1,6 +1,6 @@
 # Card Generation Prompt
 
-Senko has no built-in card generator. Paste one of the prompts below into any LLM (Claude, GPT, Gemini, etc.) to produce a file that imports cleanly via `senko import` / `senko-cards` or the TUI file picker.
+Senko has no built-in card generator. Paste one of the prompts below into any LLM (Claude, GPT, Gemini, etc.) to produce a file that imports cleanly via `senko import` / `senko review` or the TUI file picker.
 
 Senko now supports two formats: `.sko` (native JSON schema v3) and `.csv`. TXT is no longer supported.
 

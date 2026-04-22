@@ -104,6 +104,6 @@ $ senko export-history ~/Desktop/japanese-history.json --deck japanese --format 
 $ senko archive-history ~/Desktop/japanese-history.jsonl --deck japanese
 $ senko stats --deck japanese
 $ senko export japanese --format csv --output ~/Desktop/japanese.csv
-$ senko-cards japanese --due-only --record-progress
-$ senko-cards ~/Desktop/external_cards.csv --due-only
+$ senko review japanese --due-only --record-progress
+$ senko review ~/Desktop/external_cards.csv --due-only
 ```

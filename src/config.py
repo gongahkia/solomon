@@ -22,6 +22,11 @@ DEFAULT_CONFIG = {
         "show_stats": True,
         "confirm_delete": True,
         "show_import_preview": True,
+        "syntax_highlighting": True,
+        "render_latex": True,
+        "image_width": 72,
+        "image_height": 24,
+        "enable_card_voting": True,
     },
 }
 
@@ -104,6 +109,11 @@ def normalize_config(config: dict | None) -> dict:
     normalized["tui"]["show_stats"] = _coerce_bool(tui.get("show_stats"), True)
     normalized["tui"]["confirm_delete"] = _coerce_bool(tui.get("confirm_delete"), True)
     normalized["tui"]["show_import_preview"] = _coerce_bool(tui.get("show_import_preview"), True)
+    normalized["tui"]["syntax_highlighting"] = _coerce_bool(tui.get("syntax_highlighting"), True)
+    normalized["tui"]["render_latex"] = _coerce_bool(tui.get("render_latex"), True)
+    normalized["tui"]["enable_card_voting"] = _coerce_bool(tui.get("enable_card_voting"), True)
+    normalized["tui"]["image_width"] = _coerce_int(tui.get("image_width"), 72, 1)
+    normalized["tui"]["image_height"] = _coerce_int(tui.get("image_height"), 24, 1)
     if normalized["srs"]["easy_interval"] < normalized["srs"]["graduating_interval"]:
         normalized["srs"]["easy_interval"] = normalized["srs"]["graduating_interval"]
     if normalized["srs"]["max_interval"] < normalized["srs"]["easy_interval"]:

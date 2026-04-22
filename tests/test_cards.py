@@ -66,6 +66,14 @@ class CardsTests(unittest.TestCase):
         saved = storage.read_sko("study.sko", config.load_config())["set_a"][0]
         self.assertTrue(saved["suspended"])
 
+    def test_downvoted_cards_can_be_deleted_after_review(self):
+        storage.write_sko("study.sko", {"set_a": [new_card("Q", "A")]}, config.load_config())
+        with patch("cards.clear_screen"), patch("builtins.input", side_effect=["", "-", "3", "a"]):
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(cards.main(["study", "--record-progress"]), 0)
+        saved_cards = storage.read_sko("study.sko", config.load_config())["set_a"]
+        self.assertEqual(saved_cards, [])
+
 
 if __name__ == "__main__":
     unittest.main()

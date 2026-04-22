@@ -22,8 +22,38 @@ def start_session(cards: list[dict], review_mode: str) -> dict:
         "review_cards": review_cards_for_mode(cards, review_mode),
         "history": [],
         "counts": {0: 0, 1: 0, 2: 0, 3: 0},
+        "votes": {},
+        "vote_lookup": {},
         "start_time": time.time(),
     }
+
+
+def _vote_key(card: dict) -> str:
+    return str(card.get("id") or id(card))
+
+
+def set_vote(session: dict, card: dict, vote: int) -> int:
+    key = _vote_key(card)
+    session["vote_lookup"][key] = card
+    if vote not in {-1, 0, 1}:
+        vote = 0
+    if vote == 0:
+        session["votes"].pop(key, None)
+        return 0
+    session["votes"][key] = vote
+    return vote
+
+
+def get_vote(session: dict, card: dict) -> int:
+    return int(session["votes"].get(_vote_key(card), 0))
+
+
+def downvoted_cards(session: dict) -> list[dict]:
+    cards = []
+    for key, vote in session.get("votes", {}).items():
+        if vote < 0 and key in session.get("vote_lookup", {}):
+            cards.append(session["vote_lookup"][key])
+    return cards
 
 
 def apply_review(
@@ -67,9 +97,11 @@ def session_elapsed_minutes(session: dict) -> float:
 
 def review_summary_lines(session: dict, cards: list[dict]) -> list[str]:
     counts = session["counts"]
+    downvoted = len(downvoted_cards(session))
     return [
         f"Reviewed {reviewed_count(session)} cards in {session_elapsed_minutes(session):.1f} minutes.",
         f"Again {counts[0]} | Hard {counts[1]} | Good {counts[2]} | Easy {counts[3]}",
+        f"Downvoted this session: {downvoted}",
         f"Remaining due today: {cards_due_count(cards)}",
     ]
 

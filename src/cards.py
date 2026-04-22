@@ -4,12 +4,16 @@ import argparse
 import os
 
 from config import load_config
+from rich_content import render_rich_text, styled_lines_to_ansi
 from schema import touch_card
 from import_export import import_from_csv, import_from_json
 from review_session import (
     apply_review,
+    downvoted_cards,
+    get_vote,
     review_mode_from_due_only,
     reviewed_count,
+    set_vote,
     session_elapsed_minutes,
     start_session,
     undo_last_review,
@@ -71,6 +75,74 @@ def _maybe_handle_leech(card: dict, config: dict) -> None:
         print("Enter 's' to suspend or 'k' to keep the card active.")
 
 
+def _print_rich(text: str, config: dict) -> None:
+    tui_config = config.get("tui", {})
+    styled = render_rich_text(
+        text,
+        width=100,
+        image_width=int(tui_config.get("image_width", 72)),
+        image_height=int(tui_config.get("image_height", 24)),
+        syntax_highlighting=bool(tui_config.get("syntax_highlighting", True)),
+        render_latex=bool(tui_config.get("render_latex", True)),
+    )
+    for line in styled_lines_to_ansi(styled):
+        print(line)
+
+
+def _remove_cards_by_ids(data: dict, card_ids: set[str]) -> int:
+    removed = 0
+    for set_name in list(data.keys()):
+        cards = data[set_name]
+        kept = []
+        for card in cards:
+            card_id = str(card.get("id") or id(card))
+            if card_id in card_ids:
+                removed += 1
+                continue
+            kept.append(card)
+        data[set_name] = kept
+    return removed
+
+
+def _handle_downvoted_removal(deck_name: str | None, data: dict, session: dict, config: dict, record_progress: bool) -> int:
+    downvoted = []
+    seen = set()
+    for card in downvoted_cards(session):
+        card_id = str(card.get("id") or id(card))
+        if card_id in seen:
+            continue
+        seen.add(card_id)
+        downvoted.append(card)
+    if not downvoted:
+        return 0
+    print("\nDownvoted cards:")
+    for index, card in enumerate(downvoted, start=1):
+        print(f"{index}. {card.get('card_name', 'Card')} ({card.get('id', '?')})")
+    if not deck_name or not record_progress:
+        print("Downvoted cards were surfaced only. Use a managed deck with --record-progress to delete now.")
+        return 0
+    while True:
+        action = input("\nDelete downvoted cards? [a] all  [s] select  [k] keep: ").strip().lower()
+        if action in {"k", ""}:
+            return 0
+        if action == "a":
+            return _remove_cards_by_ids(data, {str(card.get("id") or id(card)) for card in downvoted})
+        if action == "s":
+            raw = input("Enter card numbers to delete (comma-separated): ").strip()
+            if not raw:
+                return 0
+            selected_ids = set()
+            for token in raw.split(","):
+                token = token.strip()
+                if not token.isdigit():
+                    continue
+                index = int(token) - 1
+                if 0 <= index < len(downvoted):
+                    selected_ids.add(str(downvoted[index].get("id") or id(downvoted[index])))
+            return _remove_cards_by_ids(data, selected_ids)
+        print("Enter 'a', 's', or 'k'.")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -109,24 +181,40 @@ def main(argv: list[str] | None = None) -> int:
             position = set_offset + index + 1
             print(set_name)
             print(f"{position}/{total_cards}")
-            print(f"Q: {card.get('card_name', '')}")
+            print("Q:")
+            _print_rich(card.get("card_name", ""), config)
             input("\nPress [Enter] to show the answer")
             clear_screen()
             print(set_name)
             print(f"{position}/{total_cards}")
-            print(f"Q: {card.get('card_name', '')}")
-            print(f"A: {card.get('card_info', '')}")
+            print("Q:")
+            _print_rich(card.get("card_name", ""), config)
+            print("A:")
+            _print_rich(card.get("card_info", ""), config)
             if card.get("card_add_info"):
-                print(f"Notes: {card['card_add_info']}")
+                print("Notes:")
+                _print_rich(card["card_add_info"], config)
             if card.get("tags"):
                 print(f"Tags: {', '.join(card['tags'])}")
             if args.record_progress:
                 while True:
+                    voting_enabled = bool(config.get("tui", {}).get("enable_card_voting", True))
+                    if voting_enabled:
+                        vote = get_vote(session, card)
+                        vote_label = "none"
+                        if vote > 0:
+                            vote_label = "upvoted"
+                        elif vote < 0:
+                            vote_label = "downvoted"
+                        print(f"Vote: {vote_label}  (+ upvote, - downvote, 0 clear)")
                     prompt = "\nGrade [1-4]"
                     if session["history"]:
                         prompt += " | [u] Undo last"
                     prompt += " | [q] Quit: "
                     grade = input(prompt).strip().lower()
+                    if voting_enabled and grade in {"+", "-", "0"}:
+                        set_vote(session, card, {"+": 1, "-": -1, "0": 0}[grade])
+                        continue
                     if grade == "u" and session["history"]:
                         undo_last_review(session, deck_name=deck_name, set_name=set_name)
                         index = max(0, index - 1)
@@ -158,9 +246,10 @@ def main(argv: list[str] | None = None) -> int:
                 input("\nPress [Enter] to continue")
                 index += 1
             clear_screen()
-        if should_stop:
-            break
+            if should_stop:
+                break
         set_offset += len(cards)
+    removed_cards = _handle_downvoted_removal(deck_name, data, session, config, args.record_progress)
     _save_if_needed(deck_name, data, config, args.record_progress)
     reviewed = reviewed_count(session) if args.record_progress else total_cards
     print(f"Reviewed {reviewed} cards in {session_elapsed_minutes(session):.2f} minutes.")
@@ -173,6 +262,11 @@ def main(argv: list[str] | None = None) -> int:
                 easy=session["counts"][3],
             )
         )
+        print(f"Downvoted {len(downvoted_cards(session))} cards.")
+    if removed_cards:
+        print(f"Deleted {removed_cards} downvoted cards.")
+        if deck_name:
+            write_sko(deck_name, data, config)
     if args.record_progress and deck_name:
         print(f"Saved progress to {deck_name}.")
     return 0

@@ -8,7 +8,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import config
 import history
 import storage
-from review_session import apply_review, review_summary_lines, start_session, undo_last_review
+from review_session import (
+    apply_review,
+    downvoted_cards,
+    get_vote,
+    review_summary_lines,
+    set_vote,
+    start_session,
+    undo_last_review,
+)
 from schema import new_card
 
 
@@ -72,6 +80,20 @@ class ReviewSessionTests(unittest.TestCase):
         lines = review_summary_lines(session, [card])
         self.assertIn("Reviewed 1 cards", lines[0])
         self.assertIn("Hard 1", lines[1])
+        self.assertIn("Downvoted this session", lines[2])
+
+    def test_vote_tracking_supports_upvote_downvote_and_clear(self):
+        first = new_card("Q1", "A1")
+        second = new_card("Q2", "A2")
+        session = start_session([first, second], "all")
+        self.assertEqual(get_vote(session, first), 0)
+        set_vote(session, first, 1)
+        set_vote(session, second, -1)
+        self.assertEqual(get_vote(session, first), 1)
+        self.assertEqual(get_vote(session, second), -1)
+        self.assertEqual([card["id"] for card in downvoted_cards(session)], [second["id"]])
+        set_vote(session, second, 0)
+        self.assertEqual(downvoted_cards(session), [])
 
 
 if __name__ == "__main__":

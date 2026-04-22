@@ -1,7 +1,23 @@
 import curses
 import curses.textpad
 
-COLORS = {"error": 1, "success": 2, "prompt": 3, "info": 4, "muted": 5, "accent": 6, "default": 7}
+COLORS = {
+    "error": 1,
+    "success": 2,
+    "prompt": 3,
+    "info": 4,
+    "muted": 5,
+    "accent": 6,
+    "default": 7,
+    "code_keyword": 8,
+    "code_type": 9,
+    "code_string": 10,
+    "code_number": 11,
+    "code_comment": 12,
+    "code_annotation": 13,
+    "latex": 14,
+    "image": 15,
+}
 
 def init_colors():
     if curses.has_colors():
@@ -13,6 +29,14 @@ def init_colors():
         curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
         curses.init_pair(6, curses.COLOR_CYAN, curses.COLOR_BLACK)
         curses.init_pair(7, curses.COLOR_WHITE, curses.COLOR_BLACK)
+        curses.init_pair(8, curses.COLOR_CYAN, curses.COLOR_BLACK)
+        curses.init_pair(9, curses.COLOR_BLUE, curses.COLOR_BLACK)
+        curses.init_pair(10, curses.COLOR_GREEN, curses.COLOR_BLACK)
+        curses.init_pair(11, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        curses.init_pair(12, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+        curses.init_pair(13, curses.COLOR_RED, curses.COLOR_BLACK)
+        curses.init_pair(14, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+        curses.init_pair(15, curses.COLOR_CYAN, curses.COLOR_BLACK)
 
 def run_app(main_fn):
     def _wrapper(stdscr):

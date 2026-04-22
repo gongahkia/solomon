@@ -24,6 +24,11 @@ class ConfigTests(unittest.TestCase):
                     "show_stats": "yes",
                     "confirm_delete": "no",
                     "show_import_preview": "true",
+                    "syntax_highlighting": "false",
+                    "render_latex": "1",
+                    "enable_card_voting": "on",
+                    "image_width": "80",
+                    "image_height": 0,
                 },
             }
         )
@@ -37,6 +42,11 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(normalized["tui"]["show_stats"])
         self.assertFalse(normalized["tui"]["confirm_delete"])
         self.assertTrue(normalized["tui"]["show_import_preview"])
+        self.assertFalse(normalized["tui"]["syntax_highlighting"])
+        self.assertTrue(normalized["tui"]["render_latex"])
+        self.assertTrue(normalized["tui"]["enable_card_voting"])
+        self.assertEqual(normalized["tui"]["image_width"], 80)
+        self.assertEqual(normalized["tui"]["image_height"], 1)
 
 
 if __name__ == "__main__":

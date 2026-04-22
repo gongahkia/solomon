@@ -1,6 +1,8 @@
 import curses
 import curses.textpad
 
+from terminal_images import clear_native_images
+
 COLORS = {
     "error": 1,
     "success": 2,
@@ -42,11 +44,13 @@ def run_app(main_fn):
     def _wrapper(stdscr):
         init_colors()
         curses.curs_set(0)
+        clear_native_images()
         main_fn(stdscr)
     try:
         curses.wrapper(_wrapper)
     except KeyboardInterrupt:
         # Allow Ctrl-C to exit cleanly without a Python traceback.
+        clear_native_images()
         return
 
 def _item_matches_query(item, query):
@@ -62,6 +66,7 @@ def select_from_list(stdscr, title, items, footer="", y_offset=2, extra_bindings
     cursor = 0
     search_query = ""
     while True:
+        clear_native_images()
         indexed_items = [(index, item) for index, item in enumerate(items) if _item_matches_query(item, search_query)]
         if cursor >= len(indexed_items):
             cursor = max(0, len(indexed_items) - 1)
@@ -142,6 +147,7 @@ def select_from_list(stdscr, title, items, footer="", y_offset=2, extra_bindings
                 pass
 
 def show_help(stdscr, bindings):
+    clear_native_images()
     stdscr.erase()
     max_y, max_x = stdscr.getmaxyx()
     stdscr.addstr(0, 0, "Keybindings", curses.color_pair(COLORS["prompt"]))
@@ -163,6 +169,7 @@ def show_help(stdscr, bindings):
 def text_input(stdscr, prompt, initial="", y=0, x=0):
     buf = initial
     while True:
+        clear_native_images()
         stdscr.move(y, x)
         stdscr.clrtoeol()
         max_x = stdscr.getmaxyx()[1]
@@ -194,6 +201,7 @@ def multiline_input(stdscr, title, initial="", footer="Ctrl-G save  Esc cancel")
             return 8
         return key
 
+    clear_native_images()
     stdscr.erase()
     max_y, max_x = stdscr.getmaxyx()
     try:
@@ -232,6 +240,7 @@ def form_input(stdscr, title, fields):
     for active in range(len(fields)):
         buf = values[active]
         while True:
+            clear_native_images()
             stdscr.erase()
             max_y, max_x = stdscr.getmaxyx()
             stdscr.addstr(0, 0, title[:max_x-1], curses.color_pair(COLORS["prompt"]))

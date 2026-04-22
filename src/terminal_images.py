@@ -49,7 +49,7 @@ def _emit(sequence: str) -> None:
 def clear_native_images() -> None:
     if not terminal_supports_graphics():
         return
-    _emit("\x1b_Ga=d,d=A,q=2;\x1b\\")
+    _emit("\x1b_Ga=d,d=A;\x1b\\")
 
 
 def _build_kitty_body(url: str, payload: bytes, *, width_cells: int, height_cells: int) -> str | None:
@@ -67,9 +67,16 @@ def _build_kitty_body(url: str, payload: bytes, *, width_cells: int, height_cell
     target_width_px = max(32, width_cells * 8)
     target_height_px = max(32, height_cells * 16)
     image.thumbnail((target_width_px, target_height_px))
+    # Draw onto an opaque canvas so transparent/unused regions do not leak
+    # underlying text fallback lines in terminal overlays.
+    canvas = Image.new("RGBA", (target_width_px, target_height_px), (0, 0, 0, 255))
+    offset_x = max(0, (target_width_px - image.width) // 2)
+    offset_y = max(0, (target_height_px - image.height) // 2)
+    canvas.paste(image, (offset_x, offset_y), image)
+    output = canvas.convert("RGB")
     buffer = io.BytesIO()
     try:
-        image.save(buffer, format="PNG")
+        output.save(buffer, format="PNG")
     except Exception:
         return None
     encoded = base64.b64encode(buffer.getvalue()).decode("ascii")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import curses
 
+from terminal_images import clear_native_images
 from tui import COLORS
 
 
@@ -23,6 +24,7 @@ def wait_for_keys(stdscr, accepted: tuple[int, ...]) -> int:
 
 
 def show_message(stdscr, title: str, lines: list[str], color_key: str = "info") -> None:
+    clear_native_images()
     stdscr.erase()
     add_line(stdscr, 0, 0, title, curses.color_pair(COLORS[color_key]))
     for index, line in enumerate(lines, start=2):
@@ -33,6 +35,7 @@ def show_message(stdscr, title: str, lines: list[str], color_key: str = "info") 
 
 
 def confirm_prompt(stdscr, prompt: str, color_key: str = "error") -> bool:
+    clear_native_images()
     stdscr.erase()
     add_line(stdscr, 0, 0, prompt, curses.color_pair(COLORS[color_key]))
     add_line(stdscr, 2, 0, "[y] Yes  [n] No", curses.color_pair(COLORS["muted"]))

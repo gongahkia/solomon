@@ -595,6 +595,7 @@ def render_rich_text(
     image_height: int,
     syntax_highlighting: bool = True,
     render_latex: bool = True,
+    show_image_warnings: bool = False,
 ) -> list[StyledLine]:
     lines = text.splitlines() or [""]
     styled_lines: list[StyledLine] = []
@@ -635,7 +636,7 @@ def render_rich_text(
                 max_width=preview_max_width,
             )
             note = IMAGE_PREVIEW_NOTE_CACHE.get(preview_key)
-            if note:
+            if note and show_image_warnings:
                 styled_lines.append([(f"Preview note: {note}", "image")])
             if preview is None:
                 reason = IMAGE_PREVIEW_ERROR_CACHE.get(preview_key)

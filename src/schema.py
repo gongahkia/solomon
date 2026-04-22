@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import date, datetime
+import re
 from uuid import uuid4
 
 DATE_FORMAT = "%d/%m/%Y"
@@ -94,7 +95,7 @@ def _normalize_tags(tags: list[str] | str | None) -> list[str]:
     if tags is None:
         return []
     if isinstance(tags, str):
-        raw_tags = [part.strip() for part in tags.split(",")]
+        raw_tags = [part.strip() for part in re.split(r"[;,]", tags)]
     elif isinstance(tags, list):
         raw_tags = [str(part).strip() for part in tags]
     else:
@@ -118,6 +119,78 @@ def _validate_timestamp(value: str) -> bool:
         return True
     except (TypeError, ValueError):
         return False
+
+
+def _coerce_bool(value, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "y", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "n", "off"}:
+            return False
+    return default
+
+
+def _coerce_int(value, default: int = 0, minimum: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, parsed)
+
+
+def _coerce_float(value, default: float = 0.0, minimum: float | None = None) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None:
+        parsed = max(minimum, parsed)
+    return parsed
+
+
+def _coerce_timestamp(value: str | None, fallback: str) -> str:
+    if isinstance(value, str):
+        stripped = value.strip()
+        if _validate_timestamp(stripped):
+            return stripped
+        try:
+            parsed = datetime.fromisoformat(stripped.replace("Z", "+00:00"))
+            return parsed.isoformat(timespec="seconds")
+        except (TypeError, ValueError):
+            pass
+    return fallback
+
+
+def _coerce_card_date(value) -> str:
+    if value in (None, ""):
+        return today_str()
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return today_str()
+        try:
+            return datetime.strptime(stripped, DATE_FORMAT).strftime(DATE_FORMAT)
+        except (TypeError, ValueError):
+            pass
+        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%d-%m-%Y", "%d.%m.%Y", "%m-%d-%Y"):
+            try:
+                return datetime.strptime(stripped, fmt).strftime(DATE_FORMAT)
+            except (TypeError, ValueError):
+                continue
+        try:
+            parsed = datetime.fromisoformat(stripped.replace("Z", "+00:00"))
+            return parsed.strftime(DATE_FORMAT)
+        except (TypeError, ValueError):
+            return today_str()
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(value)).strftime(DATE_FORMAT)
+        except (TypeError, ValueError, OSError):
+            return today_str()
+    return today_str()
 
 
 def validate_card(card: dict) -> list[str]:
@@ -228,6 +301,28 @@ def migrate_card(card: dict, config: dict | None = None) -> dict:
     migrated.setdefault("hard_count", 0)
     migrated.setdefault("good_count", 0)
     migrated.setdefault("easy_count", 0)
+    migrated["card_name"] = str(migrated.get("card_name", "") or "")
+    migrated["card_info"] = str(migrated.get("card_info", "") or "")
+    migrated["card_add_info"] = str(migrated.get("card_add_info", "") or "")
+    migrated["card_date"] = _coerce_card_date(migrated.get("card_date"))
+    migrated["ease_factor"] = _coerce_float(
+        migrated.get("ease_factor"),
+        float(defaults["ease_factor"]),
+        minimum=1.0,
+    )
+    migrated["interval"] = _coerce_int(migrated.get("interval"), defaults["interval"], minimum=0)
+    migrated["repetitions"] = _coerce_int(migrated.get("repetitions"), defaults["repetitions"], minimum=0)
+    migrated["suspended"] = _coerce_bool(migrated.get("suspended"), defaults["suspended"])
+    migrated["step_index"] = _coerce_int(migrated.get("step_index"), 0, minimum=0)
+    migrated["lapses"] = _coerce_int(migrated.get("lapses"), 0, minimum=0)
+    migrated["again_count"] = _coerce_int(migrated.get("again_count"), 0, minimum=0)
+    migrated["hard_count"] = _coerce_int(migrated.get("hard_count"), 0, minimum=0)
+    migrated["good_count"] = _coerce_int(migrated.get("good_count"), 0, minimum=0)
+    migrated["easy_count"] = _coerce_int(migrated.get("easy_count"), 0, minimum=0)
+    if migrated.get("state") not in CARD_STATES:
+        migrated["state"] = _default_state(migrated)
+    migrated["created_at"] = _coerce_timestamp(migrated.get("created_at"), now)
+    migrated["updated_at"] = _coerce_timestamp(migrated.get("updated_at"), now)
     migrated["tags"] = _normalize_tags(migrated.get("tags"))
     errors = validate_card(migrated)
     if errors:

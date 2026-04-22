@@ -33,9 +33,30 @@ CSV_ALIASES = {
 
 
 def import_from_json(filepath: str, config: dict | None = None) -> dict:
-    with open(filepath, "r") as fhand:
-        data = json.load(fhand)
-    return normalize_document(data, config)[DOCUMENT_SETS_KEY]
+    sets, _, _ = load_json_import(filepath, config)
+    return sets
+
+
+def _raw_sets_from_json(raw: dict) -> dict:
+    if isinstance(raw, dict) and DOCUMENT_SETS_KEY in raw:
+        sets = raw.get(DOCUMENT_SETS_KEY)
+        if isinstance(sets, dict):
+            return sets
+    return raw if isinstance(raw, dict) else {}
+
+
+def load_json_import(filepath: str, config: dict | None = None) -> tuple[dict, dict, bool]:
+    with open(filepath, "r", encoding="utf-8") as fhand:
+        raw = json.load(fhand)
+    normalized_document = normalize_document(raw, config)
+    normalized_sets = normalized_document[DOCUMENT_SETS_KEY]
+    recovered = _raw_sets_from_json(raw) != normalized_sets
+    return (normalized_sets, normalized_document, recovered)
+
+
+def rewrite_json_source(filepath: str, normalized_document: dict) -> None:
+    with open(filepath, "w", encoding="utf-8") as fhand:
+        json.dump(normalized_document, fhand, indent=2)
 
 
 def infer_csv_mapping(fieldnames: list[str] | None, overrides: dict | None = None) -> tuple[dict, list[str]]:
@@ -57,6 +78,26 @@ def infer_csv_mapping(fieldnames: list[str] | None, overrides: dict | None = Non
 
 
 def import_from_csv(filepath: str, config: dict | None = None, field_mapping: dict | None = None) -> dict:
+    def _safe_float(value: str, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _safe_int(value: str, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _safe_bool(value: str, default: bool) -> bool:
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "y", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "n", "off"}:
+            return False
+        return default
+
     result = {}
     with open(filepath, "r", newline="") as fhand:
         reader = csv.DictReader(fhand)
@@ -80,17 +121,17 @@ def import_from_csv(filepath: str, config: dict | None = None, field_mapping: di
                 card["card_date"] = row[date_field].strip()
             suspended_field = mapping.get("suspended")
             if suspended_field and row.get(suspended_field):
-                card["suspended"] = row[suspended_field].strip().lower() in {"1", "true", "yes", "y"}
+                card["suspended"] = _safe_bool(row[suspended_field], card.get("suspended", False))
             for field in ("ease_factor",):
                 source = mapping.get(field)
                 value = (row.get(source) or "").strip() if source else ""
                 if value:
-                    card[field] = float(value)
+                    card[field] = _safe_float(value, card.get(field, 0.0))
             for field in ("interval", "repetitions"):
                 source = mapping.get(field)
                 value = (row.get(source) or "").strip() if source else ""
                 if value:
-                    card[field] = int(value)
+                    card[field] = _safe_int(value, card.get(field, 0))
             result.setdefault(set_name, []).append(card)
     return normalize_document(result, config)[DOCUMENT_SETS_KEY]
 

@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+import json
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -124,6 +125,35 @@ class DeckScreenTests(unittest.TestCase):
             deck_screens.import_screen(screen, config.load_config())
         imported = storage.read_sko("study.sko", config.load_config())
         self.assertEqual(imported["science"][0]["card_info"], "New info")
+
+    def test_import_screen_can_rewrite_recovered_json_source_when_user_accepts(self):
+        source_path = os.path.join(self.tmpdir.name, "broken_source.sko")
+        with open(source_path, "w", encoding="utf-8") as fhand:
+            json.dump(
+                {
+                    "_schema_version": 3,
+                    "sets": {
+                        "science": [
+                            {
+                                "card_name": "Atom",
+                                "card_info": "Matter",
+                                "card_add_info": "",
+                                "card_date": "2026-04-22",
+                            }
+                        ]
+                    },
+                },
+                fhand,
+            )
+        screen = FakeScreen([ord("n"), ord("q")])
+        with patch("deck_screens.text_input", side_effect=[source_path, "study"]), patch(
+            "deck_screens.wait_for_keys", return_value=ord("w")
+        ), patch("curses.color_pair", return_value=0):
+            deck_screens.import_screen(screen, config.load_config())
+        with open(source_path, "r", encoding="utf-8") as fhand:
+            rewritten = json.load(fhand)
+        self.assertRegex(rewritten["sets"]["science"][0]["card_date"], r"\d{2}/\d{2}/\d{4}")
+        self.assertNotEqual(rewritten["sets"]["science"][0]["card_date"], "2026-04-22")
 
     def test_export_screen_writes_the_requested_json_file(self):
         storage.write_sko("study.sko", {"science": [new_card("Atom", "Matter")]}, config.load_config())

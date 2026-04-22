@@ -235,6 +235,8 @@ def menu_sko(stdscr) -> None:
         )
         if choice is None:
             return
+        if isinstance(choice, tuple):
+            continue
         selected_action = menu_items[choice][0]
         if selected_action == "quit":
             return

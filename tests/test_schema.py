@@ -4,7 +4,14 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from schema import DOCUMENT_SETS_KEY, DOCUMENT_VERSION_KEY, SCHEMA_VERSION, SchemaError, normalize_document, reset_card_progress
+from schema import (
+    DOCUMENT_SETS_KEY,
+    DOCUMENT_VERSION_KEY,
+    SCHEMA_VERSION,
+    SchemaError,
+    normalize_document,
+    reset_card_progress,
+)
 
 
 class SchemaTests(unittest.TestCase):
@@ -69,6 +76,39 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(card["repetitions"], 0)
         self.assertEqual(card["state"], "new")
         self.assertEqual(card["step_index"], 0)
+
+    def test_normalize_document_recovers_invalid_card_dates_and_types(self):
+        document = normalize_document(
+            {
+                "import": [
+                    {
+                        "card_name": "Q1",
+                        "card_info": "A1",
+                        "card_add_info": "",
+                        "card_date": "",
+                        "suspended": "true",
+                        "interval": "4",
+                        "repetitions": "2",
+                        "ease_factor": "2.8",
+                    },
+                    {
+                        "card_name": "Q2",
+                        "card_info": "A2",
+                        "card_add_info": "",
+                        "card_date": "2026-04-22",
+                    },
+                ]
+            }
+        )
+        first = document[DOCUMENT_SETS_KEY]["import"][0]
+        second = document[DOCUMENT_SETS_KEY]["import"][1]
+        self.assertTrue(first["suspended"])
+        self.assertEqual(first["interval"], 4)
+        self.assertEqual(first["repetitions"], 2)
+        self.assertEqual(first["ease_factor"], 2.8)
+        self.assertRegex(first["card_date"], r"\d{2}/\d{2}/\d{4}")
+        self.assertRegex(second["card_date"], r"\d{2}/\d{2}/\d{4}")
+        self.assertNotEqual(second["card_date"], "2026-04-22")
 
 
 if __name__ == "__main__":

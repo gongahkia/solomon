@@ -57,6 +57,10 @@ class MainTUITests(unittest.TestCase):
         deck_screen.assert_called_once()
         self.assertTrue(deck_screen.call_args.kwargs["direct_review"])
 
+    def test_menu_sko_ignores_unhandled_key_tuples(self):
+        with patch("main.select_from_list", side_effect=[(None, "x"), 7]):
+            main.menu_sko(self.screen)
+
     def test_menu_sko_routes_browse_to_standard_deck_screen(self):
         with patch("main.select_from_list", side_effect=[1, 7]), patch(
             "main.select_sko_file", return_value="study.sko"

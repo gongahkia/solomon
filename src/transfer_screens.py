@@ -11,10 +11,11 @@ from import_export import (
     export_to_csv,
     export_to_json,
     import_from_csv,
-    import_from_json,
     infer_csv_mapping,
+    load_json_import,
     merge_sets,
     preview_import,
+    rewrite_json_source,
 )
 from screen_common import add_line, show_message, wait_for_keys
 from storage import read_sko, write_sko
@@ -122,7 +123,17 @@ def import_screen(
                 return
             data = import_from_csv(filepath, config, field_mapping=csv_mapping)
         elif filepath.endswith(".json") or filepath.endswith(".sko"):
-            data = import_from_json(filepath, config)
+            data, normalized_document, recovered = load_json_import(filepath, config)
+            if recovered:
+                stdscr.erase()
+                add(stdscr, 0, 0, "Recovered invalid fields in source file.", curses.color_pair(COLORS["prompt"]))
+                add(stdscr, 2, 0, "Write normalized fixes back to source now?")
+                add(stdscr, 3, 0, f"Source: {filepath}")
+                add(stdscr, 5, 0, "[w] Write fixes to file  [k] Keep source unchanged", curses.color_pair(COLORS["muted"]))
+                stdscr.refresh()
+                choice = wait(stdscr, (ord("w"), ord("W"), ord("k"), ord("K")))
+                if choice in (ord("w"), ord("W")):
+                    rewrite_json_source(filepath, normalized_document)
         else:
             raise ValueError("Unsupported file type. Use .csv, .json, or .sko.")
     except (ValueError, json.JSONDecodeError) as exc:

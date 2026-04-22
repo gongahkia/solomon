@@ -7,7 +7,15 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from import_export import count_duplicates, export_to_csv, import_from_csv, import_from_json, merge_sets
+from import_export import (
+    count_duplicates,
+    export_to_csv,
+    import_from_csv,
+    import_from_json,
+    load_json_import,
+    merge_sets,
+    rewrite_json_source,
+)
 from schema import new_card
 
 
@@ -47,6 +55,60 @@ class ImportExportTests(unittest.TestCase):
         self.assertIn("chemistry", restored)
         self.assertEqual(restored["chemistry"][0]["card_name"], "Atom")
 
+    def test_json_import_recovers_blank_or_iso_card_dates(self):
+        document = {
+            "_schema_version": 3,
+            "sets": {
+                "import": [
+                    {
+                        "card_name": "Blank date",
+                        "card_info": "A",
+                        "card_add_info": "",
+                        "card_date": "",
+                    },
+                    {
+                        "card_name": "ISO date",
+                        "card_info": "B",
+                        "card_add_info": "",
+                        "card_date": "2026-04-22",
+                    },
+                ]
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "broken_dates.sko")
+            with open(path, "w") as fhand:
+                json.dump(document, fhand)
+            restored = import_from_json(path)
+        self.assertRegex(restored["import"][0]["card_date"], r"\d{2}/\d{2}/\d{4}")
+        self.assertRegex(restored["import"][1]["card_date"], r"\d{2}/\d{2}/\d{4}")
+
+    def test_json_import_can_rewrite_recovered_source_document(self):
+        document = {
+            "_schema_version": 3,
+            "sets": {
+                "import": [
+                    {
+                        "card_name": "ISO date",
+                        "card_info": "B",
+                        "card_add_info": "",
+                        "card_date": "2026-04-22",
+                    }
+                ]
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "recover.sko")
+            with open(path, "w", encoding="utf-8") as fhand:
+                json.dump(document, fhand)
+            _sets, normalized_document, recovered = load_json_import(path)
+            self.assertTrue(recovered)
+            rewrite_json_source(path, normalized_document)
+            with open(path, "r", encoding="utf-8") as fhand:
+                rewritten = json.load(fhand)
+        self.assertRegex(rewritten["sets"]["import"][0]["card_date"], r"\d{2}/\d{2}/\d{4}")
+        self.assertNotEqual(rewritten["sets"]["import"][0]["card_date"], "2026-04-22")
+
     def test_merge_sets_can_replace_duplicates(self):
         existing = {"set_a": [new_card("Bonjour", "hello")]}
         incoming = {"set_a": [new_card("Bonjour", "good day"), new_card("Merci", "thanks")]}
@@ -70,6 +132,44 @@ class ImportExportTests(unittest.TestCase):
             )
         self.assertEqual(restored["physics"][0]["card_name"], "Force")
         self.assertEqual(restored["physics"][0]["card_info"], "Mass times acceleration")
+
+    def test_csv_import_recovers_invalid_numeric_boolean_and_iso_date(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "broken.csv")
+            with open(path, "w", newline="", encoding="utf-8") as fhand:
+                writer = csv.DictWriter(
+                    fhand,
+                    fieldnames=[
+                        "set_name",
+                        "card_name",
+                        "card_info",
+                        "card_date",
+                        "suspended",
+                        "ease_factor",
+                        "interval",
+                        "repetitions",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "set_name": "physics",
+                        "card_name": "Force",
+                        "card_info": "Mass times acceleration",
+                        "card_date": "2026-04-22",
+                        "suspended": "yes",
+                        "ease_factor": "bad",
+                        "interval": "x",
+                        "repetitions": "y",
+                    }
+                )
+            restored = import_from_csv(path)
+        card = restored["physics"][0]
+        self.assertRegex(card["card_date"], r"\d{2}/\d{2}/\d{4}")
+        self.assertTrue(card["suspended"])
+        self.assertEqual(card["interval"], 0)
+        self.assertEqual(card["repetitions"], 0)
+        self.assertEqual(card["ease_factor"], 2.5)
 
     def test_merge_sets_can_replace_whole_sets(self):
         existing = {"set_a": [new_card("Bonjour", "hello")], "set_b": [new_card("Merci", "thanks")]}

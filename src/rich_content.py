@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import re
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 
 StyledSpan = tuple[str, str]
@@ -127,6 +128,8 @@ LATEX_COMMANDS = {
 }
 
 IMAGE_PREVIEW_CACHE: dict[tuple[str, int, int, int], list[str] | None] = {}
+IMAGE_PREVIEW_ERROR_CACHE: dict[tuple[str, int, int, int], str | None] = {}
+LATEX_PREVIEW_CACHE: dict[tuple[str, int], list[str] | None] = {}
 
 
 def _is_image_url(url: str) -> bool:
@@ -221,25 +224,9 @@ def _image_preview_placeholder(image_width: int, image_height: int, *, max_width
     return [top, *middle_rows, top]
 
 
-def _image_preview_from_url(url: str, *, image_width: int, image_height: int, max_width: int) -> list[str] | None:
-    cache_key = (url, image_width, image_height, max_width)
-    if cache_key in IMAGE_PREVIEW_CACHE:
-        return IMAGE_PREVIEW_CACHE[cache_key]
-    try:
-        from PIL import Image
-    except Exception:
-        IMAGE_PREVIEW_CACHE[cache_key] = None
-        return None
-    try:
-        request = Request(url, headers={"User-Agent": "senko/3.0"})
-        with urlopen(request, timeout=2.5) as response:
-            payload = response.read(2_000_000)
-        image = Image.open(io.BytesIO(payload)).convert("L")
-    except Exception:
-        IMAGE_PREVIEW_CACHE[cache_key] = None
-        return None
-    target_width = max(8, min(max_width, image_width))
-    target_height = max(4, min(image_height, 18))
+def _image_to_ascii(image, *, max_width: int, max_height: int) -> list[str]:
+    target_width = max(8, min(max_width, image.width))
+    target_height = max(4, min(max_height, image.height))
     if target_height > target_width * 2:
         target_height = max(4, target_width * 2)
     image = image.resize((target_width, target_height))
@@ -252,7 +239,90 @@ def _image_preview_from_url(url: str, *, image_width: int, image_height: int, ma
             index = min(len(ramp) - 1, int((pixel / 255) * (len(ramp) - 1)))
             row_chars.append(ramp[index])
         lines.append("".join(row_chars))
+    return lines
+
+
+def _image_preview_from_url(url: str, *, image_width: int, image_height: int, max_width: int) -> list[str] | None:
+    cache_key = (url, image_width, image_height, max_width)
+    if cache_key in IMAGE_PREVIEW_CACHE:
+        return IMAGE_PREVIEW_CACHE[cache_key]
+    try:
+        from PIL import Image
+    except Exception:
+        IMAGE_PREVIEW_CACHE[cache_key] = None
+        IMAGE_PREVIEW_ERROR_CACHE[cache_key] = "Pillow not installed"
+        return None
+    try:
+        request = Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+                "Accept": "image/*,*/*;q=0.8",
+            },
+        )
+        with urlopen(request, timeout=6) as response:
+            payload = response.read(2_000_000)
+        image = Image.open(io.BytesIO(payload)).convert("L")
+    except HTTPError as exc:
+        IMAGE_PREVIEW_CACHE[cache_key] = None
+        IMAGE_PREVIEW_ERROR_CACHE[cache_key] = f"HTTP {exc.code}"
+        return None
+    except URLError:
+        IMAGE_PREVIEW_CACHE[cache_key] = None
+        IMAGE_PREVIEW_ERROR_CACHE[cache_key] = "Network error"
+        return None
+    except Exception:
+        IMAGE_PREVIEW_CACHE[cache_key] = None
+        IMAGE_PREVIEW_ERROR_CACHE[cache_key] = "Image decode failed"
+        return None
+    lines = _image_to_ascii(image, max_width=max(8, min(max_width, image_width)), max_height=max(4, min(image_height, 18)))
     IMAGE_PREVIEW_CACHE[cache_key] = lines
+    IMAGE_PREVIEW_ERROR_CACHE[cache_key] = None
+    return lines
+
+
+def _latex_preview_from_expression(expression: str, *, max_width: int) -> list[str] | None:
+    expr = expression.strip()
+    cache_key = (expr, max_width)
+    if cache_key in LATEX_PREVIEW_CACHE:
+        return LATEX_PREVIEW_CACHE[cache_key]
+    try:
+        from PIL import Image, ImageChops
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+    except Exception:
+        LATEX_PREVIEW_CACHE[cache_key] = None
+        return None
+    if not expr:
+        LATEX_PREVIEW_CACHE[cache_key] = None
+        return None
+    try:
+        figure = Figure(figsize=(8, 2.5), dpi=200)
+        canvas = FigureCanvasAgg(figure)
+        ax = figure.add_subplot(111)
+        ax.axis("off")
+        ax.text(
+            0.02,
+            0.5,
+            f"${expr}$",
+            fontsize=24,
+            va="center",
+            ha="left",
+            color="black",
+        )
+        canvas.draw()
+        width, height = canvas.get_width_height()
+        image = Image.frombuffer("RGBA", (width, height), canvas.buffer_rgba(), "raw", "RGBA", 0, 1).convert("L")
+        # Crop whitespace around rendered formula.
+        inverted = ImageChops.invert(image)
+        bbox = inverted.getbbox()
+        if bbox:
+            image = image.crop(bbox)
+        lines = _image_to_ascii(image, max_width=max(12, max_width), max_height=12)
+    except Exception:
+        LATEX_PREVIEW_CACHE[cache_key] = None
+        return None
+    LATEX_PREVIEW_CACHE[cache_key] = lines
     return lines
 
 
@@ -460,6 +530,9 @@ def render_rich_text(
                 max_width=max(14, min(width, image_width)),
             )
             if preview is None:
+                reason = IMAGE_PREVIEW_ERROR_CACHE.get((url, image_width, image_height, max(14, min(width, image_width))))
+                if reason:
+                    styled_lines.append([(f"Preview unavailable: {reason}", "image")])
                 preview = _image_preview_placeholder(
                     image_width,
                     image_height,
@@ -480,11 +553,15 @@ def render_rich_text(
                 latex_parts.append(lines[index])
                 index += 1
             latex_text = "\n".join(part for part in latex_parts if part).strip()
-            if render_latex:
-                latex_text = _latex_to_text(latex_text)
             styled_lines.append([("Math", "muted")])
-            for latex_line in (latex_text.splitlines() or [""]):
-                styled_lines.extend(_wrap_spans([(latex_line, "latex")], width))
+            ascii_preview = _latex_preview_from_expression(latex_text, max_width=max(12, width - 1)) if render_latex else None
+            if ascii_preview:
+                for latex_line in ascii_preview:
+                    styled_lines.extend(_wrap_spans([(latex_line, "latex")], width))
+            else:
+                latex_display = _latex_to_text(latex_text) if render_latex else latex_text
+                for latex_line in (latex_display.splitlines() or [""]):
+                    styled_lines.extend(_wrap_spans([(latex_line, "latex")], width))
             index += 1
             continue
         if stripped == "":

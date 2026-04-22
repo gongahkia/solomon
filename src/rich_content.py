@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import re
+import ssl
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -113,9 +114,9 @@ LATEX_REPLACEMENTS = {
 }
 
 LATEX_COMMANDS = {
-    "sum": "sum",
-    "prod": "prod",
-    "int": "int",
+    "sum": "∑",
+    "prod": "∏",
+    "int": "∫",
     "lim": "lim",
     "sin": "sin",
     "cos": "cos",
@@ -143,11 +144,71 @@ SUPERSCRIPT_MAP = {
     "=": "⁼",
     "(": "⁽",
     ")": "⁾",
+    "n": "ⁿ",
+    "i": "ⁱ",
+    "a": "ᵃ",
+    "b": "ᵇ",
+    "c": "ᶜ",
+    "d": "ᵈ",
+    "e": "ᵉ",
+    "f": "ᶠ",
+    "g": "ᵍ",
+    "h": "ʰ",
+    "j": "ʲ",
+    "k": "ᵏ",
+    "l": "ˡ",
+    "m": "ᵐ",
+    "o": "ᵒ",
+    "p": "ᵖ",
+    "r": "ʳ",
+    "s": "ˢ",
+    "t": "ᵗ",
+    "u": "ᵘ",
+    "v": "ᵛ",
+    "w": "ʷ",
+    "x": "ˣ",
+    "y": "ʸ",
+    "z": "ᶻ",
+}
+
+SUBSCRIPT_MAP = {
+    "0": "₀",
+    "1": "₁",
+    "2": "₂",
+    "3": "₃",
+    "4": "₄",
+    "5": "₅",
+    "6": "₆",
+    "7": "₇",
+    "8": "₈",
+    "9": "₉",
+    "+": "₊",
+    "-": "₋",
+    "=": "₌",
+    "(": "₍",
+    ")": "₎",
+    "a": "ₐ",
+    "e": "ₑ",
+    "h": "ₕ",
+    "i": "ᵢ",
+    "j": "ⱼ",
+    "k": "ₖ",
+    "l": "ₗ",
+    "m": "ₘ",
+    "n": "ₙ",
+    "o": "ₒ",
+    "p": "ₚ",
+    "r": "ᵣ",
+    "s": "ₛ",
+    "t": "ₜ",
+    "u": "ᵤ",
+    "v": "ᵥ",
+    "x": "ₓ",
 }
 
 IMAGE_PREVIEW_CACHE: dict[tuple[str, int, int, int], list[str] | None] = {}
 IMAGE_PREVIEW_ERROR_CACHE: dict[tuple[str, int, int, int], str | None] = {}
-LATEX_PREVIEW_CACHE: dict[tuple[str, int], list[str] | None] = {}
+IMAGE_PREVIEW_NOTE_CACHE: dict[tuple[str, int, int, int], str | None] = {}
 
 
 def _is_image_url(url: str) -> bool:
@@ -205,6 +266,15 @@ def _looks_like_code(lines: list[str]) -> bool:
 
 
 def _latex_to_text(content: str) -> str:
+    def _render_script(text: str, mapping: dict[str, str], fallback_prefix: str) -> str:
+        output = []
+        for char in text:
+            mapped = mapping.get(char)
+            if mapped is None:
+                return f"{fallback_prefix}({text})"
+            output.append(mapped)
+        return "".join(output)
+
     result = content.strip()
     for source, target in LATEX_REPLACEMENTS.items():
         result = result.replace(source, target)
@@ -220,8 +290,13 @@ def _latex_to_text(content: str) -> str:
     result = re.sub(r"_([A-Za-z0-9]+)", r"_(\1)", result)
     result = re.sub(r"\^([A-Za-z0-9]+)", r"^(\1)", result)
     result = re.sub(
-        r"\^\(([\d+\-=()]+)\)",
-        lambda match: "".join(SUPERSCRIPT_MAP.get(char, char) for char in match.group(1)),
+        r"_\(([^)]+)\)",
+        lambda match: _render_script(match.group(1), SUBSCRIPT_MAP, "_"),
+        result,
+    )
+    result = re.sub(
+        r"\^\(([^)]+)\)",
+        lambda match: _render_script(match.group(1), SUPERSCRIPT_MAP, "^"),
         result,
     )
     result = result.replace("{", "").replace("}", "")
@@ -265,40 +340,11 @@ def _image_to_ascii(image, *, max_width: int, max_height: int) -> list[str]:
     return lines
 
 
-def _binary_ascii_from_image(image, *, max_width: int, max_height: int) -> list[str]:
-    target_width = max(12, min(max_width, image.width))
-    target_height = max(4, min(max_height, image.height))
-    image = image.resize((target_width, target_height))
-    matrix = []
-    for y in range(target_height):
-        row = []
-        for x in range(target_width):
-            row.append("█" if image.getpixel((x, y)) < 150 else " ")
-        matrix.append(row)
-    while matrix and not any(cell == "█" for cell in matrix[0]):
-        matrix.pop(0)
-    while matrix and not any(cell == "█" for cell in matrix[-1]):
-        matrix.pop()
-    if not matrix:
-        return []
-    left = 0
-    right = len(matrix[0]) - 1
-    while left <= right and not any(row[left] == "█" for row in matrix):
-        left += 1
-    while right >= left and not any(row[right] == "█" for row in matrix):
-        right -= 1
-    if left > right:
-        return []
-    lines = []
-    for row in matrix:
-        lines.append("".join(row[left : right + 1]).rstrip())
-    return [line for line in lines if line.strip()]
-
-
 def _image_preview_from_url(url: str, *, image_width: int, image_height: int, max_width: int) -> list[str] | None:
     cache_key = (url, image_width, image_height, max_width)
     if cache_key in IMAGE_PREVIEW_CACHE:
         return IMAGE_PREVIEW_CACHE[cache_key]
+    IMAGE_PREVIEW_NOTE_CACHE[cache_key] = None
     try:
         from PIL import Image
     except Exception:
@@ -313,8 +359,23 @@ def _image_preview_from_url(url: str, *, image_width: int, image_height: int, ma
                 "Accept": "image/*,*/*;q=0.8",
             },
         )
-        with urlopen(request, timeout=6) as response:
-            payload = response.read(2_000_000)
+        context = ssl.create_default_context()
+        try:
+            import certifi
+
+            context.load_verify_locations(certifi.where())
+        except Exception:
+            pass
+        try:
+            with urlopen(request, timeout=6, context=context) as response:
+                payload = response.read(2_000_000)
+        except URLError as exc:
+            reason = str(getattr(exc, "reason", "") or "")
+            if "CERTIFICATE_VERIFY_FAILED" not in reason:
+                raise
+            with urlopen(request, timeout=6, context=ssl._create_unverified_context()) as response:
+                payload = response.read(2_000_000)
+            IMAGE_PREVIEW_NOTE_CACHE[cache_key] = "TLS certificate check failed; preview fetched insecurely"
         image = Image.open(io.BytesIO(payload)).convert("L")
     except HTTPError as exc:
         IMAGE_PREVIEW_CACHE[cache_key] = None
@@ -332,60 +393,6 @@ def _image_preview_from_url(url: str, *, image_width: int, image_height: int, ma
     lines = _image_to_ascii(image, max_width=max(8, min(max_width, image_width)), max_height=max(4, min(image_height, 18)))
     IMAGE_PREVIEW_CACHE[cache_key] = lines
     IMAGE_PREVIEW_ERROR_CACHE[cache_key] = None
-    return lines
-
-
-def _latex_preview_from_expression(expression: str, *, max_width: int) -> list[str] | None:
-    expr = expression.strip()
-    cache_key = (expr, max_width)
-    if cache_key in LATEX_PREVIEW_CACHE:
-        return LATEX_PREVIEW_CACHE[cache_key]
-    try:
-        from PIL import Image, ImageChops
-        from matplotlib.figure import Figure
-        from matplotlib.backends.backend_agg import FigureCanvasAgg
-    except Exception:
-        LATEX_PREVIEW_CACHE[cache_key] = None
-        return None
-    if not expr:
-        LATEX_PREVIEW_CACHE[cache_key] = None
-        return None
-    try:
-        figure = Figure(figsize=(8, 2.5), dpi=200)
-        canvas = FigureCanvasAgg(figure)
-        ax = figure.add_subplot(111)
-        ax.axis("off")
-        ax.text(
-            0.02,
-            0.5,
-            f"${expr}$",
-            fontsize=24,
-            va="center",
-            ha="left",
-            color="black",
-        )
-        canvas.draw()
-        width, height = canvas.get_width_height()
-        rgba = Image.frombuffer("RGBA", (width, height), canvas.buffer_rgba(), "raw", "RGBA", 0, 1)
-        white = Image.new("RGBA", rgba.size, "white")
-        white.alpha_composite(rgba)
-        image = white.convert("L")
-        # Crop whitespace around rendered formula.
-        inverted = ImageChops.invert(image)
-        bbox = inverted.getbbox()
-        if bbox:
-            image = image.crop(bbox)
-        lines = _binary_ascii_from_image(
-            image,
-            max_width=max(24, min(max_width, 56)),
-            max_height=10,
-        )
-        if not lines:
-            return None
-    except Exception:
-        LATEX_PREVIEW_CACHE[cache_key] = None
-        return None
-    LATEX_PREVIEW_CACHE[cache_key] = lines
     return lines
 
 
@@ -579,6 +586,8 @@ def render_rich_text(
         image = _parse_image_line(line)
         if image is not None:
             alt, url = image
+            preview_max_width = max(14, min(width, image_width))
+            preview_key = (url, image_width, image_height, preview_max_width)
             styled_lines.extend(
                 [
                     [(f"Image: {alt}", "image")],
@@ -590,16 +599,19 @@ def render_rich_text(
                 url,
                 image_width=image_width,
                 image_height=image_height,
-                max_width=max(14, min(width, image_width)),
+                max_width=preview_max_width,
             )
+            note = IMAGE_PREVIEW_NOTE_CACHE.get(preview_key)
+            if note:
+                styled_lines.append([(f"Preview note: {note}", "image")])
             if preview is None:
-                reason = IMAGE_PREVIEW_ERROR_CACHE.get((url, image_width, image_height, max(14, min(width, image_width))))
+                reason = IMAGE_PREVIEW_ERROR_CACHE.get(preview_key)
                 if reason:
                     styled_lines.append([(f"Preview unavailable: {reason}", "image")])
                 preview = _image_preview_placeholder(
                     image_width,
                     image_height,
-                    max_width=max(14, min(width, image_width)),
+                    max_width=preview_max_width,
                 )
             for preview_line in preview:
                 styled_lines.append([(preview_line, "image")])
@@ -617,14 +629,9 @@ def render_rich_text(
                 index += 1
             latex_text = "\n".join(part for part in latex_parts if part).strip()
             styled_lines.append([("Math", "muted")])
-            ascii_preview = _latex_preview_from_expression(latex_text, max_width=max(12, width - 1)) if render_latex else None
-            if ascii_preview:
-                for latex_line in ascii_preview:
-                    styled_lines.extend(_wrap_spans([(latex_line, "latex")], width))
-            else:
-                latex_display = _latex_to_text(latex_text) if render_latex else latex_text
-                for latex_line in (latex_display.splitlines() or [""]):
-                    styled_lines.extend(_wrap_spans([(latex_line, "latex")], width))
+            latex_display = _latex_to_text(latex_text) if render_latex else latex_text
+            for latex_line in (latex_display.splitlines() or [""]):
+                styled_lines.extend(_wrap_spans([(latex_line, "latex")], width))
             index += 1
             continue
         if stripped == "":

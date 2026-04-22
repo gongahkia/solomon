@@ -84,6 +84,7 @@ def _print_rich(text: str, config: dict) -> None:
         image_height=int(tui_config.get("image_height", 24)),
         syntax_highlighting=bool(tui_config.get("syntax_highlighting", True)),
         render_latex=bool(tui_config.get("render_latex", True)),
+        show_image_warnings=bool(tui_config.get("show_image_warnings", False)),
     )
     for line in styled_lines_to_ansi(styled):
         print(line)

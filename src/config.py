@@ -24,6 +24,7 @@ DEFAULT_CONFIG = {
         "show_import_preview": True,
         "syntax_highlighting": True,
         "render_latex": True,
+        "show_image_warnings": False,
         "native_image_rendering": True,
         "image_width": 72,
         "image_height": 24,
@@ -112,6 +113,7 @@ def normalize_config(config: dict | None) -> dict:
     normalized["tui"]["show_import_preview"] = _coerce_bool(tui.get("show_import_preview"), True)
     normalized["tui"]["syntax_highlighting"] = _coerce_bool(tui.get("syntax_highlighting"), True)
     normalized["tui"]["render_latex"] = _coerce_bool(tui.get("render_latex"), True)
+    normalized["tui"]["show_image_warnings"] = _coerce_bool(tui.get("show_image_warnings"), False)
     normalized["tui"]["native_image_rendering"] = _coerce_bool(tui.get("native_image_rendering"), True)
     normalized["tui"]["enable_card_voting"] = _coerce_bool(tui.get("enable_card_voting"), True)
     normalized["tui"]["image_width"] = _coerce_int(tui.get("image_width"), 72, 1)

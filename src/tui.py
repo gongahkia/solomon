@@ -43,7 +43,11 @@ def run_app(main_fn):
         init_colors()
         curses.curs_set(0)
         main_fn(stdscr)
-    curses.wrapper(_wrapper)
+    try:
+        curses.wrapper(_wrapper)
+    except KeyboardInterrupt:
+        # Allow Ctrl-C to exit cleanly without a Python traceback.
+        return
 
 def _item_matches_query(item, query):
     if not query:

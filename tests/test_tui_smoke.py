@@ -68,6 +68,10 @@ class TUISmokeTests(unittest.TestCase):
             )
         self.assertEqual(choice, 1)
 
+    def test_run_app_handles_keyboard_interrupt(self):
+        with patch("curses.wrapper", side_effect=KeyboardInterrupt):
+            tui.run_app(lambda _stdscr: None)
+
     def test_render_review_session_logs_history(self):
         cards = [new_card("Question", "Answer")]
         screen = FakeScreen([10, ord(" "), ord("3"), 10])

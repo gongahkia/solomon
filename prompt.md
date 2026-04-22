@@ -7,6 +7,23 @@ Senko now supports two formats: `.sko` (native JSON schema v3) and `.csv`. TXT i
 - **`.sko`** — recommended. Carries full SRS metadata, tags as a real array, and passes `senko validate` directly.
 - **`.csv`** — convenient for hand-editing in spreadsheets; mapped through `infer_csv_mapping` on import.
 
+## Rich Content Support (TUI + CLI Review)
+
+Senko supports rich card content in `card_name`, `card_info`, and `card_add_info`.
+
+- **Code blocks / syntax highlighting**
+  - Use fenced code blocks: ```` ```java ... ``` ```` for Java (or plain fences for generic code).
+  - Unfenced Java-like snippets are also auto-detected, but fenced blocks are preferred for consistency.
+- **LaTeX-style math formatting**
+  - Inline math: `$...$` or `\(...\)`.
+  - Block math: `$$...$$`.
+  - Rendering is terminal-friendly text formatting (not full TeX layout).
+- **Image URLs**
+  - Use Markdown image syntax: `![Alt text](https://.../image.png)` or a direct image URL on its own line.
+  - Auto-size uses user config (`tui.image_width`, `tui.image_height`).
+  - In supported terminals (Ghostty/kitty protocol), Senko renders native inline images; otherwise it falls back to ASCII preview.
+  - Non-fatal image warnings are hidden by default (`tui.show_image_warnings=false`).
+
 ## Instructions
 
 1. Pick the format you want (`.sko` or `.csv`).
@@ -33,6 +50,10 @@ GLOBAL RULES
 - `card_name` = prompt/front (term, question, or cue). Keep it short.
 - `card_info` = answer/back (definition, translation, explanation). One-liner preferred.
 - `card_add_info` = optional hint/mnemonic/example/source. May be "".
+- Rich formatting is allowed inside `card_name`, `card_info`, and `card_add_info`:
+  - Java/code: fenced blocks with language labels when possible.
+  - Math: inline `$...$` or block `$$...$$`.
+  - Images: `![Alt](https://...)` or direct image URL line.
 - `tags` = JSON array of 0–5 lowercase strings, hyphen-or-underscore-joined.
 - No duplicate `card_name` values within the set.
 - `id` is a unique string per card: "1", "2", ... through "<NUM_CARDS>".
@@ -104,6 +125,12 @@ ROW RULES
 - `card_name` = prompt/front. Required, non-empty, unique within the set.
 - `card_info` = answer/back. Required.
 - `card_add_info` = optional hint/mnemonic/example. May be empty.
+- Rich formatting is allowed in `card_name`, `card_info`, and `card_add_info`:
+  - code fences (for example ` ```java ... ``` `),
+  - inline math `$...$` / `\(...\)`,
+  - block math `$$...$$`,
+  - image URLs via `![Alt](https://...)` or direct image URL line.
+- If a field contains newlines (for code fences or block math), wrap it in CSV quotes and preserve the newlines.
 - `card_date` = leave empty (Senko treats blank as "new, due now").
 - `tags` = 0–5 lowercase labels separated by semicolons (`verb;common`). Do NOT use commas inside tags — they will break CSV parsing. Leave empty if none.
 - `suspended` = `false` for every generated card.
@@ -118,6 +145,10 @@ CONTENT QUALITY BAR
 - Concept decks: `card_name` = question; `card_info` = concise answer; `card_add_info` = rationale or formula.
 - Avoid cards whose answer appears inside the prompt.
 - Avoid yes/no cards unless the discrimination is the point.
+- When generating programming/math decks, prefer rich formatting that matches the content:
+  - code questions include executable snippets or short blocks
+  - formula cards use inline or block math tokens
+  - diagram cards include a stable image URL in `card_add_info`
 
 OUTPUT
 Return ONLY the CSV text (header row plus <NUM_CARDS> data rows). Nothing else.

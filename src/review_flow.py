@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import curses
+import re
 
 from deck_ops import card_detail, card_status
 from rich_content import render_rich_text
@@ -17,6 +18,7 @@ from review_session import (
 from screen_common import add_line, show_message
 from schema import is_leech, touch_card
 from srs import active_cards, cards_due
+from terminal_images import clear_native_images, render_native_image, terminal_supports_graphics
 from tui import COLORS, select_from_list
 
 
@@ -61,6 +63,91 @@ def _draw_styled_lines(
         add_line(stdscr, row, 0, "...", curses.color_pair(COLORS["muted"]))
         row += 1
     return (row, truncated)
+
+
+AUTO_SIZE_RE = re.compile(r"^Auto-size:\s*(\d+)x(\d+)\s*$")
+
+
+def _parse_auto_size(line: str) -> tuple[int, int] | None:
+    match = AUTO_SIZE_RE.match(line.strip())
+    if not match:
+        return None
+    return (max(1, int(match.group(1))), max(1, int(match.group(2))))
+
+
+def _native_image_enabled(config: dict) -> bool:
+    if not bool(config.get("tui", {}).get("native_image_rendering", True)):
+        return False
+    return terminal_supports_graphics()
+
+
+def _collect_native_image_requests(
+    styled_lines: list[list[tuple[str, str]]],
+    *,
+    start_row: int,
+    end_row_exclusive: int,
+    default_width: int,
+    default_height: int,
+) -> list[dict]:
+    requests = []
+    row = start_row
+    pending_url = None
+    pending_width = default_width
+    pending_height = default_height
+    ready_for_preview = False
+    for line in styled_lines:
+        if row >= end_row_exclusive:
+            break
+        raw_text = "".join(text for text, _style in line)
+        stripped = raw_text.strip()
+        if stripped.startswith("URL: "):
+            pending_url = stripped[5:].strip()
+            pending_width = default_width
+            pending_height = default_height
+            ready_for_preview = False
+        elif pending_url and stripped.startswith("Auto-size:"):
+            parsed = _parse_auto_size(stripped)
+            if parsed is not None:
+                pending_width, pending_height = parsed
+            ready_for_preview = True
+        elif pending_url and stripped.startswith("Preview note:"):
+            pass
+        elif pending_url and stripped.startswith("Preview unavailable:"):
+            pass
+        elif pending_url and ready_for_preview and raw_text:
+            requests.append(
+                {
+                    "url": pending_url,
+                    "row": row,
+                    "col": 0,
+                    "width": pending_width,
+                    "height": pending_height,
+                }
+            )
+            pending_url = None
+            ready_for_preview = False
+        row += 1
+    return requests
+
+
+def _render_native_image_requests(stdscr, requests: list[dict], config: dict) -> None:
+    if not requests or not _native_image_enabled(config):
+        return
+    max_y, max_x = stdscr.getmaxyx()
+    for request in requests:
+        row = int(request.get("row", 0))
+        col = int(request.get("col", 0))
+        if row >= max_y - 1 or col >= max_x - 1:
+            continue
+        width = max(4, min(int(request.get("width", 40)), max_x - col - 1))
+        height = max(2, min(int(request.get("height", 12)), max_y - row - 2))
+        render_native_image(
+            str(request.get("url", "")),
+            row=row,
+            col=col,
+            width_cells=width,
+            height_cells=height,
+        )
 
 
 def _rich_lines(text: str, config: dict, width: int) -> list[list[tuple[str, str]]]:
@@ -114,6 +201,8 @@ def _review_mode_screen(stdscr, set_name: str, cards: list[dict]) -> str | None:
 
 def _draw_card_front(stdscr, set_name: str, card: dict, index: int, total_cards: int, can_undo: bool, config: dict) -> int:
     while True:
+        if _native_image_enabled(config):
+            clear_native_images()
         stdscr.erase()
         max_y, max_x = stdscr.getmaxyx()
         detail, color = card_detail(card, config)
@@ -122,6 +211,13 @@ def _draw_card_front(stdscr, set_name: str, card: dict, index: int, total_cards:
         add_line(stdscr, 1, 0, detail, curses.color_pair(color))
         content_top = max(3, max_y // 3)
         question_lines = _rich_lines(card.get("card_name", ""), config, max_x - 1)
+        image_requests = _collect_native_image_requests(
+            question_lines,
+            start_row=content_top,
+            end_row_exclusive=max_y - 2,
+            default_width=int(config.get("tui", {}).get("image_width", 72)),
+            default_height=int(config.get("tui", {}).get("image_height", 24)),
+        )
         _draw_styled_lines(
             stdscr,
             question_lines,
@@ -134,6 +230,7 @@ def _draw_card_front(stdscr, set_name: str, card: dict, index: int, total_cards:
             footer += "  [u] Undo last"
         add_line(stdscr, max_y - 1, 0, footer, curses.color_pair(COLORS["muted"]))
         stdscr.refresh()
+        _render_native_image_requests(stdscr, image_requests, config)
         key = stdscr.getch()
         if key in (ord(" "), 10, 13, ord("q"), ord("Q"), ord("u"), ord("U")):
             return key
@@ -142,9 +239,21 @@ def _draw_card_front(stdscr, set_name: str, card: dict, index: int, total_cards:
 def _draw_card_back(stdscr, set_name: str, card: dict, index: int, total_cards: int, config: dict, session: dict) -> int:
     voting_enabled = bool(config.get("tui", {}).get("enable_card_voting", True))
     while True:
+        if _native_image_enabled(config):
+            clear_native_images()
         stdscr.erase()
         max_y, max_x = stdscr.getmaxyx()
+        image_requests: list[dict] = []
         question_lines = _rich_lines(card.get("card_name", ""), config, max_x - 1)
+        image_requests.extend(
+            _collect_native_image_requests(
+                question_lines,
+                start_row=0,
+                end_row_exclusive=1,
+                default_width=int(config.get("tui", {}).get("image_width", 72)),
+                default_height=int(config.get("tui", {}).get("image_height", 24)),
+            )
+        )
         _draw_styled_lines(
             stdscr,
             question_lines,
@@ -167,9 +276,19 @@ def _draw_card_back(stdscr, set_name: str, card: dict, index: int, total_cards: 
             extra += f" | vote:{vote_label}"
         add_line(stdscr, 1, 0, extra, curses.color_pair(color))
         row = 3
+        answer_lines = _rich_lines(card.get("card_info", ""), config, max_x - 1)
+        image_requests.extend(
+            _collect_native_image_requests(
+                answer_lines,
+                start_row=row,
+                end_row_exclusive=max_y - 4,
+                default_width=int(config.get("tui", {}).get("image_width", 72)),
+                default_height=int(config.get("tui", {}).get("image_height", 24)),
+            )
+        )
         row, _ = _draw_styled_lines(
             stdscr,
-            _rich_lines(card.get("card_info", ""), config, max_x - 1),
+            answer_lines,
             start_row=row,
             end_row_exclusive=max_y - 4,
             default_style="default",
@@ -179,9 +298,19 @@ def _draw_card_back(stdscr, set_name: str, card: dict, index: int, total_cards: 
             row += 1
             add_line(stdscr, row, 0, "Notes:", curses.color_pair(COLORS["muted"]))
             row += 1
+            notes_lines = _rich_lines(add_info, config, max_x - 1)
+            image_requests.extend(
+                _collect_native_image_requests(
+                    notes_lines,
+                    start_row=row,
+                    end_row_exclusive=max_y - 4,
+                    default_width=int(config.get("tui", {}).get("image_width", 72)),
+                    default_height=int(config.get("tui", {}).get("image_height", 24)),
+                )
+            )
             row, _ = _draw_styled_lines(
                 stdscr,
-                _rich_lines(add_info, config, max_x - 1),
+                notes_lines,
                 start_row=row,
                 end_row_exclusive=max_y - 4,
                 default_style="muted",
@@ -200,6 +329,7 @@ def _draw_card_back(stdscr, set_name: str, card: dict, index: int, total_cards: 
             curses.color_pair(COLORS["prompt"]),
         )
         stdscr.refresh()
+        _render_native_image_requests(stdscr, image_requests, config)
         key = stdscr.getch()
         if voting_enabled and key == ord("+"):
             set_vote(session, card, 1)

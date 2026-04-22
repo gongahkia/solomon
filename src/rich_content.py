@@ -209,6 +209,9 @@ SUBSCRIPT_MAP = {
 IMAGE_PREVIEW_CACHE: dict[tuple[str, int, int, int], list[str] | None] = {}
 IMAGE_PREVIEW_ERROR_CACHE: dict[tuple[str, int, int, int], str | None] = {}
 IMAGE_PREVIEW_NOTE_CACHE: dict[tuple[str, int, int, int], str | None] = {}
+IMAGE_PAYLOAD_CACHE: dict[str, bytes | None] = {}
+IMAGE_FETCH_ERROR_CACHE: dict[str, str | None] = {}
+IMAGE_FETCH_NOTE_CACHE: dict[str, str | None] = {}
 
 
 def _is_image_url(url: str) -> bool:
@@ -218,6 +221,61 @@ def _is_image_url(url: str) -> bool:
         if path.endswith(ext):
             return True
     return False
+
+
+def fetch_image_payload(url: str, *, max_bytes: int = 2_000_000) -> tuple[bytes | None, str | None, str | None]:
+    if url in IMAGE_PAYLOAD_CACHE:
+        return (
+            IMAGE_PAYLOAD_CACHE[url],
+            IMAGE_FETCH_ERROR_CACHE.get(url),
+            IMAGE_FETCH_NOTE_CACHE.get(url),
+        )
+    request = Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+            "Accept": "image/*,*/*;q=0.8",
+        },
+    )
+    context = ssl.create_default_context()
+    try:
+        import certifi
+
+        context.load_verify_locations(certifi.where())
+    except Exception:
+        pass
+    note = None
+    try:
+        try:
+            with urlopen(request, timeout=6, context=context) as response:
+                payload = response.read(max_bytes)
+        except URLError as exc:
+            reason = str(getattr(exc, "reason", "") or "")
+            if "CERTIFICATE_VERIFY_FAILED" not in reason:
+                raise
+            with urlopen(request, timeout=6, context=ssl._create_unverified_context()) as response:
+                payload = response.read(max_bytes)
+            note = "TLS certificate check failed; preview fetched insecurely"
+    except HTTPError as exc:
+        IMAGE_PAYLOAD_CACHE[url] = None
+        IMAGE_FETCH_ERROR_CACHE[url] = f"HTTP {exc.code}"
+        IMAGE_FETCH_NOTE_CACHE[url] = None
+        return (None, IMAGE_FETCH_ERROR_CACHE[url], None)
+    except URLError as exc:
+        IMAGE_PAYLOAD_CACHE[url] = None
+        reason = str(getattr(exc, "reason", "") or "").strip()
+        IMAGE_FETCH_ERROR_CACHE[url] = f"Network error ({reason})" if reason else "Network error"
+        IMAGE_FETCH_NOTE_CACHE[url] = None
+        return (None, IMAGE_FETCH_ERROR_CACHE[url], None)
+    except Exception:
+        IMAGE_PAYLOAD_CACHE[url] = None
+        IMAGE_FETCH_ERROR_CACHE[url] = "Network error"
+        IMAGE_FETCH_NOTE_CACHE[url] = None
+        return (None, IMAGE_FETCH_ERROR_CACHE[url], None)
+    IMAGE_PAYLOAD_CACHE[url] = payload
+    IMAGE_FETCH_ERROR_CACHE[url] = None
+    IMAGE_FETCH_NOTE_CACHE[url] = note
+    return (payload, None, note)
 
 
 def _parse_image_line(line: str) -> tuple[str, str] | None:
@@ -351,41 +409,16 @@ def _image_preview_from_url(url: str, *, image_width: int, image_height: int, ma
         IMAGE_PREVIEW_CACHE[cache_key] = None
         IMAGE_PREVIEW_ERROR_CACHE[cache_key] = "Pillow not installed"
         return None
+    payload, fetch_error, fetch_note = fetch_image_payload(url)
+    if payload is None:
+        IMAGE_PREVIEW_CACHE[cache_key] = None
+        IMAGE_PREVIEW_ERROR_CACHE[cache_key] = fetch_error
+        IMAGE_PREVIEW_NOTE_CACHE[cache_key] = fetch_note
+        return None
+    if fetch_note:
+        IMAGE_PREVIEW_NOTE_CACHE[cache_key] = fetch_note
     try:
-        request = Request(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-                "Accept": "image/*,*/*;q=0.8",
-            },
-        )
-        context = ssl.create_default_context()
-        try:
-            import certifi
-
-            context.load_verify_locations(certifi.where())
-        except Exception:
-            pass
-        try:
-            with urlopen(request, timeout=6, context=context) as response:
-                payload = response.read(2_000_000)
-        except URLError as exc:
-            reason = str(getattr(exc, "reason", "") or "")
-            if "CERTIFICATE_VERIFY_FAILED" not in reason:
-                raise
-            with urlopen(request, timeout=6, context=ssl._create_unverified_context()) as response:
-                payload = response.read(2_000_000)
-            IMAGE_PREVIEW_NOTE_CACHE[cache_key] = "TLS certificate check failed; preview fetched insecurely"
         image = Image.open(io.BytesIO(payload)).convert("L")
-    except HTTPError as exc:
-        IMAGE_PREVIEW_CACHE[cache_key] = None
-        IMAGE_PREVIEW_ERROR_CACHE[cache_key] = f"HTTP {exc.code}"
-        return None
-    except URLError as exc:
-        IMAGE_PREVIEW_CACHE[cache_key] = None
-        reason = str(getattr(exc, "reason", "") or "").strip()
-        IMAGE_PREVIEW_ERROR_CACHE[cache_key] = f"Network error ({reason})" if reason else "Network error"
-        return None
     except Exception:
         IMAGE_PREVIEW_CACHE[cache_key] = None
         IMAGE_PREVIEW_ERROR_CACHE[cache_key] = "Image decode failed"

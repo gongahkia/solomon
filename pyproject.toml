@@ -24,6 +24,10 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Topic :: Education",
 ]
+dependencies = [
+  "Pillow>=10.0.0",
+  "matplotlib>=3.8.0",
+]
 
 [project.scripts]
 senko = "main:main"

@@ -31,6 +31,7 @@ def config_editor(
         ("tui", "show_import_preview", "bool"),
         ("tui", "syntax_highlighting", "bool"),
         ("tui", "render_latex", "bool"),
+        ("tui", "show_image_warnings", "bool"),
         ("tui", "native_image_rendering", "bool"),
         ("tui", "image_width", "int"),
         ("tui", "image_height", "int"),

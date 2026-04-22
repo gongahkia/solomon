@@ -26,6 +26,7 @@ class ConfigTests(unittest.TestCase):
                     "show_import_preview": "true",
                     "syntax_highlighting": "false",
                     "render_latex": "1",
+                    "show_image_warnings": "on",
                     "native_image_rendering": "off",
                     "enable_card_voting": "on",
                     "image_width": "80",
@@ -45,6 +46,7 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(normalized["tui"]["show_import_preview"])
         self.assertFalse(normalized["tui"]["syntax_highlighting"])
         self.assertTrue(normalized["tui"]["render_latex"])
+        self.assertTrue(normalized["tui"]["show_image_warnings"])
         self.assertFalse(normalized["tui"]["native_image_rendering"])
         self.assertTrue(normalized["tui"]["enable_card_voting"])
         self.assertEqual(normalized["tui"]["image_width"], 80)

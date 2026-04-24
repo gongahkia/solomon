@@ -6,6 +6,7 @@ pub mod orders;
 pub mod protocol;
 pub mod replay;
 pub mod storage;
+pub mod weather;
 
 pub use daemon::{DaemonState, DaemonStatus};
 pub use market::{LiveMarketSnapshot, MarketEvent, MarketStateCache};

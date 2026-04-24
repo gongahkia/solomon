@@ -4,6 +4,7 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from stonks_cli.polymarket.lifecycle import LiveOrderManager
 from stonks_cli.polymarket.stream import MarketStateCache
 
 MARKET_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
@@ -100,6 +101,61 @@ class MarketWebSocketClient:
                 if max_messages is not None and count >= max_messages:
                     break
         return snapshots
+
+
+class UserWebSocketClient:
+    def __init__(
+        self,
+        *,
+        auth: dict[str, str],
+        market_ids: list[str] | None = None,
+        asset_ids: list[str] | None = None,
+        url: str = USER_WS_URL,
+        connector: Callable[[str], Awaitable[object]] | None = None,
+    ):
+        self._subscription = build_user_subscription(auth=auth, market_ids=market_ids, asset_ids=asset_ids)
+        self._url = url
+        self._connector = connector or _connect_ws
+
+    async def run_once(
+        self,
+        *,
+        order_manager: LiveOrderManager,
+        max_messages: int | None = None,
+    ) -> list[dict[str, Any]]:
+        updates: list[dict[str, Any]] = []
+        ws = await self._connector(self._url)
+        async with ws:
+            await ws.send(json.dumps(self._subscription))
+            count = 0
+            async for raw in ws:
+                for event in parse_ws_message(raw):
+                    record = order_manager.apply_user_event(event)
+                    updates.append({"event": event, "record": None if record is None else asdict_record(record)})
+                count += 1
+                if max_messages is not None and count >= max_messages:
+                    break
+        return updates
+
+
+def asdict_record(record) -> dict[str, Any]:
+    return {
+        "order_id": record.order_id,
+        "token_id": record.token_id,
+        "market_id": record.market_id,
+        "slug": record.slug,
+        "outcome": record.outcome,
+        "side": record.side,
+        "price": record.price,
+        "shares": record.shares,
+        "status": record.status,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+        "remaining_shares": record.remaining_shares,
+        "filled_shares": record.filled_shares,
+        "cancel_reason": record.cancel_reason,
+        "reason": record.reason,
+    }
 
 
 async def _connect_ws(url: str):

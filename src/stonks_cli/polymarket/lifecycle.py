@@ -155,26 +155,113 @@ class LiveOrderManager:
         return record
 
     def apply_user_event(self, event: dict[str, Any], *, now: str | None = None) -> LiveOrderRecord | None:
+        event_type = str(event.get("event_type") or "").lower()
+        if event_type == "trade":
+            updated = self._apply_trade_event(event, now=now)
+            if updated is not None:
+                save_live_orders(self.records())
+            return updated
+        updated = self._apply_order_event(event, now=now)
+        if updated is not None:
+            save_live_orders(self.records())
+        return updated
+
+    def _apply_order_event(self, event: dict[str, Any], *, now: str | None = None) -> LiveOrderRecord | None:
         order_id = _event_order_id(event)
-        if not order_id or order_id not in self._records:
+        if not order_id:
             return None
-        record = self._records[order_id]
+        record = self._records.get(order_id)
         ts = now or str(event.get("timestamp") or event.get("ts") or utc_now_iso())
-        status = _event_status(event) or record.status
-        filled_shares = _as_float(event.get("filled_size", event.get("filledSize")))
+        status = _event_status(event) or "OPEN"
+        original_size = _as_float(event.get("original_size", event.get("size", event.get("originalSize"))))
+        size_matched = _as_float(event.get("size_matched", event.get("filled_size", event.get("sizeMatched"))))
         remaining_shares = _as_float(event.get("remaining_size", event.get("remainingSize")))
-        if filled_shares is None and remaining_shares is not None:
-            filled_shares = max(0.0, round(record.shares - remaining_shares, 8))
-        if remaining_shares is None and filled_shares is not None:
-            remaining_shares = max(0.0, round(record.shares - filled_shares, 8))
-        updated = replace(
-            record,
-            status=status,
-            updated_at=ts,
-            filled_shares=record.filled_shares if filled_shares is None else filled_shares,
-            remaining_shares=record.remaining_shares if remaining_shares is None else remaining_shares,
-        )
-        self._records[order_id] = updated
+        if original_size is not None and size_matched is not None:
+            remaining_shares = max(0.0, round(original_size - size_matched, 8))
+        if record is None:
+            shares = original_size if original_size is not None else _as_float(event.get("size")) or 0.0
+            record = LiveOrderRecord(
+                order_id=order_id,
+                token_id=str(event.get("asset_id") or event.get("assetId") or ""),
+                market_id=str(event.get("market") or ""),
+                slug=None,
+                outcome=event.get("outcome"),
+                side=str(event.get("side") or ""),
+                price=_as_float(event.get("price")) or 0.0,
+                shares=shares,
+                status=status,
+                created_at=ts,
+                updated_at=ts,
+                remaining_shares=shares if remaining_shares is None else remaining_shares,
+                filled_shares=0.0 if size_matched is None else size_matched,
+            )
+        else:
+            record = replace(
+                record,
+                status=status,
+                updated_at=ts,
+                filled_shares=record.filled_shares if size_matched is None else size_matched,
+                remaining_shares=record.remaining_shares if remaining_shares is None else remaining_shares,
+            )
+        self._records[order_id] = record
+        return record
+
+    def _apply_trade_event(self, event: dict[str, Any], *, now: str | None = None) -> LiveOrderRecord | None:
+        ts = now or str(event.get("timestamp") or event.get("last_update") or utc_now_iso())
+        status = str(event.get("status") or "MATCHED")
+        for maker_order in event.get("maker_orders") or []:
+            if not isinstance(maker_order, dict):
+                continue
+            order_id = str(maker_order.get("order_id") or "").strip()
+            if not order_id or order_id not in self._records:
+                continue
+            record = self._records[order_id]
+            matched = _as_float(maker_order.get("matched_amount")) or 0.0
+            filled = min(record.shares, round(record.filled_shares + matched, 8))
+            remaining = max(0.0, round(record.shares - filled, 8))
+            updated = replace(
+                record,
+                status=status,
+                updated_at=ts,
+                filled_shares=filled,
+                remaining_shares=remaining,
+            )
+            self._records[order_id] = updated
+            return updated
+
+        taker_order_id = str(event.get("taker_order_id") or "").strip()
+        if taker_order_id and taker_order_id in self._records:
+            record = self._records[taker_order_id]
+            size = _as_float(event.get("size")) or record.shares
+            filled = min(record.shares, size)
+            updated = replace(
+                record,
+                status=status,
+                updated_at=ts,
+                filled_shares=filled,
+                remaining_shares=max(0.0, round(record.shares - filled, 8)),
+            )
+            self._records[taker_order_id] = updated
+            return updated
+        return None
+
+    def sync_open_orders(self, open_orders: list[dict[str, Any]], *, now: str | None = None) -> list[LiveOrderRecord]:
+        updated: list[LiveOrderRecord] = []
+        seen: set[str] = set()
+        for order in open_orders:
+            if not isinstance(order, dict):
+                continue
+            record = self._apply_order_event(order, now=now)
+            if record is not None:
+                seen.add(record.order_id)
+                updated.append(record)
+        for order_id, record in list(self._records.items()):
+            if record.status in {"OPEN", "PLACEMENT", "UPDATE", "LIVE", "PARTIAL"} and order_id not in seen:
+                self._records[order_id] = replace(
+                    record,
+                    status="STALE_LOCAL",
+                    updated_at=now or utc_now_iso(),
+                )
         save_live_orders(self.records())
         return updated
 

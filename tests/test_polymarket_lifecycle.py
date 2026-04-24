@@ -133,3 +133,88 @@ def test_live_order_manager_applies_fill_event(monkeypatch, tmp_path):
     assert updated.status == "FILLED"
     assert updated.filled_shares == 12
     assert updated.remaining_shares == 0
+
+
+def test_live_order_manager_syncs_open_order_snapshot(monkeypatch, tmp_path):
+    from stonks_cli.polymarket import lifecycle
+
+    monkeypatch.setattr(lifecycle, "default_state_dir", lambda: tmp_path)
+
+    cfg = AppConfig(polymarket=PolymarketConfig(enabled=True, paper=False))
+    manager = LiveOrderManager(cfg)
+    manager.register_submitted(
+        "order-1",
+        build_live_order_request(
+            cfg,
+            ExecutionOrder(
+                token_id="YES1",
+                market_id="1",
+                slug="btc-higher",
+                outcome="YES",
+                side="BUY",
+                price=0.58,
+                shares=12,
+            ),
+            LiveMarketSnapshot(token_id="YES1", best_bid=0.57, best_ask=0.60, tick_size=0.01),
+        ),
+        now="2026-04-24T00:00:00Z",
+    )
+
+    synced = manager.sync_open_orders(
+        [
+            {
+                "id": "order-1",
+                "asset_id": "YES1",
+                "market": "1",
+                "side": "BUY",
+                "price": "0.58",
+                "original_size": "12",
+                "size_matched": "4",
+                "status": "OPEN",
+            }
+        ],
+        now="2026-04-24T00:00:10Z",
+    )
+
+    assert len(synced) == 1
+    assert synced[0].filled_shares == 4
+    assert synced[0].remaining_shares == 8
+
+
+def test_live_order_manager_applies_trade_maker_fill(monkeypatch, tmp_path):
+    from stonks_cli.polymarket import lifecycle
+
+    monkeypatch.setattr(lifecycle, "default_state_dir", lambda: tmp_path)
+
+    cfg = AppConfig(polymarket=PolymarketConfig(enabled=True, paper=False))
+    manager = LiveOrderManager(cfg)
+    manager.register_submitted(
+        "order-1",
+        build_live_order_request(
+            cfg,
+            ExecutionOrder(
+                token_id="YES1",
+                market_id="1",
+                slug="btc-higher",
+                outcome="YES",
+                side="SELL",
+                price=0.61,
+                shares=12,
+            ),
+            LiveMarketSnapshot(token_id="YES1", best_bid=0.57, best_ask=0.63, tick_size=0.01),
+        ),
+        now="2026-04-24T00:00:00Z",
+    )
+
+    updated = manager.apply_user_event(
+        {
+            "event_type": "trade",
+            "status": "MATCHED",
+            "maker_orders": [{"order_id": "order-1", "matched_amount": "5"}],
+            "timestamp": "2026-04-24T00:00:05Z",
+        }
+    )
+
+    assert updated is not None
+    assert updated.filled_shares == 5
+    assert updated.remaining_shares == 7

@@ -76,6 +76,9 @@ class PolymarketConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     enabled: bool = Field(default=False)
     private_key_env: str = Field(default="POLYMARKET_PRIVATE_KEY")
+    api_key_env: str = Field(default="POLYMARKET_API_KEY")
+    api_secret_env: str = Field(default="POLYMARKET_API_SECRET")
+    api_passphrase_env: str = Field(default="POLYMARKET_API_PASSPHRASE")
     signature_type: Literal["proxy", "eoa", "gnosis-safe"] = "proxy"
     chain_id: int = Field(default=137, ge=1)
     scanner_limit: int = Field(default=200, ge=1, le=1000)

@@ -1,3 +1,4 @@
+pub mod book_math;
 pub mod control;
 pub mod daemon;
 pub mod event_trigger;

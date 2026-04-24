@@ -2095,3 +2095,10 @@ def do_polymarket_journal(limit: int = 100) -> list[dict[str, object]]:
     from stonks_cli.polymarket.journal import read_journal
 
     return read_journal(limit=limit)
+
+
+def do_polymarket_preflight(*, deep_auth: bool = False) -> dict[str, object]:
+    cfg = load_config()
+    from stonks_cli.polymarket.preflight import run_preflight
+
+    return run_preflight(cfg, deep_auth=deep_auth)

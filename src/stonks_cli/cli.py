@@ -41,6 +41,7 @@ from stonks_cli.commands import (
     do_polymarket_paper_init,
     do_polymarket_paper_sell,
     do_polymarket_paper_status,
+    do_polymarket_preflight,
     do_polymarket_guard_status,
     do_polymarket_runtime_halt,
     do_polymarket_runtime_loop,
@@ -988,6 +989,18 @@ def polymarket_journal(
     """Show the recent Polymarket runtime journal."""
     try:
         data = do_polymarket_journal(limit=limit)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_app.command("doctor")
+def polymarket_doctor(
+    deep_auth: bool = typer.Option(False, "--deep-auth", help="Attempt authenticated client initialization"),
+) -> None:
+    """Run pre-live Polymarket environment and safety checks."""
+    try:
+        data = do_polymarket_preflight(deep_auth=deep_auth)
         Console().print_json(json.dumps(data))
     except Exception as e:
         raise _exit_for_error(e)

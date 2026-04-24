@@ -51,3 +51,17 @@ def test_load_config_normalizes_tickers(monkeypatch, tmp_path):
     cfg = load_config()
     assert cfg.tickers == ["AAPL.US"]
     assert "MSFT.US" in cfg.ticker_overrides
+
+
+def test_polymarket_live_min_order_notional_is_preserved(monkeypatch, tmp_path):
+    cfg_path = tmp_path / "config.json"
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
+    cfg_path.write_text(
+        json.dumps({"polymarket": {"live_min_order_notional_usd": 7.5}}),
+        encoding="utf-8",
+    )
+
+    cfg = load_config()
+
+    assert cfg.polymarket.live_min_order_notional_usd == 7.5
+    assert cfg.polymarket.model_dump(mode="json")["live_min_order_notional_usd"] == 7.5

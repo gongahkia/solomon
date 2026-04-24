@@ -103,6 +103,7 @@ class PolymarketConfig(BaseModel):
     stale_position_hours: float = Field(default=24.0, ge=0.0)
     live_post_only: bool = True
     live_order_max_age_seconds: int = Field(default=30, ge=1, le=86400)
+    live_min_order_notional_usd: float = Field(default=5.0, ge=0.0)
     max_live_open_orders: int = Field(default=20, ge=0, le=100000)
     max_daily_loss: float = Field(default=0.0, ge=0.0)
     max_consecutive_live_errors: int = Field(default=3, ge=1, le=1000)

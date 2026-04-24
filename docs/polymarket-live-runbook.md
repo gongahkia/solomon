@@ -64,10 +64,11 @@ Repo config minimum:
     "rust_hotpath_enabled": true,
     "auto_trade_enabled": false,
     "live_require_armed_env": true,
-    "max_position_fraction": 0.05,
+    "max_position_fraction": 0.25,
     "max_market_notional": 10.0,
     "max_open_positions": 1,
     "max_live_open_orders": 1,
+    "live_min_order_notional_usd": 5.0,
     "max_daily_loss": 10.0
   }
 }

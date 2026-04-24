@@ -66,6 +66,8 @@ pub struct ControlConfig {
     pub live_post_only: bool,
     #[serde(default = "default_live_order_max_age_seconds")]
     pub live_order_max_age_seconds: usize,
+    #[serde(default = "default_live_min_order_notional")]
+    pub live_min_order_notional_usd: f64,
     #[serde(default)]
     pub max_daily_loss: f64,
     #[serde(default = "default_live_require_armed_env")]
@@ -103,6 +105,7 @@ impl Default for ControlConfig {
             max_live_open_orders: default_max_live_open_orders(),
             live_post_only: true,
             live_order_max_age_seconds: default_live_order_max_age_seconds(),
+            live_min_order_notional_usd: default_live_min_order_notional(),
             max_daily_loss: 0.0,
             live_require_armed_env: true,
             live_armed_env: default_live_armed_env(),
@@ -346,6 +349,7 @@ fn default_stop_loss() -> f64 { 0.08 }
 fn default_stale_hours() -> f64 { 24.0 }
 fn default_max_live_open_orders() -> usize { 20 }
 fn default_live_order_max_age_seconds() -> usize { 30 }
+fn default_live_min_order_notional() -> f64 { 5.0 }
 fn default_live_require_armed_env() -> bool { true }
 fn default_live_armed_env() -> String { "STONKS_CLI_POLYMARKET_LIVE_ARMED".to_string() }
 fn default_loop_interval_ms() -> u64 { 1000 }
@@ -1161,6 +1165,12 @@ fn trade_guard_reasons(
         if live_orders.iter().filter(|record| is_live_open_status(&record.status)).count() >= cfg.max_live_open_orders {
             reasons.push("max_live_open_orders_reached".to_string());
         }
+        if let (Some(midpoint), Some(snapshot)) = (scan.midpoint, live_snapshot) {
+            let notional = snapshot.collateral_balance.max(0.0) * cfg.max_position_fraction;
+            if midpoint > 0.0 && notional < cfg.live_min_order_notional_usd {
+                reasons.push("live_notional_below_minimum".to_string());
+            }
+        }
     }
     if cfg.paper {
         if cfg.max_daily_loss > 0.0 && account.realized_pnl <= -cfg.max_daily_loss { reasons.push("max_daily_loss_reached".to_string()); }
@@ -1420,8 +1430,8 @@ fn polymarket_cli_bin() -> String {
 
 fn polymarket_cli_json(args: &[String]) -> Result<Value, String> {
     let mut cmd = Command::new(polymarket_cli_bin());
-    cmd.args(args);
     cmd.arg("-o").arg("json");
+    cmd.args(args);
     let output = cmd.output().map_err(|err| err.to_string())?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -1466,6 +1476,13 @@ fn live_collateral_balance() -> Result<f64, String> {
 fn live_trades() -> Result<Vec<LiveTrade>, String> {
     let payload = polymarket_cli_json(&["clob".to_string(), "trades".to_string()])?;
     Ok(normalize_live_trades(&payload))
+}
+
+fn live_tick_size(token_id: &str) -> Result<f64, String> {
+    let payload = polymarket_cli_json(&["clob".to_string(), "tick-size".to_string(), token_id.to_string()])?;
+    extract_first_numeric(&payload, &["tick_size", "tickSize", "minimum_tick_size", "minimumTickSize", "size", "value"])
+        .or_else(|| value_to_f64(&payload))
+        .ok_or_else(|| format!("unable to parse tick size for token {token_id}"))
 }
 
 fn live_account_snapshot() -> Result<LiveAccountSnapshot, String> {
@@ -1571,8 +1588,17 @@ fn live_place_order(
     side_hint: Option<&str>,
 ) -> Result<Value, String> {
     let token_id = scan.token_id.clone().ok_or_else(|| "missing token_id".to_string())?;
-    let price = scan.midpoint.ok_or_else(|| "missing midpoint".to_string())?;
     let side = side_hint.unwrap_or("buy").to_ascii_lowercase();
+    let raw_price = scan.midpoint.ok_or_else(|| "missing midpoint".to_string())?;
+    let tick_size = live_tick_size(&token_id)?;
+    let price = normalize_price_for_side(raw_price, &side, tick_size)?;
+    let notional = price * shares;
+    if notional < cfg.live_min_order_notional_usd {
+        return Err(format!(
+            "live order notional ${notional:.2} is below configured minimum ${:.2}",
+            cfg.live_min_order_notional_usd
+        ));
+    }
     let mut args = vec![
         "clob".to_string(),
         "create-order".to_string(),
@@ -1589,6 +1615,7 @@ fn live_place_order(
         args.push("--post-only".to_string());
     }
     let response = polymarket_cli_json(&args)?;
+    validate_live_order_response(&response)?;
     let order_id = response
         .get("orderID")
         .or_else(|| response.get("orderId"))
@@ -1596,6 +1623,9 @@ fn live_place_order(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    if order_id.is_empty() {
+        return Err(format!("live order response did not include an order id: {response}"));
+    }
     if !order_id.is_empty() {
         let mut records = load_live_orders(state_dir)?;
         records.retain(|record| record.order_id != order_id);
@@ -1633,6 +1663,49 @@ fn live_place_order(
     });
     append_journal(state_dir, json!({"event":"live_execution","result":result.clone()}))?;
     Ok(result)
+}
+
+fn normalize_price_for_side(price: f64, side: &str, tick_size: f64) -> Result<f64, String> {
+    if !(0.0..1.0).contains(&price) {
+        return Err("price must be between 0 and 1".to_string());
+    }
+    if tick_size <= 0.0 {
+        return Err("tick size must be positive".to_string());
+    }
+    let units = price / tick_size;
+    let snapped = if side.eq_ignore_ascii_case("buy") {
+        units.floor() * tick_size
+    } else {
+        units.ceil() * tick_size
+    };
+    let decimals = tick_decimals(tick_size);
+    let factor = 10_f64.powi(decimals as i32);
+    let normalized = (snapped * factor).round() / factor;
+    if !(0.0..1.0).contains(&normalized) {
+        return Err("normalized price must be between 0 and 1".to_string());
+    }
+    Ok(normalized)
+}
+
+fn tick_decimals(tick_size: f64) -> usize {
+    let text = format!("{tick_size:.8}");
+    text.trim_end_matches('0')
+        .split('.')
+        .nth(1)
+        .map(|v| v.len())
+        .unwrap_or(0)
+}
+
+fn validate_live_order_response(response: &Value) -> Result<(), String> {
+    if response.get("success").and_then(|v| v.as_bool()) == Some(false) {
+        let detail = response
+            .get("errorMsg")
+            .or_else(|| response.get("error"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("order rejected");
+        return Err(detail.to_string());
+    }
+    Ok(())
 }
 
 fn normalize_live_orders(payload: &Value) -> Vec<LiveOrderRecord> {
@@ -2181,12 +2254,17 @@ mod tests {
             &script,
             r#"#!/bin/sh
 set -eu
+if [ "${1:-}" = "-o" ]; then
+  shift 2
+fi
 if [ "$1" = "clob" ] && [ "$2" = "balance" ]; then
   printf '%s\n' '{"balance":"250"}'
 elif [ "$1" = "clob" ] && [ "$2" = "trades" ]; then
   printf '%s\n' '[{"id":"trade-1","asset_id":"YES1","market":"m1","side":"BUY","size":"10","price":"0.40","match_time":"1710000000","outcome":"YES"},{"id":"trade-2","asset_id":"YES1","market":"m1","side":"SELL","size":"4","price":"0.55","match_time":"1710000100","outcome":"YES"}]'
 elif [ "$1" = "clob" ] && [ "$2" = "orders" ]; then
   printf '%s\n' '[]'
+elif [ "$1" = "clob" ] && [ "$2" = "tick-size" ]; then
+  printf '%s\n' '{"tick_size":"0.01"}'
 elif [ "$1" = "clob" ] && [ "$2" = "create-order" ]; then
   printf '%s\n' '{"success":true,"orderID":"order-live-1","status":"live"}'
 elif [ "$1" = "clob" ] && [ "$2" = "cancel" ]; then
@@ -2490,6 +2568,79 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
         let records = load_live_orders(&state_dir).expect("live orders");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].order_id, "order-live-1");
+    }
+
+    #[test]
+    fn live_price_normalization_is_side_aware() {
+        assert_eq!(normalize_price_for_side(0.537, "buy", 0.01).expect("buy"), 0.53);
+        assert_eq!(normalize_price_for_side(0.537, "sell", 0.01).expect("sell"), 0.54);
+        assert_eq!(normalize_price_for_side(0.5800000000000001, "buy", 0.01).expect("drift"), 0.58);
+    }
+
+    #[test]
+    fn live_order_response_rejection_is_error() {
+        let response = json!({"success": false, "errorMsg": "INVALID_ORDER_MIN_SIZE"});
+        let err = validate_live_order_response(&response).expect_err("reject");
+        assert_eq!(err, "INVALID_ORDER_MIN_SIZE");
+    }
+
+    #[test]
+    fn live_trade_guard_rejects_notional_below_minimum() {
+        let state_dir = temp_state_dir("live-min-notional");
+        let guard = GuardState {
+            trading_day: Utc::now().date_naive().to_string(),
+            halted: false,
+            halt_reason: None,
+            live_error_count: 0,
+            stream_error_count: 0,
+        };
+        let snapshot = LiveAccountSnapshot {
+            collateral_balance: 20.0,
+            realized_pnl: 0.0,
+            positions: Vec::new(),
+        };
+        let reasons = trade_guard_reasons(
+            &state_dir,
+            &ControlConfig {
+                paper: false,
+                auto_trade_enabled: true,
+                auto_trade_min_score: 1.0,
+                auto_trade_min_target_wallets: 1,
+                max_position_fraction: 0.05,
+                live_min_order_notional_usd: 5.0,
+                ..ControlConfig::default()
+            },
+            &guard,
+            &PaperAccount {
+                cash: 0.0,
+                realized_pnl: 0.0,
+                positions: Vec::new(),
+                trades: Vec::new(),
+            },
+            Some(&snapshot),
+            &MarketScan {
+                market_id: "m1".to_string(),
+                slug: Some("btc-higher".to_string()),
+                question: "Will BTC close higher today?".to_string(),
+                token_id: Some("YES1".to_string()),
+                outcome: Some("YES".to_string()),
+                midpoint: Some(0.45),
+                bids_depth_usd: 1000.0,
+                asks_depth_usd: 1000.0,
+                liquidity_usd: Some(100_000.0),
+                volume_usd: Some(1_000_000.0),
+                hours_to_resolution: Some(8.0),
+                complement_deviation_bps: Some(0.0),
+                score: 20.0,
+                status: "PASS".to_string(),
+                reasons: Vec::new(),
+                target_wallet_count: 2,
+                target_trade_count: 10,
+                target_net_volume: 100.0,
+            },
+        );
+
+        assert!(reasons.iter().any(|reason| reason == "live_notional_below_minimum"));
     }
 
     #[test]

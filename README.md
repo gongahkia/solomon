@@ -208,7 +208,8 @@ To enable Rust-backed live trading from the CLI shell, set:
   "polymarket": {
     "paper": false,
     "rust_hotpath_enabled": true,
-    "rust_hotpath_use_cargo": false
+    "rust_hotpath_use_cargo": false,
+    "live_min_order_notional_usd": 5.0
   }
 }
 ```

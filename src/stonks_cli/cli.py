@@ -42,11 +42,14 @@ from stonks_cli.commands import (
     do_polymarket_paper_sell,
     do_polymarket_paper_status,
     do_polymarket_preflight,
+    do_polymarket_replay_market,
+    do_polymarket_replay_user,
     do_polymarket_guard_status,
     do_polymarket_runtime_halt,
     do_polymarket_runtime_loop,
     do_polymarket_runtime_once,
     do_polymarket_runtime_resume,
+    do_polymarket_runtime_soak,
     do_polymarket_runtime_status,
     do_polymarket_scan,
     do_polymarket_journal,
@@ -96,6 +99,7 @@ polymarket_markets_app = typer.Typer()
 polymarket_runtime_app = typer.Typer()
 polymarket_wallets_app = typer.Typer()
 polymarket_paper_app = typer.Typer()
+polymarket_replay_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
@@ -114,6 +118,7 @@ polymarket_app.add_typer(polymarket_markets_app, name="markets")
 polymarket_app.add_typer(polymarket_runtime_app, name="runtime")
 polymarket_app.add_typer(polymarket_wallets_app, name="wallets")
 polymarket_app.add_typer(polymarket_paper_app, name="paper")
+polymarket_app.add_typer(polymarket_replay_app, name="replay")
 
 
 @app.callback()
@@ -1138,6 +1143,52 @@ def polymarket_paper_sell(
     """Execute a Polymarket paper sell."""
     try:
         data = do_polymarket_paper_sell(token_id, shares, price)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_replay_app.command("market")
+def polymarket_replay_market(
+    path: Path = typer.Argument(..., exists=True, readable=True, help="Path to JSON or JSONL market events"),
+) -> None:
+    """Replay recorded market websocket events into the local cache model."""
+    try:
+        data = do_polymarket_replay_market(path)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_replay_app.command("user")
+def polymarket_replay_user(
+    path: Path = typer.Argument(..., exists=True, readable=True, help="Path to JSON or JSONL user events"),
+) -> None:
+    """Replay recorded user/order websocket events into the local order manager."""
+    try:
+        data = do_polymarket_replay_user(path)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_runtime_app.command("soak")
+def polymarket_runtime_soak(
+    cycles: int = typer.Option(1, "--cycles", min=1),
+    limit: int | None = typer.Option(None, "--limit", min=1, max=1000),
+    market_events_path: Path | None = typer.Option(None, "--market-events-path", exists=True, readable=True),
+    user_events_path: Path | None = typer.Option(None, "--user-events-path", exists=True, readable=True),
+    batch_size: int = typer.Option(1, "--batch-size", min=1),
+) -> None:
+    """Run deterministic multi-cycle soak testing with recorded event files."""
+    try:
+        data = do_polymarket_runtime_soak(
+            limit=limit,
+            cycles=cycles,
+            market_events_path=market_events_path,
+            user_events_path=user_events_path,
+            batch_size=batch_size,
+        )
         Console().print_json(json.dumps(data))
     except Exception as e:
         raise _exit_for_error(e)

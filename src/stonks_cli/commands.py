@@ -2102,3 +2102,40 @@ def do_polymarket_preflight(*, deep_auth: bool = False) -> dict[str, object]:
     from stonks_cli.polymarket.preflight import run_preflight
 
     return run_preflight(cfg, deep_auth=deep_auth)
+
+
+def do_polymarket_replay_market(path: Path) -> dict[str, object]:
+    from stonks_cli.polymarket.replay import replay_market_events
+
+    return replay_market_events(path)
+
+
+def do_polymarket_replay_user(path: Path) -> dict[str, object]:
+    cfg = load_config()
+    from stonks_cli.polymarket.replay import replay_user_events
+
+    return replay_user_events(path, cfg=cfg)
+
+
+def do_polymarket_runtime_soak(
+    *,
+    limit: int | None = None,
+    cycles: int = 1,
+    market_events_path: Path | None = None,
+    user_events_path: Path | None = None,
+    batch_size: int = 1,
+) -> dict[str, object]:
+    cfg = load_config()
+    client = _polymarket_client()
+    from stonks_cli.polymarket.replay import soak_runtime
+
+    return soak_runtime(
+        client,
+        cfg=cfg,
+        limit=limit if limit is not None else cfg.polymarket.scanner_limit,
+        scan_cfg=_polymarket_scan_config(cfg),
+        cycles=cycles,
+        market_events_path=market_events_path,
+        user_events_path=user_events_path,
+        batch_size=batch_size,
+    )

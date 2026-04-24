@@ -1970,10 +1970,12 @@ def do_polymarket_runtime_loop(
     client = _polymarket_client()
     from stonks_cli.polymarket.auth import derive_api_credentials
     from stonks_cli.polymarket.runtime import run_runtime_loop
+    from stonks_cli.polymarket.rust_bridge import rust_session
     from stonks_cli.polymarket.websocket import MarketWebSocketClient, UserWebSocketClient
 
     market_ws: MarketWebSocketClient | None = None
     user_ws: UserWebSocketClient | None = None
+    rust = rust_session(cfg) if cfg.polymarket.rust_hotpath_enabled else None
 
     def _stream_hook(*, iteration: int, market_cache) -> None:
         nonlocal market_ws, user_ws
@@ -1982,7 +1984,12 @@ def do_polymarket_runtime_loop(
             token_ids = [str(row.get("token_id")) for row in queue if row.get("token_id")]
             if token_ids:
                 market_ws = MarketWebSocketClient(asset_ids=token_ids)
-                asyncio.run(market_ws.run_once(max_messages=market_messages))
+                asyncio.run(
+                    market_ws.run_once(
+                        max_messages=market_messages,
+                        event_handler=(lambda event, snapshot: rust.apply_market_event(event)) if rust is not None else None,
+                    )
+                )
                 for token_id, snapshot in market_ws.cache.as_dict().items():
                     market_cache.upsert_snapshot(snapshot)
         if not cfg.polymarket.paper and user_messages > 0:
@@ -1991,7 +1998,13 @@ def do_polymarket_runtime_loop(
             from stonks_cli.polymarket.lifecycle import LiveOrderManager
 
             order_manager = LiveOrderManager(cfg)
-            asyncio.run(user_ws.run_once(order_manager=order_manager, max_messages=user_messages))
+            asyncio.run(
+                user_ws.run_once(
+                    order_manager=order_manager,
+                    max_messages=user_messages,
+                    event_handler=(lambda event, record: rust.apply_user_event(event)) if rust is not None else None,
+                )
+            )
 
     return run_runtime_loop(
         client,

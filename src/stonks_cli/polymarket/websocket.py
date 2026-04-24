@@ -19,6 +19,7 @@ def build_market_subscription(asset_ids: list[str], *, channels: list[str] | Non
         "type": "market",
         "assets_ids": assets,
         "channels": channels or ["market", "best_bid_ask", "price_change", "tick_size_change"],
+        "custom_feature_enabled": True,
     }
 
 
@@ -72,7 +73,12 @@ class MarketWebSocketClient:
     def cache(self) -> MarketStateCache:
         return self._cache
 
-    async def run_once(self, *, max_messages: int | None = None) -> list[dict[str, Any]]:
+    async def run_once(
+        self,
+        *,
+        max_messages: int | None = None,
+        event_handler: Callable[[dict[str, Any], dict[str, Any]], None] | None = None,
+    ) -> list[dict[str, Any]]:
         snapshots: list[dict[str, Any]] = []
         ws = await self._connector(self._url)
         async with ws:
@@ -84,18 +90,21 @@ class MarketWebSocketClient:
                         snapshot = self._cache.apply(event)
                     except ValueError:
                         continue
+                    snapshot_payload = {
+                        "token_id": snapshot.token_id,
+                        "best_bid": snapshot.best_bid,
+                        "best_ask": snapshot.best_ask,
+                        "midpoint": snapshot.midpoint,
+                        "last_trade_price": snapshot.last_trade_price,
+                        "tick_size": snapshot.tick_size,
+                        "resolved": snapshot.resolved,
+                        "last_event_type": snapshot.last_event_type,
+                        "last_event_at": snapshot.last_event_at,
+                    }
+                    if event_handler is not None:
+                        event_handler(event, snapshot_payload)
                     snapshots.append(
-                        {
-                            "token_id": snapshot.token_id,
-                            "best_bid": snapshot.best_bid,
-                            "best_ask": snapshot.best_ask,
-                            "midpoint": snapshot.midpoint,
-                            "last_trade_price": snapshot.last_trade_price,
-                            "tick_size": snapshot.tick_size,
-                            "resolved": snapshot.resolved,
-                            "last_event_type": snapshot.last_event_type,
-                            "last_event_at": snapshot.last_event_at,
-                        }
+                        snapshot_payload
                     )
                 count += 1
                 if max_messages is not None and count >= max_messages:
@@ -120,8 +129,9 @@ class UserWebSocketClient:
     async def run_once(
         self,
         *,
-        order_manager: LiveOrderManager,
+        order_manager: LiveOrderManager | None = None,
         max_messages: int | None = None,
+        event_handler: Callable[[dict[str, Any], dict[str, Any] | None], None] | None = None,
     ) -> list[dict[str, Any]]:
         updates: list[dict[str, Any]] = []
         ws = await self._connector(self._url)
@@ -130,7 +140,9 @@ class UserWebSocketClient:
             count = 0
             async for raw in ws:
                 for event in parse_ws_message(raw):
-                    record = order_manager.apply_user_event(event)
+                    record = order_manager.apply_user_event(event) if order_manager is not None else None
+                    if event_handler is not None:
+                        event_handler(event, None if record is None else asdict_record(record))
                     updates.append({"event": event, "record": None if record is None else asdict_record(record)})
                 count += 1
                 if max_messages is not None and count >= max_messages:

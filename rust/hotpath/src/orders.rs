@@ -219,7 +219,11 @@ pub fn normalize_price_to_tick(
     if !(0.0..1.0).contains(&price) {
         return Err("price must be between 0 and 1".to_string());
     }
-    let ratio = price / tick_size;
+    let epsilon = tick_size * 1e-6;
+    let ratio = match side {
+        ExecutionSide::Buy => (price + epsilon) / tick_size,
+        ExecutionSide::Sell => (price - epsilon) / tick_size,
+    };
     let snapped = match side {
         ExecutionSide::Buy => ratio.floor() * tick_size,
         ExecutionSide::Sell => ratio.ceil() * tick_size,
@@ -266,6 +270,10 @@ mod tests {
         assert_eq!(
             normalize_price_to_tick(0.537, ExecutionSide::Sell, 0.01).unwrap(),
             0.54
+        );
+        assert_eq!(
+            normalize_price_to_tick(0.58, ExecutionSide::Buy, 0.01).unwrap(),
+            0.58
         );
     }
 

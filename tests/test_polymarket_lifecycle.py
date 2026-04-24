@@ -16,6 +16,7 @@ from stonks_cli.polymarket.models import LiveMarketSnapshot
 def test_normalize_price_to_tick_is_side_aware():
     assert normalize_price_to_tick(0.537, tick_size=0.01, side="BUY") == 0.53
     assert normalize_price_to_tick(0.537, tick_size=0.01, side="SELL") == 0.54
+    assert normalize_price_to_tick(0.58, tick_size=0.01, side="BUY") == 0.58
 
 
 def test_build_live_order_request_rejects_post_only_cross():

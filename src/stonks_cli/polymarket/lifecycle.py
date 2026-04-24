@@ -66,10 +66,11 @@ def normalize_price_to_tick(price: float, *, tick_size: float, side: str) -> flo
     if price <= 0 or price >= 1:
         raise ValueError("price must be between 0 and 1")
     direction = side.upper()
+    epsilon = tick_size * 1e-6
     if direction == "BUY":
-        snapped = math.floor(price / tick_size) * tick_size
+        snapped = math.floor((price + epsilon) / tick_size) * tick_size
     elif direction == "SELL":
-        snapped = math.ceil(price / tick_size) * tick_size
+        snapped = math.ceil((price - epsilon) / tick_size) * tick_size
     else:
         raise ValueError(f"unsupported side: {side}")
     return round(min(max(snapped, tick_size), 1.0 - tick_size), 8)

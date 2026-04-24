@@ -22,6 +22,12 @@ def test_build_market_subscription_requires_assets():
         build_market_subscription([])
 
 
+def test_build_market_subscription_enables_custom_features():
+    payload = build_market_subscription(["YES1"])
+
+    assert payload["custom_feature_enabled"] is True
+
+
 def test_parse_ws_message_accepts_single_and_batch_payloads():
     single = parse_ws_message('{"event_type":"best_bid_ask","asset_id":"YES1"}')
     batch = parse_ws_message(
@@ -73,10 +79,13 @@ def test_market_websocket_client_updates_cache_from_stream():
         return fake_socket
 
     async def _run():
+        seen: list[tuple[str, dict[str, object]]] = []
         client = MarketWebSocketClient(asset_ids=["YES1"], connector=_connector)
-        snapshots = await client.run_once(max_messages=2)
+        snapshots = await client.run_once(max_messages=2, event_handler=lambda event, snapshot: seen.append((event["event_type"], snapshot)))
         assert len(fake_socket.sent) == 1
         assert len(snapshots) == 2
+        assert seen[0][0] == "best_bid_ask"
+        assert seen[0][1]["token_id"] == "YES1"
         assert client.cache.get("YES1") is not None
         assert client.cache.get("YES1").last_trade_price == 0.42
 
@@ -137,6 +146,7 @@ def test_user_websocket_client_updates_order_manager(monkeypatch, tmp_path):
     async def _run():
         cfg = AppConfig(polymarket=PolymarketConfig(enabled=True, paper=False))
         manager = LiveOrderManager(cfg)
+        seen: list[dict[str, object]] = []
         manager.register_submitted(
             "order-1",
             build_live_order_request(
@@ -160,9 +170,14 @@ def test_user_websocket_client_updates_order_manager(monkeypatch, tmp_path):
             market_ids=["1"],
             connector=_connector,
         )
-        updates = await client.run_once(order_manager=manager, max_messages=1)
+        updates = await client.run_once(
+            order_manager=manager,
+            max_messages=1,
+            event_handler=lambda event, record: seen.append({"event": event, "record": record}),
+        )
         assert len(fake_socket.sent) == 1
         assert len(updates) == 1
+        assert seen[0]["record"]["order_id"] == "order-1"
         assert manager.records()[0].filled_shares == 3
         assert manager.records()[0].remaining_shares == 9
 

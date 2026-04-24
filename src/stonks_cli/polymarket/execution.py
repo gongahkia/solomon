@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from dataclasses import dataclass
+from time import time
 from typing import Protocol
 
 from stonks_cli.config import AppConfig
@@ -9,7 +10,9 @@ from stonks_cli.polymarket.auth import authenticated_clob_client
 from stonks_cli.polymarket.client import PolymarketClient
 from stonks_cli.polymarket.journal import append_journal
 from stonks_cli.polymarket.lifecycle import LiveOrderManager, build_live_order_request
+from stonks_cli.polymarket.models import LiveOrderRequest
 from stonks_cli.polymarket.paper import paper_buy, paper_sell
+from stonks_cli.polymarket.rust_bridge import rust_session
 from stonks_cli.polymarket.stream import snapshot_from_book
 
 
@@ -71,26 +74,36 @@ class LiveExecutor:
         self._cfg = cfg
         self._market_client = PolymarketClient()
         self._order_manager = LiveOrderManager(cfg)
+        self._rust = rust_session(cfg) if cfg.polymarket.rust_hotpath_enabled else None
 
     def _build_client(self):
         client, _ = authenticated_clob_client(self._cfg)
         return client
 
     def cancel_stale_orders(self) -> list[dict[str, object]]:
-        actions = self._order_manager.stale_cancels()
+        if self._rust is not None:
+            stale_ids = self._rust.stale_orders(max_age_s=self._cfg.polymarket.live_order_max_age_seconds)
+            actions = [record for record in self._order_manager.records() if record.order_id in set(stale_ids)]
+        else:
+            actions = self._order_manager.stale_cancels()
         if not actions:
             return []
         client = self._build_client()
         results: list[dict[str, object]] = []
         for action in actions:
-            response = _cancel_live_order(client, action.order_id)
-            updated = self._order_manager.mark_cancelled(action.order_id, reason=action.reason or "stale_open_order")
+            order_id = action.order_id if hasattr(action, "order_id") else action["order_id"]
+            reason = action.reason if hasattr(action, "reason") else action.get("reason")
+            token_id = action.token_id if hasattr(action, "token_id") else action.get("token_id")
+            response = _cancel_live_order(client, order_id)
+            updated = self._order_manager.mark_cancelled(order_id, reason=reason or "stale_open_order")
+            if self._rust is not None:
+                self._rust.apply_fill(order_id=order_id, status="CANCELLED", remaining=0.0)
             result = {
                 "mode": "live",
                 "action": "CANCEL",
-                "token_id": action.token_id,
-                "order_id": action.order_id,
-                "reason": action.reason,
+                "token_id": token_id,
+                "order_id": order_id,
+                "reason": reason,
                 "response": response,
                 "updated": asdict(updated) if updated is not None else None,
             }
@@ -107,7 +120,37 @@ class LiveExecutor:
         client = self._build_client()
         book = self._market_client.get_book(order.token_id)
         snapshot = snapshot_from_book(book)
-        live_request = build_live_order_request(self._cfg, order, snapshot)
+        if self._rust is not None:
+            self._rust.update_book(
+                token_id=order.token_id,
+                best_bid=snapshot.best_bid,
+                best_ask=snapshot.best_ask,
+                tick_size=snapshot.tick_size,
+                min_order_size=snapshot.min_order_size,
+            )
+            guarded = self._rust.guard_order(
+                order_id="preview",
+                token_id=order.token_id,
+                market_id=order.market_id,
+                side=order.side.upper(),
+                price=order.price,
+                shares=order.shares,
+                post_only=self._cfg.polymarket.live_post_only,
+            )
+            live_request = LiveOrderRequest(
+                token_id=order.token_id,
+                market_id=order.market_id,
+                slug=order.slug,
+                outcome=order.outcome,
+                side=order.side.upper(),
+                price=float(guarded["price"]),
+                shares=float(guarded["shares"]),
+                post_only=_as_bool_string(guarded.get("post_only"), default=self._cfg.polymarket.live_post_only),
+                tick_size=snapshot.tick_size,
+                reason=order.reason,
+            )
+        else:
+            live_request = build_live_order_request(self._cfg, order, snapshot)
         side = Side.BUY if order.side.upper() == "BUY" else Side.SELL
         pre_submit_cancels = self.cancel_stale_orders()
         response = client.create_and_post_order(
@@ -123,6 +166,17 @@ class LiveExecutor:
         order_id = _extract_live_order_id(response)
         if order_id:
             self._order_manager.register_submitted(order_id, live_request)
+            if self._rust is not None:
+                self._rust.register_order(
+                    order_id=order_id,
+                    token_id=live_request.token_id,
+                    market_id=live_request.market_id,
+                    side=live_request.side,
+                    price=live_request.price,
+                    shares=live_request.shares,
+                    post_only=live_request.post_only,
+                    now_s=int(time()),
+                )
         result = {
             "mode": "live",
             "response": response,
@@ -168,3 +222,9 @@ def _cancel_live_order(client: object, order_id: str) -> object:
         except TypeError:
             continue
     raise AttributeError("live client does not expose a supported cancel method")
+
+
+def _as_bool_string(value: str | None, *, default: bool) -> bool:
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "yes"}

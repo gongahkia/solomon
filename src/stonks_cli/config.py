@@ -103,6 +103,10 @@ class PolymarketConfig(BaseModel):
     auto_trade_enabled: bool = False
     auto_trade_min_score: float = Field(default=12.0, ge=0.0)
     auto_trade_min_target_wallets: int = Field(default=1, ge=0, le=1000)
+    consensus_enabled: bool = True
+    consensus_min_buy_votes: int = Field(default=2, ge=1, le=3)
+    consensus_single_vote_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
+    consensus_arbitrage_min_deviation_bps: float = Field(default=700.0, ge=0.0)
     auto_exit_enabled: bool = True
     take_profit_price_delta: float = Field(default=0.10, ge=0.0, le=1.0)
     stop_loss_price_delta: float = Field(default=0.08, ge=0.0, le=1.0)

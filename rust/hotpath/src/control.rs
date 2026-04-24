@@ -58,6 +58,14 @@ pub struct ControlConfig {
     pub auto_trade_min_score: f64,
     #[serde(default = "default_auto_trade_min_wallets")]
     pub auto_trade_min_target_wallets: usize,
+    #[serde(default = "default_true")]
+    pub consensus_enabled: bool,
+    #[serde(default = "default_consensus_min_buy_votes")]
+    pub consensus_min_buy_votes: usize,
+    #[serde(default = "default_consensus_single_vote_fraction")]
+    pub consensus_single_vote_fraction: f64,
+    #[serde(default = "default_consensus_arbitrage_min_deviation_bps")]
+    pub consensus_arbitrage_min_deviation_bps: f64,
     #[serde(default = "default_max_position_fraction")]
     pub max_position_fraction: f64,
     #[serde(default = "default_min_cash_reserve_fraction")]
@@ -113,6 +121,10 @@ impl Default for ControlConfig {
             auto_trade_enabled: false,
             auto_trade_min_score: default_auto_trade_min_score(),
             auto_trade_min_target_wallets: default_auto_trade_min_wallets(),
+            consensus_enabled: true,
+            consensus_min_buy_votes: default_consensus_min_buy_votes(),
+            consensus_single_vote_fraction: default_consensus_single_vote_fraction(),
+            consensus_arbitrage_min_deviation_bps: default_consensus_arbitrage_min_deviation_bps(),
             max_position_fraction: default_max_position_fraction(),
             min_cash_reserve_fraction: default_min_cash_reserve_fraction(),
             max_open_positions: default_max_open_positions(),
@@ -280,6 +292,23 @@ pub struct WalletMarketSignal {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StrategyVote {
+    pub agent: String,
+    pub action: String,
+    pub confidence: f64,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConsensusDecision {
+    pub accepted: bool,
+    pub buy_votes: usize,
+    pub required_buy_votes: usize,
+    pub position_fraction: f64,
+    pub votes: Vec<StrategyVote>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GuardState {
     pub trading_day: String,
     pub halted: bool,
@@ -359,6 +388,9 @@ fn default_min_hours() -> f64 { 4.0 }
 fn default_max_hours() -> f64 { 168.0 }
 fn default_auto_trade_min_score() -> f64 { 12.0 }
 fn default_auto_trade_min_wallets() -> usize { 1 }
+fn default_consensus_min_buy_votes() -> usize { 2 }
+fn default_consensus_single_vote_fraction() -> f64 { 0.5 }
+fn default_consensus_arbitrage_min_deviation_bps() -> f64 { 700.0 }
 fn default_max_position_fraction() -> f64 { 0.10 }
 fn default_min_cash_reserve_fraction() -> f64 { 0.10 }
 fn default_max_open_positions() -> usize { 5 }
@@ -1029,9 +1061,10 @@ fn maybe_open_position(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketSca
     let live_snapshot = if cfg.paper { None } else { Some(live_account_snapshot()?) };
     let guard = load_guard_state(state_dir)?;
     for scan in scans {
+        let consensus = consensus_decision(cfg, scan);
         let reasons = trade_guard_reasons(state_dir, cfg, &guard, &account, live_snapshot.as_ref(), scan);
         if !reasons.is_empty() {
-            append_journal(state_dir, json!({"event":"proposal_rejected","token_id":scan.token_id,"market_id":scan.market_id,"slug":scan.slug,"reasons":reasons,"score":scan.score}))?;
+            append_journal(state_dir, json!({"event":"proposal_rejected","token_id":scan.token_id,"market_id":scan.market_id,"slug":scan.slug,"reasons":reasons,"score":scan.score,"consensus":consensus}))?;
             continue;
         }
         let max_notional = {
@@ -1045,7 +1078,7 @@ fn maybe_open_position(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketSca
             if available_cash - max_notional < reserve_cash {
                 max_notional = (available_cash - reserve_cash).max(0.0);
             }
-            max_notional
+            max_notional * consensus.position_fraction
         };
         if max_notional <= 0.0 || scan.midpoint.is_none() { continue; }
         let shares = round6(max_notional / scan.midpoint.unwrap());
@@ -1064,11 +1097,11 @@ fn maybe_open_position(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketSca
                     "price": scan.midpoint,
                     "target_price": target,
                     "stop_price": stop,
-                    "thesis": format!("score={:.2}|wallets={}", scan.score, scan.target_wallet_count),
-                    "reason": format!("score={:.2}|wallets={}", scan.score, scan.target_wallet_count),
+                    "thesis": format!("score={:.2}|wallets={}|votes={}/{}", scan.score, scan.target_wallet_count, consensus.buy_votes, consensus.required_buy_votes),
+                    "reason": format!("score={:.2}|wallets={}|votes={}/{}", scan.score, scan.target_wallet_count, consensus.buy_votes, consensus.required_buy_votes),
                 }),
             )?;
-            append_journal(state_dir, json!({"event":"paper_execution","result":result.clone()}))?;
+            append_journal(state_dir, json!({"event":"paper_execution","result":result.clone(),"consensus":consensus}))?;
             result
         } else {
             live_place_order(
@@ -1076,7 +1109,7 @@ fn maybe_open_position(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketSca
                 cfg,
                 scan,
                 shares,
-                format!("score={:.2}|wallets={}", scan.score, scan.target_wallet_count),
+                format!("score={:.2}|wallets={}|votes={}/{}", scan.score, scan.target_wallet_count, consensus.buy_votes, consensus.required_buy_votes),
                 None,
             )?
         };
@@ -1216,6 +1249,12 @@ fn trade_guard_reasons(
     if scan.midpoint.is_none() || !(0.0..1.0).contains(&scan.midpoint.unwrap()) { reasons.push("invalid_midpoint".to_string()); }
     if scan.score < cfg.auto_trade_min_score { reasons.push("score_below_threshold".to_string()); }
     if scan.target_wallet_count < cfg.auto_trade_min_target_wallets { reasons.push("wallet_signal_below_threshold".to_string()); }
+    if cfg.consensus_enabled {
+        let consensus = consensus_decision(cfg, scan);
+        if !consensus.accepted {
+            reasons.push(format!("consensus_buy_votes<{}/{}", consensus.buy_votes, consensus.required_buy_votes));
+        }
+    }
     if cfg.paper {
         if account.positions.iter().any(|p| Some(&p.token_id) == scan.token_id.as_ref()) { reasons.push("position_already_open".to_string()); }
         if account.positions.len() >= cfg.max_open_positions { reasons.push("max_open_positions_reached".to_string()); }
@@ -1273,6 +1312,92 @@ fn trade_guard_reasons(
         }
     }
     reasons
+}
+
+fn consensus_decision(cfg: &ControlConfig, scan: &MarketScan) -> ConsensusDecision {
+    let votes = strategy_votes(cfg, scan);
+    let buy_votes = votes.iter().filter(|vote| vote.action == "BUY").count();
+    let required_buy_votes = cfg.consensus_min_buy_votes.max(1).min(votes.len().max(1));
+    let accepted = !cfg.consensus_enabled || buy_votes >= required_buy_votes;
+    let position_fraction = if !accepted {
+        0.0
+    } else if buy_votes >= 2 {
+        1.0
+    } else if buy_votes == 1 {
+        cfg.consensus_single_vote_fraction.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    ConsensusDecision {
+        accepted,
+        buy_votes,
+        required_buy_votes,
+        position_fraction,
+        votes,
+    }
+}
+
+fn strategy_votes(cfg: &ControlConfig, scan: &MarketScan) -> Vec<StrategyVote> {
+    vec![
+        arbitrage_vote(cfg, scan),
+        convergence_vote(cfg, scan),
+        whale_copy_vote(cfg, scan),
+    ]
+}
+
+fn arbitrage_vote(cfg: &ControlConfig, scan: &MarketScan) -> StrategyVote {
+    let deviation = scan.complement_deviation_bps.unwrap_or(0.0);
+    if scan.status == "PASS" && deviation >= cfg.consensus_arbitrage_min_deviation_bps {
+        return StrategyVote {
+            agent: "arbitrage".to_string(),
+            action: "BUY".to_string(),
+            confidence: round6((0.50 + (deviation / 2_000.0)).min(0.95)),
+            reason: format!("complement_deviation_bps={deviation:.2}"),
+        };
+    }
+    StrategyVote {
+        agent: "arbitrage".to_string(),
+        action: "HOLD".to_string(),
+        confidence: 0.0,
+        reason: format!("deviation_below_threshold:{deviation:.2}"),
+    }
+}
+
+fn convergence_vote(cfg: &ControlConfig, scan: &MarketScan) -> StrategyVote {
+    if scan.status == "PASS" && scan.score >= cfg.auto_trade_min_score {
+        return StrategyVote {
+            agent: "convergence".to_string(),
+            action: "BUY".to_string(),
+            confidence: round6((scan.score / (cfg.auto_trade_min_score * 2.0).max(1.0)).min(0.95)),
+            reason: format!("score={:.2}", scan.score),
+        };
+    }
+    StrategyVote {
+        agent: "convergence".to_string(),
+        action: "HOLD".to_string(),
+        confidence: 0.0,
+        reason: format!("score_below_threshold:{:.2}", scan.score),
+    }
+}
+
+fn whale_copy_vote(cfg: &ControlConfig, scan: &MarketScan) -> StrategyVote {
+    if scan.status == "PASS"
+        && scan.target_wallet_count >= cfg.auto_trade_min_target_wallets
+        && scan.target_net_volume > 0.0
+    {
+        return StrategyVote {
+            agent: "whale_copy".to_string(),
+            action: "BUY".to_string(),
+            confidence: round6((0.55 + (scan.target_wallet_count as f64 * 0.08)).min(0.95)),
+            reason: format!("wallets={}|net_volume={:.2}", scan.target_wallet_count, scan.target_net_volume),
+        };
+    }
+    StrategyVote {
+        agent: "whale_copy".to_string(),
+        action: "HOLD".to_string(),
+        confidence: 0.0,
+        reason: format!("wallet_signal_weak:{}|{:.2}", scan.target_wallet_count, scan.target_net_volume),
+    }
 }
 
 fn settle_market(state_dir: &Path, args: &Value) -> Result<Value, String> {
@@ -2709,6 +2834,92 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
         );
 
         assert!(reasons.iter().any(|reason| reason == "live_notional_below_minimum"));
+    }
+
+    #[test]
+    fn consensus_requires_multiple_agents_and_halves_single_vote_when_allowed() {
+        let scan = MarketScan {
+            market_id: "m1".to_string(),
+            slug: Some("btc-higher".to_string()),
+            question: "Will BTC close higher today?".to_string(),
+            token_id: Some("YES1".to_string()),
+            outcome: Some("YES".to_string()),
+            midpoint: Some(0.45),
+            bids_depth_usd: 1000.0,
+            asks_depth_usd: 1000.0,
+            liquidity_usd: Some(100_000.0),
+            volume_usd: Some(1_000_000.0),
+            hours_to_resolution: Some(8.0),
+            complement_deviation_bps: Some(100.0),
+            score: 20.0,
+            status: "PASS".to_string(),
+            reasons: Vec::new(),
+            target_wallet_count: 0,
+            target_trade_count: 0,
+            target_net_volume: 0.0,
+        };
+        let strict = consensus_decision(
+            &ControlConfig {
+                auto_trade_min_score: 10.0,
+                auto_trade_min_target_wallets: 1,
+                consensus_min_buy_votes: 2,
+                ..ControlConfig::default()
+            },
+            &scan,
+        );
+        let article_style = consensus_decision(
+            &ControlConfig {
+                auto_trade_min_score: 10.0,
+                auto_trade_min_target_wallets: 1,
+                consensus_min_buy_votes: 1,
+                consensus_single_vote_fraction: 0.5,
+                ..ControlConfig::default()
+            },
+            &scan,
+        );
+
+        assert_eq!(strict.buy_votes, 1);
+        assert!(!strict.accepted);
+        assert!(article_style.accepted);
+        assert_eq!(article_style.position_fraction, 0.5);
+    }
+
+    #[test]
+    fn consensus_accepts_convergence_and_whale_copy_agreement() {
+        let scan = MarketScan {
+            market_id: "m1".to_string(),
+            slug: Some("btc-higher".to_string()),
+            question: "Will BTC close higher today?".to_string(),
+            token_id: Some("YES1".to_string()),
+            outcome: Some("YES".to_string()),
+            midpoint: Some(0.45),
+            bids_depth_usd: 1000.0,
+            asks_depth_usd: 1000.0,
+            liquidity_usd: Some(100_000.0),
+            volume_usd: Some(1_000_000.0),
+            hours_to_resolution: Some(8.0),
+            complement_deviation_bps: Some(100.0),
+            score: 20.0,
+            status: "PASS".to_string(),
+            reasons: Vec::new(),
+            target_wallet_count: 2,
+            target_trade_count: 10,
+            target_net_volume: 100.0,
+        };
+        let decision = consensus_decision(
+            &ControlConfig {
+                auto_trade_min_score: 10.0,
+                auto_trade_min_target_wallets: 1,
+                consensus_min_buy_votes: 2,
+                ..ControlConfig::default()
+            },
+            &scan,
+        );
+
+        assert!(decision.accepted);
+        assert_eq!(decision.buy_votes, 2);
+        assert_eq!(decision.position_fraction, 1.0);
+        assert!(decision.votes.iter().any(|vote| vote.agent == "whale_copy" && vote.action == "BUY"));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 pub mod control;
 pub mod daemon;
+pub mod event_trigger;
 pub mod market;
 pub mod orders;
 pub mod protocol;

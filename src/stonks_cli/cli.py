@@ -1086,6 +1086,7 @@ def polymarket_wallet_signals() -> None:
         table = Table(title="Polymarket Wallet Market Signals")
         table.add_column("Market")
         table.add_column("Outcome")
+        table.add_column("Category")
         table.add_column("Wallets", justify="right")
         table.add_column("Trades", justify="right")
         table.add_column("Net Vol", justify="right")
@@ -1094,6 +1095,7 @@ def polymarket_wallet_signals() -> None:
             table.add_row(
                 str(row.get("market_id") or "-"),
                 str(row.get("outcome") or "-"),
+                str(row.get("category") or "-"),
                 str(int(row.get("wallet_count") or 0)),
                 str(int(row.get("trade_count") or 0)),
                 f"{float(row.get('net_volume') or 0):,.2f}",

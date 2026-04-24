@@ -94,6 +94,8 @@ class PolymarketConfig(BaseModel):
     crypto_only: bool = False
     block_sports: bool = False
     target_wallet_addresses: list[str] = Field(default_factory=list)
+    wallet_copy_allowed_categories: list[str] = Field(default_factory=list)
+    wallet_copy_blocked_categories: list[str] = Field(default_factory=list)
     paper: bool = True
     loop_interval_ms: int = Field(default=1000, ge=100, le=60000)
     paper_starting_cash: float = Field(default=1000.0, ge=0.0)

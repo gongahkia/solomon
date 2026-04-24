@@ -55,6 +55,10 @@ pub struct ControlConfig {
     #[serde(default)]
     pub target_wallet_addresses: Vec<String>,
     #[serde(default)]
+    pub wallet_copy_allowed_categories: Vec<String>,
+    #[serde(default)]
+    pub wallet_copy_blocked_categories: Vec<String>,
+    #[serde(default)]
     pub auto_trade_enabled: bool,
     #[serde(default = "default_auto_trade_min_score")]
     pub auto_trade_min_score: f64,
@@ -121,6 +125,8 @@ impl Default for ControlConfig {
             crypto_only: false,
             block_sports: false,
             target_wallet_addresses: Vec::new(),
+            wallet_copy_allowed_categories: Vec::new(),
+            wallet_copy_blocked_categories: Vec::new(),
             auto_trade_enabled: false,
             auto_trade_min_score: default_auto_trade_min_score(),
             auto_trade_min_target_wallets: default_auto_trade_min_wallets(),
@@ -284,16 +290,29 @@ pub struct WalletTarget {
     pub closed_round_trips: usize,
     #[serde(default)]
     pub source: String,
+    #[serde(default)]
+    pub category_performance: BTreeMap<String, WalletCategoryStats>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WalletMarketSignal {
     pub market_id: String,
     pub outcome: String,
+    #[serde(default)]
+    pub category: String,
     pub wallet_count: usize,
     pub trade_count: usize,
     pub net_volume: f64,
     pub gross_volume: f64,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct WalletCategoryStats {
+    pub trades: usize,
+    pub realized_pnl: f64,
+    pub gross_volume: f64,
+    pub win_rate: f64,
+    pub closed_round_trips: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -376,6 +395,16 @@ struct WalletStats {
     winning_round_trips: usize,
     explicit_profit_total: f64,
     explicit_profit_count: usize,
+    category_stats: HashMap<String, WalletCategoryAccumulator>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct WalletCategoryAccumulator {
+    trades: usize,
+    realized_pnl: f64,
+    gross_volume: f64,
+    closed_round_trips: usize,
+    winning_round_trips: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -383,6 +412,7 @@ struct Lot {
     qty: f64,
     price: f64,
     opened_at: String,
+    category: Option<String>,
 }
 
 fn default_true() -> bool { true }
@@ -550,11 +580,13 @@ fn scan_markets(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<V
         let book = book_get(&json!({ "token_id": token.token_id }))?;
         let mut scan = structural_scan_market(&market, &book, cfg);
         if let Some(signal) = by_signal.get(&(scan.market_id.clone(), scan.outcome.clone().unwrap_or_default().to_ascii_uppercase())) {
-            scan.target_wallet_count = signal.wallet_count;
-            scan.target_trade_count = signal.trade_count;
-            scan.target_net_volume = signal.net_volume;
-            let extra_score = (signal.wallet_count as f64 * 2.0).min(10.0) + ((signal.trade_count as f64) / 10.0).min(5.0);
-            scan.score = round2(scan.score + extra_score);
+            if wallet_signal_category_allowed(cfg, signal) {
+                scan.target_wallet_count = signal.wallet_count;
+                scan.target_trade_count = signal.trade_count;
+                scan.target_net_volume = signal.net_volume;
+                let extra_score = (signal.wallet_count as f64 * 2.0).min(10.0) + ((signal.trade_count as f64) / 10.0).min(5.0);
+                scan.score = round2(scan.score + extra_score);
+            }
         }
         if include_filtered || scan.status == "PASS" {
             out.push(scan);
@@ -562,6 +594,16 @@ fn scan_markets(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<V
     }
     out.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     Ok(out)
+}
+
+fn wallet_signal_category_allowed(cfg: &ControlConfig, signal: &WalletMarketSignal) -> bool {
+    let category = normalize_category(&signal.category);
+    if !cfg.wallet_copy_allowed_categories.is_empty()
+        && !cfg.wallet_copy_allowed_categories.iter().any(|item| normalize_category(item) == category)
+    {
+        return false;
+    }
+    !cfg.wallet_copy_blocked_categories.iter().any(|item| normalize_category(item) == category)
 }
 
 fn structural_scan_market(market: &PolymarketMarket, book: &OrderBook, cfg: &ControlConfig) -> MarketScan {
@@ -873,9 +915,9 @@ fn wallets_rank(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<V
     let min_win_rate = arg_f64(args, "min_win_rate").unwrap_or(0.70);
     let limit = arg_usize(args, "limit").unwrap_or(50);
     let mut stats_by_wallet: HashMap<String, WalletStats> = HashMap::new();
-    let mut long_books: HashMap<String, HashMap<(String, String), VecDeque<Lot>>> = HashMap::new();
-    let mut short_books: HashMap<String, HashMap<(String, String), VecDeque<Lot>>> = HashMap::new();
-    let mut market_counts: HashMap<String, HashMap<(String, String), (usize, f64, f64)>> = HashMap::new();
+    let mut long_books: HashMap<String, HashMap<(String, String, String), VecDeque<Lot>>> = HashMap::new();
+    let mut short_books: HashMap<String, HashMap<(String, String, String), VecDeque<Lot>>> = HashMap::new();
+    let mut market_counts: HashMap<String, HashMap<(String, String, String), (usize, f64, f64)>> = HashMap::new();
 
     for row in rows.iter().skip(1) {
         let wallet = row.get("maker").map(|v| v.trim().to_ascii_lowercase()).unwrap_or_default();
@@ -891,10 +933,14 @@ fn wallets_rank(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<V
         let price = price.unwrap();
         let qty = qty.unwrap();
         if qty <= 0.0 { continue; }
-        let instrument = (market_id.clone(), side.clone());
+        let category = infer_trade_category(row);
+        let instrument = (market_id.clone(), side.clone(), category.clone());
         let stats = stats_by_wallet.entry(wallet.clone()).or_default();
         stats.trades += 1;
         stats.gross_volume += price * qty;
+        let category_bucket = stats.category_stats.entry(category.clone()).or_default();
+        category_bucket.trades += 1;
+        category_bucket.gross_volume += price * qty;
         let counts = market_counts.entry(wallet.clone()).or_default().entry(instrument.clone()).or_insert((0, 0.0, 0.0));
         counts.0 += 1;
         counts.1 += if direction == "BUY" { qty } else { -qty };
@@ -917,13 +963,18 @@ fn wallets_rank(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<V
                 stats.realized_pnl += pnl;
                 stats.closed_round_trips += 1;
                 if pnl > 0.0 { stats.winning_round_trips += 1; }
+                let lot_category = lot.category.clone().unwrap_or_else(|| "unknown".to_string());
+                let bucket = stats.category_stats.entry(lot_category).or_default();
+                bucket.realized_pnl += pnl;
+                bucket.closed_round_trips += 1;
+                if pnl > 0.0 { bucket.winning_round_trips += 1; }
                 remaining -= matched;
                 lot.qty -= matched;
                 shorts.pop_front();
                 if lot.qty > 1e-12 { shorts.push_front(lot); }
             }
             if remaining > 0.0 {
-                long_books.entry(wallet.clone()).or_default().entry(instrument).or_default().push_back(Lot { qty: remaining, price, opened_at: ts.clone() });
+                long_books.entry(wallet.clone()).or_default().entry(instrument).or_default().push_back(Lot { qty: remaining, price, opened_at: ts.clone(), category: Some(category.clone()) });
             }
         } else {
             let books = long_books.entry(wallet.clone()).or_default();
@@ -936,13 +987,18 @@ fn wallets_rank(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<V
                 stats.realized_pnl += pnl;
                 stats.closed_round_trips += 1;
                 if pnl > 0.0 { stats.winning_round_trips += 1; }
+                let lot_category = lot.category.clone().unwrap_or_else(|| "unknown".to_string());
+                let bucket = stats.category_stats.entry(lot_category).or_default();
+                bucket.realized_pnl += pnl;
+                bucket.closed_round_trips += 1;
+                if pnl > 0.0 { bucket.winning_round_trips += 1; }
                 remaining -= matched;
                 lot.qty -= matched;
                 longs.pop_front();
                 if lot.qty > 1e-12 { longs.push_front(lot); }
             }
             if remaining > 0.0 {
-                short_books.entry(wallet.clone()).or_default().entry(instrument).or_default().push_back(Lot { qty: remaining, price, opened_at: ts.clone() });
+                short_books.entry(wallet.clone()).or_default().entry(instrument).or_default().push_back(Lot { qty: remaining, price, opened_at: ts.clone(), category: Some(category.clone()) });
             }
         }
     }
@@ -961,6 +1017,7 @@ fn wallets_rank(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<V
             win_rate: round6(win_rate),
             closed_round_trips: stats.closed_round_trips,
             source: "ranked".to_string(),
+            category_performance: finalize_category_stats(stats.category_stats),
         });
     }
     targets.sort_by(|a, b| b.realized_pnl.partial_cmp(&a.realized_pnl).unwrap_or(std::cmp::Ordering::Equal));
@@ -969,7 +1026,7 @@ fn wallets_rank(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<V
     write_json(&wallet_targets_path(state_dir), &targets)?;
     let selected: HashSet<String> = targets.iter().map(|t| t.wallet.clone()).collect();
     let mut signals = Vec::new();
-    for ((market_id, outcome), buckets) in market_counts.into_iter().flat_map(|(wallet, by_inst)| by_inst.into_iter().map(move |(inst, counts)| ((inst.0, inst.1), (wallet.clone(), counts)))) .fold(BTreeMap::<(String,String), Vec<(String,(usize,f64,f64))>>::new(), |mut acc, (inst, payload)| { acc.entry(inst).or_default().push(payload); acc }) {
+    for ((market_id, outcome, category), buckets) in market_counts.into_iter().flat_map(|(wallet, by_inst)| by_inst.into_iter().map(move |(inst, counts)| ((inst.0, inst.1, inst.2), (wallet.clone(), counts)))) .fold(BTreeMap::<(String,String,String), Vec<(String,(usize,f64,f64))>>::new(), |mut acc, (inst, payload)| { acc.entry(inst).or_default().push(payload); acc }) {
         let mut wallets = HashSet::new();
         let mut trade_count = 0usize;
         let mut net_volume = 0.0;
@@ -985,6 +1042,7 @@ fn wallets_rank(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<V
             signals.push(WalletMarketSignal {
                 market_id,
                 outcome,
+                category,
                 wallet_count: wallets.len(),
                 trade_count,
                 net_volume: round6(net_volume),
@@ -1018,6 +1076,7 @@ fn merge_configured_wallet_targets(cfg: &ControlConfig, targets: &mut Vec<Wallet
             win_rate: 0.0,
             closed_round_trips: 0,
             source: "configured".to_string(),
+            category_performance: BTreeMap::new(),
         });
         seen.insert(normalized);
     }
@@ -1025,6 +1084,62 @@ fn merge_configured_wallet_targets(cfg: &ControlConfig, targets: &mut Vec<Wallet
 
 fn normalize_wallet(wallet: &str) -> String {
     wallet.trim().to_ascii_lowercase()
+}
+
+fn infer_trade_category(row: &HashMap<String, String>) -> String {
+    for col in ["category", "market_category", "event_category", "vertical"] {
+        if let Some(value) = row.get(col).map(|value| normalize_category(value)).filter(|value| !value.is_empty()) {
+            return value;
+        }
+    }
+    let text = ["question", "title", "slug", "market_slug", "event_slug"]
+        .iter()
+        .filter_map(|col| row.get(*col))
+        .map(|value| value.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    infer_category_from_text(&text)
+}
+
+fn infer_category_from_text(text: &str) -> String {
+    let lowered = text.to_ascii_lowercase();
+    if CRYPTO_KEYWORDS.iter().any(|keyword| lowered.contains(keyword)) {
+        "crypto".to_string()
+    } else if SPORTS_KEYWORDS.iter().any(|keyword| lowered.contains(keyword)) {
+        "sports".to_string()
+    } else if ["election", "president", "senate", "congress", "politic"].iter().any(|keyword| lowered.contains(keyword)) {
+        "politics".to_string()
+    } else if ["fed", "inflation", "cpi", "rates", "gdp", "macro"].iter().any(|keyword| lowered.contains(keyword)) {
+        "macro".to_string()
+    } else {
+        "unknown".to_string()
+    }
+}
+
+fn normalize_category(value: &str) -> String {
+    value.trim().to_ascii_lowercase().replace(' ', "_")
+}
+
+fn finalize_category_stats(stats: HashMap<String, WalletCategoryAccumulator>) -> BTreeMap<String, WalletCategoryStats> {
+    let mut out = BTreeMap::new();
+    for (category, item) in stats {
+        let win_rate = if item.closed_round_trips > 0 {
+            item.winning_round_trips as f64 / item.closed_round_trips as f64
+        } else {
+            0.0
+        };
+        out.insert(
+            category,
+            WalletCategoryStats {
+                trades: item.trades,
+                realized_pnl: round6(item.realized_pnl),
+                gross_volume: round6(item.gross_volume),
+                win_rate: round6(win_rate),
+                closed_round_trips: item.closed_round_trips,
+            },
+        );
+    }
+    out
 }
 
 fn runtime_once(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<Value, String> {
@@ -1730,6 +1845,7 @@ fn live_account_snapshot() -> Result<LiveAccountSnapshot, String> {
                     qty: trade.shares,
                     price: trade.price,
                     opened_at: trade.matched_at,
+                    category: None,
                 });
             }
             "SELL" => {
@@ -2567,11 +2683,11 @@ fi
         fs::write(
             &csv_path,
             "\
-timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,price,usd_amount,token_amount,transactionHash\n\
-2026-01-01T00:00:00Z,1,0xgood,0xdef,YES,BUY,SELL,0.40,40,100,0x1\n\
-2026-01-01T01:00:00Z,1,0xgood,0xdef,YES,SELL,BUY,0.60,60,100,0x2\n\
-2026-01-01T02:00:00Z,2,0xbad,0xdef,YES,BUY,SELL,0.70,70,100,0x3\n\
-2026-01-01T03:00:00Z,2,0xbad,0xdef,YES,SELL,BUY,0.50,50,100,0x4\n",
+timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,price,usd_amount,token_amount,transactionHash,category\n\
+2026-01-01T00:00:00Z,1,0xgood,0xdef,YES,BUY,SELL,0.40,40,100,0x1,crypto\n\
+2026-01-01T01:00:00Z,1,0xgood,0xdef,YES,SELL,BUY,0.60,60,100,0x2,crypto\n\
+2026-01-01T02:00:00Z,2,0xbad,0xdef,YES,BUY,SELL,0.70,70,100,0x3,sports\n\
+2026-01-01T03:00:00Z,2,0xbad,0xdef,YES,SELL,BUY,0.50,50,100,0x4,sports\n",
         )
         .expect("write csv");
 
@@ -2587,8 +2703,10 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].wallet, "0xgood");
         assert_eq!(targets[0].realized_pnl, 20.0);
+        assert_eq!(targets[0].category_performance.get("crypto").map(|stats| stats.realized_pnl), Some(20.0));
         assert_eq!(signals.len(), 1);
         assert_eq!(signals[0].market_id, "1");
+        assert_eq!(signals[0].category, "crypto");
         assert_eq!(signals[0].wallet_count, 1);
     }
 
@@ -2605,6 +2723,7 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
                 win_rate: 0.75,
                 closed_round_trips: 20,
                 source: "ranked".to_string(),
+                category_performance: BTreeMap::new(),
             }],
         )
         .expect("write targets");
@@ -2626,6 +2745,34 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
         assert!(targets.iter().any(|target| {
             target.wallet == "0x6e1d5040d0ac73709b0621f620d2a60b80d2d0f" && target.source == "configured"
         }));
+    }
+
+    #[test]
+    fn wallet_signal_category_filters_block_cross_category_copying() {
+        let signal = WalletMarketSignal {
+            market_id: "m1".to_string(),
+            outcome: "YES".to_string(),
+            category: "sports".to_string(),
+            wallet_count: 2,
+            trade_count: 8,
+            net_volume: 100.0,
+            gross_volume: 200.0,
+        };
+
+        assert!(!wallet_signal_category_allowed(
+            &ControlConfig {
+                wallet_copy_allowed_categories: vec!["crypto".to_string()],
+                ..ControlConfig::default()
+            },
+            &signal,
+        ));
+        assert!(!wallet_signal_category_allowed(
+            &ControlConfig {
+                wallet_copy_blocked_categories: vec!["sports".to_string()],
+                ..ControlConfig::default()
+            },
+            &signal,
+        ));
     }
 
     #[test]

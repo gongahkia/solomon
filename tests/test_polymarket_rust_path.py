@@ -98,3 +98,30 @@ def test_polymarket_rust_test_shells_out(monkeypatch, tmp_path):
 
     assert result["returncode"] == 0
     assert result["stdout"] == "ok"
+
+
+def test_polymarket_rust_replay_shells_out(monkeypatch, tmp_path):
+    commands = _import_commands()
+
+    workspace = tmp_path / "rust"
+    workspace.mkdir()
+    fixture = tmp_path / "fixture.txt"
+    fixture.write_text("PING\n", encoding="utf-8")
+    monkeypatch.setattr(commands, "_rust_workspace_root", lambda: workspace)
+
+    class _Completed:
+        returncode = 0
+        stdout = "PONG\n"
+        stderr = ""
+
+    def _run(cmd, cwd, capture_output, text, check):
+        assert cmd[-2:] == ["replay", str(fixture)]
+        assert cwd == workspace
+        return _Completed()
+
+    monkeypatch.setattr(commands.subprocess, "run", _run)
+
+    result = commands.do_polymarket_rust_replay(fixture)
+
+    assert result["returncode"] == 0
+    assert result["stdout"] == "PONG\n"

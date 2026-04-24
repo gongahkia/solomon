@@ -1,12 +1,30 @@
 use std::io::{self, BufRead as _, Write as _};
+use std::path::PathBuf;
 
-use stonks_polymarket_hotpath::{DaemonState, protocol::handle_command};
+use stonks_polymarket_hotpath::{DaemonState, protocol::handle_command, replay::replay_commands};
 
 fn main() {
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
         Some("ping") => {
             println!("PONG");
+        }
+        Some("replay") => {
+            let Some(path) = args.next() else {
+                eprintln!("usage: stonks-polymarket-hotpath replay <path>");
+                std::process::exit(2);
+            };
+            match replay_commands(&PathBuf::from(path)) {
+                Ok(lines) => {
+                    for line in lines {
+                        println!("{line}");
+                    }
+                }
+                Err(err) => {
+                    eprintln!("{err}");
+                    std::process::exit(1);
+                }
+            }
         }
         Some("daemon") => {
             let stdin = io::stdin();
@@ -23,7 +41,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("usage: stonks-polymarket-hotpath <ping|daemon>");
+            eprintln!("usage: stonks-polymarket-hotpath <ping|replay|daemon>");
             std::process::exit(2);
         }
     }

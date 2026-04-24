@@ -45,6 +45,7 @@ from stonks_cli.commands import (
     do_polymarket_replay_market,
     do_polymarket_replay_user,
     do_polymarket_rust_ping,
+    do_polymarket_rust_replay,
     do_polymarket_rust_status,
     do_polymarket_rust_test,
     do_polymarket_settle,
@@ -1218,6 +1219,18 @@ def polymarket_rust_test() -> None:
     """Run the Rust hot-path test suite."""
     try:
         data = do_polymarket_rust_test()
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_rust_app.command("replay")
+def polymarket_rust_replay(
+    path: Path = typer.Argument(..., exists=True, readable=True, help="Path to line-based Rust protocol fixture"),
+) -> None:
+    """Run the Rust replay command against a protocol fixture file."""
+    try:
+        data = do_polymarket_rust_replay(path)
         Console().print_json(json.dumps(data))
     except Exception as e:
         raise _exit_for_error(e)

@@ -122,6 +122,14 @@ impl MarketStateCache {
     pub fn len(&self) -> usize {
         self.snapshots.len()
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &LiveMarketSnapshot)> {
+        self.snapshots.iter()
+    }
+
+    pub fn insert_snapshot(&mut self, snapshot: LiveMarketSnapshot) {
+        self.snapshots.insert(snapshot.token_id.clone(), snapshot);
+    }
 }
 
 fn midpoint(best_bid: Option<f64>, best_ask: Option<f64>, fallback: Option<f64>) -> Option<f64> {

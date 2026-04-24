@@ -2191,6 +2191,22 @@ def do_polymarket_rust_test() -> dict[str, object]:
     }
 
 
+def do_polymarket_rust_replay(path: Path) -> dict[str, object]:
+    workspace = _rust_workspace_root()
+    completed = subprocess.run(
+        ["cargo", "run", "--quiet", "--bin", "stonks-polymarket-hotpath", "--", "replay", str(path)],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return {
+        "returncode": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
+
+
 def _rust_workspace_root() -> Path:
     return Path(__file__).resolve().parents[2] / "rust"
 

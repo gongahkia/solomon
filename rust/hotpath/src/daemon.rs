@@ -60,6 +60,19 @@ impl DaemonState {
             open_order_count: self.order_manager.open_count(),
         }
     }
+
+    pub fn market_cache(&self) -> &MarketStateCache {
+        &self.market_cache
+    }
+
+    pub fn order_manager(&self) -> &OrderManager {
+        &self.order_manager
+    }
+
+    pub fn replace_state(&mut self, market_cache: MarketStateCache, order_manager: OrderManager) {
+        self.market_cache = market_cache;
+        self.order_manager = order_manager;
+    }
 }
 
 pub fn parse_side(raw: &str) -> Result<ExecutionSide, String> {

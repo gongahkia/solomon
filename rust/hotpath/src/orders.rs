@@ -160,6 +160,14 @@ impl OrderManager {
     pub fn get(&self, order_id: &str) -> Option<&LiveOrderRecord> {
         self.records.get(order_id)
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &LiveOrderRecord)> {
+        self.records.iter()
+    }
+
+    pub fn insert_record(&mut self, record: LiveOrderRecord) {
+        self.records.insert(record.order_id.clone(), record);
+    }
 }
 
 pub fn build_live_order_request(

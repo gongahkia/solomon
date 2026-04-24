@@ -178,6 +178,7 @@ $ stonks-cli polymarket runtime once
 $ stonks-cli polymarket rust status
 $ stonks-cli polymarket rust ping --use-cargo
 $ stonks-cli polymarket rust test
+$ stonks-cli polymarket rust replay ./fixtures/hotpath.txt
 ```
 
 ### Rust Hot Path
@@ -185,13 +186,16 @@ $ stonks-cli polymarket rust test
 The repo now includes a Rust hot-path workspace under [rust/](/Users/gongahkia/Desktop/coding/projects/stonks-cli/rust:1).
 
 - `rust/hotpath`: low-latency market state cache, guarded order construction, order lifecycle tracking, and a tiny stdin/stdout daemon protocol
+- persisted daemon state and deterministic replay fixtures
 - `stonks-cli polymarket rust status`: inspect the local Rust workspace and binary
 - `stonks-cli polymarket rust ping`: smoke test the Rust binary
 - `stonks-cli polymarket rust test`: run the Rust test suite
+- `stonks-cli polymarket rust replay`: execute a line-based hot-path fixture through the Rust daemon protocol
 
 Current scope:
 
 - deterministic hot-path core in Rust
+- persisted state and replayable protocol fixtures
 - no external crates required
 - ready to be extended with the official `polymarket-client-sdk` adapter layer next
 

@@ -4,7 +4,7 @@ import sys
 import types
 
 
-def _import_commands():
+def _import_commands(monkeypatch):
     blocking = types.ModuleType("apscheduler.schedulers.blocking")
     blocking.BlockingScheduler = object
     background = types.ModuleType("apscheduler.schedulers.background")
@@ -17,12 +17,12 @@ def _import_commands():
             return expr
 
     cron.CronTrigger = _CronTrigger
-    sys.modules.setdefault("apscheduler", types.ModuleType("apscheduler"))
-    sys.modules.setdefault("apscheduler.schedulers", types.ModuleType("apscheduler.schedulers"))
-    sys.modules["apscheduler.schedulers.blocking"] = blocking
-    sys.modules["apscheduler.schedulers.background"] = background
-    sys.modules.setdefault("apscheduler.triggers", types.ModuleType("apscheduler.triggers"))
-    sys.modules["apscheduler.triggers.cron"] = cron
+    monkeypatch.setitem(sys.modules, "apscheduler", types.ModuleType("apscheduler"))
+    monkeypatch.setitem(sys.modules, "apscheduler.schedulers", types.ModuleType("apscheduler.schedulers"))
+    monkeypatch.setitem(sys.modules, "apscheduler.schedulers.blocking", blocking)
+    monkeypatch.setitem(sys.modules, "apscheduler.schedulers.background", background)
+    monkeypatch.setitem(sys.modules, "apscheduler.triggers", types.ModuleType("apscheduler.triggers"))
+    monkeypatch.setitem(sys.modules, "apscheduler.triggers.cron", cron)
 
     from stonks_cli import commands
 
@@ -30,7 +30,7 @@ def _import_commands():
 
 
 def test_polymarket_rust_status_reports_workspace(monkeypatch, tmp_path):
-    commands = _import_commands()
+    commands = _import_commands(monkeypatch)
 
     workspace = tmp_path / "rust"
     (workspace / "hotpath").mkdir(parents=True)
@@ -50,7 +50,7 @@ def test_polymarket_rust_status_reports_workspace(monkeypatch, tmp_path):
 
 
 def test_polymarket_rust_ping_uses_binary(monkeypatch, tmp_path):
-    commands = _import_commands()
+    commands = _import_commands(monkeypatch)
 
     workspace = tmp_path / "rust"
     binary = workspace / "target" / "debug" / "stonks-polymarket-hotpath"
@@ -76,7 +76,7 @@ def test_polymarket_rust_ping_uses_binary(monkeypatch, tmp_path):
 
 
 def test_polymarket_rust_test_shells_out(monkeypatch, tmp_path):
-    commands = _import_commands()
+    commands = _import_commands(monkeypatch)
 
     workspace = tmp_path / "rust"
     workspace.mkdir()
@@ -101,7 +101,7 @@ def test_polymarket_rust_test_shells_out(monkeypatch, tmp_path):
 
 
 def test_polymarket_rust_replay_shells_out(monkeypatch, tmp_path):
-    commands = _import_commands()
+    commands = _import_commands(monkeypatch)
 
     workspace = tmp_path / "rust"
     workspace.mkdir()

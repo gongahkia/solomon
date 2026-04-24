@@ -71,20 +71,27 @@ Repo config minimum:
     "wallet_copy_allowed_categories": ["crypto"],
     "consensus_enabled": true,
     "consensus_min_buy_votes": 2,
+    "min_entry_price": 0.10,
+    "max_spread_bps": 750.0,
     "volume_spike_exit_enabled": true,
     "volume_spike_multiplier": 3.0,
     "live_require_armed_env": true,
     "max_position_fraction": 0.25,
     "max_market_notional": 10.0,
+    "max_total_notional": 20.0,
     "max_open_positions": 1,
     "max_live_open_orders": 1,
     "live_min_order_notional_usd": 5.0,
-    "max_daily_loss": 10.0
+    "max_daily_loss": 10.0,
+    "max_daily_profit": 10.0,
+    "stop_loss_reentry_cooldown_minutes": 60.0
   }
 }
 ```
 
 Keep `auto_trade_enabled=false` until manual buy/cancel/sell validation passes. The added wallet and category settings make Trackmind-style copying explicit and category-scoped instead of letting any ranked wallet influence every market.
+
+If anything looks wrong during testing, run `stonks-cli polymarket emergency-stop --reason operator_stop`. Add `--close-positions` only when you explicitly want the bot to try closing positions at available current prices.
 
 ## Dry Run
 

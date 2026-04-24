@@ -34,6 +34,10 @@ pub struct ControlConfig {
     pub min_market_liquidity_usd: f64,
     #[serde(default = "default_min_book_depth")]
     pub min_book_depth_usd: f64,
+    #[serde(default)]
+    pub min_entry_price: f64,
+    #[serde(default = "default_max_spread_bps")]
+    pub max_spread_bps: f64,
     #[serde(default = "default_min_hours")]
     pub min_hours_to_resolution: f64,
     #[serde(default = "default_max_hours")]
@@ -86,6 +90,8 @@ pub struct ControlConfig {
     pub stale_position_hours: f64,
     #[serde(default)]
     pub max_market_notional: f64,
+    #[serde(default)]
+    pub max_total_notional: f64,
     #[serde(default = "default_max_live_open_orders")]
     pub max_live_open_orders: usize,
     #[serde(default = "default_true")]
@@ -96,6 +102,10 @@ pub struct ControlConfig {
     pub live_min_order_notional_usd: f64,
     #[serde(default)]
     pub max_daily_loss: f64,
+    #[serde(default)]
+    pub max_daily_profit: f64,
+    #[serde(default = "default_stop_loss_cooldown_minutes")]
+    pub stop_loss_reentry_cooldown_minutes: f64,
     #[serde(default = "default_live_require_armed_env")]
     pub live_require_armed_env: bool,
     #[serde(default = "default_live_armed_env")]
@@ -121,6 +131,8 @@ impl Default for ControlConfig {
             scanner_limit: default_scanner_limit(),
             min_market_liquidity_usd: default_min_market_liquidity(),
             min_book_depth_usd: default_min_book_depth(),
+            min_entry_price: 0.0,
+            max_spread_bps: default_max_spread_bps(),
             min_hours_to_resolution: default_min_hours(),
             max_hours_to_resolution: default_max_hours(),
             require_active: true,
@@ -147,11 +159,14 @@ impl Default for ControlConfig {
             stop_loss_price_delta: default_stop_loss(),
             stale_position_hours: default_stale_hours(),
             max_market_notional: 0.0,
+            max_total_notional: 0.0,
             max_live_open_orders: default_max_live_open_orders(),
             live_post_only: true,
             live_order_max_age_seconds: default_live_order_max_age_seconds(),
             live_min_order_notional_usd: default_live_min_order_notional(),
             max_daily_loss: 0.0,
+            max_daily_profit: 0.0,
+            stop_loss_reentry_cooldown_minutes: default_stop_loss_cooldown_minutes(),
             live_require_armed_env: true,
             live_armed_env: default_live_armed_env(),
             loop_interval_ms: default_loop_interval_ms(),
@@ -440,6 +455,7 @@ fn default_true() -> bool { true }
 fn default_scanner_limit() -> usize { 200 }
 fn default_min_market_liquidity() -> f64 { 50_000.0 }
 fn default_min_book_depth() -> f64 { 500.0 }
+fn default_max_spread_bps() -> f64 { 1_000.0 }
 fn default_min_hours() -> f64 { 4.0 }
 fn default_max_hours() -> f64 { 168.0 }
 fn default_auto_trade_min_score() -> f64 { 12.0 }
@@ -458,6 +474,7 @@ fn default_live_order_max_age_seconds() -> usize { 30 }
 fn default_live_min_order_notional() -> f64 { 5.0 }
 fn default_volume_spike_multiplier() -> f64 { 3.0 }
 fn default_volume_spike_min_delta_usd() -> f64 { 500.0 }
+fn default_stop_loss_cooldown_minutes() -> f64 { 60.0 }
 fn default_live_require_armed_env() -> bool { true }
 fn default_live_armed_env() -> String { "STONKS_CLI_POLYMARKET_LIVE_ARMED".to_string() }
 fn default_loop_interval_ms() -> u64 { 1000 }
@@ -483,6 +500,7 @@ pub fn handle_control(op: &str, request: ControlRequest) -> Result<Value, String
         "guard_status" => Ok(guard_status_value(&state_dir)?),
         "guard_halt" => Ok(json!(halt_guard(&state_dir, arg_str(&request.args, "reason").unwrap_or("manual_halt"))?)),
         "guard_resume" => Ok(json!(resume_guard(&state_dir)?)),
+        "emergency_stop" => Ok(emergency_stop(&state_dir, &request.config, &request.args)?),
         "doctor" => Ok(json!(preflight(&state_dir, &request.config, &request.args))),
         "settle" => Ok(json!(settle_market(&state_dir, &request.args)?)),
         "replay_market" => Ok(json!(replay_market_events(&request.args)?)),
@@ -650,6 +668,19 @@ fn structural_scan_market(market: &PolymarketMarket, book: &OrderBook, cfg: &Con
     }
     if bids_depth < cfg.min_book_depth_usd || asks_depth < cfg.min_book_depth_usd {
         reasons.push(format!("depth<{}", cfg.min_book_depth_usd as i64));
+    }
+    if let Some(midpoint) = book.midpoint {
+        if cfg.min_entry_price > 0.0 && midpoint < cfg.min_entry_price {
+            reasons.push(format!("price<{:.3}", cfg.min_entry_price));
+        }
+    }
+    if let (Some(best_bid), Some(best_ask), Some(midpoint)) = (book.best_bid, book.best_ask, book.midpoint) {
+        if midpoint > 0.0 {
+            let spread_bps = ((best_ask - best_bid).max(0.0) / midpoint) * 10_000.0;
+            if cfg.max_spread_bps > 0.0 && spread_bps > cfg.max_spread_bps {
+                reasons.push(format!("spread_bps>{:.0}", cfg.max_spread_bps));
+            }
+        }
     }
     if let Some(h) = hrs {
         if h < cfg.min_hours_to_resolution {
@@ -1408,6 +1439,52 @@ fn auto_exit_live_positions(state_dir: &Path, cfg: &ControlConfig, scans: &[Mark
     Ok(actions)
 }
 
+fn auto_exit_live_positions_for_reason(
+    state_dir: &Path,
+    cfg: &ControlConfig,
+    scans: &[MarketScan],
+    reason: &str,
+) -> Result<Vec<Value>, String> {
+    let snapshot = live_account_snapshot()?;
+    let prices: HashMap<String, f64> = scans
+        .iter()
+        .filter_map(|scan| scan.token_id.clone().zip(scan.midpoint))
+        .collect();
+    let mut actions = Vec::new();
+    for position in snapshot.positions {
+        let Some(current_price) = prices.get(&position.token_id).copied() else { continue; };
+        let action = live_place_order(
+            state_dir,
+            cfg,
+            &MarketScan {
+                market_id: position.market_id.clone(),
+                slug: None,
+                question: String::new(),
+                token_id: Some(position.token_id.clone()),
+                outcome: position.outcome.clone(),
+                midpoint: Some(current_price),
+                bids_depth_usd: 0.0,
+                asks_depth_usd: 0.0,
+                liquidity_usd: None,
+                volume_usd: None,
+                hours_to_resolution: None,
+                complement_deviation_bps: None,
+                score: 0.0,
+                status: "PASS".to_string(),
+                reasons: Vec::new(),
+                target_wallet_count: 0,
+                target_trade_count: 0,
+                target_net_volume: 0.0,
+            },
+            position.shares,
+            reason.to_string(),
+            Some("sell"),
+        )?;
+        actions.push(action);
+    }
+    Ok(actions)
+}
+
 fn detect_and_record_volume_spikes(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketScan]) -> Result<HashSet<String>, String> {
     let mut state = read_json::<VolumeState>(&volume_state_path(state_dir)).unwrap_or_default();
     let mut spikes = HashSet::new();
@@ -1497,6 +1574,9 @@ fn trade_guard_reasons(
     if cfg.paper {
         if account.positions.iter().any(|p| Some(&p.token_id) == scan.token_id.as_ref()) { reasons.push("position_already_open".to_string()); }
         if account.positions.len() >= cfg.max_open_positions { reasons.push("max_open_positions_reached".to_string()); }
+        if stop_loss_cooldown_active(cfg, account, scan) {
+            reasons.push("stop_loss_reentry_cooldown".to_string());
+        }
     } else {
         let live_positions = live_snapshot.map(|snapshot| snapshot.positions.as_slice()).unwrap_or(&[]);
         if live_orders.iter().any(|record| scan.token_id.as_deref() == Some(record.token_id.as_str()) && is_live_open_status(&record.status)) {
@@ -1520,9 +1600,13 @@ fn trade_guard_reasons(
     }
     if cfg.paper {
         if cfg.max_daily_loss > 0.0 && account.realized_pnl <= -cfg.max_daily_loss { reasons.push("max_daily_loss_reached".to_string()); }
+        if cfg.max_daily_profit > 0.0 && account.realized_pnl >= cfg.max_daily_profit { reasons.push("max_daily_profit_reached".to_string()); }
     } else if let Some(snapshot) = live_snapshot {
         if cfg.max_daily_loss > 0.0 && snapshot.realized_pnl <= -cfg.max_daily_loss {
             reasons.push("max_daily_loss_reached".to_string());
+        }
+        if cfg.max_daily_profit > 0.0 && snapshot.realized_pnl >= cfg.max_daily_profit {
+            reasons.push("max_daily_profit_reached".to_string());
         }
     }
     if cfg.max_market_notional > 0.0 {
@@ -1550,7 +1634,42 @@ fn trade_guard_reasons(
             reasons.push("max_market_notional_reached".to_string());
         }
     }
+    if cfg.max_total_notional > 0.0 {
+        let total_notional: f64 = if cfg.paper {
+            account.positions.iter().map(|p| p.shares * p.avg_price).sum()
+        } else {
+            live_snapshot
+                .map(|snapshot| snapshot.positions.iter().map(|p| p.shares * p.avg_price).sum())
+                .unwrap_or(0.0)
+        };
+        let available_cash = if cfg.paper {
+            account.cash
+        } else {
+            live_snapshot.map(|snapshot| snapshot.collateral_balance).unwrap_or(0.0)
+        };
+        let current_notional = scan.midpoint.unwrap_or(0.0) * (available_cash * cfg.max_position_fraction).max(0.0);
+        if total_notional + current_notional > cfg.max_total_notional {
+            reasons.push("max_total_notional_reached".to_string());
+        }
+    }
     reasons
+}
+
+fn stop_loss_cooldown_active(cfg: &ControlConfig, account: &PaperAccount, scan: &MarketScan) -> bool {
+    if cfg.stop_loss_reentry_cooldown_minutes <= 0.0 {
+        return false;
+    }
+    let Some(token_id) = scan.token_id.as_deref() else {
+        return false;
+    };
+    let cooldown_hours = cfg.stop_loss_reentry_cooldown_minutes / 60.0;
+    account.trades.iter().rev().any(|trade| {
+        trade.action == "SELL"
+            && trade.token_id == token_id
+            && trade.realized_pnl.unwrap_or(0.0) < 0.0
+            && trade.reason.as_deref() == Some("STOP_LOSS")
+            && hours_since(&trade.ts).is_some_and(|hours| hours <= cooldown_hours)
+    })
 }
 
 fn consensus_decision(cfg: &ControlConfig, scan: &MarketScan) -> ConsensusDecision {
@@ -1768,6 +1887,50 @@ fn resume_guard(state_dir: &Path) -> Result<GuardState, String> {
     };
     write_json(&guard_path(state_dir), &state)?;
     Ok(state)
+}
+
+fn emergency_stop(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<Value, String> {
+    let close_positions = arg_bool(args, "close_positions").unwrap_or(false);
+    let reason = arg_str(args, "reason").unwrap_or("emergency_stop");
+    let guard = halt_guard(state_dir, reason)?;
+    let mut actions = Vec::new();
+    if cfg.paper {
+        if close_positions {
+            let account = load_paper_opt(state_dir).unwrap_or(PaperAccount {
+                cash: cfg.paper_starting_cash,
+                realized_pnl: 0.0,
+                positions: Vec::new(),
+                trades: Vec::new(),
+            });
+            let positions = account.positions.clone();
+            for position in positions {
+                let action = paper_sell(
+                    state_dir,
+                    &json!({
+                        "token_id": position.token_id,
+                        "shares": position.shares,
+                        "price": position.avg_price,
+                        "reason": "EMERGENCY_STOP",
+                    }),
+                )?;
+                actions.push(action);
+            }
+        }
+    } else {
+        actions.extend(cancel_all_live_orders(state_dir)?);
+        if close_positions {
+            let scans = scan_markets(state_dir, cfg, &json!({ "limit": cfg.scanner_limit, "include_filtered": true }))?;
+            actions.extend(auto_exit_live_positions_for_reason(state_dir, cfg, &scans, "EMERGENCY_STOP")?);
+        }
+    }
+    append_journal(
+        state_dir,
+        json!({"event":"emergency_stop","reason":reason,"close_positions":close_positions,"action_count":actions.len()}),
+    )?;
+    Ok(json!({
+        "guard": guard,
+        "actions": actions,
+    }))
 }
 
 fn preflight(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Value {
@@ -1992,6 +2155,32 @@ fn cancel_stale_live_orders(state_dir: &Path, cfg: &ControlConfig) -> Result<Vec
             continue;
         }
         if order_age_seconds(&record.created_at).unwrap_or(0) < cfg.live_order_max_age_seconds as i64 {
+            continue;
+        }
+        let response = polymarket_cli_json(&[
+            "clob".to_string(),
+            "cancel".to_string(),
+            record.order_id.clone(),
+        ])?;
+        actions.push(json!({
+            "mode": "live",
+            "action": "CANCEL",
+            "token_id": record.token_id,
+            "order_id": record.order_id,
+            "response": response,
+        }));
+    }
+    if !actions.is_empty() {
+        let _ = live_sync_open_orders(state_dir);
+    }
+    Ok(actions)
+}
+
+fn cancel_all_live_orders(state_dir: &Path) -> Result<Vec<Value>, String> {
+    let records = live_sync_open_orders(state_dir)?;
+    let mut actions = Vec::new();
+    for record in records {
+        if !is_live_open_status(&record.status) {
             continue;
         }
         let response = polymarket_cli_json(&[
@@ -2879,6 +3068,35 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
     }
 
     #[test]
+    fn emergency_stop_halts_and_closes_paper_positions_when_requested() {
+        let state_dir = temp_state_dir("emergency-stop-paper");
+        paper_init(&state_dir, &json!({ "cash": 1000.0 })).expect("init");
+        paper_buy(
+            &state_dir,
+            &json!({
+                "token_id": "YES1",
+                "market_id": "m1",
+                "shares": 10.0,
+                "price": 0.40,
+            }),
+        )
+        .expect("buy");
+
+        let result = emergency_stop(
+            &state_dir,
+            &ControlConfig::default(),
+            &json!({"reason":"test_stop","close_positions":true}),
+        )
+        .expect("stop");
+        let account = load_paper(&state_dir).expect("account");
+
+        assert_eq!(result.get("actions").and_then(|v| v.as_array()).map(|items| items.len()), Some(1));
+        assert!(account.positions.is_empty());
+        assert_eq!(account.trades.last().and_then(|trade| trade.reason.as_deref()), Some("EMERGENCY_STOP"));
+        assert!(load_guard_state(&state_dir).expect("guard").halted);
+    }
+
+    #[test]
     fn replay_helpers_reduce_market_and_user_events() {
         let state_dir = temp_state_dir("replay");
         let market_path = state_dir.join("market.jsonl");
@@ -3143,6 +3361,129 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
         );
 
         assert!(reasons.iter().any(|reason| reason == "live_notional_below_minimum"));
+    }
+
+    #[test]
+    fn structural_scan_filters_low_price_and_wide_spread_entries() {
+        let market = PolymarketMarket {
+            market_id: "m1".to_string(),
+            question: "Will BTC close higher today?".to_string(),
+            slug: Some("btc-higher".to_string()),
+            condition_id: None,
+            active: Some(true),
+            closed: Some(false),
+            liquidity_usd: Some(100_000.0),
+            volume_usd: Some(500_000.0),
+            end_date_iso: None,
+            tokens: vec![MarketToken {
+                token_id: "YES1".to_string(),
+                outcome: Some("YES".to_string()),
+                price: Some(0.06),
+            }],
+            raw: json!({}),
+        };
+        let book = OrderBook {
+            token_id: "YES1".to_string(),
+            bids: vec![BookLevel { price: 0.04, size: 20_000.0 }],
+            asks: vec![BookLevel { price: 0.08, size: 20_000.0 }],
+            midpoint: Some(0.06),
+            best_bid: Some(0.04),
+            best_ask: Some(0.08),
+            raw: json!({}),
+        };
+        let scan = structural_scan_market(
+            &market,
+            &book,
+            &ControlConfig {
+                min_entry_price: 0.10,
+                max_spread_bps: 500.0,
+                ..ControlConfig::default()
+            },
+        );
+
+        assert_eq!(scan.status, "FILTERED");
+        assert!(scan.reasons.iter().any(|reason| reason == "price<0.100"));
+        assert!(scan.reasons.iter().any(|reason| reason == "spread_bps>500"));
+    }
+
+    #[test]
+    fn trade_guard_blocks_profit_target_total_exposure_and_stop_loss_reentry() {
+        let state_dir = temp_state_dir("advanced-guards");
+        let account = PaperAccount {
+            cash: 100.0,
+            realized_pnl: 20.0,
+            positions: vec![PaperPosition {
+                token_id: "OPEN1".to_string(),
+                market_id: "m-open".to_string(),
+                slug: None,
+                outcome: Some("YES".to_string()),
+                shares: 100.0,
+                avg_price: 0.40,
+                opened_at: utc_now_iso(),
+                target_price: None,
+                stop_price: None,
+                thesis: None,
+            }],
+            trades: vec![PaperTrade {
+                ts: utc_now_iso(),
+                action: "SELL".to_string(),
+                token_id: "YES1".to_string(),
+                market_id: "m1".to_string(),
+                slug: None,
+                outcome: Some("YES".to_string()),
+                shares: 10.0,
+                price: 0.30,
+                notional: 3.0,
+                realized_pnl: Some(-2.0),
+                reason: Some("STOP_LOSS".to_string()),
+            }],
+        };
+        let reasons = trade_guard_reasons(
+            &state_dir,
+            &ControlConfig {
+                auto_trade_enabled: true,
+                auto_trade_min_score: 1.0,
+                auto_trade_min_target_wallets: 0,
+                consensus_enabled: false,
+                max_daily_profit: 10.0,
+                max_total_notional: 44.0,
+                stop_loss_reentry_cooldown_minutes: 60.0,
+                ..ControlConfig::default()
+            },
+            &GuardState {
+                trading_day: Utc::now().date_naive().to_string(),
+                halted: false,
+                halt_reason: None,
+                live_error_count: 0,
+                stream_error_count: 0,
+            },
+            &account,
+            None,
+            &MarketScan {
+                market_id: "m1".to_string(),
+                slug: Some("btc-higher".to_string()),
+                question: "Will BTC close higher today?".to_string(),
+                token_id: Some("YES1".to_string()),
+                outcome: Some("YES".to_string()),
+                midpoint: Some(0.50),
+                bids_depth_usd: 1000.0,
+                asks_depth_usd: 1000.0,
+                liquidity_usd: Some(100_000.0),
+                volume_usd: Some(1_000_000.0),
+                hours_to_resolution: Some(8.0),
+                complement_deviation_bps: Some(0.0),
+                score: 20.0,
+                status: "PASS".to_string(),
+                reasons: Vec::new(),
+                target_wallet_count: 0,
+                target_trade_count: 0,
+                target_net_volume: 0.0,
+            },
+        );
+
+        assert!(reasons.iter().any(|reason| reason == "max_daily_profit_reached"));
+        assert!(reasons.iter().any(|reason| reason == "max_total_notional_reached"));
+        assert!(reasons.iter().any(|reason| reason == "stop_loss_reentry_cooldown"));
     }
 
     #[test]

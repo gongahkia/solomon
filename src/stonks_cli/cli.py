@@ -35,6 +35,7 @@ from stonks_cli.commands import (
     do_insider,
     do_news,
     do_polymarket_book,
+    do_polymarket_emergency_stop,
     do_polymarket_market_get,
     do_polymarket_markets_list,
     do_polymarket_paper_buy,
@@ -1048,6 +1049,19 @@ def polymarket_doctor(
     """Run pre-live Polymarket environment and safety checks."""
     try:
         data = do_polymarket_preflight(deep_auth=deep_auth)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_app.command("emergency-stop")
+def polymarket_emergency_stop(
+    reason: str = typer.Option("operator_emergency_stop", "--reason"),
+    close_positions: bool = typer.Option(False, "--close-positions", help="Also try to close positions where current prices are available"),
+) -> None:
+    """Halt runtime and cancel all live open orders."""
+    try:
+        data = do_polymarket_emergency_stop(reason=reason, close_positions=close_positions)
         Console().print_json(json.dumps(data))
     except Exception as e:
         raise _exit_for_error(e)

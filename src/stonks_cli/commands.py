@@ -2005,6 +2005,10 @@ def do_polymarket_runtime_resume() -> dict[str, object]:
     return _polymarket_control("guard_resume")
 
 
+def do_polymarket_emergency_stop(*, reason: str = "emergency_stop", close_positions: bool = False) -> dict[str, object]:
+    return _polymarket_control("emergency_stop", args={"reason": reason, "close_positions": close_positions})
+
+
 def do_polymarket_wallets_import(csv_path: Path) -> dict[str, object]:
     return _polymarket_control("wallets_import", args={"csv_path": str(csv_path)})
 

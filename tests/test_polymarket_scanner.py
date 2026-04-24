@@ -132,6 +132,7 @@ def test_scan_markets_filters_partial_fill_estimate():
 
     assert scans[0].status == "FILTERED"
     assert "fill_estimate_partial" in scans[0].reasons
+    assert scans[0].entry_fill_unfilled_notional == 3.0
 
 
 def test_scan_markets_filters_orderbook_walk_slippage():
@@ -156,3 +157,5 @@ def test_scan_markets_filters_orderbook_walk_slippage():
 
     assert scans[0].status == "FILTERED"
     assert "entry_slippage_bps>100" in scans[0].reasons
+    assert scans[0].entry_fill_avg_price == 0.51
+    assert scans[0].entry_fill_slippage_bps == 200.0

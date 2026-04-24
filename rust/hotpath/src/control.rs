@@ -245,6 +245,14 @@ pub struct MarketScan {
     pub volume_usd: Option<f64>,
     pub hours_to_resolution: Option<f64>,
     pub complement_deviation_bps: Option<f64>,
+    #[serde(default)]
+    pub entry_fill_avg_price: Option<f64>,
+    #[serde(default)]
+    pub entry_fill_worst_price: Option<f64>,
+    #[serde(default)]
+    pub entry_fill_unfilled_notional: Option<f64>,
+    #[serde(default)]
+    pub entry_fill_slippage_bps: Option<f64>,
     pub score: f64,
     pub status: String,
     pub reasons: Vec<String>,
@@ -620,6 +628,10 @@ fn scan_markets(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<V
                     volume_usd: market.volume_usd,
                     hours_to_resolution: hours_to_resolution(market.end_date_iso.as_deref()),
                     complement_deviation_bps: complement_deviation_bps(&market),
+                    entry_fill_avg_price: None,
+                    entry_fill_worst_price: None,
+                    entry_fill_unfilled_notional: None,
+                    entry_fill_slippage_bps: None,
                     score: 0.0,
                     status: "FILTERED".to_string(),
                     reasons: vec!["missing_token".to_string()],
@@ -666,6 +678,10 @@ fn structural_scan_market(market: &PolymarketMarket, book: &OrderBook, cfg: &Con
     let asks_depth = round2(book.asks.iter().map(|level| level.price * level.size).sum());
     let hrs = hours_to_resolution(market.end_date_iso.as_deref());
     let deviation_bps = complement_deviation_bps(market);
+    let mut entry_fill_avg_price = None;
+    let mut entry_fill_worst_price = None;
+    let mut entry_fill_unfilled_notional = None;
+    let mut entry_fill_slippage_bps = None;
     let mut reasons = Vec::new();
     if cfg.require_active && market.active == Some(false) {
         reasons.push("inactive".to_string());
@@ -698,12 +714,16 @@ fn structural_scan_market(market: &PolymarketMarket, book: &OrderBook, cfg: &Con
     if cfg.slippage_check_notional_usd > 0.0 {
         match estimate_entry_fill(book, cfg.slippage_check_notional_usd) {
             Some(fill) => {
+                entry_fill_avg_price = Some(fill.avg_price);
+                entry_fill_worst_price = Some(fill.worst_price);
+                entry_fill_unfilled_notional = Some(fill.unfilled_notional);
                 if cfg.require_full_fill_estimate && !fill.fully_filled {
                     reasons.push("fill_estimate_partial".to_string());
                 }
                 if let Some(midpoint) = book.midpoint {
                     if midpoint > 0.0 && fill.avg_price > 0.0 {
                         let slippage_bps = ((fill.avg_price - midpoint).max(0.0) / midpoint) * 10_000.0;
+                        entry_fill_slippage_bps = Some(round2(slippage_bps));
                         if cfg.max_entry_slippage_bps > 0.0 && slippage_bps > cfg.max_entry_slippage_bps {
                             reasons.push(format!("entry_slippage_bps>{:.0}", cfg.max_entry_slippage_bps));
                         }
@@ -740,6 +760,10 @@ fn structural_scan_market(market: &PolymarketMarket, book: &OrderBook, cfg: &Con
         volume_usd: market.volume_usd,
         hours_to_resolution: hrs.map(round2),
         complement_deviation_bps: deviation_bps.map(round2),
+        entry_fill_avg_price,
+        entry_fill_worst_price,
+        entry_fill_unfilled_notional,
+        entry_fill_slippage_bps,
         score: round2((depth_balance / 1000.0) + deviation_score + time_score * 10.0),
         status,
         reasons,
@@ -1312,7 +1336,7 @@ fn maybe_open_position(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketSca
         let consensus = consensus_decision(cfg, scan);
         let reasons = trade_guard_reasons(state_dir, cfg, &guard, &account, live_snapshot.as_ref(), scan);
         if !reasons.is_empty() {
-            append_journal(state_dir, json!({"event":"proposal_rejected","token_id":scan.token_id,"market_id":scan.market_id,"slug":scan.slug,"reasons":reasons,"score":scan.score,"consensus":consensus}))?;
+            append_journal(state_dir, json!({"event":"proposal_rejected","token_id":scan.token_id,"market_id":scan.market_id,"slug":scan.slug,"reasons":reasons,"score":scan.score,"consensus":consensus,"entry_fill":scan_entry_fill_metrics(scan)}))?;
             continue;
         }
         let max_notional = {
@@ -1349,7 +1373,7 @@ fn maybe_open_position(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketSca
                     "reason": format!("score={:.2}|wallets={}|votes={}/{}", scan.score, scan.target_wallet_count, consensus.buy_votes, consensus.required_buy_votes),
                 }),
             )?;
-            append_journal(state_dir, json!({"event":"paper_execution","result":result.clone(),"consensus":consensus}))?;
+            append_journal(state_dir, json!({"event":"paper_execution","result":result.clone(),"consensus":consensus,"entry_fill":scan_entry_fill_metrics(scan)}))?;
             result
         } else {
             live_place_order(
@@ -1460,6 +1484,10 @@ fn auto_exit_live_positions(state_dir: &Path, cfg: &ControlConfig, scans: &[Mark
                 volume_usd: None,
                 hours_to_resolution: None,
                 complement_deviation_bps: None,
+                entry_fill_avg_price: None,
+                entry_fill_worst_price: None,
+                entry_fill_unfilled_notional: None,
+                entry_fill_slippage_bps: None,
                 score: 0.0,
                 status: "PASS".to_string(),
                 reasons: Vec::new(),
@@ -1510,6 +1538,10 @@ fn auto_exit_live_positions_for_reason(
                 volume_usd: None,
                 hours_to_resolution: None,
                 complement_deviation_bps: None,
+                entry_fill_avg_price: None,
+                entry_fill_worst_price: None,
+                entry_fill_unfilled_notional: None,
+                entry_fill_slippage_bps: None,
                 score: 0.0,
                 status: "PASS".to_string(),
                 reasons: Vec::new(),
@@ -2372,8 +2404,17 @@ fn live_place_order(
         "reason": reason,
         "response": response,
     });
-    append_journal(state_dir, json!({"event":"live_execution","result":result.clone()}))?;
+    append_journal(state_dir, json!({"event":"live_execution","result":result.clone(),"entry_fill":scan_entry_fill_metrics(scan)}))?;
     Ok(result)
+}
+
+fn scan_entry_fill_metrics(scan: &MarketScan) -> Value {
+    json!({
+        "avg_price": scan.entry_fill_avg_price,
+        "worst_price": scan.entry_fill_worst_price,
+        "unfilled_notional": scan.entry_fill_unfilled_notional,
+        "slippage_bps": scan.entry_fill_slippage_bps,
+    })
 }
 
 fn normalize_price_for_side(price: f64, side: &str, tick_size: f64) -> Result<f64, String> {
@@ -3333,6 +3374,10 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
                 volume_usd: Some(1_000_000.0),
                 hours_to_resolution: Some(8.0),
                 complement_deviation_bps: Some(0.0),
+                entry_fill_avg_price: None,
+                entry_fill_worst_price: None,
+                entry_fill_unfilled_notional: None,
+                entry_fill_slippage_bps: None,
                 score: 20.0,
                 status: "PASS".to_string(),
                 reasons: Vec::new(),
@@ -3388,6 +3433,10 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
                 volume_usd: Some(1_000_000.0),
                 hours_to_resolution: Some(8.0),
                 complement_deviation_bps: Some(0.0),
+                entry_fill_avg_price: None,
+                entry_fill_worst_price: None,
+                entry_fill_unfilled_notional: None,
+                entry_fill_slippage_bps: None,
                 score: 20.0,
                 status: "PASS".to_string(),
                 reasons: Vec::new(),
@@ -3467,6 +3516,10 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
                 volume_usd: Some(1_000_000.0),
                 hours_to_resolution: Some(8.0),
                 complement_deviation_bps: Some(0.0),
+                entry_fill_avg_price: None,
+                entry_fill_worst_price: None,
+                entry_fill_unfilled_notional: None,
+                entry_fill_slippage_bps: None,
                 score: 20.0,
                 status: "PASS".to_string(),
                 reasons: Vec::new(),
@@ -3563,6 +3616,7 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
 
         assert_eq!(scan.status, "FILTERED");
         assert!(scan.reasons.iter().any(|reason| reason == "fill_estimate_partial"));
+        assert_eq!(scan.entry_fill_unfilled_notional, Some(3.0));
     }
 
     #[test]
@@ -3606,6 +3660,8 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
 
         assert_eq!(scan.status, "FILTERED");
         assert!(scan.reasons.iter().any(|reason| reason == "entry_slippage_bps>100"));
+        assert_eq!(scan.entry_fill_avg_price, Some(0.51));
+        assert_eq!(scan.entry_fill_slippage_bps, Some(200.0));
     }
 
     #[test]
@@ -3674,6 +3730,10 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
                 volume_usd: Some(1_000_000.0),
                 hours_to_resolution: Some(8.0),
                 complement_deviation_bps: Some(0.0),
+                entry_fill_avg_price: None,
+                entry_fill_worst_price: None,
+                entry_fill_unfilled_notional: None,
+                entry_fill_slippage_bps: None,
                 score: 20.0,
                 status: "PASS".to_string(),
                 reasons: Vec::new(),
@@ -3703,6 +3763,10 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
             volume_usd: Some(1_000_000.0),
             hours_to_resolution: Some(8.0),
             complement_deviation_bps: Some(100.0),
+            entry_fill_avg_price: None,
+            entry_fill_worst_price: None,
+            entry_fill_unfilled_notional: None,
+            entry_fill_slippage_bps: None,
             score: 20.0,
             status: "PASS".to_string(),
             reasons: Vec::new(),
@@ -3751,6 +3815,10 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
             volume_usd: Some(1_000_000.0),
             hours_to_resolution: Some(8.0),
             complement_deviation_bps: Some(100.0),
+            entry_fill_avg_price: None,
+            entry_fill_worst_price: None,
+            entry_fill_unfilled_notional: None,
+            entry_fill_slippage_bps: None,
             score: 20.0,
             status: "PASS".to_string(),
             reasons: Vec::new(),
@@ -3790,6 +3858,10 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
             volume_usd: Some(1_000.0),
             hours_to_resolution: Some(8.0),
             complement_deviation_bps: Some(100.0),
+            entry_fill_avg_price: None,
+            entry_fill_worst_price: None,
+            entry_fill_unfilled_notional: None,
+            entry_fill_slippage_bps: None,
             score: 20.0,
             status: "PASS".to_string(),
             reasons: Vec::new(),
@@ -3845,6 +3917,10 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
                 volume_usd: Some(1_800.0),
                 hours_to_resolution: Some(8.0),
                 complement_deviation_bps: Some(100.0),
+                entry_fill_avg_price: None,
+                entry_fill_worst_price: None,
+                entry_fill_unfilled_notional: None,
+                entry_fill_slippage_bps: None,
                 score: 20.0,
                 status: "PASS".to_string(),
                 reasons: Vec::new(),

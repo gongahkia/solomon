@@ -22,6 +22,7 @@ The cloned `KaustubhPatange/polymarket-trade-engine` repository is a TypeScript/
 - Rust orderbook fill estimator: `rust/hotpath/src/book_math.rs`
 - Rust scanner guard that rejects partial estimated entry fills and excessive entry slippage.
 - Python config and fallback scanner parity for the same fill/slippage controls.
+- Fill-estimate metrics on scan rows and execution/rejection journal entries.
 - Runtime PID lock for the Rust control loop, preventing two live loops from trading the same state directory.
 - Existing safeguards from prior phases already covered the other Reddit failure modes: stop-loss re-entry cooldown, total exposure caps, daily loss/profit stops, volume-spike exits, live arm flag, stale order cancellation, and emergency stop.
 
@@ -38,5 +39,4 @@ The system is closer to live-safe operation, but these changes do not prove prof
 ## Remaining High-Value Work Before Scaling
 
 - Add a validated BTC short-window module only after wiring reliable BTC reference feeds and Polymarket slot parsing.
-- Record fill estimates in the journal for every accepted/rejected live proposal so early live tests can be audited.
 - Backtest or paper-replay strategy votes against captured WebSocket data before increasing order size.

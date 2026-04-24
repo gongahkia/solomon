@@ -59,6 +59,10 @@ class MarketScan:
     score: float
     status: str
     reasons: list[str] = field(default_factory=list)
+    entry_fill_avg_price: float | None = None
+    entry_fill_worst_price: float | None = None
+    entry_fill_unfilled_notional: float | None = None
+    entry_fill_slippage_bps: float | None = None
     target_wallet_count: int = 0
     target_trade_count: int = 0
     target_net_volume: float = 0.0

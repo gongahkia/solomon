@@ -114,6 +114,10 @@ def structural_scan_market(
     asks_depth = book_depth_usd(book.asks)
     hrs = hours_to_resolution(market, now=now)
     deviation_bps = complement_deviation_bps(market)
+    entry_fill_avg_price = None
+    entry_fill_worst_price = None
+    entry_fill_unfilled_notional = None
+    entry_fill_slippage_bps = None
     reasons: list[str] = []
 
     if cfg.require_active and market.active is False:
@@ -129,10 +133,14 @@ def structural_scan_market(
         if fill is None:
             reasons.append("fill_estimate_unavailable")
         else:
+            entry_fill_avg_price = float(fill["avg_price"])
+            entry_fill_worst_price = float(fill["worst_price"])
+            entry_fill_unfilled_notional = float(fill["unfilled_notional"])
             if cfg.require_full_fill_estimate and not fill["fully_filled"]:
                 reasons.append("fill_estimate_partial")
             if book.midpoint and book.midpoint > 0:
                 slippage_bps = max(0.0, float(fill["avg_price"]) - book.midpoint) / book.midpoint * 10000
+                entry_fill_slippage_bps = round(slippage_bps, 2)
                 if cfg.max_entry_slippage_bps > 0 and slippage_bps > cfg.max_entry_slippage_bps:
                     reasons.append(f"entry_slippage_bps>{cfg.max_entry_slippage_bps:.0f}")
     if hrs is not None and hrs < cfg.min_hours_to_resolution:
@@ -166,6 +174,10 @@ def structural_scan_market(
         score=score,
         status=status,
         reasons=reasons,
+        entry_fill_avg_price=entry_fill_avg_price,
+        entry_fill_worst_price=entry_fill_worst_price,
+        entry_fill_unfilled_notional=entry_fill_unfilled_notional,
+        entry_fill_slippage_bps=entry_fill_slippage_bps,
     )
 
 

@@ -1,0 +1,15 @@
+[package]
+name = "stonks-polymarket-hotpath"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "stonks_polymarket_hotpath"
+path = "src/lib.rs"
+
+[[bin]]
+name = "stonks-polymarket-hotpath"
+path = "src/main.rs"
+
+[dependencies]

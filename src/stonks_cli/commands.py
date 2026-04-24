@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+import subprocess
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -2145,3 +2147,53 @@ def do_polymarket_settle(*, market_id: str, winning_token_id: str) -> dict[str, 
     from stonks_cli.polymarket.settlement import paper_settle_market
 
     return paper_settle_market(market_id=market_id, winning_token_id=winning_token_id)
+
+
+def do_polymarket_rust_status() -> dict[str, object]:
+    workspace = _rust_workspace_root()
+    binary = _rust_binary_path(workspace)
+    return {
+        "workspace_root": str(workspace),
+        "workspace_exists": workspace.exists(),
+        "cargo_toml_exists": (workspace / "Cargo.toml").exists(),
+        "crate_exists": (workspace / "hotpath" / "Cargo.toml").exists(),
+        "cargo_present": shutil.which("cargo") is not None,
+        "rustc_present": shutil.which("rustc") is not None,
+        "binary_exists": binary.exists(),
+        "binary_path": str(binary),
+    }
+
+
+def do_polymarket_rust_ping(*, use_cargo: bool = False) -> dict[str, object]:
+    workspace = _rust_workspace_root()
+    if use_cargo:
+        cmd = ["cargo", "run", "--quiet", "--bin", "stonks-polymarket-hotpath", "--", "ping"]
+        completed = subprocess.run(cmd, cwd=workspace, capture_output=True, text=True, check=False)
+    else:
+        binary = _rust_binary_path(workspace)
+        if not binary.exists():
+            raise FileNotFoundError(f"Rust hot path binary not found: {binary}")
+        completed = subprocess.run([str(binary), "ping"], capture_output=True, text=True, check=False)
+    return {
+        "returncode": completed.returncode,
+        "stdout": completed.stdout.strip(),
+        "stderr": completed.stderr.strip(),
+    }
+
+
+def do_polymarket_rust_test() -> dict[str, object]:
+    workspace = _rust_workspace_root()
+    completed = subprocess.run(["cargo", "test"], cwd=workspace, capture_output=True, text=True, check=False)
+    return {
+        "returncode": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
+
+
+def _rust_workspace_root() -> Path:
+    return Path(__file__).resolve().parents[2] / "rust"
+
+
+def _rust_binary_path(workspace: Path) -> Path:
+    return workspace / "target" / "debug" / "stonks-polymarket-hotpath"

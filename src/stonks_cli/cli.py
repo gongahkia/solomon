@@ -44,6 +44,9 @@ from stonks_cli.commands import (
     do_polymarket_preflight,
     do_polymarket_replay_market,
     do_polymarket_replay_user,
+    do_polymarket_rust_ping,
+    do_polymarket_rust_status,
+    do_polymarket_rust_test,
     do_polymarket_settle,
     do_polymarket_guard_status,
     do_polymarket_runtime_halt,
@@ -101,6 +104,7 @@ polymarket_runtime_app = typer.Typer()
 polymarket_wallets_app = typer.Typer()
 polymarket_paper_app = typer.Typer()
 polymarket_replay_app = typer.Typer()
+polymarket_rust_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
@@ -120,6 +124,7 @@ polymarket_app.add_typer(polymarket_runtime_app, name="runtime")
 polymarket_app.add_typer(polymarket_wallets_app, name="wallets")
 polymarket_app.add_typer(polymarket_paper_app, name="paper")
 polymarket_app.add_typer(polymarket_replay_app, name="replay")
+polymarket_app.add_typer(polymarket_rust_app, name="rust")
 
 
 @app.callback()
@@ -1181,6 +1186,38 @@ def polymarket_settle(
     """Manually settle a resolved Polymarket paper market."""
     try:
         data = do_polymarket_settle(market_id=market_id, winning_token_id=winning_token_id)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_rust_app.command("status")
+def polymarket_rust_status() -> None:
+    """Show the local Rust hot-path workspace and binary status."""
+    try:
+        data = do_polymarket_rust_status()
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_rust_app.command("ping")
+def polymarket_rust_ping(
+    use_cargo: bool = typer.Option(False, "--use-cargo", help="Run via cargo instead of an already-built binary"),
+) -> None:
+    """Smoke test the Rust hot-path binary."""
+    try:
+        data = do_polymarket_rust_ping(use_cargo=use_cargo)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_rust_app.command("test")
+def polymarket_rust_test() -> None:
+    """Run the Rust hot-path test suite."""
+    try:
+        data = do_polymarket_rust_test()
         Console().print_json(json.dumps(data))
     except Exception as e:
         raise _exit_for_error(e)

@@ -175,7 +175,25 @@ $ stonks-cli polymarket wallets signals
 $ stonks-cli polymarket paper init --cash 1000
 $ stonks-cli polymarket paper status
 $ stonks-cli polymarket runtime once
+$ stonks-cli polymarket rust status
+$ stonks-cli polymarket rust ping --use-cargo
+$ stonks-cli polymarket rust test
 ```
+
+### Rust Hot Path
+
+The repo now includes a Rust hot-path workspace under [rust/](/Users/gongahkia/Desktop/coding/projects/stonks-cli/rust:1).
+
+- `rust/hotpath`: low-latency market state cache, guarded order construction, order lifecycle tracking, and a tiny stdin/stdout daemon protocol
+- `stonks-cli polymarket rust status`: inspect the local Rust workspace and binary
+- `stonks-cli polymarket rust ping`: smoke test the Rust binary
+- `stonks-cli polymarket rust test`: run the Rust test suite
+
+Current scope:
+
+- deterministic hot-path core in Rust
+- no external crates required
+- ready to be extended with the official `polymarket-client-sdk` adapter layer next
 
 3. `stonks-cli` also includes an optional [Model Context Protocol](https://modelcontextprotocol.io) server that allows for [AI Agents](https://modelcontextprotocol.io/docs/agents/) to directly interact with `stonks-cli` tooling.
 

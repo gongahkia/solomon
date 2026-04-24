@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
@@ -61,6 +62,10 @@ pub struct ControlConfig {
     pub max_market_notional: f64,
     #[serde(default = "default_max_live_open_orders")]
     pub max_live_open_orders: usize,
+    #[serde(default = "default_true")]
+    pub live_post_only: bool,
+    #[serde(default = "default_live_order_max_age_seconds")]
+    pub live_order_max_age_seconds: usize,
     #[serde(default)]
     pub max_daily_loss: f64,
     #[serde(default = "default_live_require_armed_env")]
@@ -96,6 +101,8 @@ impl Default for ControlConfig {
             stale_position_hours: default_stale_hours(),
             max_market_notional: 0.0,
             max_live_open_orders: default_max_live_open_orders(),
+            live_post_only: true,
+            live_order_max_age_seconds: default_live_order_max_age_seconds(),
             max_daily_loss: 0.0,
             live_require_armed_env: true,
             live_armed_env: default_live_armed_env(),
@@ -260,6 +267,22 @@ pub struct GuardState {
     pub stream_error_count: usize,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LiveOrderRecord {
+    pub order_id: String,
+    pub token_id: String,
+    pub market_id: String,
+    pub side: String,
+    pub price: f64,
+    pub shares: f64,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub remaining_shares: f64,
+    pub filled_shares: f64,
+    pub post_only: bool,
+}
+
 #[derive(Clone, Debug, Default)]
 struct WalletStats {
     trades: usize,
@@ -292,6 +315,7 @@ fn default_take_profit() -> f64 { 0.10 }
 fn default_stop_loss() -> f64 { 0.08 }
 fn default_stale_hours() -> f64 { 24.0 }
 fn default_max_live_open_orders() -> usize { 20 }
+fn default_live_order_max_age_seconds() -> usize { 30 }
 fn default_live_require_armed_env() -> bool { true }
 fn default_live_armed_env() -> String { "STONKS_CLI_POLYMARKET_LIVE_ARMED".to_string() }
 fn default_loop_interval_ms() -> u64 { 1000 }
@@ -837,10 +861,12 @@ fn runtime_once(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<V
     let mut actions = Vec::new();
     if cfg.paper {
         actions.extend(auto_exit_positions(state_dir, cfg, &scans)?);
-        if cfg.auto_trade_enabled {
-            if let Some(action) = maybe_open_position(state_dir, cfg, &scans)? {
-                actions.push(action);
-            }
+    } else {
+        actions.extend(cancel_stale_live_orders(state_dir, cfg)?);
+    }
+    if cfg.auto_trade_enabled {
+        if let Some(action) = maybe_open_position(state_dir, cfg, &scans)? {
+            actions.push(action);
         }
     }
     let status = RuntimeStatus {
@@ -850,7 +876,7 @@ fn runtime_once(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<V
         last_scan_at: Some(utc_now_iso()),
         last_scan_count: limit,
         last_pass_count: scans.len(),
-        open_positions: load_paper_opt(state_dir).map(|account| account.positions.len()).unwrap_or(0),
+        open_positions: current_open_count(state_dir, cfg),
         last_actions: actions.iter().filter_map(|value| value.get("action").and_then(|v| v.as_str()).zip(value.get("token_id").and_then(|v| v.as_str()))).map(|(a,t)| format!("{a}:{t}")).collect(),
         last_error: None,
     };
@@ -898,7 +924,7 @@ fn maybe_open_position(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketSca
     let account = load_paper_opt(state_dir).unwrap_or(PaperAccount { cash: cfg.paper_starting_cash, realized_pnl: 0.0, positions: Vec::new(), trades: Vec::new() });
     let guard = load_guard_state(state_dir)?;
     for scan in scans {
-        let reasons = trade_guard_reasons(cfg, &guard, &account, scan);
+        let reasons = trade_guard_reasons(state_dir, cfg, &guard, &account, scan);
         if !reasons.is_empty() {
             append_journal(state_dir, json!({"event":"proposal_rejected","token_id":scan.token_id,"market_id":scan.market_id,"slug":scan.slug,"reasons":reasons,"score":scan.score}))?;
             continue;
@@ -917,22 +943,33 @@ fn maybe_open_position(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketSca
         if shares <= 0.0 { continue; }
         let target = (scan.midpoint.unwrap() + cfg.take_profit_price_delta).min(0.99);
         let stop = (scan.midpoint.unwrap() - cfg.stop_loss_price_delta).max(0.01);
-        let action = paper_buy(
-            state_dir,
-            &json!({
-                "token_id": scan.token_id,
-                "market_id": scan.market_id,
-                "slug": scan.slug,
-                "outcome": scan.outcome,
-                "shares": shares,
-                "price": scan.midpoint,
-                "target_price": target,
-                "stop_price": stop,
-                "thesis": format!("score={:.2}|wallets={}", scan.score, scan.target_wallet_count),
-                "reason": format!("score={:.2}|wallets={}", scan.score, scan.target_wallet_count),
-            }),
-        )?;
-        append_journal(state_dir, json!({"event":"paper_execution","result":action.clone()}))?;
+        let action = if cfg.paper {
+            let result = paper_buy(
+                state_dir,
+                &json!({
+                    "token_id": scan.token_id,
+                    "market_id": scan.market_id,
+                    "slug": scan.slug,
+                    "outcome": scan.outcome,
+                    "shares": shares,
+                    "price": scan.midpoint,
+                    "target_price": target,
+                    "stop_price": stop,
+                    "thesis": format!("score={:.2}|wallets={}", scan.score, scan.target_wallet_count),
+                    "reason": format!("score={:.2}|wallets={}", scan.score, scan.target_wallet_count),
+                }),
+            )?;
+            append_journal(state_dir, json!({"event":"paper_execution","result":result.clone()}))?;
+            result
+        } else {
+            live_place_order(
+                state_dir,
+                cfg,
+                scan,
+                shares,
+                format!("score={:.2}|wallets={}", scan.score, scan.target_wallet_count),
+            )?
+        };
         return Ok(Some(action));
     }
     Ok(None)
@@ -976,8 +1013,13 @@ fn auto_exit_positions(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketSca
     Ok(actions)
 }
 
-fn trade_guard_reasons(cfg: &ControlConfig, guard: &GuardState, account: &PaperAccount, scan: &MarketScan) -> Vec<String> {
+fn trade_guard_reasons(state_dir: &Path, cfg: &ControlConfig, guard: &GuardState, account: &PaperAccount, scan: &MarketScan) -> Vec<String> {
     let mut reasons = Vec::new();
+    let live_orders = if cfg.paper {
+        Vec::new()
+    } else {
+        load_live_orders(state_dir).unwrap_or_default()
+    };
     if guard.halted {
         reasons.push(format!("halted:{}", guard.halt_reason.clone().unwrap_or_else(|| "manual_halt".to_string())));
     }
@@ -990,8 +1032,20 @@ fn trade_guard_reasons(cfg: &ControlConfig, guard: &GuardState, account: &PaperA
     if scan.midpoint.is_none() || !(0.0..1.0).contains(&scan.midpoint.unwrap()) { reasons.push("invalid_midpoint".to_string()); }
     if scan.score < cfg.auto_trade_min_score { reasons.push("score_below_threshold".to_string()); }
     if scan.target_wallet_count < cfg.auto_trade_min_target_wallets { reasons.push("wallet_signal_below_threshold".to_string()); }
-    if account.positions.iter().any(|p| Some(&p.token_id) == scan.token_id.as_ref()) { reasons.push("position_already_open".to_string()); }
-    if account.positions.len() >= cfg.max_open_positions { reasons.push("max_open_positions_reached".to_string()); }
+    if cfg.paper {
+        if account.positions.iter().any(|p| Some(&p.token_id) == scan.token_id.as_ref()) { reasons.push("position_already_open".to_string()); }
+        if account.positions.len() >= cfg.max_open_positions { reasons.push("max_open_positions_reached".to_string()); }
+    } else {
+        if live_orders.iter().any(|record| scan.token_id.as_deref() == Some(record.token_id.as_str()) && is_live_open_status(&record.status)) {
+            reasons.push("position_already_open".to_string());
+        }
+        if live_orders.iter().filter(|record| is_live_open_status(&record.status)).count() >= cfg.max_open_positions {
+            reasons.push("max_open_positions_reached".to_string());
+        }
+        if live_orders.iter().filter(|record| is_live_open_status(&record.status)).count() >= cfg.max_live_open_orders {
+            reasons.push("max_live_open_orders_reached".to_string());
+        }
+    }
     if cfg.max_daily_loss > 0.0 && account.realized_pnl <= -cfg.max_daily_loss { reasons.push("max_daily_loss_reached".to_string()); }
     if cfg.max_market_notional > 0.0 {
         let market_notional: f64 = account.positions.iter().filter(|p| p.market_id == scan.market_id).map(|p| p.shares * p.avg_price).sum();
@@ -1033,6 +1087,7 @@ fn wallet_signals_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket
 fn journal_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_journal.jsonl") }
 fn guard_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_guard.json") }
 fn manual_halt_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket.halt") }
+fn live_orders_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_live_orders.json") }
 
 fn load_paper(state_dir: &Path) -> Result<PaperAccount, String> {
     read_json(&paper_path(state_dir))
@@ -1040,6 +1095,17 @@ fn load_paper(state_dir: &Path) -> Result<PaperAccount, String> {
 
 fn load_paper_opt(state_dir: &Path) -> Option<PaperAccount> {
     read_json(&paper_path(state_dir)).ok()
+}
+
+fn load_live_orders(state_dir: &Path) -> Result<Vec<LiveOrderRecord>, String> {
+    if !live_orders_path(state_dir).exists() {
+        return Ok(Vec::new());
+    }
+    read_json(&live_orders_path(state_dir))
+}
+
+fn save_live_orders(state_dir: &Path, records: &[LiveOrderRecord]) -> Result<(), String> {
+    write_json(&live_orders_path(state_dir), &records)
 }
 
 fn load_runtime_status(state_dir: &Path) -> Result<RuntimeStatus, String> {
@@ -1070,6 +1136,15 @@ fn load_guard_state(state_dir: &Path) -> Result<GuardState, String> {
         });
     }
     read_json(&guard_path(state_dir))
+}
+
+fn current_open_count(state_dir: &Path, cfg: &ControlConfig) -> usize {
+    if cfg.paper {
+        return load_paper_opt(state_dir).map(|account| account.positions.len()).unwrap_or(0);
+    }
+    load_live_orders(state_dir)
+        .map(|records| records.into_iter().filter(|record| is_live_open_status(&record.status)).count())
+        .unwrap_or(0)
 }
 
 fn guard_status_value(state_dir: &Path) -> Result<Value, String> {
@@ -1122,6 +1197,8 @@ fn preflight(state_dir: &Path, cfg: &ControlConfig) -> Value {
         checks.push(json!({"name":"private_key","status":if has_key {"pass"} else {"fail"},"detail":if has_key {"private key env present"} else {"missing private key in POLYMARKET_PRIVATE_KEY"}}));
         let armed = live_trading_armed(cfg);
         checks.push(json!({"name":"live_arm","status":if armed || !cfg.live_require_armed_env {"pass"} else {"warn"},"detail":if armed {format!("{} armed", cfg.live_armed_env)} else {format!("set {}=1 to allow live auto-trading", cfg.live_armed_env)}}));
+        let cli_present = Command::new(polymarket_cli_bin()).arg("--help").output().is_ok();
+        checks.push(json!({"name":"polymarket_cli","status":if cli_present {"pass"} else {"fail"},"detail":if cli_present {"polymarket CLI available"} else {"install Polymarket's official `polymarket-cli` for Rust live execution"}}));
     }
     let overall = if checks.iter().any(|c| c.get("status").and_then(|v| v.as_str()) == Some("fail")) {
         "fail"
@@ -1142,6 +1219,202 @@ fn active_halt_reason(state_dir: &Path, state: Option<&GuardState>) -> Option<St
         }).or_else(|| Some("manual_halt".to_string()));
     }
     state.and_then(|current| if current.halted { current.halt_reason.clone() } else { None })
+}
+
+fn polymarket_cli_bin() -> String {
+    env::var("POLYMARKET_CLI_BIN").unwrap_or_else(|_| "polymarket".to_string())
+}
+
+fn polymarket_cli_json(args: &[String]) -> Result<Value, String> {
+    let mut cmd = Command::new(polymarket_cli_bin());
+    cmd.args(args);
+    cmd.arg("-o").arg("json");
+    let output = cmd.output().map_err(|err| err.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Err(if !stderr.is_empty() { stderr } else { stdout });
+    }
+    let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+    serde_json::from_str(&stdout).map_err(|err| err.to_string())
+}
+
+fn live_sync_open_orders(state_dir: &Path) -> Result<Vec<LiveOrderRecord>, String> {
+    let payload = polymarket_cli_json(&["clob".to_string(), "orders".to_string()])?;
+    let records = normalize_live_orders(&payload);
+    save_live_orders(state_dir, &records)?;
+    if !records.is_empty() {
+        append_journal(state_dir, json!({"event":"live_open_orders_synced","orders":records}))?;
+    }
+    Ok(records)
+}
+
+fn cancel_stale_live_orders(state_dir: &Path, cfg: &ControlConfig) -> Result<Vec<Value>, String> {
+    let records = live_sync_open_orders(state_dir)?;
+    let mut actions = Vec::new();
+    for record in records {
+        if !is_live_open_status(&record.status) {
+            continue;
+        }
+        if order_age_seconds(&record.created_at).unwrap_or(0) < cfg.live_order_max_age_seconds as i64 {
+            continue;
+        }
+        let response = polymarket_cli_json(&[
+            "clob".to_string(),
+            "cancel".to_string(),
+            record.order_id.clone(),
+        ])?;
+        actions.push(json!({
+            "mode": "live",
+            "action": "CANCEL",
+            "token_id": record.token_id,
+            "order_id": record.order_id,
+            "response": response,
+        }));
+    }
+    if !actions.is_empty() {
+        let _ = live_sync_open_orders(state_dir);
+    }
+    Ok(actions)
+}
+
+fn live_place_order(
+    state_dir: &Path,
+    cfg: &ControlConfig,
+    scan: &MarketScan,
+    shares: f64,
+    reason: String,
+) -> Result<Value, String> {
+    let token_id = scan.token_id.clone().ok_or_else(|| "missing token_id".to_string())?;
+    let price = scan.midpoint.ok_or_else(|| "missing midpoint".to_string())?;
+    let mut args = vec![
+        "clob".to_string(),
+        "create-order".to_string(),
+        "--token".to_string(),
+        token_id.clone(),
+        "--side".to_string(),
+        "buy".to_string(),
+        "--price".to_string(),
+        price.to_string(),
+        "--size".to_string(),
+        shares.to_string(),
+    ];
+    if cfg.live_post_only {
+        args.push("--post-only".to_string());
+    }
+    let response = polymarket_cli_json(&args)?;
+    let order_id = response
+        .get("orderID")
+        .or_else(|| response.get("orderId"))
+        .or_else(|| response.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if !order_id.is_empty() {
+        let mut records = load_live_orders(state_dir)?;
+        records.retain(|record| record.order_id != order_id);
+        records.push(LiveOrderRecord {
+            order_id: order_id.clone(),
+            token_id: token_id.clone(),
+            market_id: scan.market_id.clone(),
+            side: "BUY".to_string(),
+            price,
+            shares,
+            status: response
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("live")
+                .to_string()
+                .to_ascii_uppercase(),
+            created_at: utc_now_iso(),
+            updated_at: utc_now_iso(),
+            remaining_shares: shares,
+            filled_shares: 0.0,
+            post_only: cfg.live_post_only,
+        });
+        save_live_orders(state_dir, &records)?;
+    }
+    let result = json!({
+        "mode": "live",
+        "action": "BUY",
+        "token_id": token_id,
+        "market_id": scan.market_id,
+        "price": price,
+        "shares": shares,
+        "order_id": if order_id.is_empty() { Value::Null } else { json!(order_id) },
+        "reason": reason,
+        "response": response,
+    });
+    append_journal(state_dir, json!({"event":"live_execution","result":result.clone()}))?;
+    Ok(result)
+}
+
+fn normalize_live_orders(payload: &Value) -> Vec<LiveOrderRecord> {
+    let items = if let Some(items) = payload.as_array() {
+        items.clone()
+    } else if let Some(items) = payload.get("orders").and_then(|v| v.as_array()) {
+        items.clone()
+    } else {
+        Vec::new()
+    };
+    items
+        .into_iter()
+        .filter_map(|item| {
+            let obj = item.as_object()?;
+            let order_id = pick_string(obj, &["id", "order_id", "orderId"])?;
+            let token_id = pick_string(obj, &["asset_id", "assetId", "token_id", "tokenId"]).unwrap_or_default();
+            let market_id = pick_string(obj, &["market", "market_id", "marketId"]).unwrap_or_default();
+            let side = pick_string(obj, &["side"]).unwrap_or_else(|| "BUY".to_string());
+            let price = pick_f64(obj, &["price"]).unwrap_or(0.0);
+            let shares = pick_f64(obj, &["original_size", "size", "shares"]).unwrap_or(0.0);
+            let filled_shares = pick_f64(obj, &["size_matched", "filled_size", "filled"]).unwrap_or(0.0);
+            let remaining = (shares - filled_shares).max(0.0);
+            let created_at = normalize_created_at(obj.get("created_at").or_else(|| obj.get("createdAt")));
+            Some(LiveOrderRecord {
+                order_id,
+                token_id,
+                market_id,
+                side,
+                price,
+                shares,
+                status: pick_string(obj, &["status"]).unwrap_or_else(|| "LIVE".to_string()).to_ascii_uppercase(),
+                created_at: created_at.clone(),
+                updated_at: created_at,
+                remaining_shares: round6(remaining),
+                filled_shares: round6(filled_shares),
+                post_only: false,
+            })
+        })
+        .collect()
+}
+
+fn normalize_created_at(value: Option<&Value>) -> String {
+    let Some(value) = value else { return utc_now_iso(); };
+    if let Some(raw) = value.as_str() {
+        if let Ok(ts) = raw.parse::<i64>() {
+            return epoch_seconds_to_iso(ts);
+        }
+        return raw.to_string();
+    }
+    if let Some(ts) = value.as_i64() {
+        return epoch_seconds_to_iso(ts);
+    }
+    utc_now_iso()
+}
+
+fn epoch_seconds_to_iso(ts: i64) -> String {
+    DateTime::<Utc>::from_timestamp(ts, 0)
+        .map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .unwrap_or_else(utc_now_iso)
+}
+
+fn order_age_seconds(created_at: &str) -> Option<i64> {
+    let parsed = DateTime::parse_from_rfc3339(created_at).ok()?;
+    Some((Utc::now() - parsed.with_timezone(&Utc)).num_seconds())
+}
+
+fn is_live_open_status(status: &str) -> bool {
+    matches!(status.to_ascii_uppercase().as_str(), "LIVE" | "OPEN" | "PLACEMENT" | "UPDATE" | "PARTIAL" | "UNMATCHED" | "DELAYED")
 }
 
 fn replay_market_events(args: &Value) -> Result<Value, String> {
@@ -1695,5 +1968,95 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
                 .and_then(|v| v.as_str()),
             Some("FILLED")
         );
+    }
+
+    #[test]
+    fn normalize_live_orders_parses_cli_payload() {
+        let records = normalize_live_orders(&json!([
+            {
+                "id": "order-1",
+                "asset_id": "YES1",
+                "market": "m1",
+                "side": "BUY",
+                "price": "0.45",
+                "original_size": "10",
+                "size_matched": "4",
+                "status": "live",
+                "created_at": "1710000000"
+            }
+        ]));
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].order_id, "order-1");
+        assert_eq!(records[0].remaining_shares, 6.0);
+        assert_eq!(records[0].status, "LIVE");
+        assert!(records[0].created_at.ends_with('Z'));
+    }
+
+    #[test]
+    fn live_trade_guards_block_duplicate_open_orders() {
+        let state_dir = temp_state_dir("live-guards");
+        save_live_orders(
+            &state_dir,
+            &[LiveOrderRecord {
+                order_id: "order-1".to_string(),
+                token_id: "YES1".to_string(),
+                market_id: "m1".to_string(),
+                side: "BUY".to_string(),
+                price: 0.45,
+                shares: 10.0,
+                status: "LIVE".to_string(),
+                created_at: utc_now_iso(),
+                updated_at: utc_now_iso(),
+                remaining_shares: 10.0,
+                filled_shares: 0.0,
+                post_only: true,
+            }],
+        )
+        .expect("save live orders");
+        let guard = GuardState {
+            trading_day: Utc::now().date_naive().to_string(),
+            halted: false,
+            halt_reason: None,
+            live_error_count: 0,
+            stream_error_count: 0,
+        };
+        let reasons = trade_guard_reasons(
+            &state_dir,
+            &ControlConfig {
+                paper: false,
+                auto_trade_enabled: true,
+                ..ControlConfig::default()
+            },
+            &guard,
+            &PaperAccount {
+                cash: 0.0,
+                realized_pnl: 0.0,
+                positions: Vec::new(),
+                trades: Vec::new(),
+            },
+            &MarketScan {
+                market_id: "m1".to_string(),
+                slug: Some("btc-higher".to_string()),
+                question: "Will BTC close higher today?".to_string(),
+                token_id: Some("YES1".to_string()),
+                outcome: Some("YES".to_string()),
+                midpoint: Some(0.45),
+                bids_depth_usd: 1000.0,
+                asks_depth_usd: 1000.0,
+                liquidity_usd: Some(100_000.0),
+                volume_usd: Some(1_000_000.0),
+                hours_to_resolution: Some(8.0),
+                complement_deviation_bps: Some(0.0),
+                score: 20.0,
+                status: "PASS".to_string(),
+                reasons: Vec::new(),
+                target_wallet_count: 2,
+                target_trade_count: 10,
+                target_net_volume: 100.0,
+            },
+        );
+
+        assert!(reasons.iter().any(|reason| reason == "position_already_open"));
     }
 }

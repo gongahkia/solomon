@@ -41,6 +41,18 @@ pub struct ControlConfig {
     #[serde(default = "default_true")]
     pub require_active: bool,
     #[serde(default)]
+    pub allowed_market_keywords: Vec<String>,
+    #[serde(default)]
+    pub blocked_market_keywords: Vec<String>,
+    #[serde(default)]
+    pub allowed_market_slugs: Vec<String>,
+    #[serde(default)]
+    pub blocked_market_slugs: Vec<String>,
+    #[serde(default)]
+    pub crypto_only: bool,
+    #[serde(default)]
+    pub block_sports: bool,
+    #[serde(default)]
     pub auto_trade_enabled: bool,
     #[serde(default = "default_auto_trade_min_score")]
     pub auto_trade_min_score: f64,
@@ -92,6 +104,12 @@ impl Default for ControlConfig {
             min_hours_to_resolution: default_min_hours(),
             max_hours_to_resolution: default_max_hours(),
             require_active: true,
+            allowed_market_keywords: Vec::new(),
+            blocked_market_keywords: Vec::new(),
+            allowed_market_slugs: Vec::new(),
+            blocked_market_slugs: Vec::new(),
+            crypto_only: false,
+            block_sports: false,
             auto_trade_enabled: false,
             auto_trade_min_score: default_auto_trade_min_score(),
             auto_trade_min_target_wallets: default_auto_trade_min_wallets(),
@@ -522,6 +540,7 @@ fn structural_scan_market(market: &PolymarketMarket, book: &OrderBook, cfg: &Con
     if market.closed == Some(true) {
         reasons.push("closed".to_string());
     }
+    reasons.extend(market_universe_rejections(market, cfg));
     if let Some(liq) = market.liquidity_usd {
         if liq < cfg.min_market_liquidity_usd {
             reasons.push(format!("liquidity<{}", cfg.min_market_liquidity_usd as i64));
@@ -565,6 +584,55 @@ fn structural_scan_market(market: &PolymarketMarket, book: &OrderBook, cfg: &Con
         target_net_volume: 0.0,
     }
 }
+
+fn market_universe_rejections(market: &PolymarketMarket, cfg: &ControlConfig) -> Vec<String> {
+    let mut reasons = Vec::new();
+    let slug = market.slug.clone().unwrap_or_default().to_ascii_lowercase();
+    let haystack = format!(
+        "{} {} {}",
+        market.question.to_ascii_lowercase(),
+        slug,
+        market.raw.get("category").and_then(|v| v.as_str()).unwrap_or("").to_ascii_lowercase()
+    );
+    if !cfg.allowed_market_slugs.is_empty()
+        && !cfg.allowed_market_slugs.iter().any(|item| slug == normalize_filter_text(item))
+    {
+        reasons.push("not_in_allowed_market_slugs".to_string());
+    }
+    if cfg.blocked_market_slugs.iter().any(|item| slug == normalize_filter_text(item)) {
+        reasons.push("blocked_market_slug".to_string());
+    }
+    if !cfg.allowed_market_keywords.is_empty()
+        && !cfg.allowed_market_keywords.iter().any(|item| haystack.contains(&normalize_filter_text(item)))
+    {
+        reasons.push("not_in_allowed_market_keywords".to_string());
+    }
+    if cfg.blocked_market_keywords.iter().any(|item| haystack.contains(&normalize_filter_text(item))) {
+        reasons.push("blocked_market_keyword".to_string());
+    }
+    if cfg.crypto_only && !CRYPTO_KEYWORDS.iter().any(|keyword| haystack.contains(keyword)) {
+        reasons.push("not_crypto_market".to_string());
+    }
+    if cfg.block_sports && SPORTS_KEYWORDS.iter().any(|keyword| haystack.contains(keyword)) {
+        reasons.push("blocked_sports_market".to_string());
+    }
+    reasons
+}
+
+fn normalize_filter_text(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+const CRYPTO_KEYWORDS: &[&str] = &[
+    "bitcoin", "btc", "ethereum", "eth", "solana", "sol", "crypto", "stablecoin", "usdc", "tether",
+    "defi", "blockchain", "etf", "binance", "coinbase",
+];
+
+const SPORTS_KEYWORDS: &[&str] = &[
+    "sport", "sports", "nba", "nfl", "mlb", "nhl", "ufc", "soccer", "football", "basketball", "baseball", "hockey",
+    "tennis", "golf", "formula 1", "f1", "champions league", "premier league", "world cup",
+    "super bowl", "march madness",
+];
 
 fn paper_init(state_dir: &Path, args: &Value) -> Result<PaperAccount, String> {
     let cash = arg_f64(args, "cash").unwrap_or(default_paper_starting_cash());
@@ -2641,6 +2709,49 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
         );
 
         assert!(reasons.iter().any(|reason| reason == "live_notional_below_minimum"));
+    }
+
+    #[test]
+    fn structural_scan_enforces_market_universe_filters() {
+        let market = PolymarketMarket {
+            market_id: "m1".to_string(),
+            question: "Will the Lakers win tonight?".to_string(),
+            slug: Some("lakers-vs-warriors".to_string()),
+            condition_id: None,
+            active: Some(true),
+            closed: Some(false),
+            liquidity_usd: Some(100_000.0),
+            volume_usd: Some(500_000.0),
+            end_date_iso: None,
+            tokens: vec![MarketToken {
+                token_id: "YES1".to_string(),
+                outcome: Some("YES".to_string()),
+                price: Some(0.5),
+            }],
+            raw: json!({"category":"sports"}),
+        };
+        let book = OrderBook {
+            token_id: "YES1".to_string(),
+            bids: vec![BookLevel { price: 0.49, size: 2_000.0 }],
+            asks: vec![BookLevel { price: 0.51, size: 2_000.0 }],
+            midpoint: Some(0.50),
+            best_bid: Some(0.49),
+            best_ask: Some(0.51),
+            raw: json!({}),
+        };
+        let scan = structural_scan_market(
+            &market,
+            &book,
+            &ControlConfig {
+                crypto_only: true,
+                block_sports: true,
+                ..ControlConfig::default()
+            },
+        );
+
+        assert_eq!(scan.status, "FILTERED");
+        assert!(scan.reasons.iter().any(|reason| reason == "not_crypto_market"));
+        assert!(scan.reasons.iter().any(|reason| reason == "blocked_sports_market"));
     }
 
     #[test]

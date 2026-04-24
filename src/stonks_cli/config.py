@@ -87,6 +87,12 @@ class PolymarketConfig(BaseModel):
     min_hours_to_resolution: float = Field(default=4.0, ge=0.0)
     max_hours_to_resolution: float = Field(default=168.0, ge=0.0)
     require_active: bool = True
+    allowed_market_keywords: list[str] = Field(default_factory=list)
+    blocked_market_keywords: list[str] = Field(default_factory=list)
+    allowed_market_slugs: list[str] = Field(default_factory=list)
+    blocked_market_slugs: list[str] = Field(default_factory=list)
+    crypto_only: bool = False
+    block_sports: bool = False
     paper: bool = True
     loop_interval_ms: int = Field(default=1000, ge=100, le=60000)
     paper_starting_cash: float = Field(default=1000.0, ge=0.0)

@@ -2002,6 +2002,27 @@ def do_polymarket_runtime_loop(
     )
 
 
+def do_polymarket_guard_status() -> dict[str, object]:
+    from stonks_cli.polymarket.guards import active_halt_reason, load_guard_state
+
+    state = load_guard_state()
+    out = asdict(state)
+    out["active_halt_reason"] = active_halt_reason(state)
+    return out
+
+
+def do_polymarket_runtime_halt(reason: str) -> dict[str, object]:
+    from stonks_cli.polymarket.guards import halt_trading
+
+    return asdict(halt_trading(reason=reason))
+
+
+def do_polymarket_runtime_resume() -> dict[str, object]:
+    from stonks_cli.polymarket.guards import resume_trading
+
+    return asdict(resume_trading())
+
+
 def do_polymarket_wallets_import(csv_path: Path) -> dict[str, object]:
     from stonks_cli.polymarket.wallets import import_wallet_trades
 

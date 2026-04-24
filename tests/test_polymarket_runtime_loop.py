@@ -77,9 +77,10 @@ def test_run_structural_scan_once_applies_market_cache(monkeypatch, tmp_path):
 
 
 def test_run_runtime_loop_runs_multiple_iterations(monkeypatch, tmp_path):
-    from stonks_cli.polymarket import storage
+    from stonks_cli.polymarket import guards, storage
 
     monkeypatch.setattr(storage, "default_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(guards, "default_state_dir", lambda: tmp_path)
     client = PolymarketClient(session=_Session())
     cfg = AppConfig(polymarket=PolymarketConfig(enabled=True, paper=True, auto_trade_enabled=False))
 
@@ -100,3 +101,37 @@ def test_run_runtime_loop_runs_multiple_iterations(monkeypatch, tmp_path):
     assert result["cycles"] == 2
     assert len(result["iterations"]) == 2
     assert result["final_status"]["state"] == "idle"
+
+
+def test_run_runtime_loop_halts_after_stream_error_threshold(monkeypatch, tmp_path):
+    from stonks_cli.polymarket import guards, storage
+
+    monkeypatch.setattr(storage, "default_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(guards, "default_state_dir", lambda: tmp_path)
+
+    client = PolymarketClient(session=_Session())
+    cfg = AppConfig(
+        polymarket=PolymarketConfig(
+            enabled=True,
+            paper=True,
+            auto_trade_enabled=False,
+            max_consecutive_stream_errors=1,
+        )
+    )
+
+    def _bad_stream_hook(*, iteration: int, market_cache: MarketStateCache):
+        raise RuntimeError("socket_disconnect")
+
+    result = run_runtime_loop(
+        client,
+        cfg=cfg,
+        limit=1,
+        scan_cfg=_scan_cfg(),
+        cycles=3,
+        sleep_seconds=0.0,
+        stream_hook=_bad_stream_hook,
+    )
+
+    assert result["iterations"] == []
+    assert result["guard_state"]["halted"] is True
+    assert result["guard_state"]["stream_error_count"] == 1

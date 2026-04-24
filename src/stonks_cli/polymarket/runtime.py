@@ -4,10 +4,18 @@ from dataclasses import asdict
 import time
 
 from stonks_cli.config import AppConfig
-from stonks_cli.logging_utils import track_event
+from stonks_cli.logging_utils import log_suppressed_exception, track_event
 from stonks_cli.polymarket.client import utc_now_iso
 from stonks_cli.polymarket.exits import exit_decision
 from stonks_cli.polymarket.execution import ExecutionOrder, executor_for_config
+from stonks_cli.polymarket.guards import (
+    active_halt_reason,
+    clear_error_counters,
+    evaluate_trade_guards,
+    load_guard_state,
+    record_live_error,
+    record_stream_error,
+)
 from stonks_cli.polymarket.journal import append_journal, read_journal
 from stonks_cli.polymarket.models import MarketScan, RuntimeStatus
 from stonks_cli.polymarket.paper import init_paper_account, load_paper_account
@@ -114,20 +122,44 @@ def maybe_auto_trade(cfg: AppConfig, scans: list) -> list[dict[str, object]]:
                 score=scan.score,
             )
             continue
-        result = executor.execute(
-            ExecutionOrder(
+        guard_reasons = evaluate_trade_guards(cfg, account, decision.proposal)
+        if guard_reasons:
+            append_journal(
+                "proposal_rejected",
                 token_id=decision.proposal.token_id,
                 market_id=decision.proposal.market_id,
                 slug=decision.proposal.slug,
-                outcome=decision.proposal.outcome,
-                side=decision.proposal.side,
-                price=decision.proposal.price,
-                shares=decision.proposal.shares,
-                target_price=decision.proposal.target_price,
-                stop_price=decision.proposal.stop_price,
-                reason=decision.proposal.reason,
+                reasons=guard_reasons,
+                score=decision.proposal.score,
             )
-        )
+            continue
+        try:
+            result = executor.execute(
+                ExecutionOrder(
+                    token_id=decision.proposal.token_id,
+                    market_id=decision.proposal.market_id,
+                    slug=decision.proposal.slug,
+                    outcome=decision.proposal.outcome,
+                    side=decision.proposal.side,
+                    price=decision.proposal.price,
+                    shares=decision.proposal.shares,
+                    target_price=decision.proposal.target_price,
+                    stop_price=decision.proposal.stop_price,
+                    reason=decision.proposal.reason,
+                )
+            )
+        except Exception as e:
+            log_suppressed_exception(context="polymarket.runtime.auto_trade", error=e, token_id=decision.proposal.token_id)
+            append_journal(
+                "auto_trade_error",
+                token_id=decision.proposal.token_id,
+                market_id=decision.proposal.market_id,
+                slug=decision.proposal.slug,
+                error=str(e),
+            )
+            if not cfg.polymarket.paper:
+                record_live_error(cfg, reason=type(e).__name__)
+            break
         actions.append(result)
         break
     return actions
@@ -183,7 +215,16 @@ def maybe_reconcile_live_orders(cfg: AppConfig) -> list[dict[str, object]]:
     cancel_stale = getattr(executor, "cancel_stale_orders", None)
     if cancel_stale is None:
         return []
-    return cancel_stale()
+    try:
+        actions = cancel_stale()
+    except Exception as e:
+        log_suppressed_exception(context="polymarket.runtime.reconcile_live_orders", error=e)
+        append_journal("live_reconcile_error", error=str(e))
+        record_live_error(cfg, reason=type(e).__name__)
+        return []
+    if actions:
+        clear_error_counters()
+    return actions
 
 
 def run_runtime_cycle(
@@ -284,9 +325,41 @@ def run_runtime_loop(
     results: list[dict[str, object]] = []
     sleep_for = cfg.polymarket.loop_interval_ms / 1000.0 if sleep_seconds is None else sleep_seconds
     for iteration in range(1, cycles + 1):
+        halt_reason = active_halt_reason(load_guard_state())
+        if halt_reason:
+            append_journal("runtime_loop_halted", iteration=iteration, reason=halt_reason)
+            break
         if stream_hook is not None:
-            stream_hook(iteration=iteration, market_cache=market_cache)
-        result = run_runtime_cycle(client, cfg=cfg, limit=limit, scan_cfg=scan_cfg, market_cache=market_cache)
+            try:
+                stream_hook(iteration=iteration, market_cache=market_cache)
+                clear_error_counters()
+            except Exception as e:
+                log_suppressed_exception(context="polymarket.runtime.loop.stream_hook", error=e, iteration=iteration)
+                state = record_stream_error(cfg, reason=type(e).__name__)
+                append_journal(
+                    "runtime_loop_stream_error",
+                    iteration=iteration,
+                    error=str(e),
+                    stream_error_count=state.stream_error_count,
+                    halted=state.halted,
+                )
+                if state.halted:
+                    break
+        try:
+            result = run_runtime_cycle(client, cfg=cfg, limit=limit, scan_cfg=scan_cfg, market_cache=market_cache)
+        except Exception as e:
+            log_suppressed_exception(context="polymarket.runtime.loop.cycle", error=e, iteration=iteration)
+            state = record_live_error(cfg, reason=type(e).__name__)
+            append_journal(
+                "runtime_loop_cycle_error",
+                iteration=iteration,
+                error=str(e),
+                live_error_count=state.live_error_count,
+                halted=state.halted,
+            )
+            if state.halted:
+                break
+            continue
         results.append(result)
         append_journal(
             "runtime_loop_iteration",
@@ -296,10 +369,12 @@ def run_runtime_loop(
         )
         if iteration < cycles and sleep_for > 0:
             time.sleep(sleep_for)
+    final_status = results[-1]["status"] if results else asdict(runtime_status())
     return {
         "cycles": cycles,
         "sleep_seconds": sleep_for,
-        "final_status": results[-1]["status"],
+        "final_status": final_status,
+        "guard_state": asdict(load_guard_state()),
         "iterations": [
             {
                 "iteration": idx + 1,

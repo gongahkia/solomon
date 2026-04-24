@@ -146,12 +146,13 @@ def test_runtime_cycle_can_auto_exit_position_not_in_scan_queue(monkeypatch, tmp
 
 
 def test_runtime_cycle_reconciles_live_orders_before_new_trades(monkeypatch, tmp_path):
-    from stonks_cli.polymarket import journal, paper, runtime, storage, wallets
+    from stonks_cli.polymarket import guards, journal, paper, runtime, storage, wallets
 
     monkeypatch.setattr(storage, "default_state_dir", lambda: tmp_path)
     monkeypatch.setattr(paper, "default_state_dir", lambda: tmp_path)
     monkeypatch.setattr(wallets, "default_state_dir", lambda: tmp_path)
     monkeypatch.setattr(journal, "default_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(guards, "default_state_dir", lambda: tmp_path)
 
     class _StubExecutor:
         def cancel_stale_orders(self):

@@ -41,8 +41,11 @@ from stonks_cli.commands import (
     do_polymarket_paper_init,
     do_polymarket_paper_sell,
     do_polymarket_paper_status,
+    do_polymarket_guard_status,
+    do_polymarket_runtime_halt,
     do_polymarket_runtime_loop,
     do_polymarket_runtime_once,
+    do_polymarket_runtime_resume,
     do_polymarket_runtime_status,
     do_polymarket_scan,
     do_polymarket_journal,
@@ -941,6 +944,38 @@ def polymarket_runtime_loop(
             market_messages=market_messages,
             user_messages=user_messages,
         )
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_runtime_app.command("guard-status")
+def polymarket_runtime_guard_status() -> None:
+    """Show Polymarket trading guard and halt state."""
+    try:
+        data = do_polymarket_guard_status()
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_runtime_app.command("halt")
+def polymarket_runtime_halt(
+    reason: str = typer.Option("manual_halt", "--reason"),
+) -> None:
+    """Manually halt Polymarket trading until resumed."""
+    try:
+        data = do_polymarket_runtime_halt(reason)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_runtime_app.command("resume")
+def polymarket_runtime_resume() -> None:
+    """Resume Polymarket trading after a manual or automatic halt."""
+    try:
+        data = do_polymarket_runtime_resume()
         Console().print_json(json.dumps(data))
     except Exception as e:
         raise _exit_for_error(e)

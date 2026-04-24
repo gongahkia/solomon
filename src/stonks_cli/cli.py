@@ -41,6 +41,7 @@ from stonks_cli.commands import (
     do_polymarket_paper_init,
     do_polymarket_paper_sell,
     do_polymarket_paper_status,
+    do_polymarket_runtime_loop,
     do_polymarket_runtime_once,
     do_polymarket_runtime_status,
     do_polymarket_scan,
@@ -918,6 +919,28 @@ def polymarket_runtime_once(
     """Run one Polymarket scan cycle and persist runtime status."""
     try:
         data = do_polymarket_runtime_once(limit=limit)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_runtime_app.command("loop")
+def polymarket_runtime_loop(
+    cycles: int = typer.Option(1, "--cycles", min=1),
+    limit: int | None = typer.Option(None, "--limit", min=1, max=1000),
+    sleep_seconds: float | None = typer.Option(None, "--sleep-seconds", min=0.0),
+    market_messages: int = typer.Option(0, "--market-messages", min=0, help="Pump market websocket messages per cycle"),
+    user_messages: int = typer.Option(0, "--user-messages", min=0, help="Pump user websocket messages per cycle"),
+) -> None:
+    """Run multiple Polymarket runtime cycles with optional websocket pumping."""
+    try:
+        data = do_polymarket_runtime_loop(
+            limit=limit,
+            cycles=cycles,
+            sleep_seconds=sleep_seconds,
+            market_messages=market_messages,
+            user_messages=user_messages,
+        )
         Console().print_json(json.dumps(data))
     except Exception as e:
         raise _exit_for_error(e)

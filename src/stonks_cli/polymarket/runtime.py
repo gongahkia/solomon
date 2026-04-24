@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import time
 
 from stonks_cli.config import AppConfig
 from stonks_cli.logging_utils import track_event
@@ -13,6 +14,7 @@ from stonks_cli.polymarket.paper import init_paper_account, load_paper_account
 from stonks_cli.polymarket.risk import build_trade_proposal
 from stonks_cli.polymarket.scanner import StructuralScanConfig, enrich_scans_with_wallet_signals, scan_markets
 from stonks_cli.polymarket.storage import load_runtime_status, save_runtime_status
+from stonks_cli.polymarket.stream import MarketStateCache
 from stonks_cli.polymarket.wallets import load_wallet_market_signals
 
 
@@ -27,10 +29,19 @@ def _current_open_positions() -> int:
         return 0
 
 
-def run_structural_scan_once(client, *, limit: int, cfg: StructuralScanConfig, paper: bool) -> tuple[RuntimeStatus, list]:
+def run_structural_scan_once(
+    client,
+    *,
+    limit: int,
+    cfg: StructuralScanConfig,
+    paper: bool,
+    market_cache: MarketStateCache | None = None,
+) -> tuple[RuntimeStatus, list]:
     try:
         append_journal("scan_started", limit=limit, paper=paper)
         scans = scan_markets(client, limit=limit, cfg=cfg, include_filtered=False)
+        if market_cache is not None:
+            scans = _apply_market_cache(scans, market_cache)
         signals = load_wallet_market_signals()
         if signals:
             scans = enrich_scans_with_wallet_signals(scans, signals)
@@ -175,13 +186,32 @@ def maybe_reconcile_live_orders(cfg: AppConfig) -> list[dict[str, object]]:
     return cancel_stale()
 
 
-def run_runtime_cycle(client, *, cfg: AppConfig, limit: int, scan_cfg: StructuralScanConfig) -> dict[str, object]:
-    status, scans = run_structural_scan_once(client, limit=limit, cfg=scan_cfg, paper=cfg.polymarket.paper)
+def run_runtime_cycle(
+    client,
+    *,
+    cfg: AppConfig,
+    limit: int,
+    scan_cfg: StructuralScanConfig,
+    market_cache: MarketStateCache | None = None,
+) -> dict[str, object]:
+    status, scans = run_structural_scan_once(
+        client,
+        limit=limit,
+        cfg=scan_cfg,
+        paper=cfg.polymarket.paper,
+        market_cache=market_cache,
+    )
     try:
         account = load_paper_account()
         missing_tokens = [position.token_id for position in account.positions if position.token_id not in {scan.token_id for scan in scans}]
         for token_id in missing_tokens:
-            midpoint = client.get_midpoint(token_id)
+            midpoint = None
+            if market_cache is not None:
+                snapshot = market_cache.get(token_id)
+                if snapshot is not None:
+                    midpoint = snapshot.midpoint or snapshot.last_trade_price
+            if midpoint is None:
+                midpoint = client.get_midpoint(token_id)
             if midpoint is None:
                 continue
             scans.append(
@@ -236,3 +266,85 @@ def run_runtime_cycle(client, *, cfg: AppConfig, limit: int, scan_cfg: Structura
         "actions": actions,
         "journal": read_journal(limit=20),
     }
+
+
+def run_runtime_loop(
+    client,
+    *,
+    cfg: AppConfig,
+    limit: int,
+    scan_cfg: StructuralScanConfig,
+    cycles: int,
+    sleep_seconds: float | None = None,
+    stream_hook=None,
+) -> dict[str, object]:
+    if cycles <= 0:
+        raise ValueError("cycles must be positive")
+    market_cache = MarketStateCache()
+    results: list[dict[str, object]] = []
+    sleep_for = cfg.polymarket.loop_interval_ms / 1000.0 if sleep_seconds is None else sleep_seconds
+    for iteration in range(1, cycles + 1):
+        if stream_hook is not None:
+            stream_hook(iteration=iteration, market_cache=market_cache)
+        result = run_runtime_cycle(client, cfg=cfg, limit=limit, scan_cfg=scan_cfg, market_cache=market_cache)
+        results.append(result)
+        append_journal(
+            "runtime_loop_iteration",
+            iteration=iteration,
+            state=result["status"].get("state"),
+            action_count=len(result["actions"]),
+        )
+        if iteration < cycles and sleep_for > 0:
+            time.sleep(sleep_for)
+    return {
+        "cycles": cycles,
+        "sleep_seconds": sleep_for,
+        "final_status": results[-1]["status"],
+        "iterations": [
+            {
+                "iteration": idx + 1,
+                "status": result["status"],
+                "action_count": len(result["actions"]),
+            }
+            for idx, result in enumerate(results)
+        ],
+    }
+
+
+def _apply_market_cache(scans: list[MarketScan], market_cache: MarketStateCache) -> list[MarketScan]:
+    updated: list[MarketScan] = []
+    for scan in scans:
+        if scan.token_id is None:
+            updated.append(scan)
+            continue
+        snapshot = market_cache.get(scan.token_id)
+        if snapshot is None:
+            updated.append(scan)
+            continue
+        midpoint = snapshot.midpoint or snapshot.last_trade_price or scan.midpoint
+        reasons = list(scan.reasons)
+        if midpoint is not None and midpoint != scan.midpoint:
+            reasons.append("stream_midpoint")
+        updated.append(
+            MarketScan(
+                market_id=scan.market_id,
+                slug=scan.slug,
+                question=scan.question,
+                token_id=scan.token_id,
+                outcome=scan.outcome,
+                midpoint=midpoint,
+                bids_depth_usd=scan.bids_depth_usd,
+                asks_depth_usd=scan.asks_depth_usd,
+                liquidity_usd=scan.liquidity_usd,
+                volume_usd=scan.volume_usd,
+                hours_to_resolution=scan.hours_to_resolution,
+                complement_deviation_bps=scan.complement_deviation_bps,
+                score=scan.score,
+                status=scan.status,
+                reasons=reasons,
+                target_wallet_count=scan.target_wallet_count,
+                target_trade_count=scan.target_trade_count,
+                target_net_volume=scan.target_net_volume,
+            )
+        )
+    return updated

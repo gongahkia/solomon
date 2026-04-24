@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
@@ -1952,6 +1953,52 @@ def do_polymarket_runtime_once(*, limit: int | None = None) -> dict[str, object]
         cfg=cfg,
         limit=limit if limit is not None else cfg.polymarket.scanner_limit,
         scan_cfg=_polymarket_scan_config(cfg),
+    )
+
+
+def do_polymarket_runtime_loop(
+    *,
+    limit: int | None = None,
+    cycles: int = 1,
+    sleep_seconds: float | None = None,
+    market_messages: int = 0,
+    user_messages: int = 0,
+) -> dict[str, object]:
+    cfg = load_config()
+    client = _polymarket_client()
+    from stonks_cli.polymarket.auth import derive_api_credentials
+    from stonks_cli.polymarket.runtime import run_runtime_loop
+    from stonks_cli.polymarket.websocket import MarketWebSocketClient, UserWebSocketClient
+
+    market_ws: MarketWebSocketClient | None = None
+    user_ws: UserWebSocketClient | None = None
+
+    def _stream_hook(*, iteration: int, market_cache) -> None:
+        nonlocal market_ws, user_ws
+        if market_messages > 0:
+            queue = do_polymarket_scan(limit=limit if limit is not None else cfg.polymarket.scanner_limit)
+            token_ids = [str(row.get("token_id")) for row in queue if row.get("token_id")]
+            if token_ids:
+                market_ws = MarketWebSocketClient(asset_ids=token_ids)
+                asyncio.run(market_ws.run_once(max_messages=market_messages))
+                for token_id, snapshot in market_ws.cache.as_dict().items():
+                    market_cache.upsert_snapshot(snapshot)
+        if not cfg.polymarket.paper and user_messages > 0:
+            creds = derive_api_credentials(cfg)
+            user_ws = user_ws or UserWebSocketClient(auth=creds.as_dict())
+            from stonks_cli.polymarket.lifecycle import LiveOrderManager
+
+            order_manager = LiveOrderManager(cfg)
+            asyncio.run(user_ws.run_once(order_manager=order_manager, max_messages=user_messages))
+
+    return run_runtime_loop(
+        client,
+        cfg=cfg,
+        limit=limit if limit is not None else cfg.polymarket.scanner_limit,
+        scan_cfg=_polymarket_scan_config(cfg),
+        cycles=cycles,
+        sleep_seconds=sleep_seconds,
+        stream_hook=_stream_hook if market_messages > 0 or user_messages > 0 else None,
     )
 
 

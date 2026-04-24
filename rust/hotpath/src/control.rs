@@ -1274,6 +1274,7 @@ fn runtime_once(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<V
 }
 
 fn runtime_loop(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<Value, String> {
+    let _lock = acquire_runtime_lock(state_dir)?;
     let cycles = arg_usize(args, "cycles").unwrap_or(1);
     let limit = arg_usize(args, "limit").unwrap_or(cfg.scanner_limit);
     let sleep_seconds = arg_f64(args, "sleep_seconds").unwrap_or(cfg.loop_interval_ms as f64 / 1000.0);
@@ -1830,6 +1831,53 @@ fn guard_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_guard.js
 fn manual_halt_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket.halt") }
 fn live_orders_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_live_orders.json") }
 fn volume_state_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_volume_state.json") }
+fn runtime_lock_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_runtime.lock") }
+
+#[derive(Debug)]
+struct RuntimeLock {
+    path: PathBuf,
+}
+
+impl Drop for RuntimeLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn acquire_runtime_lock(state_dir: &Path) -> Result<RuntimeLock, String> {
+    ensure_dir(state_dir)?;
+    let path = runtime_lock_path(state_dir);
+    if path.exists() {
+        let raw = fs::read_to_string(&path).unwrap_or_default();
+        let pid = raw.trim().parse::<u32>().ok();
+        if pid.is_some_and(process_is_running) {
+            return Err(format!("runtime_loop_already_running: {}", raw.trim()));
+        }
+        fs::remove_file(&path).map_err(|err| err.to_string())?;
+    }
+    fs::write(&path, std::process::id().to_string()).map_err(|err| err.to_string())?;
+    Ok(RuntimeLock { path })
+}
+
+fn process_is_running(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        Command::new("kill")
+            .arg("-0")
+            .arg(pid.to_string())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
+}
 
 fn load_paper(state_dir: &Path) -> Result<PaperAccount, String> {
     read_json(&paper_path(state_dir))
@@ -3105,6 +3153,34 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
         let resumed_status = guard_status_value(&state_dir).expect("guard status");
         assert!(!resumed.halted);
         assert_eq!(resumed_status.get("active_halt_reason"), Some(&Value::Null));
+    }
+
+    #[test]
+    fn runtime_lock_blocks_second_live_loop() {
+        let state_dir = temp_state_dir("runtime-lock-active");
+        ensure_dir(&state_dir).expect("dir");
+        fs::write(runtime_lock_path(&state_dir), std::process::id().to_string()).expect("lock");
+
+        let err = acquire_runtime_lock(&state_dir).expect_err("active lock should block");
+
+        assert!(err.contains("runtime_loop_already_running"));
+    }
+
+    #[test]
+    fn runtime_lock_replaces_stale_lock_and_cleans_up_on_drop() {
+        let state_dir = temp_state_dir("runtime-lock-stale");
+        ensure_dir(&state_dir).expect("dir");
+        fs::write(runtime_lock_path(&state_dir), "not-a-pid").expect("lock");
+
+        {
+            let _lock = acquire_runtime_lock(&state_dir).expect("lock");
+            assert_eq!(
+                fs::read_to_string(runtime_lock_path(&state_dir)).expect("lock pid"),
+                std::process::id().to_string(),
+            );
+        }
+
+        assert!(!runtime_lock_path(&state_dir).exists());
     }
 
     #[test]

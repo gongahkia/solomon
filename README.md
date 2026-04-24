@@ -196,8 +196,22 @@ Current scope:
 
 - deterministic hot-path core in Rust
 - persisted state and replayable protocol fixtures
+- Python runtime delegation for guarded order requests, stale-order reconciliation, and websocket event mirroring
 - no external crates required
-- ready to be extended with the official `polymarket-client-sdk` adapter layer next
+
+To enable Rust-backed live hot-path handling from the Python control plane, set:
+
+```json
+{
+  "polymarket": {
+    "paper": false,
+    "rust_hotpath_enabled": true,
+    "rust_hotpath_use_cargo": false
+  }
+}
+```
+
+With `rust_hotpath_enabled=true`, Python still owns the CLI, orchestration, journals, and strategy/risk policy, while Rust owns the low-latency market snapshot cache and open-order hot path.
 
 3. `stonks-cli` also includes an optional [Model Context Protocol](https://modelcontextprotocol.io) server that allows for [AI Agents](https://modelcontextprotocol.io/docs/agents/) to directly interact with `stonks-cli` tooling.
 

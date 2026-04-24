@@ -45,9 +45,19 @@ def test_reduce_market_event_updates_book_and_tick_size():
 def test_reduce_market_event_marks_market_resolved():
     snapshot = LiveMarketSnapshot(token_id="YES1", best_bid=0.4, best_ask=0.5)
 
-    updated = reduce_market_event(snapshot, {"event_type": "market_resolved", "asset_id": "YES1"})
+    updated = reduce_market_event(
+        snapshot,
+        {
+            "event_type": "market_resolved",
+            "asset_id": "YES1",
+            "winning_asset_id": "YES1",
+            "winning_outcome": "YES",
+        },
+    )
 
     assert updated.resolved is True
+    assert updated.winning_token_id == "YES1"
+    assert updated.winning_outcome == "YES"
     assert updated.last_event_type == "market_resolved"
 
 

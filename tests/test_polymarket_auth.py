@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from stonks_cli.config import AppConfig, PolymarketConfig
-from stonks_cli.polymarket.auth import ApiCredentials, authenticated_clob_client, derive_api_credentials
+from stonks_cli.polymarket.auth import ApiCredentials, authenticated_clob_client, build_clob_client, derive_api_credentials
 
 
 class _FakeClient:
@@ -13,6 +13,16 @@ class _FakeClient:
             "apiKey": "key-1",
             "secret": "secret-1",
             "passphrase": "pass-1",
+        }
+
+
+class _ChainOnlyClient:
+    def __init__(self, *, host, chain, key, creds=None):
+        self.kwargs = {
+            "host": host,
+            "chain": chain,
+            "key": key,
+            "creds": creds,
         }
 
 
@@ -39,3 +49,14 @@ def test_authenticated_clob_client_derives_credentials_when_env_missing(monkeypa
     assert isinstance(client, _FakeClient)
     assert creds.api_key == "key-1"
     assert client.kwargs["creds"]["apiKey"] == "key-1"
+
+
+def test_build_clob_client_falls_back_to_chain_signature(monkeypatch):
+    cfg = AppConfig(polymarket=PolymarketConfig())
+    monkeypatch.setenv("POLYMARKET_PRIVATE_KEY", "0xabc")
+
+    client = build_clob_client(cfg, creds=ApiCredentials("k", "s", "p"), client_class=_ChainOnlyClient)
+
+    assert isinstance(client, _ChainOnlyClient)
+    assert client.kwargs["chain"] == cfg.polymarket.chain_id
+    assert client.kwargs["creds"]["apiKey"] == "k"

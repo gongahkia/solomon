@@ -3,9 +3,12 @@ from __future__ import annotations
 from stonks_cli.config import AppConfig, PolymarketConfig
 from stonks_cli.polymarket.guards import (
     active_halt_reason,
+    clear_error_counters,
     evaluate_trade_guards,
     halt_trading,
     load_guard_state,
+    record_live_error,
+    record_stream_error,
     resume_trading,
 )
 from stonks_cli.polymarket.lifecycle import LiveOrderManager, build_live_order_request
@@ -101,3 +104,38 @@ def test_guard_blocks_max_market_notional(monkeypatch, tmp_path):
     reasons = evaluate_trade_guards(cfg, account, _proposal())
 
     assert "max_market_notional_reached" in reasons
+
+
+def test_live_error_threshold_halts_and_resume_clears(monkeypatch, tmp_path):
+    from stonks_cli.polymarket import guards
+
+    monkeypatch.setattr(guards, "default_state_dir", lambda: tmp_path)
+
+    cfg = AppConfig(polymarket=PolymarketConfig(enabled=True, paper=False, max_consecutive_live_errors=2))
+
+    state_1 = record_live_error(cfg, reason="RuntimeError")
+    state_2 = record_live_error(cfg, reason="RuntimeError")
+
+    assert state_1.halted is False
+    assert state_2.halted is True
+    assert "live_errors" in (state_2.halt_reason or "")
+
+    resumed = resume_trading()
+    assert resumed.halted is False
+    assert resumed.live_error_count == 0
+
+
+def test_stream_error_threshold_halts_and_clear_resets_counters(monkeypatch, tmp_path):
+    from stonks_cli.polymarket import guards
+
+    monkeypatch.setattr(guards, "default_state_dir", lambda: tmp_path)
+
+    cfg = AppConfig(polymarket=PolymarketConfig(enabled=True, paper=True, max_consecutive_stream_errors=1))
+
+    state = record_stream_error(cfg, reason="Disconnect")
+    assert state.halted is True
+    assert state.stream_error_count == 1
+
+    cleared = clear_error_counters()
+    assert cleared.live_error_count == 0
+    assert cleared.stream_error_count == 0

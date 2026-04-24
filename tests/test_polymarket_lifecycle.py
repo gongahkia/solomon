@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from stonks_cli.config import AppConfig, PolymarketConfig
 from stonks_cli.polymarket.execution import ExecutionOrder
 from stonks_cli.polymarket.lifecycle import (
@@ -54,6 +56,40 @@ def test_build_live_order_request_snaps_to_tick_and_accepts_safe_order():
 
     assert request.price == 0.58
     assert request.post_only is True
+
+
+def test_build_live_order_request_rejects_resolved_market():
+    cfg = AppConfig(polymarket=PolymarketConfig(enabled=True, paper=False, live_post_only=True))
+    order = ExecutionOrder(
+        token_id="YES1",
+        market_id="1",
+        slug="btc-higher",
+        outcome="YES",
+        side="BUY",
+        price=0.58,
+        shares=10,
+    )
+    snapshot = LiveMarketSnapshot(token_id="YES1", best_bid=0.57, best_ask=0.60, tick_size=0.01, resolved=True)
+
+    with pytest.raises(ValueError, match="resolved"):
+        build_live_order_request(cfg, order, snapshot)
+
+
+def test_build_live_order_request_rejects_below_min_order_size():
+    cfg = AppConfig(polymarket=PolymarketConfig(enabled=True, paper=False, live_post_only=True))
+    order = ExecutionOrder(
+        token_id="YES1",
+        market_id="1",
+        slug="btc-higher",
+        outcome="YES",
+        side="BUY",
+        price=0.58,
+        shares=2,
+    )
+    snapshot = LiveMarketSnapshot(token_id="YES1", best_bid=0.57, best_ask=0.60, tick_size=0.01, min_order_size=5)
+
+    with pytest.raises(ValueError, match="below venue minimum"):
+        build_live_order_request(cfg, order, snapshot)
 
 
 def test_live_order_manager_persists_and_marks_stale_cancel(monkeypatch, tmp_path):

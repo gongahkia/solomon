@@ -141,3 +141,60 @@ class ProposalDecision:
 class ExitDecision:
     should_exit: bool
     reason: str | None = None
+
+
+@dataclass(frozen=True)
+class LiveMarketSnapshot:
+    token_id: str
+    best_bid: float | None = None
+    best_ask: float | None = None
+    midpoint: float | None = None
+    last_trade_price: float | None = None
+    tick_size: float = 0.01
+    min_order_size: float | None = None
+    bids: list[BookLevel] = field(default_factory=list)
+    asks: list[BookLevel] = field(default_factory=list)
+    resolved: bool = False
+    last_event_type: str | None = None
+    last_event_at: str | None = None
+
+
+@dataclass(frozen=True)
+class LiveOrderRequest:
+    token_id: str
+    market_id: str
+    slug: str | None
+    outcome: str | None
+    side: str
+    price: float
+    shares: float
+    post_only: bool
+    tick_size: float
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class LiveOrderRecord:
+    order_id: str
+    token_id: str
+    market_id: str
+    slug: str | None
+    outcome: str | None
+    side: str
+    price: float
+    shares: float
+    status: str
+    created_at: str
+    updated_at: str
+    remaining_shares: float
+    filled_shares: float = 0.0
+    cancel_reason: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class LiveOrderAction:
+    action: str
+    order_id: str
+    token_id: str
+    reason: str | None = None

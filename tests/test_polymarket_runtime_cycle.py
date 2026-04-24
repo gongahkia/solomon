@@ -143,3 +143,44 @@ def test_runtime_cycle_can_auto_exit_position_not_in_scan_queue(monkeypatch, tmp
     assert len(result["actions"]) == 1
     assert result["actions"][0]["action"] == "SELL"
     assert result["status"]["open_positions"] == 0
+
+
+def test_runtime_cycle_reconciles_live_orders_before_new_trades(monkeypatch, tmp_path):
+    from stonks_cli.polymarket import journal, paper, runtime, storage, wallets
+
+    monkeypatch.setattr(storage, "default_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(paper, "default_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(wallets, "default_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(journal, "default_state_dir", lambda: tmp_path)
+
+    class _StubExecutor:
+        def cancel_stale_orders(self):
+            return [{"action": "CANCEL", "order_id": "order-1", "token_id": "YES1"}]
+
+        def execute(self, order):
+            raise AssertionError("trade execution should not run in this test")
+
+    monkeypatch.setattr(runtime, "executor_for_config", lambda cfg: _StubExecutor())
+    monkeypatch.setattr(runtime, "maybe_auto_trade", lambda cfg, scans: [])
+
+    client = PolymarketClient(session=_Session())
+    cfg = AppConfig(
+        polymarket=PolymarketConfig(
+            enabled=True,
+            paper=False,
+            auto_trade_enabled=False,
+            auto_exit_enabled=False,
+        )
+    )
+    scan_cfg = StructuralScanConfig(
+        min_market_liquidity_usd=50000,
+        min_book_depth_usd=500,
+        min_hours_to_resolution=4,
+        max_hours_to_resolution=168,
+        require_active=True,
+    )
+
+    result = run_runtime_cycle(client, cfg=cfg, limit=1, scan_cfg=scan_cfg)
+
+    assert result["actions"] == [{"action": "CANCEL", "order_id": "order-1", "token_id": "YES1"}]
+    assert result["status"]["state"] == "traded"

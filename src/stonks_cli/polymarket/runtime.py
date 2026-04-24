@@ -165,6 +165,16 @@ def maybe_auto_exit(cfg: AppConfig, scans: list) -> list[dict[str, object]]:
     return actions
 
 
+def maybe_reconcile_live_orders(cfg: AppConfig) -> list[dict[str, object]]:
+    if cfg.polymarket.paper:
+        return []
+    executor = executor_for_config(cfg)
+    cancel_stale = getattr(executor, "cancel_stale_orders", None)
+    if cancel_stale is None:
+        return []
+    return cancel_stale()
+
+
 def run_runtime_cycle(client, *, cfg: AppConfig, limit: int, scan_cfg: StructuralScanConfig) -> dict[str, object]:
     status, scans = run_structural_scan_once(client, limit=limit, cfg=scan_cfg, paper=cfg.polymarket.paper)
     try:
@@ -198,9 +208,10 @@ def run_runtime_cycle(client, *, cfg: AppConfig, limit: int, scan_cfg: Structura
             )
     except Exception:
         pass
+    reconcile_actions = maybe_reconcile_live_orders(cfg)
     exit_actions = maybe_auto_exit(cfg, scans)
     trade_actions = maybe_auto_trade(cfg, scans)
-    actions = exit_actions + trade_actions
+    actions = reconcile_actions + exit_actions + trade_actions
     updated = RuntimeStatus(
         mode=status.mode,
         state="idle" if not actions else "traded",

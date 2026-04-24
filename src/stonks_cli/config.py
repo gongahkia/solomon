@@ -97,6 +97,8 @@ class PolymarketConfig(BaseModel):
     take_profit_price_delta: float = Field(default=0.10, ge=0.0, le=1.0)
     stop_loss_price_delta: float = Field(default=0.08, ge=0.0, le=1.0)
     stale_position_hours: float = Field(default=24.0, ge=0.0)
+    live_post_only: bool = True
+    live_order_max_age_seconds: int = Field(default=30, ge=1, le=86400)
 
 
 class TuiConfig(BaseModel):

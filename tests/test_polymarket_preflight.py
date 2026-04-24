@@ -49,7 +49,14 @@ def test_preflight_checks_rust_and_live_arm_when_enabled(monkeypatch, tmp_path):
     monkeypatch.setattr(
         preflight,
         "authenticated_clob_client",
-        lambda cfg: (types.SimpleNamespace(cancel_order=lambda **kwargs: {}, get_open_orders=lambda: []), types.SimpleNamespace(api_key="abcd1234")),
+        lambda cfg: (
+            types.SimpleNamespace(
+                cancel_order=lambda **kwargs: {},
+                get_open_orders=lambda: [],
+                post_heartbeat=lambda **kwargs: {"heartbeat_id": "hb-1"},
+            ),
+            types.SimpleNamespace(api_key="abcd1234"),
+        ),
     )
 
     result = run_preflight(
@@ -67,3 +74,4 @@ def test_preflight_checks_rust_and_live_arm_when_enabled(monkeypatch, tmp_path):
     assert any(check["name"] == "live_arm" and check["status"] == "pass" for check in result["checks"])
     assert any(check["name"] == "rust_hotpath_session" and check["status"] == "pass" for check in result["checks"])
     assert any(check["name"] == "open_orders_method" and check["status"] == "pass" for check in result["checks"])
+    assert any(check["name"] == "heartbeat_method" and check["status"] == "pass" for check in result["checks"])

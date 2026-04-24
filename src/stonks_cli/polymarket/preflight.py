@@ -8,6 +8,7 @@ from typing import Any
 from stonks_cli.config import AppConfig
 from stonks_cli.paths import default_state_dir
 from stonks_cli.polymarket.auth import authenticated_clob_client, load_api_credentials_from_env, private_key_from_env
+from stonks_cli.polymarket.heartbeat import has_heartbeat_method
 from stonks_cli.polymarket.guards import active_halt_reason, live_trading_armed, load_guard_state
 from stonks_cli.polymarket.lifecycle import live_orders_path
 from stonks_cli.polymarket.rust_bridge import rust_session
@@ -141,6 +142,13 @@ def _live_checks(cfg: AppConfig, *, deep_auth: bool) -> list[PreflightCheck]:
                         if _has_open_orders_method(client)
                         else "no known open orders method found"
                     ),
+                )
+            )
+            checks.append(
+                PreflightCheck(
+                    name="heartbeat_method",
+                    status="pass" if has_heartbeat_method(client) else "warn",
+                    detail="supported heartbeat method found" if has_heartbeat_method(client) else "no known heartbeat method found",
                 )
             )
             if cfg.polymarket.rust_hotpath_enabled:

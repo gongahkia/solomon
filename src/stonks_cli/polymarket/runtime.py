@@ -8,6 +8,7 @@ from stonks_cli.logging_utils import log_suppressed_exception, track_event
 from stonks_cli.polymarket.client import utc_now_iso
 from stonks_cli.polymarket.exits import exit_decision
 from stonks_cli.polymarket.execution import ExecutionOrder, executor_for_config
+from stonks_cli.polymarket.heartbeat import maybe_send_heartbeat
 from stonks_cli.polymarket.guards import (
     active_halt_reason,
     clear_error_counters,
@@ -364,6 +365,24 @@ def run_runtime_loop(
         if halt_reason:
             append_journal("runtime_loop_halted", iteration=iteration, reason=halt_reason)
             break
+        if not cfg.polymarket.paper:
+            try:
+                heartbeat = maybe_send_heartbeat(cfg)
+            except Exception as e:
+                log_suppressed_exception(context="polymarket.runtime.loop.heartbeat", error=e, iteration=iteration)
+                state = record_live_error(cfg, reason=type(e).__name__)
+                append_journal(
+                    "runtime_loop_heartbeat_error",
+                    iteration=iteration,
+                    error=str(e),
+                    live_error_count=state.live_error_count,
+                    halted=state.halted,
+                )
+                if state.halted:
+                    break
+            else:
+                if heartbeat is not None:
+                    append_journal("runtime_loop_heartbeat", iteration=iteration, heartbeat_id=heartbeat.get("heartbeat_id"))
         if stream_hook is not None:
             try:
                 stream_hook(iteration=iteration, market_cache=market_cache)

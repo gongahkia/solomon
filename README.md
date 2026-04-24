@@ -221,6 +221,13 @@ $ export STONKS_CLI_POLYMARKET_LIVE_ARMED=1
 
 That gate only affects live auto-trading. It is there to prevent accidental real-money execution when `paper=false` is set but the operator has not intentionally armed the bot.
 
+Live mode also maintains a Polymarket heartbeat by default:
+
+- `polymarket.live_heartbeat_enabled = true`
+- `polymarket.live_heartbeat_interval_seconds = 5`
+
+This keeps the session liveness mechanism active so the venue can cancel open orders if the bot dies or disconnects unexpectedly.
+
 3. `stonks-cli` also includes an optional [Model Context Protocol](https://modelcontextprotocol.io) server that allows for [AI Agents](https://modelcontextprotocol.io/docs/agents/) to directly interact with `stonks-cli` tooling.
 
 4. Run the below to install `stonks-cli`'s MCP functionality.

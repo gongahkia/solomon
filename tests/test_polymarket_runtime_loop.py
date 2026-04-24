@@ -135,3 +135,33 @@ def test_run_runtime_loop_halts_after_stream_error_threshold(monkeypatch, tmp_pa
     assert result["iterations"] == []
     assert result["guard_state"]["halted"] is True
     assert result["guard_state"]["stream_error_count"] == 1
+
+
+def test_run_runtime_loop_sends_heartbeat_in_live_mode(monkeypatch, tmp_path):
+    from stonks_cli.polymarket import guards, runtime, storage
+
+    monkeypatch.setattr(storage, "default_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(guards, "default_state_dir", lambda: tmp_path)
+
+    client = PolymarketClient(session=_Session())
+    cfg = AppConfig(
+        polymarket=PolymarketConfig(
+            enabled=True,
+            paper=False,
+            auto_trade_enabled=False,
+        )
+    )
+    sent: list[int] = []
+    monkeypatch.setattr(runtime, "maybe_send_heartbeat", lambda cfg: sent.append(1) or {"heartbeat_id": "hb-1"})
+
+    result = run_runtime_loop(
+        client,
+        cfg=cfg,
+        limit=1,
+        scan_cfg=_scan_cfg(),
+        cycles=2,
+        sleep_seconds=0.0,
+    )
+
+    assert result["cycles"] == 2
+    assert sent == [1, 1]

@@ -8,7 +8,7 @@ from stonks_cli.polymarket.client import utc_now_iso
 from stonks_cli.polymarket.exits import exit_decision
 from stonks_cli.polymarket.execution import ExecutionOrder, executor_for_config
 from stonks_cli.polymarket.journal import append_journal, read_journal
-from stonks_cli.polymarket.models import RuntimeStatus
+from stonks_cli.polymarket.models import MarketScan, RuntimeStatus
 from stonks_cli.polymarket.paper import init_paper_account, load_paper_account
 from stonks_cli.polymarket.risk import build_trade_proposal
 from stonks_cli.polymarket.scanner import StructuralScanConfig, enrich_scans_with_wallet_signals, scan_markets
@@ -167,6 +167,37 @@ def maybe_auto_exit(cfg: AppConfig, scans: list) -> list[dict[str, object]]:
 
 def run_runtime_cycle(client, *, cfg: AppConfig, limit: int, scan_cfg: StructuralScanConfig) -> dict[str, object]:
     status, scans = run_structural_scan_once(client, limit=limit, cfg=scan_cfg, paper=cfg.polymarket.paper)
+    try:
+        account = load_paper_account()
+        missing_tokens = [position.token_id for position in account.positions if position.token_id not in {scan.token_id for scan in scans}]
+        for token_id in missing_tokens:
+            midpoint = client.get_midpoint(token_id)
+            if midpoint is None:
+                continue
+            scans.append(
+                MarketScan(
+                    market_id="",
+                    slug=None,
+                    question="",
+                    token_id=token_id,
+                    outcome=None,
+                    midpoint=midpoint,
+                    bids_depth_usd=0.0,
+                    asks_depth_usd=0.0,
+                    liquidity_usd=None,
+                    volume_usd=None,
+                    hours_to_resolution=None,
+                    complement_deviation_bps=None,
+                    score=0.0,
+                    status="PASS",
+                    reasons=["position_mark_refresh"],
+                    target_wallet_count=0,
+                    target_trade_count=0,
+                    target_net_volume=0.0,
+                )
+            )
+    except Exception:
+        pass
     exit_actions = maybe_auto_exit(cfg, scans)
     trade_actions = maybe_auto_trade(cfg, scans)
     actions = exit_actions + trade_actions

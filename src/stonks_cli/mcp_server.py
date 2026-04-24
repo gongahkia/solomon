@@ -47,9 +47,14 @@ from stonks_cli.commands import (
     do_polymarket_book,
     do_polymarket_market_get,
     do_polymarket_markets_list,
+    do_polymarket_paper_buy,
+    do_polymarket_paper_init,
+    do_polymarket_paper_sell,
+    do_polymarket_paper_status,
     do_polymarket_runtime_once,
     do_polymarket_runtime_status,
     do_polymarket_scan,
+    do_polymarket_wallet_market_signals,
     do_polymarket_wallet_targets,
     do_polymarket_wallets_import,
     do_polymarket_wallets_rank,
@@ -336,6 +341,43 @@ def polymarket_rank_wallets(
 def polymarket_get_wallet_targets() -> Any:
     """Get the saved Polymarket wallet target list."""
     return {"targets": _serialize(do_polymarket_wallet_targets())}
+
+
+@mcp.tool()
+def polymarket_get_wallet_market_signals() -> Any:
+    """Get aggregated market-side signals from the ranked target wallets."""
+    return {"signals": _serialize(do_polymarket_wallet_market_signals())}
+
+
+@mcp.tool()
+def polymarket_paper_init(cash: float | None = None) -> Any:
+    """Initialize the Polymarket paper account."""
+    return _serialize(do_polymarket_paper_init(cash))
+
+
+@mcp.tool()
+def polymarket_paper_status() -> Any:
+    """Get the Polymarket paper account state."""
+    return _serialize(do_polymarket_paper_status())
+
+
+@mcp.tool()
+def polymarket_paper_buy(
+    token_id: str,
+    market_id: str,
+    price: float,
+    shares: float,
+    slug: str | None = None,
+    outcome: str | None = None,
+) -> Any:
+    """Execute a Polymarket paper buy."""
+    return _serialize(do_polymarket_paper_buy(token_id, market_id, price, shares, slug=slug, outcome=outcome))
+
+
+@mcp.tool()
+def polymarket_paper_sell(token_id: str, shares: float, price: float) -> Any:
+    """Execute a Polymarket paper sell."""
+    return _serialize(do_polymarket_paper_sell(token_id, shares, price))
 
 
 @mcp.tool()

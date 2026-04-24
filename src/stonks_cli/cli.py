@@ -37,9 +37,14 @@ from stonks_cli.commands import (
     do_polymarket_book,
     do_polymarket_market_get,
     do_polymarket_markets_list,
+    do_polymarket_paper_buy,
+    do_polymarket_paper_init,
+    do_polymarket_paper_sell,
+    do_polymarket_paper_status,
     do_polymarket_runtime_once,
     do_polymarket_runtime_status,
     do_polymarket_scan,
+    do_polymarket_wallet_market_signals,
     do_polymarket_wallet_targets,
     do_polymarket_wallets_import,
     do_polymarket_wallets_rank,
@@ -84,6 +89,7 @@ polymarket_app = typer.Typer()
 polymarket_markets_app = typer.Typer()
 polymarket_runtime_app = typer.Typer()
 polymarket_wallets_app = typer.Typer()
+polymarket_paper_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
@@ -101,6 +107,7 @@ app.add_typer(polymarket_app, name="polymarket")
 polymarket_app.add_typer(polymarket_markets_app, name="markets")
 polymarket_app.add_typer(polymarket_runtime_app, name="runtime")
 polymarket_app.add_typer(polymarket_wallets_app, name="wallets")
+polymarket_app.add_typer(polymarket_paper_app, name="paper")
 
 
 @app.callback()
@@ -873,6 +880,7 @@ def polymarket_scan(
         table.add_column("Bid Depth", justify="right")
         table.add_column("Ask Depth", justify="right")
         table.add_column("Hours", justify="right")
+        table.add_column("Wallets", justify="right")
         table.add_column("Score", justify="right")
         table.add_column("Reasons")
         for row in rows:
@@ -883,6 +891,7 @@ def polymarket_scan(
                 f"${float(row.get('bids_depth_usd') or 0):,.0f}",
                 f"${float(row.get('asks_depth_usd') or 0):,.0f}",
                 f"{float(row['hours_to_resolution']):.1f}" if row.get("hours_to_resolution") is not None else "-",
+                str(int(row.get("target_wallet_count") or 0)),
                 f"{float(row.get('score') or 0):.2f}",
                 ", ".join(row.get("reasons") or []) or "-",
             )
@@ -967,6 +976,85 @@ def polymarket_wallet_targets() -> None:
     try:
         rows = do_polymarket_wallet_targets()
         Console().print_json(json.dumps(rows))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_wallets_app.command("signals")
+def polymarket_wallet_signals() -> None:
+    """Show aggregated target-wallet market and outcome signals."""
+    try:
+        rows = do_polymarket_wallet_market_signals()
+        table = Table(title="Polymarket Wallet Market Signals")
+        table.add_column("Market")
+        table.add_column("Outcome")
+        table.add_column("Wallets", justify="right")
+        table.add_column("Trades", justify="right")
+        table.add_column("Net Vol", justify="right")
+        table.add_column("Gross Vol", justify="right")
+        for row in rows:
+            table.add_row(
+                str(row.get("market_id") or "-"),
+                str(row.get("outcome") or "-"),
+                str(int(row.get("wallet_count") or 0)),
+                str(int(row.get("trade_count") or 0)),
+                f"{float(row.get('net_volume') or 0):,.2f}",
+                f"{float(row.get('gross_volume') or 0):,.2f}",
+            )
+        Console().print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_paper_app.command("init")
+def polymarket_paper_init(
+    cash: float | None = typer.Option(None, "--cash", min=0.0, help="Override starting cash"),
+) -> None:
+    """Initialize the Polymarket paper account."""
+    try:
+        data = do_polymarket_paper_init(cash)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_paper_app.command("status")
+def polymarket_paper_status() -> None:
+    """Show Polymarket paper account state."""
+    try:
+        data = do_polymarket_paper_status()
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_paper_app.command("buy")
+def polymarket_paper_buy(
+    token_id: str = typer.Argument(...),
+    market_id: str = typer.Option(..., "--market-id"),
+    price: float = typer.Option(..., "--price", min=0.0),
+    shares: float = typer.Option(..., "--shares", min=0.0),
+    slug: str | None = typer.Option(None, "--slug"),
+    outcome: str | None = typer.Option(None, "--outcome"),
+) -> None:
+    """Execute a Polymarket paper buy."""
+    try:
+        data = do_polymarket_paper_buy(token_id, market_id, price, shares, slug=slug, outcome=outcome)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_paper_app.command("sell")
+def polymarket_paper_sell(
+    token_id: str = typer.Argument(...),
+    shares: float = typer.Option(..., "--shares", min=0.0),
+    price: float = typer.Option(..., "--price", min=0.0),
+) -> None:
+    """Execute a Polymarket paper sell."""
+    try:
+        data = do_polymarket_paper_sell(token_id, shares, price)
+        Console().print_json(json.dumps(data))
     except Exception as e:
         raise _exit_for_error(e)
 

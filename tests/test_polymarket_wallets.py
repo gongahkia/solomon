@@ -5,6 +5,7 @@ import csv
 from stonks_cli.polymarket.wallets import (
     import_wallet_trades,
     load_wallet_import_summary,
+    load_wallet_market_signals,
     load_wallet_targets,
     rank_wallets,
 )
@@ -138,3 +139,8 @@ def test_rank_wallets_uses_fifo_realized_pnl_fallback(monkeypatch, tmp_path):
     assert round(targets[0].win_rate, 2) == 1.00
     assert len(saved) == 1
     assert saved[0].wallet == "0xgood"
+    signals = load_wallet_market_signals()
+    assert len(signals) == 1
+    assert signals[0].market_id == "1"
+    assert signals[0].outcome == "YES"
+    assert signals[0].wallet_count == 1

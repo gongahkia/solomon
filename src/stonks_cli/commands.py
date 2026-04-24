@@ -1921,7 +1921,8 @@ def do_polymarket_scan(
 ) -> list[dict[str, object]]:
     cfg = load_config()
     client = _polymarket_client()
-    from stonks_cli.polymarket.scanner import scan_markets
+    from stonks_cli.polymarket.scanner import enrich_scans_with_wallet_signals, scan_markets
+    from stonks_cli.polymarket.wallets import load_wallet_market_signals
 
     scans = scan_markets(
         client,
@@ -1929,6 +1930,9 @@ def do_polymarket_scan(
         cfg=_polymarket_scan_config(cfg),
         include_filtered=include_filtered,
     )
+    signals = load_wallet_market_signals()
+    if signals:
+        scans = enrich_scans_with_wallet_signals(scans, signals)
     return [asdict(scan) for scan in scans]
 
 
@@ -1941,18 +1945,14 @@ def do_polymarket_runtime_status() -> dict[str, object]:
 def do_polymarket_runtime_once(*, limit: int | None = None) -> dict[str, object]:
     cfg = load_config()
     client = _polymarket_client()
-    from stonks_cli.polymarket.runtime import run_structural_scan_once
+    from stonks_cli.polymarket.runtime import run_runtime_cycle
 
-    status, scans = run_structural_scan_once(
+    return run_runtime_cycle(
         client,
+        cfg=cfg,
         limit=limit if limit is not None else cfg.polymarket.scanner_limit,
-        cfg=_polymarket_scan_config(cfg),
-        paper=cfg.polymarket.paper,
+        scan_cfg=_polymarket_scan_config(cfg),
     )
-    return {
-        "status": asdict(status),
-        "queue": [asdict(scan) for scan in scans],
-    }
 
 
 def do_polymarket_wallets_import(csv_path: Path) -> dict[str, object]:
@@ -1978,3 +1978,46 @@ def do_polymarket_wallet_targets() -> list[dict[str, object]]:
     from stonks_cli.polymarket.wallets import load_wallet_targets
 
     return [asdict(target) for target in load_wallet_targets()]
+
+
+def do_polymarket_wallet_market_signals() -> list[dict[str, object]]:
+    from stonks_cli.polymarket.wallets import load_wallet_market_signals
+
+    return [asdict(signal) for signal in load_wallet_market_signals()]
+
+
+def do_polymarket_paper_init(starting_cash: float | None = None) -> dict[str, object]:
+    cfg = load_config()
+    from stonks_cli.polymarket.paper import init_paper_account
+
+    account = init_paper_account(starting_cash if starting_cash is not None else cfg.polymarket.paper_starting_cash)
+    return asdict(account)
+
+
+def do_polymarket_paper_status() -> dict[str, object]:
+    from stonks_cli.polymarket.paper import paper_status
+    from stonks_cli.polymarket.runtime import runtime_status
+
+    status = runtime_status()
+    out = paper_status()
+    out["runtime"] = asdict(status)
+    return out
+
+
+def do_polymarket_paper_buy(
+    token_id: str,
+    market_id: str,
+    price: float,
+    shares: float,
+    slug: str | None = None,
+    outcome: str | None = None,
+) -> dict[str, object]:
+    from stonks_cli.polymarket.paper import paper_buy
+
+    return paper_buy(token_id=token_id, market_id=market_id, slug=slug, outcome=outcome, shares=shares, price=price)
+
+
+def do_polymarket_paper_sell(token_id: str, shares: float, price: float) -> dict[str, object]:
+    from stonks_cli.polymarket.paper import paper_sell
+
+    return paper_sell(token_id=token_id, shares=shares, price=price)

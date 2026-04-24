@@ -157,3 +157,39 @@ def scan_markets(
             scans.append(scan)
     scans.sort(key=lambda item: item.score, reverse=True)
     return scans
+
+
+def enrich_scans_with_wallet_signals(scans: list[MarketScan], signals) -> list[MarketScan]:
+    by_market_outcome = {(signal.market_id, signal.outcome.upper()): signal for signal in signals}
+    enriched: list[MarketScan] = []
+    for scan in scans:
+        outcome = (scan.outcome or "").upper()
+        signal = by_market_outcome.get((scan.market_id, outcome))
+        if signal is None:
+            enriched.append(scan)
+            continue
+        extra_score = min(signal.wallet_count * 2.0, 10.0) + min(signal.trade_count / 10.0, 5.0)
+        enriched.append(
+            MarketScan(
+                market_id=scan.market_id,
+                slug=scan.slug,
+                question=scan.question,
+                token_id=scan.token_id,
+                outcome=scan.outcome,
+                midpoint=scan.midpoint,
+                bids_depth_usd=scan.bids_depth_usd,
+                asks_depth_usd=scan.asks_depth_usd,
+                liquidity_usd=scan.liquidity_usd,
+                volume_usd=scan.volume_usd,
+                hours_to_resolution=scan.hours_to_resolution,
+                complement_deviation_bps=scan.complement_deviation_bps,
+                score=round(scan.score + extra_score, 2),
+                status=scan.status,
+                reasons=list(scan.reasons),
+                target_wallet_count=signal.wallet_count,
+                target_trade_count=signal.trade_count,
+                target_net_volume=signal.net_volume,
+            )
+        )
+    enriched.sort(key=lambda item: item.score, reverse=True)
+    return enriched

@@ -59,6 +59,9 @@ class MarketScan:
     score: float
     status: str
     reasons: list[str] = field(default_factory=list)
+    target_wallet_count: int = 0
+    target_trade_count: int = 0
+    target_net_volume: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -69,4 +72,39 @@ class RuntimeStatus:
     last_scan_at: str | None
     last_scan_count: int
     last_pass_count: int
+    open_positions: int = 0
+    last_actions: list[str] = field(default_factory=list)
     last_error: str | None = None
+
+
+@dataclass(frozen=True)
+class PaperPosition:
+    token_id: str
+    market_id: str
+    slug: str | None
+    outcome: str | None
+    shares: float
+    avg_price: float
+    opened_at: str
+
+
+@dataclass(frozen=True)
+class PaperTrade:
+    ts: str
+    action: str
+    token_id: str
+    market_id: str
+    slug: str | None
+    outcome: str | None
+    shares: float
+    price: float
+    notional: float
+    realized_pnl: float | None = None
+
+
+@dataclass(frozen=True)
+class PaperAccount:
+    cash: float
+    realized_pnl: float
+    positions: list[PaperPosition]
+    trades: list[PaperTrade]

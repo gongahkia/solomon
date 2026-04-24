@@ -23,6 +23,8 @@ def load_runtime_status() -> RuntimeStatus:
             last_scan_at=None,
             last_scan_count=0,
             last_pass_count=0,
+            open_positions=0,
+            last_actions=[],
             last_error=None,
         )
     try:
@@ -36,6 +38,8 @@ def load_runtime_status() -> RuntimeStatus:
             last_scan_at=None,
             last_scan_count=0,
             last_pass_count=0,
+            open_positions=0,
+            last_actions=[],
             last_error=str(e),
         )
     return RuntimeStatus(
@@ -45,6 +49,8 @@ def load_runtime_status() -> RuntimeStatus:
         last_scan_at=payload.get("last_scan_at"),
         last_scan_count=int(payload.get("last_scan_count") or 0),
         last_pass_count=int(payload.get("last_pass_count") or 0),
+        open_positions=int(payload.get("open_positions") or 0),
+        last_actions=[str(item) for item in (payload.get("last_actions") or [])],
         last_error=payload.get("last_error"),
     )
 

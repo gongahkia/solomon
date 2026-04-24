@@ -163,6 +163,20 @@ $ stonks-cli watchlist analyze tech --json --csv --name report_tech_latest.txt
 $ stonks-cli signals diff
 ```
 
+### Polymarket
+
+```console
+$ stonks-cli polymarket markets list --limit 25
+$ stonks-cli polymarket scan
+$ stonks-cli polymarket runtime status
+$ stonks-cli polymarket wallets import ~/poly_data/processed/trades.csv
+$ stonks-cli polymarket wallets rank --min-trades 100 --min-win-rate 0.70 --limit 50
+$ stonks-cli polymarket wallets signals
+$ stonks-cli polymarket paper init --cash 1000
+$ stonks-cli polymarket paper status
+$ stonks-cli polymarket runtime once
+```
+
 3. `stonks-cli` also includes an optional [Model Context Protocol](https://modelcontextprotocol.io) server that allows for [AI Agents](https://modelcontextprotocol.io/docs/agents/) to directly interact with `stonks-cli` tooling.
 
 4. Run the below to install `stonks-cli`'s MCP functionality.

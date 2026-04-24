@@ -38,6 +38,16 @@ class WalletTarget:
     closed_round_trips: int
 
 
+@dataclass(frozen=True)
+class WalletMarketSignal:
+    market_id: str
+    outcome: str
+    wallet_count: int
+    trade_count: int
+    net_volume: float
+    gross_volume: float
+
+
 @dataclass
 class _WalletStats:
     trades: int = 0
@@ -61,6 +71,10 @@ def _wallet_manifest_path() -> Path:
 
 def _wallet_targets_path() -> Path:
     return default_state_dir() / "polymarket_wallet_targets.json"
+
+
+def _wallet_market_stats_path() -> Path:
+    return default_state_dir() / "polymarket_wallet_market_stats.json"
 
 
 def _read_rows(csv_path: Path):
@@ -155,6 +169,7 @@ def rank_wallets(
     stats_by_wallet: dict[str, _WalletStats] = defaultdict(_WalletStats)
     long_books: dict[str, dict[tuple[str, str], deque[_Lot]]] = defaultdict(lambda: defaultdict(deque))
     short_books: dict[str, dict[tuple[str, str], deque[_Lot]]] = defaultdict(lambda: defaultdict(deque))
+    market_counts: dict[str, dict[tuple[str, str], dict[str, float]]] = defaultdict(lambda: defaultdict(dict))
 
     rows = _read_rows(path)
     next(rows)  # fieldnames
@@ -174,6 +189,13 @@ def rank_wallets(
         stats = stats_by_wallet[wallet]
         stats.trades += 1
         stats.gross_volume += price * qty
+        counts = market_counts[wallet].setdefault(
+            instrument,
+            {"trade_count": 0.0, "net_volume": 0.0, "gross_volume": 0.0},
+        )
+        counts["trade_count"] += 1.0
+        counts["gross_volume"] += price * qty
+        counts["net_volume"] += qty if direction == "BUY" else -qty
 
         explicit_profit = None
         for col in ("profit", "pnl", "realized_pnl"):
@@ -243,10 +265,10 @@ def rank_wallets(
                 closed_round_trips=stats.closed_round_trips,
             )
         )
-
     targets.sort(key=lambda item: (item.realized_pnl, item.gross_volume), reverse=True)
     trimmed = targets[: max(0, limit)]
     save_wallet_targets(trimmed)
+    save_wallet_market_signals(_aggregate_market_signals(market_counts, {t.wallet for t in trimmed}))
     return trimmed
 
 
@@ -257,6 +279,50 @@ def save_wallet_targets(targets: list[WalletTarget]) -> None:
         json.dumps([asdict(target) for target in targets], indent=2),
         encoding="utf-8",
     )
+
+
+def _aggregate_market_signals(
+    per_wallet_market_counts: dict[str, dict[tuple[str, str], dict[str, float]]],
+    selected_wallets: set[str],
+) -> list[WalletMarketSignal]:
+    aggregate: dict[tuple[str, str], dict[str, float | set[str]]] = {}
+    for wallet, instruments in per_wallet_market_counts.items():
+        if wallet not in selected_wallets:
+            continue
+        for instrument, counts in instruments.items():
+            bucket = aggregate.setdefault(
+                instrument,
+                {"wallets": set(), "trade_count": 0.0, "net_volume": 0.0, "gross_volume": 0.0},
+            )
+            cast_wallets = bucket["wallets"]
+            assert isinstance(cast_wallets, set)
+            cast_wallets.add(wallet)
+            bucket["trade_count"] = float(bucket["trade_count"]) + float(counts.get("trade_count") or 0.0)
+            bucket["net_volume"] = float(bucket["net_volume"]) + float(counts.get("net_volume") or 0.0)
+            bucket["gross_volume"] = float(bucket["gross_volume"]) + float(counts.get("gross_volume") or 0.0)
+
+    signals: list[WalletMarketSignal] = []
+    for (market_id, outcome), bucket in aggregate.items():
+        cast_wallets = bucket["wallets"]
+        assert isinstance(cast_wallets, set)
+        signals.append(
+            WalletMarketSignal(
+                market_id=market_id,
+                outcome=outcome,
+                wallet_count=len(cast_wallets),
+                trade_count=int(float(bucket["trade_count"])),
+                net_volume=round(float(bucket["net_volume"]), 6),
+                gross_volume=round(float(bucket["gross_volume"]), 6),
+            )
+        )
+    signals.sort(key=lambda item: (item.wallet_count, item.trade_count, item.gross_volume), reverse=True)
+    return signals
+
+
+def save_wallet_market_signals(signals: list[WalletMarketSignal]) -> None:
+    path = _wallet_market_stats_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps([asdict(signal) for signal in signals], indent=2), encoding="utf-8")
 
 
 def load_wallet_targets() -> list[WalletTarget]:
@@ -282,6 +348,34 @@ def load_wallet_targets() -> list[WalletTarget]:
                 gross_volume=float(item.get("gross_volume") or 0.0),
                 win_rate=float(item.get("win_rate") or 0.0),
                 closed_round_trips=int(item.get("closed_round_trips") or 0),
+            )
+        )
+    return out
+
+
+def load_wallet_market_signals() -> list[WalletMarketSignal]:
+    path = _wallet_market_stats_path()
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        log_suppressed_exception(context="polymarket.wallets.load_market_signals", error=e, path=path)
+        return []
+    out: list[WalletMarketSignal] = []
+    if not isinstance(payload, list):
+        return out
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        out.append(
+            WalletMarketSignal(
+                market_id=str(item.get("market_id") or ""),
+                outcome=str(item.get("outcome") or ""),
+                wallet_count=int(item.get("wallet_count") or 0),
+                trade_count=int(item.get("trade_count") or 0),
+                net_volume=float(item.get("net_volume") or 0.0),
+                gross_volume=float(item.get("gross_volume") or 0.0),
             )
         )
     return out

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 import typer
 from pydantic import ValidationError
 from rich.console import Console
+from rich.table import Table
 
 from stonks_cli.commands import (
     do_analyze,
@@ -32,6 +34,15 @@ from stonks_cli.commands import (
     do_history_show,
     do_insider,
     do_news,
+    do_polymarket_book,
+    do_polymarket_market_get,
+    do_polymarket_markets_list,
+    do_polymarket_runtime_once,
+    do_polymarket_runtime_status,
+    do_polymarket_scan,
+    do_polymarket_wallet_targets,
+    do_polymarket_wallets_import,
+    do_polymarket_wallets_rank,
     do_plugins_list,
     do_portfolio_add,
     do_portfolio_allocation,
@@ -69,6 +80,10 @@ portfolio_app = typer.Typer()
 paper_app = typer.Typer()
 alert_app = typer.Typer()
 dividend_app = typer.Typer()
+polymarket_app = typer.Typer()
+polymarket_markets_app = typer.Typer()
+polymarket_runtime_app = typer.Typer()
+polymarket_wallets_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
@@ -82,6 +97,10 @@ app.add_typer(portfolio_app, name="portfolio")
 app.add_typer(paper_app, name="paper")
 app.add_typer(alert_app, name="alert")
 app.add_typer(dividend_app, name="dividend")
+app.add_typer(polymarket_app, name="polymarket")
+polymarket_app.add_typer(polymarket_markets_app, name="markets")
+polymarket_app.add_typer(polymarket_runtime_app, name="runtime")
+polymarket_app.add_typer(polymarket_wallets_app, name="wallets")
 
 
 @app.callback()
@@ -786,6 +805,168 @@ def plugins_list() -> None:
         provider_factories = list(out.get("provider_factories") or [])
         console.print(f"strategies: {', '.join(strategies) if strategies else '-'}")
         console.print(f"provider_factories: {', '.join(provider_factories) if provider_factories else '-'}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_markets_app.command("list")
+def polymarket_markets_list(
+    limit: int = typer.Option(50, "--limit", min=1, max=1000),
+    active: bool = typer.Option(True, "--active/--all", help="Prefer active markets by default"),
+    closed: bool = typer.Option(False, "--closed/--open", help="Include closed markets"),
+    order: str = typer.Option("volume", "--order", help="Gamma order field"),
+) -> None:
+    """List Polymarket markets using the Polymarket-native client."""
+    try:
+        rows = do_polymarket_markets_list(limit=limit, active=active, closed=closed, order=order)
+        table = Table(title="Polymarket Markets")
+        table.add_column("Slug")
+        table.add_column("Question")
+        table.add_column("Liquidity", justify="right")
+        table.add_column("Volume", justify="right")
+        table.add_column("End")
+        for row in rows:
+            table.add_row(
+                str(row.get("slug") or "-"),
+                str(row.get("question") or "-"),
+                f"${float(row['liquidity_usd']):,.0f}" if row.get("liquidity_usd") is not None else "-",
+                f"${float(row['volume_usd']):,.0f}" if row.get("volume_usd") is not None else "-",
+                str(row.get("end_date_iso") or "-"),
+            )
+        Console().print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_markets_app.command("get")
+def polymarket_market_get(slug_or_id: str = typer.Argument(..., help="Polymarket market slug or numeric id")) -> None:
+    """Show one Polymarket market as JSON."""
+    try:
+        data = do_polymarket_market_get(slug_or_id)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_app.command("book")
+def polymarket_book(token_id: str = typer.Argument(..., help="CLOB token id")) -> None:
+    """Show a Polymarket order book as JSON."""
+    try:
+        data = do_polymarket_book(token_id)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_app.command("scan")
+def polymarket_scan(
+    limit: int | None = typer.Option(None, "--limit", min=1, max=1000),
+    include_filtered: bool = typer.Option(False, "--include-filtered", help="Include rejected markets"),
+) -> None:
+    """Run a deterministic structural Polymarket scanner."""
+    try:
+        rows = do_polymarket_scan(limit=limit, include_filtered=include_filtered)
+        table = Table(title="Polymarket Scan Queue")
+        table.add_column("Status")
+        table.add_column("Slug")
+        table.add_column("Mid", justify="right")
+        table.add_column("Bid Depth", justify="right")
+        table.add_column("Ask Depth", justify="right")
+        table.add_column("Hours", justify="right")
+        table.add_column("Score", justify="right")
+        table.add_column("Reasons")
+        for row in rows:
+            table.add_row(
+                str(row.get("status") or "-"),
+                str(row.get("slug") or "-"),
+                f"{float(row['midpoint']):.3f}" if row.get("midpoint") is not None else "-",
+                f"${float(row.get('bids_depth_usd') or 0):,.0f}",
+                f"${float(row.get('asks_depth_usd') or 0):,.0f}",
+                f"{float(row['hours_to_resolution']):.1f}" if row.get("hours_to_resolution") is not None else "-",
+                f"{float(row.get('score') or 0):.2f}",
+                ", ".join(row.get("reasons") or []) or "-",
+            )
+        Console().print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_runtime_app.command("status")
+def polymarket_runtime_status() -> None:
+    """Show Polymarket runtime state."""
+    try:
+        data = do_polymarket_runtime_status()
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_runtime_app.command("once")
+def polymarket_runtime_once(
+    limit: int | None = typer.Option(None, "--limit", min=1, max=1000),
+) -> None:
+    """Run one Polymarket scan cycle and persist runtime status."""
+    try:
+        data = do_polymarket_runtime_once(limit=limit)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_wallets_app.command("import")
+def polymarket_wallets_import(
+    csv_path: Path = typer.Argument(..., exists=True, readable=True, help="Path to poly_data processed/trades.csv"),
+) -> None:
+    """Register a wallet trade dataset for ranking and copy-trading research."""
+    try:
+        data = do_polymarket_wallets_import(csv_path)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_wallets_app.command("rank")
+def polymarket_wallets_rank(
+    csv_path: Path | None = typer.Option(None, "--csv-path", help="Override imported source path"),
+    min_trades: int = typer.Option(100, "--min-trades", min=1),
+    min_win_rate: float = typer.Option(0.70, "--min-win-rate", min=0.0, max=1.0),
+    limit: int = typer.Option(50, "--limit", min=1, max=1000),
+) -> None:
+    """Rank wallets by realized PnL and win rate from imported trade history."""
+    try:
+        rows = do_polymarket_wallets_rank(
+            csv_path=csv_path,
+            min_trades=min_trades,
+            min_win_rate=min_win_rate,
+            limit=limit,
+        )
+        table = Table(title="Polymarket Wallet Targets")
+        table.add_column("Wallet")
+        table.add_column("Trades", justify="right")
+        table.add_column("Realized PnL", justify="right")
+        table.add_column("Win Rate", justify="right")
+        table.add_column("Closed RT", justify="right")
+        table.add_column("Gross Vol", justify="right")
+        for row in rows:
+            table.add_row(
+                str(row.get("wallet") or "-"),
+                str(int(row.get("trades") or 0)),
+                f"${float(row.get('realized_pnl') or 0):,.2f}",
+                f"{float(row.get('win_rate') or 0) * 100:.1f}%",
+                str(int(row.get("closed_round_trips") or 0)),
+                f"${float(row.get('gross_volume') or 0):,.2f}",
+            )
+        Console().print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_wallets_app.command("targets")
+def polymarket_wallet_targets() -> None:
+    """Show the saved wallet target list."""
+    try:
+        rows = do_polymarket_wallet_targets()
+        Console().print_json(json.dumps(rows))
     except Exception as e:
         raise _exit_for_error(e)
 

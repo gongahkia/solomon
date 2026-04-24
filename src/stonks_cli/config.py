@@ -72,6 +72,22 @@ class ApiKeysConfig(BaseModel):
     alpaca_paper: bool = True
 
 
+class PolymarketConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    enabled: bool = Field(default=False)
+    private_key_env: str = Field(default="POLYMARKET_PRIVATE_KEY")
+    signature_type: Literal["proxy", "eoa", "gnosis-safe"] = "proxy"
+    chain_id: int = Field(default=137, ge=1)
+    scanner_limit: int = Field(default=200, ge=1, le=1000)
+    min_market_liquidity_usd: float = Field(default=50000.0, ge=0.0)
+    min_book_depth_usd: float = Field(default=500.0, ge=0.0)
+    min_hours_to_resolution: float = Field(default=4.0, ge=0.0)
+    max_hours_to_resolution: float = Field(default=168.0, ge=0.0)
+    require_active: bool = True
+    paper: bool = True
+    loop_interval_ms: int = Field(default=1000, ge=100, le=60000)
+
+
 class TuiConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     refresh_interval: int = Field(default=60, ge=5, le=3600)
@@ -106,6 +122,7 @@ class AppConfig(BaseModel):
         description="Optional webhook URL for alert notifications",
     )
     api_keys: ApiKeysConfig = Field(default_factory=ApiKeysConfig)
+    polymarket: PolymarketConfig = Field(default_factory=PolymarketConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
 
 

@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class MarketToken:
+    token_id: str
+    outcome: str | None = None
+    price: float | None = None
+
+
+@dataclass(frozen=True)
+class PolymarketMarket:
+    market_id: str
+    question: str
+    slug: str | None
+    condition_id: str | None
+    active: bool | None
+    closed: bool | None
+    liquidity_usd: float | None
+    volume_usd: float | None
+    end_date_iso: str | None
+    tokens: list[MarketToken] = field(default_factory=list)
+    raw: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class BookLevel:
+    price: float
+    size: float
+
+
+@dataclass(frozen=True)
+class OrderBook:
+    token_id: str
+    bids: list[BookLevel]
+    asks: list[BookLevel]
+    midpoint: float | None
+    best_bid: float | None
+    best_ask: float | None
+    raw: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class MarketScan:
+    market_id: str
+    slug: str | None
+    question: str
+    token_id: str | None
+    outcome: str | None
+    midpoint: float | None
+    bids_depth_usd: float
+    asks_depth_usd: float
+    liquidity_usd: float | None
+    volume_usd: float | None
+    hours_to_resolution: float | None
+    complement_deviation_bps: float | None
+    score: float
+    status: str
+    reasons: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RuntimeStatus:
+    mode: str
+    state: str
+    paper: bool
+    last_scan_at: str | None
+    last_scan_count: int
+    last_pass_count: int
+    last_error: str | None = None

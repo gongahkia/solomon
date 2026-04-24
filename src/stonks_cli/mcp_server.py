@@ -44,6 +44,15 @@ from stonks_cli.commands import (
     do_paper_leaderboard,
     do_paper_sell,
     do_paper_status,
+    do_polymarket_book,
+    do_polymarket_market_get,
+    do_polymarket_markets_list,
+    do_polymarket_runtime_once,
+    do_polymarket_runtime_status,
+    do_polymarket_scan,
+    do_polymarket_wallet_targets,
+    do_polymarket_wallets_import,
+    do_polymarket_wallets_rank,
     do_plugins_list,
     do_portfolio_add,
     do_portfolio_allocation,
@@ -257,6 +266,76 @@ def get_market_movers(sector: bool = False) -> Any:
     """
     movers = do_movers(sector=sector)
     return {"movers": _serialize(movers)}
+
+
+@mcp.tool()
+def polymarket_list_markets(limit: int = 50, active: bool | None = None, closed: bool | None = None) -> Any:
+    """List Polymarket markets using the Polymarket-native client."""
+    rows = do_polymarket_markets_list(limit=limit, active=active, closed=closed, order="volume")
+    return {"markets": _serialize(rows)}
+
+
+@mcp.tool()
+def polymarket_get_market(slug_or_id: str) -> Any:
+    """Fetch a single Polymarket market by slug or numeric id."""
+    return _serialize(do_polymarket_market_get(slug_or_id))
+
+
+@mcp.tool()
+def polymarket_get_book(token_id: str) -> Any:
+    """Fetch a single Polymarket order book by token id."""
+    return _serialize(do_polymarket_book(token_id))
+
+
+@mcp.tool()
+def polymarket_scan_queue(limit: int | None = None, include_filtered: bool = False) -> Any:
+    """Build a structural Polymarket scan queue."""
+    rows = do_polymarket_scan(limit=limit, include_filtered=include_filtered)
+    return {"queue": _serialize(rows)}
+
+
+@mcp.tool()
+def polymarket_runtime_status() -> Any:
+    """Get Polymarket runtime state."""
+    return _serialize(do_polymarket_runtime_status())
+
+
+@mcp.tool()
+def polymarket_run_once(limit: int | None = None) -> Any:
+    """Run one Polymarket scan cycle and persist runtime state."""
+    return _serialize(do_polymarket_runtime_once(limit=limit))
+
+
+@mcp.tool()
+def polymarket_import_wallet_trades(csv_path: str) -> Any:
+    """Register a poly_data processed/trades.csv file for wallet ranking."""
+    return _serialize(do_polymarket_wallets_import(Path(csv_path)))
+
+
+@mcp.tool()
+def polymarket_rank_wallets(
+    csv_path: str | None = None,
+    min_trades: int = 100,
+    min_win_rate: float = 0.70,
+    limit: int = 50,
+) -> Any:
+    """Rank Polymarket wallets by realized FIFO PnL and win rate."""
+    return {
+        "targets": _serialize(
+            do_polymarket_wallets_rank(
+                csv_path=Path(csv_path) if csv_path else None,
+                min_trades=min_trades,
+                min_win_rate=min_win_rate,
+                limit=limit,
+            )
+        )
+    }
+
+
+@mcp.tool()
+def polymarket_get_wallet_targets() -> Any:
+    """Get the saved Polymarket wallet target list."""
+    return {"targets": _serialize(do_polymarket_wallet_targets())}
 
 
 @mcp.tool()

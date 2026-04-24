@@ -1839,3 +1839,142 @@ def do_unusual(threshold: float = 2.0) -> list[dict]:
         return []
 
     return detect_unusual_volume(tickers, threshold=threshold)
+
+
+def _polymarket_scan_config(cfg: AppConfig):
+    from stonks_cli.polymarket.scanner import StructuralScanConfig
+
+    pm = cfg.polymarket
+    return StructuralScanConfig(
+        min_market_liquidity_usd=pm.min_market_liquidity_usd,
+        min_book_depth_usd=pm.min_book_depth_usd,
+        min_hours_to_resolution=pm.min_hours_to_resolution,
+        max_hours_to_resolution=pm.max_hours_to_resolution,
+        require_active=pm.require_active,
+    )
+
+
+def _polymarket_client():
+    from stonks_cli.polymarket.client import PolymarketClient
+
+    return PolymarketClient()
+
+
+def _market_to_dict(market) -> dict[str, object]:
+    return {
+        "market_id": market.market_id,
+        "question": market.question,
+        "slug": market.slug,
+        "condition_id": market.condition_id,
+        "active": market.active,
+        "closed": market.closed,
+        "liquidity_usd": market.liquidity_usd,
+        "volume_usd": market.volume_usd,
+        "end_date_iso": market.end_date_iso,
+        "tokens": [asdict(t) for t in market.tokens],
+    }
+
+
+def _book_to_dict(book) -> dict[str, object]:
+    return {
+        "token_id": book.token_id,
+        "best_bid": book.best_bid,
+        "best_ask": book.best_ask,
+        "midpoint": book.midpoint,
+        "bids": [asdict(level) for level in book.bids],
+        "asks": [asdict(level) for level in book.asks],
+    }
+
+
+def do_polymarket_markets_list(
+    *,
+    limit: int | None = None,
+    active: bool | None = None,
+    closed: bool | None = None,
+    order: str = "volume",
+) -> list[dict[str, object]]:
+    cfg = load_config()
+    client = _polymarket_client()
+    use_limit = limit if limit is not None else cfg.polymarket.scanner_limit
+    use_active = cfg.polymarket.require_active if active is None else active
+    use_closed = False if closed is None else closed
+    markets = client.list_markets(limit=use_limit, active=use_active, closed=use_closed, order=order)
+    return [_market_to_dict(m) for m in markets]
+
+
+def do_polymarket_market_get(slug_or_id: str) -> dict[str, object]:
+    client = _polymarket_client()
+    market = client.get_market(slug_or_id)
+    return _market_to_dict(market)
+
+
+def do_polymarket_book(token_id: str) -> dict[str, object]:
+    client = _polymarket_client()
+    book = client.get_book(token_id)
+    return _book_to_dict(book)
+
+
+def do_polymarket_scan(
+    *,
+    limit: int | None = None,
+    include_filtered: bool = False,
+) -> list[dict[str, object]]:
+    cfg = load_config()
+    client = _polymarket_client()
+    from stonks_cli.polymarket.scanner import scan_markets
+
+    scans = scan_markets(
+        client,
+        limit=limit if limit is not None else cfg.polymarket.scanner_limit,
+        cfg=_polymarket_scan_config(cfg),
+        include_filtered=include_filtered,
+    )
+    return [asdict(scan) for scan in scans]
+
+
+def do_polymarket_runtime_status() -> dict[str, object]:
+    from stonks_cli.polymarket.runtime import runtime_status
+
+    return asdict(runtime_status())
+
+
+def do_polymarket_runtime_once(*, limit: int | None = None) -> dict[str, object]:
+    cfg = load_config()
+    client = _polymarket_client()
+    from stonks_cli.polymarket.runtime import run_structural_scan_once
+
+    status, scans = run_structural_scan_once(
+        client,
+        limit=limit if limit is not None else cfg.polymarket.scanner_limit,
+        cfg=_polymarket_scan_config(cfg),
+        paper=cfg.polymarket.paper,
+    )
+    return {
+        "status": asdict(status),
+        "queue": [asdict(scan) for scan in scans],
+    }
+
+
+def do_polymarket_wallets_import(csv_path: Path) -> dict[str, object]:
+    from stonks_cli.polymarket.wallets import import_wallet_trades
+
+    return asdict(import_wallet_trades(csv_path))
+
+
+def do_polymarket_wallets_rank(
+    *,
+    csv_path: Path | None = None,
+    min_trades: int = 100,
+    min_win_rate: float = 0.70,
+    limit: int = 50,
+) -> list[dict[str, object]]:
+    from stonks_cli.polymarket.wallets import rank_wallets
+
+    targets = rank_wallets(csv_path=csv_path, min_trades=min_trades, min_win_rate=min_win_rate, limit=limit)
+    return [asdict(target) for target in targets]
+
+
+def do_polymarket_wallet_targets() -> list[dict[str, object]]:
+    from stonks_cli.polymarket.wallets import load_wallet_targets
+
+    return [asdict(target) for target in load_wallet_targets()]

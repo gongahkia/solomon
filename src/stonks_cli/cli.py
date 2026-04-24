@@ -44,6 +44,7 @@ from stonks_cli.commands import (
     do_polymarket_preflight,
     do_polymarket_replay_market,
     do_polymarket_replay_user,
+    do_polymarket_settle,
     do_polymarket_guard_status,
     do_polymarket_runtime_halt,
     do_polymarket_runtime_loop,
@@ -91,10 +92,10 @@ plugins_app = typer.Typer()
 watchlist_app = typer.Typer()
 signals_app = typer.Typer()
 portfolio_app = typer.Typer()
-paper_app = typer.Typer()
+paper_app = typer.Typer(help="Legacy stock paper trading commands.")
 alert_app = typer.Typer()
 dividend_app = typer.Typer()
-polymarket_app = typer.Typer()
+polymarket_app = typer.Typer(help="Primary Polymarket trading, runtime, and research commands.")
 polymarket_markets_app = typer.Typer()
 polymarket_runtime_app = typer.Typer()
 polymarket_wallets_app = typer.Typer()
@@ -1167,6 +1168,19 @@ def polymarket_replay_user(
     """Replay recorded user/order websocket events into the local order manager."""
     try:
         data = do_polymarket_replay_user(path)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_app.command("settle")
+def polymarket_settle(
+    market_id: str = typer.Option(..., "--market-id"),
+    winning_token_id: str = typer.Option(..., "--winning-token-id"),
+) -> None:
+    """Manually settle a resolved Polymarket paper market."""
+    try:
+        data = do_polymarket_settle(market_id=market_id, winning_token_id=winning_token_id)
         Console().print_json(json.dumps(data))
     except Exception as e:
         raise _exit_for_error(e)

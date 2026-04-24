@@ -155,6 +155,8 @@ class LiveMarketSnapshot:
     bids: list[BookLevel] = field(default_factory=list)
     asks: list[BookLevel] = field(default_factory=list)
     resolved: bool = False
+    winning_token_id: str | None = None
+    winning_outcome: str | None = None
     last_event_type: str | None = None
     last_event_at: str | None = None
 

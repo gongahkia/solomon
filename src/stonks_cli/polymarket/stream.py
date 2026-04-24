@@ -122,7 +122,16 @@ def reduce_market_event(snapshot: LiveMarketSnapshot | None, event: dict[str, An
         return replace(current, tick_size=tick_size, last_event_type=event_type, last_event_at=last_event_at)
 
     if event_type == "market_resolved":
-        return replace(current, resolved=True, last_event_type=event_type, last_event_at=last_event_at)
+        winning_token_id = _pick(event, "winning_asset_id", "winningAssetId", "winner_asset_id", "winnerAssetId")
+        winning_outcome = _pick(event, "winning_outcome", "winningOutcome", "winner", "outcome")
+        return replace(
+            current,
+            resolved=True,
+            winning_token_id=str(winning_token_id) if winning_token_id not in (None, "") else current.winning_token_id,
+            winning_outcome=str(winning_outcome) if winning_outcome not in (None, "") else current.winning_outcome,
+            last_event_type=event_type,
+            last_event_at=last_event_at,
+        )
 
     return replace(current, last_event_type=event_type, last_event_at=last_event_at)
 

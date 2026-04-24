@@ -21,6 +21,7 @@ from stonks_cli.polymarket.models import MarketScan, RuntimeStatus
 from stonks_cli.polymarket.paper import init_paper_account, load_paper_account
 from stonks_cli.polymarket.risk import build_trade_proposal
 from stonks_cli.polymarket.scanner import StructuralScanConfig, enrich_scans_with_wallet_signals, scan_markets
+from stonks_cli.polymarket.settlement import paper_settle_market
 from stonks_cli.polymarket.storage import load_runtime_status, save_runtime_status
 from stonks_cli.polymarket.stream import MarketStateCache
 from stonks_cli.polymarket.wallets import load_wallet_market_signals
@@ -227,6 +228,39 @@ def maybe_reconcile_live_orders(cfg: AppConfig) -> list[dict[str, object]]:
     return actions
 
 
+def maybe_settle_resolved_positions(cfg: AppConfig, market_cache: MarketStateCache | None) -> list[dict[str, object]]:
+    if market_cache is None:
+        return []
+    try:
+        account = load_paper_account()
+    except Exception:
+        return []
+    if not account.positions:
+        return []
+    settlements: list[dict[str, object]] = []
+    settled_markets: set[str] = set()
+    for position in account.positions:
+        if position.market_id in settled_markets:
+            continue
+        snapshot = market_cache.get(position.token_id)
+        if snapshot is None or not snapshot.resolved or not snapshot.winning_token_id:
+            continue
+        result = paper_settle_market(
+            market_id=position.market_id,
+            winning_token_id=snapshot.winning_token_id,
+            reason="stream_resolution",
+        )
+        append_journal(
+            "market_settlement",
+            market_id=position.market_id,
+            winning_token_id=snapshot.winning_token_id,
+            settled_count=len(result["settled"]),
+        )
+        settlements.append(result)
+        settled_markets.add(position.market_id)
+    return settlements
+
+
 def run_runtime_cycle(
     client,
     *,
@@ -279,10 +313,11 @@ def run_runtime_cycle(
             )
     except Exception:
         pass
+    settlement_actions = maybe_settle_resolved_positions(cfg, market_cache)
     reconcile_actions = maybe_reconcile_live_orders(cfg)
     exit_actions = maybe_auto_exit(cfg, scans)
     trade_actions = maybe_auto_trade(cfg, scans)
-    actions = reconcile_actions + exit_actions + trade_actions
+    actions = settlement_actions + reconcile_actions + exit_actions + trade_actions
     updated = RuntimeStatus(
         mode=status.mode,
         state="idle" if not actions else "traded",

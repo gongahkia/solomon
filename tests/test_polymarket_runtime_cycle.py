@@ -8,6 +8,7 @@ from stonks_cli.polymarket.client import PolymarketClient
 from stonks_cli.polymarket.paper import init_paper_account
 from stonks_cli.polymarket.runtime import run_runtime_cycle
 from stonks_cli.polymarket.scanner import StructuralScanConfig
+from stonks_cli.polymarket.stream import MarketStateCache
 from stonks_cli.polymarket.wallets import WalletMarketSignal, save_wallet_market_signals
 
 
@@ -185,3 +186,54 @@ def test_runtime_cycle_reconciles_live_orders_before_new_trades(monkeypatch, tmp
 
     assert result["actions"] == [{"action": "CANCEL", "order_id": "order-1", "token_id": "YES1"}]
     assert result["status"]["state"] == "traded"
+
+
+def test_runtime_cycle_settles_resolved_market_from_stream_cache(monkeypatch, tmp_path):
+    from stonks_cli.polymarket import guards, journal, paper, storage, wallets
+
+    monkeypatch.setattr(storage, "default_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(paper, "default_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(wallets, "default_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(journal, "default_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(guards, "default_state_dir", lambda: tmp_path)
+
+    init_paper_account(1000.0)
+    paper.paper_buy(
+        token_id="YES1",
+        market_id="1",
+        slug="btc-higher",
+        outcome="YES",
+        shares=10.0,
+        price=0.60,
+    )
+    cache = MarketStateCache()
+    cache.apply(
+        {
+            "event_type": "market_resolved",
+            "asset_id": "YES1",
+            "winning_asset_id": "YES1",
+            "winning_outcome": "YES",
+        }
+    )
+
+    client = PolymarketClient(session=_Session())
+    cfg = AppConfig(
+        polymarket=PolymarketConfig(
+            enabled=True,
+            paper=True,
+            auto_trade_enabled=False,
+            auto_exit_enabled=False,
+        )
+    )
+    scan_cfg = StructuralScanConfig(
+        min_market_liquidity_usd=50000,
+        min_book_depth_usd=500,
+        min_hours_to_resolution=4,
+        max_hours_to_resolution=168,
+        require_active=True,
+    )
+
+    result = run_runtime_cycle(client, cfg=cfg, limit=1, scan_cfg=scan_cfg, market_cache=cache)
+
+    assert result["actions"][0]["market_id"] == "1"
+    assert result["status"]["open_positions"] == 0

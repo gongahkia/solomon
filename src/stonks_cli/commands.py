@@ -2139,3 +2139,9 @@ def do_polymarket_runtime_soak(
         user_events_path=user_events_path,
         batch_size=batch_size,
     )
+
+
+def do_polymarket_settle(*, market_id: str, winning_token_id: str) -> dict[str, object]:
+    from stonks_cli.polymarket.settlement import paper_settle_market
+
+    return paper_settle_market(market_id=market_id, winning_token_id=winning_token_id)

@@ -73,6 +73,9 @@ Repo config minimum:
     "consensus_min_buy_votes": 2,
     "min_entry_price": 0.10,
     "max_spread_bps": 750.0,
+    "slippage_check_notional_usd": 5.0,
+    "max_entry_slippage_bps": 300.0,
+    "require_full_fill_estimate": true,
     "volume_spike_exit_enabled": true,
     "volume_spike_multiplier": 3.0,
     "live_require_armed_env": true,
@@ -89,7 +92,7 @@ Repo config minimum:
 }
 ```
 
-Keep `auto_trade_enabled=false` until manual buy/cancel/sell validation passes. The added wallet and category settings make Trackmind-style copying explicit and category-scoped instead of letting any ranked wallet influence every market.
+Keep `auto_trade_enabled=false` until manual buy/cancel/sell validation passes. The added wallet and category settings make Trackmind-style copying explicit and category-scoped instead of letting any ranked wallet influence every market. The slippage settings force the scanner to walk the current ask book for a real tiny order and reject markets where that order would not fully fill or would cross too much depth.
 
 If anything looks wrong during testing, run `stonks-cli polymarket emergency-stop --reason operator_stop`. Add `--close-positions` only when you explicitly want the bot to try closing positions at available current prices.
 

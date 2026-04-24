@@ -86,6 +86,9 @@ class PolymarketConfig(BaseModel):
     min_book_depth_usd: float = Field(default=500.0, ge=0.0)
     min_entry_price: float = Field(default=0.0, ge=0.0, le=1.0)
     max_spread_bps: float = Field(default=1000.0, ge=0.0)
+    slippage_check_notional_usd: float = Field(default=5.0, ge=0.0)
+    max_entry_slippage_bps: float = Field(default=300.0, ge=0.0)
+    require_full_fill_estimate: bool = True
     min_hours_to_resolution: float = Field(default=4.0, ge=0.0)
     max_hours_to_resolution: float = Field(default=168.0, ge=0.0)
     require_active: bool = True

@@ -11,6 +11,9 @@ from stonks_cli.polymarket.models import MarketScan, OrderBook, PolymarketMarket
 class StructuralScanConfig:
     min_market_liquidity_usd: float = 50000.0
     min_book_depth_usd: float = 500.0
+    slippage_check_notional_usd: float = 5.0
+    max_entry_slippage_bps: float = 300.0
+    require_full_fill_estimate: bool = True
     min_hours_to_resolution: float = 4.0
     max_hours_to_resolution: float = 168.0
     require_active: bool = True
@@ -55,6 +58,43 @@ def book_depth_usd(levels) -> float:
     return round(sum(max(0.0, lvl.price) * max(0.0, lvl.size) for lvl in levels), 2)
 
 
+def estimate_buy_fill(levels, notional: float) -> dict[str, float | bool] | None:
+    if notional <= 0:
+        return None
+    sane = sorted(
+        (lvl for lvl in levels if lvl.price > 0 and lvl.size > 0),
+        key=lambda lvl: lvl.price,
+    )
+    if not sane:
+        return None
+    remaining = float(notional)
+    shares = 0.0
+    worst_price = 0.0
+    for lvl in sane:
+        if remaining <= 1e-9:
+            break
+        level_notional = lvl.price * lvl.size
+        if level_notional <= remaining + 1e-9:
+            shares += lvl.size
+            remaining -= level_notional
+            worst_price = lvl.price
+        else:
+            shares += remaining / lvl.price
+            worst_price = lvl.price
+            remaining = 0.0
+    spent = max(0.0, float(notional) - remaining)
+    if spent <= 0 or shares <= 0:
+        return None
+    return {
+        "spent_notional": round(spent, 6),
+        "unfilled_notional": round(max(0.0, remaining), 6),
+        "shares": round(shares, 6),
+        "avg_price": round(spent / shares, 6),
+        "worst_price": round(worst_price, 6),
+        "fully_filled": remaining <= 1e-6,
+    }
+
+
 def complement_deviation_bps(market: PolymarketMarket) -> float | None:
     prices = [token.price for token in market.tokens if token.price is not None]
     if len(prices) < 2:
@@ -84,6 +124,17 @@ def structural_scan_market(
         reasons.append(f"liquidity<{cfg.min_market_liquidity_usd:.0f}")
     if bids_depth < cfg.min_book_depth_usd or asks_depth < cfg.min_book_depth_usd:
         reasons.append(f"depth<{cfg.min_book_depth_usd:.0f}")
+    if cfg.slippage_check_notional_usd > 0:
+        fill = estimate_buy_fill(book.asks, cfg.slippage_check_notional_usd)
+        if fill is None:
+            reasons.append("fill_estimate_unavailable")
+        else:
+            if cfg.require_full_fill_estimate and not fill["fully_filled"]:
+                reasons.append("fill_estimate_partial")
+            if book.midpoint and book.midpoint > 0:
+                slippage_bps = max(0.0, float(fill["avg_price"]) - book.midpoint) / book.midpoint * 10000
+                if cfg.max_entry_slippage_bps > 0 and slippage_bps > cfg.max_entry_slippage_bps:
+                    reasons.append(f"entry_slippage_bps>{cfg.max_entry_slippage_bps:.0f}")
     if hrs is not None and hrs < cfg.min_hours_to_resolution:
         reasons.append(f"hours<{cfg.min_hours_to_resolution:.1f}")
     if hrs is not None and hrs > cfg.max_hours_to_resolution:

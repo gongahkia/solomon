@@ -1850,6 +1850,9 @@ def _polymarket_scan_config(cfg: AppConfig):
     return StructuralScanConfig(
         min_market_liquidity_usd=pm.min_market_liquidity_usd,
         min_book_depth_usd=pm.min_book_depth_usd,
+        slippage_check_notional_usd=pm.slippage_check_notional_usd,
+        max_entry_slippage_bps=pm.max_entry_slippage_bps,
+        require_full_fill_estimate=pm.require_full_fill_estimate,
         min_hours_to_resolution=pm.min_hours_to_resolution,
         max_hours_to_resolution=pm.max_hours_to_resolution,
         require_active=pm.require_active,

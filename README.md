@@ -218,6 +218,9 @@ To enable Rust-backed live trading from the CLI shell, set:
     "consensus_min_buy_votes": 2,
     "min_entry_price": 0.10,
     "max_spread_bps": 750.0,
+    "slippage_check_notional_usd": 5.0,
+    "max_entry_slippage_bps": 300.0,
+    "require_full_fill_estimate": true,
     "max_total_notional": 20.0,
     "max_daily_profit": 10.0,
     "stop_loss_reentry_cooldown_minutes": 60.0,
@@ -238,7 +241,7 @@ The Rust control backend uses that CLI for:
 - `clob orders`
 - `clob cancel`
 
-The Polymarket path now includes deterministic alpha controls from the Trackmind-style article and later field reports: hard market-universe filters, configurable target wallets, category-aware wallet-copy signals, three-agent consensus voting, spread/low-price filters, stop-loss re-entry cooldowns, total exposure caps, daily profit/loss stops, volume-spike exits, an emergency stop command, and offline BYO-key research theses via `stonks-cli polymarket research thesis`.
+The Polymarket path now includes deterministic alpha controls from the Trackmind-style article and later field reports: hard market-universe filters, configurable target wallets, category-aware wallet-copy signals, three-agent consensus voting, spread/low-price filters, orderbook-walk fill/slippage checks, stop-loss re-entry cooldowns, total exposure caps, daily profit/loss stops, volume-spike exits, an emergency stop command, and offline BYO-key research theses via `stonks-cli polymarket research thesis`.
 
 For a staged operator workflow, see [docs/polymarket-live-runbook.md](/Users/gongahkia/Desktop/coding/projects/stonks-cli/docs/polymarket-live-runbook.md:1).
 

@@ -108,3 +108,51 @@ def test_scan_markets_can_include_filtered_rows():
     assert filtered.status == "FILTERED"
     assert "liquidity<50000" in filtered.reasons
     assert "depth<500" in filtered.reasons
+
+
+def test_scan_markets_filters_partial_fill_estimate():
+    session = _Session(
+        markets_payload=[_market(market_id="1", token_id="YES1", liquidity=100000, hours=12)],
+        books_by_token={
+            "YES1": _book(bid_price=0.49, bid_size=5000, ask_price=0.50, ask_size=4),
+        },
+    )
+    client = PolymarketClient(session=session)
+    cfg = StructuralScanConfig(
+        min_market_liquidity_usd=50000,
+        min_book_depth_usd=0,
+        slippage_check_notional_usd=5.0,
+        require_full_fill_estimate=True,
+        min_hours_to_resolution=4,
+        max_hours_to_resolution=168,
+        require_active=True,
+    )
+
+    scans = scan_markets(client, limit=10, cfg=cfg, include_filtered=True)
+
+    assert scans[0].status == "FILTERED"
+    assert "fill_estimate_partial" in scans[0].reasons
+
+
+def test_scan_markets_filters_orderbook_walk_slippage():
+    session = _Session(
+        markets_payload=[_market(market_id="1", token_id="YES1", liquidity=100000, hours=12)],
+        books_by_token={
+            "YES1": _book(bid_price=0.49, bid_size=5000, ask_price=0.51, ask_size=5000),
+        },
+    )
+    client = PolymarketClient(session=session)
+    cfg = StructuralScanConfig(
+        min_market_liquidity_usd=50000,
+        min_book_depth_usd=0,
+        slippage_check_notional_usd=5.0,
+        max_entry_slippage_bps=100.0,
+        min_hours_to_resolution=4,
+        max_hours_to_resolution=168,
+        require_active=True,
+    )
+
+    scans = scan_markets(client, limit=10, cfg=cfg, include_filtered=True)
+
+    assert scans[0].status == "FILTERED"
+    assert "entry_slippage_bps>100" in scans[0].reasons

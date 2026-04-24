@@ -11,6 +11,8 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::book_math::{PriceLevel, estimate_buy_fill};
+
 const GAMMA_URL: &str = "https://gamma-api.polymarket.com/markets";
 const CLOB_BOOK_URL: &str = "https://clob.polymarket.com/book";
 
@@ -38,6 +40,12 @@ pub struct ControlConfig {
     pub min_entry_price: f64,
     #[serde(default = "default_max_spread_bps")]
     pub max_spread_bps: f64,
+    #[serde(default = "default_slippage_check_notional")]
+    pub slippage_check_notional_usd: f64,
+    #[serde(default = "default_max_entry_slippage_bps")]
+    pub max_entry_slippage_bps: f64,
+    #[serde(default = "default_true")]
+    pub require_full_fill_estimate: bool,
     #[serde(default = "default_min_hours")]
     pub min_hours_to_resolution: f64,
     #[serde(default = "default_max_hours")]
@@ -133,6 +141,9 @@ impl Default for ControlConfig {
             min_book_depth_usd: default_min_book_depth(),
             min_entry_price: 0.0,
             max_spread_bps: default_max_spread_bps(),
+            slippage_check_notional_usd: default_slippage_check_notional(),
+            max_entry_slippage_bps: default_max_entry_slippage_bps(),
+            require_full_fill_estimate: true,
             min_hours_to_resolution: default_min_hours(),
             max_hours_to_resolution: default_max_hours(),
             require_active: true,
@@ -456,6 +467,8 @@ fn default_scanner_limit() -> usize { 200 }
 fn default_min_market_liquidity() -> f64 { 50_000.0 }
 fn default_min_book_depth() -> f64 { 500.0 }
 fn default_max_spread_bps() -> f64 { 1_000.0 }
+fn default_slippage_check_notional() -> f64 { 5.0 }
+fn default_max_entry_slippage_bps() -> f64 { 300.0 }
 fn default_min_hours() -> f64 { 4.0 }
 fn default_max_hours() -> f64 { 168.0 }
 fn default_auto_trade_min_score() -> f64 { 12.0 }
@@ -682,6 +695,24 @@ fn structural_scan_market(market: &PolymarketMarket, book: &OrderBook, cfg: &Con
             }
         }
     }
+    if cfg.slippage_check_notional_usd > 0.0 {
+        match estimate_entry_fill(book, cfg.slippage_check_notional_usd) {
+            Some(fill) => {
+                if cfg.require_full_fill_estimate && !fill.fully_filled {
+                    reasons.push("fill_estimate_partial".to_string());
+                }
+                if let Some(midpoint) = book.midpoint {
+                    if midpoint > 0.0 && fill.avg_price > 0.0 {
+                        let slippage_bps = ((fill.avg_price - midpoint).max(0.0) / midpoint) * 10_000.0;
+                        if cfg.max_entry_slippage_bps > 0.0 && slippage_bps > cfg.max_entry_slippage_bps {
+                            reasons.push(format!("entry_slippage_bps>{:.0}", cfg.max_entry_slippage_bps));
+                        }
+                    }
+                }
+            }
+            None => reasons.push("fill_estimate_unavailable".to_string()),
+        }
+    }
     if let Some(h) = hrs {
         if h < cfg.min_hours_to_resolution {
             reasons.push(format!("hours<{:.1}", cfg.min_hours_to_resolution));
@@ -716,6 +747,15 @@ fn structural_scan_market(market: &PolymarketMarket, book: &OrderBook, cfg: &Con
         target_trade_count: 0,
         target_net_volume: 0.0,
     }
+}
+
+fn estimate_entry_fill(book: &OrderBook, notional: f64) -> Option<crate::book_math::BuyFillEstimate> {
+    let levels: Vec<PriceLevel> = book
+        .asks
+        .iter()
+        .map(|level| PriceLevel { price: level.price, size: level.size })
+        .collect();
+    estimate_buy_fill(&levels, notional)
 }
 
 fn market_universe_rejections(market: &PolymarketMarket, cfg: &ControlConfig) -> Vec<String> {
@@ -3404,6 +3444,92 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
         assert_eq!(scan.status, "FILTERED");
         assert!(scan.reasons.iter().any(|reason| reason == "price<0.100"));
         assert!(scan.reasons.iter().any(|reason| reason == "spread_bps>500"));
+    }
+
+    #[test]
+    fn structural_scan_filters_partial_entry_fill_estimates() {
+        let market = PolymarketMarket {
+            market_id: "m1".to_string(),
+            question: "Will BTC close higher today?".to_string(),
+            slug: Some("btc-higher".to_string()),
+            condition_id: None,
+            active: Some(true),
+            closed: Some(false),
+            liquidity_usd: Some(100_000.0),
+            volume_usd: Some(500_000.0),
+            end_date_iso: None,
+            tokens: vec![MarketToken {
+                token_id: "YES1".to_string(),
+                outcome: Some("YES".to_string()),
+                price: Some(0.50),
+            }],
+            raw: json!({}),
+        };
+        let book = OrderBook {
+            token_id: "YES1".to_string(),
+            bids: vec![BookLevel { price: 0.49, size: 2_000.0 }],
+            asks: vec![BookLevel { price: 0.50, size: 4.0 }],
+            midpoint: Some(0.50),
+            best_bid: Some(0.49),
+            best_ask: Some(0.50),
+            raw: json!({}),
+        };
+        let scan = structural_scan_market(
+            &market,
+            &book,
+            &ControlConfig {
+                min_book_depth_usd: 0.0,
+                slippage_check_notional_usd: 5.0,
+                require_full_fill_estimate: true,
+                ..ControlConfig::default()
+            },
+        );
+
+        assert_eq!(scan.status, "FILTERED");
+        assert!(scan.reasons.iter().any(|reason| reason == "fill_estimate_partial"));
+    }
+
+    #[test]
+    fn structural_scan_filters_entry_slippage_from_book_walk() {
+        let market = PolymarketMarket {
+            market_id: "m1".to_string(),
+            question: "Will BTC close higher today?".to_string(),
+            slug: Some("btc-higher".to_string()),
+            condition_id: None,
+            active: Some(true),
+            closed: Some(false),
+            liquidity_usd: Some(100_000.0),
+            volume_usd: Some(500_000.0),
+            end_date_iso: None,
+            tokens: vec![MarketToken {
+                token_id: "YES1".to_string(),
+                outcome: Some("YES".to_string()),
+                price: Some(0.50),
+            }],
+            raw: json!({}),
+        };
+        let book = OrderBook {
+            token_id: "YES1".to_string(),
+            bids: vec![BookLevel { price: 0.49, size: 2_000.0 }],
+            asks: vec![BookLevel { price: 0.51, size: 2_000.0 }],
+            midpoint: Some(0.50),
+            best_bid: Some(0.49),
+            best_ask: Some(0.51),
+            raw: json!({}),
+        };
+        let scan = structural_scan_market(
+            &market,
+            &book,
+            &ControlConfig {
+                min_book_depth_usd: 0.0,
+                slippage_check_notional_usd: 5.0,
+                max_entry_slippage_bps: 100.0,
+                ..ControlConfig::default()
+            },
+        );
+
+        assert_eq!(scan.status, "FILTERED");
+        assert!(scan.reasons.iter().any(|reason| reason == "entry_slippage_bps>100"));
     }
 
     #[test]

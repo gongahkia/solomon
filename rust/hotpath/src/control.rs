@@ -1,0 +1,1546 @@
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
+
+use chrono::{DateTime, Utc};
+use reqwest::blocking::Client;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+const GAMMA_URL: &str = "https://gamma-api.polymarket.com/markets";
+const CLOB_BOOK_URL: &str = "https://clob.polymarket.com/book";
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ControlRequest {
+    #[serde(default)]
+    pub state_dir: String,
+    #[serde(default)]
+    pub config: ControlConfig,
+    #[serde(default)]
+    pub args: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ControlConfig {
+    #[serde(default = "default_true")]
+    pub paper: bool,
+    #[serde(default = "default_scanner_limit")]
+    pub scanner_limit: usize,
+    #[serde(default = "default_min_market_liquidity")]
+    pub min_market_liquidity_usd: f64,
+    #[serde(default = "default_min_book_depth")]
+    pub min_book_depth_usd: f64,
+    #[serde(default = "default_min_hours")]
+    pub min_hours_to_resolution: f64,
+    #[serde(default = "default_max_hours")]
+    pub max_hours_to_resolution: f64,
+    #[serde(default = "default_true")]
+    pub require_active: bool,
+    #[serde(default)]
+    pub auto_trade_enabled: bool,
+    #[serde(default = "default_auto_trade_min_score")]
+    pub auto_trade_min_score: f64,
+    #[serde(default = "default_auto_trade_min_wallets")]
+    pub auto_trade_min_target_wallets: usize,
+    #[serde(default = "default_max_position_fraction")]
+    pub max_position_fraction: f64,
+    #[serde(default = "default_min_cash_reserve_fraction")]
+    pub min_cash_reserve_fraction: f64,
+    #[serde(default = "default_max_open_positions")]
+    pub max_open_positions: usize,
+    #[serde(default = "default_take_profit")]
+    pub take_profit_price_delta: f64,
+    #[serde(default = "default_stop_loss")]
+    pub stop_loss_price_delta: f64,
+    #[serde(default = "default_stale_hours")]
+    pub stale_position_hours: f64,
+    #[serde(default)]
+    pub max_market_notional: f64,
+    #[serde(default = "default_max_live_open_orders")]
+    pub max_live_open_orders: usize,
+    #[serde(default)]
+    pub max_daily_loss: f64,
+    #[serde(default = "default_live_require_armed_env")]
+    pub live_require_armed_env: bool,
+    #[serde(default = "default_live_armed_env")]
+    pub live_armed_env: String,
+    #[serde(default = "default_loop_interval_ms")]
+    pub loop_interval_ms: u64,
+    #[serde(default)]
+    pub auto_exit_enabled: bool,
+    #[serde(default = "default_paper_starting_cash")]
+    pub paper_starting_cash: f64,
+}
+
+impl Default for ControlConfig {
+    fn default() -> Self {
+        Self {
+            paper: true,
+            scanner_limit: default_scanner_limit(),
+            min_market_liquidity_usd: default_min_market_liquidity(),
+            min_book_depth_usd: default_min_book_depth(),
+            min_hours_to_resolution: default_min_hours(),
+            max_hours_to_resolution: default_max_hours(),
+            require_active: true,
+            auto_trade_enabled: false,
+            auto_trade_min_score: default_auto_trade_min_score(),
+            auto_trade_min_target_wallets: default_auto_trade_min_wallets(),
+            max_position_fraction: default_max_position_fraction(),
+            min_cash_reserve_fraction: default_min_cash_reserve_fraction(),
+            max_open_positions: default_max_open_positions(),
+            take_profit_price_delta: default_take_profit(),
+            stop_loss_price_delta: default_stop_loss(),
+            stale_position_hours: default_stale_hours(),
+            max_market_notional: 0.0,
+            max_live_open_orders: default_max_live_open_orders(),
+            max_daily_loss: 0.0,
+            live_require_armed_env: true,
+            live_armed_env: default_live_armed_env(),
+            loop_interval_ms: default_loop_interval_ms(),
+            auto_exit_enabled: true,
+            paper_starting_cash: default_paper_starting_cash(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MarketToken {
+    pub token_id: String,
+    pub outcome: Option<String>,
+    pub price: Option<f64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PolymarketMarket {
+    pub market_id: String,
+    pub question: String,
+    pub slug: Option<String>,
+    pub condition_id: Option<String>,
+    pub active: Option<bool>,
+    pub closed: Option<bool>,
+    pub liquidity_usd: Option<f64>,
+    pub volume_usd: Option<f64>,
+    pub end_date_iso: Option<String>,
+    pub tokens: Vec<MarketToken>,
+    #[serde(default)]
+    pub raw: Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BookLevel {
+    pub price: f64,
+    pub size: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OrderBook {
+    pub token_id: String,
+    pub bids: Vec<BookLevel>,
+    pub asks: Vec<BookLevel>,
+    pub midpoint: Option<f64>,
+    pub best_bid: Option<f64>,
+    pub best_ask: Option<f64>,
+    #[serde(default)]
+    pub raw: Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MarketScan {
+    pub market_id: String,
+    pub slug: Option<String>,
+    pub question: String,
+    pub token_id: Option<String>,
+    pub outcome: Option<String>,
+    pub midpoint: Option<f64>,
+    pub bids_depth_usd: f64,
+    pub asks_depth_usd: f64,
+    pub liquidity_usd: Option<f64>,
+    pub volume_usd: Option<f64>,
+    pub hours_to_resolution: Option<f64>,
+    pub complement_deviation_bps: Option<f64>,
+    pub score: f64,
+    pub status: String,
+    pub reasons: Vec<String>,
+    #[serde(default)]
+    pub target_wallet_count: usize,
+    #[serde(default)]
+    pub target_trade_count: usize,
+    #[serde(default)]
+    pub target_net_volume: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RuntimeStatus {
+    pub mode: String,
+    pub state: String,
+    pub paper: bool,
+    pub last_scan_at: Option<String>,
+    pub last_scan_count: usize,
+    pub last_pass_count: usize,
+    pub open_positions: usize,
+    pub last_actions: Vec<String>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PaperPosition {
+    pub token_id: String,
+    pub market_id: String,
+    pub slug: Option<String>,
+    pub outcome: Option<String>,
+    pub shares: f64,
+    pub avg_price: f64,
+    pub opened_at: String,
+    pub target_price: Option<f64>,
+    pub stop_price: Option<f64>,
+    pub thesis: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PaperTrade {
+    pub ts: String,
+    pub action: String,
+    pub token_id: String,
+    pub market_id: String,
+    pub slug: Option<String>,
+    pub outcome: Option<String>,
+    pub shares: f64,
+    pub price: f64,
+    pub notional: f64,
+    pub realized_pnl: Option<f64>,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PaperAccount {
+    pub cash: f64,
+    pub realized_pnl: f64,
+    pub positions: Vec<PaperPosition>,
+    pub trades: Vec<PaperTrade>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WalletImportSummary {
+    pub source_path: String,
+    pub row_count: usize,
+    pub wallet_count: usize,
+    pub imported_at: String,
+    pub detected_profit_column: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WalletTarget {
+    pub wallet: String,
+    pub trades: usize,
+    pub realized_pnl: f64,
+    pub gross_volume: f64,
+    pub win_rate: f64,
+    pub closed_round_trips: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WalletMarketSignal {
+    pub market_id: String,
+    pub outcome: String,
+    pub wallet_count: usize,
+    pub trade_count: usize,
+    pub net_volume: f64,
+    pub gross_volume: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GuardState {
+    pub trading_day: String,
+    pub halted: bool,
+    pub halt_reason: Option<String>,
+    pub live_error_count: usize,
+    pub stream_error_count: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+struct WalletStats {
+    trades: usize,
+    realized_pnl: f64,
+    gross_volume: f64,
+    closed_round_trips: usize,
+    winning_round_trips: usize,
+    explicit_profit_total: f64,
+    explicit_profit_count: usize,
+}
+
+#[derive(Clone, Debug)]
+struct Lot {
+    qty: f64,
+    price: f64,
+}
+
+fn default_true() -> bool { true }
+fn default_scanner_limit() -> usize { 200 }
+fn default_min_market_liquidity() -> f64 { 50_000.0 }
+fn default_min_book_depth() -> f64 { 500.0 }
+fn default_min_hours() -> f64 { 4.0 }
+fn default_max_hours() -> f64 { 168.0 }
+fn default_auto_trade_min_score() -> f64 { 12.0 }
+fn default_auto_trade_min_wallets() -> usize { 1 }
+fn default_max_position_fraction() -> f64 { 0.10 }
+fn default_min_cash_reserve_fraction() -> f64 { 0.10 }
+fn default_max_open_positions() -> usize { 5 }
+fn default_take_profit() -> f64 { 0.10 }
+fn default_stop_loss() -> f64 { 0.08 }
+fn default_stale_hours() -> f64 { 24.0 }
+fn default_max_live_open_orders() -> usize { 20 }
+fn default_live_require_armed_env() -> bool { true }
+fn default_live_armed_env() -> String { "STONKS_CLI_POLYMARKET_LIVE_ARMED".to_string() }
+fn default_loop_interval_ms() -> u64 { 1000 }
+fn default_paper_starting_cash() -> f64 { 1000.0 }
+
+pub fn handle_control(op: &str, request: ControlRequest) -> Result<Value, String> {
+    let state_dir = resolve_state_dir(&request)?;
+    match op {
+        "markets_list" => Ok(json!(markets_list(&request.args)?)),
+        "market_get" => Ok(json!(market_get(&request.args)?)),
+        "book" => Ok(json!(book_get(&request.args)?)),
+        "scan" => Ok(json!(scan_markets(&state_dir, &request.config, &request.args)?)),
+        "paper_init" => Ok(json!(paper_init(&state_dir, &request.args)?)),
+        "paper_status" => Ok(json!(paper_status(&state_dir, &request.args)?)),
+        "paper_buy" => Ok(json!(paper_buy(&state_dir, &request.args)?)),
+        "paper_sell" => Ok(json!(paper_sell(&state_dir, &request.args)?)),
+        "wallets_import" => Ok(json!(wallets_import(&state_dir, &request.args)?)),
+        "wallets_rank" => Ok(json!(wallets_rank(&state_dir, &request.args)?)),
+        "wallet_targets" => Ok(json!(read_json_vec::<WalletTarget>(&wallet_targets_path(&state_dir))?)),
+        "wallet_signals" => Ok(json!(read_json_vec::<WalletMarketSignal>(&wallet_signals_path(&state_dir))?)),
+        "journal" => Ok(json!(read_journal(&state_dir, arg_usize(&request.args, "limit").unwrap_or(100))?)),
+        "runtime_status" => Ok(json!(load_runtime_status(&state_dir)?)),
+        "guard_status" => Ok(guard_status_value(&state_dir)?),
+        "guard_halt" => Ok(json!(halt_guard(&state_dir, arg_str(&request.args, "reason").unwrap_or("manual_halt"))?)),
+        "guard_resume" => Ok(json!(resume_guard(&state_dir)?)),
+        "doctor" => Ok(json!(preflight(&state_dir, &request.config))),
+        "settle" => Ok(json!(settle_market(&state_dir, &request.args)?)),
+        "replay_market" => Ok(json!(replay_market_events(&request.args)?)),
+        "replay_user" => Ok(json!(replay_user_events(&request.args)?)),
+        "runtime_soak" => Ok(runtime_soak(&state_dir, &request.config, &request.args)?),
+        "runtime_once" => Ok(runtime_once(&state_dir, &request.config, &request.args)?),
+        "runtime_loop" => Ok(runtime_loop(&state_dir, &request.config, &request.args)?),
+        other => Err(format!("unsupported control op: {other}")),
+    }
+}
+
+fn resolve_state_dir(request: &ControlRequest) -> Result<PathBuf, String> {
+    if !request.state_dir.trim().is_empty() {
+        return Ok(PathBuf::from(request.state_dir.trim()));
+    }
+    if let Ok(path) = env::var("STONKS_CLI_STATE_DIR") {
+        if !path.trim().is_empty() {
+            return Ok(PathBuf::from(path));
+        }
+    }
+    Err("state_dir is required".to_string())
+}
+
+fn json_client() -> Result<Client, String> {
+    Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|err| err.to_string())
+}
+
+fn markets_list(args: &Value) -> Result<Vec<PolymarketMarket>, String> {
+    let limit = arg_usize(args, "limit").unwrap_or(100);
+    let active = arg_bool(args, "active");
+    let closed = arg_bool(args, "closed");
+    let order = arg_str(args, "order").unwrap_or("volume");
+    let client = json_client()?;
+    let mut req = client.get(GAMMA_URL).query(&[("limit", limit.to_string()), ("offset", "0".to_string()), ("order", order.to_string())]);
+    if let Some(v) = active { req = req.query(&[("active", v.to_string())]); }
+    if let Some(v) = closed { req = req.query(&[("closed", v.to_string())]); }
+    let payload: Value = req.send().map_err(|err| err.to_string())?.error_for_status().map_err(|err| err.to_string())?.json().map_err(|err| err.to_string())?;
+    parse_market_list(payload)
+}
+
+fn market_get(args: &Value) -> Result<PolymarketMarket, String> {
+    let slug_or_id = required_str(args, "slug_or_id")?;
+    let client = json_client()?;
+    let req = if slug_or_id.chars().all(|c| c.is_ascii_digit()) {
+        client.get(GAMMA_URL).query(&[("id", slug_or_id.to_string())])
+    } else {
+        client.get(GAMMA_URL).query(&[("slug", slug_or_id.to_string())])
+    };
+    let payload: Value = req.send().map_err(|err| err.to_string())?.error_for_status().map_err(|err| err.to_string())?.json().map_err(|err| err.to_string())?;
+    match payload {
+        Value::Array(items) => items.into_iter().next().map(parse_market).transpose()?.ok_or_else(|| format!("market not found: {slug_or_id}")),
+        Value::Object(_) => parse_market(payload),
+        _ => Err("unexpected market payload".to_string()),
+    }
+}
+
+fn book_get(args: &Value) -> Result<OrderBook, String> {
+    let token_id = required_str(args, "token_id")?;
+    let client = json_client()?;
+    let payload: Value = client
+        .get(CLOB_BOOK_URL)
+        .query(&[("token_id", token_id.to_string())])
+        .send()
+        .map_err(|err| err.to_string())?
+        .error_for_status()
+        .map_err(|err| err.to_string())?
+        .json()
+        .map_err(|err| err.to_string())?;
+    parse_order_book(token_id, payload)
+}
+
+fn scan_markets(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<Vec<MarketScan>, String> {
+    let limit = arg_usize(args, "limit").unwrap_or(cfg.scanner_limit);
+    let include_filtered = arg_bool(args, "include_filtered").unwrap_or(false);
+    let markets = markets_list(&json!({
+        "limit": limit,
+        "active": cfg.require_active,
+        "closed": false,
+        "order": "volume"
+    }))?;
+    let signals = read_json_vec::<WalletMarketSignal>(&wallet_signals_path(state_dir)).unwrap_or_default();
+    let mut by_signal: HashMap<(String, String), WalletMarketSignal> = HashMap::new();
+    for signal in signals {
+        by_signal.insert((signal.market_id.clone(), signal.outcome.to_ascii_uppercase()), signal);
+    }
+    let mut out = Vec::new();
+    for market in markets {
+        let token = primary_token(&market);
+        if token.is_none() {
+            if include_filtered {
+                out.push(MarketScan {
+                    market_id: market.market_id.clone(),
+                    slug: market.slug.clone(),
+                    question: market.question.clone(),
+                    token_id: None,
+                    outcome: None,
+                    midpoint: None,
+                    bids_depth_usd: 0.0,
+                    asks_depth_usd: 0.0,
+                    liquidity_usd: market.liquidity_usd,
+                    volume_usd: market.volume_usd,
+                    hours_to_resolution: hours_to_resolution(market.end_date_iso.as_deref()),
+                    complement_deviation_bps: complement_deviation_bps(&market),
+                    score: 0.0,
+                    status: "FILTERED".to_string(),
+                    reasons: vec!["missing_token".to_string()],
+                    target_wallet_count: 0,
+                    target_trade_count: 0,
+                    target_net_volume: 0.0,
+                });
+            }
+            continue;
+        }
+        let token = token.unwrap();
+        let book = book_get(&json!({ "token_id": token.token_id }))?;
+        let mut scan = structural_scan_market(&market, &book, cfg);
+        if let Some(signal) = by_signal.get(&(scan.market_id.clone(), scan.outcome.clone().unwrap_or_default().to_ascii_uppercase())) {
+            scan.target_wallet_count = signal.wallet_count;
+            scan.target_trade_count = signal.trade_count;
+            scan.target_net_volume = signal.net_volume;
+            let extra_score = (signal.wallet_count as f64 * 2.0).min(10.0) + ((signal.trade_count as f64) / 10.0).min(5.0);
+            scan.score = round2(scan.score + extra_score);
+        }
+        if include_filtered || scan.status == "PASS" {
+            out.push(scan);
+        }
+    }
+    out.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
+}
+
+fn structural_scan_market(market: &PolymarketMarket, book: &OrderBook, cfg: &ControlConfig) -> MarketScan {
+    let token = primary_token(market);
+    let bids_depth = round2(book.bids.iter().map(|level| level.price * level.size).sum());
+    let asks_depth = round2(book.asks.iter().map(|level| level.price * level.size).sum());
+    let hrs = hours_to_resolution(market.end_date_iso.as_deref());
+    let deviation_bps = complement_deviation_bps(market);
+    let mut reasons = Vec::new();
+    if cfg.require_active && market.active == Some(false) {
+        reasons.push("inactive".to_string());
+    }
+    if market.closed == Some(true) {
+        reasons.push("closed".to_string());
+    }
+    if let Some(liq) = market.liquidity_usd {
+        if liq < cfg.min_market_liquidity_usd {
+            reasons.push(format!("liquidity<{}", cfg.min_market_liquidity_usd as i64));
+        }
+    }
+    if bids_depth < cfg.min_book_depth_usd || asks_depth < cfg.min_book_depth_usd {
+        reasons.push(format!("depth<{}", cfg.min_book_depth_usd as i64));
+    }
+    if let Some(h) = hrs {
+        if h < cfg.min_hours_to_resolution {
+            reasons.push(format!("hours<{:.1}", cfg.min_hours_to_resolution));
+        }
+        if h > cfg.max_hours_to_resolution {
+            reasons.push(format!("hours>{:.1}", cfg.max_hours_to_resolution));
+        }
+    }
+    let depth_balance = bids_depth.min(asks_depth);
+    let time_score = hrs
+        .map(|h| (1.0 - ((h - 24.0).abs() / 24.0).min(1.0)).max(0.0))
+        .unwrap_or(0.0);
+    let deviation_score = deviation_bps.unwrap_or(0.0) / 100.0;
+    let status = if reasons.is_empty() { "PASS" } else { "FILTERED" }.to_string();
+    MarketScan {
+        market_id: market.market_id.clone(),
+        slug: market.slug.clone(),
+        question: market.question.clone(),
+        token_id: token.as_ref().map(|token| token.token_id.clone()),
+        outcome: token.and_then(|token| token.outcome.clone()),
+        midpoint: book.midpoint,
+        bids_depth_usd: bids_depth,
+        asks_depth_usd: asks_depth,
+        liquidity_usd: market.liquidity_usd,
+        volume_usd: market.volume_usd,
+        hours_to_resolution: hrs.map(round2),
+        complement_deviation_bps: deviation_bps.map(round2),
+        score: round2((depth_balance / 1000.0) + deviation_score + time_score * 10.0),
+        status,
+        reasons,
+        target_wallet_count: 0,
+        target_trade_count: 0,
+        target_net_volume: 0.0,
+    }
+}
+
+fn paper_init(state_dir: &Path, args: &Value) -> Result<PaperAccount, String> {
+    let cash = arg_f64(args, "cash").unwrap_or(default_paper_starting_cash());
+    let account = PaperAccount { cash, realized_pnl: 0.0, positions: Vec::new(), trades: Vec::new() };
+    write_json(&paper_path(state_dir), &account)?;
+    Ok(account)
+}
+
+fn paper_status(state_dir: &Path, args: &Value) -> Result<Value, String> {
+    let account = load_paper(state_dir)?;
+    let mut midpoints: HashMap<String, f64> = HashMap::new();
+    if let Some(map) = args.get("midpoints").and_then(|value| value.as_object()) {
+        for (key, value) in map {
+            if let Some(price) = value.as_f64() {
+                midpoints.insert(key.clone(), price);
+            }
+        }
+    }
+    let mut unrealized = 0.0;
+    let mut positions = Vec::new();
+    for position in &account.positions {
+        let mark = *midpoints.get(&position.token_id).unwrap_or(&position.avg_price);
+        let u = (mark - position.avg_price) * position.shares;
+        unrealized += u;
+        positions.push(json!({
+            "token_id": position.token_id,
+            "market_id": position.market_id,
+            "slug": position.slug,
+            "outcome": position.outcome,
+            "shares": position.shares,
+            "avg_price": position.avg_price,
+            "opened_at": position.opened_at,
+            "target_price": position.target_price,
+            "stop_price": position.stop_price,
+            "thesis": position.thesis,
+            "mark_price": mark,
+            "market_value": round8(mark * position.shares),
+            "unrealized_pnl": round8(u),
+        }));
+    }
+    let equity = round8(account.cash + positions.iter().filter_map(|value| value.get("market_value").and_then(|v| v.as_f64())).sum::<f64>());
+    Ok(json!({
+        "cash": account.cash,
+        "realized_pnl": account.realized_pnl,
+        "unrealized_pnl": round8(unrealized),
+        "equity": equity,
+        "positions": positions,
+        "trades": account.trades.iter().rev().take(20).cloned().collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>(),
+    }))
+}
+
+fn paper_buy(state_dir: &Path, args: &Value) -> Result<Value, String> {
+    let mut account = load_paper(state_dir)?;
+    let token_id = required_str(args, "token_id")?.to_string();
+    let market_id = required_str(args, "market_id")?.to_string();
+    let shares = required_f64(args, "shares")?;
+    let price = required_f64(args, "price")?;
+    if shares <= 0.0 || price <= 0.0 {
+        return Err("shares and price must be positive".to_string());
+    }
+    let notional = shares * price;
+    if account.cash < notional {
+        return Err(format!("Insufficient paper cash. Need ${notional:.2}, have ${:.2}", account.cash));
+    }
+    let slug = arg_str(args, "slug").map(str::to_string);
+    let outcome = arg_str(args, "outcome").map(str::to_string);
+    let target_price = arg_f64(args, "target_price");
+    let stop_price = arg_f64(args, "stop_price");
+    let thesis = arg_str(args, "thesis").map(str::to_string);
+    if let Some(index) = account.positions.iter().position(|p| p.token_id == token_id) {
+        let position = account.positions[index].clone();
+        let new_shares = position.shares + shares;
+        let new_avg = ((position.avg_price * position.shares) + notional) / new_shares;
+        account.positions[index] = PaperPosition {
+            token_id: position.token_id,
+            market_id: position.market_id,
+            slug: position.slug,
+            outcome: position.outcome,
+            shares: new_shares,
+            avg_price: round8(new_avg),
+            opened_at: position.opened_at,
+            target_price: target_price.or(position.target_price),
+            stop_price: stop_price.or(position.stop_price),
+            thesis: thesis.or(position.thesis),
+        };
+    } else {
+        account.positions.push(PaperPosition {
+            token_id: token_id.clone(),
+            market_id: market_id.clone(),
+            slug,
+            outcome,
+            shares,
+            avg_price: price,
+            opened_at: utc_now_iso(),
+            target_price,
+            stop_price,
+            thesis,
+        });
+    }
+    account.cash = round8(account.cash - notional);
+    account.trades.push(PaperTrade {
+        ts: utc_now_iso(),
+        action: "BUY".to_string(),
+        token_id: token_id.clone(),
+        market_id: market_id.clone(),
+        slug: arg_str(args, "slug").map(str::to_string),
+        outcome: arg_str(args, "outcome").map(str::to_string),
+        shares,
+        price,
+        notional,
+        realized_pnl: None,
+        reason: arg_str(args, "reason").map(str::to_string),
+    });
+    write_json(&paper_path(state_dir), &account)?;
+    Ok(json!({
+        "action": "BUY",
+        "token_id": token_id,
+        "shares": shares,
+        "price": price,
+        "notional": round8(notional),
+        "cash": account.cash,
+    }))
+}
+
+fn paper_sell(state_dir: &Path, args: &Value) -> Result<Value, String> {
+    let mut account = load_paper(state_dir)?;
+    let token_id = required_str(args, "token_id")?.to_string();
+    let shares = required_f64(args, "shares")?;
+    let price = required_f64(args, "price")?;
+    let index = account.positions.iter().position(|p| p.token_id == token_id).ok_or_else(|| "Insufficient paper position to sell".to_string())?;
+    let position = account.positions[index].clone();
+    if position.shares < shares {
+        return Err("Insufficient paper position to sell".to_string());
+    }
+    let notional = shares * price;
+    let realized = (price - position.avg_price) * shares;
+    let remaining = round8(position.shares - shares);
+    account.cash = round8(account.cash + notional);
+    account.realized_pnl = round8(account.realized_pnl + realized);
+    account.positions.remove(index);
+    if remaining > 0.0 {
+        account.positions.push(PaperPosition { shares: remaining, ..position.clone() });
+    }
+    account.trades.push(PaperTrade {
+        ts: utc_now_iso(),
+        action: "SELL".to_string(),
+        token_id: token_id.clone(),
+        market_id: position.market_id.clone(),
+        slug: position.slug.clone(),
+        outcome: position.outcome.clone(),
+        shares,
+        price,
+        notional,
+        realized_pnl: Some(round8(realized)),
+        reason: arg_str(args, "reason").map(str::to_string),
+    });
+    write_json(&paper_path(state_dir), &account)?;
+    Ok(json!({
+        "action": "SELL",
+        "token_id": token_id,
+        "shares": shares,
+        "price": price,
+        "notional": round8(notional),
+        "realized_pnl": round8(realized),
+        "cash": account.cash,
+    }))
+}
+
+fn wallets_import(state_dir: &Path, args: &Value) -> Result<WalletImportSummary, String> {
+    let source_path = PathBuf::from(required_str(args, "csv_path")?);
+    let rows = read_csv_rows(&source_path)?;
+    let fieldnames = rows.first().ok_or_else(|| "wallet import requires a header row".to_string())?;
+    for required in ["maker", "market_id", "nonusdc_side", "maker_direction", "price", "token_amount"] {
+        if !fieldnames.contains_key(required) {
+            return Err(format!("wallet import requires columns: {required}"));
+        }
+    }
+    let mut wallets = HashSet::new();
+    for row in rows.iter().skip(1) {
+        if let Some(maker) = row.get("maker").map(|value| value.trim().to_ascii_lowercase()).filter(|value| !value.is_empty()) {
+            wallets.insert(maker);
+        }
+    }
+    let detected_profit_column = fieldnames.contains_key("profit") || fieldnames.contains_key("pnl") || fieldnames.contains_key("realized_pnl");
+    let summary = WalletImportSummary {
+        source_path: source_path.canonicalize().unwrap_or(source_path).display().to_string(),
+        row_count: rows.len().saturating_sub(1),
+        wallet_count: wallets.len(),
+        imported_at: utc_now_iso(),
+        detected_profit_column,
+    };
+    write_json(&wallet_manifest_path(state_dir), &summary)?;
+    Ok(summary)
+}
+
+fn wallets_rank(state_dir: &Path, args: &Value) -> Result<Vec<WalletTarget>, String> {
+    let summary: WalletImportSummary = read_json(&wallet_manifest_path(state_dir))?;
+    let csv_path = arg_str(args, "csv_path").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(summary.source_path));
+    let rows = read_csv_rows(&csv_path)?;
+    let min_trades = arg_usize(args, "min_trades").unwrap_or(100);
+    let min_win_rate = arg_f64(args, "min_win_rate").unwrap_or(0.70);
+    let limit = arg_usize(args, "limit").unwrap_or(50);
+    let mut stats_by_wallet: HashMap<String, WalletStats> = HashMap::new();
+    let mut long_books: HashMap<String, HashMap<(String, String), VecDeque<Lot>>> = HashMap::new();
+    let mut short_books: HashMap<String, HashMap<(String, String), VecDeque<Lot>>> = HashMap::new();
+    let mut market_counts: HashMap<String, HashMap<(String, String), (usize, f64, f64)>> = HashMap::new();
+
+    for row in rows.iter().skip(1) {
+        let wallet = row.get("maker").map(|v| v.trim().to_ascii_lowercase()).unwrap_or_default();
+        let market_id = row.get("market_id").cloned().unwrap_or_default();
+        let side = row.get("nonusdc_side").cloned().unwrap_or_default();
+        let direction = row.get("maker_direction").map(|v| v.trim().to_ascii_uppercase()).unwrap_or_default();
+        let price = row.get("price").and_then(|v| v.parse::<f64>().ok());
+        let qty = row.get("token_amount").and_then(|v| v.parse::<f64>().ok());
+        if wallet.is_empty() || market_id.is_empty() || side.is_empty() || !matches!(direction.as_str(), "BUY" | "SELL") || price.is_none() || qty.is_none() {
+            continue;
+        }
+        let price = price.unwrap();
+        let qty = qty.unwrap();
+        if qty <= 0.0 { continue; }
+        let instrument = (market_id.clone(), side.clone());
+        let stats = stats_by_wallet.entry(wallet.clone()).or_default();
+        stats.trades += 1;
+        stats.gross_volume += price * qty;
+        let counts = market_counts.entry(wallet.clone()).or_default().entry(instrument.clone()).or_insert((0, 0.0, 0.0));
+        counts.0 += 1;
+        counts.1 += if direction == "BUY" { qty } else { -qty };
+        counts.2 += price * qty;
+        for col in ["profit", "pnl", "realized_pnl"] {
+            if let Some(value) = row.get(col).and_then(|v| v.parse::<f64>().ok()) {
+                stats.explicit_profit_total += value;
+                stats.explicit_profit_count += 1;
+                break;
+            }
+        }
+        if direction == "BUY" {
+            let books = short_books.entry(wallet.clone()).or_default();
+            let shorts = books.entry(instrument.clone()).or_default();
+            let mut remaining = qty;
+            while remaining > 0.0 && !shorts.is_empty() {
+                let mut lot = shorts.front().cloned().unwrap();
+                let matched = remaining.min(lot.qty);
+                let pnl = (lot.price - price) * matched;
+                stats.realized_pnl += pnl;
+                stats.closed_round_trips += 1;
+                if pnl > 0.0 { stats.winning_round_trips += 1; }
+                remaining -= matched;
+                lot.qty -= matched;
+                shorts.pop_front();
+                if lot.qty > 1e-12 { shorts.push_front(lot); }
+            }
+            if remaining > 0.0 {
+                long_books.entry(wallet.clone()).or_default().entry(instrument).or_default().push_back(Lot { qty: remaining, price });
+            }
+        } else {
+            let books = long_books.entry(wallet.clone()).or_default();
+            let longs = books.entry(instrument.clone()).or_default();
+            let mut remaining = qty;
+            while remaining > 0.0 && !longs.is_empty() {
+                let mut lot = longs.front().cloned().unwrap();
+                let matched = remaining.min(lot.qty);
+                let pnl = (price - lot.price) * matched;
+                stats.realized_pnl += pnl;
+                stats.closed_round_trips += 1;
+                if pnl > 0.0 { stats.winning_round_trips += 1; }
+                remaining -= matched;
+                lot.qty -= matched;
+                longs.pop_front();
+                if lot.qty > 1e-12 { longs.push_front(lot); }
+            }
+            if remaining > 0.0 {
+                short_books.entry(wallet.clone()).or_default().entry(instrument).or_default().push_back(Lot { qty: remaining, price });
+            }
+        }
+    }
+
+    let mut targets = Vec::new();
+    for (wallet, stats) in stats_by_wallet {
+        if stats.trades < min_trades { continue; }
+        let realized = if stats.explicit_profit_count > 0 { stats.explicit_profit_total } else { stats.realized_pnl };
+        let win_rate = if stats.closed_round_trips > 0 { stats.winning_round_trips as f64 / stats.closed_round_trips as f64 } else { 0.0 };
+        if win_rate < min_win_rate { continue; }
+        targets.push(WalletTarget {
+            wallet,
+            trades: stats.trades,
+            realized_pnl: round6(realized),
+            gross_volume: round6(stats.gross_volume),
+            win_rate: round6(win_rate),
+            closed_round_trips: stats.closed_round_trips,
+        });
+    }
+    targets.sort_by(|a, b| b.realized_pnl.partial_cmp(&a.realized_pnl).unwrap_or(std::cmp::Ordering::Equal));
+    targets.truncate(limit);
+    write_json(&wallet_targets_path(state_dir), &targets)?;
+    let selected: HashSet<String> = targets.iter().map(|t| t.wallet.clone()).collect();
+    let mut signals = Vec::new();
+    for ((market_id, outcome), buckets) in market_counts.into_iter().flat_map(|(wallet, by_inst)| by_inst.into_iter().map(move |(inst, counts)| ((inst.0, inst.1), (wallet.clone(), counts)))) .fold(BTreeMap::<(String,String), Vec<(String,(usize,f64,f64))>>::new(), |mut acc, (inst, payload)| { acc.entry(inst).or_default().push(payload); acc }) {
+        let mut wallets = HashSet::new();
+        let mut trade_count = 0usize;
+        let mut net_volume = 0.0;
+        let mut gross_volume = 0.0;
+        for (wallet, counts) in buckets {
+            if !selected.contains(&wallet) { continue; }
+            wallets.insert(wallet);
+            trade_count += counts.0;
+            net_volume += counts.1;
+            gross_volume += counts.2;
+        }
+        if !wallets.is_empty() {
+            signals.push(WalletMarketSignal {
+                market_id,
+                outcome,
+                wallet_count: wallets.len(),
+                trade_count,
+                net_volume: round6(net_volume),
+                gross_volume: round6(gross_volume),
+            });
+        }
+    }
+    signals.sort_by(|a, b| b.wallet_count.cmp(&a.wallet_count).then(b.trade_count.cmp(&a.trade_count)));
+    write_json(&wallet_signals_path(state_dir), &signals)?;
+    Ok(targets)
+}
+
+fn runtime_once(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<Value, String> {
+    let limit = arg_usize(args, "limit").unwrap_or(cfg.scanner_limit);
+    let scans = scan_markets(state_dir, cfg, &json!({ "limit": limit, "include_filtered": false }))?;
+    let mut actions = Vec::new();
+    if cfg.paper {
+        actions.extend(auto_exit_positions(state_dir, cfg, &scans)?);
+        if cfg.auto_trade_enabled {
+            if let Some(action) = maybe_open_position(state_dir, cfg, &scans)? {
+                actions.push(action);
+            }
+        }
+    }
+    let status = RuntimeStatus {
+        mode: "polymarket".to_string(),
+        state: if actions.is_empty() { "idle".to_string() } else { "traded".to_string() },
+        paper: cfg.paper,
+        last_scan_at: Some(utc_now_iso()),
+        last_scan_count: limit,
+        last_pass_count: scans.len(),
+        open_positions: load_paper_opt(state_dir).map(|account| account.positions.len()).unwrap_or(0),
+        last_actions: actions.iter().filter_map(|value| value.get("action").and_then(|v| v.as_str()).zip(value.get("token_id").and_then(|v| v.as_str()))).map(|(a,t)| format!("{a}:{t}")).collect(),
+        last_error: None,
+    };
+    write_json(&runtime_status_path(state_dir), &status)?;
+    append_journal(state_dir, json!({"event":"runtime_cycle_completed","state":status.state,"open_positions":status.open_positions,"action_count":actions.len()}))?;
+    Ok(json!({
+        "status": status,
+        "queue": scans,
+        "actions": actions,
+        "journal": read_journal(state_dir, 20)?,
+    }))
+}
+
+fn runtime_loop(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<Value, String> {
+    let cycles = arg_usize(args, "cycles").unwrap_or(1);
+    let limit = arg_usize(args, "limit").unwrap_or(cfg.scanner_limit);
+    let sleep_seconds = arg_f64(args, "sleep_seconds").unwrap_or(cfg.loop_interval_ms as f64 / 1000.0);
+    let mut iterations = Vec::new();
+    for iteration in 1..=cycles {
+        let guard = load_guard_state(state_dir)?;
+        if guard.halted {
+            append_journal(state_dir, json!({"event":"runtime_loop_halted","iteration":iteration,"reason":guard.halt_reason}))?;
+            break;
+        }
+        let result = runtime_once(state_dir, cfg, &json!({ "limit": limit }))?;
+        iterations.push(json!({
+            "iteration": iteration,
+            "status": result.get("status").cloned().unwrap_or(json!({})),
+            "action_count": result.get("actions").and_then(|v| v.as_array()).map(|v| v.len()).unwrap_or(0),
+        }));
+        if iteration < cycles && sleep_seconds > 0.0 {
+            thread::sleep(Duration::from_secs_f64(sleep_seconds));
+        }
+    }
+    Ok(json!({
+        "cycles": cycles,
+        "sleep_seconds": sleep_seconds,
+        "final_status": load_runtime_status(state_dir)?,
+        "guard_state": load_guard_state(state_dir)?,
+        "iterations": iterations,
+    }))
+}
+
+fn maybe_open_position(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketScan]) -> Result<Option<Value>, String> {
+    let account = load_paper_opt(state_dir).unwrap_or(PaperAccount { cash: cfg.paper_starting_cash, realized_pnl: 0.0, positions: Vec::new(), trades: Vec::new() });
+    let guard = load_guard_state(state_dir)?;
+    for scan in scans {
+        let reasons = trade_guard_reasons(cfg, &guard, &account, scan);
+        if !reasons.is_empty() {
+            append_journal(state_dir, json!({"event":"proposal_rejected","token_id":scan.token_id,"market_id":scan.market_id,"slug":scan.slug,"reasons":reasons,"score":scan.score}))?;
+            continue;
+        }
+        let max_notional = {
+            let available_cash = account.cash.max(0.0);
+            let mut max_notional = available_cash * cfg.max_position_fraction;
+            let reserve_cash = available_cash * cfg.min_cash_reserve_fraction;
+            if available_cash - max_notional < reserve_cash {
+                max_notional = (available_cash - reserve_cash).max(0.0);
+            }
+            max_notional
+        };
+        if max_notional <= 0.0 || scan.midpoint.is_none() { continue; }
+        let shares = round6(max_notional / scan.midpoint.unwrap());
+        if shares <= 0.0 { continue; }
+        let target = (scan.midpoint.unwrap() + cfg.take_profit_price_delta).min(0.99);
+        let stop = (scan.midpoint.unwrap() - cfg.stop_loss_price_delta).max(0.01);
+        let action = paper_buy(
+            state_dir,
+            &json!({
+                "token_id": scan.token_id,
+                "market_id": scan.market_id,
+                "slug": scan.slug,
+                "outcome": scan.outcome,
+                "shares": shares,
+                "price": scan.midpoint,
+                "target_price": target,
+                "stop_price": stop,
+                "thesis": format!("score={:.2}|wallets={}", scan.score, scan.target_wallet_count),
+                "reason": format!("score={:.2}|wallets={}", scan.score, scan.target_wallet_count),
+            }),
+        )?;
+        append_journal(state_dir, json!({"event":"paper_execution","result":action.clone()}))?;
+        return Ok(Some(action));
+    }
+    Ok(None)
+}
+
+fn auto_exit_positions(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketScan]) -> Result<Vec<Value>, String> {
+    if !cfg.auto_exit_enabled { return Ok(Vec::new()); }
+    let account = match load_paper_opt(state_dir) {
+        Some(account) => account,
+        None => return Ok(Vec::new()),
+    };
+    let price_map: HashMap<String, f64> = scans.iter().filter_map(|scan| scan.token_id.clone().zip(scan.midpoint)).collect();
+    let mut actions = Vec::new();
+    for position in account.positions {
+        let current_price = price_map.get(&position.token_id).copied();
+        let should_exit = if let Some(price) = current_price {
+            position.target_price.is_some_and(|target| price >= target)
+                || position.stop_price.is_some_and(|stop| price <= stop)
+                || hours_since(&position.opened_at).unwrap_or(0.0) >= cfg.stale_position_hours
+        } else {
+            hours_since(&position.opened_at).unwrap_or(0.0) >= cfg.stale_position_hours
+        };
+        if !should_exit { continue; }
+        let price = current_price.unwrap_or(position.avg_price);
+        let reason = if position.target_price.is_some_and(|target| price >= target) {
+            "TARGET_HIT"
+        } else if position.stop_price.is_some_and(|stop| price <= stop) {
+            "STOP_LOSS"
+        } else {
+            "STALE_POSITION"
+        };
+        let action = paper_sell(state_dir, &json!({
+            "token_id": position.token_id,
+            "shares": position.shares,
+            "price": price,
+            "reason": reason,
+        }))?;
+        append_journal(state_dir, json!({"event":"auto_exit","token_id":position.token_id,"market_id":position.market_id,"slug":position.slug,"reason":reason,"price":price,"shares":position.shares}))?;
+        actions.push(action);
+    }
+    Ok(actions)
+}
+
+fn trade_guard_reasons(cfg: &ControlConfig, guard: &GuardState, account: &PaperAccount, scan: &MarketScan) -> Vec<String> {
+    let mut reasons = Vec::new();
+    if guard.halted {
+        reasons.push(format!("halted:{}", guard.halt_reason.clone().unwrap_or_else(|| "manual_halt".to_string())));
+    }
+    if !cfg.paper && cfg.live_require_armed_env && !live_trading_armed(cfg) {
+        reasons.push("live_trading_not_armed".to_string());
+    }
+    if !cfg.auto_trade_enabled { reasons.push("auto_trade_disabled".to_string()); }
+    if scan.status != "PASS" { reasons.push("scan_not_pass".to_string()); }
+    if scan.token_id.is_none() { reasons.push("missing_token".to_string()); }
+    if scan.midpoint.is_none() || !(0.0..1.0).contains(&scan.midpoint.unwrap()) { reasons.push("invalid_midpoint".to_string()); }
+    if scan.score < cfg.auto_trade_min_score { reasons.push("score_below_threshold".to_string()); }
+    if scan.target_wallet_count < cfg.auto_trade_min_target_wallets { reasons.push("wallet_signal_below_threshold".to_string()); }
+    if account.positions.iter().any(|p| Some(&p.token_id) == scan.token_id.as_ref()) { reasons.push("position_already_open".to_string()); }
+    if account.positions.len() >= cfg.max_open_positions { reasons.push("max_open_positions_reached".to_string()); }
+    if cfg.max_daily_loss > 0.0 && account.realized_pnl <= -cfg.max_daily_loss { reasons.push("max_daily_loss_reached".to_string()); }
+    if cfg.max_market_notional > 0.0 {
+        let market_notional: f64 = account.positions.iter().filter(|p| p.market_id == scan.market_id).map(|p| p.shares * p.avg_price).sum();
+        let current_notional = scan.midpoint.unwrap_or(0.0) * (account.cash * cfg.max_position_fraction).max(0.0);
+        if market_notional + current_notional > cfg.max_market_notional {
+            reasons.push("max_market_notional_reached".to_string());
+        }
+    }
+    reasons
+}
+
+fn settle_market(state_dir: &Path, args: &Value) -> Result<Value, String> {
+    let market_id = required_str(args, "market_id")?;
+    let winning_token_id = required_str(args, "winning_token_id")?;
+    let mut account = load_paper(state_dir)?;
+    let mut settled = Vec::new();
+    let mut remaining = Vec::new();
+    for position in account.positions {
+        if position.market_id != market_id {
+            remaining.push(position);
+            continue;
+        }
+        let payout = if position.token_id == winning_token_id { position.shares } else { 0.0 };
+        let realized_pnl = payout - (position.shares * position.avg_price);
+        account.cash = round8(account.cash + payout);
+        account.realized_pnl = round8(account.realized_pnl + realized_pnl);
+        settled.push(json!({"token_id":position.token_id,"market_id":position.market_id,"shares":position.shares,"payout":payout,"realized_pnl":round8(realized_pnl)}));
+    }
+    account.positions = remaining;
+    write_json(&paper_path(state_dir), &account)?;
+    Ok(json!({"market_id":market_id,"winning_token_id":winning_token_id,"settled":settled,"cash":account.cash,"realized_pnl":account.realized_pnl}))
+}
+
+fn runtime_status_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_runtime.json") }
+fn paper_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_paper.json") }
+fn wallet_manifest_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_wallets.json") }
+fn wallet_targets_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_wallet_targets.json") }
+fn wallet_signals_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_wallet_market_stats.json") }
+fn journal_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_journal.jsonl") }
+fn guard_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_guard.json") }
+fn manual_halt_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket.halt") }
+
+fn load_paper(state_dir: &Path) -> Result<PaperAccount, String> {
+    read_json(&paper_path(state_dir))
+}
+
+fn load_paper_opt(state_dir: &Path) -> Option<PaperAccount> {
+    read_json(&paper_path(state_dir)).ok()
+}
+
+fn load_runtime_status(state_dir: &Path) -> Result<RuntimeStatus, String> {
+    if !runtime_status_path(state_dir).exists() {
+        return Ok(RuntimeStatus {
+            mode: "polymarket".to_string(),
+            state: "idle".to_string(),
+            paper: true,
+            last_scan_at: None,
+            last_scan_count: 0,
+            last_pass_count: 0,
+            open_positions: 0,
+            last_actions: Vec::new(),
+            last_error: None,
+        });
+    }
+    read_json(&runtime_status_path(state_dir))
+}
+
+fn load_guard_state(state_dir: &Path) -> Result<GuardState, String> {
+    if !guard_path(state_dir).exists() {
+        return Ok(GuardState {
+            trading_day: Utc::now().date_naive().to_string(),
+            halted: false,
+            halt_reason: None,
+            live_error_count: 0,
+            stream_error_count: 0,
+        });
+    }
+    read_json(&guard_path(state_dir))
+}
+
+fn guard_status_value(state_dir: &Path) -> Result<Value, String> {
+    let state = load_guard_state(state_dir)?;
+    Ok(json!({
+        "trading_day": state.trading_day,
+        "halted": state.halted,
+        "halt_reason": state.halt_reason,
+        "live_error_count": state.live_error_count,
+        "stream_error_count": state.stream_error_count,
+        "active_halt_reason": active_halt_reason(state_dir, Some(&state)),
+    }))
+}
+
+fn halt_guard(state_dir: &Path, reason: &str) -> Result<GuardState, String> {
+    let state = GuardState {
+        halted: true,
+        halt_reason: Some(reason.to_string()),
+        ..load_guard_state(state_dir)?
+    };
+    write_json(&guard_path(state_dir), &state)?;
+    fs::write(manual_halt_path(state_dir), reason).map_err(|err| err.to_string())?;
+    Ok(state)
+}
+
+fn resume_guard(state_dir: &Path) -> Result<GuardState, String> {
+    if manual_halt_path(state_dir).exists() {
+        fs::remove_file(manual_halt_path(state_dir)).map_err(|err| err.to_string())?;
+    }
+    let state = GuardState {
+        halted: false,
+        halt_reason: None,
+        live_error_count: 0,
+        stream_error_count: 0,
+        ..load_guard_state(state_dir)?
+    };
+    write_json(&guard_path(state_dir), &state)?;
+    Ok(state)
+}
+
+fn preflight(state_dir: &Path, cfg: &ControlConfig) -> Value {
+    let mut checks = Vec::new();
+    checks.push(json!({"name":"state_dir","status":if ensure_dir(state_dir).is_ok() {"pass"} else {"fail"},"detail":state_dir.display().to_string()}));
+    let guard = load_guard_state(state_dir).ok();
+    let halt_reason = active_halt_reason(state_dir, guard.as_ref());
+    checks.push(json!({"name":"guard_state","status":if halt_reason.is_some() {"fail"} else {"pass"},"detail":halt_reason.unwrap_or_else(|| "trading guards clear".to_string())}));
+    checks.push(json!({"name":"mode","status":if cfg.paper {"warn"} else {"pass"},"detail":if cfg.paper {"paper mode enabled; live execution disabled"} else {"live mode enabled"}}));
+    if !cfg.paper {
+        let has_key = env::var("POLYMARKET_PRIVATE_KEY").map(|v| !v.trim().is_empty()).unwrap_or(false);
+        checks.push(json!({"name":"private_key","status":if has_key {"pass"} else {"fail"},"detail":if has_key {"private key env present"} else {"missing private key in POLYMARKET_PRIVATE_KEY"}}));
+        let armed = live_trading_armed(cfg);
+        checks.push(json!({"name":"live_arm","status":if armed || !cfg.live_require_armed_env {"pass"} else {"warn"},"detail":if armed {format!("{} armed", cfg.live_armed_env)} else {format!("set {}=1 to allow live auto-trading", cfg.live_armed_env)}}));
+    }
+    let overall = if checks.iter().any(|c| c.get("status").and_then(|v| v.as_str()) == Some("fail")) {
+        "fail"
+    } else if checks.iter().any(|c| c.get("status").and_then(|v| v.as_str()) == Some("warn")) {
+        "warn"
+    } else {
+        "pass"
+    };
+    json!({"overall":overall,"paper":cfg.paper,"checks":checks})
+}
+
+fn active_halt_reason(state_dir: &Path, state: Option<&GuardState>) -> Option<String> {
+    let halt_path = manual_halt_path(state_dir);
+    if halt_path.exists() {
+        return fs::read_to_string(halt_path).ok().map(|v| {
+            let trimmed = v.trim().to_string();
+            if trimmed.is_empty() { "manual_halt".to_string() } else { trimmed }
+        }).or_else(|| Some("manual_halt".to_string()));
+    }
+    state.and_then(|current| if current.halted { current.halt_reason.clone() } else { None })
+}
+
+fn replay_market_events(args: &Value) -> Result<Value, String> {
+    let path = PathBuf::from(required_str(args, "path")?);
+    let events = load_event_file(&path)?;
+    let mut snapshots: BTreeMap<String, Value> = BTreeMap::new();
+    let mut applied = 0usize;
+    for event in events {
+        let token_id = event_token_id(&event);
+        let Some(token_id) = token_id else { continue; };
+        let entry = snapshots.entry(token_id.clone()).or_insert_with(|| json!({
+            "best_bid": Value::Null,
+            "best_ask": Value::Null,
+            "midpoint": Value::Null,
+            "last_trade_price": Value::Null,
+            "resolved": false,
+        }));
+        let Some(obj) = entry.as_object_mut() else { continue; };
+        match event_type(&event).as_deref() {
+            Some("book") | Some("best_bid_ask") => {
+                if let Some(bid) = event.get("best_bid").and_then(value_to_f64).or_else(|| best_price(event.get("bids"), true)) {
+                    obj.insert("best_bid".to_string(), json!(bid));
+                }
+                if let Some(ask) = event.get("best_ask").and_then(value_to_f64).or_else(|| best_price(event.get("asks"), false)) {
+                    obj.insert("best_ask".to_string(), json!(ask));
+                }
+            }
+            Some("price_change") | Some("last_trade_price") => {
+                if let Some(price) = event.get("price").and_then(value_to_f64) {
+                    obj.insert("last_trade_price".to_string(), json!(price));
+                }
+            }
+            Some("market_resolved") => {
+                obj.insert("resolved".to_string(), json!(true));
+                if let Some(winner) = event.get("winning_asset_id").or_else(|| event.get("winner_asset_id")).and_then(|v| v.as_str()) {
+                    obj.insert("winner_token_id".to_string(), json!(winner));
+                }
+            }
+            _ => {}
+        }
+        let bid = obj.get("best_bid").and_then(value_to_f64);
+        let ask = obj.get("best_ask").and_then(value_to_f64);
+        let midpoint = match (bid, ask) {
+            (Some(b), Some(a)) => Some(round6((b + a) / 2.0)),
+            (Some(b), None) => Some(b),
+            (None, Some(a)) => Some(a),
+            _ => None,
+        };
+        obj.insert("midpoint".to_string(), midpoint.map_or(Value::Null, |v| json!(v)));
+        applied += 1;
+    }
+    Ok(json!({"applied": applied, "snapshots": snapshots}))
+}
+
+fn replay_user_events(args: &Value) -> Result<Value, String> {
+    let path = PathBuf::from(required_str(args, "path")?);
+    let events = load_event_file(&path)?;
+    let mut orders: BTreeMap<String, Value> = BTreeMap::new();
+    let mut updates = 0usize;
+    for event in events {
+        let Some(order_id) = event.get("order_id").or_else(|| event.get("id")).and_then(|v| v.as_str()) else { continue; };
+        let status = event
+            .get("status")
+            .or_else(|| event.get("type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("UPDATE");
+        let filled = event
+            .get("filled_size")
+            .or_else(|| event.get("size_matched"))
+            .and_then(value_to_f64)
+            .unwrap_or(0.0);
+        let remaining = event
+            .get("remaining_size")
+            .or_else(|| event.get("size_remaining"))
+            .and_then(value_to_f64)
+            .unwrap_or(0.0);
+        orders.insert(order_id.to_string(), json!({
+            "order_id": order_id,
+            "status": status,
+            "filled_shares": filled,
+            "remaining_shares": remaining,
+        }));
+        updates += 1;
+    }
+    Ok(json!({
+        "applied": updates,
+        "orders": orders.into_values().collect::<Vec<_>>(),
+    }))
+}
+
+fn runtime_soak(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<Value, String> {
+    let market_events = arg_str(args, "market_events_path")
+        .map(PathBuf::from)
+        .map(|path| load_event_file(&path))
+        .transpose()?
+        .unwrap_or_default();
+    let user_events = arg_str(args, "user_events_path")
+        .map(PathBuf::from)
+        .map(|path| load_event_file(&path))
+        .transpose()?
+        .unwrap_or_default();
+    let batch_size = arg_usize(args, "batch_size").unwrap_or(1);
+    let cycles = arg_usize(args, "cycles").unwrap_or(1);
+    let limit = arg_usize(args, "limit").unwrap_or(cfg.scanner_limit);
+    let mut market_idx = 0usize;
+    let mut user_idx = 0usize;
+    let mut iterations = Vec::new();
+    for iteration in 1..=cycles {
+        market_idx = (market_idx + batch_size).min(market_events.len());
+        user_idx = (user_idx + batch_size).min(user_events.len());
+        let result = runtime_once(state_dir, cfg, &json!({ "limit": limit }))?;
+        iterations.push(json!({
+            "iteration": iteration,
+            "status": result.get("status").cloned().unwrap_or(json!({})),
+            "action_count": result.get("actions").and_then(|v| v.as_array()).map(|v| v.len()).unwrap_or(0),
+        }));
+    }
+    Ok(json!({
+        "cycles": cycles,
+        "market_events_consumed": market_idx,
+        "user_events_consumed": user_idx,
+        "final_status": load_runtime_status(state_dir)?,
+        "iterations": iterations,
+    }))
+}
+
+fn ensure_dir(path: &Path) -> Result<(), String> {
+    fs::create_dir_all(path).map_err(|err| err.to_string())
+}
+
+fn read_journal(state_dir: &Path, limit: usize) -> Result<Vec<Value>, String> {
+    let path = journal_path(state_dir);
+    if !path.exists() { return Ok(Vec::new()); }
+    let text = fs::read_to_string(path).map_err(|err| err.to_string())?;
+    let mut out = Vec::new();
+    for line in text.lines().rev().take(limit).collect::<Vec<_>>().into_iter().rev() {
+        if let Ok(value) = serde_json::from_str::<Value>(line) {
+            out.push(value);
+        }
+    }
+    Ok(out)
+}
+
+fn append_journal(state_dir: &Path, payload: Value) -> Result<(), String> {
+    let path = journal_path(state_dir);
+    ensure_dir(state_dir)?;
+    let mut current = if path.exists() { fs::read_to_string(&path).map_err(|err| err.to_string())? } else { String::new() };
+    current.push_str(&serde_json::to_string(&payload).map_err(|err| err.to_string())?);
+    current.push('\n');
+    fs::write(path, current).map_err(|err| err.to_string())
+}
+
+fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
+    let text = fs::read_to_string(path).map_err(|err| err.to_string())?;
+    serde_json::from_str(&text).map_err(|err| err.to_string())
+}
+
+fn read_json_vec<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Vec<T>, String> {
+    if !path.exists() { return Ok(Vec::new()); }
+    read_json(path)
+}
+
+fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    if let Some(parent) = path.parent() { ensure_dir(parent)?; }
+    let text = serde_json::to_string_pretty(value).map_err(|err| err.to_string())?;
+    fs::write(path, text).map_err(|err| err.to_string())
+}
+
+fn parse_market_list(payload: Value) -> Result<Vec<PolymarketMarket>, String> {
+    let items = payload.as_array().ok_or_else(|| "unexpected markets payload".to_string())?;
+    items.iter().cloned().map(parse_market).collect()
+}
+
+fn parse_market(raw: Value) -> Result<PolymarketMarket, String> {
+    let obj = raw.as_object().ok_or_else(|| "unexpected market payload".to_string())?;
+    let tokens = if let Some(items) = obj.get("tokens").and_then(|v| v.as_array()) {
+        items.iter().map(|item| {
+            let token = item.as_object().ok_or_else(|| "invalid token".to_string())?;
+            Ok(MarketToken {
+                token_id: pick_string(token, &["token_id", "tokenId", "id", "asset_id", "assetId"]).unwrap_or_default(),
+                outcome: pick_string(token, &["outcome", "name"]),
+                price: pick_f64(token, &["price", "last_price", "lastPrice"]),
+            })
+        }).collect::<Result<Vec<_>, String>>()?
+    } else {
+        let token_ids = obj.get("clobTokenIds").and_then(parse_string_list).unwrap_or_default();
+        let outcomes = obj.get("outcomes").and_then(parse_string_list).unwrap_or_default();
+        let prices = obj.get("outcomePrices").and_then(parse_f64_list).unwrap_or_default();
+        token_ids.iter().enumerate().map(|(idx, token_id)| MarketToken {
+            token_id: token_id.clone(),
+            outcome: outcomes.get(idx).cloned(),
+            price: prices.get(idx).copied(),
+        }).collect()
+    };
+    Ok(PolymarketMarket {
+        market_id: pick_string(obj, &["id", "market_id", "marketId"]).unwrap_or_default(),
+        question: pick_string(obj, &["question", "title"]).unwrap_or_default(),
+        slug: pick_string(obj, &["slug", "market_slug"]),
+        condition_id: pick_string(obj, &["condition_id", "conditionId"]),
+        active: pick_bool(obj, &["active"]),
+        closed: pick_bool(obj, &["closed"]),
+        liquidity_usd: pick_f64(obj, &["liquidityNum", "liquidity", "liquidity_usd"]),
+        volume_usd: pick_f64(obj, &["volumeNum", "volume", "volume_usd"]),
+        end_date_iso: pick_string(obj, &["endDate", "end_date_iso", "endDateIso", "closedTime"]),
+        tokens,
+        raw,
+    })
+}
+
+fn parse_order_book(token_id: &str, payload: Value) -> Result<OrderBook, String> {
+    let obj = payload.as_object().ok_or_else(|| "unexpected order book payload".to_string())?;
+    let bids = parse_levels(obj.get("bids"));
+    let asks = parse_levels(obj.get("asks"));
+    let best_bid = bids.iter().map(|lvl| lvl.price).reduce(f64::max);
+    let best_ask = asks.iter().map(|lvl| lvl.price).reduce(f64::min);
+    let midpoint = match (best_bid, best_ask) {
+        (Some(bid), Some(ask)) => Some(round6((bid + ask) / 2.0)),
+        (Some(bid), None) => Some(bid),
+        (None, Some(ask)) => Some(ask),
+        (None, None) => None,
+    };
+    Ok(OrderBook {
+        token_id: token_id.to_string(),
+        bids,
+        asks,
+        midpoint,
+        best_bid,
+        best_ask,
+        raw: payload,
+    })
+}
+
+fn parse_levels(value: Option<&Value>) -> Vec<BookLevel> {
+    let Some(Value::Array(levels)) = value else { return Vec::new(); };
+    levels.iter().filter_map(|item| match item {
+        Value::Object(obj) => Some(BookLevel {
+            price: pick_f64(obj, &["price"])?,
+            size: pick_f64(obj, &["size", "amount"])?,
+        }),
+        Value::Array(items) if items.len() >= 2 => Some(BookLevel {
+            price: value_to_f64(&items[0])?,
+            size: value_to_f64(&items[1])?,
+        }),
+        _ => None,
+    }).collect()
+}
+
+fn primary_token(market: &PolymarketMarket) -> Option<MarketToken> {
+    market.tokens.iter().find(|token| token.outcome.as_deref().is_some_and(|o| o.eq_ignore_ascii_case("yes"))).cloned().or_else(|| market.tokens.first().cloned())
+}
+
+fn complement_deviation_bps(market: &PolymarketMarket) -> Option<f64> {
+    let prices: Vec<f64> = market.tokens.iter().filter_map(|t| t.price).collect();
+    if prices.len() < 2 { return None; }
+    Some(round2((prices.iter().sum::<f64>() - 1.0).abs() * 10_000.0))
+}
+
+fn hours_to_resolution(value: Option<&str>) -> Option<f64> {
+    let raw = value?;
+    let parsed = DateTime::parse_from_rfc3339(raw).ok()?;
+    let hours = (parsed.with_timezone(&Utc) - Utc::now()).num_seconds() as f64 / 3600.0;
+    Some(hours)
+}
+
+fn utc_now_iso() -> String {
+    Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+fn hours_since(raw: &str) -> Option<f64> {
+    let parsed = DateTime::parse_from_rfc3339(raw).ok()?;
+    Some((Utc::now() - parsed.with_timezone(&Utc)).num_seconds() as f64 / 3600.0)
+}
+
+fn live_trading_armed(cfg: &ControlConfig) -> bool {
+    env::var(&cfg.live_armed_env).map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "armed")).unwrap_or(false)
+}
+
+fn read_csv_rows(path: &Path) -> Result<Vec<HashMap<String, String>>, String> {
+    let text = fs::read_to_string(path).map_err(|err| err.to_string())?;
+    let mut lines = text.lines();
+    let header = lines.next().ok_or_else(|| "empty csv".to_string())?;
+    let columns: Vec<String> = header.split(',').map(|v| v.trim().to_string()).collect();
+    let mut rows = Vec::new();
+    rows.push(columns.iter().map(|c| (c.clone(), c.clone())).collect());
+    for line in lines {
+        if line.trim().is_empty() { continue; }
+        let values: Vec<&str> = line.split(',').collect();
+        let mut row = HashMap::new();
+        for (idx, key) in columns.iter().enumerate() {
+            row.insert(key.clone(), values.get(idx).copied().unwrap_or("").trim().to_string());
+        }
+        rows.push(row);
+    }
+    Ok(rows)
+}
+
+fn load_event_file(path: &Path) -> Result<Vec<Value>, String> {
+    let text = fs::read_to_string(path).map_err(|err| err.to_string())?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    if trimmed.starts_with('[') {
+        let payload = serde_json::from_str::<Vec<Value>>(trimmed).map_err(|err| err.to_string())?;
+        return Ok(payload.into_iter().filter(|value| value.is_object()).collect());
+    }
+    let mut out = Vec::new();
+    for line in trimmed.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let payload = serde_json::from_str::<Value>(line).map_err(|err| err.to_string())?;
+        if payload.is_object() {
+            out.push(payload);
+        }
+    }
+    Ok(out)
+}
+
+fn event_type(event: &Value) -> Option<String> {
+    event
+        .get("event_type")
+        .or_else(|| event.get("event"))
+        .or_else(|| event.get("type"))
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string)
+}
+
+fn event_token_id(event: &Value) -> Option<String> {
+    ["asset_id", "assetId", "token_id", "tokenId"]
+        .iter()
+        .find_map(|key| event.get(*key))
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string)
+}
+
+fn best_price(value: Option<&Value>, descending: bool) -> Option<f64> {
+    let Some(Value::Array(levels)) = value else { return None; };
+    let mut prices: Vec<f64> = levels
+        .iter()
+        .filter_map(|item| match item {
+            Value::Object(obj) => obj.get("price").and_then(value_to_f64),
+            Value::Array(items) if !items.is_empty() => value_to_f64(&items[0]),
+            _ => None,
+        })
+        .collect();
+    if prices.is_empty() {
+        return None;
+    }
+    prices.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    if descending { prices.last().copied() } else { prices.first().copied() }
+}
+
+fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
+    args.get(key).and_then(|v| v.as_str())
+}
+fn arg_bool(args: &Value, key: &str) -> Option<bool> {
+    args.get(key).and_then(|v| v.as_bool())
+}
+fn arg_usize(args: &Value, key: &str) -> Option<usize> {
+    args.get(key).and_then(|v| v.as_u64()).map(|v| v as usize)
+}
+fn arg_f64(args: &Value, key: &str) -> Option<f64> {
+    args.get(key).and_then(value_to_f64)
+}
+fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
+    arg_str(args, key).ok_or_else(|| format!("missing required key: {key}"))
+}
+fn required_f64(args: &Value, key: &str) -> Result<f64, String> {
+    arg_f64(args, key).ok_or_else(|| format!("missing required key: {key}"))
+}
+fn pick_string(map: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|k| map.get(*k)).and_then(|v| v.as_str().map(ToString::to_string))
+}
+fn pick_f64(map: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<f64> {
+    keys.iter().find_map(|k| map.get(*k)).and_then(value_to_f64)
+}
+fn pick_bool(map: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<bool> {
+    keys.iter().find_map(|k| map.get(*k)).and_then(|v| v.as_bool().or_else(|| v.as_str().and_then(|s| match s.to_ascii_lowercase().as_str() { "true" | "1" | "yes" => Some(true), "false" | "0" | "no" => Some(false), _ => None })))
+}
+fn value_to_f64(value: &Value) -> Option<f64> {
+    value.as_f64().or_else(|| value.as_str().and_then(|v| v.parse::<f64>().ok()))
+}
+fn parse_string_list(value: &Value) -> Option<Vec<String>> {
+    match value {
+        Value::Array(items) => Some(items.iter().filter_map(|v| v.as_str().map(ToString::to_string)).collect()),
+        Value::String(text) if text.starts_with('[') => serde_json::from_str::<Vec<String>>(text).ok(),
+        _ => None,
+    }
+}
+fn parse_f64_list(value: &Value) -> Option<Vec<f64>> {
+    match value {
+        Value::Array(items) => Some(items.iter().filter_map(value_to_f64).collect()),
+        Value::String(text) if text.starts_with('[') => serde_json::from_str::<Vec<Value>>(text).ok().map(|items| items.iter().filter_map(value_to_f64).collect()),
+        _ => None,
+    }
+}
+
+fn round2(value: f64) -> f64 { (value * 100.0).round() / 100.0 }
+fn round6(value: f64) -> f64 { (value * 1_000_000.0).round() / 1_000_000.0 }
+fn round8(value: f64) -> f64 { (value * 100_000_000.0).round() / 100_000_000.0 }

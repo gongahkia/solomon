@@ -1,7 +1,7 @@
-use std::io::{self, BufRead as _, Write as _};
+use std::io::{self, BufRead as _, Read as _, Write as _};
 use std::path::PathBuf;
 
-use stonks_polymarket_hotpath::{DaemonState, protocol::handle_command, replay::replay_commands};
+use stonks_polymarket_hotpath::{DaemonState, control::{ControlRequest, handle_control}, protocol::handle_command, replay::replay_commands};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -40,8 +40,37 @@ fn main() {
                 let _ = stdout.flush();
             }
         }
+        Some("control") => {
+            let Some(op) = args.next() else {
+                eprintln!("usage: stonks-polymarket-hotpath control <op>");
+                std::process::exit(2);
+            };
+            let mut body = String::new();
+            if let Err(err) = io::stdin().read_to_string(&mut body) {
+                eprintln!("{err}");
+                std::process::exit(1);
+            }
+            let request = if body.trim().is_empty() {
+                ControlRequest::default()
+            } else {
+                match serde_json::from_str::<ControlRequest>(&body) {
+                    Ok(request) => request,
+                    Err(err) => {
+                        eprintln!("{err}");
+                        std::process::exit(1);
+                    }
+                }
+            };
+            match handle_control(&op, request) {
+                Ok(value) => println!("{}", serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string())),
+                Err(err) => {
+                    eprintln!("{err}");
+                    std::process::exit(1);
+                }
+            }
+        }
         _ => {
-            eprintln!("usage: stonks-polymarket-hotpath <ping|replay|daemon>");
+            eprintln!("usage: stonks-polymarket-hotpath <ping|replay|daemon|control>");
             std::process::exit(2);
         }
     }

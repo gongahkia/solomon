@@ -1,3 +1,4 @@
+pub mod control;
 pub mod daemon;
 pub mod market;
 pub mod orders;

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import shutil
 import subprocess
@@ -1863,6 +1862,13 @@ def _polymarket_client():
     return PolymarketClient()
 
 
+def _polymarket_control(op: str, *, args: dict[str, object] | None = None):
+    cfg = load_config()
+    from stonks_cli.polymarket.rust_control import rust_control_call
+
+    return rust_control_call(op, args=args, cfg=cfg)
+
+
 def _market_to_dict(market) -> dict[str, object]:
     return {
         "market_id": market.market_id,
@@ -1897,24 +1903,21 @@ def do_polymarket_markets_list(
     order: str = "volume",
 ) -> list[dict[str, object]]:
     cfg = load_config()
-    client = _polymarket_client()
     use_limit = limit if limit is not None else cfg.polymarket.scanner_limit
     use_active = cfg.polymarket.require_active if active is None else active
     use_closed = False if closed is None else closed
-    markets = client.list_markets(limit=use_limit, active=use_active, closed=use_closed, order=order)
-    return [_market_to_dict(m) for m in markets]
+    return _polymarket_control(
+        "markets_list",
+        args={"limit": use_limit, "active": use_active, "closed": use_closed, "order": order},
+    )
 
 
 def do_polymarket_market_get(slug_or_id: str) -> dict[str, object]:
-    client = _polymarket_client()
-    market = client.get_market(slug_or_id)
-    return _market_to_dict(market)
+    return _polymarket_control("market_get", args={"slug_or_id": slug_or_id})
 
 
 def do_polymarket_book(token_id: str) -> dict[str, object]:
-    client = _polymarket_client()
-    book = client.get_book(token_id)
-    return _book_to_dict(book)
+    return _polymarket_control("book", args={"token_id": token_id})
 
 
 def do_polymarket_scan(
@@ -1923,39 +1926,22 @@ def do_polymarket_scan(
     include_filtered: bool = False,
 ) -> list[dict[str, object]]:
     cfg = load_config()
-    client = _polymarket_client()
-    from stonks_cli.polymarket.scanner import enrich_scans_with_wallet_signals, scan_markets
-    from stonks_cli.polymarket.wallets import load_wallet_market_signals
-
-    scans = scan_markets(
-        client,
-        limit=limit if limit is not None else cfg.polymarket.scanner_limit,
-        cfg=_polymarket_scan_config(cfg),
-        include_filtered=include_filtered,
+    return _polymarket_control(
+        "scan",
+        args={
+            "limit": limit if limit is not None else cfg.polymarket.scanner_limit,
+            "include_filtered": include_filtered,
+        },
     )
-    signals = load_wallet_market_signals()
-    if signals:
-        scans = enrich_scans_with_wallet_signals(scans, signals)
-    return [asdict(scan) for scan in scans]
 
 
 def do_polymarket_runtime_status() -> dict[str, object]:
-    from stonks_cli.polymarket.runtime import runtime_status
-
-    return asdict(runtime_status())
+    return _polymarket_control("runtime_status")
 
 
 def do_polymarket_runtime_once(*, limit: int | None = None) -> dict[str, object]:
     cfg = load_config()
-    client = _polymarket_client()
-    from stonks_cli.polymarket.runtime import run_runtime_cycle
-
-    return run_runtime_cycle(
-        client,
-        cfg=cfg,
-        limit=limit if limit is not None else cfg.polymarket.scanner_limit,
-        scan_cfg=_polymarket_scan_config(cfg),
-    )
+    return _polymarket_control("runtime_once", args={"limit": limit if limit is not None else cfg.polymarket.scanner_limit})
 
 
 def do_polymarket_runtime_loop(
@@ -1967,81 +1953,32 @@ def do_polymarket_runtime_loop(
     user_messages: int = 0,
 ) -> dict[str, object]:
     cfg = load_config()
-    client = _polymarket_client()
-    from stonks_cli.polymarket.auth import derive_api_credentials
-    from stonks_cli.polymarket.runtime import run_runtime_loop
-    from stonks_cli.polymarket.rust_bridge import rust_session
-    from stonks_cli.polymarket.websocket import MarketWebSocketClient, UserWebSocketClient
-
-    market_ws: MarketWebSocketClient | None = None
-    user_ws: UserWebSocketClient | None = None
-    rust = rust_session(cfg) if cfg.polymarket.rust_hotpath_enabled else None
-
-    def _stream_hook(*, iteration: int, market_cache) -> None:
-        nonlocal market_ws, user_ws
-        if market_messages > 0:
-            queue = do_polymarket_scan(limit=limit if limit is not None else cfg.polymarket.scanner_limit)
-            token_ids = [str(row.get("token_id")) for row in queue if row.get("token_id")]
-            if token_ids:
-                market_ws = MarketWebSocketClient(asset_ids=token_ids)
-                asyncio.run(
-                    market_ws.run_once(
-                        max_messages=market_messages,
-                        event_handler=(lambda event, snapshot: rust.apply_market_event(event)) if rust is not None else None,
-                    )
-                )
-                for token_id, snapshot in market_ws.cache.as_dict().items():
-                    market_cache.upsert_snapshot(snapshot)
-        if not cfg.polymarket.paper and user_messages > 0:
-            creds = derive_api_credentials(cfg)
-            user_ws = user_ws or UserWebSocketClient(auth=creds.as_dict())
-            from stonks_cli.polymarket.lifecycle import LiveOrderManager
-
-            order_manager = LiveOrderManager(cfg)
-            asyncio.run(
-                user_ws.run_once(
-                    order_manager=order_manager,
-                    max_messages=user_messages,
-                    event_handler=(lambda event, record: rust.apply_user_event(event)) if rust is not None else None,
-                )
-            )
-
-    return run_runtime_loop(
-        client,
-        cfg=cfg,
-        limit=limit if limit is not None else cfg.polymarket.scanner_limit,
-        scan_cfg=_polymarket_scan_config(cfg),
-        cycles=cycles,
-        sleep_seconds=sleep_seconds,
-        stream_hook=_stream_hook if market_messages > 0 or user_messages > 0 else None,
+    return _polymarket_control(
+        "runtime_loop",
+        args={
+            "limit": limit if limit is not None else cfg.polymarket.scanner_limit,
+            "cycles": cycles,
+            "sleep_seconds": sleep_seconds,
+            "market_messages": market_messages,
+            "user_messages": user_messages,
+        },
     )
 
 
 def do_polymarket_guard_status() -> dict[str, object]:
-    from stonks_cli.polymarket.guards import active_halt_reason, load_guard_state
-
-    state = load_guard_state()
-    out = asdict(state)
-    out["active_halt_reason"] = active_halt_reason(state)
-    return out
+    return _polymarket_control("guard_status")
 
 
 def do_polymarket_runtime_halt(reason: str) -> dict[str, object]:
-    from stonks_cli.polymarket.guards import halt_trading
-
-    return asdict(halt_trading(reason=reason))
+    return _polymarket_control("guard_halt", args={"reason": reason})
 
 
 def do_polymarket_runtime_resume() -> dict[str, object]:
-    from stonks_cli.polymarket.guards import resume_trading
-
-    return asdict(resume_trading())
+    return _polymarket_control("guard_resume")
 
 
 def do_polymarket_wallets_import(csv_path: Path) -> dict[str, object]:
-    from stonks_cli.polymarket.wallets import import_wallet_trades
-
-    return asdict(import_wallet_trades(csv_path))
+    return _polymarket_control("wallets_import", args={"csv_path": str(csv_path)})
 
 
 def do_polymarket_wallets_rank(
@@ -2051,39 +1988,36 @@ def do_polymarket_wallets_rank(
     min_win_rate: float = 0.70,
     limit: int = 50,
 ) -> list[dict[str, object]]:
-    from stonks_cli.polymarket.wallets import rank_wallets
-
-    targets = rank_wallets(csv_path=csv_path, min_trades=min_trades, min_win_rate=min_win_rate, limit=limit)
-    return [asdict(target) for target in targets]
+    return _polymarket_control(
+        "wallets_rank",
+        args={
+            "csv_path": str(csv_path) if csv_path is not None else None,
+            "min_trades": min_trades,
+            "min_win_rate": min_win_rate,
+            "limit": limit,
+        },
+    )
 
 
 def do_polymarket_wallet_targets() -> list[dict[str, object]]:
-    from stonks_cli.polymarket.wallets import load_wallet_targets
-
-    return [asdict(target) for target in load_wallet_targets()]
+    return _polymarket_control("wallet_targets")
 
 
 def do_polymarket_wallet_market_signals() -> list[dict[str, object]]:
-    from stonks_cli.polymarket.wallets import load_wallet_market_signals
-
-    return [asdict(signal) for signal in load_wallet_market_signals()]
+    return _polymarket_control("wallet_signals")
 
 
 def do_polymarket_paper_init(starting_cash: float | None = None) -> dict[str, object]:
     cfg = load_config()
-    from stonks_cli.polymarket.paper import init_paper_account
-
-    account = init_paper_account(starting_cash if starting_cash is not None else cfg.polymarket.paper_starting_cash)
-    return asdict(account)
+    return _polymarket_control(
+        "paper_init",
+        args={"cash": starting_cash if starting_cash is not None else cfg.polymarket.paper_starting_cash},
+    )
 
 
 def do_polymarket_paper_status() -> dict[str, object]:
-    from stonks_cli.polymarket.paper import paper_status
-    from stonks_cli.polymarket.runtime import runtime_status
-
-    status = runtime_status()
-    out = paper_status()
-    out["runtime"] = asdict(status)
+    out = _polymarket_control("paper_status")
+    out["runtime"] = _polymarket_control("runtime_status")
     return out
 
 
@@ -2095,41 +2029,37 @@ def do_polymarket_paper_buy(
     slug: str | None = None,
     outcome: str | None = None,
 ) -> dict[str, object]:
-    from stonks_cli.polymarket.paper import paper_buy
-
-    return paper_buy(token_id=token_id, market_id=market_id, slug=slug, outcome=outcome, shares=shares, price=price)
+    return _polymarket_control(
+        "paper_buy",
+        args={
+            "token_id": token_id,
+            "market_id": market_id,
+            "slug": slug,
+            "outcome": outcome,
+            "shares": shares,
+            "price": price,
+        },
+    )
 
 
 def do_polymarket_paper_sell(token_id: str, shares: float, price: float) -> dict[str, object]:
-    from stonks_cli.polymarket.paper import paper_sell
-
-    return paper_sell(token_id=token_id, shares=shares, price=price)
+    return _polymarket_control("paper_sell", args={"token_id": token_id, "shares": shares, "price": price})
 
 
 def do_polymarket_journal(limit: int = 100) -> list[dict[str, object]]:
-    from stonks_cli.polymarket.journal import read_journal
-
-    return read_journal(limit=limit)
+    return _polymarket_control("journal", args={"limit": limit})
 
 
 def do_polymarket_preflight(*, deep_auth: bool = False) -> dict[str, object]:
-    cfg = load_config()
-    from stonks_cli.polymarket.preflight import run_preflight
-
-    return run_preflight(cfg, deep_auth=deep_auth)
+    return _polymarket_control("doctor", args={"deep_auth": deep_auth})
 
 
 def do_polymarket_replay_market(path: Path) -> dict[str, object]:
-    from stonks_cli.polymarket.replay import replay_market_events
-
-    return replay_market_events(path)
+    return _polymarket_control("replay_market", args={"path": str(path)})
 
 
 def do_polymarket_replay_user(path: Path) -> dict[str, object]:
-    cfg = load_config()
-    from stonks_cli.polymarket.replay import replay_user_events
-
-    return replay_user_events(path, cfg=cfg)
+    return _polymarket_control("replay_user", args={"path": str(path)})
 
 
 def do_polymarket_runtime_soak(
@@ -2141,25 +2071,20 @@ def do_polymarket_runtime_soak(
     batch_size: int = 1,
 ) -> dict[str, object]:
     cfg = load_config()
-    client = _polymarket_client()
-    from stonks_cli.polymarket.replay import soak_runtime
-
-    return soak_runtime(
-        client,
-        cfg=cfg,
-        limit=limit if limit is not None else cfg.polymarket.scanner_limit,
-        scan_cfg=_polymarket_scan_config(cfg),
-        cycles=cycles,
-        market_events_path=market_events_path,
-        user_events_path=user_events_path,
-        batch_size=batch_size,
+    return _polymarket_control(
+        "runtime_soak",
+        args={
+            "limit": limit if limit is not None else cfg.polymarket.scanner_limit,
+            "cycles": cycles,
+            "market_events_path": str(market_events_path) if market_events_path is not None else None,
+            "user_events_path": str(user_events_path) if user_events_path is not None else None,
+            "batch_size": batch_size,
+        },
     )
 
 
 def do_polymarket_settle(*, market_id: str, winning_token_id: str) -> dict[str, object]:
-    from stonks_cli.polymarket.settlement import paper_settle_market
-
-    return paper_settle_market(market_id=market_id, winning_token_id=winning_token_id)
+    return _polymarket_control("settle", args={"market_id": market_id, "winning_token_id": winning_token_id})
 
 
 def do_polymarket_rust_status() -> dict[str, object]:

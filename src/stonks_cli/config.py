@@ -88,9 +88,15 @@ class PolymarketConfig(BaseModel):
     loop_interval_ms: int = Field(default=1000, ge=100, le=60000)
     paper_starting_cash: float = Field(default=1000.0, ge=0.0)
     max_position_fraction: float = Field(default=0.10, ge=0.0, le=1.0)
+    min_cash_reserve_fraction: float = Field(default=0.10, ge=0.0, le=1.0)
+    max_open_positions: int = Field(default=5, ge=0, le=1000)
     auto_trade_enabled: bool = False
     auto_trade_min_score: float = Field(default=12.0, ge=0.0)
     auto_trade_min_target_wallets: int = Field(default=1, ge=0, le=1000)
+    auto_exit_enabled: bool = True
+    take_profit_price_delta: float = Field(default=0.10, ge=0.0, le=1.0)
+    stop_loss_price_delta: float = Field(default=0.08, ge=0.0, le=1.0)
+    stale_position_hours: float = Field(default=24.0, ge=0.0)
 
 
 class TuiConfig(BaseModel):

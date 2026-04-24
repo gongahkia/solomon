@@ -2021,3 +2021,9 @@ def do_polymarket_paper_sell(token_id: str, shares: float, price: float) -> dict
     from stonks_cli.polymarket.paper import paper_sell
 
     return paper_sell(token_id=token_id, shares=shares, price=price)
+
+
+def do_polymarket_journal(limit: int = 100) -> list[dict[str, object]]:
+    from stonks_cli.polymarket.journal import read_journal
+
+    return read_journal(limit=limit)

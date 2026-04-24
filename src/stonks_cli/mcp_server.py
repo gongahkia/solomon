@@ -47,6 +47,7 @@ from stonks_cli.commands import (
     do_polymarket_book,
     do_polymarket_market_get,
     do_polymarket_markets_list,
+    do_polymarket_journal,
     do_polymarket_paper_buy,
     do_polymarket_paper_init,
     do_polymarket_paper_sell,
@@ -378,6 +379,12 @@ def polymarket_paper_buy(
 def polymarket_paper_sell(token_id: str, shares: float, price: float) -> Any:
     """Execute a Polymarket paper sell."""
     return _serialize(do_polymarket_paper_sell(token_id, shares, price))
+
+
+@mcp.tool()
+def polymarket_get_journal(limit: int = 100) -> Any:
+    """Get recent Polymarket runtime journal entries."""
+    return {"journal": _serialize(do_polymarket_journal(limit=limit))}
 
 
 @mcp.tool()

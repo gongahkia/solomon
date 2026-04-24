@@ -44,6 +44,7 @@ from stonks_cli.commands import (
     do_polymarket_runtime_once,
     do_polymarket_runtime_status,
     do_polymarket_scan,
+    do_polymarket_journal,
     do_polymarket_wallet_market_signals,
     do_polymarket_wallet_targets,
     do_polymarket_wallets_import,
@@ -917,6 +918,18 @@ def polymarket_runtime_once(
     """Run one Polymarket scan cycle and persist runtime status."""
     try:
         data = do_polymarket_runtime_once(limit=limit)
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_app.command("journal")
+def polymarket_journal(
+    limit: int = typer.Option(100, "--limit", min=1, max=1000),
+) -> None:
+    """Show the recent Polymarket runtime journal."""
+    try:
+        data = do_polymarket_journal(limit=limit)
         Console().print_json(json.dumps(data))
     except Exception as e:
         raise _exit_for_error(e)

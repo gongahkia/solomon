@@ -86,6 +86,9 @@ class PaperPosition:
     shares: float
     avg_price: float
     opened_at: str
+    target_price: float | None = None
+    stop_price: float | None = None
+    thesis: str | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +103,7 @@ class PaperTrade:
     price: float
     notional: float
     realized_pnl: float | None = None
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -108,3 +112,32 @@ class PaperAccount:
     realized_pnl: float
     positions: list[PaperPosition]
     trades: list[PaperTrade]
+
+
+@dataclass(frozen=True)
+class TradeProposal:
+    token_id: str
+    market_id: str
+    slug: str | None
+    outcome: str | None
+    side: str
+    price: float
+    shares: float
+    notional: float
+    score: float
+    target_price: float | None = None
+    stop_price: float | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class ProposalDecision:
+    accepted: bool
+    reasons: list[str]
+    proposal: TradeProposal | None = None
+
+
+@dataclass(frozen=True)
+class ExitDecision:
+    should_exit: bool
+    reason: str | None = None

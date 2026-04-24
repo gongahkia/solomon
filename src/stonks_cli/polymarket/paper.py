@@ -35,6 +35,9 @@ def load_paper_account() -> PaperAccount:
                 shares=float(item.get("shares") or 0.0),
                 avg_price=float(item.get("avg_price") or 0.0),
                 opened_at=str(item.get("opened_at") or ""),
+                target_price=float(item["target_price"]) if item.get("target_price") is not None else None,
+                stop_price=float(item["stop_price"]) if item.get("stop_price") is not None else None,
+                thesis=item.get("thesis"),
             )
             for item in (payload.get("positions") or [])
             if isinstance(item, dict)
@@ -51,6 +54,7 @@ def load_paper_account() -> PaperAccount:
                 price=float(item.get("price") or 0.0),
                 notional=float(item.get("notional") or 0.0),
                 realized_pnl=float(item["realized_pnl"]) if item.get("realized_pnl") is not None else None,
+                reason=item.get("reason"),
             )
             for item in (payload.get("trades") or [])
             if isinstance(item, dict)
@@ -85,6 +89,10 @@ def paper_buy(
     outcome: str | None,
     shares: float,
     price: float,
+    target_price: float | None = None,
+    stop_price: float | None = None,
+    thesis: str | None = None,
+    reason: str | None = None,
 ) -> dict[str, object]:
     if shares <= 0 or price <= 0:
         raise ValueError("shares and price must be positive")
@@ -106,6 +114,9 @@ def paper_buy(
                 shares=shares,
                 avg_price=price,
                 opened_at=utc_now_iso(),
+                target_price=target_price,
+                stop_price=stop_price,
+                thesis=thesis,
             )
         )
     else:
@@ -121,6 +132,9 @@ def paper_buy(
                 shares=new_shares,
                 avg_price=round(new_avg, 8),
                 opened_at=position.opened_at,
+                target_price=position.target_price if target_price is None else target_price,
+                stop_price=position.stop_price if stop_price is None else stop_price,
+                thesis=position.thesis if thesis is None else thesis,
             )
         )
 
@@ -135,6 +149,7 @@ def paper_buy(
             shares=shares,
             price=price,
             notional=notional,
+            reason=reason,
         )
     )
     updated = PaperAccount(
@@ -154,7 +169,7 @@ def paper_buy(
     }
 
 
-def paper_sell(*, token_id: str, shares: float, price: float) -> dict[str, object]:
+def paper_sell(*, token_id: str, shares: float, price: float, reason: str | None = None) -> dict[str, object]:
     if shares <= 0 or price <= 0:
         raise ValueError("shares and price must be positive")
     account = load_paper_account()
@@ -177,6 +192,9 @@ def paper_sell(*, token_id: str, shares: float, price: float) -> dict[str, objec
                 shares=remaining,
                 avg_price=position.avg_price,
                 opened_at=position.opened_at,
+                target_price=position.target_price,
+                stop_price=position.stop_price,
+                thesis=position.thesis,
             )
         )
 
@@ -193,6 +211,7 @@ def paper_sell(*, token_id: str, shares: float, price: float) -> dict[str, objec
             price=price,
             notional=notional,
             realized_pnl=round(realized, 8),
+            reason=reason,
         )
     )
     updated = PaperAccount(

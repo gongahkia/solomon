@@ -1935,6 +1935,34 @@ def do_polymarket_scan(
     )
 
 
+def do_polymarket_research_thesis(
+    *,
+    market_id: str,
+    provider: str = "claude",
+    model: str | None = None,
+    api_key_env: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, object]:
+    from stonks_cli.polymarket.research import generate_thesis, load_theses, save_thesis
+
+    scans = do_polymarket_scan(include_filtered=False)
+    scan = next((item for item in scans if str(item.get("market_id") or "") == market_id), None)
+    if scan is None:
+        raise ValueError(f"market not found in current scan queue: {market_id}")
+    thesis = generate_thesis(scan, provider=provider, model=model, api_key_env=api_key_env, dry_run=dry_run)
+    save_thesis(thesis)
+    return {
+        "thesis": thesis.to_dict(),
+        "cached_count": len(load_theses()),
+    }
+
+
+def do_polymarket_research_list() -> list[dict[str, object]]:
+    from stonks_cli.polymarket.research import load_theses
+
+    return [item.to_dict() for item in load_theses()]
+
+
 def do_polymarket_runtime_status() -> dict[str, object]:
     return _polymarket_control("runtime_status")
 

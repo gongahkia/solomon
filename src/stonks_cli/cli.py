@@ -44,6 +44,8 @@ from stonks_cli.commands import (
     do_polymarket_preflight,
     do_polymarket_replay_market,
     do_polymarket_replay_user,
+    do_polymarket_research_list,
+    do_polymarket_research_thesis,
     do_polymarket_rust_ping,
     do_polymarket_rust_replay,
     do_polymarket_rust_status,
@@ -105,6 +107,7 @@ polymarket_runtime_app = typer.Typer()
 polymarket_wallets_app = typer.Typer()
 polymarket_paper_app = typer.Typer()
 polymarket_replay_app = typer.Typer()
+polymarket_research_app = typer.Typer()
 polymarket_rust_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
@@ -125,6 +128,7 @@ polymarket_app.add_typer(polymarket_runtime_app, name="runtime")
 polymarket_app.add_typer(polymarket_wallets_app, name="wallets")
 polymarket_app.add_typer(polymarket_paper_app, name="paper")
 polymarket_app.add_typer(polymarket_replay_app, name="replay")
+polymarket_app.add_typer(polymarket_research_app, name="research")
 polymarket_app.add_typer(polymarket_rust_app, name="rust")
 
 
@@ -914,6 +918,37 @@ def polymarket_scan(
                 ", ".join(row.get("reasons") or []) or "-",
             )
         Console().print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_research_app.command("thesis")
+def polymarket_research_thesis(
+    market_id: str = typer.Argument(..., help="Market id from `stonks-cli polymarket scan`"),
+    provider: str = typer.Option("claude", "--provider", help="claude, openai, or codex"),
+    model: str | None = typer.Option(None, "--model", help="Provider model override"),
+    api_key_env: str | None = typer.Option(None, "--api-key-env", help="Environment variable containing the API key"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Build and cache a no-network thesis placeholder"),
+) -> None:
+    """Generate and cache an offline LLM thesis for a scanned market."""
+    try:
+        data = do_polymarket_research_thesis(
+            market_id=market_id,
+            provider=provider,
+            model=model,
+            api_key_env=api_key_env,
+            dry_run=dry_run,
+        )
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_research_app.command("list")
+def polymarket_research_list() -> None:
+    """Show cached Polymarket LLM theses."""
+    try:
+        Console().print_json(json.dumps(do_polymarket_research_list()))
     except Exception as e:
         raise _exit_for_error(e)
 

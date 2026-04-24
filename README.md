@@ -185,7 +185,7 @@ $ stonks-cli polymarket rust replay ./fixtures/hotpath.txt
 
 The repo now includes a Rust hot-path workspace under [rust/](/Users/gongahkia/Desktop/coding/projects/stonks-cli/rust:1).
 
-- `rust/hotpath`: low-latency market state cache, guarded order construction, order lifecycle tracking, and a tiny stdin/stdout daemon protocol
+- `rust/hotpath`: low-latency market state cache, guarded order construction, order lifecycle tracking, the Polymarket control backend, and a tiny stdin/stdout daemon protocol
 - persisted daemon state and deterministic replay fixtures
 - `stonks-cli polymarket rust status`: inspect the local Rust workspace and binary
 - `stonks-cli polymarket rust ping`: smoke test the Rust binary
@@ -194,12 +194,12 @@ The repo now includes a Rust hot-path workspace under [rust/](/Users/gongahkia/D
 
 Current scope:
 
-- deterministic hot-path core in Rust
+- Rust-backed Polymarket control plane for markets, scans, paper trading, wallet ranking, journals, guards, settlement, replay, and runtime cycles
+- Rust-backed live runtime path for open-order sync, stale cancel, and live order placement through Polymarket's official `polymarket-cli`
 - persisted state and replayable protocol fixtures
-- Python runtime delegation for guarded order requests, stale-order reconciliation, and websocket event mirroring
-- no external crates required
+- Python is now the thin CLI shell for the Polymarket surface; the stateful backend logic runs in Rust
 
-To enable Rust-backed live hot-path handling from the Python control plane, set:
+To enable Rust-backed live trading from the CLI shell, set:
 
 ```json
 {
@@ -211,7 +211,17 @@ To enable Rust-backed live hot-path handling from the Python control plane, set:
 }
 ```
 
-With `rust_hotpath_enabled=true`, Python still owns the CLI, orchestration, journals, and strategy/risk policy, while Rust owns the low-latency market snapshot cache and open-order hot path.
+Live mode now expects Polymarket's official Rust CLI to be installed and available as `polymarket`. Override the binary name with:
+
+```console
+$ export POLYMARKET_CLI_BIN=/path/to/polymarket
+```
+
+The Rust control backend uses that CLI for:
+
+- `clob create-order`
+- `clob orders`
+- `clob cancel`
 
 For live auto-trading, the control plane now also requires an explicit arm flag by default:
 

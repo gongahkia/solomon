@@ -104,6 +104,12 @@ pub struct ControlConfig {
     pub loop_interval_ms: u64,
     #[serde(default)]
     pub auto_exit_enabled: bool,
+    #[serde(default = "default_true")]
+    pub volume_spike_exit_enabled: bool,
+    #[serde(default = "default_volume_spike_multiplier")]
+    pub volume_spike_multiplier: f64,
+    #[serde(default = "default_volume_spike_min_delta_usd")]
+    pub volume_spike_min_delta_usd: f64,
     #[serde(default = "default_paper_starting_cash")]
     pub paper_starting_cash: f64,
 }
@@ -150,6 +156,9 @@ impl Default for ControlConfig {
             live_armed_env: default_live_armed_env(),
             loop_interval_ms: default_loop_interval_ms(),
             auto_exit_enabled: true,
+            volume_spike_exit_enabled: true,
+            volume_spike_multiplier: default_volume_spike_multiplier(),
+            volume_spike_min_delta_usd: default_volume_spike_min_delta_usd(),
             paper_starting_cash: default_paper_starting_cash(),
         }
     }
@@ -386,6 +395,18 @@ struct LiveAccountSnapshot {
     positions: Vec<LivePosition>,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct VolumeState {
+    markets: HashMap<String, VolumeTracker>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct VolumeTracker {
+    last_volume_usd: f64,
+    avg_delta_usd: f64,
+    updated_at: String,
+}
+
 #[derive(Clone, Debug, Default)]
 struct WalletStats {
     trades: usize,
@@ -435,6 +456,8 @@ fn default_stale_hours() -> f64 { 24.0 }
 fn default_max_live_open_orders() -> usize { 20 }
 fn default_live_order_max_age_seconds() -> usize { 30 }
 fn default_live_min_order_notional() -> f64 { 5.0 }
+fn default_volume_spike_multiplier() -> f64 { 3.0 }
+fn default_volume_spike_min_delta_usd() -> f64 { 500.0 }
 fn default_live_require_armed_env() -> bool { true }
 fn default_live_armed_env() -> String { "STONKS_CLI_POLYMARKET_LIVE_ARMED".to_string() }
 fn default_loop_interval_ms() -> u64 { 1000 }
@@ -1145,11 +1168,12 @@ fn finalize_category_stats(stats: HashMap<String, WalletCategoryAccumulator>) ->
 fn runtime_once(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<Value, String> {
     let limit = arg_usize(args, "limit").unwrap_or(cfg.scanner_limit);
     let scans = scan_markets(state_dir, cfg, &json!({ "limit": limit, "include_filtered": false }))?;
+    let volume_spikes = detect_and_record_volume_spikes(state_dir, cfg, &scans)?;
     let mut actions = Vec::new();
     if cfg.paper {
-        actions.extend(auto_exit_positions(state_dir, cfg, &scans)?);
+        actions.extend(auto_exit_positions(state_dir, cfg, &scans, &volume_spikes)?);
     } else {
-        actions.extend(auto_exit_live_positions(state_dir, cfg, &scans)?);
+        actions.extend(auto_exit_live_positions(state_dir, cfg, &scans, &volume_spikes)?);
         actions.extend(cancel_stale_live_orders(state_dir, cfg)?);
     }
     if cfg.auto_trade_enabled {
@@ -1270,7 +1294,7 @@ fn maybe_open_position(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketSca
     Ok(None)
 }
 
-fn auto_exit_positions(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketScan]) -> Result<Vec<Value>, String> {
+fn auto_exit_positions(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketScan], volume_spikes: &HashSet<String>) -> Result<Vec<Value>, String> {
     if !cfg.auto_exit_enabled { return Ok(Vec::new()); }
     let account = match load_paper_opt(state_dir) {
         Some(account) => account,
@@ -1280,7 +1304,10 @@ fn auto_exit_positions(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketSca
     let mut actions = Vec::new();
     for position in account.positions {
         let current_price = price_map.get(&position.token_id).copied();
-        let should_exit = if let Some(price) = current_price {
+        let volume_spike = volume_spikes.contains(&position.token_id) || volume_spikes.contains(&position.market_id);
+        let should_exit = if volume_spike {
+            true
+        } else if let Some(price) = current_price {
             position.target_price.is_some_and(|target| price >= target)
                 || position.stop_price.is_some_and(|stop| price <= stop)
                 || hours_since(&position.opened_at).unwrap_or(0.0) >= cfg.stale_position_hours
@@ -1289,7 +1316,9 @@ fn auto_exit_positions(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketSca
         };
         if !should_exit { continue; }
         let price = current_price.unwrap_or(position.avg_price);
-        let reason = if position.target_price.is_some_and(|target| price >= target) {
+        let reason = if volume_spike {
+            "VOLUME_SPIKE"
+        } else if position.target_price.is_some_and(|target| price >= target) {
             "TARGET_HIT"
         } else if position.stop_price.is_some_and(|stop| price <= stop) {
             "STOP_LOSS"
@@ -1308,7 +1337,7 @@ fn auto_exit_positions(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketSca
     Ok(actions)
 }
 
-fn auto_exit_live_positions(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketScan]) -> Result<Vec<Value>, String> {
+fn auto_exit_live_positions(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketScan], volume_spikes: &HashSet<String>) -> Result<Vec<Value>, String> {
     if !cfg.auto_exit_enabled {
         return Ok(Vec::new());
     }
@@ -1323,16 +1352,20 @@ fn auto_exit_live_positions(state_dir: &Path, cfg: &ControlConfig, scans: &[Mark
     let mut actions = Vec::new();
     for position in snapshot.positions {
         let Some(current_price) = prices.get(&position.token_id).copied() else { continue; };
+        let volume_spike = volume_spikes.contains(&position.token_id) || volume_spikes.contains(&position.market_id);
         let target = (position.avg_price + cfg.take_profit_price_delta).min(0.99);
         let stop = (position.avg_price - cfg.stop_loss_price_delta).max(0.01);
         let should_exit =
-            current_price >= target
+            volume_spike
+                || current_price >= target
                 || current_price <= stop
                 || hours_since(&position.opened_at).unwrap_or(0.0) >= cfg.stale_position_hours;
         if !should_exit {
             continue;
         }
-        let reason = if current_price >= target {
+        let reason = if volume_spike {
+            "VOLUME_SPIKE"
+        } else if current_price >= target {
             "TARGET_HIT"
         } else if current_price <= stop {
             "STOP_LOSS"
@@ -1373,6 +1406,60 @@ fn auto_exit_live_positions(state_dir: &Path, cfg: &ControlConfig, scans: &[Mark
         actions.push(result);
     }
     Ok(actions)
+}
+
+fn detect_and_record_volume_spikes(state_dir: &Path, cfg: &ControlConfig, scans: &[MarketScan]) -> Result<HashSet<String>, String> {
+    let mut state = read_json::<VolumeState>(&volume_state_path(state_dir)).unwrap_or_default();
+    let mut spikes = HashSet::new();
+    if !cfg.volume_spike_exit_enabled {
+        return Ok(spikes);
+    }
+    let now = utc_now_iso();
+    for scan in scans {
+        let Some(volume) = scan.volume_usd else { continue; };
+        let key = volume_key(scan);
+        if key.is_empty() {
+            continue;
+        }
+        let previous = state.markets.get(&key).cloned().unwrap_or_default();
+        let delta = (volume - previous.last_volume_usd).max(0.0);
+        let baseline = previous.avg_delta_usd;
+        if previous.last_volume_usd > 0.0
+            && baseline > 0.0
+            && delta >= cfg.volume_spike_min_delta_usd
+            && delta > baseline * cfg.volume_spike_multiplier
+        {
+            if let Some(token_id) = scan.token_id.as_ref() {
+                spikes.insert(token_id.clone());
+            }
+            spikes.insert(scan.market_id.clone());
+        }
+        let avg_delta = if previous.last_volume_usd <= 0.0 {
+            0.0
+        } else if baseline > 0.0 {
+            (baseline * 0.8) + (delta * 0.2)
+        } else {
+            delta
+        };
+        state.markets.insert(
+            key,
+            VolumeTracker {
+                last_volume_usd: volume,
+                avg_delta_usd: round8(avg_delta),
+                updated_at: now.clone(),
+            },
+        );
+    }
+    write_json(&volume_state_path(state_dir), &state)?;
+    Ok(spikes)
+}
+
+fn volume_key(scan: &MarketScan) -> String {
+    if let Some(token_id) = scan.token_id.as_ref() {
+        format!("{}:{token_id}", scan.market_id)
+    } else {
+        scan.market_id.clone()
+    }
 }
 
 fn trade_guard_reasons(
@@ -1583,6 +1670,7 @@ fn journal_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_journa
 fn guard_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_guard.json") }
 fn manual_halt_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket.halt") }
 fn live_orders_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_live_orders.json") }
+fn volume_state_path(state_dir: &Path) -> PathBuf { state_dir.join("polymarket_volume_state.json") }
 
 fn load_paper(state_dir: &Path) -> Result<PaperAccount, String> {
     read_json(&paper_path(state_dir))
@@ -3141,6 +3229,94 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
         assert_eq!(decision.buy_votes, 2);
         assert_eq!(decision.position_fraction, 1.0);
         assert!(decision.votes.iter().any(|vote| vote.agent == "whale_copy" && vote.action == "BUY"));
+    }
+
+    #[test]
+    fn volume_spike_detection_tracks_delta_against_baseline() {
+        let state_dir = temp_state_dir("volume-spike");
+        let mut scan = MarketScan {
+            market_id: "m1".to_string(),
+            slug: Some("btc-higher".to_string()),
+            question: "Will BTC close higher today?".to_string(),
+            token_id: Some("YES1".to_string()),
+            outcome: Some("YES".to_string()),
+            midpoint: Some(0.45),
+            bids_depth_usd: 1000.0,
+            asks_depth_usd: 1000.0,
+            liquidity_usd: Some(100_000.0),
+            volume_usd: Some(1_000.0),
+            hours_to_resolution: Some(8.0),
+            complement_deviation_bps: Some(100.0),
+            score: 20.0,
+            status: "PASS".to_string(),
+            reasons: Vec::new(),
+            target_wallet_count: 2,
+            target_trade_count: 10,
+            target_net_volume: 100.0,
+        };
+        let cfg = ControlConfig {
+            volume_spike_multiplier: 3.0,
+            volume_spike_min_delta_usd: 0.0,
+            ..ControlConfig::default()
+        };
+
+        assert!(detect_and_record_volume_spikes(&state_dir, &cfg, &[scan.clone()]).expect("first").is_empty());
+        scan.volume_usd = Some(1_100.0);
+        assert!(detect_and_record_volume_spikes(&state_dir, &cfg, &[scan.clone()]).expect("baseline").is_empty());
+        scan.volume_usd = Some(1_800.0);
+        let spikes = detect_and_record_volume_spikes(&state_dir, &cfg, &[scan]).expect("spike");
+
+        assert!(spikes.contains("YES1"));
+        assert!(spikes.contains("m1"));
+    }
+
+    #[test]
+    fn paper_exit_uses_volume_spike_reason() {
+        let state_dir = temp_state_dir("volume-exit");
+        paper_init(&state_dir, &json!({ "cash": 1000.0 })).expect("init");
+        paper_buy(
+            &state_dir,
+            &json!({
+                "token_id": "YES1",
+                "market_id": "m1",
+                "shares": 10.0,
+                "price": 0.40,
+            }),
+        )
+        .expect("buy");
+        let mut spikes = HashSet::new();
+        spikes.insert("YES1".to_string());
+        let actions = auto_exit_positions(
+            &state_dir,
+            &ControlConfig::default(),
+            &[MarketScan {
+                market_id: "m1".to_string(),
+                slug: Some("btc-higher".to_string()),
+                question: "Will BTC close higher today?".to_string(),
+                token_id: Some("YES1".to_string()),
+                outcome: Some("YES".to_string()),
+                midpoint: Some(0.41),
+                bids_depth_usd: 1000.0,
+                asks_depth_usd: 1000.0,
+                liquidity_usd: Some(100_000.0),
+                volume_usd: Some(1_800.0),
+                hours_to_resolution: Some(8.0),
+                complement_deviation_bps: Some(100.0),
+                score: 20.0,
+                status: "PASS".to_string(),
+                reasons: Vec::new(),
+                target_wallet_count: 2,
+                target_trade_count: 10,
+                target_net_volume: 100.0,
+            }],
+            &spikes,
+        )
+        .expect("exit");
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].get("action").and_then(|v| v.as_str()), Some("SELL"));
+        let account = load_paper(&state_dir).expect("account");
+        assert_eq!(account.trades.last().and_then(|trade| trade.reason.as_deref()), Some("VOLUME_SPIKE"));
     }
 
     #[test]

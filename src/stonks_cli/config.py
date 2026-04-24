@@ -111,6 +111,9 @@ class PolymarketConfig(BaseModel):
     consensus_single_vote_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
     consensus_arbitrage_min_deviation_bps: float = Field(default=700.0, ge=0.0)
     auto_exit_enabled: bool = True
+    volume_spike_exit_enabled: bool = True
+    volume_spike_multiplier: float = Field(default=3.0, ge=1.0)
+    volume_spike_min_delta_usd: float = Field(default=500.0, ge=0.0)
     take_profit_price_delta: float = Field(default=0.10, ge=0.0, le=1.0)
     stop_loss_price_delta: float = Field(default=0.08, ge=0.0, le=1.0)
     stale_position_hours: float = Field(default=24.0, ge=0.0)

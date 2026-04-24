@@ -63,6 +63,16 @@ Repo config minimum:
     "paper": false,
     "rust_hotpath_enabled": true,
     "auto_trade_enabled": false,
+    "crypto_only": true,
+    "block_sports": true,
+    "target_wallet_addresses": [
+      "0x6e1d5040d0ac73709b0621f620d2a60b80d2d0f"
+    ],
+    "wallet_copy_allowed_categories": ["crypto"],
+    "consensus_enabled": true,
+    "consensus_min_buy_votes": 2,
+    "volume_spike_exit_enabled": true,
+    "volume_spike_multiplier": 3.0,
     "live_require_armed_env": true,
     "max_position_fraction": 0.25,
     "max_market_notional": 10.0,
@@ -73,6 +83,8 @@ Repo config minimum:
   }
 }
 ```
+
+Keep `auto_trade_enabled=false` until manual buy/cancel/sell validation passes. The added wallet and category settings make Trackmind-style copying explicit and category-scoped instead of letting any ranked wallet influence every market.
 
 ## Dry Run
 

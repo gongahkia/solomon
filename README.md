@@ -209,7 +209,14 @@ To enable Rust-backed live trading from the CLI shell, set:
     "paper": false,
     "rust_hotpath_enabled": true,
     "rust_hotpath_use_cargo": false,
-    "live_min_order_notional_usd": 5.0
+    "live_min_order_notional_usd": 5.0,
+    "crypto_only": true,
+    "block_sports": true,
+    "target_wallet_addresses": ["0x6e1d5040d0ac73709b0621f620d2a60b80d2d0f"],
+    "wallet_copy_allowed_categories": ["crypto"],
+    "consensus_enabled": true,
+    "consensus_min_buy_votes": 2,
+    "volume_spike_exit_enabled": true
   }
 }
 ```
@@ -225,6 +232,8 @@ The Rust control backend uses that CLI for:
 - `clob create-order`
 - `clob orders`
 - `clob cancel`
+
+The Polymarket path now includes deterministic alpha controls from the Trackmind-style article: hard market-universe filters, configurable target wallets, category-aware wallet-copy signals, three-agent consensus voting, volume-spike exits, and offline BYO-key research theses via `stonks-cli polymarket research thesis`.
 
 For a staged operator workflow, see [docs/polymarket-live-runbook.md](/Users/gongahkia/Desktop/coding/projects/stonks-cli/docs/polymarket-live-runbook.md:1).
 

@@ -1544,3 +1544,156 @@ fn parse_f64_list(value: &Value) -> Option<Vec<f64>> {
 fn round2(value: f64) -> f64 { (value * 100.0).round() / 100.0 }
 fn round6(value: f64) -> f64 { (value * 1_000_000.0).round() / 1_000_000.0 }
 fn round8(value: f64) -> f64 { (value * 100_000_000.0).round() / 100_000_000.0 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_state_dir(name: &str) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("stonks-cli-{name}-{suffix}"));
+        fs::create_dir_all(&path).expect("create temp state dir");
+        path
+    }
+
+    #[test]
+    fn paper_buy_sell_round_trip_updates_account() {
+        let state_dir = temp_state_dir("paper-round-trip");
+        paper_init(&state_dir, &json!({ "cash": 1000.0 })).expect("init");
+
+        let buy = paper_buy(
+            &state_dir,
+            &json!({
+                "token_id": "YES1",
+                "market_id": "m1",
+                "slug": "btc-higher",
+                "outcome": "YES",
+                "shares": 100.0,
+                "price": 0.40,
+            }),
+        )
+        .expect("buy");
+        let sell = paper_sell(&state_dir, &json!({ "token_id": "YES1", "shares": 50.0, "price": 0.60 })).expect("sell");
+        let status = paper_status(&state_dir, &json!({ "midpoints": { "YES1": 0.58 } })).expect("status");
+
+        assert_eq!(buy.get("action").and_then(|v| v.as_str()), Some("BUY"));
+        assert_eq!(sell.get("action").and_then(|v| v.as_str()), Some("SELL"));
+        assert_eq!(status.get("cash").and_then(|v| v.as_f64()), Some(990.0));
+        assert_eq!(status.get("realized_pnl").and_then(|v| v.as_f64()), Some(10.0));
+        assert_eq!(status.get("positions").and_then(|v| v.as_array()).map(|v| v.len()), Some(1));
+    }
+
+    #[test]
+    fn settle_market_realizes_binary_payout() {
+        let state_dir = temp_state_dir("paper-settle");
+        paper_init(&state_dir, &json!({ "cash": 1000.0 })).expect("init");
+        paper_buy(
+            &state_dir,
+            &json!({
+                "token_id": "YES1",
+                "market_id": "m1",
+                "shares": 10.0,
+                "price": 0.60,
+            }),
+        )
+        .expect("buy");
+
+        let settled = settle_market(&state_dir, &json!({ "market_id": "m1", "winning_token_id": "YES1" })).expect("settle");
+
+        assert_eq!(settled.get("cash").and_then(|v| v.as_f64()), Some(1004.0));
+        assert_eq!(settled.get("realized_pnl").and_then(|v| v.as_f64()), Some(4.0));
+        assert_eq!(settled.get("settled").and_then(|v| v.as_array()).map(|v| v.len()), Some(1));
+    }
+
+    #[test]
+    fn wallet_rank_uses_fifo_fallback_and_persists_signals() {
+        let state_dir = temp_state_dir("wallet-rank");
+        let csv_path = state_dir.join("trades.csv");
+        fs::write(
+            &csv_path,
+            "\
+timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,price,usd_amount,token_amount,transactionHash\n\
+2026-01-01T00:00:00Z,1,0xgood,0xdef,YES,BUY,SELL,0.40,40,100,0x1\n\
+2026-01-01T01:00:00Z,1,0xgood,0xdef,YES,SELL,BUY,0.60,60,100,0x2\n\
+2026-01-01T02:00:00Z,2,0xbad,0xdef,YES,BUY,SELL,0.70,70,100,0x3\n\
+2026-01-01T03:00:00Z,2,0xbad,0xdef,YES,SELL,BUY,0.50,50,100,0x4\n",
+        )
+        .expect("write csv");
+
+        wallets_import(&state_dir, &json!({ "csv_path": csv_path })).expect("import");
+        let targets = wallets_rank(
+            &state_dir,
+            &json!({ "min_trades": 2, "min_win_rate": 0.60, "limit": 10 }),
+        )
+        .expect("rank");
+        let signals: Vec<WalletMarketSignal> = read_json(&wallet_signals_path(&state_dir)).expect("signals");
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].wallet, "0xgood");
+        assert_eq!(targets[0].realized_pnl, 20.0);
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0].market_id, "1");
+        assert_eq!(signals[0].wallet_count, 1);
+    }
+
+    #[test]
+    fn guard_status_reports_manual_halt_reason() {
+        let state_dir = temp_state_dir("guard");
+        let halted = halt_guard(&state_dir, "manual_risk").expect("halt");
+        let status = guard_status_value(&state_dir).expect("guard status");
+
+        assert!(halted.halted);
+        assert_eq!(status.get("active_halt_reason").and_then(|v| v.as_str()), Some("manual_risk"));
+
+        let resumed = resume_guard(&state_dir).expect("resume");
+        let resumed_status = guard_status_value(&state_dir).expect("guard status");
+        assert!(!resumed.halted);
+        assert_eq!(resumed_status.get("active_halt_reason"), Some(&Value::Null));
+    }
+
+    #[test]
+    fn replay_helpers_reduce_market_and_user_events() {
+        let state_dir = temp_state_dir("replay");
+        let market_path = state_dir.join("market.jsonl");
+        let user_path = state_dir.join("user.json");
+        fs::write(
+            &market_path,
+            concat!(
+                "{\"event_type\":\"best_bid_ask\",\"asset_id\":\"YES1\",\"best_bid\":\"0.41\",\"best_ask\":\"0.43\"}\n",
+                "{\"event_type\":\"last_trade_price\",\"asset_id\":\"YES1\",\"price\":\"0.42\"}\n"
+            ),
+        )
+        .expect("market events");
+        fs::write(
+            &user_path,
+            "[{\"order_id\":\"order-1\",\"status\":\"FILLED\",\"filled_size\":12,\"remaining_size\":0}]",
+        )
+        .expect("user events");
+
+        let market = replay_market_events(&json!({ "path": market_path })).expect("market replay");
+        let user = replay_user_events(&json!({ "path": user_path })).expect("user replay");
+
+        assert_eq!(market.get("applied").and_then(|v| v.as_u64()), Some(2));
+        assert_eq!(
+            market
+                .get("snapshots")
+                .and_then(|v| v.get("YES1"))
+                .and_then(|v| v.get("last_trade_price"))
+                .and_then(|v| v.as_f64()),
+            Some(0.42)
+        );
+        assert_eq!(user.get("applied").and_then(|v| v.as_u64()), Some(1));
+        assert_eq!(
+            user.get("orders")
+                .and_then(|v| v.as_array())
+                .and_then(|v| v.first())
+                .and_then(|v| v.get("status"))
+                .and_then(|v| v.as_str()),
+            Some("FILLED")
+        );
+    }
+}

@@ -371,7 +371,7 @@ pub fn handle_control(op: &str, request: ControlRequest) -> Result<Value, String
         "guard_status" => Ok(guard_status_value(&state_dir)?),
         "guard_halt" => Ok(json!(halt_guard(&state_dir, arg_str(&request.args, "reason").unwrap_or("manual_halt"))?)),
         "guard_resume" => Ok(json!(resume_guard(&state_dir)?)),
-        "doctor" => Ok(json!(preflight(&state_dir, &request.config))),
+        "doctor" => Ok(json!(preflight(&state_dir, &request.config, &request.args))),
         "settle" => Ok(json!(settle_market(&state_dir, &request.args)?)),
         "replay_market" => Ok(json!(replay_market_events(&request.args)?)),
         "replay_user" => Ok(json!(replay_user_events(&request.args)?)),
@@ -1327,8 +1327,9 @@ fn resume_guard(state_dir: &Path) -> Result<GuardState, String> {
     Ok(state)
 }
 
-fn preflight(state_dir: &Path, cfg: &ControlConfig) -> Value {
+fn preflight(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Value {
     let mut checks = Vec::new();
+    let deep_auth = arg_bool(args, "deep_auth").unwrap_or(false);
     checks.push(json!({"name":"state_dir","status":if ensure_dir(state_dir).is_ok() {"pass"} else {"fail"},"detail":state_dir.display().to_string()}));
     let guard = load_guard_state(state_dir).ok();
     let halt_reason = active_halt_reason(state_dir, guard.as_ref());
@@ -1341,6 +1342,9 @@ fn preflight(state_dir: &Path, cfg: &ControlConfig) -> Value {
         checks.push(json!({"name":"live_arm","status":if armed || !cfg.live_require_armed_env {"pass"} else {"warn"},"detail":if armed {format!("{} armed", cfg.live_armed_env)} else {format!("set {}=1 to allow live auto-trading", cfg.live_armed_env)}}));
         let cli_present = Command::new(polymarket_cli_bin()).arg("--help").output().is_ok();
         checks.push(json!({"name":"polymarket_cli","status":if cli_present {"pass"} else {"fail"},"detail":if cli_present {"polymarket CLI available"} else {"install Polymarket's official `polymarket-cli` for Rust live execution"}}));
+        if cli_present && deep_auth {
+            checks.extend(deep_auth_checks());
+        }
     }
     let overall = if checks.iter().any(|c| c.get("status").and_then(|v| v.as_str()) == Some("fail")) {
         "fail"
@@ -1349,7 +1353,54 @@ fn preflight(state_dir: &Path, cfg: &ControlConfig) -> Value {
     } else {
         "pass"
     };
-    json!({"overall":overall,"paper":cfg.paper,"checks":checks})
+    json!({"overall":overall,"paper":cfg.paper,"deep_auth":deep_auth,"checks":checks})
+}
+
+fn deep_auth_checks() -> Vec<Value> {
+    let mut checks = Vec::new();
+    checks.push(cli_command_check("wallet_show", &["wallet", "show"], None));
+    checks.push(cli_command_check("wallet_address", &["wallet", "address"], None));
+    checks.push(cli_command_check("approve_check", &["approve", "check"], None));
+    checks.push(cli_command_check(
+        "clob_balance_collateral",
+        &["clob", "balance", "--asset-type", "collateral"],
+        Some(extract_first_numeric_expected),
+    ));
+    checks.push(cli_command_check("clob_orders", &["clob", "orders"], None));
+    checks.push(cli_command_check("clob_trades", &["clob", "trades"], None));
+    checks
+}
+
+fn cli_command_check(
+    name: &str,
+    args: &[&str],
+    validator: Option<fn(&Value) -> Result<String, String>>,
+) -> Value {
+    let result = polymarket_cli_json(&args.iter().map(|item| item.to_string()).collect::<Vec<_>>());
+    match result {
+        Ok(payload) => {
+            let detail = match validator {
+                Some(validate) => match validate(&payload) {
+                    Ok(detail) => detail,
+                    Err(err) => {
+                        return json!({"name":name,"status":"fail","detail":err});
+                    }
+                },
+                None => "ok".to_string(),
+            };
+            json!({"name":name,"status":"pass","detail":detail})
+        }
+        Err(err) => json!({"name":name,"status":"fail","detail":err}),
+    }
+}
+
+fn extract_first_numeric_expected(payload: &Value) -> Result<String, String> {
+    let value = extract_first_numeric(
+        payload,
+        &["available", "available_balance", "availableBalance", "balance", "amount", "total"],
+    )
+    .ok_or_else(|| "could not parse numeric balance payload".to_string())?;
+    Ok(format!("{value:.4}"))
 }
 
 fn active_halt_reason(state_dir: &Path, state: Option<&GuardState>) -> Option<String> {
@@ -2439,5 +2490,28 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
         let records = load_live_orders(&state_dir).expect("live orders");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].order_id, "order-live-1");
+    }
+
+    #[test]
+    fn deep_auth_preflight_checks_mock_cli() {
+        let state_dir = temp_state_dir("deep-auth");
+        let script = write_mock_cli(&state_dir);
+        unsafe { env::set_var("POLYMARKET_CLI_BIN", &script); }
+        unsafe { env::set_var("POLYMARKET_PRIVATE_KEY", "0xtest"); }
+        unsafe { env::set_var("STONKS_CLI_POLYMARKET_LIVE_ARMED", "1"); }
+
+        let result = preflight(
+            &state_dir,
+            &ControlConfig {
+                paper: false,
+                ..ControlConfig::default()
+            },
+            &json!({ "deep_auth": true }),
+        );
+
+        assert_eq!(result.get("overall").and_then(|v| v.as_str()), Some("pass"));
+        let checks = result.get("checks").and_then(|v| v.as_array()).expect("checks");
+        assert!(checks.iter().any(|check| check.get("name").and_then(|v| v.as_str()) == Some("wallet_show")));
+        assert!(checks.iter().any(|check| check.get("name").and_then(|v| v.as_str()) == Some("clob_balance_collateral")));
     }
 }

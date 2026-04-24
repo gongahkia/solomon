@@ -166,6 +166,7 @@ $ stonks-cli signals diff
 ### Polymarket
 
 ```console
+$ ./scripts/install_polymarket_cli.sh
 $ stonks-cli polymarket markets list --limit 25
 $ stonks-cli polymarket scan
 $ stonks-cli polymarket runtime status
@@ -179,6 +180,7 @@ $ stonks-cli polymarket rust status
 $ stonks-cli polymarket rust ping --use-cargo
 $ stonks-cli polymarket rust test
 $ stonks-cli polymarket rust replay ./fixtures/hotpath.txt
+$ ./scripts/polymarket_live_dry_run.sh
 ```
 
 ### Rust Hot Path
@@ -222,6 +224,8 @@ The Rust control backend uses that CLI for:
 - `clob create-order`
 - `clob orders`
 - `clob cancel`
+
+For a staged operator workflow, see [docs/polymarket-live-runbook.md](/Users/gongahkia/Desktop/coding/projects/stonks-cli/docs/polymarket-live-runbook.md:1).
 
 For live auto-trading, the control plane now also requires an explicit arm flag by default:
 

@@ -29,7 +29,7 @@ def rust_control_call(
     use_state_dir = state_dir or default_state_dir()
     workspace = rust_workspace_root()
     binary = rust_binary_path(workspace)
-    use_cargo = use_cfg.polymarket.rust_hotpath_use_cargo or not binary.exists()
+    use_cargo = use_cfg.polymarket.rust_hotpath_use_cargo or _rust_rebuild_required(workspace, binary)
     cmd = (
         ["cargo", "run", "--quiet", "--bin", "stonks-polymarket-hotpath", "--", "control", op]
         if use_cargo
@@ -55,3 +55,26 @@ def rust_control_call(
     if not text:
         return None
     return json.loads(text)
+
+
+def _rust_rebuild_required(workspace: Path, binary: Path) -> bool:
+    if not binary.exists():
+        return True
+    try:
+        binary_mtime = binary.stat().st_mtime
+    except OSError:
+        return True
+    for path in [workspace / "Cargo.toml", workspace / "Cargo.lock", workspace / "hotpath" / "Cargo.toml"]:
+        try:
+            if path.exists() and path.stat().st_mtime > binary_mtime:
+                return True
+        except OSError:
+            return True
+    src_dir = workspace / "hotpath" / "src"
+    for source in src_dir.rglob("*.rs"):
+        try:
+            if source.stat().st_mtime > binary_mtime:
+                return True
+        except OSError:
+            return True
+    return False

@@ -53,6 +53,8 @@ pub struct ControlConfig {
     #[serde(default)]
     pub block_sports: bool,
     #[serde(default)]
+    pub target_wallet_addresses: Vec<String>,
+    #[serde(default)]
     pub auto_trade_enabled: bool,
     #[serde(default = "default_auto_trade_min_score")]
     pub auto_trade_min_score: f64,
@@ -118,6 +120,7 @@ impl Default for ControlConfig {
             blocked_market_slugs: Vec::new(),
             crypto_only: false,
             block_sports: false,
+            target_wallet_addresses: Vec::new(),
             auto_trade_enabled: false,
             auto_trade_min_score: default_auto_trade_min_score(),
             auto_trade_min_target_wallets: default_auto_trade_min_wallets(),
@@ -279,6 +282,8 @@ pub struct WalletTarget {
     pub gross_volume: f64,
     pub win_rate: f64,
     pub closed_round_trips: usize,
+    #[serde(default)]
+    pub source: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -417,8 +422,8 @@ pub fn handle_control(op: &str, request: ControlRequest) -> Result<Value, String
         "paper_buy" => Ok(json!(paper_buy(&state_dir, &request.args)?)),
         "paper_sell" => Ok(json!(paper_sell(&state_dir, &request.args)?)),
         "wallets_import" => Ok(json!(wallets_import(&state_dir, &request.args)?)),
-        "wallets_rank" => Ok(json!(wallets_rank(&state_dir, &request.args)?)),
-        "wallet_targets" => Ok(json!(read_json_vec::<WalletTarget>(&wallet_targets_path(&state_dir))?)),
+        "wallets_rank" => Ok(json!(wallets_rank(&state_dir, &request.config, &request.args)?)),
+        "wallet_targets" => Ok(json!(wallet_targets_get(&state_dir, &request.config)?)),
         "wallet_signals" => Ok(json!(read_json_vec::<WalletMarketSignal>(&wallet_signals_path(&state_dir))?)),
         "journal" => Ok(json!(read_journal(&state_dir, arg_usize(&request.args, "limit").unwrap_or(100))?)),
         "runtime_status" => Ok(json!(load_runtime_status(&state_dir)?)),
@@ -860,7 +865,7 @@ fn wallets_import(state_dir: &Path, args: &Value) -> Result<WalletImportSummary,
     Ok(summary)
 }
 
-fn wallets_rank(state_dir: &Path, args: &Value) -> Result<Vec<WalletTarget>, String> {
+fn wallets_rank(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<Vec<WalletTarget>, String> {
     let summary: WalletImportSummary = read_json(&wallet_manifest_path(state_dir))?;
     let csv_path = arg_str(args, "csv_path").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(summary.source_path));
     let rows = read_csv_rows(&csv_path)?;
@@ -955,10 +960,12 @@ fn wallets_rank(state_dir: &Path, args: &Value) -> Result<Vec<WalletTarget>, Str
             gross_volume: round6(stats.gross_volume),
             win_rate: round6(win_rate),
             closed_round_trips: stats.closed_round_trips,
+            source: "ranked".to_string(),
         });
     }
     targets.sort_by(|a, b| b.realized_pnl.partial_cmp(&a.realized_pnl).unwrap_or(std::cmp::Ordering::Equal));
     targets.truncate(limit);
+    merge_configured_wallet_targets(cfg, &mut targets);
     write_json(&wallet_targets_path(state_dir), &targets)?;
     let selected: HashSet<String> = targets.iter().map(|t| t.wallet.clone()).collect();
     let mut signals = Vec::new();
@@ -988,6 +995,36 @@ fn wallets_rank(state_dir: &Path, args: &Value) -> Result<Vec<WalletTarget>, Str
     signals.sort_by(|a, b| b.wallet_count.cmp(&a.wallet_count).then(b.trade_count.cmp(&a.trade_count)));
     write_json(&wallet_signals_path(state_dir), &signals)?;
     Ok(targets)
+}
+
+fn wallet_targets_get(state_dir: &Path, cfg: &ControlConfig) -> Result<Vec<WalletTarget>, String> {
+    let mut targets = read_json_vec::<WalletTarget>(&wallet_targets_path(state_dir)).unwrap_or_default();
+    merge_configured_wallet_targets(cfg, &mut targets);
+    Ok(targets)
+}
+
+fn merge_configured_wallet_targets(cfg: &ControlConfig, targets: &mut Vec<WalletTarget>) {
+    let mut seen: HashSet<String> = targets.iter().map(|target| target.wallet.to_ascii_lowercase()).collect();
+    for wallet in &cfg.target_wallet_addresses {
+        let normalized = normalize_wallet(wallet);
+        if normalized.is_empty() || seen.contains(&normalized) {
+            continue;
+        }
+        targets.push(WalletTarget {
+            wallet: normalized.clone(),
+            trades: 0,
+            realized_pnl: 0.0,
+            gross_volume: 0.0,
+            win_rate: 0.0,
+            closed_round_trips: 0,
+            source: "configured".to_string(),
+        });
+        seen.insert(normalized);
+    }
+}
+
+fn normalize_wallet(wallet: &str) -> String {
+    wallet.trim().to_ascii_lowercase()
 }
 
 fn runtime_once(state_dir: &Path, cfg: &ControlConfig, args: &Value) -> Result<Value, String> {
@@ -2541,6 +2578,7 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
         wallets_import(&state_dir, &json!({ "csv_path": csv_path })).expect("import");
         let targets = wallets_rank(
             &state_dir,
+            &ControlConfig::default(),
             &json!({ "min_trades": 2, "min_win_rate": 0.60, "limit": 10 }),
         )
         .expect("rank");
@@ -2552,6 +2590,42 @@ timestamp,market_id,maker,taker,nonusdc_side,maker_direction,taker_direction,pri
         assert_eq!(signals.len(), 1);
         assert_eq!(signals[0].market_id, "1");
         assert_eq!(signals[0].wallet_count, 1);
+    }
+
+    #[test]
+    fn configured_wallet_targets_are_merged_without_overwriting_ranked_wallets() {
+        let state_dir = temp_state_dir("wallet-config-targets");
+        write_json(
+            &wallet_targets_path(&state_dir),
+            &vec![WalletTarget {
+                wallet: "0xranked".to_string(),
+                trades: 100,
+                realized_pnl: 42.0,
+                gross_volume: 1_000.0,
+                win_rate: 0.75,
+                closed_round_trips: 20,
+                source: "ranked".to_string(),
+            }],
+        )
+        .expect("write targets");
+
+        let targets = wallet_targets_get(
+            &state_dir,
+            &ControlConfig {
+                target_wallet_addresses: vec![
+                    "0xRanked".to_string(),
+                    "0x6e1d5040d0ac73709b0621f620d2a60b80d2d0f".to_string(),
+                ],
+                ..ControlConfig::default()
+            },
+        )
+        .expect("targets");
+
+        assert_eq!(targets.len(), 2);
+        assert!(targets.iter().any(|target| target.wallet == "0xranked" && target.source == "ranked"));
+        assert!(targets.iter().any(|target| {
+            target.wallet == "0x6e1d5040d0ac73709b0621f620d2a60b80d2d0f" && target.source == "configured"
+        }));
     }
 
     #[test]

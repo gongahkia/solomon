@@ -1052,6 +1052,7 @@ def polymarket_wallets_rank(
         table.add_column("Win Rate", justify="right")
         table.add_column("Closed RT", justify="right")
         table.add_column("Gross Vol", justify="right")
+        table.add_column("Source")
         for row in rows:
             table.add_row(
                 str(row.get("wallet") or "-"),
@@ -1060,6 +1061,7 @@ def polymarket_wallets_rank(
                 f"{float(row.get('win_rate') or 0) * 100:.1f}%",
                 str(int(row.get("closed_round_trips") or 0)),
                 f"${float(row.get('gross_volume') or 0):,.2f}",
+                str(row.get("source") or "-"),
             )
         Console().print(table)
     except Exception as e:

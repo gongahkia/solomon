@@ -73,6 +73,10 @@ impl DaemonState {
         self.market_cache = market_cache;
         self.order_manager = order_manager;
     }
+
+    pub fn into_parts(self) -> (MarketStateCache, OrderManager) {
+        (self.market_cache, self.order_manager)
+    }
 }
 
 pub fn parse_side(raw: &str) -> Result<ExecutionSide, String> {

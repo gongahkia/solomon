@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from stonks_cli.config import AppConfig, PolymarketConfig
+from stonks_cli.polymarket.models import LiveOrderRecord
 from stonks_cli.polymarket.rust_bridge import RustHotPathSession
 
 
@@ -75,3 +76,27 @@ def test_rust_bridge_parses_stale_order_ids():
     order_ids = bridge.stale_orders(max_age_s=30, now_s=100)
 
     assert order_ids == ["o1", "o2"]
+
+
+def test_rust_bridge_syncs_order_record():
+    bridge = _Bridge()
+
+    bridge.sync_order_record(
+        LiveOrderRecord(
+            order_id="order-1",
+            token_id="YES1",
+            market_id="m1",
+            slug="btc-higher",
+            outcome="YES",
+            side="BUY",
+            price=0.58,
+            shares=12.0,
+            status="OPEN",
+            created_at="2026-04-24T00:00:00Z",
+            updated_at="2026-04-24T00:00:05Z",
+            remaining_shares=9.0,
+            filled_shares=3.0,
+        )
+    )
+
+    assert any(line.startswith("SYNCORDER id=order-1 token=YES1 market=m1 side=BUY price=0.58") for line in bridge.lines)

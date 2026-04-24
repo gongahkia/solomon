@@ -9,6 +9,8 @@ from stonks_cli.config import AppConfig, PolymarketConfig
 from stonks_cli.polymarket.execution import (
     ExecutionOrder,
     LiveExecutor,
+    _fetch_live_open_orders,
+    _normalize_open_orders_payload,
     _cancel_live_order,
     _extract_live_order_id,
     validate_execution_order,
@@ -162,3 +164,75 @@ def test_live_executor_uses_rust_hotpath_guard(monkeypatch, tmp_path):
     assert ("stale_orders", cfg.polymarket.live_order_max_age_seconds) in rust.calls
     assert any(name == "guard_order" for name, _ in rust.calls)
     assert any(name == "register_order" for name, _ in rust.calls)
+
+
+def test_fetch_live_open_orders_supports_common_payload_shapes():
+    class _ClientA:
+        def get_open_orders(self):
+            return [{"id": "one"}]
+
+    class _ClientB:
+        def get_orders(self, *, status):
+            assert status == "OPEN"
+            return {"orders": [{"id": "two"}]}
+
+    assert _fetch_live_open_orders(_ClientA()) == [{"id": "one"}]
+    assert _fetch_live_open_orders(_ClientB()) == [{"id": "two"}]
+    assert _normalize_open_orders_payload({"items": [{"id": "three"}]}) == [{"id": "three"}]
+
+
+def test_live_executor_syncs_open_orders_before_stale_cancel(monkeypatch, tmp_path):
+    cfg = AppConfig(polymarket=PolymarketConfig(enabled=True, paper=False, rust_hotpath_enabled=True))
+    from stonks_cli.polymarket import lifecycle
+
+    monkeypatch.setattr(lifecycle, "default_state_dir", lambda: tmp_path)
+
+    class _Rust:
+        def __init__(self):
+            self.synced: list[str] = []
+            self.cancel_checks: list[int] = []
+            self.cancel_updates: list[str] = []
+
+        def stale_orders(self, *, max_age_s: int):
+            self.cancel_checks.append(max_age_s)
+            return ["order-1"]
+
+        def sync_order_record(self, record):
+            self.synced.append(record.order_id)
+            return {"order_id": record.order_id}
+
+        def apply_fill(self, *, order_id: str, **kwargs):
+            self.cancel_updates.append(order_id)
+            return {"order_id": order_id}
+
+    rust = _Rust()
+    monkeypatch.setattr("stonks_cli.polymarket.execution.rust_session", lambda cfg: rust)
+
+    class _Client:
+        def get_open_orders(self):
+            return [
+                {
+                    "id": "order-1",
+                    "asset_id": "YES1",
+                    "market": "m1",
+                    "side": "BUY",
+                    "price": "0.58",
+                    "original_size": "12",
+                    "size_matched": "3",
+                    "status": "OPEN",
+                    "timestamp": "2026-04-24T00:00:05Z",
+                }
+            ]
+
+        def cancel_order(self, *, order_id):
+            return {"cancelled": order_id}
+
+    client = _Client()
+    monkeypatch.setattr(LiveExecutor, "_build_client", lambda self: client)
+
+    executor = LiveExecutor(cfg)
+    actions = executor.cancel_stale_orders()
+
+    assert rust.synced == ["order-1"]
+    assert rust.cancel_updates == ["order-1"]
+    assert actions[0]["order_id"] == "order-1"

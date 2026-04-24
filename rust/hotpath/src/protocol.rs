@@ -34,6 +34,7 @@ pub fn handle_command(state: &mut DaemonState, line: &str) -> String {
         "RESOLVE" => handle_resolve(state, &kv),
         "GUARD" => handle_guard(state, &kv),
         "ORDER" => handle_order(state, &kv),
+        "SYNCORDER" => handle_sync_order(state, &kv),
         "FILL" => handle_fill(state, &kv),
         "TRADE" => handle_trade(state, &kv),
         "STALE" => handle_stale(state, &kv),
@@ -183,6 +184,27 @@ fn handle_fill(state: &mut DaemonState, kv: &BTreeMap<String, String>) -> Result
         )),
         None => Err("unknown order".to_string()),
     }
+}
+
+fn handle_sync_order(state: &mut DaemonState, kv: &BTreeMap<String, String>) -> Result<String, String> {
+    let record = crate::orders::LiveOrderRecord {
+        order_id: required(kv, "id")?,
+        token_id: required(kv, "token")?,
+        market_id: required(kv, "market")?,
+        side: parse_side(&required(kv, "side")?)?,
+        price: required_f64(kv, "price")?,
+        shares: required_f64(kv, "shares")?,
+        status: required(kv, "status")?,
+        created_at_s: required_u64(kv, "created")?,
+        updated_at_s: required_u64(kv, "updated")?,
+        remaining_shares: required_f64(kv, "remaining")?,
+        filled_shares: required_f64(kv, "filled")?,
+    };
+    let synced = state.sync_order(record);
+    Ok(format!(
+        "OK order_id={} status={} remaining={}",
+        synced.order_id, synced.status, synced.remaining_shares
+    ))
 }
 
 fn handle_trade(state: &mut DaemonState, kv: &BTreeMap<String, String>) -> Result<String, String> {
@@ -368,5 +390,16 @@ mod tests {
         let trade = handle_command(&mut state, "TRADE id=o1 matched=4 status=MATCHED now=105");
         assert!(trade.contains("filled=4"));
         assert!(trade.contains("remaining=6"));
+    }
+
+    #[test]
+    fn protocol_can_sync_order_record() {
+        let mut state = DaemonState::default();
+        let result = handle_command(
+            &mut state,
+            "SYNCORDER id=o1 token=YES1 market=m1 side=BUY price=0.58 shares=10 status=OPEN created=100 updated=101 remaining=7 filled=3",
+        );
+        assert!(result.contains("order_id=o1"));
+        assert!(result.contains("remaining=7"));
     }
 }

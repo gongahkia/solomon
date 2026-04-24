@@ -107,6 +107,8 @@ class PolymarketConfig(BaseModel):
     max_daily_loss: float = Field(default=0.0, ge=0.0)
     max_consecutive_live_errors: int = Field(default=3, ge=1, le=1000)
     max_consecutive_stream_errors: int = Field(default=5, ge=1, le=1000)
+    live_require_armed_env: bool = True
+    live_armed_env: str = Field(default="STONKS_CLI_POLYMARKET_LIVE_ARMED")
     rust_hotpath_enabled: bool = False
     rust_hotpath_use_cargo: bool = False
 

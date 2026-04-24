@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -89,6 +90,8 @@ def evaluate_trade_guards(cfg: AppConfig, account: PaperAccount, proposal: Trade
     halt_reason = active_halt_reason(state)
     if halt_reason:
         reasons.append(f"halted:{halt_reason}")
+    if not cfg.polymarket.paper and cfg.polymarket.live_require_armed_env and not live_trading_armed(cfg):
+        reasons.append("live_trading_not_armed")
     if cfg.polymarket.max_daily_loss > 0 and account.realized_pnl <= -cfg.polymarket.max_daily_loss:
         reasons.append("max_daily_loss_reached")
     if cfg.polymarket.max_market_notional > 0:
@@ -130,6 +133,11 @@ def clear_error_counters() -> GuardState:
     state = replace_state(load_guard_state(), live_error_count=0, stream_error_count=0)
     save_guard_state(state)
     return state
+
+
+def live_trading_armed(cfg: AppConfig) -> bool:
+    raw = os.getenv(cfg.polymarket.live_armed_env or "STONKS_CLI_POLYMARKET_LIVE_ARMED", "").strip().lower()
+    return raw in {"1", "true", "yes", "armed"}
 
 
 def replace_state(state: GuardState, **updates) -> GuardState:

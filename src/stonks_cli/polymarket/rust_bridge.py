@@ -8,6 +8,7 @@ from time import time
 from typing import Any
 
 from stonks_cli.config import AppConfig
+from stonks_cli.polymarket.models import LiveOrderRecord
 
 
 class RustHotPathSession:
@@ -223,6 +224,26 @@ class RustHotPathSession:
             return []
         return [item for item in order_ids.split(",") if item]
 
+    def sync_order_record(self, record: LiveOrderRecord) -> dict[str, str]:
+        return self._command(
+            " ".join(
+                [
+                    "SYNCORDER",
+                    f"id={record.order_id}",
+                    f"token={record.token_id}",
+                    f"market={record.market_id}",
+                    f"side={record.side}",
+                    f"price={record.price}",
+                    f"shares={record.shares}",
+                    f"status={record.status}",
+                    f"created={_iso_to_epoch_seconds(record.created_at)}",
+                    f"updated={_iso_to_epoch_seconds(record.updated_at)}",
+                    f"remaining={record.remaining_shares}",
+                    f"filled={record.filled_shares}",
+                ]
+            )
+        )
+
     def resolve_market(self, *, token_id: str, winner_token_id: str | None = None, outcome: str | None = None) -> None:
         parts = ["RESOLVE", f"token={token_id}"]
         if winner_token_id is not None:
@@ -368,6 +389,16 @@ def _timestamp_to_epoch_seconds(event: dict[str, Any]) -> int:
             parsed = parsed.replace(tzinfo=UTC)
         return int(parsed.timestamp())
     return int(time())
+
+
+def _iso_to_epoch_seconds(raw: str) -> int:
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return int(time())
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return int(parsed.timestamp())
 
 
 def _best_price(raw_levels: object, *, side: str) -> float | None:

@@ -81,6 +81,7 @@ class LiveExecutor:
         return client
 
     def cancel_stale_orders(self) -> list[dict[str, object]]:
+        self.sync_open_orders()
         if self._rust is not None:
             stale_ids = self._rust.stale_orders(max_age_s=self._cfg.polymarket.live_order_max_age_seconds)
             actions = [record for record in self._order_manager.records() if record.order_id in set(stale_ids)]
@@ -110,6 +111,27 @@ class LiveExecutor:
             append_journal("live_stale_cancel", result=result)
             results.append(result)
         return results
+
+    def sync_open_orders(self) -> list[dict[str, object]]:
+        client = self._build_client()
+        payload = _fetch_live_open_orders(client)
+        synced = self._order_manager.sync_open_orders(payload)
+        if self._rust is not None:
+            for record in synced:
+                self._rust.sync_order_record(record)
+        result = [
+            {
+                "order_id": record.order_id,
+                "token_id": record.token_id,
+                "status": record.status,
+                "remaining_shares": record.remaining_shares,
+                "filled_shares": record.filled_shares,
+            }
+            for record in synced
+        ]
+        if result:
+            append_journal("live_open_orders_synced", orders=result)
+        return result
 
     def execute(self, order: ExecutionOrder) -> dict[str, object]:
         validate_execution_order(order)
@@ -222,6 +244,39 @@ def _cancel_live_order(client: object, order_id: str) -> object:
         except TypeError:
             continue
     raise AttributeError("live client does not expose a supported cancel method")
+
+
+def _fetch_live_open_orders(client: object) -> list[dict[str, object]]:
+    attempts = (
+        ("get_open_orders", {}),
+        ("get_orders", {"params": {"status": "OPEN"}}),
+        ("get_orders", {"status": "OPEN"}),
+        ("open_orders", {}),
+        ("list_open_orders", {}),
+    )
+    for method_name, kwargs in attempts:
+        method = getattr(client, method_name, None)
+        if method is None:
+            continue
+        try:
+            payload = method(**kwargs)
+        except TypeError:
+            continue
+        normalized = _normalize_open_orders_payload(payload)
+        if normalized is not None:
+            return normalized
+    return []
+
+
+def _normalize_open_orders_payload(payload: object) -> list[dict[str, object]] | None:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        for key in ("orders", "data", "items"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+    return None
 
 
 def _as_bool_string(value: str | None, *, default: bool) -> bool:

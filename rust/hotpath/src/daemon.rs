@@ -38,6 +38,14 @@ impl DaemonState {
         Ok(self.order_manager.register_submitted(&request, now_s))
     }
 
+    pub fn sync_order(&mut self, record: LiveOrderRecord) -> &LiveOrderRecord {
+        let order_id = record.order_id.clone();
+        self.order_manager.insert_record(record);
+        self.order_manager
+            .get(&order_id)
+            .expect("record inserted")
+    }
+
     pub fn apply_order_event(&mut self, event: OrderEvent, now_s: u64) -> Option<&LiveOrderRecord> {
         self.order_manager.apply_event(event, now_s)
     }

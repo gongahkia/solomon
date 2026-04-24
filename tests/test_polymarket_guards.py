@@ -6,6 +6,7 @@ from stonks_cli.polymarket.guards import (
     clear_error_counters,
     evaluate_trade_guards,
     halt_trading,
+    live_trading_armed,
     load_guard_state,
     record_live_error,
     record_stream_error,
@@ -139,3 +140,21 @@ def test_stream_error_threshold_halts_and_clear_resets_counters(monkeypatch, tmp
     cleared = clear_error_counters()
     assert cleared.live_error_count == 0
     assert cleared.stream_error_count == 0
+
+
+def test_live_trading_arm_flag_blocks_unarmed_live_trades(monkeypatch, tmp_path):
+    from stonks_cli.polymarket import guards, lifecycle
+
+    monkeypatch.setattr(guards, "default_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(lifecycle, "default_state_dir", lambda: tmp_path)
+
+    cfg = AppConfig(polymarket=PolymarketConfig(enabled=True, paper=False, live_require_armed_env=True))
+
+    assert live_trading_armed(cfg) is False
+
+    reasons = evaluate_trade_guards(cfg, PaperAccount(cash=100.0, realized_pnl=0.0, positions=[], trades=[]), _proposal())
+
+    assert "live_trading_not_armed" in reasons
+
+    monkeypatch.setenv("STONKS_CLI_POLYMARKET_LIVE_ARMED", "1")
+    assert live_trading_armed(cfg) is True

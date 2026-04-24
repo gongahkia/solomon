@@ -213,6 +213,14 @@ To enable Rust-backed live hot-path handling from the Python control plane, set:
 
 With `rust_hotpath_enabled=true`, Python still owns the CLI, orchestration, journals, and strategy/risk policy, while Rust owns the low-latency market snapshot cache and open-order hot path.
 
+For live auto-trading, the control plane now also requires an explicit arm flag by default:
+
+```console
+$ export STONKS_CLI_POLYMARKET_LIVE_ARMED=1
+```
+
+That gate only affects live auto-trading. It is there to prevent accidental real-money execution when `paper=false` is set but the operator has not intentionally armed the bot.
+
 3. `stonks-cli` also includes an optional [Model Context Protocol](https://modelcontextprotocol.io) server that allows for [AI Agents](https://modelcontextprotocol.io/docs/agents/) to directly interact with `stonks-cli` tooling.
 
 4. Run the below to install `stonks-cli`'s MCP functionality.

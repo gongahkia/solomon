@@ -83,22 +83,10 @@ def _mouse_event(key: int) -> str | None:
     right_events = (
         "BUTTON3_CLICKED",
     )
-    wheel_up_events = (
-        "BUTTON4_PRESSED",
-        "BUTTON4_CLICKED",
-    )
-    wheel_down_events = (
-        "BUTTON5_PRESSED",
-        "BUTTON5_CLICKED",
-    )
     if any(button_state & getattr(curses, event_name, 0) for event_name in left_events):
         return "left"
     if any(button_state & getattr(curses, event_name, 0) for event_name in right_events):
         return "right"
-    if any(button_state & getattr(curses, event_name, 0) for event_name in wheel_up_events):
-        return "wheel_up"
-    if any(button_state & getattr(curses, event_name, 0) for event_name in wheel_down_events):
-        return "wheel_down"
     return None
 
 
@@ -114,9 +102,9 @@ def _grade_footer(selected_grade: int, voting_enabled: bool) -> str:
     for index, label in enumerate(GRADE_LABELS):
         key_label = str(index + 1)
         if index == selected_grade:
-            key_label += "/Click"
+            key_label += "/Left"
         grade_parts.append(f"[{key_label}] {label}")
-    footer = "  ".join(grade_parts) + "  [Wheel] Change  [q] Quit session"
+    footer = "  ".join(grade_parts) + "  [Right Click] Change  [q] Quit session"
     if voting_enabled:
         footer += "  [+] Upvote  [-] Downvote  [0] Clear vote"
     return footer
@@ -388,12 +376,9 @@ def _draw_card_back(stdscr, set_name: str, card: dict, index: int, total_cards: 
         _render_native_image_requests(stdscr, image_requests, config)
         key = stdscr.getch()
         mouse_event = _mouse_event(key)
-        if mouse_event in ("left", "right"):
+        if mouse_event == "left":
             return ord(str(selected_grade + 1))
-        if mouse_event == "wheel_up":
-            selected_grade = (selected_grade - 1) % len(GRADE_LABELS)
-            continue
-        if mouse_event == "wheel_down":
+        if mouse_event == "right":
             selected_grade = (selected_grade + 1) % len(GRADE_LABELS)
             continue
         if voting_enabled and key == ord("+"):

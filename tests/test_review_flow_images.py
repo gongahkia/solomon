@@ -54,14 +54,10 @@ class ReviewFlowImageTests(unittest.TestCase):
         with patch("review_flow.curses.getmouse", return_value=(0, 10, 5, 0, review_flow.curses.BUTTON3_CLICKED)):
             self.assertEqual(review_flow._mouse_button(review_flow.curses.KEY_MOUSE), "right")
 
-    @unittest.skipIf(not getattr(review_flow.curses, "BUTTON5_PRESSED", 0), "curses wheel constants unavailable")
-    def test_mouse_event_recognizes_wheel_down(self):
-        with patch("review_flow.curses.getmouse", return_value=(0, 10, 5, 0, review_flow.curses.BUTTON5_PRESSED)):
-            self.assertEqual(review_flow._mouse_event(review_flow.curses.KEY_MOUSE), "wheel_down")
-
     def test_grade_footer_combines_click_with_selected_grade(self):
         footer = review_flow._grade_footer(2, False)
-        self.assertIn("[3/Click] Good", footer)
+        self.assertIn("[3/Left] Good", footer)
+        self.assertIn("[Right Click] Change", footer)
         self.assertNotIn("[Click] Good", footer)
 
 

@@ -45,10 +45,6 @@ def init_mouse():
     for event_name in (
         "BUTTON1_CLICKED",
         "BUTTON3_CLICKED",
-        "BUTTON4_PRESSED",
-        "BUTTON4_CLICKED",
-        "BUTTON5_PRESSED",
-        "BUTTON5_CLICKED",
     ):
         mouse_events |= getattr(curses, event_name, 0)
     if not mouse_events:

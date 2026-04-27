@@ -40,9 +40,31 @@ def init_colors():
         curses.init_pair(14, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
         curses.init_pair(15, curses.COLOR_CYAN, curses.COLOR_BLACK)
 
+def init_mouse():
+    mouse_events = 0
+    for event_name in (
+        "BUTTON1_CLICKED",
+        "BUTTON3_CLICKED",
+        "BUTTON4_PRESSED",
+        "BUTTON4_CLICKED",
+        "BUTTON5_PRESSED",
+        "BUTTON5_CLICKED",
+    ):
+        mouse_events |= getattr(curses, event_name, 0)
+    if not mouse_events:
+        return
+    try:
+        curses.mousemask(mouse_events)
+        if hasattr(curses, "mouseinterval"):
+            curses.mouseinterval(200)
+    except curses.error:
+        pass
+
+
 def run_app(main_fn):
     def _wrapper(stdscr):
         init_colors()
+        init_mouse()
         curses.curs_set(0)
         clear_native_images()
         main_fn(stdscr)

@@ -87,6 +87,52 @@ class TUISmokeTests(unittest.TestCase):
         self.assertEqual(updated_cards[0]["good_count"], 1)
         self.assertEqual(len(history.load_history(deck_name="study.sko", set_name="set_a")), 1)
 
+    @unittest.skipIf(not getattr(review_flow.curses, "BUTTON1_CLICKED", 0), "curses mouse constants unavailable")
+    def test_render_review_session_advances_with_mouse_clicks(self):
+        cards = [new_card("Question", "Answer")]
+        screen = FakeScreen([10, review_flow.curses.KEY_MOUSE, review_flow.curses.KEY_MOUSE, 10])
+        with patch("curses.color_pair", return_value=0), patch(
+            "review_flow.curses.getmouse",
+            return_value=(0, 10, 5, 0, review_flow.curses.BUTTON1_CLICKED),
+        ):
+            _, updated_cards = review_flow.render_review_session(
+                screen,
+                "study.sko",
+                "set_a",
+                cards,
+                config.load_config(),
+            )
+        self.assertEqual(updated_cards[0]["good_count"], 1)
+
+    @unittest.skipIf(not getattr(review_flow.curses, "BUTTON5_PRESSED", 0), "curses wheel constants unavailable")
+    def test_render_review_session_wheel_changes_mouse_grade(self):
+        cards = [new_card("Question", "Answer")]
+        screen = FakeScreen(
+            [
+                10,
+                review_flow.curses.KEY_MOUSE,
+                review_flow.curses.KEY_MOUSE,
+                review_flow.curses.KEY_MOUSE,
+                10,
+            ]
+        )
+        with patch("curses.color_pair", return_value=0), patch(
+            "review_flow.curses.getmouse",
+            side_effect=[
+                (0, 10, 5, 0, review_flow.curses.BUTTON1_CLICKED),
+                (0, 10, 5, 0, review_flow.curses.BUTTON5_PRESSED),
+                (0, 10, 5, 0, review_flow.curses.BUTTON1_CLICKED),
+            ],
+        ):
+            _, updated_cards = review_flow.render_review_session(
+                screen,
+                "study.sko",
+                "set_a",
+                cards,
+                config.load_config(),
+            )
+        self.assertEqual(updated_cards[0]["easy_count"], 1)
+
     def test_show_stats_screen_handles_navigation(self):
         card = new_card("Question", "Answer")
         history.log_review_event("study.sko", "set_a", card, dict(card), 2, "due")

@@ -44,6 +44,26 @@ class ReviewFlowImageTests(unittest.TestCase):
         with patch("review_flow.terminal_supports_graphics", return_value=True):
             self.assertFalse(review_flow._native_image_enabled({"tui": {"native_image_rendering": False}}))
 
+    @unittest.skipIf(not getattr(review_flow.curses, "BUTTON1_CLICKED", 0), "curses mouse constants unavailable")
+    def test_mouse_button_recognizes_left_click(self):
+        with patch("review_flow.curses.getmouse", return_value=(0, 10, 5, 0, review_flow.curses.BUTTON1_CLICKED)):
+            self.assertEqual(review_flow._mouse_button(review_flow.curses.KEY_MOUSE), "left")
+
+    @unittest.skipIf(not getattr(review_flow.curses, "BUTTON3_CLICKED", 0), "curses right mouse constants unavailable")
+    def test_mouse_button_recognizes_right_click(self):
+        with patch("review_flow.curses.getmouse", return_value=(0, 10, 5, 0, review_flow.curses.BUTTON3_CLICKED)):
+            self.assertEqual(review_flow._mouse_button(review_flow.curses.KEY_MOUSE), "right")
+
+    @unittest.skipIf(not getattr(review_flow.curses, "BUTTON5_PRESSED", 0), "curses wheel constants unavailable")
+    def test_mouse_event_recognizes_wheel_down(self):
+        with patch("review_flow.curses.getmouse", return_value=(0, 10, 5, 0, review_flow.curses.BUTTON5_PRESSED)):
+            self.assertEqual(review_flow._mouse_event(review_flow.curses.KEY_MOUSE), "wheel_down")
+
+    def test_grade_footer_combines_click_with_selected_grade(self):
+        footer = review_flow._grade_footer(2, False)
+        self.assertIn("[3/Click] Good", footer)
+        self.assertNotIn("[Click] Good", footer)
+
 
 if __name__ == "__main__":
     unittest.main()

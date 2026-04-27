@@ -66,6 +66,60 @@ def _draw_styled_lines(
 
 
 AUTO_SIZE_RE = re.compile(r"^Auto-size:\s*(\d+)x(\d+)\s*$")
+GRADE_LABELS = ("Again", "Hard", "Good", "Easy")
+
+
+def _mouse_event(key: int) -> str | None:
+    if key != curses.KEY_MOUSE:
+        return None
+    try:
+        _, _, _, _, button_state = curses.getmouse()
+    except curses.error:
+        return None
+
+    left_events = (
+        "BUTTON1_CLICKED",
+    )
+    right_events = (
+        "BUTTON3_CLICKED",
+    )
+    wheel_up_events = (
+        "BUTTON4_PRESSED",
+        "BUTTON4_CLICKED",
+    )
+    wheel_down_events = (
+        "BUTTON5_PRESSED",
+        "BUTTON5_CLICKED",
+    )
+    if any(button_state & getattr(curses, event_name, 0) for event_name in left_events):
+        return "left"
+    if any(button_state & getattr(curses, event_name, 0) for event_name in right_events):
+        return "right"
+    if any(button_state & getattr(curses, event_name, 0) for event_name in wheel_up_events):
+        return "wheel_up"
+    if any(button_state & getattr(curses, event_name, 0) for event_name in wheel_down_events):
+        return "wheel_down"
+    return None
+
+
+def _mouse_button(key: int) -> str | None:
+    event = _mouse_event(key)
+    if event in ("left", "right"):
+        return event
+    return None
+
+
+def _grade_footer(selected_grade: int, voting_enabled: bool) -> str:
+    grade_parts = []
+    for index, label in enumerate(GRADE_LABELS):
+        key_label = str(index + 1)
+        if index == selected_grade:
+            key_label += "/Click"
+        grade_parts.append(f"[{key_label}] {label}")
+    footer = "  ".join(grade_parts) + "  [Wheel] Change  [q] Quit session"
+    if voting_enabled:
+        footer += "  [+] Upvote  [-] Downvote  [0] Clear vote"
+    return footer
 
 
 def _parse_auto_size(line: str) -> tuple[int, int] | None:
@@ -226,19 +280,22 @@ def _draw_card_front(stdscr, set_name: str, card: dict, index: int, total_cards:
             end_row_exclusive=max_y - 2,
             default_style="default",
         )
-        footer = "[Space] Show answer  [q] Quit session"
+        footer = "[Space/Click] Show answer  [q] Quit session"
         if can_undo:
             footer += "  [u] Undo last"
         add_line(stdscr, max_y - 1, 0, footer, curses.color_pair(COLORS["muted"]))
         stdscr.refresh()
         _render_native_image_requests(stdscr, image_requests, config)
         key = stdscr.getch()
+        if _mouse_button(key) in ("left", "right"):
+            return ord(" ")
         if key in (ord(" "), 10, 13, ord("q"), ord("Q"), ord("u"), ord("U")):
             return key
 
 
 def _draw_card_back(stdscr, set_name: str, card: dict, index: int, total_cards: int, config: dict, session: dict) -> int:
     voting_enabled = bool(config.get("tui", {}).get("enable_card_voting", True))
+    selected_grade = 2
     while True:
         if _native_image_enabled(config):
             clear_native_images()
@@ -319,9 +376,7 @@ def _draw_card_back(stdscr, set_name: str, card: dict, index: int, total_cards: 
         tags = card.get("tags", [])
         if tags:
             add_line(stdscr, max_y - 3, 0, f"Tags: {', '.join(tags)}", curses.color_pair(COLORS["muted"]))
-        footer = "[1] Again  [2] Hard  [3] Good  [4] Easy  [q] Quit session"
-        if voting_enabled:
-            footer += "  [+] Upvote  [-] Downvote  [0] Clear vote"
+        footer = _grade_footer(selected_grade, voting_enabled)
         add_line(
             stdscr,
             max_y - 1,
@@ -332,6 +387,15 @@ def _draw_card_back(stdscr, set_name: str, card: dict, index: int, total_cards: 
         stdscr.refresh()
         _render_native_image_requests(stdscr, image_requests, config)
         key = stdscr.getch()
+        mouse_event = _mouse_event(key)
+        if mouse_event in ("left", "right"):
+            return ord(str(selected_grade + 1))
+        if mouse_event == "wheel_up":
+            selected_grade = (selected_grade - 1) % len(GRADE_LABELS)
+            continue
+        if mouse_event == "wheel_down":
+            selected_grade = (selected_grade + 1) % len(GRADE_LABELS)
+            continue
         if voting_enabled and key == ord("+"):
             set_vote(session, card, 1)
             continue

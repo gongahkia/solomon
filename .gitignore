@@ -17,3 +17,4 @@ reports/
 .cache/
 target/
 rust/target/
+CLAUDE.md

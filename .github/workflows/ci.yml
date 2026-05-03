@@ -1,10 +1,7 @@
 name: stonks-cli CI/CD on push
 
 on:
-  push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
+  workflow_dispatch:
 
 jobs:
   lint:

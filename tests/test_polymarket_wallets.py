@@ -1,14 +1,44 @@
 from __future__ import annotations
 
 import csv
+from pathlib import Path
 
 from stonks_cli.polymarket.wallets import (
+    detect_whale_trades,
     import_wallet_trades,
     load_wallet_import_summary,
     load_wallet_market_signals,
     load_wallet_targets,
     rank_wallets,
 )
+
+
+def test_detect_whale_trades_filters_by_notional(tmp_path: Path):
+    csv_path = tmp_path / "trades.csv"
+    csv_path.write_text(
+        "maker,market_id,nonusdc_side,maker_direction,price,token_amount,timestamp\n"
+        "0xaaa,m1,YES,BUY,0.4,30000,t1\n"
+        "0xbbb,m1,YES,SELL,0.42,500,t2\n"
+        "0xccc,m2,NO,BUY,0.1,50000,t3\n",
+        encoding="utf-8",
+    )
+    whales = detect_whale_trades(csv_path=csv_path, min_notional_usd=5000.0, limit=10)
+    notionals = sorted(w.notional for w in whales)
+    assert notionals == [5000.0, 12000.0]
+    assert all(w.notional >= 5000.0 for w in whales)
+
+
+def test_detect_whale_trades_filters_by_market(tmp_path: Path):
+    csv_path = tmp_path / "trades.csv"
+    csv_path.write_text(
+        "maker,market_id,nonusdc_side,maker_direction,price,token_amount\n"
+        "0xaaa,m1,YES,BUY,0.4,30000\n"
+        "0xccc,m2,NO,BUY,0.1,50000\n",
+        encoding="utf-8",
+    )
+    whales = detect_whale_trades(csv_path=csv_path, min_notional_usd=1000.0, limit=10, market_id="m2")
+    assert len(whales) == 1
+    assert whales[0].market_id == "m2"
 
 
 def _write_csv(path, rows):

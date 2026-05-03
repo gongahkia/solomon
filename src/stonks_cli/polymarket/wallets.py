@@ -353,6 +353,62 @@ def load_wallet_targets() -> list[WalletTarget]:
     return out
 
 
+@dataclass(frozen=True)
+class WhaleTrade:
+    wallet: str
+    market_id: str
+    side: str
+    direction: str
+    price: float
+    shares: float
+    notional: float
+    ts: str | None
+
+
+def detect_whale_trades(
+    *,
+    csv_path: Path | None = None,
+    min_notional_usd: float = 10000.0,
+    limit: int = 100,
+    market_id: str | None = None,
+) -> list[WhaleTrade]:
+    """Scan the imported trade CSV and surface single trades >= min_notional_usd.
+    Filter by market_id when provided. Sorted by notional desc."""
+    path = _resolve_source(csv_path)
+    rows_iter = _read_rows(path)
+    next(rows_iter) # consume fieldnames
+    whales: list[WhaleTrade] = []
+    for row in rows_iter:
+        wallet = str(row.get("maker") or "").strip().lower()
+        mid = str(row.get("market_id") or "").strip()
+        side = str(row.get("nonusdc_side") or "").strip()
+        direction = str(row.get("maker_direction") or "").strip().upper()
+        price = _safe_float(row.get("price"))
+        qty = _safe_float(row.get("token_amount"))
+        if not wallet or not mid or price is None or qty is None or qty <= 0 or price <= 0:
+            continue
+        if market_id is not None and mid != market_id:
+            continue
+        notional = price * qty
+        if notional < min_notional_usd:
+            continue
+        ts = row.get("timestamp") or row.get("ts") or row.get("created_at")
+        whales.append(
+            WhaleTrade(
+                wallet=wallet,
+                market_id=mid,
+                side=side,
+                direction=direction,
+                price=round(price, 6),
+                shares=round(qty, 6),
+                notional=round(notional, 2),
+                ts=str(ts) if ts else None,
+            )
+        )
+    whales.sort(key=lambda w: w.notional, reverse=True)
+    return whales[: max(0, limit)]
+
+
 def load_wallet_market_signals() -> list[WalletMarketSignal]:
     path = _wallet_market_stats_path()
     if not path.exists():

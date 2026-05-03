@@ -4,7 +4,43 @@ import json
 from datetime import UTC, datetime, timedelta
 
 from stonks_cli.polymarket.client import PolymarketClient
-from stonks_cli.polymarket.scanner import StructuralScanConfig, scan_markets
+from stonks_cli.polymarket.models import BookLevel, OrderBook
+from stonks_cli.polymarket.scanner import StructuralScanConfig, hurst_exponent, scan_markets, stoikov_microprice
+
+
+def test_hurst_classifies_mean_reverting_below_random_walk():
+    import random
+
+    random.seed(7)
+    mean_rev = [0.5 + (-1) ** i * 0.01 + random.gauss(0, 0.001) for i in range(80)]
+    trending = [0.5 + i * 0.001 + random.gauss(0, 0.001) for i in range(80)]
+    h_mr = hurst_exponent(mean_rev)
+    h_tr = hurst_exponent(trending)
+    assert h_mr is not None and h_tr is not None
+    assert h_mr < 0.5 < h_tr
+
+
+def test_hurst_returns_none_on_short_series():
+    assert hurst_exponent([0.5, 0.51]) is None
+
+
+def test_microprice_skewed_toward_thin_side():
+    book = OrderBook(
+        token_id="t",
+        bids=[BookLevel(price=0.40, size=100.0)],
+        asks=[BookLevel(price=0.42, size=10.0)],
+        midpoint=0.41,
+        best_bid=0.40,
+        best_ask=0.42,
+    )
+    mp = stoikov_microprice(book)
+    assert mp is not None
+    assert abs(mp - 0.4182) < 1e-3
+
+
+def test_microprice_returns_none_on_empty_book():
+    empty = OrderBook(token_id="t", bids=[], asks=[], midpoint=None, best_bid=None, best_ask=None)
+    assert stoikov_microprice(empty) is None
 
 
 class _Resp:

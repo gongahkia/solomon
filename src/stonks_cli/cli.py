@@ -34,10 +34,12 @@ from stonks_cli.commands import (
     do_history_list,
     do_history_show,
     do_insider,
-    do_jupiter_prices,
     do_news,
+    do_plugins_list,
     do_polymarket_book,
     do_polymarket_emergency_stop,
+    do_polymarket_guard_status,
+    do_polymarket_journal,
     do_polymarket_market_get,
     do_polymarket_markets_list,
     do_polymarket_paper_buy,
@@ -49,25 +51,22 @@ from stonks_cli.commands import (
     do_polymarket_replay_user,
     do_polymarket_research_list,
     do_polymarket_research_thesis,
-    do_polymarket_rust_ping,
-    do_polymarket_rust_replay,
-    do_polymarket_rust_status,
-    do_polymarket_rust_test,
-    do_polymarket_settle,
-    do_polymarket_guard_status,
     do_polymarket_runtime_halt,
     do_polymarket_runtime_loop,
     do_polymarket_runtime_once,
     do_polymarket_runtime_resume,
     do_polymarket_runtime_soak,
     do_polymarket_runtime_status,
+    do_polymarket_rust_ping,
+    do_polymarket_rust_replay,
+    do_polymarket_rust_status,
+    do_polymarket_rust_test,
     do_polymarket_scan,
-    do_polymarket_journal,
+    do_polymarket_settle,
     do_polymarket_wallet_market_signals,
     do_polymarket_wallet_targets,
     do_polymarket_wallets_import,
     do_polymarket_wallets_rank,
-    do_plugins_list,
     do_portfolio_add,
     do_portfolio_allocation,
     do_portfolio_history,
@@ -119,19 +118,20 @@ polymarket_research_app = typer.Typer()
 polymarket_rust_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
-app.add_typer(schedule_app, name="schedule")
 app.add_typer(data_app, name="data")
 app.add_typer(report_app, name="report")
 app.add_typer(history_app, name="history")
-app.add_typer(plugins_app, name="plugins")
-app.add_typer(watchlist_app, name="watchlist")
-app.add_typer(signals_app, name="signals")
-app.add_typer(portfolio_app, name="portfolio")
 app.add_typer(research_app, name="research")
-app.add_typer(paper_app, name="paper")
-app.add_typer(alert_app, name="alert")
-app.add_typer(dividend_app, name="dividend")
 app.add_typer(polymarket_app, name="polymarket")
+# legacy/dead-weight equity surface, hidden from --help but kept for tests
+app.add_typer(schedule_app, name="schedule", hidden=True)
+app.add_typer(plugins_app, name="plugins", hidden=True)
+app.add_typer(watchlist_app, name="watchlist", hidden=True)
+app.add_typer(signals_app, name="signals", hidden=True)
+app.add_typer(portfolio_app, name="portfolio", hidden=True)
+app.add_typer(paper_app, name="paper", hidden=True)
+app.add_typer(alert_app, name="alert", hidden=True)
+app.add_typer(dividend_app, name="dividend", hidden=True)
 polymarket_app.add_typer(polymarket_markets_app, name="markets")
 polymarket_app.add_typer(polymarket_runtime_app, name="runtime")
 polymarket_app.add_typer(polymarket_wallets_app, name="wallets")
@@ -196,7 +196,7 @@ def doctor() -> None:
         raise _exit_for_error(e)
 
 
-@app.command()
+@app.command(hidden=True)
 def quick(
     tickers: list[str] = typer.Argument(..., help="Ticker symbol(s) (e.g., AAPL MSFT GOOG)"),
     no_color: bool = typer.Option(False, "--no-color", help="Strip color formatting for piping"),
@@ -262,7 +262,7 @@ def quick(
         raise _exit_for_error(e)
 
 
-@app.command()
+@app.command(hidden=True)
 def chart(
     ticker: str = typer.Argument(..., help="Ticker symbol (e.g., AAPL)"),
     days: int = typer.Option(90, "--days", help="Number of days to display"),
@@ -281,7 +281,7 @@ def chart(
         raise _exit_for_error(e)
 
 
-@app.command("chart-compare")
+@app.command("chart-compare", hidden=True)
 def chart_compare(
     tickers: list[str] = typer.Argument(..., help="Ticker symbols to compare (e.g., AAPL MSFT GOOG)"),
     days: int = typer.Option(90, "--days", help="Number of days to display"),
@@ -293,7 +293,7 @@ def chart_compare(
         raise _exit_for_error(e)
 
 
-@app.command("chart-rsi")
+@app.command("chart-rsi", hidden=True)
 def chart_rsi(
     ticker: str = typer.Argument(..., help="Ticker symbol (e.g., AAPL)"),
     period: int = typer.Option(14, "--period", help="RSI period"),
@@ -306,7 +306,7 @@ def chart_rsi(
         raise _exit_for_error(e)
 
 
-@app.command()
+@app.command(hidden=True)
 def correlation(
     tickers: list[str] = typer.Argument(..., help="Ticker symbols (e.g., AAPL MSFT GOOG)"),
     days: int = typer.Option(252, "--days", help="Number of trading days for correlation calculation"),
@@ -353,7 +353,7 @@ def correlation(
         raise _exit_for_error(e)
 
 
-@app.command()
+@app.command(hidden=True)
 def sector(
     sector_name: str = typer.Argument(..., help="Sector name (e.g., Technology, Healthcare, Financials)"),
 ) -> None:
@@ -399,44 +399,7 @@ def sector(
         raise _exit_for_error(e)
 
 
-@app.command()
-def tui(
-    watchlist: str = typer.Option(None, "--watchlist", help="Start with specific watchlist"),
-    refresh: int = typer.Option(60, "--refresh", help="Refresh interval in seconds"),
-    view: str = typer.Option(
-        "dashboard", "--view", help="Default view (dashboard/watchlist/detail/portfolio/analysis/alerts/settings)"
-    ),
-) -> None:
-    """Launch full Textual TUI application."""
-    try:
-        from stonks_cli.tui.app import StonksApp
-
-        StonksApp(watchlist_name=watchlist, refresh_interval=refresh, default_view=view).run()
-    except ImportError:
-        Console().print("[red]textual not installed. Run: pip install stonks-cli[tui][/red]")
-        raise typer.Exit(1)
-    except Exception as e:
-        raise _exit_for_error(e)
-
-
-@app.command()
-def watch(
-    watchlist: str = typer.Option(None, "--watchlist", help="Start with specific watchlist"),
-    refresh: int = typer.Option(60, "--refresh", help="Refresh interval in seconds"),
-) -> None:
-    """Launch interactive watchlist TUI (alias for tui --view watchlist)."""
-    try:
-        from stonks_cli.tui.app import StonksApp
-
-        StonksApp(watchlist_name=watchlist, refresh_interval=refresh, default_view="watchlist").run()
-    except ImportError:
-        Console().print("[red]textual not installed. Run: pip install stonks-cli[tui][/red]")
-        raise typer.Exit(1)
-    except Exception as e:
-        raise _exit_for_error(e)
-
-
-@app.command()
+@app.command(hidden=True)
 def fundamentals(
     ticker: str = typer.Argument(..., help="Ticker symbol (e.g., AAPL)"),
     json_out: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -487,7 +450,7 @@ def fundamentals(
         raise _exit_for_error(e)
 
 
-@app.command()
+@app.command(hidden=True)
 def news(
     ticker: str = typer.Argument(..., help="Ticker symbol (e.g., AAPL)"),
     sentiment: bool = typer.Option(False, "--sentiment", help="Show only notable sentiment headlines"),
@@ -532,7 +495,7 @@ def news(
         raise _exit_for_error(e)
 
 
-@app.command()
+@app.command(hidden=True)
 def earnings(
     ticker: str = typer.Option(None, "--ticker", help="Show earnings history for specific ticker"),
     show_next: bool = typer.Option(False, "--next", help="Show only next upcoming earnings date"),
@@ -642,7 +605,7 @@ def earnings(
         raise _exit_for_error(e)
 
 
-@app.command()
+@app.command(hidden=True)
 def insider(
     ticker: str = typer.Argument(..., help="Ticker symbol (e.g., AAPL)"),
     days: int = typer.Option(90, "--days", help="Days to look back"),
@@ -963,6 +926,43 @@ def polymarket_research_list() -> None:
         raise _exit_for_error(e)
 
 
+@polymarket_app.command("run")
+def polymarket_run(
+    cycles: int = typer.Option(1, "--cycles", min=1, help="Number of runtime cycles"),
+    limit: int | None = typer.Option(None, "--limit", min=1, max=1000),
+    sleep_seconds: float | None = typer.Option(None, "--sleep-seconds", min=0.0),
+    market_messages: int = typer.Option(0, "--market-messages", min=0),
+    user_messages: int = typer.Option(0, "--user-messages", min=0),
+    soak: bool = typer.Option(False, "--soak", help="Deterministic soak using recorded events"),
+    market_events_path: Path | None = typer.Option(None, "--market-events-path", exists=True, readable=True),
+    user_events_path: Path | None = typer.Option(None, "--user-events-path", exists=True, readable=True),
+    batch_size: int = typer.Option(1, "--batch-size", min=1),
+) -> None:
+    """Unified Polymarket runtime entrypoint (replaces runtime once/loop/soak)."""
+    try:
+        if soak:
+            data = do_polymarket_runtime_soak(
+                limit=limit,
+                cycles=cycles,
+                market_events_path=market_events_path,
+                user_events_path=user_events_path,
+                batch_size=batch_size,
+            )
+        elif cycles == 1 and not market_messages and not user_messages and sleep_seconds is None:
+            data = do_polymarket_runtime_once(limit=limit)
+        else:
+            data = do_polymarket_runtime_loop(
+                limit=limit,
+                cycles=cycles,
+                sleep_seconds=sleep_seconds,
+                market_messages=market_messages,
+                user_messages=user_messages,
+            )
+        Console().print_json(json.dumps(data))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 @polymarket_runtime_app.command("status")
 def polymarket_runtime_status() -> None:
     """Show Polymarket runtime state."""
@@ -1042,9 +1042,71 @@ def polymarket_runtime_resume() -> None:
 @polymarket_app.command("journal")
 def polymarket_journal(
     limit: int = typer.Option(100, "--limit", min=1, max=1000),
+    by_signal: bool = typer.Option(False, "--by-signal", help="Aggregate paper trade realized PnL by signal source"),
+    tearsheet: bool = typer.Option(False, "--tearsheet", help="Show full quantstats-style metrics (Sortino, Calmar, profit factor, expectancy)"),
 ) -> None:
-    """Show the recent Polymarket runtime journal."""
+    """Show recent Polymarket runtime journal, or PnL grouped by signal source."""
     try:
+        if by_signal or tearsheet:
+            from stonks_cli.polymarket.paper import pnl_by_signal
+
+            data = pnl_by_signal()
+            rows = data.get("by_signal") or []
+            if tearsheet:
+                table = Table(title="Polymarket Tearsheet by Signal Source")
+                table.add_column("Signal")
+                table.add_column("PnL", justify="right")
+                table.add_column("RTs", justify="right")
+                table.add_column("Win%", justify="right")
+                table.add_column("Sharpe", justify="right")
+                table.add_column("Sortino", justify="right")
+                table.add_column("Calmar", justify="right")
+                table.add_column("MaxDD", justify="right")
+                table.add_column("PF", justify="right")
+                table.add_column("Expect", justify="right")
+                table.add_column("AvgWin", justify="right")
+                table.add_column("AvgLoss", justify="right")
+                for row in rows:
+                    table.add_row(
+                        str(row.get("signal") or "-"),
+                        f"${float(row.get('realized_pnl') or 0):,.2f}",
+                        str(int(row.get("round_trips") or 0)),
+                        f"{float(row.get('win_rate') or 0) * 100:.1f}%",
+                        f"{float(row.get('sharpe') or 0):.2f}",
+                        f"{float(row.get('sortino') or 0):.2f}",
+                        f"{float(row.get('calmar') or 0):.2f}",
+                        f"{float(row.get('max_drawdown') or 0) * 100:.1f}%",
+                        f"{float(row.get('profit_factor') or 0):.2f}",
+                        f"${float(row.get('expectancy') or 0):,.4f}",
+                        f"${float(row.get('avg_win') or 0):,.2f}",
+                        f"${float(row.get('avg_loss') or 0):,.2f}",
+                    )
+            else:
+                table = Table(title="Polymarket PnL by Signal Source")
+                table.add_column("Signal")
+                table.add_column("Realized PnL", justify="right")
+                table.add_column("RTs", justify="right")
+                table.add_column("Win%", justify="right")
+                table.add_column("Sharpe", justify="right")
+                table.add_column("MaxDD", justify="right")
+                table.add_column("Buy $", justify="right")
+                table.add_column("Sell $", justify="right")
+                table.add_column("Open $", justify="right")
+                for row in rows:
+                    table.add_row(
+                        str(row.get("signal") or "-"),
+                        f"${float(row.get('realized_pnl') or 0):,.2f}",
+                        str(int(row.get("round_trips") or 0)),
+                        f"{float(row.get('win_rate') or 0) * 100:.1f}%",
+                        f"{float(row.get('sharpe') or 0):.2f}",
+                        f"{float(row.get('max_drawdown') or 0) * 100:.1f}%",
+                        f"${float(row.get('buy_notional') or 0):,.2f}",
+                        f"${float(row.get('sell_notional') or 0):,.2f}",
+                        f"${float(row.get('open_notional') or 0):,.2f}",
+                    )
+            Console().print(table)
+            Console().print(f"[bold]Total realized:[/bold] ${float(data.get('total_realized_pnl') or 0):,.2f} | trades={int(data.get('trade_count') or 0)}")
+            return
         data = do_polymarket_journal(limit=limit)
         Console().print_json(json.dumps(data))
     except Exception as e:
@@ -1120,6 +1182,43 @@ def polymarket_wallets_rank(
                 str(int(row.get("closed_round_trips") or 0)),
                 f"${float(row.get('gross_volume') or 0):,.2f}",
                 str(row.get("source") or "-"),
+            )
+        Console().print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@polymarket_wallets_app.command("whales")
+def polymarket_wallets_whales(
+    csv_path: Path | None = typer.Option(None, "--csv-path", help="Override imported source path"),
+    min_notional: float = typer.Option(10000.0, "--min-notional", min=0.0),
+    limit: int = typer.Option(50, "--limit", min=1, max=1000),
+    market_id: str | None = typer.Option(None, "--market-id"),
+) -> None:
+    """List individual whale trades (notional >= --min-notional) from imported wallet CSV."""
+    try:
+        from stonks_cli.polymarket.wallets import detect_whale_trades
+
+        rows = detect_whale_trades(csv_path=csv_path, min_notional_usd=min_notional, limit=limit, market_id=market_id)
+        table = Table(title=f"Polymarket Whale Trades (>= ${min_notional:,.0f})")
+        table.add_column("Wallet")
+        table.add_column("Market")
+        table.add_column("Dir")
+        table.add_column("Side")
+        table.add_column("Px", justify="right")
+        table.add_column("Shares", justify="right")
+        table.add_column("Notional", justify="right")
+        table.add_column("TS")
+        for w in rows:
+            table.add_row(
+                w.wallet[:10] + "…",
+                w.market_id,
+                w.direction,
+                w.side,
+                f"{w.price:.4f}",
+                f"{w.shares:,.2f}",
+                f"${w.notional:,.0f}",
+                w.ts or "-",
             )
         Console().print(table)
     except Exception as e:
@@ -1428,7 +1527,7 @@ def analyze(
         raise _exit_for_error(e)
 
 
-@app.command()
+@app.command(hidden=True)
 def backtest(
     tickers: list[str] = typer.Argument(None),
     start: str | None = typer.Option(None, "--start", help="YYYY-MM-DD"),
@@ -1460,7 +1559,7 @@ def backtest(
         raise _exit_for_error(e)
 
 
-@app.command()
+@app.command(hidden=True)
 def bench(
     tickers: list[str] = typer.Argument(None),
     iterations: int = typer.Option(5, "--iterations", min=1, max=50),
@@ -1560,15 +1659,6 @@ def data_purge(older_than_days: int | None = typer.Option(None, "--older-than-da
         out = do_data_purge(older_than_days=older_than_days)
         Console().print(f"cache_dir: {out.get('cache_dir')}")
         Console().print(f"deleted: {out.get('deleted')}")
-    except Exception as e:
-        raise _exit_for_error(e)
-
-
-@data_app.command("jupiter-prices")
-def data_jupiter_prices(ids: list[str] = typer.Argument(..., help="Solana token mint address(es)")) -> None:
-    """Fetch token prices from Jupiter Price API v3."""
-    try:
-        Console().print(json.dumps(do_jupiter_prices(ids), indent=2))
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -2414,7 +2504,7 @@ def dividend_calendar(
         raise _exit_for_error(e)
 
 
-@app.command()
+@app.command(hidden=True)
 def snapshot(
     tickers: list[str] = typer.Argument(None, help="Optional ticker override list"),
     unusual_threshold: float = typer.Option(2.0, "--unusual-threshold", min=1.0),
@@ -2513,7 +2603,7 @@ def snapshot(
         raise _exit_for_error(e)
 
 
-@app.command()
+@app.command(hidden=True)
 def movers(
     sector: bool = typer.Option(False, "--sector", "-s", help="Show sector ETF performance instead of indices"),
 ) -> None:
@@ -2561,7 +2651,7 @@ def movers(
         raise _exit_for_error(e)
 
 
-@app.command()
+@app.command(hidden=True)
 def unusual(
     threshold: float = typer.Option(2.0, "--threshold", "-t", help="Volume multiple threshold (default 2.0x)"),
 ) -> None:

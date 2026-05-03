@@ -23,7 +23,7 @@ class ResearchEntry:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ResearchEntry":
+    def from_dict(cls, data: dict[str, Any]) -> ResearchEntry:
         return cls(
             entry_id=str(data.get("entry_id") or uuid.uuid4().hex[:12]),
             title=str(data.get("title") or ""),

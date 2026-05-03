@@ -2,7 +2,43 @@ from __future__ import annotations
 
 from stonks_cli.config import AppConfig, PolymarketConfig
 from stonks_cli.polymarket.models import PaperAccount, PaperPosition
-from stonks_cli.polymarket.risk import build_trade_proposal
+from stonks_cli.polymarket.risk import (
+    build_trade_proposal,
+    kelly_fraction_for_binary,
+    vol_target_fraction_for_binary,
+)
+
+
+def test_vol_target_higher_for_extreme_prices():
+    # at entry=0.5 vol is max => smaller fraction; at extreme price vol shrinks => larger fraction
+    f_mid = vol_target_fraction_for_binary(target_per_trade=0.05, entry_price=0.5)
+    f_low = vol_target_fraction_for_binary(target_per_trade=0.05, entry_price=0.10)
+    assert f_low > f_mid > 0
+
+
+def test_vol_target_zero_on_invalid_inputs():
+    assert vol_target_fraction_for_binary(target_per_trade=0.0, entry_price=0.5) == 0.0
+    assert vol_target_fraction_for_binary(target_per_trade=0.05, entry_price=0.0) == 0.0
+    assert vol_target_fraction_for_binary(target_per_trade=0.05, entry_price=1.0) == 0.0
+
+
+def test_kelly_binary_zero_at_parity():
+    assert kelly_fraction_for_binary(p_win=0.5, entry_price=0.5) == 0.0
+
+
+def test_kelly_binary_positive_when_edge():
+    f = kelly_fraction_for_binary(p_win=0.6, entry_price=0.5)
+    assert round(f, 4) == 0.2
+
+
+def test_kelly_binary_clamped_to_zero_when_negative_edge():
+    assert kelly_fraction_for_binary(p_win=0.4, entry_price=0.5) == 0.0
+
+
+def test_kelly_binary_invalid_inputs():
+    assert kelly_fraction_for_binary(p_win=0.0, entry_price=0.5) == 0.0
+    assert kelly_fraction_for_binary(p_win=0.5, entry_price=0.0) == 0.0
+    assert kelly_fraction_for_binary(p_win=0.5, entry_price=1.0) == 0.0
 
 
 class _Scan:

@@ -317,7 +317,8 @@ def run_runtime_cycle(
     settlement_actions = maybe_settle_resolved_positions(cfg, market_cache)
     reconcile_actions = maybe_reconcile_live_orders(cfg)
     exit_actions = maybe_auto_exit(cfg, scans)
-    trade_actions = maybe_auto_trade(cfg, scans)
+    trade_scans = apply_hurst_regime_filter(cfg, scans, market_cache)
+    trade_actions = maybe_auto_trade(cfg, trade_scans)
     actions = settlement_actions + reconcile_actions + exit_actions + trade_actions
     updated = RuntimeStatus(
         mode=status.mode,
@@ -477,3 +478,26 @@ def _apply_market_cache(scans: list[MarketScan], market_cache: MarketStateCache)
             )
         )
     return updated
+
+
+def apply_hurst_regime_filter(cfg: AppConfig, scans: list[MarketScan], market_cache: MarketStateCache | None) -> list[MarketScan]:
+    """Drop scans whose midpoint history shows trending (Hurst >= cfg.hurst_max)."""
+    if not cfg.polymarket.hurst_filter_enabled or market_cache is None:
+        return scans
+    from stonks_cli.polymarket.scanner import hurst_exponent
+
+    filtered: list[MarketScan] = []
+    for scan in scans:
+        if scan.token_id is None:
+            filtered.append(scan)
+            continue
+        history = market_cache.midpoint_history(scan.token_id)
+        h = hurst_exponent(history)
+        if h is None: # insufficient data — keep, can't reject
+            filtered.append(scan)
+            continue
+        if h < cfg.polymarket.hurst_max:
+            filtered.append(scan) # mean-reverting; keep
+            continue
+        append_journal("hurst_filter_rejected", token_id=scan.token_id, hurst=h, slug=scan.slug)
+    return filtered

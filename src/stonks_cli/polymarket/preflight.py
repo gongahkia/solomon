@@ -8,8 +8,8 @@ from typing import Any
 from stonks_cli.config import AppConfig
 from stonks_cli.paths import default_state_dir
 from stonks_cli.polymarket.auth import authenticated_clob_client, load_api_credentials_from_env, private_key_from_env
-from stonks_cli.polymarket.heartbeat import has_heartbeat_method
 from stonks_cli.polymarket.guards import active_halt_reason, live_trading_armed, load_guard_state
+from stonks_cli.polymarket.heartbeat import has_heartbeat_method
 from stonks_cli.polymarket.lifecycle import live_orders_path
 from stonks_cli.polymarket.rust_bridge import rust_session
 from stonks_cli.polymarket.storage import runtime_state_path
@@ -46,7 +46,14 @@ def run_preflight(cfg: AppConfig, *, deep_auth: bool = False) -> dict[str, Any]:
             detail=str(build_market_subscription(["sample-token"])),
         )
     )
-    checks.append(_dependency_check("websockets", "websockets"))
+    websocket_check = _dependency_check("websockets", "websockets")
+    if cfg.polymarket.paper and websocket_check.status == "fail":
+        websocket_check = PreflightCheck(
+            name=websocket_check.name,
+            status="warn",
+            detail=f"{websocket_check.detail}; live streaming unavailable in paper mode",
+        )
+    checks.append(websocket_check)
 
     if cfg.polymarket.paper:
         checks.append(PreflightCheck(name="mode", status="warn", detail="paper mode enabled; live execution disabled"))

@@ -137,8 +137,21 @@ def reduce_market_event(snapshot: LiveMarketSnapshot | None, event: dict[str, An
 
 
 class MarketStateCache:
+    HISTORY_CAP = 256 # bound midpoint history per token (~17min @ 4Hz)
+
     def __init__(self) -> None:
         self._snapshots: dict[str, LiveMarketSnapshot] = {}
+        self._midpoint_history: dict[str, list[float]] = {}
+
+    def _track_midpoint(self, token_id: str, midpoint: float | None) -> None:
+        if midpoint is None:
+            return
+        history = self._midpoint_history.setdefault(token_id, [])
+        if history and history[-1] == midpoint:
+            return
+        history.append(float(midpoint))
+        if len(history) > self.HISTORY_CAP:
+            del history[: len(history) - self.HISTORY_CAP]
 
     def apply(self, event: dict[str, Any]) -> LiveMarketSnapshot:
         token_id = _event_token_id(event)
@@ -146,14 +159,19 @@ class MarketStateCache:
             raise ValueError("market event is missing token identifier")
         snapshot = reduce_market_event(self._snapshots.get(token_id), event)
         self._snapshots[token_id] = snapshot
+        self._track_midpoint(token_id, snapshot.midpoint)
         return snapshot
 
     def upsert_snapshot(self, snapshot: LiveMarketSnapshot) -> LiveMarketSnapshot:
         self._snapshots[snapshot.token_id] = snapshot
+        self._track_midpoint(snapshot.token_id, snapshot.midpoint)
         return snapshot
 
     def get(self, token_id: str) -> LiveMarketSnapshot | None:
         return self._snapshots.get(token_id)
+
+    def midpoint_history(self, token_id: str) -> list[float]:
+        return list(self._midpoint_history.get(token_id, []))
 
     def as_dict(self) -> dict[str, LiveMarketSnapshot]:
         return dict(self._snapshots)

@@ -232,6 +232,167 @@ def paper_sell(*, token_id: str, shares: float, price: float, reason: str | None
     }
 
 
+def _classify_signal(reason: str | None) -> str:
+    if not reason:
+        return "manual" # no reason = cli paper buy
+    text = str(reason).lower()
+    if "wallets=" in text:
+        try:
+            after = text.split("wallets=", 1)[1]
+            n = int("".join(ch for ch in after if ch.isdigit()) or "0")
+            if n > 0:
+                return "wallet_copy"
+        except Exception:
+            pass
+    if "score=" in text:
+        return "scanner" # structural score only, no wallet vote
+    if text in {"target_hit", "stop_loss", "stale_position"}:
+        return "exit" # sell-side exit reason; bucket by buy reason via fifo
+    return "other"
+
+
+def _sharpe_and_drawdown(returns: list[float]) -> tuple[float, float]:
+    """Return (sharpe, max_drawdown_pct) from a list of per-trade returns.
+    sharpe is unannualized (per-trade); max DD on cumulative compounded equity."""
+    if not returns:
+        return 0.0, 0.0
+    n = len(returns)
+    mean = sum(returns) / n
+    if n > 1:
+        var = sum((r - mean) ** 2 for r in returns) / (n - 1)
+        std = var ** 0.5
+    else:
+        std = 0.0
+    sharpe = (mean / std) if std > 1e-12 else 0.0
+    equity = 1.0
+    peak = 1.0
+    max_dd = 0.0
+    for r in returns:
+        equity *= (1.0 + r)
+        peak = max(peak, equity)
+        if peak > 0:
+            dd = (equity - peak) / peak
+            if dd < max_dd:
+                max_dd = dd
+    return round(sharpe, 4), round(max_dd, 4)
+
+
+def _tearsheet_metrics(returns: list[float], pnls: list[float]) -> dict[str, float]:
+    """Quantstats-style metrics: sortino, calmar, profit_factor, expectancy."""
+    sharpe, max_dd = _sharpe_and_drawdown(returns)
+    n = len(returns)
+    if n == 0:
+        return {"sharpe": 0.0, "sortino": 0.0, "calmar": 0.0, "max_drawdown": 0.0,
+                "profit_factor": 0.0, "expectancy": 0.0, "avg_win": 0.0, "avg_loss": 0.0}
+    mean_ret = sum(returns) / n
+    downside = [r for r in returns if r < 0]
+    if downside:
+        d_var = sum(r * r for r in downside) / len(downside) # semi-deviation
+        d_std = d_var ** 0.5
+        sortino = (mean_ret / d_std) if d_std > 1e-12 else 0.0
+    else:
+        sortino = float("inf") if mean_ret > 0 else 0.0
+    calmar = (mean_ret / abs(max_dd)) if max_dd < -1e-12 else 0.0
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+    gross_win = sum(wins)
+    gross_loss = abs(sum(losses))
+    profit_factor = (gross_win / gross_loss) if gross_loss > 1e-12 else (float("inf") if gross_win > 0 else 0.0)
+    avg_win = (gross_win / len(wins)) if wins else 0.0
+    avg_loss = (-gross_loss / len(losses)) if losses else 0.0
+    win_rate = len(wins) / n
+    expectancy = win_rate * avg_win + (1.0 - win_rate) * avg_loss
+    def _safe(x: float) -> float:
+        return round(x, 4) if x not in (float("inf"), float("-inf")) else 0.0
+    return {
+        "sharpe": sharpe,
+        "sortino": _safe(sortino),
+        "calmar": _safe(calmar),
+        "max_drawdown": max_dd,
+        "profit_factor": _safe(profit_factor),
+        "expectancy": round(expectancy, 6),
+        "avg_win": round(avg_win, 6),
+        "avg_loss": round(avg_loss, 6),
+    }
+
+
+def pnl_by_signal() -> dict[str, object]:
+    """FIFO-match buys to sells per token, attribute realized pnl to the buy's signal."""
+    from collections import defaultdict, deque
+
+    account = load_paper_account()
+    trades = sorted(account.trades, key=lambda t: t.ts)
+    open_lots: dict[str, deque] = defaultdict(deque) # token_id -> deque[(qty, price, signal)]
+    realized: dict[str, dict[str, float]] = defaultdict(lambda: {"realized_pnl": 0.0, "round_trips": 0, "wins": 0, "buy_notional": 0.0, "sell_notional": 0.0})
+    returns_by_sig: dict[str, list[float]] = defaultdict(list)
+    pnls_by_sig: dict[str, list[float]] = defaultdict(list)
+
+    for tr in trades:
+        if tr.action.upper() == "BUY":
+            sig = _classify_signal(tr.reason)
+            open_lots[tr.token_id].append((tr.shares, tr.price, sig))
+            realized[sig]["buy_notional"] += tr.notional
+        elif tr.action.upper() == "SELL":
+            remaining = tr.shares
+            lots = open_lots[tr.token_id]
+            while remaining > 1e-12 and lots:
+                lot_qty, lot_price, lot_sig = lots[0]
+                matched = min(remaining, lot_qty)
+                pnl = (tr.price - lot_price) * matched
+                bucket = realized[lot_sig]
+                bucket["realized_pnl"] += pnl
+                bucket["round_trips"] += 1
+                bucket["sell_notional"] += matched * tr.price
+                if pnl > 0:
+                    bucket["wins"] += 1
+                cost = lot_price * matched
+                if cost > 0:
+                    returns_by_sig[lot_sig].append(pnl / cost)
+                pnls_by_sig[lot_sig].append(pnl)
+                remaining -= matched
+                if matched >= lot_qty - 1e-12:
+                    lots.popleft()
+                else:
+                    lots[0] = (lot_qty - matched, lot_price, lot_sig)
+            if remaining > 1e-9:
+                bucket = realized["unknown_sell"]
+                bucket["realized_pnl"] += (tr.price * remaining) - 0.0
+                bucket["round_trips"] += 1
+                bucket["sell_notional"] += tr.price * remaining
+
+    # open exposure per signal from remaining lots
+    open_exposure: dict[str, float] = defaultdict(float)
+    open_shares: dict[str, float] = defaultdict(float)
+    for token_id, lots in open_lots.items():
+        for qty, price, sig in lots:
+            open_exposure[sig] += qty * price
+            open_shares[sig] += qty
+
+    rows = []
+    for sig, b in realized.items():
+        rt = int(b["round_trips"])
+        win_rate = (b["wins"] / rt) if rt > 0 else 0.0
+        metrics = _tearsheet_metrics(returns_by_sig.get(sig, []), pnls_by_sig.get(sig, []))
+        rows.append({
+            "signal": sig,
+            "realized_pnl": round(b["realized_pnl"], 6),
+            "round_trips": rt,
+            "win_rate": round(win_rate, 4),
+            **metrics,
+            "buy_notional": round(b["buy_notional"], 4),
+            "sell_notional": round(b["sell_notional"], 4),
+            "open_notional": round(open_exposure.get(sig, 0.0), 4),
+            "open_shares": round(open_shares.get(sig, 0.0), 6),
+        })
+    rows.sort(key=lambda r: r["realized_pnl"], reverse=True)
+    total_realized = round(sum(r["realized_pnl"] for r in rows), 6)
+    return {
+        "by_signal": rows,
+        "total_realized_pnl": total_realized,
+        "trade_count": len(trades),
+    }
+
+
 def paper_status(midpoints: dict[str, float] | None = None) -> dict[str, object]:
     account = load_paper_account()
     prices = midpoints or {}

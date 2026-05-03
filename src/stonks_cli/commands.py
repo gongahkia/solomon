@@ -1702,12 +1702,6 @@ def do_portfolio_optimize(method: str = "risk_parity", lookback: int = 60) -> di
     return {"method": method, "lookback": lookback, "weights": weights, "tickers": tickers}
 
 
-def do_jupiter_prices(ids: list[str]) -> dict[str, object]:
-    from stonks_cli.data.jupiter import fetch_jupiter_prices
-
-    return fetch_jupiter_prices(ids, api_key=os.getenv("JUPITER_API_KEY"))
-
-
 def do_research_log(title: str, body: str, tags: list[str] | None = None) -> dict[str, object]:
     from stonks_cli.research import add_research_entry
 

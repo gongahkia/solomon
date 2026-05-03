@@ -58,6 +58,70 @@ def book_depth_usd(levels) -> float:
     return round(sum(max(0.0, lvl.price) * max(0.0, lvl.size) for lvl in levels), 2)
 
 
+def hurst_exponent(series: list[float]) -> float | None:
+    """Rescaled-range (R/S) Hurst exponent. <0.5 mean-reverting, ~0.5 random walk, >0.5 trending.
+    Returns None on insufficient data. Pure-Python; no NumPy dep."""
+    n = len(series)
+    if n < 20:
+        return None
+    # use chunk lags to keep it cheap; integers from 4..n//2 stepped log-ish
+    lags: list[int] = []
+    lag = 4
+    while lag <= max(8, n // 2):
+        lags.append(lag)
+        lag = max(lag + 1, int(lag * 1.5))
+    if len(lags) < 4:
+        return None
+    import math
+
+    log_rs: list[float] = []
+    log_lag: list[float] = []
+    for lag in lags:
+        chunks = [series[i : i + lag] for i in range(0, n - lag + 1, lag)]
+        rs_vals: list[float] = []
+        for chunk in chunks:
+            if len(chunk) < lag:
+                continue
+            mean = sum(chunk) / lag
+            dev = [v - mean for v in chunk]
+            cumsum = []
+            running = 0.0
+            for d in dev:
+                running += d
+                cumsum.append(running)
+            r = max(cumsum) - min(cumsum)
+            var = sum(d * d for d in dev) / lag
+            s = math.sqrt(var) if var > 0 else 0.0
+            if s > 1e-12:
+                rs_vals.append(r / s)
+        if rs_vals:
+            log_rs.append(math.log(sum(rs_vals) / len(rs_vals)))
+            log_lag.append(math.log(lag))
+    if len(log_rs) < 3:
+        return None
+    # ols slope of log_rs ~ slope * log_lag + intercept
+    k = len(log_rs)
+    mx = sum(log_lag) / k
+    my = sum(log_rs) / k
+    num = sum((x - mx) * (y - my) for x, y in zip(log_lag, log_rs))
+    den = sum((x - mx) ** 2 for x in log_lag)
+    if den <= 0:
+        return None
+    return round(num / den, 4)
+
+
+def stoikov_microprice(book) -> float | None:
+    """Size-weighted fair price: ask*bid_size/(bid+ask) + bid*ask_size/(bid+ask). See Stoikov microprice."""
+    best_bid = max((lvl for lvl in book.bids if lvl.price > 0 and lvl.size > 0), key=lambda l: l.price, default=None)
+    best_ask = min((lvl for lvl in book.asks if lvl.price > 0 and lvl.size > 0), key=lambda l: l.price, default=None)
+    if best_bid is None or best_ask is None:
+        return None
+    total = best_bid.size + best_ask.size
+    if total <= 0:
+        return None
+    return round(best_ask.price * (best_bid.size / total) + best_bid.price * (best_ask.size / total), 6)
+
+
 def estimate_buy_fill(levels, notional: float) -> dict[str, float | bool] | None:
     if notional <= 0:
         return None
@@ -178,6 +242,7 @@ def structural_scan_market(
         entry_fill_worst_price=entry_fill_worst_price,
         entry_fill_unfilled_notional=entry_fill_unfilled_notional,
         entry_fill_slippage_bps=entry_fill_slippage_bps,
+        microprice=stoikov_microprice(book),
     )
 
 

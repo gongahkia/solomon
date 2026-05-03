@@ -66,6 +66,7 @@ class MarketScan:
     target_wallet_count: int = 0
     target_trade_count: int = 0
     target_net_volume: float = 0.0
+    microprice: float | None = None # Stoikov size-imbalance fair price
 
 
 @dataclass(frozen=True)

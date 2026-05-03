@@ -138,6 +138,14 @@ class PolymarketConfig(BaseModel):
     live_armed_env: str = Field(default="STONKS_CLI_POLYMARKET_LIVE_ARMED")
     rust_hotpath_enabled: bool = False
     rust_hotpath_use_cargo: bool = False
+    kelly_sizing_enabled: bool = False # opt-in fractional-Kelly sizing using wallet win-rate
+    kelly_fraction: float = Field(default=0.25, ge=0.0, le=1.0) # 1/4 Kelly default
+    use_microprice_for_entry: bool = False # use Stoikov microprice instead of midpoint as entry reference
+    hurst_filter_enabled: bool = False # filter out non-mean-reverting markets at scan time
+    hurst_max: float = Field(default=0.45, ge=0.0, le=1.0) # only accept markets with hurst < this (mean-reverting)
+    vol_target_enabled: bool = False # carver-style inverse-vol sizing fallback when no wallet signal
+    vol_target_per_trade: float = Field(default=0.05, ge=0.0, le=1.0) # max equity at risk per trade
+    whale_trade_min_usd: float = Field(default=10000.0, ge=0.0) # threshold for whale-trade alerts
 
 
 class TuiConfig(BaseModel):

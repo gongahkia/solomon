@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass
@@ -24,6 +25,12 @@ from stonks_cli.reporting.report import write_text_report
 from stonks_cli.scheduler.run import SchedulerHandle, run_scheduler, start_scheduler_in_thread
 from stonks_cli.scheduler.tz import cron_trigger_from_config, resolve_timezone
 from stonks_cli.storage import get_history_record, get_last_report_path, get_last_run, list_history, save_last_run
+
+
+@dataclass(frozen=True)
+class BacktestArtifacts:
+    report_path: Path
+    json_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -855,11 +862,25 @@ def do_backtest(
     end: str | None,
     out_dir: Path,
 ) -> Path:
+    return do_backtest_artifacts(tickers, start=start, end=end, out_dir=out_dir).report_path
+
+
+def do_backtest_artifacts(
+    tickers: list[str] | None,
+    *,
+    start: str | None,
+    end: str | None,
+    out_dir: Path,
+    json_out: bool = False,
+    advanced: bool = False,
+    validate: bool = False,
+) -> BacktestArtifacts:
     cfg = load_config()
     use = tickers if tickers else cfg.tickers
     strategy_fn = select_strategy(cfg)
 
     rows: list[BacktestRow] = []
+    details: list[dict[str, object]] = []
     for t in use:
         provider = provider_for_config(cfg, t)
         series = provider.fetch_daily(t)
@@ -877,8 +898,37 @@ def do_backtest(
         )
         metrics = compute_backtest_metrics(bt.equity)
         rows.append(BacktestRow(ticker=series.ticker, metrics=metrics))
+        item: dict[str, object] = {
+            "ticker": series.ticker,
+            "metrics": asdict(metrics),
+        }
+        if advanced:
+            from stonks_cli.analysis.advanced_metrics import compute_advanced_metrics
 
-    return write_backtest_report(rows, out_dir)
+            item["advanced_metrics"] = compute_advanced_metrics(bt.equity).to_dict()
+        if validate:
+            from stonks_cli.analysis.validation import validate_equity_curve
+
+            item["validation"] = validate_equity_curve(bt.equity, seed=cfg.seed)
+        details.append(item)
+
+    report_path = write_backtest_report(rows, out_dir)
+    json_path = None
+    if json_out or advanced or validate:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        json_path = report_path.with_suffix(".json")
+        payload = {
+            "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "tickers": list(use),
+            "start": start,
+            "end": end,
+            "advanced": advanced,
+            "validation": validate,
+            "results": details,
+        }
+        json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    return BacktestArtifacts(report_path=report_path, json_path=json_path)
 
 
 def do_report_open() -> Path:
@@ -1591,7 +1641,7 @@ def do_sector(sector_name: str) -> dict:
     return result
 
 
-def do_correlation(tickers: list[str], days: int = 252) -> dict:
+def do_correlation(tickers: list[str], days: int = 252, method: str = "pearson") -> dict:
     """Compute correlation matrix for given tickers."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -1617,11 +1667,63 @@ def do_correlation(tickers: list[str], days: int = 252) -> dict:
             ticker, df = fut.result()
             dfs[ticker] = df
 
-    corr_matrix = compute_correlation_matrix(normalized_tickers, dfs, days=days)
+    if method not in {"pearson", "spearman"}:
+        raise ValueError("method must be pearson or spearman")
+
+    corr_matrix = compute_correlation_matrix(normalized_tickers, dfs, days=days, method=method)  # type: ignore[arg-type]
     return {
         "tickers": normalized_tickers,
         "matrix": corr_matrix,
+        "method": method,
     }
+
+
+def do_portfolio_optimize(method: str = "risk_parity", lookback: int = 60) -> dict[str, object]:
+    from stonks_cli.portfolio.optimization import optimize_weights
+    from stonks_cli.portfolio.storage import load_portfolio
+
+    portfolio = load_portfolio()
+    tickers = sorted({p.ticker for p in portfolio.positions if p.shares > 0})
+    if not tickers:
+        return {"method": method, "lookback": lookback, "weights": {}, "tickers": []}
+
+    cfg = load_config()
+    frames: dict[str, object] = {}
+    for ticker in tickers:
+        provider = provider_for_config(cfg, ticker)
+        df = provider.fetch_daily(ticker).df
+        if "close" in df.columns and not df.empty:
+            frames[ticker] = df["close"].astype(float)
+
+    import pandas as pd
+
+    prices = pd.DataFrame(frames).dropna(how="all")
+    weights = optimize_weights(prices, method=method, lookback=lookback)  # type: ignore[arg-type]
+    return {"method": method, "lookback": lookback, "weights": weights, "tickers": tickers}
+
+
+def do_jupiter_prices(ids: list[str]) -> dict[str, object]:
+    from stonks_cli.data.jupiter import fetch_jupiter_prices
+
+    return fetch_jupiter_prices(ids, api_key=os.getenv("JUPITER_API_KEY"))
+
+
+def do_research_log(title: str, body: str, tags: list[str] | None = None) -> dict[str, object]:
+    from stonks_cli.research import add_research_entry
+
+    return add_research_entry(title, body, tags=tags).to_dict()
+
+
+def do_research_list(limit: int = 20) -> list[dict[str, object]]:
+    from stonks_cli.research import list_research_entries
+
+    return [entry.to_dict() for entry in list_research_entries(limit=limit)]
+
+
+def do_research_search(query: str, limit: int = 20) -> list[dict[str, object]]:
+    from stonks_cli.research import search_research_entries
+
+    return [entry.to_dict() for entry in search_research_entries(query, limit=limit)]
 
 
 def do_data_purge(*, older_than_days: int | None = None) -> dict[str, object]:

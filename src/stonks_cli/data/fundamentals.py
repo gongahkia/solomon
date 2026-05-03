@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from json import JSONDecodeError
 from typing import Any
 
 from stonks_cli.data.cache import default_cache_dir, load_cached_text, save_cached_text
@@ -112,8 +113,27 @@ def fetch_fundamentals_yahoo(ticker: str) -> Fundamentals | None:
     base_ticker = ticker.split(".")[0]
     stock = yf.Ticker(base_ticker)
 
+    # The chart endpoint is often available even when Yahoo's quoteSummary
+    # path is rate-limited. Touch it first so callers can still get cached
+    # history elsewhere without treating fundamentals as a provider outage.
+    try:
+        stock.history(period="5d", interval="1d")
+    except Exception as e:
+        log_suppressed_exception(
+            context="data.fundamentals.fetch_fundamentals_yahoo.history_prefetch",
+            error=e,
+            ticker=base_ticker,
+        )
+
     try:
         info = stock.info
+    except JSONDecodeError as e:
+        log_suppressed_exception(
+            context="data.fundamentals.fetch_fundamentals_yahoo.rate_limited_json",
+            error=e,
+            ticker=base_ticker,
+        )
+        return None
     except Exception as e:
         log_suppressed_exception(
             context="data.fundamentals.fetch_fundamentals_yahoo.stock_info",

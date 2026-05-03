@@ -155,6 +155,98 @@ class YFinanceProvider(PriceProvider):
         return PriceSeries(ticker=normalized, df=df)
 
 
+class AkShareProvider(PriceProvider):
+    """Optional AKShare-backed provider for A-shares, HK, US, ETFs, and forex daily bars."""
+
+    def fetch_daily(self, ticker: str) -> PriceSeries:
+        normalized = normalize_ticker(ticker)
+        try:
+            import akshare as ak
+        except Exception as e:
+            raise ImportError("akshare provider requires optional dependency: install stonks-cli[akshare]") from e
+
+        try:
+            df = self._fetch_one(ak, normalized)
+        except Exception as e:
+            log_suppressed_exception(context="provider.akshare.fetch_daily", error=e, ticker=normalized)
+            raise
+        return PriceSeries(ticker=normalized, df=df if df is not None else pd.DataFrame())
+
+    def _fetch_one(self, ak, ticker: str) -> pd.DataFrame:
+        upper = ticker.upper()
+        if self._is_exchange_etf(upper):
+            digits, _, suffix = upper.partition(".")
+            return self._normalize(ak.fund_etf_hist_sina(symbol=f"{suffix.lower()}{digits}"), date_col="date")
+        if upper.endswith((".SH", ".SZ", ".BJ")):
+            return self._normalize(
+                ak.stock_zh_a_hist(symbol=upper.split(".")[0], period="daily", adjust="qfq"),
+                date_col="日期",
+            )
+        if upper.endswith(".HK"):
+            symbol = upper.removesuffix(".HK").zfill(5)
+            return self._normalize(ak.stock_hk_hist(symbol=symbol, period="daily", adjust="qfq"), date_col="日期")
+        if upper.endswith(".FX") or self._looks_like_forex(upper):
+            symbol = upper.removesuffix(".FX")
+            raw = ak.forex_hist_em(symbol=symbol)
+            return self._normalize(
+                raw.rename(columns={"今开": "open", "最高": "high", "最低": "low", "最新价": "close"}),
+                date_col="日期",
+                volume_default=0.0,
+            )
+
+        symbol = upper.removesuffix(".US")
+        for prefix in ("105.", "106.", ""):
+            try:
+                raw = ak.stock_us_hist(symbol=f"{prefix}{symbol}", period="daily", adjust="qfq")
+                if raw is not None and not raw.empty:
+                    return self._normalize(raw, date_col="日期")
+            except Exception:
+                continue
+        return pd.DataFrame()
+
+    @staticmethod
+    def _is_exchange_etf(ticker: str) -> bool:
+        if not ticker.endswith((".SH", ".SZ")):
+            return False
+        digits = ticker.split(".")[0]
+        return len(digits) == 6 and digits.isdigit() and digits[:2] in {"15", "16", "50", "51", "52", "56", "58"}
+
+    @staticmethod
+    def _looks_like_forex(ticker: str) -> bool:
+        symbol = ticker.removesuffix(".FX")
+        return len(symbol) == 6 and symbol.isalpha() and symbol[-3:] in {"USD", "EUR", "JPY", "GBP", "CHF", "CAD", "AUD", "NZD", "CNH"}
+
+    @staticmethod
+    def _normalize(raw: pd.DataFrame, *, date_col: str, volume_default: float | None = None) -> pd.DataFrame:
+        if raw is None or raw.empty:
+            return pd.DataFrame()
+        df = raw.copy()
+        renames = {
+            "开盘": "open",
+            "收盘": "close",
+            "最高": "high",
+            "最低": "low",
+            "成交量": "volume",
+            "date": "date",
+            "日期": "date",
+        }
+        df = df.rename(columns=renames)
+        if date_col in df.columns and date_col != "date":
+            df = df.rename(columns={date_col: "date"})
+        if "date" in df.columns:
+            df["date"] = pd.to_datetime(df["date"], utc=False)
+            df = df.set_index("date").sort_index()
+        if "volume" not in df.columns and volume_default is not None:
+            df["volume"] = volume_default
+        keep = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
+        if not {"open", "high", "low", "close"}.issubset(set(keep)):
+            return pd.DataFrame()
+        out = df[keep].apply(pd.to_numeric, errors="coerce")
+        if "volume" not in out.columns:
+            out["volume"] = 0.0
+        return out.dropna(subset=["open", "high", "low", "close"])
+
+
 class CsvProvider(PriceProvider):
     def __init__(self, csv_path: str):
         self._path = csv_path

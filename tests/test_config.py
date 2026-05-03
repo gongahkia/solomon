@@ -65,3 +65,11 @@ def test_polymarket_live_min_order_notional_is_preserved(monkeypatch, tmp_path):
 
     assert cfg.polymarket.live_min_order_notional_usd == 7.5
     assert cfg.polymarket.model_dump(mode="json")["live_min_order_notional_usd"] == 7.5
+
+
+def test_config_accepts_akshare_provider(monkeypatch, tmp_path):
+    cfg_path = tmp_path / "config.json"
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
+    cfg_path.write_text(json.dumps({"data": {"provider": "akshare"}}), encoding="utf-8")
+
+    assert load_config().data.provider == "akshare"

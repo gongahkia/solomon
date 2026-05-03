@@ -1,15 +1,23 @@
 from __future__ import annotations
 
+from typing import Literal
+
 import pandas as pd
 
 
-def compute_correlation_matrix(tickers: list[str], dfs: dict[str, pd.DataFrame], days: int = 252) -> pd.DataFrame:
-    """Compute pairwise Pearson correlation matrix of daily returns.
+def compute_correlation_matrix(
+    tickers: list[str],
+    dfs: dict[str, pd.DataFrame],
+    days: int = 252,
+    method: Literal["pearson", "spearman"] = "pearson",
+) -> pd.DataFrame:
+    """Compute pairwise correlation matrix of daily returns.
 
     Args:
         tickers: List of ticker symbols.
         dfs: Dict mapping ticker to DataFrame with 'Close' column.
         days: Number of trading days to use for calculation.
+        method: Correlation method, pearson or spearman.
 
     Returns:
         DataFrame with correlation matrix (tickers as both index and columns).
@@ -29,7 +37,7 @@ def compute_correlation_matrix(tickers: list[str], dfs: dict[str, pd.DataFrame],
         return pd.DataFrame()
 
     returns_df = pd.DataFrame(returns_data)
-    return returns_df.corr(method="pearson")
+    return returns_df.corr(method=method)
 
 
 def compute_beta(ticker_df: pd.DataFrame, benchmark_df: pd.DataFrame, days: int = 252) -> float:

@@ -26,7 +26,7 @@ from stonks_cli.analysis.strategy import (
     sma_cross_strategy,
 )
 from stonks_cli.config import AppConfig
-from stonks_cli.data.providers import CsvProvider, PriceProvider, StooqProvider, YFinanceProvider, normalize_ticker
+from stonks_cli.data.providers import AkShareProvider, CsvProvider, PriceProvider, StooqProvider, YFinanceProvider, normalize_ticker
 from stonks_cli.logging_utils import log_suppressed_exception, track_event
 from stonks_cli.plugins import registry_for_config
 from stonks_cli.reporting.csv_report import write_csv_summary
@@ -111,6 +111,8 @@ def provider_for_config(cfg: AppConfig, ticker: str) -> PriceProvider:
         return provider  # type: ignore[return-value]
     if data_cfg.provider == "yfinance":
         return YFinanceProvider()
+    if data_cfg.provider == "akshare":
+        return AkShareProvider()
     if data_cfg.provider == "finnhub":
         from stonks_cli.data.finnhub import FinnhubProvider
 

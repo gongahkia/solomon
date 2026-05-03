@@ -13,6 +13,7 @@ from stonks_cli.commands import (
     do_analyze,
     do_analyze_artifacts,
     do_backtest,
+    do_backtest_artifacts,
     do_bench,
     do_chart,
     do_chart_compare,
@@ -33,6 +34,7 @@ from stonks_cli.commands import (
     do_history_list,
     do_history_show,
     do_insider,
+    do_jupiter_prices,
     do_news,
     do_polymarket_book,
     do_polymarket_emergency_stop,
@@ -69,12 +71,16 @@ from stonks_cli.commands import (
     do_portfolio_add,
     do_portfolio_allocation,
     do_portfolio_history,
+    do_portfolio_optimize,
     do_portfolio_remove,
     do_portfolio_show,
     do_quick,
     do_report_latest,
     do_report_open,
     do_report_view,
+    do_research_list,
+    do_research_log,
+    do_research_search,
     do_schedule_once,
     do_schedule_run,
     do_schedule_status,
@@ -99,6 +105,7 @@ plugins_app = typer.Typer()
 watchlist_app = typer.Typer()
 signals_app = typer.Typer()
 portfolio_app = typer.Typer()
+research_app = typer.Typer(help="Lightweight research notes and searchable thesis history.")
 paper_app = typer.Typer(help="Legacy stock paper trading commands.")
 alert_app = typer.Typer()
 dividend_app = typer.Typer()
@@ -120,6 +127,7 @@ app.add_typer(plugins_app, name="plugins")
 app.add_typer(watchlist_app, name="watchlist")
 app.add_typer(signals_app, name="signals")
 app.add_typer(portfolio_app, name="portfolio")
+app.add_typer(research_app, name="research")
 app.add_typer(paper_app, name="paper")
 app.add_typer(alert_app, name="alert")
 app.add_typer(dividend_app, name="dividend")
@@ -302,12 +310,13 @@ def chart_rsi(
 def correlation(
     tickers: list[str] = typer.Argument(..., help="Ticker symbols (e.g., AAPL MSFT GOOG)"),
     days: int = typer.Option(252, "--days", help="Number of trading days for correlation calculation"),
+    method: str = typer.Option("pearson", "--method", help="Correlation method: pearson or spearman"),
 ) -> None:
     """Display correlation matrix for multiple tickers."""
     from rich.table import Table
 
     try:
-        result = do_correlation(tickers, days=days)
+        result = do_correlation(tickers, days=days, method=method)
         console = Console()
 
         matrix = result["matrix"]
@@ -317,7 +326,7 @@ def correlation(
             console.print("[yellow]No correlation data available[/yellow]")
             return
 
-        table = Table(title=f"Correlation Matrix ({days} days)")
+        table = Table(title=f"Correlation Matrix ({days} days, {result.get('method', method)})")
         table.add_column("", style="bold")
 
         for t in ticker_list:
@@ -1425,15 +1434,27 @@ def backtest(
     start: str | None = typer.Option(None, "--start", help="YYYY-MM-DD"),
     end: str | None = typer.Option(None, "--end", help="YYYY-MM-DD"),
     out_dir: str = typer.Option("reports", "--out-dir"),
+    json_out: bool = typer.Option(False, "--json", help="Write JSON output alongside the text report"),
+    advanced: bool = typer.Option(False, "--advanced", help="Include advanced risk metrics in JSON output"),
+    validate: bool = typer.Option(False, "--validate", help="Include statistical validation in JSON output"),
 ) -> None:
     """Run a simple walk-forward backtest and write a summary report."""
     try:
-        path = do_backtest(
-            tickers if tickers else None,
-            start=start,
-            end=end,
-            out_dir=Path(out_dir),
-        )
+        if json_out or advanced or validate:
+            artifacts = do_backtest_artifacts(
+                tickers if tickers else None,
+                start=start,
+                end=end,
+                out_dir=Path(out_dir),
+                json_out=json_out,
+                advanced=advanced,
+                validate=validate,
+            )
+            Console().print(f"Wrote backtest: {artifacts.report_path}")
+            if artifacts.json_path:
+                Console().print(f"Wrote json: {artifacts.json_path}")
+            return
+        path = do_backtest(tickers if tickers else None, start=start, end=end, out_dir=Path(out_dir))
         Console().print(f"Wrote backtest: {path}")
     except Exception as e:
         raise _exit_for_error(e)
@@ -1539,6 +1560,15 @@ def data_purge(older_than_days: int | None = typer.Option(None, "--older-than-da
         out = do_data_purge(older_than_days=older_than_days)
         Console().print(f"cache_dir: {out.get('cache_dir')}")
         Console().print(f"deleted: {out.get('deleted')}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@data_app.command("jupiter-prices")
+def data_jupiter_prices(ids: list[str] = typer.Argument(..., help="Solana token mint address(es)")) -> None:
+    """Fetch token prices from Jupiter Price API v3."""
+    try:
+        Console().print(json.dumps(do_jupiter_prices(ids), indent=2))
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -1755,6 +1785,35 @@ def portfolio_allocation() -> None:
         raise _exit_for_error(e)
 
 
+@portfolio_app.command("optimize")
+def portfolio_optimize(
+    method: str = typer.Option(
+        "risk_parity",
+        "--method",
+        help="Optimizer: equal, equal_volatility, risk_parity, or mean_variance",
+    ),
+    lookback: int = typer.Option(60, "--lookback", min=5, help="Trailing price rows used for covariance"),
+) -> None:
+    """Suggest long-only target weights for current portfolio positions."""
+    from rich.table import Table
+
+    try:
+        data = do_portfolio_optimize(method=method, lookback=lookback)
+        weights = data.get("weights", {})
+        if not weights:
+            Console().print("[yellow]No optimizable portfolio positions found[/yellow]")
+            return
+
+        table = Table(title=f"Portfolio Optimizer ({data['method']}, lookback={data['lookback']})")
+        table.add_column("Ticker", style="cyan")
+        table.add_column("Weight", justify="right")
+        for ticker, weight in sorted(weights.items(), key=lambda x: x[1], reverse=True):
+            table.add_row(str(ticker), f"{float(weight) * 100:.2f}%")
+        Console().print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 @portfolio_app.command("history")
 def portfolio_history() -> None:
     """Show portfolio transaction history."""
@@ -1803,6 +1862,73 @@ def portfolio_history() -> None:
                 gl_str,
             )
 
+        Console().print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@research_app.command("log")
+def research_log(
+    title: str = typer.Argument(..., help="Short research title"),
+    body: str = typer.Argument(..., help="Research note or thesis body"),
+    tags: list[str] = typer.Option(None, "--tag", help="Repeatable tag"),
+) -> None:
+    """Append a research note to the local searchable log."""
+    try:
+        entry = do_research_log(title, body, tags=tags)
+        Console().print(f"Logged research: {entry['entry_id']}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@research_app.command("list")
+def research_list(limit: int = typer.Option(20, "--limit", min=1, max=200)) -> None:
+    """List recent research notes."""
+    from rich.table import Table
+
+    try:
+        rows = do_research_list(limit=limit)
+        if not rows:
+            Console().print("[yellow]No research notes logged[/yellow]")
+            return
+        table = Table(title="Research Notes")
+        table.add_column("Created", style="dim")
+        table.add_column("ID", style="cyan")
+        table.add_column("Title")
+        table.add_column("Tags")
+        for row in rows:
+            table.add_row(
+                str(row.get("created_at", ""))[:19],
+                str(row.get("entry_id", "")),
+                str(row.get("title", "")),
+                ", ".join(str(t) for t in (row.get("tags") or [])),
+            )
+        Console().print(table)
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@research_app.command("search")
+def research_search(
+    query: str = typer.Argument(..., help="Text to search for"),
+    limit: int = typer.Option(20, "--limit", min=1, max=200),
+) -> None:
+    """Search local research notes."""
+    from rich.table import Table
+
+    try:
+        rows = do_research_search(query, limit=limit)
+        if not rows:
+            Console().print("[yellow]No matching research notes[/yellow]")
+            return
+        table = Table(title=f"Research Search: {query}")
+        table.add_column("Created", style="dim")
+        table.add_column("ID", style="cyan")
+        table.add_column("Title")
+        table.add_column("Excerpt")
+        for row in rows:
+            body = str(row.get("body", ""))
+            table.add_row(str(row.get("created_at", ""))[:19], str(row.get("entry_id", "")), str(row.get("title", "")), body[:80])
         Console().print(table)
     except Exception as e:
         raise _exit_for_error(e)

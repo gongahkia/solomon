@@ -31,6 +31,7 @@ dependencies = [
 
 [project.scripts]
 senko = "main:main"
+senko-cards = "cards:main"
 
 [tool.setuptools]
 py-modules = [
@@ -56,6 +57,7 @@ py-modules = [
   "rich_content",
   "schema",
   "screen_common",
+  "source_tracking",
   "srs",
   "settings_screen",
   "stats_view",

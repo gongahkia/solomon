@@ -93,6 +93,11 @@ from stonks_cli.commands import (
 )
 from stonks_cli.errors import ExitCodes, StonksError
 from stonks_cli.logging_utils import LoggingConfig, configure_logging, log_suppressed_exception
+from stonks_cli.whalemirror.attribution import (
+    DEFAULT_ATTRIBUTION_FIXTURE,
+    rank_wallets_from_fixture,
+    render_wallet_ranking_markdown,
+)
 from stonks_cli.whalemirror.ingestion import (
     DEFAULT_CAPTURE_FIXTURE,
     replay_capture_fixture,
@@ -122,6 +127,7 @@ dividend_app = typer.Typer()
 polymarket_app = typer.Typer(help="Historical Polymarket commands retained for migration reference.")
 whalemirror_app = typer.Typer(help="WhaleMirror Hyperliquid paper-first commands.")
 whalemirror_ingest_app = typer.Typer(help="Hyperliquid ingestion fixture and capture commands.")
+whalemirror_wallets_app = typer.Typer(help="Venue-neutral wallet attribution commands.")
 polymarket_markets_app = typer.Typer()
 polymarket_runtime_app = typer.Typer()
 polymarket_wallets_app = typer.Typer()
@@ -147,6 +153,7 @@ app.add_typer(paper_app, name="paper", hidden=True)
 app.add_typer(alert_app, name="alert", hidden=True)
 app.add_typer(dividend_app, name="dividend", hidden=True)
 whalemirror_app.add_typer(whalemirror_ingest_app, name="ingest")
+whalemirror_app.add_typer(whalemirror_wallets_app, name="wallets")
 polymarket_app.add_typer(polymarket_markets_app, name="markets")
 polymarket_app.add_typer(polymarket_runtime_app, name="runtime")
 polymarket_app.add_typer(polymarket_wallets_app, name="wallets")
@@ -245,6 +252,30 @@ def whalemirror_ingest_replay(
                 }
             )
         )
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@whalemirror_wallets_app.command("rank")
+def whalemirror_wallets_rank(
+    fixture: Path = typer.Option(DEFAULT_ATTRIBUTION_FIXTURE, "--fixture", exists=True, readable=True),
+    limit: int = typer.Option(100, "--limit", min=1, max=1000),
+    markdown: bool = typer.Option(False, "--markdown", help="Render a markdown ranking table instead of JSON"),
+) -> None:
+    """Rank wallets from reproducible trade-outcome and funding fixtures."""
+    try:
+        rankings = rank_wallets_from_fixture(fixture, limit=limit)
+        if markdown:
+            Console().print(render_wallet_ranking_markdown(rankings))
+        else:
+            Console().print_json(
+                json.dumps(
+                    {
+                        "fixture_path": str(fixture),
+                        "rankings": [ranking.to_dict() for ranking in rankings],
+                    }
+                )
+            )
     except Exception as e:
         raise _exit_for_error(e)
 

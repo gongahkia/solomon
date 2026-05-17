@@ -96,6 +96,16 @@ $ stonks-cli whalemirror ingest replay \
 
 That replay decodes representative perp, spot, and user-fill websocket messages into the venue-neutral `NormalizedTrade` model and reports ingestion health.
 
+Wallet attribution fixture ranking:
+
+```console
+$ stonks-cli whalemirror wallets rank \
+    --fixture tests/fixtures/whalemirror/wallet-attribution.jsonl \
+    --limit 100
+```
+
+The ranking reports expectancy, Sharpe, rolling decay, leverage-adjusted PnL, funding-adjusted PnL, survivorship-adjusted PnL, and caveats. Public top-10 sanity checks are tracked separately in GitHub issue #15.
+
 ## Live Guard
 
 Live execution is disabled unless the venue-specific arm flag is set. For Hyperliquid:

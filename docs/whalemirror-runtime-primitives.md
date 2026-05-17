@@ -15,6 +15,7 @@ The Phase 1 runtime keeps the existing scheduler, config, storage, plugin loader
 | `evaluate_execution_guards` | `stonks_cli.whalemirror.guards` | Fails closed for live execution unless the venue is allowed and explicitly armed. |
 | `append_decision` / `read_decisions` | `stonks_cli.whalemirror.journal` | JSONL decision journal that can back the markdown ledger. |
 | `decode_ws_message` / `IngestionMonitor` | `stonks_cli.whalemirror.ingestion` | Hyperliquid websocket fixture decoding plus health/drop accounting before the 7-day capture gate. |
+| `rank_wallets` | `stonks_cli.whalemirror.attribution` | Venue-neutral wallet attribution from trade outcomes and funding events, with caveats before public leaderboard validation. |
 
 ## Live Arm Gate
 

@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+from stonks_cli.whalemirror.attribution import (
+    FundingEvent,
+    WalletRanking,
+    WalletTradeOutcome,
+    load_attribution_fixture,
+    rank_wallets,
+    rank_wallets_from_fixture,
+    render_wallet_ranking_markdown,
+)
 from stonks_cli.whalemirror.guards import (
     evaluate_execution_guards,
     live_arm_env,
@@ -49,6 +58,7 @@ __all__ = [
     "BackoffPolicy",
     "DecisionRecord",
     "ExecutionIntent",
+    "FundingEvent",
     "HyperliquidWebsocketIngestor",
     "HyperliquidCancelIntent",
     "HyperliquidOpenOrder",
@@ -62,6 +72,8 @@ __all__ = [
     "ReplayTrace",
     "TradeSide",
     "Venue",
+    "WalletRanking",
+    "WalletTradeOutcome",
     "append_decision",
     "build_open_orders_subscription",
     "build_order_updates_subscription",
@@ -71,13 +83,17 @@ __all__ = [
     "decode_ws_message",
     "decision_journal_path",
     "evaluate_execution_guards",
+    "load_attribution_fixture",
     "load_replay_fixture",
     "live_arm_env",
     "live_execution_armed",
     "read_decisions",
+    "rank_wallets",
+    "rank_wallets_from_fixture",
     "replay_capture_fixture",
     "render_decision_ledger",
     "render_tearsheet",
+    "render_wallet_ranking_markdown",
     "write_capture_jsonl",
     "write_fixture_artifacts",
 ]

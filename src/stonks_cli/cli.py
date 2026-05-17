@@ -100,7 +100,7 @@ from stonks_cli.whalemirror.ledger import (
     write_fixture_artifacts,
 )
 
-app = typer.Typer(add_completion=True)
+app = typer.Typer(add_completion=True, help="WhaleMirror Hyperliquid paper-first observability CLI.")
 config_app = typer.Typer()
 schedule_app = typer.Typer()
 data_app = typer.Typer()
@@ -110,11 +110,11 @@ plugins_app = typer.Typer()
 watchlist_app = typer.Typer()
 signals_app = typer.Typer()
 portfolio_app = typer.Typer()
-research_app = typer.Typer(help="Lightweight research notes and searchable thesis history.")
+research_app = typer.Typer(help="Legacy research notes and searchable thesis history.")
 paper_app = typer.Typer(help="Legacy stock paper trading commands.")
 alert_app = typer.Typer()
 dividend_app = typer.Typer()
-polymarket_app = typer.Typer(help="Primary Polymarket trading, runtime, and research commands.")
+polymarket_app = typer.Typer(help="Historical Polymarket commands retained for migration reference.")
 whalemirror_app = typer.Typer(help="WhaleMirror Hyperliquid paper-first commands.")
 polymarket_markets_app = typer.Typer()
 polymarket_runtime_app = typer.Typer()
@@ -125,13 +125,13 @@ polymarket_research_app = typer.Typer()
 polymarket_rust_app = typer.Typer()
 
 app.add_typer(config_app, name="config")
-app.add_typer(data_app, name="data")
-app.add_typer(report_app, name="report")
-app.add_typer(history_app, name="history")
-app.add_typer(research_app, name="research")
 app.add_typer(whalemirror_app, name="whalemirror")
-app.add_typer(polymarket_app, name="polymarket")
 # legacy/dead-weight equity surface, hidden from --help but kept for tests
+app.add_typer(data_app, name="data", hidden=True)
+app.add_typer(report_app, name="report", hidden=True)
+app.add_typer(history_app, name="history", hidden=True)
+app.add_typer(research_app, name="research", hidden=True)
+app.add_typer(polymarket_app, name="polymarket", hidden=True)
 app.add_typer(schedule_app, name="schedule", hidden=True)
 app.add_typer(plugins_app, name="plugins", hidden=True)
 app.add_typer(watchlist_app, name="watchlist", hidden=True)
@@ -183,7 +183,7 @@ def version() -> None:
 
 @app.command()
 def doctor() -> None:
-    """Diagnose environment (config, data)."""
+    """Diagnose the local WhaleMirror environment."""
     try:
         results = do_doctor()
         console = Console()
@@ -1505,7 +1505,7 @@ def config_validate() -> None:
         raise _exit_for_error(e)
 
 
-@app.command()
+@app.command(hidden=True)
 def analyze(
     tickers: list[str] = typer.Argument(None),
     start: str | None = typer.Option(None, "--start", help="YYYY-MM-DD"),

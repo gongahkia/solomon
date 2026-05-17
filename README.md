@@ -19,6 +19,7 @@ See:
 
 - [Product decisions](docs/product-decisions.md)
 - [Decision ledger](docs/decision-ledger.md)
+- [Equity archive](docs/equity-archive.md)
 - [Runtime primitives](docs/whalemirror-runtime-primitives.md)
 - [Pivot plan](WORKON-PIVOT-ASAP.md)
 
@@ -146,9 +147,10 @@ $ stonks-cli config init
 $ stonks-cli config where
 $ stonks-cli config show
 $ stonks-cli config validate
+$ stonks-cli whalemirror ledger-demo
 ```
 
-The old equity commands and generic stock MCP story are deprecated product surfaces. They may still exist in code during the Phase 0 removal pass, but they are not the active roadmap. The old Polymarket commands are also not current SG live execution guidance.
+The old equity commands and generic stock MCP story are archived product surfaces. They are hidden from root help, excluded from package extras, and documented only as migration reference. The old Polymarket commands are also not current SG live execution guidance.
 
 ## Out Of Scope
 

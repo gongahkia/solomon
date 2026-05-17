@@ -1,6 +1,11 @@
-# Polymarket Live Runbook
+# Archived Polymarket Live Runbook
 
-## Install
+> [!WARNING]
+> This document is historical reference only. Do not use it as execution guidance from Singapore. The active repo posture is WhaleMirror on SG-legal venues only; Polymarket, Kalshi, sportsbooks, and circumvention-based prediction-market execution are out of scope for SG users.
+
+The notes below are retained so old implementation decisions can be audited while the repo pivots to WhaleMirror. They are not current operating instructions.
+
+## Historical Install Notes
 
 1. Install the official Rust CLI:
 
@@ -15,7 +20,7 @@ polymarket --version
 polymarket status
 ```
 
-## Segregated Wallet
+## Historical Wallet Notes
 
 Use a separate wallet for first live testing.
 
@@ -38,7 +43,7 @@ Absolute floor:
 
 - one `US$5` market-order style test is only about `S$6.40`, but that is too thin for a proper buy/cancel/sell validation sequence.
 
-## Environment
+## Historical Environment Notes
 
 Export these before live-mode testing:
 
@@ -96,7 +101,7 @@ Keep `auto_trade_enabled=false` until manual buy/cancel/sell validation passes. 
 
 If anything looks wrong during testing, run `stonks-cli polymarket emergency-stop --reason operator_stop`. Add `--close-positions` only when you explicitly want the bot to try closing positions at available current prices.
 
-## Dry Run
+## Historical Dry Run
 
 Run the full dry-run script:
 
@@ -115,7 +120,7 @@ It will:
 - run repo doctor with deep auth
 - run read-only market sanity checks
 
-## First Live Validation
+## Historical First Live Validation
 
 Do this in order:
 
@@ -128,7 +133,7 @@ Do this in order:
 7. verify local repo journal and live-order state stayed consistent
 8. only then allow `auto_trade_enabled=true`
 
-## Rollout Limits
+## Historical Rollout Limits
 
 Suggested rollout:
 
@@ -139,7 +144,7 @@ Suggested rollout:
 5. several hours of supervised operation
 6. overnight only after logs and reconciliation stay clean
 
-## Stop Conditions
+## Historical Stop Conditions
 
 Do not scale up if any of these happen:
 

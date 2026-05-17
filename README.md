@@ -1,460 +1,161 @@
-[![](https://img.shields.io/badge/stonks_cli_1.0.0-passing-light_green)](https://github.com/gongahkia/stonks-cli/releases/tag/1.0.0)
-[![](https://img.shields.io/badge/stonks_cli_2.0.0-passing-green)](https://github.com/gongahkia/stonks-cli/releases/tag/2.0.0)
-![](https://github.com/gongahkia/stonks-cli/actions/workflows/ci.yml/badge.svg)
+# WhaleMirror (`stonks-cli`)
 
-# `stonks-cli`
+![CI](https://github.com/gongahkia/stonks-cli/actions/workflows/ci.yml/badge.svg)
 
-A [batteries-included](https://en.wikipedia.org/wiki/Batteries_Included) stock analysis [CLI](https://en.wikipedia.org/wiki/Command-line_interface) tool *(now also available via **[MCP server](https://modelcontextprotocol.io/docs/getting-started/intro)**)*.
+WhaleMirror is a paper-first, Rust-backed copy-observability project for SG-legal crypto venues. The first target venue is Hyperliquid. The repo is still named `stonks-cli` for package and command stability, but the active product identity is WhaleMirror.
 
-<div align="center">
-    <img src="./asset/logo/time.png" width="25%">
-</div>
+The goal is not to sell an AI trading bot. The goal is to measure whether selected wallets have durable edge after funding, fees, slippage, decay, and survivorship bias, then mirror them only behind explicit risk caps and an auditable ledger.
 
-## Stack
+## Status
 
-* *Script*: [Python](https://www.python.org), [Typer](https://typer.tiangolo.com), [Textual](https://textual.textualize.io/), [Rich](https://rich.readthedocs.io)
-* *Data*: [pandas](https://pandas.pydata.org), [NumPy](https://numpy.org), [Stooq](https://stooq.com), [yfinance](https://github.com/ranaroussi/yfinance), [Tiger Trade SDK](https://developer.tigerbrokers.com.sg/?lang=en_US), [Finnhub REST](https://finnhub.io/docs/api), [Alpaca Markets SDK](https://docs.alpaca.markets/docs/sdks-and-tools), [Polymarket CLOB](https://docs.polymarket.com/trading/overview)
-* *HTTP*: [Requests](https://requests.readthedocs.io)
-* *Config*: [platformdirs](https://platformdirs.readthedocs.io)
-* *AI*: [Pydantic](https://docs.pydantic.dev/latest/), [MCP](https://modelcontextprotocol.io)
-* *Scheduling*: [APScheduler](https://apscheduler.readthedocs.io) 
-* *Package*: [setuptools](https://setuptools.pypa.io)
-* *CI/CD*: [pytest](https://docs.pytest.org), [ruff](https://docs.astral.sh/ruff/), [mypy](https://mypy.readthedocs.io), [GitHub Actions](https://github.com/features/actions)
+Phase 0 pivot is in progress.
 
-## Screenshots
+- Current product: WhaleMirror, Hyperliquid-first.
+- Current implementation: reusable config, scheduler, storage, journal, guard, Rust hotpath, and new venue-neutral WhaleMirror primitives.
+- Current default: paper and dry-run only.
+- Deprecated surface: equity analysis, generic stock MCP framing, and SG Polymarket execution.
 
-<div align="center">
-    <img src="./asset/reference/8.png" width="45%">
-    <img src="./asset/reference/9.png" width="45%">
-</div>
+See:
 
-<div align="center">
-    <img src="./asset/reference/10.png" width="45%">
-    <img src="./asset/reference/11.png" width="45%">
-</div>
+- [Product decisions](docs/product-decisions.md)
+- [Decision ledger](docs/decision-ledger.md)
+- [Runtime primitives](docs/whalemirror-runtime-primitives.md)
+- [Pivot plan](WORKON-PIVOT-ASAP.md)
 
-<div align="center">
-    <img src="./asset/reference/12.png" width="45%">
-    <img src="./asset/reference/13.png" width="45%">
-</div>
+## What WhaleMirror Does
 
-<div align="center">
-    <img src="./asset/reference/14.png" width="45%">
-    <img src="./asset/reference/15.png" width="45%">
-</div>
+WhaleMirror is being built around four surfaces:
 
-## Usage
+- Hyperliquid trade ingestion into a normalized internal trade model.
+- Wallet attribution using expectancy, Sharpe, rolling decay, survivorship-adjusted PnL, leverage, and funding costs.
+- Paper-first mirror decisions with follower-bankroll-aware sizing, stop losses, cooldowns, and explicit live arm gates.
+- Public journal and ledger entries that show losses and wins with equal prominence.
 
-> [!IMPORTANT]  
-> Please read the [legal disclaimer](#legal) before using `stonks-cli`.
+## Quickstart
 
-The below instructions are for locally running `stonks-cli`. Also see [here](#available-commands) for `stonks-cli`'s out-of-the-box commands.
-
-1. First run the below to install `stonks-cli` to your local machine.
+Install locally:
 
 ```console
-$ git clone https://github.com/gongahkia/stonks-cli && cd stonks-cli
-$ python3 -m venv .venv && source .venv/bin/activate
-$ python3 -m pip install -U pip && python3 -m pip install -e .
+$ git clone https://github.com/gongahkia/stonks-cli
+$ cd stonks-cli
+$ python3 -m venv .venv
+$ source .venv/bin/activate
+$ python3 -m pip install -U pip
+$ python3 -m pip install -e ".[dev]"
 ```
 
-2. Then run the `stonks-cli` CLI client directly with any of the below commands.
-
-### Sanity check
+Sanity check:
 
 ```console
 $ stonks-cli --help
-$ stonks-cli version
 $ stonks-cli doctor
-```
-
-### Configure
-
-```console
 $ stonks-cli config init
-$ stonks-cli config where
 $ stonks-cli config show
-$ stonks-cli config set tickers '["AAPL","MSFT"]'
-$ stonks-cli config validate
 ```
 
-### Analyze 
+Paper-mode fixture smoke test:
 
 ```console
-$ stonks-cli analyze AAPL MSFT # analyse tickers and write textual report to reports/
-$ stonks-cli analyze AAPL MSFT --json # write json output alongside text report
-$ stonks-cli analyze AAPL MSFT --csv # write csv summary 
-$ stonks-cli analyze AAPL --out-dir reports # configure output directory
-$ stonks-cli analyze AAPL --start 2020-01-01 --end 2024-12-31
-$ stonks-cli analyze AAPL MSFT --name report_latest.txt # stable report filename
-$ stonks-cli analyze AAPL MSFT --sandbox # run without persisting last-run history
+$ PYTHONPATH=src python - <<'PY'
+from stonks_cli.whalemirror.guards import evaluate_execution_guards
+from stonks_cli.whalemirror.models import MirrorMode, Venue
+
+print(evaluate_execution_guards(venue=Venue.HYPERLIQUID, mode=MirrorMode.PAPER))
+print(evaluate_execution_guards(venue=Venue.HYPERLIQUID, mode=MirrorMode.LIVE))
+PY
 ```
 
-### Backtest
+Expected output:
+
+```text
+[]
+['live_trading_not_armed:STONKS_CLI_HYPERLIQUID_LIVE_ARMED']
+```
+
+That fixture proves the current default: paper mode can run without venue credentials, while live mode fails closed unless explicitly armed.
+
+## Live Guard
+
+Live execution is disabled unless the venue-specific arm flag is set. For Hyperliquid:
 
 ```console
-$ stonks-cli backtest AAPL --start 2020-01-01 --end 2024-12-31
-$ stonks-cli backtest AAPL MSFT --out-dir reports
+$ export STONKS_CLI_HYPERLIQUID_LIVE_ARMED=armed
 ```
 
-### Benchmark
+The Phase 1 live budget is capped at USD 200, with sub-USD 50 order notional until the live gate and scale gate are satisfied. No code path should raise notional automatically before the 60-day live validation and 7 consecutive green weeks.
 
-```console
-$ stonks-cli bench
-$ stonks-cli bench AAPL MSFT --iterations 10 --warmup 2
-```
+## SG-Legal Venue Policy
 
-### Schedule
+Dogfooding and execution are constrained to venues that are legal and operable for an SG resident without circumvention.
 
-```console
-$ stonks-cli schedule once
-$ stonks-cli schedule run
-$ stonks-cli schedule status
-$ stonks-cli schedule once --out-dir reports --name report_latest.txt --csv
-$ stonks-cli schedule run --out-dir reports --csv
-```
+Current and candidate venues:
 
-### Data
+| Venue | Status |
+| --- | --- |
+| Hyperliquid | Phase 1 target. |
+| Solana / EVM DEXes | Candidate Phase 2 venues. |
+| OKX / Bybit | Candidate later venues after accepting API-key custody risk. |
+| Polymarket | Out of scope for SG execution. Historical material only. |
+| Kalshi | Out of scope. |
+| Sportsbooks | Out of scope. |
 
-```console
-$ stonks-cli data fetch AAPL MSFT
-$ stonks-cli data verify AAPL MSFT
-$ stonks-cli data cache-info
-$ stonks-cli data purge
-$ stonks-cli data purge --older-than-days 7
-```
-
-### Reports
-
-```console
-$ stonks-cli report latest
-$ stonks-cli report latest --json
-$ stonks-cli report open
-$ stonks-cli report view
-$ stonks-cli report view reports/report_2026-01-03_234154.txt
-```
-
-### History
-
-```console
-$ stonks-cli history list
-$ stonks-cli history list --limit 50
-$ stonks-cli history show 0
-```
-
-### Plugins
-
-```console
-$ stonks-cli plugins list
-```
-
-### Watchlist
-
-```console
-$ stonks-cli watchlist set tech AAPL MSFT
-$ stonks-cli watchlist list
-$ stonks-cli watchlist remove tech
-$ stonks-cli watchlist analyze tech --json --csv --name report_tech_latest.txt
-```
-
-### Signals
-
-```console
-$ stonks-cli signals diff
-```
-
-### Polymarket
-
-```console
-$ ./scripts/install_polymarket_cli.sh
-$ stonks-cli polymarket markets list --limit 25
-$ stonks-cli polymarket scan
-$ stonks-cli polymarket runtime status
-$ stonks-cli polymarket wallets import ~/poly_data/processed/trades.csv
-$ stonks-cli polymarket wallets rank --min-trades 100 --min-win-rate 0.70 --limit 50
-$ stonks-cli polymarket wallets signals
-$ stonks-cli polymarket paper init --cash 1000
-$ stonks-cli polymarket paper status
-$ stonks-cli polymarket runtime once
-$ stonks-cli polymarket rust status
-$ stonks-cli polymarket rust ping --use-cargo
-$ stonks-cli polymarket rust test
-$ stonks-cli polymarket rust replay ./fixtures/hotpath.txt
-$ ./scripts/polymarket_live_dry_run.sh
-```
-
-### Rust Hot Path
-
-The repo now includes a Rust hot-path workspace under [rust/](/Users/gongahkia/Desktop/coding/projects/stonks-cli/rust:1).
-
-- `rust/hotpath`: low-latency market state cache, guarded order construction, order lifecycle tracking, the Polymarket control backend, and a tiny stdin/stdout daemon protocol
-- persisted daemon state and deterministic replay fixtures
-- `stonks-cli polymarket rust status`: inspect the local Rust workspace and binary
-- `stonks-cli polymarket rust ping`: smoke test the Rust binary
-- `stonks-cli polymarket rust test`: run the Rust test suite
-- `stonks-cli polymarket rust replay`: execute a line-based hot-path fixture through the Rust daemon protocol
-
-Current scope:
-
-- Rust-backed Polymarket control plane for markets, scans, paper trading, wallet ranking, journals, guards, settlement, replay, and runtime cycles
-- Rust-backed live runtime path for open-order sync, stale cancel, and live order placement through Polymarket's official `polymarket-cli`
-- persisted state and replayable protocol fixtures
-- Python is now the thin CLI shell for the Polymarket surface; the stateful backend logic runs in Rust
-
-To enable Rust-backed live trading from the CLI shell, set:
-
-```json
-{
-  "polymarket": {
-    "paper": false,
-    "rust_hotpath_enabled": true,
-    "rust_hotpath_use_cargo": false,
-    "live_min_order_notional_usd": 5.0,
-    "crypto_only": true,
-    "block_sports": true,
-    "target_wallet_addresses": ["0x6e1d5040d0ac73709b0621f620d2a60b80d2d0f"],
-    "wallet_copy_allowed_categories": ["crypto"],
-    "consensus_enabled": true,
-    "consensus_min_buy_votes": 2,
-    "min_entry_price": 0.10,
-    "max_spread_bps": 750.0,
-    "slippage_check_notional_usd": 5.0,
-    "max_entry_slippage_bps": 300.0,
-    "require_full_fill_estimate": true,
-    "max_total_notional": 20.0,
-    "max_daily_profit": 10.0,
-    "stop_loss_reentry_cooldown_minutes": 60.0,
-    "volume_spike_exit_enabled": true
-  }
-}
-```
-
-Live mode now expects Polymarket's official Rust CLI to be installed and available as `polymarket`. Override the binary name with:
-
-```console
-$ export POLYMARKET_CLI_BIN=/path/to/polymarket
-```
-
-The Rust control backend uses that CLI for:
-
-- `clob create-order`
-- `clob orders`
-- `clob cancel`
-
-The Polymarket path now includes deterministic alpha controls from the Trackmind-style article and later field reports: hard market-universe filters, configurable target wallets, category-aware wallet-copy signals, three-agent consensus voting, spread/low-price filters, orderbook-walk fill/slippage checks, stop-loss re-entry cooldowns, total exposure caps, daily profit/loss stops, volume-spike exits, an emergency stop command, and offline BYO-key research theses via `stonks-cli polymarket research thesis`.
-
-For a staged operator workflow, see [docs/polymarket-live-runbook.md](/Users/gongahkia/Desktop/coding/projects/stonks-cli/docs/polymarket-live-runbook.md:1).
-
-For live auto-trading, the control plane now also requires an explicit arm flag by default:
-
-```console
-$ export STONKS_CLI_POLYMARKET_LIVE_ARMED=1
-```
-
-That gate only affects live auto-trading. It is there to prevent accidental real-money execution when `paper=false` is set but the operator has not intentionally armed the bot.
-
-Live mode also maintains a Polymarket heartbeat by default:
-
-- `polymarket.live_heartbeat_enabled = true`
-- `polymarket.live_heartbeat_interval_seconds = 5`
-
-This keeps the session liveness mechanism active so the venue can cancel open orders if the bot dies or disconnects unexpectedly.
-
-3. `stonks-cli` also includes an optional [Model Context Protocol](https://modelcontextprotocol.io) server that allows for [AI Agents](https://modelcontextprotocol.io/docs/agents/) to directly interact with `stonks-cli` tooling.
-
-4. Run the below to install `stonks-cli`'s MCP functionality.
-
-```console
-$ pip install -e ".[mcp]"
-# or with uv
-$ uv sync --extra mcp
-```
-
-5. Then execute these commands for usage.
-
-```console
-$ stonks-mcp
-$ python -m stonks_cli.mcp_server  
-```
-
-### MCP Commands
-
-* Quick Analysis: `quick_analysis`, `get_version`, `run_doctor`
-* Market Data: `get_fundamentals`, `get_news`, `get_earnings`, `get_insider_transactions`, `get_dividend_info`, `get_sector_performance`, `get_correlation_matrix`, `get_market_movers`
-* Charts: `get_chart_data`, `get_chart_compare_data`, `get_rsi_chart_data`
-* Analysis: `run_analysis`, `run_backtest`, `get_signals_diff`
-* Watchlists: `list_watchlists`, `create_watchlist`, `delete_watchlist`, `analyze_watchlist`
-* Portfolio: `add_portfolio_position`, `remove_portfolio_position`, `get_portfolio`, `get_portfolio_allocation`, `get_portfolio_history`
-* Paper Trading: `paper_buy`, `paper_sell`, `get_paper_status`, `get_paper_leaderboard`
-* Alerts: `create_alert`, `list_alerts`, `delete_alert`, `check_alerts`
-* Data: `fetch_data`, `verify_data`, `get_cache_info`
-* Config: `get_config`, `validate_config`
-* Reports: `get_latest_report`, `view_report`, `list_history`
+No README, runbook, or command example should be read as instructions to open Polymarket, Kalshi, sportsbook, or circumvention-based positions from Singapore.
 
 ## Architecture
 
 ```mermaid
-flowchart TD
-    %% High-level entrypoints
-    subgraph Interfaces["Interfaces"]
-        cli["stonks-cli<br/>Typer CLI"]
-        mcp["stonks-mcp<br/>MCP Server"]
-    end
-
-    subgraph Config["Config & State"]
-        cfg["Load config<br/>Pydantic"]
-        cfgfile["config.json"]
-        state["state.json"]
-        hist["history.jsonl"]
-        portStore["portfolio.json<br/>& history"]
-        alertStore["alerts.json"]
-    end
-
-    subgraph Plugins["Plugins"]
-        plugSpecs["plugin specs<br/>from config"]
-        plugLoad["Load plugins<br/>best-effort"]
-        stratReg["Strategy registry"]
-        provReg["Provider factory<br/>registry"]
-    end
-
-    subgraph Pipeline["Analysis Pipeline"]
-        selectStrat["Select strategy<br/>built-in or plugin"]
-        tickers["Tickers<br/>normalized"]
-        fetchParallel["Fetch prices in parallel<br/>ThreadPoolExecutor"]
-        prep["_prepare_df_for_strategy<br/>attach indicators"]
-        strat["Run strategy<br/>Recommendation"]
-        risk["Risk sizing & guardrails<br/>volatility, ATR, portfolio cap"]
-        bt["Walk-forward backtest<br/>+ metrics"]
-        results["Per-ticker results"]
-        portfolioAgg["Portfolio aggregation<br/>optional equity blend"]
-    end
-
-    subgraph Portfolio["Portfolio & Paper Trading"]
-        portMgr["Portfolio Manager"]
-        paperMgr["Paper Trading Engine"]
-    end
-
-    subgraph Alerts["Alerts System"]
-        alertCheck["Checker<br/>cron/manual"]
-        alertNotifier["Notifier"]
-    end
-
-    subgraph Providers["Data Providers"]
-        providerSelect["provider_for_config<br/>per ticker"]
-        stooq["StooqProvider<br/>https://stooq.com"]
-        yfin["YFinanceProvider<br/>optional"]
-        csv["CsvProvider"]
-        cache["Cache dir<br/>text blobs + TTL"]
-        negCache["Negative cache<br/>empty results TTL"]
-        net["HTTP GET / download"]
-        csvFile["CSV file"]
-        pxDF["OHLCV DataFrame"]
-    end
-
-    subgraph Reporting["Outputs"]
-        textRep["Write text report<br/>Rich-friendly formatting"]
-        jsonRep["Write JSON report<br/>optional"]
-        csvRep["Write CSV summary<br/>optional"]
-        outDir["reports/"]
-    end
-
-    subgraph Scheduler["Scheduler"]
-        cron["APScheduler cron trigger"]
-        schedRun["schedule run<br/>foreground"]
-        schedOnce["schedule once<br/>single job"]
-        lock["Run lock<br/>prevent overlap"]
-        pid["PID file"]
-        failure["Persist last failure<br/>best-effort"]
-    end
-
-    %% Config connections
-    cli --> cfg
-    mcp --> cfg
-    cfg --> cfgfile
-    cfg --> plugSpecs
-    plugSpecs --> plugLoad
-    plugLoad --> stratReg
-    plugLoad --> provReg
-
-    %% CLI/MCP Actions
-    cli -->|analyze| tickers
-    mcp -->|run_analysis| tickers
-    cli -->|watchlist| tickers
-    mcp -->|list_watchlists| cfgfile
-
-    %% Pipeline connections
-    tickers --> selectStrat
-    stratReg --> selectStrat
-    selectStrat --> fetchParallel
-    fetchParallel --> providerSelect
-    provReg --> providerSelect
-
-    %% Data flow
-    providerSelect --> stooq
-    providerSelect --> yfin
-    providerSelect --> csv
-
-    stooq -->|read/write| cache
-    stooq -->|check| negCache
-    stooq --> net
-    net --> pxDF
-    yfin --> pxDF
-    csv --> csvFile
-    csvFile --> pxDF
-
-    %% Analysis Logic
-    pxDF --> prep
-    prep --> strat
-    strat --> risk
-    risk --> bt
-    bt --> results
-    results --> portfolioAgg
-
-    %% Reporting
-    results --> textRep
-    portfolioAgg --> textRep
-    textRep --> outDir
-    results -->|--json| jsonRep
-    jsonRep --> outDir
-    results -->|--csv| csvRep
-    csvRep --> outDir
-
-    %% State Persistence
-    textRep -->|persist last run| state
-    jsonRep --> state
-    state --> hist
-
-    %% Portfolio Module
-    cli -->|portfolio| portMgr
-    mcp -->|get_portfolio| portMgr
-    cli -->|paper| paperMgr
-    mcp -->|paper_buy/sell| paperMgr
-    portMgr --> portStore
-    paperMgr --> portStore
-    portMgr -->|fetch price| providerSelect
-
-    %% Alerts Module
-    cli -->|alerts| alertCheck
-    mcp -->|create_alert| alertStore
-    mcp -->|check_alerts| alertCheck
-    alertCheck --> alertStore
-    alertCheck -->|fetch price| providerSelect
-    alertCheck -->|trigger| alertNotifier
-
-    %% Scheduler
-    cli -->|schedule| cron
-    schedRun --> pid
-    schedRun --> cron
-    cron --> lock
-    lock -->|trigger| tickers
+flowchart LR
+    stream["Venue trade stream"] --> decode["NormalizedTrade"]
+    decode --> rank["Attribution metrics"]
+    rank --> intent["ExecutionIntent"]
+    intent --> guards["Venue + live-arm guards"]
+    guards --> paper["Paper / dry-run"]
+    guards --> live["Live venue call"]
+    paper --> journal["Decision journal"]
+    live --> journal
+    journal --> ledger["docs/decision-ledger.md"]
 ```
+
+The existing Rust hotpath remains the port-forward layer for low-latency state cache, guarded order construction, and order lifecycle tracking. Existing Polymarket-specific code is retained only as historical implementation material until the Hyperliquid surface replaces it.
+
+## Current CLI Surface
+
+The installed command remains:
+
+```console
+$ stonks-cli --help
+```
+
+Useful stable commands:
+
+```console
+$ stonks-cli version
+$ stonks-cli doctor
+$ stonks-cli config init
+$ stonks-cli config where
+$ stonks-cli config show
+$ stonks-cli config validate
+```
+
+The old equity commands and generic stock MCP story are deprecated product surfaces. They may still exist in code during the Phase 0 removal pass, but they are not the active roadmap. The old Polymarket commands are also not current SG live execution guidance.
+
+## Out Of Scope
+
+- Equity analysis as the core product.
+- Generic stock MCP tooling.
+- Polymarket execution from Singapore.
+- Kalshi.
+- Sportsbooks.
+- Prediction markets that take stakes on event outcomes from restricted jurisdictions.
+- "AI day-trading bot" positioning.
+- Unsupported alpha claims without a public ledger.
 
 ## Legal
 
-`stonks-cli` is provided for educational and informational purposes only.
+This project is provided for educational and informational purposes only.
 
-- **Not financial advice**: This tool does not provide investment, legal, tax, or accounting advice. Any outputs (signals, sizing suggestions, backtests) are heuristic and may be wrong.
-- **No warranty**: Use at your own risk. The authors/contributors make no guarantees about correctness, uptime, or fitness for a particular purpose.
-- **Data sources & terms**: Market data is fetched from third-party sources (e.g. [Stooq](https://stooq.com) and optional [yfinance](https://github.com/ranaroussi/yfinance) / Yahoo Finance). You are responsible for complying with the applicable terms of service, rate limits, and data-usage restrictions of those providers.
-- **Trademarks**: “Yahoo” and “Stooq” are trademarks of their respective owners; this project is not affiliated with or endorsed by them.
-- **Local storage**: Reports and run history are written to local disk (e.g. `reports/` plus OS-appropriate app state/cache directories). No intentional data is sent anywhere except to fetch price data from the configured provider.
+- Not financial advice: outputs, metrics, rankings, fixtures, sizing suggestions, and ledgers are not investment, legal, tax, or accounting advice.
+- No warranty: use at your own risk. The authors and contributors make no guarantees about correctness, uptime, venue access, fill quality, or fitness for a particular purpose.
+- Venue responsibility: users are responsible for complying with venue terms, local law, tax rules, and data-use restrictions.
+- SG posture: this repo does not provide SG execution guidance for Polymarket, Kalshi, sportsbooks, or restricted prediction-market venues.
+- Local storage: state, journals, ledgers, fixtures, and reports may be written to local disk.

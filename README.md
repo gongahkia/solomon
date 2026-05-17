@@ -74,6 +74,17 @@ Expected output:
 
 That fixture proves the current default: paper mode can run without venue credentials, while live mode fails closed unless explicitly armed.
 
+Fixture-backed ledger and tearsheet demo:
+
+```console
+$ stonks-cli whalemirror ledger-demo \
+    --fixture tests/fixtures/whalemirror/paper-decisions.jsonl \
+    --ledger docs/decision-ledger.md \
+    --tearsheet docs/whalemirror-fixture-tearsheet.md
+```
+
+That demo regenerates the public [decision ledger](docs/decision-ledger.md) and the generated [fixture tearsheet](docs/whalemirror-fixture-tearsheet.md) before live data exists. The fixture includes one win and one loss so the audit path shows both with equal prominence.
+
 ## Live Guard
 
 Live execution is disabled unless the venue-specific arm flag is set. For Hyperliquid:

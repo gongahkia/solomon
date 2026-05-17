@@ -93,6 +93,12 @@ from stonks_cli.commands import (
 )
 from stonks_cli.errors import ExitCodes, StonksError
 from stonks_cli.logging_utils import LoggingConfig, configure_logging, log_suppressed_exception
+from stonks_cli.whalemirror.ledger import (
+    DEFAULT_LEDGER_PATH,
+    DEFAULT_REPLAY_FIXTURE,
+    DEFAULT_TEARSHEET_PATH,
+    write_fixture_artifacts,
+)
 
 app = typer.Typer(add_completion=True)
 config_app = typer.Typer()
@@ -109,6 +115,7 @@ paper_app = typer.Typer(help="Legacy stock paper trading commands.")
 alert_app = typer.Typer()
 dividend_app = typer.Typer()
 polymarket_app = typer.Typer(help="Primary Polymarket trading, runtime, and research commands.")
+whalemirror_app = typer.Typer(help="WhaleMirror Hyperliquid paper-first commands.")
 polymarket_markets_app = typer.Typer()
 polymarket_runtime_app = typer.Typer()
 polymarket_wallets_app = typer.Typer()
@@ -122,6 +129,7 @@ app.add_typer(data_app, name="data")
 app.add_typer(report_app, name="report")
 app.add_typer(history_app, name="history")
 app.add_typer(research_app, name="research")
+app.add_typer(whalemirror_app, name="whalemirror")
 app.add_typer(polymarket_app, name="polymarket")
 # legacy/dead-weight equity surface, hidden from --help but kept for tests
 app.add_typer(schedule_app, name="schedule", hidden=True)
@@ -192,6 +200,20 @@ def doctor() -> None:
             if k == "health_score":
                 continue
             console.print(f"{k}: {results[k]}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@whalemirror_app.command("ledger-demo")
+def whalemirror_ledger_demo(
+    fixture: Path = typer.Option(DEFAULT_REPLAY_FIXTURE, "--fixture", exists=True, readable=True),
+    ledger: Path = typer.Option(DEFAULT_LEDGER_PATH, "--ledger"),
+    tearsheet: Path = typer.Option(DEFAULT_TEARSHEET_PATH, "--tearsheet"),
+) -> None:
+    """Generate the fixture-backed public ledger and tearsheet."""
+    try:
+        result = write_fixture_artifacts(fixture_path=fixture, ledger_path=ledger, tearsheet_path=tearsheet)
+        Console().print(json.dumps(result, indent=2, sort_keys=True))
     except Exception as e:
         raise _exit_for_error(e)
 

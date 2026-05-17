@@ -109,6 +109,11 @@ from stonks_cli.whalemirror.ledger import (
     DEFAULT_TEARSHEET_PATH,
     write_fixture_artifacts,
 )
+from stonks_cli.whalemirror.paper_mirror import (
+    DEFAULT_PAPER_MIRROR_FIXTURE,
+    PaperMirrorConfig,
+    replay_paper_mirror_fixture,
+)
 
 app = typer.Typer(add_completion=True, help="WhaleMirror Hyperliquid paper-first observability CLI.")
 config_app = typer.Typer()
@@ -127,6 +132,7 @@ dividend_app = typer.Typer()
 polymarket_app = typer.Typer(help="Historical Polymarket commands retained for migration reference.")
 whalemirror_app = typer.Typer(help="WhaleMirror Hyperliquid paper-first commands.")
 whalemirror_ingest_app = typer.Typer(help="Hyperliquid ingestion fixture and capture commands.")
+whalemirror_paper_app = typer.Typer(help="Paper mirror replay and risk-control commands.")
 whalemirror_wallets_app = typer.Typer(help="Venue-neutral wallet attribution commands.")
 polymarket_markets_app = typer.Typer()
 polymarket_runtime_app = typer.Typer()
@@ -153,6 +159,7 @@ app.add_typer(paper_app, name="paper", hidden=True)
 app.add_typer(alert_app, name="alert", hidden=True)
 app.add_typer(dividend_app, name="dividend", hidden=True)
 whalemirror_app.add_typer(whalemirror_ingest_app, name="ingest")
+whalemirror_app.add_typer(whalemirror_paper_app, name="paper")
 whalemirror_app.add_typer(whalemirror_wallets_app, name="wallets")
 polymarket_app.add_typer(polymarket_markets_app, name="markets")
 polymarket_app.add_typer(polymarket_runtime_app, name="runtime")
@@ -276,6 +283,47 @@ def whalemirror_wallets_rank(
                     }
                 )
             )
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@whalemirror_paper_app.command("replay")
+def whalemirror_paper_replay(
+    fixture: Path = typer.Option(DEFAULT_PAPER_MIRROR_FIXTURE, "--fixture", exists=True, readable=True),
+    rankings_fixture: Path = typer.Option(DEFAULT_ATTRIBUTION_FIXTURE, "--rankings-fixture", exists=True, readable=True),
+    bankroll: float = typer.Option(1000.0, "--bankroll", min=0.0),
+    max_position_fraction: float = typer.Option(0.10, "--max-position-fraction", min=0.0, max=1.0),
+    max_order_notional: float = typer.Option(75.0, "--max-order-notional", min=0.0),
+    stop_loss_pct: float = typer.Option(0.08, "--stop-loss-pct", min=0.0, max=1.0),
+    cooldown_minutes: float = typer.Option(60.0, "--cooldown-minutes", min=0.0),
+) -> None:
+    """Replay paper mirror decisions with size-down, stop-loss, and cooldown controls."""
+    try:
+        rankings = rank_wallets_from_fixture(rankings_fixture, limit=5)
+        replay = replay_paper_mirror_fixture(
+            fixture_path=fixture,
+            rankings=rankings,
+            config=PaperMirrorConfig(
+                follower_bankroll_usd=bankroll,
+                max_position_fraction=max_position_fraction,
+                max_order_notional_usd=max_order_notional,
+                stop_loss_pct=stop_loss_pct,
+                cooldown_minutes=cooldown_minutes,
+            ),
+        )
+        Console().print_json(
+            json.dumps(
+                {
+                    "fixture_path": str(fixture),
+                    "rankings_fixture": str(rankings_fixture),
+                    "tearsheet": replay.tearsheet,
+                    "decisions": [decision.ledger_record.to_dict() for decision in replay.decisions],
+                    "execution_intents": [
+                        decision.intent.to_dict() for decision in replay.decisions if decision.intent is not None
+                    ],
+                }
+            )
+        )
     except Exception as e:
         raise _exit_for_error(e)
 

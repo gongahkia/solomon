@@ -52,6 +52,16 @@ from stonks_cli.whalemirror.models import (
     TradeSide,
     Venue,
 )
+from stonks_cli.whalemirror.paper_mirror import (
+    PaperClosedTrade,
+    PaperMirrorConfig,
+    PaperMirrorDecision,
+    PaperMirrorEngine,
+    PaperMirrorReplay,
+    PaperMirrorState,
+    PaperPosition,
+    replay_paper_mirror_fixture,
+)
 
 __all__ = [
     "AttributionMetrics",
@@ -69,6 +79,13 @@ __all__ = [
     "IngestionMonitor",
     "MirrorMode",
     "NormalizedTrade",
+    "PaperClosedTrade",
+    "PaperMirrorConfig",
+    "PaperMirrorDecision",
+    "PaperMirrorEngine",
+    "PaperMirrorReplay",
+    "PaperMirrorState",
+    "PaperPosition",
     "ReplayTrace",
     "TradeSide",
     "Venue",
@@ -91,6 +108,7 @@ __all__ = [
     "rank_wallets",
     "rank_wallets_from_fixture",
     "replay_capture_fixture",
+    "replay_paper_mirror_fixture",
     "render_decision_ledger",
     "render_tearsheet",
     "render_wallet_ranking_markdown",

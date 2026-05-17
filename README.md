@@ -106,6 +106,17 @@ $ stonks-cli whalemirror wallets rank \
 
 The ranking reports expectancy, Sharpe, rolling decay, leverage-adjusted PnL, funding-adjusted PnL, survivorship-adjusted PnL, and caveats. Public top-10 sanity checks are tracked separately in GitHub issue #15.
 
+Paper mirror replay with risk controls:
+
+```console
+$ stonks-cli whalemirror paper replay \
+    --fixture tests/fixtures/whalemirror/paper-mirror.jsonl \
+    --rankings-fixture tests/fixtures/whalemirror/wallet-attribution.jsonl \
+    --bankroll 1000
+```
+
+The replay emits paper-only execution intents, ledger decisions, stop-loss events, re-entry cooldown blocks, and a tearsheet with wins and losses. The 30-day top-5 paper gate is tracked separately in GitHub issue #14.
+
 ## Live Guard
 
 Live execution is disabled unless the venue-specific arm flag is set. For Hyperliquid:

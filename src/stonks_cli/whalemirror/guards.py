@@ -35,6 +35,9 @@ def evaluate_execution_guards(
     mode: MirrorMode | str,
     sg_resident: bool = True,
     require_arm: bool = True,
+    heartbeat_ok: bool | None = None,
+    emergency_stop_active: bool = False,
+    consensus_approved: bool | None = None,
     env: Mapping[str, str] | None = None,
 ) -> list[str]:
     resolved_venue = coerce_venue(venue)
@@ -50,5 +53,13 @@ def evaluate_execution_guards(
     if require_arm and not live_execution_armed(resolved_venue, env=env):
         reasons.append(f"live_trading_not_armed:{live_arm_env(resolved_venue)}")
 
-    return reasons
+    if heartbeat_ok is False:
+        reasons.append("heartbeat_not_fresh")
 
+    if emergency_stop_active:
+        reasons.append("emergency_stop_active")
+
+    if consensus_approved is False:
+        reasons.append("consensus_not_approved")
+
+    return reasons

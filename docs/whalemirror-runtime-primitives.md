@@ -14,6 +14,7 @@ The Phase 1 runtime keeps the existing scheduler, config, storage, plugin loader
 | `DecisionRecord` | `stonks_cli.whalemirror.models` | Journal and ledger record for signal-to-decision-to-outcome traceability. |
 | `evaluate_execution_guards` | `stonks_cli.whalemirror.guards` | Fails closed for live execution unless the venue is allowed and explicitly armed. |
 | `append_decision` / `read_decisions` | `stonks_cli.whalemirror.journal` | JSONL decision journal that can back the markdown ledger. |
+| `decode_ws_message` / `IngestionMonitor` | `stonks_cli.whalemirror.ingestion` | Hyperliquid websocket fixture decoding plus health/drop accounting before the 7-day capture gate. |
 
 ## Live Arm Gate
 
@@ -35,4 +36,3 @@ Paper and dry-run modes do not require an arm flag. Live mode does. Polymarket, 
 | `src/stonks_cli/plugins.py` | Keep plugin loading available for later venue adapters. |
 | `rust/hotpath` | Keep as the future low-latency state cache and guarded order construction layer. |
 | Existing Polymarket journal / tearsheet ideas | Reuse the audit and tearsheet discipline, not SG live execution. |
-

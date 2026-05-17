@@ -86,6 +86,16 @@ $ stonks-cli whalemirror ledger-demo \
 
 That demo regenerates the public [decision ledger](docs/decision-ledger.md) and the generated [fixture tearsheet](docs/whalemirror-fixture-tearsheet.md) before live data exists. The fixture includes one win and one loss so the audit path shows both with equal prominence.
 
+Hyperliquid ingestion fixture replay:
+
+```console
+$ stonks-cli whalemirror ingest replay \
+    --fixture tests/fixtures/whalemirror/hyperliquid-ws.jsonl \
+    --out .cache/whalemirror-normalized-trades.jsonl
+```
+
+That replay decodes representative perp, spot, and user-fill websocket messages into the venue-neutral `NormalizedTrade` model and reports ingestion health.
+
 ## Live Guard
 
 Live execution is disabled unless the venue-specific arm flag is set. For Hyperliquid:

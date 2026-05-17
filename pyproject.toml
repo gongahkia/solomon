@@ -16,10 +16,11 @@ dependencies = [
   "rich>=13.7",
   "typer>=0.12",
   "uv>=0.9.21",
+  "websockets>=12",
 ]
 
 [project.optional-dependencies]
-polymarket = ["py-clob-client-v2>=1.0.0", "websockets>=12"]
+polymarket = ["py-clob-client-v2>=1.0.0"]
 all = ["stonks-cli[polymarket]"]
 dev = [
   "ruff>=0.5",

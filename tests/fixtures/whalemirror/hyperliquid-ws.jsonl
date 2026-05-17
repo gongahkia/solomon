@@ -1,0 +1,4 @@
+{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"trades","coin":"BTC"}}}
+{"channel":"trades","sequence":1,"data":[{"coin":"BTC","side":"B","px":"65000","sz":"0.02","hash":"0xabc","time":1770000000000,"tid":1001,"users":["0x1111111111111111111111111111111111111111","0x2222222222222222222222222222222222222222"]}]}
+{"channel":"trades","sequence":3,"data":[{"coin":"@107","side":"A","px":"1.25","sz":"200","hash":"0xdef","time":1770000000500,"tid":1002,"users":["0x3333333333333333333333333333333333333333","0x4444444444444444444444444444444444444444"]}]}
+{"channel":"userFills","data":{"isSnapshot":false,"user":"0x5555555555555555555555555555555555555555","fills":[{"coin":"ETH","px":"3425.5","sz":"0.4","side":"A","time":1770000001000,"startPosition":"1.0","dir":"Close Long","closedPnl":"12.4","hash":"0xfill","oid":99,"crossed":true,"fee":"0.12","tid":2001,"feeToken":"USDC"}]}}

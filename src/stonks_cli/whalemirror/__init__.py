@@ -14,6 +14,17 @@ from stonks_cli.whalemirror.hyperliquid import (
     build_open_orders_subscription,
     build_order_updates_subscription,
 )
+from stonks_cli.whalemirror.ingestion import (
+    BackoffPolicy,
+    HyperliquidWebsocketIngestor,
+    IngestionHealth,
+    IngestionMonitor,
+    build_trades_subscription,
+    build_user_fills_subscription,
+    decode_ws_message,
+    replay_capture_fixture,
+    write_capture_jsonl,
+)
 from stonks_cli.whalemirror.journal import append_decision, decision_journal_path, read_decisions
 from stonks_cli.whalemirror.ledger import (
     ReplayTrace,
@@ -35,13 +46,17 @@ from stonks_cli.whalemirror.models import (
 
 __all__ = [
     "AttributionMetrics",
+    "BackoffPolicy",
     "DecisionRecord",
     "ExecutionIntent",
+    "HyperliquidWebsocketIngestor",
     "HyperliquidCancelIntent",
     "HyperliquidOpenOrder",
     "HyperliquidOrderClient",
     "HyperliquidOrderIntent",
     "HyperliquidSignature",
+    "IngestionHealth",
+    "IngestionMonitor",
     "MirrorMode",
     "NormalizedTrade",
     "ReplayTrace",
@@ -51,13 +66,18 @@ __all__ = [
     "build_open_orders_subscription",
     "build_order_updates_subscription",
     "build_tearsheet",
+    "build_trades_subscription",
+    "build_user_fills_subscription",
+    "decode_ws_message",
     "decision_journal_path",
     "evaluate_execution_guards",
     "load_replay_fixture",
     "live_arm_env",
     "live_execution_armed",
     "read_decisions",
+    "replay_capture_fixture",
     "render_decision_ledger",
     "render_tearsheet",
+    "write_capture_jsonl",
     "write_fixture_artifacts",
 ]

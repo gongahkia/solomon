@@ -1369,12 +1369,12 @@ dependencies = [
     { name = "rich" },
     { name = "typer" },
     { name = "uv" },
+    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
 all = [
     { name = "py-clob-client-v2" },
-    { name = "websockets" },
 ]
 dev = [
     { name = "mypy" },
@@ -1384,7 +1384,6 @@ dev = [
 ]
 polymarket = [
     { name = "py-clob-client-v2" },
-    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -1404,7 +1403,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "types-requests", marker = "extra == 'dev'", specifier = ">=2.32" },
     { name = "uv", specifier = ">=0.9.21" },
-    { name = "websockets", marker = "extra == 'polymarket'", specifier = ">=12" },
+    { name = "websockets", specifier = ">=12" },
 ]
 provides-extras = ["polymarket", "all", "dev"]
 

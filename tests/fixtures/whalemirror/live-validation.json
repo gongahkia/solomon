@@ -1,0 +1,40 @@
+{
+  "latency_samples": [
+    {
+      "detected_at_ms": 0,
+      "submitted_at_ms": 420,
+      "status": "ok"
+    },
+    {
+      "detected_at_ms": 1000,
+      "submitted_at_ms": 1710,
+      "status": "ok"
+    },
+    {
+      "detected_at_ms": 2000,
+      "submitted_at_ms": 2950,
+      "status": "guard_blocked",
+      "failure": "entry_price_guard"
+    }
+  ],
+  "slippage_samples": [
+    {
+      "paper_px": 65000,
+      "live_px": 65013,
+      "side": "buy",
+      "notional_usd": 25
+    },
+    {
+      "paper_px": 3425,
+      "live_px": 3420,
+      "side": "sell",
+      "notional_usd": 30
+    }
+  ],
+  "scale_gate": {
+    "current_max_live_order_notional_usd": 50,
+    "requested_max_live_order_notional_usd": 250,
+    "green_weeks": 0,
+    "required_green_weeks": 7
+  }
+}

@@ -21,6 +21,7 @@ See:
 - [Decision ledger](docs/decision-ledger.md)
 - [Equity archive](docs/equity-archive.md)
 - [Runtime primitives](docs/whalemirror-runtime-primitives.md)
+- [Validation gates](docs/whalemirror-validation-gates.md)
 - [Pivot plan](WORKON-PIVOT-ASAP.md)
 
 ## What WhaleMirror Does
@@ -116,6 +117,14 @@ $ stonks-cli whalemirror paper replay \
 ```
 
 The replay emits paper-only execution intents, ledger decisions, stop-loss events, re-entry cooldown blocks, and a tearsheet with wins and losses. The 30-day top-5 paper gate is tracked separately in GitHub issue #14.
+
+Validation gate sample run:
+
+```console
+$ scripts/whalemirror_gate_sample.sh
+```
+
+That script records restartable local evidence for #13, #14, and #10 under `.cache/whalemirror-gates/`. It proves the harness and report generation; elapsed-time gates still need real operating time before the GitHub issues can be closed.
 
 ## Live Guard
 

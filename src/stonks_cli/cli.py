@@ -114,6 +114,21 @@ from stonks_cli.whalemirror.paper_mirror import (
     PaperMirrorConfig,
     replay_paper_mirror_fixture,
 )
+from stonks_cli.whalemirror.validation_gates import (
+    CAPTURE_GATE,
+    DEFAULT_LIVE_VALIDATION_FIXTURE,
+    LIVE_GATE,
+    PAPER_GATE,
+    assess_gate,
+    default_validation_dir,
+    gate_state_path,
+    load_gate_state,
+    record_capture_probe,
+    record_live_probe,
+    record_paper_probe,
+    render_gate_report,
+    write_gate_report,
+)
 
 app = typer.Typer(add_completion=True, help="WhaleMirror Hyperliquid paper-first observability CLI.")
 config_app = typer.Typer()
@@ -131,6 +146,7 @@ alert_app = typer.Typer()
 dividend_app = typer.Typer()
 polymarket_app = typer.Typer(help="Historical Polymarket commands retained for migration reference.")
 whalemirror_app = typer.Typer(help="WhaleMirror Hyperliquid paper-first commands.")
+whalemirror_gates_app = typer.Typer(help="Restartable validation gate harnesses.")
 whalemirror_ingest_app = typer.Typer(help="Hyperliquid ingestion fixture and capture commands.")
 whalemirror_paper_app = typer.Typer(help="Paper mirror replay and risk-control commands.")
 whalemirror_wallets_app = typer.Typer(help="Venue-neutral wallet attribution commands.")
@@ -158,6 +174,7 @@ app.add_typer(portfolio_app, name="portfolio", hidden=True)
 app.add_typer(paper_app, name="paper", hidden=True)
 app.add_typer(alert_app, name="alert", hidden=True)
 app.add_typer(dividend_app, name="dividend", hidden=True)
+whalemirror_app.add_typer(whalemirror_gates_app, name="gates")
 whalemirror_app.add_typer(whalemirror_ingest_app, name="ingest")
 whalemirror_app.add_typer(whalemirror_paper_app, name="paper")
 whalemirror_app.add_typer(whalemirror_wallets_app, name="wallets")
@@ -326,6 +343,153 @@ def whalemirror_paper_replay(
         )
     except Exception as e:
         raise _exit_for_error(e)
+
+
+@whalemirror_gates_app.command("capture-sample")
+def whalemirror_gates_capture_sample(
+    fixture: Path = typer.Option(DEFAULT_CAPTURE_FIXTURE, "--fixture", exists=True, readable=True),
+    state_dir: Path = typer.Option(default_validation_dir(), "--state-dir"),
+    capture_out_dir: Path = typer.Option(Path(".cache/whalemirror-gates/captures"), "--capture-out-dir"),
+    report: Path = typer.Option(Path(".cache/whalemirror-gates/capture-gate.md"), "--report"),
+    reset: bool = typer.Option(False, "--reset", help="Start a fresh gate state before recording this sample"),
+) -> None:
+    """Record a restartable #13 capture-health sample."""
+    try:
+        state = record_capture_probe(
+            state_dir=state_dir,
+            fixture_path=fixture,
+            capture_out_dir=capture_out_dir,
+            reset=reset,
+        )
+        write_gate_report(state, report_path=report)
+        Console().print_json(
+            json.dumps(
+                {
+                    "state_path": str(gate_state_path(CAPTURE_GATE, state_dir=state_dir)),
+                    "report_path": str(report),
+                    "assessment": assess_gate(state).to_dict(),
+                    "latest_evidence": state.evidence[-1].to_dict(),
+                }
+            )
+        )
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@whalemirror_gates_app.command("paper-sample")
+def whalemirror_gates_paper_sample(
+    fixture: Path = typer.Option(DEFAULT_PAPER_MIRROR_FIXTURE, "--fixture", exists=True, readable=True),
+    rankings_fixture: Path = typer.Option(DEFAULT_ATTRIBUTION_FIXTURE, "--rankings-fixture", exists=True, readable=True),
+    state_dir: Path = typer.Option(default_validation_dir(), "--state-dir"),
+    report: Path = typer.Option(Path(".cache/whalemirror-gates/paper-gate.md"), "--report"),
+    bankroll: float = typer.Option(1000.0, "--bankroll", min=0.0),
+    max_position_fraction: float = typer.Option(0.10, "--max-position-fraction", min=0.0, max=1.0),
+    max_order_notional: float = typer.Option(75.0, "--max-order-notional", min=0.0),
+    reset: bool = typer.Option(False, "--reset", help="Start a fresh gate state before recording this sample"),
+) -> None:
+    """Record a restartable #14 paper-mirror gate sample."""
+    try:
+        state = record_paper_probe(
+            state_dir=state_dir,
+            fixture_path=fixture,
+            rankings_fixture=rankings_fixture,
+            config=PaperMirrorConfig(
+                follower_bankroll_usd=bankroll,
+                max_position_fraction=max_position_fraction,
+                max_order_notional_usd=max_order_notional,
+            ),
+            reset=reset,
+        )
+        write_gate_report(state, report_path=report)
+        Console().print_json(
+            json.dumps(
+                {
+                    "state_path": str(gate_state_path(PAPER_GATE, state_dir=state_dir)),
+                    "report_path": str(report),
+                    "assessment": assess_gate(state).to_dict(),
+                    "latest_evidence": state.evidence[-1].to_dict(),
+                }
+            )
+        )
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@whalemirror_gates_app.command("live-sample")
+def whalemirror_gates_live_sample(
+    fixture: Path = typer.Option(DEFAULT_LIVE_VALIDATION_FIXTURE, "--fixture", exists=True, readable=True),
+    state_dir: Path = typer.Option(default_validation_dir(), "--state-dir"),
+    report: Path = typer.Option(Path(".cache/whalemirror-gates/live-gate.md"), "--report"),
+    reset: bool = typer.Option(False, "--reset", help="Start a fresh gate state before recording this sample"),
+) -> None:
+    """Record a restartable #10 latency, slippage, and scale-gate sample."""
+    try:
+        state = record_live_probe(state_dir=state_dir, fixture_path=fixture, reset=reset)
+        write_gate_report(state, report_path=report)
+        Console().print_json(
+            json.dumps(
+                {
+                    "state_path": str(gate_state_path(LIVE_GATE, state_dir=state_dir)),
+                    "report_path": str(report),
+                    "assessment": assess_gate(state).to_dict(),
+                    "latest_evidence": state.evidence[-1].to_dict(),
+                }
+            )
+        )
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@whalemirror_gates_app.command("status")
+def whalemirror_gates_status(
+    gate: str = typer.Option("all", "--gate", help="all, capture, paper, live, capture-7d, paper-30d, or live-60d"),
+    state_dir: Path = typer.Option(default_validation_dir(), "--state-dir"),
+    markdown: bool = typer.Option(False, "--markdown", help="Render markdown reports instead of JSON"),
+) -> None:
+    """Show validation gate status from restartable state files."""
+    try:
+        gate_ids = _resolve_gate_ids(gate)
+        states = []
+        for gate_id in gate_ids:
+            path = gate_state_path(gate_id, state_dir=state_dir)
+            if path.exists():
+                state = load_gate_state(gate_id, state_dir=state_dir)
+                states.append(state)
+        if markdown:
+            Console().print("\n".join(render_gate_report(state) for state in states))
+        else:
+            Console().print_json(
+                json.dumps(
+                    {
+                        "state_dir": str(state_dir),
+                        "gates": [
+                            {
+                                "state_path": str(gate_state_path(state.gate_id, state_dir=state_dir)),
+                                "assessment": assess_gate(state).to_dict(),
+                            }
+                            for state in states
+                        ],
+                    }
+                )
+            )
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+def _resolve_gate_ids(gate: str) -> list[str]:
+    normalized = gate.strip().lower()
+    mapping = {
+        "all": [CAPTURE_GATE, PAPER_GATE, LIVE_GATE],
+        "capture": [CAPTURE_GATE],
+        "capture-7d": [CAPTURE_GATE],
+        "paper": [PAPER_GATE],
+        "paper-30d": [PAPER_GATE],
+        "live": [LIVE_GATE],
+        "live-60d": [LIVE_GATE],
+    }
+    if normalized not in mapping:
+        raise ValueError(f"unsupported gate: {gate}")
+    return mapping[normalized]
 
 
 @app.command(hidden=True)

@@ -148,6 +148,19 @@ class PolymarketConfig(BaseModel):
     whale_trade_min_usd: float = Field(default=10000.0, ge=0.0) # threshold for whale-trade alerts
 
 
+class WhaleMirrorConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    enabled: bool = False
+    venue: Literal["hyperliquid"] = "hyperliquid"
+    paper: bool = True
+    decision_ledger_path: str = "docs/decision-ledger.md"
+    live_require_armed_env: bool = True
+    hyperliquid_live_armed_env: str = "STONKS_CLI_HYPERLIQUID_LIVE_ARMED"
+    live_phase1_budget_usd: float = Field(default=200.0, ge=0.0)
+    max_live_order_notional_usd: float = Field(default=50.0, ge=0.0)
+    scale_gate_green_weeks: int = Field(default=7, ge=1)
+
+
 class TuiConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     refresh_interval: int = Field(default=60, ge=5, le=3600)
@@ -183,6 +196,7 @@ class AppConfig(BaseModel):
     )
     api_keys: ApiKeysConfig = Field(default_factory=ApiKeysConfig)
     polymarket: PolymarketConfig = Field(default_factory=PolymarketConfig)
+    whalemirror: WhaleMirrorConfig = Field(default_factory=WhaleMirrorConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
 
 

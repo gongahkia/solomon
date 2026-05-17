@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import platform
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -12,6 +14,8 @@ from stonks_cli.whalemirror.hyperliquid import HYPERLIQUID_WS_URL
 from stonks_cli.whalemirror.models import NormalizedTrade, TradeSide, Venue
 
 DEFAULT_CAPTURE_FIXTURE = Path("tests/fixtures/whalemirror/hyperliquid-ws.jsonl")
+DEFAULT_LIVE_CAPTURE_COINS = ("BTC", "ETH", "SOL")
+DEFAULT_LIVE_CAPTURE_SECONDS = 7 * 24 * 60 * 60
 
 
 class HyperliquidIngestionError(RuntimeError):
@@ -33,6 +37,7 @@ class BackoffPolicy:
 @dataclass
 class IngestionHealth:
     messages_received: int = 0
+    decoded_events: int = 0
     decoded_trades: int = 0
     malformed_messages: int = 0
     dropped_messages: int = 0
@@ -47,6 +52,13 @@ class IngestionHealth:
 
 def build_trades_subscription(*, coin: str) -> dict[str, Any]:
     return {"method": "subscribe", "subscription": {"type": "trades", "coin": coin}}
+
+
+def build_all_mids_subscription(*, dex: str | None = None) -> dict[str, Any]:
+    subscription: dict[str, Any] = {"type": "allMids"}
+    if dex:
+        subscription["dex"] = dex
+    return {"method": "subscribe", "subscription": subscription}
 
 
 def build_user_fills_subscription(*, user: str, aggregate_by_time: bool | None = None) -> dict[str, Any]:
@@ -64,6 +76,34 @@ def build_unsubscribe(subscription: dict[str, Any]) -> dict[str, Any]:
     if subscription.get("method") == "subscribe":
         subscription = dict(subscription["subscription"])
     return {"method": "unsubscribe", "subscription": subscription}
+
+
+def build_live_capture_subscriptions(
+    *,
+    coins: list[str] | tuple[str, ...] = DEFAULT_LIVE_CAPTURE_COINS,
+    user_fill_wallets: list[str] | tuple[str, ...] = (),
+    user_funding_wallets: list[str] | tuple[str, ...] = (),
+    include_all_mids: bool = True,
+    all_mids_dex: str | None = None,
+) -> list[dict[str, Any]]:
+    subscriptions: list[dict[str, Any]] = []
+    for coin in coins:
+        normalized = coin.strip()
+        if normalized:
+            subscriptions.append(build_trades_subscription(coin=normalized))
+    if include_all_mids:
+        subscriptions.append(build_all_mids_subscription(dex=all_mids_dex))
+    for wallet in user_fill_wallets:
+        normalized = wallet.strip().lower()
+        if normalized:
+            subscriptions.append(build_user_fills_subscription(user=normalized, aggregate_by_time=False))
+    for wallet in user_funding_wallets:
+        normalized = wallet.strip().lower()
+        if normalized:
+            subscriptions.append(build_user_fundings_subscription(user=normalized))
+    if not subscriptions:
+        raise HyperliquidIngestionError("at least one Hyperliquid websocket subscription is required")
+    return subscriptions
 
 
 def decode_ws_message(message: str | dict[str, Any]) -> list[NormalizedTrade]:
@@ -115,6 +155,7 @@ class IngestionMonitor:
                 raise HyperliquidIngestionError("websocket message must be a JSON object")
             self._record_sequence(payload)
             trades = decode_ws_message(payload)
+            self.health.decoded_events += _decoded_event_count(payload, trades)
         except Exception as e:
             self.health.malformed_messages += 1
             self.health.last_error = str(e)
@@ -160,8 +201,12 @@ class HyperliquidWebsocketIngestor:
         self,
         handler: Callable[[NormalizedTrade], Awaitable[None]],
         *,
+        raw_handler: Callable[[str], Awaitable[None]] | None = None,
+        health_handler: Callable[[IngestionHealth], Awaitable[None]] | None = None,
         stop_after_messages: int | None = None,
+        stop_after_seconds: float | None = None,
         max_reconnects: int | None = None,
+        heartbeat_seconds: float = 30.0,
     ) -> IngestionHealth:
         try:
             import websockets
@@ -170,7 +215,12 @@ class HyperliquidWebsocketIngestor:
 
         attempt = 0
         seen_messages = 0
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        deadline = started + stop_after_seconds if stop_after_seconds is not None else None
         while max_reconnects is None or attempt <= max_reconnects:
+            if deadline is not None and loop.time() >= deadline:
+                return self.monitor.health
             if attempt:
                 await asyncio.sleep(self.backoff.delay(attempt))
             try:
@@ -178,18 +228,118 @@ class HyperliquidWebsocketIngestor:
                     for subscription in self.subscriptions:
                         await websocket.send(json.dumps(subscription))
                     attempt = 0
-                    async for raw in websocket:
+                    while True:
+                        if deadline is not None and loop.time() >= deadline:
+                            return self.monitor.health
+                        timeout = heartbeat_seconds
+                        if deadline is not None:
+                            timeout = max(0.1, min(timeout, deadline - loop.time()))
+                        try:
+                            raw = await asyncio.wait_for(websocket.recv(), timeout=timeout)
+                        except TimeoutError:
+                            await websocket.send(json.dumps({"method": "ping"}))
+                            continue
                         seen_messages += 1
-                        for trade in self.monitor.record_message(str(raw)):
+                        raw_text = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+                        if raw_handler is not None:
+                            await raw_handler(raw_text)
+                        for trade in self.monitor.record_message(raw_text):
                             await handler(trade)
+                        if health_handler is not None:
+                            await health_handler(self.monitor.health)
                         if stop_after_messages is not None and seen_messages >= stop_after_messages:
                             return self.monitor.health
             except Exception as e:
                 attempt += 1
                 self.monitor.record_reconnect(str(e))
                 if max_reconnects is not None and attempt > max_reconnects:
+                    self.monitor.health.last_error = f"max_reconnects_exceeded: {e}"
                     break
         return self.monitor.health
+
+
+async def capture_hyperliquid_to_files(
+    *,
+    subscriptions: list[dict[str, Any]],
+    raw_out_path: Path | str,
+    trades_out_path: Path | str,
+    health_out_path: Path | str,
+    duration_seconds: float = DEFAULT_LIVE_CAPTURE_SECONDS,
+    ws_url: str = HYPERLIQUID_WS_URL,
+    heartbeat_seconds: float = 30.0,
+    health_interval_seconds: float = 60.0,
+    max_reconnects: int | None = None,
+    stop_after_messages: int | None = None,
+    progress_handler: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+) -> dict[str, Any]:
+    raw_path = Path(raw_out_path)
+    trades_path = Path(trades_out_path)
+    health_path = Path(health_out_path)
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    trades_path.parent.mkdir(parents=True, exist_ok=True)
+    health_path.parent.mkdir(parents=True, exist_ok=True)
+
+    monitor = IngestionMonitor()
+    ingestor = HyperliquidWebsocketIngestor(subscriptions=subscriptions, ws_url=ws_url, monitor=monitor)
+    started_at = _iso(_now())
+    started_monotonic = time.monotonic()
+    last_health_write = 0.0
+
+    async def write_health(status: str) -> dict[str, Any]:
+        payload = _capture_health_payload(
+            status=status,
+            health=monitor.health,
+            started_at_utc=started_at,
+            raw_out_path=raw_path,
+            trades_out_path=trades_path,
+            health_out_path=health_path,
+            subscriptions=subscriptions,
+            ws_url=ws_url,
+            duration_seconds=time.monotonic() - started_monotonic,
+        )
+        health_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        if progress_handler is not None:
+            await progress_handler(payload)
+        return payload
+
+    async def maybe_write_health(health: IngestionHealth) -> None:
+        nonlocal last_health_write
+        _ = health
+        now = time.monotonic()
+        if now - last_health_write >= health_interval_seconds:
+            last_health_write = now
+            await write_health("running")
+
+    async def record_raw(raw: str) -> None:
+        row = {"received_at_utc": _iso(_now()), "raw": _json_or_text(raw)}
+        raw_handle.write(json.dumps(row, sort_keys=True) + "\n")
+
+    async def record_trade(trade: NormalizedTrade) -> None:
+        trades_handle.write(json.dumps(trade.to_dict(), sort_keys=True) + "\n")
+
+    with raw_path.open("a", encoding="utf-8", buffering=1) as raw_handle, trades_path.open(
+        "a", encoding="utf-8", buffering=1
+    ) as trades_handle:
+        await write_health("running")
+        await ingestor.run(
+            record_trade,
+            raw_handler=record_raw,
+            health_handler=maybe_write_health,
+            stop_after_messages=stop_after_messages,
+            stop_after_seconds=duration_seconds,
+            max_reconnects=max_reconnects,
+            heartbeat_seconds=heartbeat_seconds,
+        )
+        return await write_health(_capture_final_status(monitor.health))
+
+
+def runtime_host_metadata() -> dict[str, Any]:
+    return {
+        "os": platform.system(),
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "python": platform.python_version(),
+    }
 
 
 def _decode_public_trade(row: Any) -> list[NormalizedTrade]:
@@ -299,3 +449,80 @@ def _millis_to_utc(value: int) -> str:
 
 def _as_float(value: Any) -> float:
     return float(str(value))
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _iso(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _decoded_event_count(payload: dict[str, Any], trades: list[NormalizedTrade]) -> int:
+    channel = str(payload.get("channel") or "")
+    if channel in {"subscriptionResponse", "pong"}:
+        return 0
+    if trades:
+        return len(trades)
+    known_channels = {
+        "allMids",
+        "activeAssetCtx",
+        "bbo",
+        "candle",
+        "l2Book",
+        "orderUpdates",
+        "trades",
+        "userEvents",
+        "userFills",
+        "userFundings",
+        "userNonFundingLedgerUpdates",
+    }
+    return 1 if channel in known_channels else 0
+
+
+def _capture_final_status(health: IngestionHealth) -> str:
+    if str(health.last_error or "").startswith("max_reconnects_exceeded:"):
+        return "max_reconnects_exceeded"
+    if health.malformed_messages or health.dropped_messages:
+        return "needs_attention"
+    return "clean_capture"
+
+
+def _capture_health_payload(
+    *,
+    status: str,
+    health: IngestionHealth,
+    started_at_utc: str,
+    raw_out_path: Path,
+    trades_out_path: Path,
+    health_out_path: Path,
+    subscriptions: list[dict[str, Any]],
+    ws_url: str,
+    duration_seconds: float,
+) -> dict[str, Any]:
+    return {
+        "source": "live_capture",
+        "started_at_utc": started_at_utc,
+        "updated_at_utc": _iso(_now()),
+        "duration_seconds": round(duration_seconds, 3),
+        "ws_url": ws_url,
+        "subscriptions": subscriptions,
+        "raw_out_path": str(raw_out_path),
+        "capture_out_path": str(trades_out_path),
+        "health_out_path": str(health_out_path),
+        "runtime": runtime_host_metadata(),
+        "health": health.to_dict(),
+        "decoded_trade_count": health.decoded_trades,
+        "decoded_event_count": health.decoded_events,
+        "final_status": status,
+    }
+
+
+def _json_or_text(raw: str) -> Any:
+    try:
+        return json.loads(raw)
+    except Exception:
+        return raw

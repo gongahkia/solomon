@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import platform
 import sys
 from pathlib import Path
 
@@ -98,9 +100,15 @@ from stonks_cli.whalemirror.attribution import (
     rank_wallets_from_fixture,
     render_wallet_ranking_markdown,
 )
+from stonks_cli.whalemirror.hyperliquid import HYPERLIQUID_WS_URL
 from stonks_cli.whalemirror.ingestion import (
     DEFAULT_CAPTURE_FIXTURE,
+    DEFAULT_LIVE_CAPTURE_COINS,
+    DEFAULT_LIVE_CAPTURE_SECONDS,
+    build_live_capture_subscriptions,
+    capture_hyperliquid_to_files,
     replay_capture_fixture,
+    runtime_host_metadata,
     write_capture_jsonl,
 )
 from stonks_cli.whalemirror.ledger import (
@@ -123,6 +131,7 @@ from stonks_cli.whalemirror.validation_gates import (
     default_validation_dir,
     gate_state_path,
     load_gate_state,
+    record_capture_health,
     record_capture_probe,
     record_live_probe,
     record_paper_probe,
@@ -277,6 +286,108 @@ def whalemirror_ingest_replay(
             )
         )
     except Exception as e:
+        raise _exit_for_error(e)
+
+
+@whalemirror_ingest_app.command("run")
+def whalemirror_ingest_run(
+    coins: list[str] = typer.Option(None, "--coin", help="Repeatable Hyperliquid trade coin, e.g. BTC or @107"),
+    user_fill_wallets: list[str] = typer.Option(None, "--user-fill-wallet", help="Repeatable wallet for userFills"),
+    user_funding_wallets: list[str] = typer.Option(
+        None, "--user-funding-wallet", help="Repeatable wallet for userFundings"
+    ),
+    all_mids: bool = typer.Option(True, "--all-mids/--no-all-mids", help="Include allMids; first dex includes spot mids"),
+    all_mids_dex: str | None = typer.Option(None, "--all-mids-dex", help="Optional allMids dex selector"),
+    duration_seconds: float = typer.Option(float(DEFAULT_LIVE_CAPTURE_SECONDS), "--duration-seconds", min=1.0),
+    raw_out: Path = typer.Option(Path(".cache/whalemirror-gates/captures/hyperliquid-raw.jsonl"), "--raw-out"),
+    out: Path = typer.Option(Path(".cache/whalemirror-gates/captures/hyperliquid-normalized.jsonl"), "--out"),
+    health: Path = typer.Option(Path(".cache/whalemirror-gates/reports/capture-health.json"), "--health"),
+    state_dir: Path = typer.Option(default_validation_dir(), "--state-dir"),
+    report: Path = typer.Option(Path(".cache/whalemirror-gates/reports/capture-gate.md"), "--report"),
+    ws_url: str = typer.Option(HYPERLIQUID_WS_URL, "--ws-url"),
+    heartbeat_seconds: float = typer.Option(30.0, "--heartbeat-seconds", min=1.0),
+    health_interval_seconds: float = typer.Option(300.0, "--health-interval-seconds", min=1.0),
+    max_reconnects: int | None = typer.Option(None, "--max-reconnects", min=0),
+    stop_after_messages: int | None = typer.Option(None, "--stop-after-messages", min=1),
+    reset: bool = typer.Option(False, "--reset", help="Start a fresh #13 gate state before recording evidence"),
+    allow_non_linux: bool = typer.Option(False, "--allow-non-linux", help="Development-only override for Mac/Windows"),
+) -> None:
+    """Run a live Hyperliquid websocket capture for the #13 Linux validation gate."""
+    if not allow_non_linux and platform.system().lower() != "linux":
+        raise _exit_for_error(
+            ValueError(
+                "live WhaleMirror validation captures must run on the always-on Linux host; "
+                "use --allow-non-linux only for development smoke tests"
+            )
+        )
+
+    subscriptions = build_live_capture_subscriptions(
+        coins=tuple(coins or DEFAULT_LIVE_CAPTURE_COINS),
+        user_fill_wallets=tuple(user_fill_wallets or ()),
+        user_funding_wallets=tuple(user_funding_wallets or ()),
+        include_all_mids=all_mids,
+        all_mids_dex=all_mids_dex,
+    )
+    latest_state = None
+    first_evidence = True
+
+    async def record_progress(payload: dict[str, object]) -> None:
+        nonlocal first_evidence, latest_state
+        latest_state = record_capture_health(
+            state_dir=state_dir,
+            capture_payload=dict(payload),
+            reset=reset and first_evidence,
+        )
+        first_evidence = False
+        write_gate_report(latest_state, report_path=report)
+
+    try:
+        result = asyncio.run(
+            capture_hyperliquid_to_files(
+                subscriptions=subscriptions,
+                raw_out_path=raw_out,
+                trades_out_path=out,
+                health_out_path=health,
+                duration_seconds=duration_seconds,
+                ws_url=ws_url,
+                heartbeat_seconds=heartbeat_seconds,
+                health_interval_seconds=health_interval_seconds,
+                max_reconnects=max_reconnects,
+                stop_after_messages=stop_after_messages,
+                progress_handler=record_progress,
+            )
+        )
+        if latest_state is None:
+            latest_state = record_capture_health(state_dir=state_dir, capture_payload=result, reset=reset)
+            write_gate_report(latest_state, report_path=report)
+        Console().print_json(
+            json.dumps(
+                {
+                    "state_path": str(gate_state_path(CAPTURE_GATE, state_dir=state_dir)),
+                    "report_path": str(report),
+                    "raw_out_path": str(raw_out),
+                    "out_path": str(out),
+                    "health_path": str(health),
+                    "assessment": assess_gate(latest_state).to_dict(),
+                    "latest_evidence": latest_state.evidence[-1].to_dict(),
+                }
+            )
+        )
+    except Exception as e:
+        interrupted = {
+            "source": "live_capture",
+            "final_status": "interrupted",
+            "error": str(e),
+            "ws_url": ws_url,
+            "subscriptions": subscriptions,
+            "raw_out_path": str(raw_out),
+            "capture_out_path": str(out),
+            "health_out_path": str(health),
+            "runtime": runtime_host_metadata(),
+            "health": {},
+        }
+        state = record_capture_health(state_dir=state_dir, capture_payload=interrupted, reset=reset and first_evidence)
+        write_gate_report(state, report_path=report)
         raise _exit_for_error(e)
 
 

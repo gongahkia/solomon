@@ -187,6 +187,23 @@ def record_capture_probe(
     )
 
 
+def record_capture_health(
+    *,
+    state_dir: Path | str | None = None,
+    capture_payload: dict[str, Any],
+    reset: bool = False,
+    now: datetime | None = None,
+) -> ValidationGateState:
+    state = init_gate(CAPTURE_GATE, state_dir=state_dir, reset=reset, now=now)
+    return append_evidence(
+        state,
+        kind="capture_health",
+        payload=capture_payload,
+        state_dir=state_dir,
+        now=now,
+    )
+
+
 def record_paper_probe(
     *,
     state_dir: Path | str | None = None,
@@ -375,16 +392,27 @@ def _capture_probe_status(health: IngestionHealth) -> str:
 
 def _capture_blockers(state: ValidationGateState) -> list[str]:
     blockers = _missing_evidence_blocker(state, "capture_health")
+    has_clean_live_completion = False
     for item in state.evidence:
         if item.kind != "capture_health":
             continue
         health = item.payload.get("health") or {}
+        source = str(item.payload.get("source") or "fixture")
+        final_status = str(item.payload.get("final_status") or "")
+        runtime = item.payload.get("runtime") or {}
+        runtime_os = str(runtime.get("os") or "")
+        if source == "live_capture" and final_status == "clean_capture":
+            has_clean_live_completion = True
+        if source == "live_capture" and runtime_os and runtime_os.lower() != "linux":
+            blockers.append("capture_not_run_on_linux_operator_host")
         if int(health.get("malformed_messages") or 0) > 0:
             blockers.append("capture_malformed_messages_present")
         if int(health.get("dropped_messages") or 0) > 0:
             blockers.append("capture_dropped_messages_present")
-        if item.payload.get("final_status") == "needs_attention":
+        if final_status in {"failed", "interrupted", "needs_attention", "max_reconnects_exceeded"}:
             blockers.append("capture_sample_needs_attention")
+    if not has_clean_live_completion:
+        blockers.append("capture_missing_clean_linux_live_completion")
     return sorted(set(blockers))
 
 

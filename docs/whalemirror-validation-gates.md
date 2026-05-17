@@ -2,23 +2,29 @@
 
 These gates are evidence collection flows, not one-shot tests. They are restartable: every sample appends to a JSON state file and regenerates a markdown report. Do not close the validation issues until elapsed time and evidence satisfy the gate.
 
+## Linux Operator Policy
+
+All long-running WhaleMirror validation and roadmap tasks must run on the always-on Linux validation machine, not on a MacBook. This applies to the #13 7-day capture, the #14 30-day paper mirror gate, the #10 60-day live validation gate, and any future roadmap task that requires uninterrupted operation.
+
+The MacBook can still run fixture smoke tests, edit code, and inspect reports. It should not be treated as the source of truth for uninterrupted validation evidence.
+
 ## Gate Map
 
 | Gate | GitHub issue | Minimum elapsed time | Command |
 | --- | ---: | ---: | --- |
-| Hyperliquid clean capture | #13 | 7 days | `stonks-cli whalemirror gates capture-sample` |
+| Hyperliquid clean capture | #13 | 7 days | `scripts/whalemirror_linux_capture_7d.sh` |
 | Top-5 paper mirror | #14 | 30 days | `stonks-cli whalemirror gates paper-sample` |
 | Live latency / slippage / scale | #10 | 60 days | `stonks-cli whalemirror gates live-sample` |
 
-## Local Run
+## Fixture Smoke Run
 
-Use the bundled script to record one sample for all gates:
+Use the bundled script to record one fixture-backed sample for all gates:
 
 ```console
 $ scripts/whalemirror_gate_sample.sh
 ```
 
-By default it writes runtime artifacts under `.cache/whalemirror-gates/`:
+On Linux, it writes runtime artifacts under `${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates/` unless `WHALEMIRROR_GATE_ROOT` is set. On non-Linux development machines, it writes under `.cache/whalemirror-gates/`.
 
 - `state/*.json`: restartable gate state
 - `reports/*.md`: human-readable evidence summaries
@@ -31,6 +37,62 @@ $ WHALEMIRROR_GATE_STATE_DIR=/path/state \
   WHALEMIRROR_GATE_REPORT_DIR=/path/reports \
   WHALEMIRROR_GATE_CAPTURE_DIR=/path/captures \
   scripts/whalemirror_gate_sample.sh
+```
+
+This script proves the harness works. It does not satisfy #13, #14, or #10.
+
+## Linux 7-Day Capture
+
+Run #13 on the always-on Linux machine:
+
+```console
+$ cd /opt/stonks-cli
+$ scripts/whalemirror_linux_capture_7d.sh
+```
+
+The script refuses to run on non-Linux hosts. By default it captures BTC, ETH, SOL trades plus `allMids`, which Hyperliquid documents as including spot mids on the first perp dex. Override the market set with environment variables:
+
+```console
+$ WHALEMIRROR_CAPTURE_COINS="BTC ETH SOL @107" \
+  WHALEMIRROR_CAPTURE_DURATION_SECONDS=604800 \
+  scripts/whalemirror_linux_capture_7d.sh
+```
+
+The live capture command is:
+
+```console
+$ stonks-cli whalemirror ingest run \
+    --coin BTC \
+    --coin ETH \
+    --coin SOL \
+    --all-mids \
+    --duration-seconds 604800 \
+    --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates/state" \
+    --raw-out "${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates/captures/hyperliquid-raw.jsonl" \
+    --out "${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates/captures/hyperliquid-normalized.jsonl" \
+    --health "${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates/reports/capture-health.json" \
+    --report "${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates/reports/capture-gate.md"
+```
+
+The #13 gate cannot pass from fixture samples. It requires a `live_capture` evidence entry with `final_status: clean_capture`, Linux runtime metadata, zero malformed messages, and zero dropped messages after the 7-day elapsed window.
+
+## systemd Template
+
+For an always-on Linux host, install the template service after placing the repo at `/opt/stonks-cli`:
+
+```console
+$ sudo mkdir -p /var/lib/stonks-cli
+$ sudo cp ops/systemd/whalemirror-capture.service /etc/systemd/system/whalemirror-capture.service
+$ sudo systemctl daemon-reload
+$ sudo systemctl enable --now whalemirror-capture.service
+$ journalctl -u whalemirror-capture.service -f
+```
+
+Check status and reports with:
+
+```console
+$ PYTHONPATH=src uv run stonks-cli whalemirror gates status \
+    --state-dir /var/lib/stonks-cli/whalemirror-gates/state
 ```
 
 ## Individual Commands

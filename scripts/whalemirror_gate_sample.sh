@@ -2,9 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-STATE_DIR="${WHALEMIRROR_GATE_STATE_DIR:-$ROOT_DIR/.cache/whalemirror-gates/state}"
-REPORT_DIR="${WHALEMIRROR_GATE_REPORT_DIR:-$ROOT_DIR/.cache/whalemirror-gates/reports}"
-CAPTURE_DIR="${WHALEMIRROR_GATE_CAPTURE_DIR:-$ROOT_DIR/.cache/whalemirror-gates/captures}"
+if [[ "$(uname -s)" == "Linux" ]]; then
+  DEFAULT_GATE_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates"
+else
+  DEFAULT_GATE_ROOT="$ROOT_DIR/.cache/whalemirror-gates"
+fi
+
+GATE_ROOT="${WHALEMIRROR_GATE_ROOT:-$DEFAULT_GATE_ROOT}"
+STATE_DIR="${WHALEMIRROR_GATE_STATE_DIR:-$GATE_ROOT/state}"
+REPORT_DIR="${WHALEMIRROR_GATE_REPORT_DIR:-$GATE_ROOT/reports}"
+CAPTURE_DIR="${WHALEMIRROR_GATE_CAPTURE_DIR:-$GATE_ROOT/captures}"
 
 cd "$ROOT_DIR"
 mkdir -p "$STATE_DIR" "$REPORT_DIR" "$CAPTURE_DIR"

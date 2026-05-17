@@ -4,6 +4,8 @@ from stonks_cli.whalemirror.ingestion import (
     DEFAULT_CAPTURE_FIXTURE,
     BackoffPolicy,
     IngestionMonitor,
+    build_all_mids_subscription,
+    build_live_capture_subscriptions,
     build_trades_subscription,
     build_unsubscribe,
     build_user_fills_subscription,
@@ -19,6 +21,7 @@ def test_subscription_builders_match_hyperliquid_shapes():
     trades = build_trades_subscription(coin="BTC")
 
     assert trades == {"method": "subscribe", "subscription": {"type": "trades", "coin": "BTC"}}
+    assert build_all_mids_subscription() == {"method": "subscribe", "subscription": {"type": "allMids"}}
     assert build_user_fills_subscription(user="0xABC", aggregate_by_time=True) == {
         "method": "subscribe",
         "subscription": {"type": "userFills", "user": "0xabc", "aggregateByTime": True},
@@ -28,6 +31,20 @@ def test_subscription_builders_match_hyperliquid_shapes():
         "subscription": {"type": "userFundings", "user": "0xabc"},
     }
     assert build_unsubscribe(trades) == {"method": "unsubscribe", "subscription": {"type": "trades", "coin": "BTC"}}
+
+
+def test_live_capture_subscription_builder_defaults_to_perps_and_all_mids():
+    subscriptions = build_live_capture_subscriptions(coins=("BTC", "ETH"), user_fill_wallets=("0xABC",))
+
+    assert subscriptions == [
+        {"method": "subscribe", "subscription": {"type": "trades", "coin": "BTC"}},
+        {"method": "subscribe", "subscription": {"type": "trades", "coin": "ETH"}},
+        {"method": "subscribe", "subscription": {"type": "allMids"}},
+        {
+            "method": "subscribe",
+            "subscription": {"type": "userFills", "user": "0xabc", "aggregateByTime": False},
+        },
+    ]
 
 
 def test_decode_public_trade_emits_buyer_and_seller_records():
@@ -134,6 +151,17 @@ def test_ingestion_monitor_tracks_sequence_gaps_and_malformed_messages():
     assert monitor.health.dropped_messages == 2
     assert monitor.health.malformed_messages == 1
     assert monitor.health.last_sequence_by_channel["trades"] == 4
+
+
+def test_ingestion_monitor_counts_non_trade_events():
+    monitor = IngestionMonitor()
+
+    trades = monitor.record_message({"channel": "allMids", "data": {"mids": {"BTC": "65000", "@107": "1.25"}}})
+
+    assert trades == []
+    assert monitor.health.messages_received == 1
+    assert monitor.health.decoded_events == 1
+    assert monitor.health.decoded_trades == 0
 
 
 def test_replay_fixture_produces_capture_output_for_attribution(tmp_path):

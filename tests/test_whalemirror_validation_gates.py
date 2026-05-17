@@ -8,6 +8,7 @@ from stonks_cli.whalemirror.validation_gates import (
     PAPER_GATE,
     assess_gate,
     latency_report,
+    record_capture_health,
     record_capture_probe,
     record_live_probe,
     record_paper_probe,
@@ -30,6 +31,56 @@ def test_capture_gate_probe_is_restartable_and_records_health(tmp_path):
     assert state.evidence[-1].payload["capture_out_path"]
     assert "elapsed_days_below_target" in assessment.blockers[0]
     assert "capture_dropped_messages_present" in assessment.blockers
+    assert "capture_missing_clean_linux_live_completion" in assessment.blockers
+
+
+def test_capture_gate_can_pass_after_clean_linux_live_completion(tmp_path):
+    state = record_capture_health(
+        state_dir=tmp_path,
+        reset=True,
+        now=NOW,
+        capture_payload={
+            "source": "live_capture",
+            "raw_out_path": "/var/lib/stonks-cli/whalemirror-gates/captures/raw.jsonl",
+            "capture_out_path": "/var/lib/stonks-cli/whalemirror-gates/captures/trades.jsonl",
+            "health_out_path": "/var/lib/stonks-cli/whalemirror-gates/reports/health.json",
+            "runtime": {"os": "Linux"},
+            "health": {
+                "messages_received": 1000,
+                "decoded_events": 1000,
+                "decoded_trades": 250,
+                "malformed_messages": 0,
+                "dropped_messages": 0,
+                "reconnects": 1,
+            },
+            "decoded_event_count": 1000,
+            "decoded_trade_count": 250,
+            "final_status": "clean_capture",
+        },
+    )
+
+    assessment = assess_gate(state, now=NOW + timedelta(days=7, minutes=1))
+
+    assert assessment.status == "passed"
+    assert assessment.blockers == []
+
+
+def test_capture_gate_blocks_non_linux_live_completion(tmp_path):
+    state = record_capture_health(
+        state_dir=tmp_path,
+        reset=True,
+        now=NOW,
+        capture_payload={
+            "source": "live_capture",
+            "runtime": {"os": "Darwin"},
+            "health": {"malformed_messages": 0, "dropped_messages": 0},
+            "final_status": "clean_capture",
+        },
+    )
+
+    assessment = assess_gate(state, now=NOW + timedelta(days=8))
+
+    assert "capture_not_run_on_linux_operator_host" in assessment.blockers
 
 
 def test_paper_gate_probe_records_tearsheet_and_risk_controls(tmp_path):

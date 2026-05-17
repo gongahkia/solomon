@@ -14,7 +14,7 @@ The Phase 1 runtime keeps the existing scheduler, config, storage, plugin loader
 | `DecisionRecord` | `stonks_cli.whalemirror.models` | Journal and ledger record for signal-to-decision-to-outcome traceability. |
 | `evaluate_execution_guards` | `stonks_cli.whalemirror.guards` | Fails closed for live execution unless the venue is allowed and explicitly armed. |
 | `append_decision` / `read_decisions` | `stonks_cli.whalemirror.journal` | JSONL decision journal that can back the markdown ledger. |
-| `decode_ws_message` / `IngestionMonitor` | `stonks_cli.whalemirror.ingestion` | Hyperliquid websocket fixture decoding plus health/drop accounting before the 7-day capture gate. |
+| `decode_ws_message` / `IngestionMonitor` / `capture_hyperliquid_to_files` | `stonks_cli.whalemirror.ingestion` | Hyperliquid websocket fixture decoding plus Linux-hosted live capture health/drop accounting before the 7-day capture gate. |
 | `rank_wallets` | `stonks_cli.whalemirror.attribution` | Venue-neutral wallet attribution from trade outcomes and funding events, with caveats before public leaderboard validation. |
 | `PaperMirrorEngine` | `stonks_cli.whalemirror.paper_mirror` | Paper-only mirror decisions with follower-bankroll size-down, stop-losses, cooldowns, and ledger-ready risk metadata. |
 
@@ -27,6 +27,10 @@ STONKS_CLI_HYPERLIQUID_LIVE_ARMED=armed
 ```
 
 Paper and dry-run modes do not require an arm flag. Live mode does. Polymarket, Kalshi, and sportsbook execution are blocked for SG dogfooding and are not valid WhaleMirror live venues.
+
+## Long-Running Host
+
+Any WhaleMirror task that must keep running without sleep or shutdown is operated from the always-on Linux validation machine. MacBook runs are acceptable for development and fixture smoke checks, but they are not accepted as completion evidence for #13, #14, #10, or future uninterrupted roadmap gates.
 
 ## Reuse Map
 

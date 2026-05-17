@@ -124,7 +124,15 @@ Validation gate sample run:
 $ scripts/whalemirror_gate_sample.sh
 ```
 
-That script records restartable local evidence for #13, #14, and #10 under `.cache/whalemirror-gates/`. It proves the harness and report generation; elapsed-time gates still need real operating time before the GitHub issues can be closed.
+That script records restartable fixture evidence for #13, #14, and #10. It proves the harness and report generation; elapsed-time gates still need real operating time before the GitHub issues can be closed.
+
+Long-running validation policy:
+
+```console
+$ scripts/whalemirror_linux_capture_7d.sh
+```
+
+All uninterrupted WhaleMirror validation and roadmap runs are Linux-hosted. The MacBook is for development, fixture smoke tests, and report inspection only. The #13 7-day capture uses the Linux-only runner above or the matching `systemd` template in `ops/systemd/`.
 
 ## Live Guard
 

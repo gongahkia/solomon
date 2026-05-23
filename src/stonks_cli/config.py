@@ -211,25 +211,6 @@ def load_config() -> AppConfig:
         return AppConfig()
     data = json.loads(path.read_text(encoding="utf-8"))
     cfg = AppConfig.model_validate(data)
-    # Normalize tickers and override keys at the boundary.
-    try:
-        from stonks_cli.data.providers import normalize_ticker
-
-        normalized_watchlists: dict[str, list[str]] = {}
-        for name, tickers in (cfg.watchlists or {}).items():
-            if not isinstance(name, str) or not name.strip():
-                continue
-            normalized_watchlists[name] = [normalize_ticker(t) for t in (tickers or [])]
-
-        cfg = cfg.model_copy(
-            update={
-                "tickers": [normalize_ticker(t) for t in cfg.tickers],
-                "ticker_overrides": {normalize_ticker(k): v for k, v in (cfg.ticker_overrides or {}).items()},
-                "watchlists": normalized_watchlists,
-            }
-        )
-    except Exception as e:
-        log_suppressed_exception(context="config.normalize_load", error=e, config_path=path)
     return cfg
 
 

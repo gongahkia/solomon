@@ -8,23 +8,10 @@ from functools import lru_cache
 from pathlib import Path
 from types import ModuleType
 
-from stonks_cli.analysis.strategy import Recommendation
 from stonks_cli.config import AppConfig
 
 StrategyFn = Callable[[object], object]
 ProviderFactory = Callable[[AppConfig, str], object]
-
-
-def _validated_strategy(spec: str, name: str, fn: StrategyFn) -> StrategyFn:
-    def wrapper(df: object) -> Recommendation:
-        out = fn(df)
-        if not isinstance(out, Recommendation):
-            raise TypeError(
-                f"plugin strategy '{name}' from '{spec}' must return Recommendation, got {type(out).__name__}"
-            )
-        return out
-
-    return wrapper
 
 
 @dataclass(frozen=True)
@@ -44,7 +31,6 @@ def _load_module(spec: str) -> ModuleType:
     s = (spec or "").strip()
     if not s:
         raise ValueError("plugin spec must be non-empty")
-
     looks_like_path = s.endswith(".py") or "/" in s or "\\" in s
     if looks_like_path:
         path = Path(s).expanduser()
@@ -57,7 +43,6 @@ def _load_module(spec: str) -> ModuleType:
         module = importlib.util.module_from_spec(module_spec)
         module_spec.loader.exec_module(module)  # type: ignore[union-attr]
         return module
-
     return importlib.import_module(s)
 
 
@@ -65,18 +50,15 @@ def _load_module(spec: str) -> ModuleType:
 def load_plugins(plugin_specs: tuple[str, ...]) -> PluginRegistry:
     strategies: dict[str, StrategyFn] = {}
     provider_factories: dict[str, ProviderFactory] = {}
-
     for spec in plugin_specs:
         module = _load_module(spec)
-
         mod_strats = getattr(module, "STONKS_STRATEGIES", None)
         if isinstance(mod_strats, dict):
             for name, fn in mod_strats.items():
                 if not isinstance(name, str) or not name.strip():
                     continue
                 if callable(fn):
-                    strategies[name] = _validated_strategy(spec, name, fn)
-
+                    strategies[name] = fn
         mod_providers = getattr(module, "STONKS_PROVIDER_FACTORIES", None)
         if isinstance(mod_providers, dict):
             for name, factory in mod_providers.items():
@@ -84,7 +66,6 @@ def load_plugins(plugin_specs: tuple[str, ...]) -> PluginRegistry:
                     continue
                 if callable(factory):
                     provider_factories[name] = factory
-
     return PluginRegistry(strategies=strategies, provider_factories=provider_factories)
 
 
@@ -93,7 +74,6 @@ def load_plugins_best_effort(plugin_specs: tuple[str, ...]) -> PluginLoadSummary
     provider_factories: dict[str, ProviderFactory] = {}
     ok: list[str] = []
     errors: dict[str, str] = {}
-
     for spec in plugin_specs:
         try:
             module = _load_module(spec)
@@ -101,15 +81,13 @@ def load_plugins_best_effort(plugin_specs: tuple[str, ...]) -> PluginLoadSummary
         except Exception as e:
             errors[spec] = str(e)
             continue
-
         mod_strats = getattr(module, "STONKS_STRATEGIES", None)
         if isinstance(mod_strats, dict):
             for name, fn in mod_strats.items():
                 if not isinstance(name, str) or not name.strip():
                     continue
                 if callable(fn):
-                    strategies[name] = _validated_strategy(spec, name, fn)
-
+                    strategies[name] = fn
         mod_providers = getattr(module, "STONKS_PROVIDER_FACTORIES", None)
         if isinstance(mod_providers, dict):
             for name, factory in mod_providers.items():
@@ -117,7 +95,6 @@ def load_plugins_best_effort(plugin_specs: tuple[str, ...]) -> PluginLoadSummary
                     continue
                 if callable(factory):
                     provider_factories[name] = factory
-
     return PluginLoadSummary(
         registry=PluginRegistry(strategies=strategies, provider_factories=provider_factories),
         ok=ok,

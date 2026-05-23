@@ -20,8 +20,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-polymarket = ["py-clob-client-v2>=1.0.0"]
-all = ["stonks-cli[polymarket]"]
 dev = [
   "ruff>=0.5",
   "mypy>=1.10",

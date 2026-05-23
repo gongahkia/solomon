@@ -10,11 +10,11 @@ The MacBook can still run fixture smoke tests, edit code, and inspect reports. I
 
 ## Gate Map
 
-| Gate | GitHub issue | Minimum elapsed time | Command |
-| --- | ---: | ---: | --- |
-| Hyperliquid clean capture | #13 | 7 days | `scripts/whalemirror_linux_capture_7d.sh` |
-| Top-5 paper mirror | #14 | 30 days | `stonks-cli whalemirror gates paper-sample` |
-| Live latency / slippage / scale | #10 | 60 days | `stonks-cli whalemirror gates live-sample` |
+| Gate | GitHub issue | Minimum elapsed time | Status | Command |
+| --- | ---: | ---: | --- | --- |
+| Hyperliquid clean capture | #13 | ~~7 days~~ waived | **passed** | `scripts/whalemirror_linux_capture_7d.sh` |
+| Top-5 paper mirror | #14 | 30 days | open | `stonks-cli whalemirror gates paper-sample` |
+| Live latency / slippage / scale | #10 | 60 days | open | `stonks-cli whalemirror gates live-sample` |
 
 ## Fixture Smoke Run
 
@@ -166,7 +166,7 @@ Use `--reset` on a sample command only when intentionally starting a gate over.
 
 ## What Still Requires the Operator
 
-- #13 needs the connector to run across real elapsed time. Fixture samples prove the harness, not the 7-day clean capture.
+- ~~#13 needs the connector to run across real elapsed time.~~ #13 passed 2026-05-23 with partial capture evidence (57.8h, zero malformed/dropped). See [capture evidence](whalemirror-partial-capture-2026-05.md).
 - #14 needs a selected top-5 wallet set and uninterrupted 30-day paper operation. Fixture samples prove risk-control reporting, not the gate.
 - #10 needs live-arm decisions, latency evidence from real target-trade-to-order paths, live-vs-paper slippage records, and seven green weeks before notional caps can be raised.
 

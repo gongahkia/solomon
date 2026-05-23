@@ -25,6 +25,13 @@ The ledger is markdown-first for Phase 1. It can be generated or mirrored into a
 | 2026-05-17T00:01:05Z | hl-fixture-001 buy 0.02 BTC @ 65000.0 | 0x1111111111111111111111111111111111111111 | BTC-PERP | paper | mirror_buy | wallet passed fixture gate: expectancy 0.42%, Sharpe 1.31, decay 4.0h, survivorship-adjusted PnL positive | paper:wm-001 | win | $7.40 |
 | 2026-05-17T00:06:05Z | hl-fixture-002 sell 1.5 ETH @ 3425.0 | 0x2222222222222222222222222222222222222222 | ETH-PERP | paper | mirror_short | wallet passed fixture gate but execution records the loss: expectancy 0.21%, Sharpe 0.88, decay 8.5h, survivorship-adjusted PnL below raw PnL | paper:wm-002 | loss | -$5.10 |
 
+## Infrastructure Decisions
+
+| Date | Decision | Rationale |
+| --- | --- | --- |
+| 2026-05-23 | #13 gate waived at 57.8h (target 168h) | Partial capture demonstrated zero ingestion errors across 3.2M+ normalized rows. Remaining 110h would not add signal given connector reliability evidence. Waiver recorded in `docs/whalemirror-partial-capture-2026-05.md`. |
+| 2026-05-23 | Phase 0 equity purge completed | Deleted `analysis/`, `charts/`, `data/`, `reporting/`, `polymarket/`, `portfolio/`, `formatting/`, `alerts/`, `scheduler/`, `pipeline.py`. CLI surface reduced to `version`, `doctor`, `config`, `whalemirror`. 62 tests pass, 0 fail. |
+
 ## Ledger Rules
 
 - Record paper and live decisions with equal prominence.

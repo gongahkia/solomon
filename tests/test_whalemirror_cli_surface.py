@@ -36,6 +36,5 @@ def test_stock_provider_extras_and_mcp_example_are_removed():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     extras = pyproject["project"]["optional-dependencies"]
 
-    assert set(extras) == {"all", "dev", "polymarket"}
-    assert extras["all"] == ["stonks-cli[polymarket]"]
+    assert set(extras) == {"dev"}
     assert not (ROOT / "mcp-config.example.json").exists()

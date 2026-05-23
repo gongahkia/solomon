@@ -49,8 +49,8 @@ def test_load_config_normalizes_tickers(monkeypatch, tmp_path):
     )
 
     cfg = load_config()
-    assert cfg.tickers == ["AAPL.US"]
-    assert "MSFT.US" in cfg.ticker_overrides
+    assert cfg.tickers == ["aapl"]  # no normalization after equity removal
+    assert "msft" in cfg.ticker_overrides
 
 
 def test_polymarket_live_min_order_notional_is_preserved(monkeypatch, tmp_path):

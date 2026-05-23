@@ -119,6 +119,8 @@ Disallowed uses:
 
 Scraped public API records and synthetic extrapolations may support exploratory planning only when they remain explicitly labeled by provenance. They are not validation evidence.
 
+The May 2026 interrupted run is summarized in [partial capture evidence](whalemirror-partial-capture-2026-05.md), with provisional activity candidates in [wallet activity shortlist](whalemirror-wallet-activity-shortlist-2026-05.md).
+
 ## systemd Template
 
 For an always-on Linux host, install the template service after placing the repo at `/opt/stonks-cli`:

@@ -22,6 +22,8 @@ See:
 - [Equity archive](docs/equity-archive.md)
 - [Runtime primitives](docs/whalemirror-runtime-primitives.md)
 - [Validation gates](docs/whalemirror-validation-gates.md)
+- [May 2026 partial capture evidence](docs/whalemirror-partial-capture-2026-05.md)
+- [May 2026 wallet activity shortlist](docs/whalemirror-wallet-activity-shortlist-2026-05.md)
 - [Pivot plan](WORKON-PIVOT-ASAP.md)
 
 ## What WhaleMirror Does

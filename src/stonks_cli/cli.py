@@ -100,6 +100,7 @@ from stonks_cli.whalemirror.attribution import (
     rank_wallets_from_fixture,
     render_wallet_ranking_markdown,
 )
+from stonks_cli.whalemirror.capture_analysis import analyze_capture_archive
 from stonks_cli.whalemirror.hyperliquid import HYPERLIQUID_WS_URL
 from stonks_cli.whalemirror.ingestion import (
     DEFAULT_CAPTURE_FIXTURE,
@@ -282,6 +283,44 @@ def whalemirror_ingest_replay(
                     "out_path": str(out) if out else None,
                     "health": health.to_dict(),
                     "trades": [trade.to_dict() for trade in trades],
+                }
+            )
+        )
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@whalemirror_ingest_app.command("analyze")
+def whalemirror_ingest_analyze(
+    capture_dir: Path = typer.Option(..., "--capture-dir", exists=True, file_okay=False, readable=True),
+    raw: Path | None = typer.Option(None, "--raw", exists=True, dir_okay=False, readable=True),
+    normalized: Path | None = typer.Option(None, "--normalized", exists=True, dir_okay=False, readable=True),
+    health: Path | None = typer.Option(None, "--health", exists=True, dir_okay=False, readable=True),
+    output_dir: Path | None = typer.Option(None, "--output-dir", file_okay=False),
+    target_seconds: float = typer.Option(float(DEFAULT_LIVE_CAPTURE_SECONDS), "--target-seconds", min=1.0),
+    top_limit: int = typer.Option(20, "--top-limit", min=1, max=100),
+) -> None:
+    """Analyze an archived partial live capture without treating it as gate-passing evidence."""
+    try:
+        result = analyze_capture_archive(
+            capture_dir=capture_dir,
+            raw_path=raw,
+            normalized_path=normalized,
+            health_path=health,
+            output_dir=output_dir,
+            target_seconds=target_seconds,
+            top_limit=top_limit,
+        )
+        summary = dict(result["summary"])
+        summary.pop("raw", None)
+        summary.pop("normalized", None)
+        Console().print_json(
+            json.dumps(
+                {
+                    "analysis_json_path": result["analysis_json_path"],
+                    "analysis_report_path": result["analysis_report_path"],
+                    "executive_summary_path": result["executive_summary_path"],
+                    "summary": summary,
                 }
             )
         )

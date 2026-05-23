@@ -65,6 +65,26 @@ def test_capture_gate_can_pass_after_clean_linux_live_completion(tmp_path):
     assert assessment.blockers == []
 
 
+def test_capture_gate_marks_stale_running_live_health(tmp_path):
+    state = record_capture_health(
+        state_dir=tmp_path,
+        reset=True,
+        now=NOW,
+        capture_payload={
+            "source": "live_capture",
+            "runtime": {"os": "Linux"},
+            "health": {"malformed_messages": 0, "dropped_messages": 0},
+            "final_status": "running",
+        },
+    )
+
+    assessment = assess_gate(state, now=NOW + timedelta(minutes=16))
+
+    assert assessment.status == "stale"
+    assert any(blocker.startswith("capture_health_stale") for blocker in assessment.blockers)
+    assert "capture_missing_clean_linux_live_completion" in assessment.blockers
+
+
 def test_capture_gate_blocks_non_linux_live_completion(tmp_path):
     state = record_capture_health(
         state_dir=tmp_path,

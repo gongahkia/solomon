@@ -9,6 +9,7 @@ from stonks_cli.whalemirror.attribution import (
     rank_wallets_from_fixture,
     render_wallet_ranking_markdown,
 )
+from stonks_cli.whalemirror.capture_analysis import analyze_capture_archive
 from stonks_cli.whalemirror.guards import (
     evaluate_execution_guards,
     live_arm_env,
@@ -121,6 +122,7 @@ __all__ = [
     "WalletRanking",
     "WalletTradeOutcome",
     "append_decision",
+    "analyze_capture_archive",
     "assess_gate",
     "build_all_mids_subscription",
     "build_live_capture_subscriptions",

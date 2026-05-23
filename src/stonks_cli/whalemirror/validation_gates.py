@@ -26,6 +26,7 @@ DEFAULT_LIVE_VALIDATION_FIXTURE = Path("tests/fixtures/whalemirror/live-validati
 CAPTURE_GATE = "capture-7d"
 PAPER_GATE = "paper-30d"
 LIVE_GATE = "live-60d"
+DEFAULT_CAPTURE_STALE_AFTER_SECONDS = 15 * 60
 
 GATE_DEFINITIONS: dict[str, dict[str, Any]] = {
     CAPTURE_GATE: {
@@ -260,17 +261,22 @@ def record_live_probe(
     )
 
 
-def assess_gate(state: ValidationGateState, *, now: datetime | None = None) -> GateAssessment:
+def assess_gate(
+    state: ValidationGateState,
+    *,
+    now: datetime | None = None,
+    capture_stale_after_seconds: float = DEFAULT_CAPTURE_STALE_AFTER_SECONDS,
+) -> GateAssessment:
     use_now = now or _now()
     elapsed_days = max(0.0, (_parse_ts(_iso(use_now)) - _parse_ts(state.started_at_utc)).total_seconds() / 86400)
     blockers = _elapsed_blockers(elapsed_days, state.target_days)
     if state.gate_id == CAPTURE_GATE:
-        blockers.extend(_capture_blockers(state))
+        blockers.extend(_capture_blockers(state, now=use_now, stale_after_seconds=capture_stale_after_seconds))
     elif state.gate_id == PAPER_GATE:
         blockers.extend(_paper_blockers(state))
     elif state.gate_id == LIVE_GATE:
         blockers.extend(_live_blockers(state))
-    status = "passed" if not blockers else "running"
+    status = "passed" if not blockers else "stale" if _has_stale_blocker(blockers) else "running"
     return GateAssessment(
         gate_id=state.gate_id,
         status=status,
@@ -390,9 +396,15 @@ def _capture_probe_status(health: IngestionHealth) -> str:
     return "clean_sample"
 
 
-def _capture_blockers(state: ValidationGateState) -> list[str]:
+def _capture_blockers(
+    state: ValidationGateState,
+    *,
+    now: datetime,
+    stale_after_seconds: float,
+) -> list[str]:
     blockers = _missing_evidence_blocker(state, "capture_health")
     has_clean_live_completion = False
+    latest_running_live_capture: ValidationEvidence | None = None
     for item in state.evidence:
         if item.kind != "capture_health":
             continue
@@ -401,6 +413,8 @@ def _capture_blockers(state: ValidationGateState) -> list[str]:
         final_status = str(item.payload.get("final_status") or "")
         runtime = item.payload.get("runtime") or {}
         runtime_os = str(runtime.get("os") or "")
+        if source == "live_capture" and final_status == "running":
+            latest_running_live_capture = item
         if source == "live_capture" and final_status == "clean_capture":
             has_clean_live_completion = True
         if source == "live_capture" and runtime_os and runtime_os.lower() != "linux":
@@ -411,6 +425,10 @@ def _capture_blockers(state: ValidationGateState) -> list[str]:
             blockers.append("capture_dropped_messages_present")
         if final_status in {"failed", "interrupted", "needs_attention", "max_reconnects_exceeded"}:
             blockers.append("capture_sample_needs_attention")
+    if latest_running_live_capture is not None:
+        age_seconds = (_parse_ts(_iso(now)) - _parse_ts(latest_running_live_capture.timestamp_utc)).total_seconds()
+        if age_seconds > stale_after_seconds:
+            blockers.append(f"capture_health_stale:{age_seconds:.0f}s>{stale_after_seconds:.0f}s")
     if not has_clean_live_completion:
         blockers.append("capture_missing_clean_linux_live_completion")
     return sorted(set(blockers))
@@ -458,6 +476,10 @@ def _elapsed_blockers(elapsed_days: float, target_days: int) -> list[str]:
     if elapsed_days >= target_days:
         return []
     return [f"elapsed_days_below_target:{elapsed_days:.2f}<{target_days}"]
+
+
+def _has_stale_blocker(blockers: list[str]) -> bool:
+    return any(blocker.startswith("capture_health_stale") for blocker in blockers)
 
 
 def _decision_controls(decisions: list[dict[str, Any]]) -> list[str]:

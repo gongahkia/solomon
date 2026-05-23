@@ -76,6 +76,49 @@ $ stonks-cli whalemirror ingest run \
 
 The #13 gate cannot pass from fixture samples. It requires a `live_capture` evidence entry with `final_status: clean_capture`, Linux runtime metadata, zero malformed messages, and zero dropped messages after the 7-day elapsed window.
 
+### Partial Capture Policy
+
+If a live capture stops before the 7-day target, archive it before restarting or analyzing it:
+
+```console
+$ mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates/archive/partial-YYYY-MM-DD-to-YYYY-MM-DD"
+$ cp "${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates/captures/hyperliquid-raw.jsonl" \
+    "${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates/archive/partial-YYYY-MM-DD-to-YYYY-MM-DD/"
+$ cp "${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates/captures/hyperliquid-normalized.jsonl" \
+    "${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates/archive/partial-YYYY-MM-DD-to-YYYY-MM-DD/"
+$ cp "${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates/reports/capture-health.json" \
+    "${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates/archive/partial-YYYY-MM-DD-to-YYYY-MM-DD/"
+```
+
+Then generate a reproducible partial-capture analysis:
+
+```console
+$ stonks-cli whalemirror ingest analyze \
+    --capture-dir "${XDG_STATE_HOME:-$HOME/.local/state}/stonks-cli/whalemirror-gates/archive/partial-YYYY-MM-DD-to-YYYY-MM-DD"
+```
+
+The analysis command writes:
+
+- `executive-summary.md`: decision-level finding.
+- `partial-capture-analysis.md`: detailed real-capture report.
+- `partial-capture-analysis.json`: machine-readable report.
+
+Allowed uses:
+
+- connector quality analysis
+- activity-based wallet screening
+- sizing assumptions for future capture volume
+- planning the next validation run
+
+Disallowed uses:
+
+- closing #13
+- claiming a completed 7-day clean capture
+- claiming wallet alpha or profitability
+- merging synthetic/extrapolated rows into real capture JSONL
+
+Scraped public API records and synthetic extrapolations may support exploratory planning only when they remain explicitly labeled by provenance. They are not validation evidence.
+
 ## systemd Template
 
 For an always-on Linux host, install the template service after placing the repo at `/opt/stonks-cli`:
@@ -94,6 +137,8 @@ Check status and reports with:
 $ PYTHONPATH=src uv run stonks-cli whalemirror gates status \
     --state-dir /var/lib/stonks-cli/whalemirror-gates/state
 ```
+
+For live capture evidence still marked `running`, status treats health evidence older than 15 minutes as stale. A stale capture remains useful to archive and analyze, but it should be restarted before it can produce #13 completion evidence.
 
 ## Individual Commands
 

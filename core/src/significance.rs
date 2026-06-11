@@ -81,6 +81,18 @@ impl SignificanceConfig {
             .map(|event| self.outcome_weight(event.outcome))
             .sum()
     }
+
+    /// Computes a positive contradiction penalty from access events.
+    #[must_use]
+    pub fn contradiction_penalty(self, events: &[AccessEvent]) -> f64 {
+        let contradiction_count = events
+            .iter()
+            .filter(|event| event.outcome == AccessOutcome::Contradicted)
+            .count();
+        let capped_count = u32::try_from(contradiction_count).unwrap_or(u32::MAX);
+
+        f64::from(capped_count) * self.contradicted_weight.abs()
+    }
 }
 
 #[cfg(test)]
@@ -143,5 +155,20 @@ mod tests {
         );
         assert!(config.outcome_bonus(&events) > config.outcome_weight(AccessOutcome::Surfaced));
         assert!(config.outcome_weight(AccessOutcome::Contradicted) < 0.0);
+    }
+
+    #[test]
+    fn contradiction_penalty_scales_with_contradictions() {
+        let config = SignificanceConfig::default();
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let events = vec![
+            AccessEvent::new(now, None, AccessOutcome::Contradicted),
+            AccessEvent::new(now, None, AccessOutcome::LedSomewhere),
+            AccessEvent::new(now, None, AccessOutcome::Contradicted),
+        ];
+
+        let expected = config.contradicted_weight.abs() * 2.0;
+
+        assert!((config.contradiction_penalty(&events) - expected).abs() < f64::EPSILON);
     }
 }

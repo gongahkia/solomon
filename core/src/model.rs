@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 /// Stable identifier for a persisted memory item.
@@ -137,6 +138,48 @@ impl Provenance {
     }
 }
 
+/// Bi-temporal timestamps for a memory item or graph edge.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TemporalBounds {
+    /// Start of the interval where the fact is claimed valid.
+    pub valid_from: OffsetDateTime,
+    /// End of the valid interval, or `None` for an open interval.
+    pub valid_to: Option<OffsetDateTime>,
+    /// Time at which Shibahama ingested the observation.
+    pub ingested_at: OffsetDateTime,
+}
+
+impl TemporalBounds {
+    /// Creates open-ended temporal bounds ingested at the same timestamp.
+    #[must_use]
+    pub const fn open_from(valid_from: OffsetDateTime, ingested_at: OffsetDateTime) -> Self {
+        Self {
+            valid_from,
+            valid_to: None,
+            ingested_at,
+        }
+    }
+
+    /// Returns true when `instant` falls inside the valid-time interval.
+    #[must_use]
+    pub fn is_valid_at(self, instant: OffsetDateTime) -> bool {
+        if instant < self.valid_from {
+            return false;
+        }
+
+        self.valid_to.is_none_or(|valid_to| instant < valid_to)
+    }
+
+    /// Returns a copy with the valid interval closed at `valid_to`.
+    #[must_use]
+    pub const fn closed_at(self, valid_to: OffsetDateTime) -> Self {
+        Self {
+            valid_to: Some(valid_to),
+            ..self
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,5 +229,20 @@ mod tests {
         assert_eq!(provenance.source_kind, SourceKind::File);
         assert_eq!(provenance.source_ref.as_deref(), Some("core/src/model.rs"));
         assert_eq!(provenance.ingested_by, "unit-test");
+    }
+
+    #[test]
+    fn temporal_bounds_support_open_and_closed_validity() {
+        let valid_from = OffsetDateTime::UNIX_EPOCH;
+        let ingested_at = valid_from;
+        let bounds = TemporalBounds::open_from(valid_from, ingested_at);
+
+        assert!(bounds.is_valid_at(valid_from));
+        assert!(bounds.is_valid_at(valid_from + time::Duration::days(1)));
+
+        let closed = bounds.closed_at(valid_from + time::Duration::days(1));
+
+        assert!(closed.is_valid_at(valid_from));
+        assert!(!closed.is_valid_at(valid_from + time::Duration::days(1)));
     }
 }

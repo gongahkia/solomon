@@ -129,6 +129,15 @@ pub struct TierCapacityConfig {
     pub hot_capacity: Option<usize>,
 }
 
+/// Detected conflict between an existing graph relation and a proposed relation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RelationContradiction {
+    /// Active relation already believed by the graph.
+    pub existing: Relation,
+    /// Proposed relation that conflicts with the existing one.
+    pub proposed: Relation,
+}
+
 /// Full durable store snapshot.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct StoreSnapshot {
@@ -799,6 +808,33 @@ impl RedbMemoryStore {
         relations.sort_by_key(|relation| relation.id);
 
         Ok(relations)
+    }
+
+    /// Detects whether `proposed` contradicts an active relation at `as_of`.
+    ///
+    /// A relation contradiction is defined as the same source entity and relation type pointing to
+    /// a different target entity while the existing relation is believed at `as_of`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when relation rows cannot be read or decoded.
+    pub fn detect_relation_contradiction(
+        &self,
+        proposed: &Relation,
+        as_of: OffsetDateTime,
+    ) -> Result<Option<RelationContradiction>, StorageError> {
+        let existing = self.graph_relations()?.into_iter().find(|relation| {
+            relation.id != proposed.id
+                && relation.from_entity == proposed.from_entity
+                && relation.relation_type == proposed.relation_type
+                && relation.to_entity != proposed.to_entity
+                && relation_believed_at(relation, as_of)
+        });
+
+        Ok(existing.map(|existing| RelationContradiction {
+            existing,
+            proposed: proposed.clone(),
+        }))
     }
 
     /// Soft-invalidates a memory by closing its valid-time interval without deleting history.
@@ -1584,6 +1620,77 @@ mod tests {
                 .relations_for_entity(source.id, Some(now + time::Duration::days(1)))
                 .expect("relations should read")
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn detect_relation_contradiction_matches_same_entity_and_attribute() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let subject = Entity::new(
+            "Project",
+            "Shibahama",
+            "project:shibahama",
+            TemporalBounds::open_from(now, now),
+        );
+        let old_value = Entity::new(
+            "Value",
+            "red",
+            "value:red",
+            TemporalBounds::open_from(now, now),
+        );
+        let new_value = Entity::new(
+            "Value",
+            "blue",
+            "value:blue",
+            TemporalBounds::open_from(now, now),
+        );
+        let existing = Relation::new(
+            "status",
+            subject.id,
+            old_value.id,
+            None,
+            TemporalBounds::open_from(now, now),
+        );
+        let proposed = Relation::new(
+            "status",
+            subject.id,
+            new_value.id,
+            None,
+            TemporalBounds::open_from(now, now),
+        );
+        let consistent = Relation::new(
+            "status",
+            subject.id,
+            old_value.id,
+            None,
+            TemporalBounds::open_from(now, now),
+        );
+
+        store.put_entity(&subject).expect("subject should write");
+        store
+            .put_entity(&old_value)
+            .expect("old value should write");
+        store
+            .put_entity(&new_value)
+            .expect("new value should write");
+        store
+            .put_relation(&existing)
+            .expect("existing relation should write");
+
+        let contradiction = store
+            .detect_relation_contradiction(&proposed, now)
+            .expect("detection should read")
+            .expect("contradiction should be detected");
+
+        assert_eq!(contradiction.existing, existing);
+        assert_eq!(contradiction.proposed, proposed);
+        assert!(
+            store
+                .detect_relation_contradiction(&consistent, now)
+                .expect("detection should read")
+                .is_none()
         );
     }
 

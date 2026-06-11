@@ -187,6 +187,36 @@ pub struct GraphTraversalResult {
     pub relations: Vec<Relation>,
 }
 
+/// Request for extracting a scoped subgraph.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SubgraphRequest {
+    /// Entity attribute key used as the scope discriminator.
+    pub scope_key: String,
+    /// Entity attribute value used as the scope discriminator.
+    pub scope_value: String,
+    /// Optional bi-temporal instant used to filter relation edges.
+    pub as_of: Option<OffsetDateTime>,
+}
+
+impl SubgraphRequest {
+    /// Creates a subgraph request for an entity attribute scope.
+    #[must_use]
+    pub fn new(scope_key: impl Into<String>, scope_value: impl Into<String>) -> Self {
+        Self {
+            scope_key: scope_key.into(),
+            scope_value: scope_value.into(),
+            as_of: None,
+        }
+    }
+
+    /// Applies bi-temporal filtering to extracted relations.
+    #[must_use]
+    pub const fn as_of(mut self, as_of: OffsetDateTime) -> Self {
+        self.as_of = Some(as_of);
+        self
+    }
+}
+
 /// Full durable store snapshot.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct StoreSnapshot {
@@ -1045,6 +1075,54 @@ impl RedbMemoryStore {
         Ok(GraphTraversalResult {
             entities: result_entities,
             relations: result_relations,
+        })
+    }
+
+    /// Extracts a subgraph for a matter, namespace, or scope attribute.
+    ///
+    /// Entities are included when `scope_key` equals `scope_value` in their attributes. Relations
+    /// are included only when both endpoints are in scope and the optional `as_of` filter accepts
+    /// the relation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph entity or relation rows cannot be read or decoded.
+    pub fn extract_subgraph(
+        &self,
+        request: &SubgraphRequest,
+    ) -> Result<GraphTraversalResult, StorageError> {
+        let mut entities = self
+            .graph_entities()?
+            .into_iter()
+            .filter(|entity| {
+                entity
+                    .attributes
+                    .get(&request.scope_key)
+                    .is_some_and(|value| value == &request.scope_value)
+            })
+            .collect::<Vec<_>>();
+        let entity_ids = entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect::<BTreeSet<_>>();
+        let mut relations = self
+            .graph_relations()?
+            .into_iter()
+            .filter(|relation| {
+                entity_ids.contains(&relation.from_entity)
+                    && entity_ids.contains(&relation.to_entity)
+                    && request
+                        .as_of
+                        .is_none_or(|instant| relation_believed_at(relation, instant))
+            })
+            .collect::<Vec<_>>();
+
+        entities.sort_by_key(|entity| entity.id);
+        relations.sort_by_key(|relation| relation.id);
+
+        Ok(GraphTraversalResult {
+            entities,
+            relations,
         })
     }
 
@@ -2164,6 +2242,80 @@ mod tests {
 
         assert_eq!(entity_ids, BTreeSet::from([start.id, middle.id, end.id]));
         assert_eq!(relation_ids, BTreeSet::from([first.id, second.id]));
+    }
+
+    #[test]
+    fn extract_subgraph_filters_entities_and_relations_by_scope() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let mut first = Entity::new(
+            "Claim",
+            "first",
+            "claim:first",
+            TemporalBounds::open_from(now, now),
+        );
+        let mut second = Entity::new(
+            "Claim",
+            "second",
+            "claim:second",
+            TemporalBounds::open_from(now, now),
+        );
+        let mut outside = Entity::new(
+            "Claim",
+            "outside",
+            "claim:outside",
+            TemporalBounds::open_from(now, now),
+        );
+        let in_scope = Relation::new(
+            "supports",
+            first.id,
+            second.id,
+            None,
+            TemporalBounds::open_from(now, now),
+        );
+        let out_of_scope = Relation::new(
+            "supports",
+            first.id,
+            outside.id,
+            None,
+            TemporalBounds::open_from(now, now),
+        );
+
+        first
+            .attributes
+            .insert("namespace".to_owned(), "matter-a".to_owned());
+        second
+            .attributes
+            .insert("namespace".to_owned(), "matter-a".to_owned());
+        outside
+            .attributes
+            .insert("namespace".to_owned(), "matter-b".to_owned());
+
+        for entity in [&first, &second, &outside] {
+            store.put_entity(entity).expect("entity should write");
+        }
+
+        for relation in [&in_scope, &out_of_scope] {
+            store.put_relation(relation).expect("relation should write");
+        }
+
+        let result = store
+            .extract_subgraph(&SubgraphRequest::new("namespace", "matter-a").as_of(now))
+            .expect("subgraph should read");
+        let entity_ids = result
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect::<BTreeSet<_>>();
+        let relation_ids = result
+            .relations
+            .iter()
+            .map(|relation| relation.id)
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(entity_ids, BTreeSet::from([first.id, second.id]));
+        assert_eq!(relation_ids, BTreeSet::from([in_scope.id]));
     }
 
     #[test]

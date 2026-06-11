@@ -722,16 +722,19 @@ impl RedbMemoryStore {
                 serde_json::from_slice(value.value())?
             };
 
+            let previous_tier = item.tier;
+
             item.access_events.push(access_event.clone());
             item.significance =
                 SignificanceConfig::default().recompute(&item, access_event.timestamp);
             item.tier =
                 SignificanceConfig::default().promote_on_access(item.tier, item.significance);
 
+            let recorded_at = access_event.timestamp;
             let sequence = event_table.len().map_err(embed)?;
             let record = EventRecord {
                 sequence,
-                recorded_at: OffsetDateTime::now_utc(),
+                recorded_at,
                 event: MemoryEvent::AccessRecorded {
                     id,
                     event: access_event,
@@ -743,6 +746,25 @@ impl RedbMemoryStore {
             event_table
                 .insert(sequence, event_bytes.as_slice())
                 .map_err(embed)?;
+
+            if item.tier != previous_tier {
+                let tier_sequence = sequence + 1;
+                let tier_record = EventRecord {
+                    sequence: tier_sequence,
+                    recorded_at,
+                    event: MemoryEvent::TierChanged {
+                        id,
+                        from: previous_tier,
+                        to: item.tier,
+                    },
+                };
+                let tier_event_bytes = serde_json::to_vec(&tier_record)?;
+
+                event_table
+                    .insert(tier_sequence, tier_event_bytes.as_slice())
+                    .map_err(embed)?;
+            }
+
             item_table
                 .insert(key.as_str(), item_bytes.as_slice())
                 .map_err(embed)?;
@@ -774,7 +796,8 @@ impl RedbMemoryStore {
     ///
     /// # Errors
     ///
-    /// Returns an error when current item state cannot be read, decoded, or written.
+    /// Returns an error when current item state or a tier-transition event cannot be read,
+    /// decoded, or written.
     pub fn refresh_significance(
         &self,
         id: MemoryId,
@@ -786,6 +809,7 @@ impl RedbMemoryStore {
             .set_durability(Durability::Immediate)
             .map_err(embed)?;
         let refreshed = {
+            let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
             let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
             let key = id.to_string();
             let mut item: MemoryItem = {
@@ -795,12 +819,32 @@ impl RedbMemoryStore {
 
                 serde_json::from_slice(value.value())?
             };
+            let previous_tier = item.tier;
 
             item.significance = policy.recompute(&item, now);
             let demoted = policy.demote_for_score(item.tier, item.significance);
             item.tier = policy.clamp_tier_to_credence_floor(&item, demoted);
 
             let bytes = serde_json::to_vec(&item)?;
+
+            if item.tier != previous_tier {
+                let sequence = event_table.len().map_err(embed)?;
+                let record = EventRecord {
+                    sequence,
+                    recorded_at: now,
+                    event: MemoryEvent::TierChanged {
+                        id,
+                        from: previous_tier,
+                        to: item.tier,
+                    },
+                };
+                let event_bytes = serde_json::to_vec(&record)?;
+
+                event_table
+                    .insert(sequence, event_bytes.as_slice())
+                    .map_err(embed)?;
+            }
+
             item_table
                 .insert(key.as_str(), bytes.as_slice())
                 .map_err(embed)?;
@@ -1468,6 +1512,40 @@ mod tests {
     }
 
     #[test]
+    fn reinforce_emits_tier_transition_event_when_promoted() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let item = test_item("promote me");
+        let item_id = item.id;
+
+        store.write(&item).expect("item should write");
+
+        let record = store
+            .reinforce(item_id, crate::model::AccessOutcome::LedSomewhere)
+            .expect("reinforce should write")
+            .expect("item should exist");
+        let events = store.events().expect("events should read");
+
+        assert!(matches!(
+            record.event,
+            MemoryEvent::AccessRecorded { id, .. } if id == item_id
+        ));
+        assert_eq!(events.len(), 3);
+        assert!(matches!(
+            events[1].event,
+            MemoryEvent::AccessRecorded { id, .. } if id == item_id
+        ));
+        assert!(matches!(
+            events[2].event,
+            MemoryEvent::TierChanged {
+                id,
+                from: Tier::Warm,
+                to: Tier::Hot,
+            } if id == item_id
+        ));
+    }
+
+    #[test]
     fn reinforce_captures_cited_outcome_signal() {
         let file = NamedTempFile::new().expect("tempfile should be created");
         let store = RedbMemoryStore::open(file.path()).expect("store should open");
@@ -1563,6 +1641,18 @@ mod tests {
 
         assert_eq!(refreshed.tier, Tier::Cold);
         assert!(refreshed.significance < policy.warm_threshold);
+
+        let events = store.events().expect("events should read");
+
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            events[1].event,
+            MemoryEvent::TierChanged {
+                id,
+                from: Tier::Hot,
+                to: Tier::Cold,
+            } if id == item.id
+        ));
     }
 
     #[test]

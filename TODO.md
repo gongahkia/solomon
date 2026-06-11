@@ -118,8 +118,8 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 ## Phase 4 — Bi-temporal knowledge graph substrate (P1)
 
 - [x] (P0) Define entity + relationship types (generic: Entity, Relation, with typed edges)
-- [ ] (P0) Implement graph storage co-located with the memory store
-- [ ] (P0) Implement edge bi-temporality (relationships also have valid-time)
+- [x] (P0) Implement graph storage co-located with the memory store
+- [x] (P0) Implement edge bi-temporality (relationships also have valid-time)
 - [ ] (P1) Implement contradiction detection: new fact vs existing fact on same (entity, attribute)
 - [ ] (P1) On contradiction → invalidate old (close valid_to), insert new, link them (supersedes edge)
 - [ ] (P1) Implement graph traversal API for retrieval expansion (n-hop, typed)

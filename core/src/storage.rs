@@ -2,7 +2,10 @@
 
 //! Durable storage primitives for Shibahama.
 
-use crate::model::{AccessEvent, CompactionRef, EmbeddingRef, MemoryId, MemoryItem, Tier};
+use crate::model::{
+    AccessEvent, CompactionRef, EmbeddingRef, Entity, EntityId, MemoryId, MemoryItem, Relation,
+    RelationId, Tier,
+};
 use crate::significance::{SignificanceBreakdown, SignificanceConfig, SignificanceFunction};
 use crate::vector::{VectorIndex, VectorIndexError};
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
@@ -19,6 +22,8 @@ use time::OffsetDateTime;
 const EVENT_LOG_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("event_log");
 const MEMORY_ITEMS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("memory_items");
 const COLD_CONTENT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("cold_content");
+const GRAPH_ENTITIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("graph_entities");
+const GRAPH_RELATIONS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("graph_relations");
 const LZ4_SIZE_PREPENDED: &str = "lz4-size-prepended";
 
 /// Error returned by storage backends.
@@ -135,6 +140,10 @@ pub struct StoreSnapshot {
     pub materialized_items: Vec<MemoryItem>,
     /// Compressed cold-content payloads.
     pub cold_contents: Vec<ColdContentRecord>,
+    /// Current graph entities.
+    pub graph_entities: Vec<Entity>,
+    /// Current graph relations.
+    pub graph_relations: Vec<Relation>,
 }
 
 /// Compressed cold-content payload included in a snapshot.
@@ -358,6 +367,8 @@ impl RedbMemoryStore {
     pub fn recover(&self) -> Result<RecoveryReport, StorageError> {
         let events = self.events()?;
         let materialized_items = self.materialized_items()?;
+        let _graph_entities = self.graph_entities()?;
+        let _graph_relations = self.graph_relations()?;
 
         Ok(RecoveryReport {
             event_count: events.len(),
@@ -437,6 +448,8 @@ impl RedbMemoryStore {
             events: self.events()?,
             materialized_items: self.materialized_items()?,
             cold_contents: self.cold_content_records()?,
+            graph_entities: self.graph_entities()?,
+            graph_relations: self.graph_relations()?,
         };
         let bytes = serde_json::to_vec_pretty(&snapshot)?;
 
@@ -560,6 +573,40 @@ impl RedbMemoryStore {
         Ok(records)
     }
 
+    fn graph_entities(&self) -> Result<Vec<Entity>, StorageError> {
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(GRAPH_ENTITIES_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(error) => return Err(embed(error)),
+        };
+        let mut entities = Vec::new();
+
+        for row in table.iter().map_err(embed)? {
+            let (_, value) = row.map_err(embed)?;
+            entities.push(serde_json::from_slice(value.value())?);
+        }
+
+        Ok(entities)
+    }
+
+    fn graph_relations(&self) -> Result<Vec<Relation>, StorageError> {
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(GRAPH_RELATIONS_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(error) => return Err(embed(error)),
+        };
+        let mut relations = Vec::new();
+
+        for row in table.iter().map_err(embed)? {
+            let (_, value) = row.map_err(embed)?;
+            relations.push(serde_json::from_slice(value.value())?);
+        }
+
+        Ok(relations)
+    }
+
     fn restore(&self, snapshot: StoreSnapshot) -> Result<(), StorageError> {
         let mut write_txn = self.db.begin_write().map_err(embed)?;
         write_txn
@@ -569,6 +616,8 @@ impl RedbMemoryStore {
             let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
             let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
             let mut cold_table = write_txn.open_table(COLD_CONTENT_TABLE).map_err(embed)?;
+            let mut entity_table = write_txn.open_table(GRAPH_ENTITIES_TABLE).map_err(embed)?;
+            let mut relation_table = write_txn.open_table(GRAPH_RELATIONS_TABLE).map_err(embed)?;
 
             for event in snapshot.events {
                 let bytes = serde_json::to_vec(&event)?;
@@ -595,6 +644,24 @@ impl RedbMemoryStore {
                     )
                     .map_err(embed)?;
             }
+
+            for entity in snapshot.graph_entities {
+                let key = entity.id.to_string();
+                let bytes = serde_json::to_vec(&entity)?;
+
+                entity_table
+                    .insert(key.as_str(), bytes.as_slice())
+                    .map_err(embed)?;
+            }
+
+            for relation in snapshot.graph_relations {
+                let key = relation.id.to_string();
+                let bytes = serde_json::to_vec(&relation)?;
+
+                relation_table
+                    .insert(key.as_str(), bytes.as_slice())
+                    .map_err(embed)?;
+            }
         }
 
         write_txn.commit().map_err(embed)
@@ -618,6 +685,120 @@ impl RedbMemoryStore {
     /// Returns an error when the item table cannot be read or a stored item cannot be decoded.
     pub fn get_many(&self, ids: &[MemoryId]) -> Result<Vec<Option<MemoryItem>>, StorageError> {
         ids.iter().map(|id| self.get(*id)).collect()
+    }
+
+    /// Stores or replaces a graph entity in the same redb database as memories.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the entity cannot be serialized, written, or committed.
+    pub fn put_entity(&self, entity: &Entity) -> Result<(), StorageError> {
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        {
+            let mut table = write_txn.open_table(GRAPH_ENTITIES_TABLE).map_err(embed)?;
+            let key = entity.id.to_string();
+            let bytes = serde_json::to_vec(entity)?;
+
+            table
+                .insert(key.as_str(), bytes.as_slice())
+                .map_err(embed)?;
+        }
+
+        write_txn.commit().map_err(embed)
+    }
+
+    /// Reads a graph entity by id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the entity table cannot be read or decoded.
+    pub fn get_entity(&self, id: EntityId) -> Result<Option<Entity>, StorageError> {
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(GRAPH_ENTITIES_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(error) => return Err(embed(error)),
+        };
+        let key = id.to_string();
+
+        table
+            .get(key.as_str())
+            .map_err(embed)?
+            .map(|value| serde_json::from_slice(value.value()).map_err(StorageError::from))
+            .transpose()
+    }
+
+    /// Stores or replaces a graph relation edge in the same redb database as memories.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the relation cannot be serialized, written, or committed.
+    pub fn put_relation(&self, relation: &Relation) -> Result<(), StorageError> {
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        {
+            let mut table = write_txn.open_table(GRAPH_RELATIONS_TABLE).map_err(embed)?;
+            let key = relation.id.to_string();
+            let bytes = serde_json::to_vec(relation)?;
+
+            table
+                .insert(key.as_str(), bytes.as_slice())
+                .map_err(embed)?;
+        }
+
+        write_txn.commit().map_err(embed)
+    }
+
+    /// Reads a graph relation by id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the relation table cannot be read or decoded.
+    pub fn get_relation(&self, id: RelationId) -> Result<Option<Relation>, StorageError> {
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(GRAPH_RELATIONS_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(error) => return Err(embed(error)),
+        };
+        let key = id.to_string();
+
+        table
+            .get(key.as_str())
+            .map_err(embed)?
+            .map(|value| serde_json::from_slice(value.value()).map_err(StorageError::from))
+            .transpose()
+    }
+
+    /// Returns direct relation edges touching `entity_id`.
+    ///
+    /// When `as_of` is supplied, relation valid-time and ingestion-time must both be in scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when relation rows cannot be read or decoded.
+    pub fn relations_for_entity(
+        &self,
+        entity_id: EntityId,
+        as_of: Option<OffsetDateTime>,
+    ) -> Result<Vec<Relation>, StorageError> {
+        let mut relations = self
+            .graph_relations()?
+            .into_iter()
+            .filter(|relation| {
+                (relation.from_entity == entity_id || relation.to_entity == entity_id)
+                    && as_of.is_none_or(|instant| relation_believed_at(relation, instant))
+            })
+            .collect::<Vec<_>>();
+
+        relations.sort_by_key(|relation| relation.id);
+
+        Ok(relations)
     }
 
     /// Soft-invalidates a memory by closing its valid-time interval without deleting history.
@@ -1134,6 +1315,10 @@ fn compression(error: impl std::fmt::Display) -> StorageError {
     StorageError::Compression(error.to_string())
 }
 
+fn relation_believed_at(relation: &Relation, as_of: OffsetDateTime) -> bool {
+    relation.timestamps.ingested_at <= as_of && relation.timestamps.is_valid_at(as_of)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1306,6 +1491,100 @@ mod tests {
             .expect("get_many should read");
 
         assert_eq!(items, vec![Some(second), None, Some(first)]);
+    }
+
+    #[test]
+    fn graph_storage_persists_entities_and_relations() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let path = file.path();
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let entity = Entity::new(
+            "Project",
+            "Shibahama",
+            "project:shibahama",
+            TemporalBounds::open_from(now, now),
+        );
+        let target = Entity::new(
+            "Claim",
+            "never-delete",
+            "claim:never-delete",
+            TemporalBounds::open_from(now, now),
+        );
+        let relation = Relation::new(
+            "documents",
+            entity.id,
+            target.id,
+            None,
+            TemporalBounds::open_from(now, now),
+        );
+
+        {
+            let store = RedbMemoryStore::open(path).expect("store should open");
+
+            store.put_entity(&entity).expect("entity should write");
+            store.put_entity(&target).expect("target should write");
+            store
+                .put_relation(&relation)
+                .expect("relation should write");
+        }
+
+        let reopened = RedbMemoryStore::open(path).expect("store should reopen");
+
+        assert_eq!(
+            reopened.get_entity(entity.id).expect("entity should read"),
+            Some(entity)
+        );
+        assert_eq!(
+            reopened
+                .get_relation(relation.id)
+                .expect("relation should read"),
+            Some(relation)
+        );
+    }
+
+    #[test]
+    fn relations_for_entity_filters_by_relation_valid_time() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let source = Entity::new(
+            "Claim",
+            "old",
+            "claim:old",
+            TemporalBounds::open_from(now, now),
+        );
+        let target = Entity::new(
+            "Claim",
+            "new",
+            "claim:new",
+            TemporalBounds::open_from(now, now),
+        );
+        let relation = Relation::new(
+            "supersedes",
+            source.id,
+            target.id,
+            None,
+            TemporalBounds::open_from(now, now).closed_at(now + time::Duration::days(1)),
+        );
+
+        store.put_entity(&source).expect("source should write");
+        store.put_entity(&target).expect("target should write");
+        store
+            .put_relation(&relation)
+            .expect("relation should write");
+
+        assert_eq!(
+            store
+                .relations_for_entity(source.id, Some(now))
+                .expect("relations should read"),
+            vec![relation]
+        );
+        assert!(
+            store
+                .relations_for_entity(source.id, Some(now + time::Duration::days(1)))
+                .expect("relations should read")
+                .is_empty()
+        );
     }
 
     #[test]

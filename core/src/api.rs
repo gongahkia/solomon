@@ -14,6 +14,7 @@ use crate::storage::{
     MemoryAuditEntry, MemoryWriteEvent, RedbMemoryStore, StorageError, TierCapacityConfig,
 };
 use crate::vector::{VectorIndex, VectorIndexError};
+use std::iter::FusedIterator;
 use std::path::Path;
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -174,6 +175,46 @@ pub struct WriteEmbedding<'a> {
     /// Embedding model version.
     pub model_version: &'a str,
 }
+
+/// Owning iterator over ranked recall candidates.
+#[derive(Clone, Debug)]
+pub struct RecallStream {
+    candidates: std::vec::IntoIter<RecallCandidate>,
+}
+
+impl RecallStream {
+    fn new(candidates: Vec<RecallCandidate>) -> Self {
+        Self {
+            candidates: candidates.into_iter(),
+        }
+    }
+
+    /// Number of candidates still available without advancing the stream.
+    #[must_use]
+    pub fn remaining(&self) -> usize {
+        self.candidates.len()
+    }
+}
+
+impl Iterator for RecallStream {
+    type Item = RecallCandidate;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.candidates.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.candidates.size_hint()
+    }
+}
+
+impl ExactSizeIterator for RecallStream {
+    fn len(&self) -> usize {
+        self.candidates.len()
+    }
+}
+
+impl FusedIterator for RecallStream {}
 
 /// Structured explanation for why a memory currently has its state.
 #[derive(Clone, Debug, PartialEq)]
@@ -351,6 +392,18 @@ impl<V: VectorIndex> Shibahama<V> {
         Ok(recall(&self.store, &self.vector_index, request)?)
     }
 
+    /// Recalls current fact memories and returns an owning iterator over ranked candidates.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when vector search, storage reads, or access recording fail.
+    pub fn stream_recall(
+        &self,
+        request: &RecallRequest<'_>,
+    ) -> Result<RecallStream, ShibahamaError> {
+        Ok(RecallStream::new(self.recall(request)?))
+    }
+
     /// Replays recalled memories as they were believed at `request.now`.
     ///
     /// # Errors
@@ -361,6 +414,18 @@ impl<V: VectorIndex> Shibahama<V> {
         request: &RecallRequest<'_>,
     ) -> Result<Vec<RecallCandidate>, ShibahamaError> {
         Ok(timeline(&self.store, &self.vector_index, request)?)
+    }
+
+    /// Replays timeline recall and returns an owning iterator over ranked candidates.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when vector search or storage reads fail.
+    pub fn stream_timeline(
+        &self,
+        request: &RecallRequest<'_>,
+    ) -> Result<RecallStream, ShibahamaError> {
+        Ok(RecallStream::new(self.timeline(request)?))
     }
 
     /// Reinforces a memory with a usage outcome.
@@ -591,5 +656,73 @@ mod tests {
 
         shibahama.set_config(ShibahamaConfig::default());
         assert_eq!(shibahama.config().tier_capacity.hot_capacity, None);
+    }
+
+    #[test]
+    fn streaming_recall_iterates_ranked_candidates() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let mut shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let first = shibahama
+            .write_with_embedding(
+                MemoryWriteEvent::new(
+                    "stream alpha",
+                    Provenance::new(SourceKind::User, None, "api-test"),
+                    now,
+                    now,
+                ),
+                WriteEmbedding {
+                    vector: &[0.0, 0.0],
+                    index_name: "api-test",
+                    model: "embedding-model",
+                    model_version: "v1",
+                },
+            )
+            .expect("first write should work");
+        shibahama
+            .write_with_embedding(
+                MemoryWriteEvent::new(
+                    "stream beta",
+                    Provenance::new(SourceKind::User, None, "api-test"),
+                    now,
+                    now,
+                ),
+                WriteEmbedding {
+                    vector: &[1.0, 1.0],
+                    index_name: "api-test",
+                    model: "embedding-model",
+                    model_version: "v1",
+                },
+            )
+            .expect("second write should work");
+        shibahama
+            .write_with_embedding(
+                MemoryWriteEvent::new(
+                    "stream gamma",
+                    Provenance::new(SourceKind::User, None, "api-test"),
+                    now,
+                    now,
+                ),
+                WriteEmbedding {
+                    vector: &[2.0, 2.0],
+                    index_name: "api-test",
+                    model: "embedding-model",
+                    model_version: "v1",
+                },
+            )
+            .expect("third write should work");
+        let query = [0.0, 0.0];
+        let request = shibahama.recall_request(&query, 3, now);
+        let mut stream = shibahama
+            .stream_recall(&request)
+            .expect("stream recall should work");
+
+        assert_eq!(stream.remaining(), 3);
+        assert_eq!(stream.next().expect("first candidate").id, first.id);
+        assert_eq!(stream.remaining(), 2);
+        assert_eq!(stream.by_ref().count(), 2);
+        assert_eq!(stream.remaining(), 0);
+        assert!(stream.next().is_none());
     }
 }

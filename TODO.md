@@ -167,7 +167,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Make `why(memory_id)` first-class: full significance/tier/provenance/currency trace
 - [x] (P1) Stable error types with actionable messages
 - [x] (P1) Config object with sane defaults (decay half-life, thresholds, tier budgets)
-- [ ] (P1) Streaming/iterator recall for large result sets
+- [x] (P1) Streaming/iterator recall for large result sets
 - [ ] (P2) Async API surface (tokio) alongside sync
 
 ### Python bindings (`pip install shibahama`)

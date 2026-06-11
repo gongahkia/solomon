@@ -19,7 +19,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P1) Add `CODEOWNERS`, issue templates, and a PR template
 - [x] (P1) Set up semantic versioning + `CHANGELOG.md` (keep-a-changelog format)
 - [x] (P2) Pre-commit hooks (fmt, clippy, secret scanning)
-- [ ] (P2) Reproducible dev environment (devcontainer or Nix flake)
+- [x] (P2) Reproducible dev environment (devcontainer or Nix flake)
 
 ### Core architectural decisions (write these down in `docs/adr/`)
 - [ ] (P0) ADR: storage substrate choice (embedded KV + pluggable vector index)

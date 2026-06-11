@@ -1,29 +1,50 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 
 {
-  description = "Solomon local development shell with Python and uv";
+  description = "Reproducible Shibahama development environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachSystem [ "aarch64-darwin" "aarch64-linux" "x86_64-linux" ] (system:
-      let
-        pkgs = import nixpkgs { inherit system; };
-      in
-      {
-        devShells.default = pkgs.mkShell {
-          packages = [
-            pkgs.git
-            pkgs.python312
-            pkgs.uv
-            pkgs.gitleaks
-          ];
-          shellHook = ''
-            echo "Solomon dev shell."
-          '';
-        };
-      });
+  outputs =
+    { nixpkgs, ... }:
+    let
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
+      forAllSystems = nixpkgs.lib.genAttrs systems;
+    in
+    {
+      devShells = forAllSystems (
+        system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+        in
+        {
+          default = pkgs.mkShell {
+            packages = with pkgs; [
+              cargo
+              clippy
+              git
+              nodejs_22
+              pnpm
+              pre-commit
+              python314
+              rustc
+              rustfmt
+            ];
+
+            shellHook = ''
+              export PATH="${pkgs.python314}/bin:$PATH"
+              export RUST_BACKTRACE=1
+              echo "Shibahama dev shell: run scripts/ci/rust.sh"
+            '';
+          };
+        }
+      );
+    };
 }

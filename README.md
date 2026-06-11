@@ -38,3 +38,9 @@ Run binding lane smoke checks:
 scripts/ci/python-binding-smoke.sh
 scripts/ci/node-binding-smoke.sh
 ```
+
+Or enter the pinned Nix development shell:
+
+```sh
+nix develop
+```

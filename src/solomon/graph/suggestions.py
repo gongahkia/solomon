@@ -4,12 +4,29 @@ from __future__ import annotations
 
 import re
 from enum import Enum
+from typing import Literal
 
 from solomon.api.schemas import SolomonModel
 from solomon.boundary.kaypoh import KaypohBoundary
 from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
 
 AUTHORITY_RE = re.compile(r"\b(Regulation\s+[A-Z]\s+(?:section|§)\s*\d+[A-Za-z0-9-]*)\b", re.IGNORECASE)
+DEFINED_TERM_QUOTED_RE = re.compile(
+    r'"(?P<term>[A-Z][A-Za-z0-9 &/-]{1,80})"\s+(?:means|shall mean|has the meaning)\s+(?P<definition>[^.;]+)',
+    re.IGNORECASE,
+)
+DEFINED_TERM_PAREN_RE = re.compile(
+    r"\b(?P<definition>[A-Z][A-Za-z0-9 &/-]{2,120}?)\s*\(\s*\"(?P<term>[A-Z][A-Za-z0-9 &/-]{1,80})\"\s*\)"
+)
+CASE_CITATION_RE = re.compile(
+    r"\b(?P<citation>[A-Z][A-Za-z.&' -]{2,80}\s+v\.?\s+[A-Z][A-Za-z.&' -]{2,80}"
+    r"(?:\s+\[[0-9]{4}\]\s+[A-Z0-9 .-]+\s+[0-9]+)?)"
+)
+SECTION_CITATION_RE = re.compile(
+    r"\b(?P<citation>[A-Z][A-Za-z0-9 &/-]{2,80}\s+(?:Act|Code|Regulation|Rules?)"
+    r"(?:\s+[0-9]{4})?\s+(?:section|s\.|§)\s*[0-9A-Za-z-]+)",
+    re.IGNORECASE,
+)
 
 
 class SuggestionDecision(str, Enum):
@@ -23,6 +40,93 @@ class DependencySuggestion(SolomonModel):
     authority_ref: str
     suggested_edge: DependencyEdge
     decision: SuggestionDecision = SuggestionDecision.PENDING
+
+
+class DefinedTerm(SolomonModel):
+    term: str
+    definition: str
+    source: Literal["quoted-definition", "parenthetical-definition"]
+
+
+class CitationReference(SolomonModel):
+    text: str
+    kind: Literal["authority", "case", "section"]
+    normalized_id: str
+
+
+class ReferenceExtraction(SolomonModel):
+    defined_terms: list[DefinedTerm]
+    citations: list[CitationReference]
+    sanitized: bool = False
+
+
+def extract_defined_terms_and_citations(
+    *,
+    content: str,
+    boundary: KaypohBoundary | None = None,
+    matter_id: str | None = None,
+) -> ReferenceExtraction:
+    """Extract review hints from Kaypoh-sanitized legal text.
+
+    This is deliberately deterministic and conservative. It creates candidate
+    references for a human dependency capture workflow; it does not assert that
+    every citation is legally load-bearing.
+    """
+
+    sanitized = False
+    text = content
+    if boundary is not None:
+        sanitized_context = boundary.sanitize_context(content, matter_id=matter_id)
+        text = sanitized_context.sanitized_text
+        sanitized = True
+
+    terms: dict[str, DefinedTerm] = {}
+    for match in DEFINED_TERM_QUOTED_RE.finditer(text):
+        term = _clean(match.group("term"))
+        terms.setdefault(
+            term.lower(),
+            DefinedTerm(
+                term=term,
+                definition=_clean(match.group("definition")),
+                source="quoted-definition",
+            ),
+        )
+    for match in DEFINED_TERM_PAREN_RE.finditer(text):
+        term = _clean(match.group("term"))
+        terms.setdefault(
+            term.lower(),
+            DefinedTerm(
+                term=term,
+                definition=_clean(match.group("definition")),
+                source="parenthetical-definition",
+            ),
+        )
+
+    citations: dict[str, CitationReference] = {}
+    for match in AUTHORITY_RE.finditer(text):
+        citation = _clean(match.group(1))
+        citations.setdefault(
+            f"authority:{citation.lower()}",
+            CitationReference(text=citation, kind="authority", normalized_id=_authority_id(citation)),
+        )
+    for match in CASE_CITATION_RE.finditer(text):
+        citation = _clean(match.group("citation"))
+        citations.setdefault(
+            f"case:{citation.lower()}",
+            CitationReference(text=citation, kind="case", normalized_id=_citation_id(citation)),
+        )
+    for match in SECTION_CITATION_RE.finditer(text):
+        citation = _clean(match.group("citation"))
+        citations.setdefault(
+            f"section:{citation.lower()}",
+            CitationReference(text=citation, kind="section", normalized_id=_citation_id(citation)),
+        )
+
+    return ReferenceExtraction(
+        defined_terms=sorted(terms.values(), key=lambda term: term.term.lower()),
+        citations=sorted(citations.values(), key=lambda citation: (citation.kind, citation.normalized_id)),
+        sanitized=sanitized,
+    )
 
 
 def suggest_authority_dependencies(
@@ -74,3 +178,15 @@ def reject_suggestion(suggestion: DependencySuggestion, *, by: str) -> Dependenc
         }
     )
 
+
+def _clean(value: str) -> str:
+    return " ".join(value.strip().split())
+
+
+def _authority_id(value: str) -> str:
+    return _citation_id(value).replace("section", "section")
+
+
+def _citation_id(value: str) -> str:
+    normalized = value.lower().replace("§", " section ")
+    return re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")

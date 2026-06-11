@@ -4,17 +4,27 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
 from rich.console import Console
 
 from solomon import __version__
-from solomon.api.service import AuthorityChangeRequest, DependencyRequest, IngestRequest, RecallRequest, SolomonService
+from solomon.api.service import (
+    AuthorityChangeRequest,
+    DependencyRequest,
+    IngestRequest,
+    RecallRequest,
+    ReferenceExtractionRequest,
+    SolomonService,
+    StalenessPredictionRequest,
+)
 from solomon.boundary.kaypoh import probe_kaypoh_client
 from solomon.config import get_settings
 from solomon.currency.models import KnowledgeKind, SourceKind
+from solomon.currency.prediction import load_pending_amendments
 from solomon.graph.models import EdgeConfidence, EdgeType
+from solomon.graph.visualization import GraphFormat
 
 app = typer.Typer(help="Solomon command-line interface.")
 console = Console()
@@ -83,6 +93,43 @@ def show_currency(item_id: str) -> None:
 @app.command("impact-query")
 def impact_query(authority_id: str) -> None:
     console.print(json.dumps(_service().impact_query(authority_id), indent=2, sort_keys=True))
+
+
+@app.command("dependency-graph")
+def dependency_graph(
+    output_format: Annotated[str, typer.Option("--format", help="Graph format: mermaid or dot.")] = "mermaid",
+    matter_id: Annotated[str | None, typer.Option("--matter-id", help="Restrict to a matter scope.")] = None,
+    client_id: Annotated[str | None, typer.Option("--client-id", help="Restrict to a client scope.")] = None,
+) -> None:
+    if output_format not in {"mermaid", "dot"}:
+        raise typer.BadParameter("format must be mermaid or dot")
+    console.print(
+        _service().dependency_graph(
+            output_format=cast(GraphFormat, output_format),
+            matter_id=matter_id,
+            client_id=client_id,
+        )
+    )
+
+
+@app.command("extract-refs")
+def extract_refs(content: Annotated[str, typer.Argument(help="Knowledge text to scan.")]) -> None:
+    extraction = _service().extract_references(ReferenceExtractionRequest(content=content))
+    console.print(extraction.model_dump_json(indent=2))
+
+
+@app.command("predict-stale")
+def predict_stale(
+    pending_feed: Annotated[Path, typer.Argument(help="JSON or CSV feed of pending authority amendments.")],
+    lookahead_days: Annotated[int, typer.Option("--lookahead-days", min=1)] = 180,
+) -> None:
+    report = _service().predict_staleness(
+        StalenessPredictionRequest(
+            pending_amendments=load_pending_amendments(pending_feed),
+            lookahead_days=lookahead_days,
+        )
+    )
+    console.print(report.model_dump_json(indent=2))
 
 
 @app.command("register-authority-change")

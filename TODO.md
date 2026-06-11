@@ -81,13 +81,13 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P2) Confidence on dependency edges (human-asserted vs LLM-suggested) — affects how aggressively staleness propagates
 - [x] (P2) Graph centrality as an input to surfacing order (well-depended-on positions rank earlier when relevant)
 - [x] (P2) Subgraph extraction per matter/client for scoped review
-- [ ] (P3) Visualise the dependency graph (internal knowledge hanging off external authorities)
+- [x] (P3) Visualise the dependency graph (internal knowledge hanging off external authorities)
 
 ### Dependency capture (honest about the manual cost)
 - [x] (P1) Manual dependency tagging API + CLI (the baseline; the market already pays a curator to do this)
 - [x] (P2) LLM-assisted dependency suggestion: extract candidate authority references from an item (routed through Kaypoh first — see Phase 4)
 - [x] (P2) Human-in-the-loop confirm/reject for suggested dependencies (suggested = lower edge confidence until confirmed)
-- [ ] (P3) Defined-term / citation extraction (could 🔌 reuse Kaypoh's `defined_terms` / `citations` patterns as a reference)
+- [x] (P3) Defined-term / citation extraction (could 🔌 reuse Kaypoh's `defined_terms` / `citations` patterns as a reference)
 
 ---
 
@@ -102,7 +102,7 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P1) External-change ingestion: `register_authority_change(authority, new_version, date)` → triggers Phase-2 propagation
 - [x] (P2) Simple external feeds (manual entry + a couple of structured regulatory-update sources); NOT comprehensive monitoring (out of scope, that's Shepard's-scale)
 - [x] (P2) Currency report for a matter/client: everything we've relied on and its current state
-- [ ] (P3) Predictive "likely to go stale soon" heuristic (authority with pending amendments)
+- [x] (P3) Predictive "likely to go stale soon" heuristic (authority with pending amendments)
 
 ---
 

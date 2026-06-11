@@ -46,6 +46,9 @@ def test_fastapi_app_exposes_public_verbs(tmp_path: Path) -> None:
         "/verification/{item_id}",
         "/authorities/{authority_id}/changes",
         "/impact/{authority_id}",
+        "/graph",
+        "/references/extract",
+        "/staleness/predict",
         "/why/{item_id}",
         "/timeline",
     }.issubset(paths)
@@ -66,4 +69,3 @@ def test_sync_client_uses_httpx_transport() -> None:
         assert client.ingest({"content": "x"})["id"] == "item-1"
         assert client.recall({"query": "x"})[0]["item"]["id"] == "item-1"
         assert client.why("item-1")["item"]["id"] == "item-1"
-

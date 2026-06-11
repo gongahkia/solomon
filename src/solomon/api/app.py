@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from solomon import __version__
@@ -14,12 +14,15 @@ from solomon.api.service import (
     DependencyRequest,
     IngestRequest,
     RecallRequest,
+    ReferenceExtractionRequest,
     SolomonService,
+    StalenessPredictionRequest,
     VerificationRequest,
 )
 from solomon.boundary.kaypoh import KaypohImportStatus, probe_kaypoh_client
 from solomon.config import Settings, get_settings
 from solomon.errors import SolomonError
+from solomon.graph.visualization import GraphFormat
 
 
 class HealthResponse(BaseModel):
@@ -116,6 +119,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/impact/{authority_id}")
     def impact(authority_id: str) -> dict[str, Any]:
         return service.impact_query(authority_id)
+
+    @app.get("/graph", response_class=PlainTextResponse)
+    def dependency_graph(
+        output_format: str = "mermaid",
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> str:
+        if output_format not in {"mermaid", "dot"}:
+            return "unsupported graph format"
+        return service.dependency_graph(
+            output_format=cast(GraphFormat, output_format),
+            matter_id=matter_id,
+            client_id=client_id,
+        )
+
+    @app.post("/references/extract")
+    def extract_references(request: ReferenceExtractionRequest) -> dict[str, Any]:
+        return service.extract_references(request).model_dump(mode="json")
+
+    @app.post("/staleness/predict")
+    def predict_staleness(request: StalenessPredictionRequest) -> dict[str, Any]:
+        return service.predict_staleness(request).model_dump(mode="json")
 
     @app.get("/why/{item_id}")
     def why(item_id: str) -> dict[str, Any]:

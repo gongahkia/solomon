@@ -260,6 +260,52 @@
         "title": "KnowledgeKind",
         "type": "string"
       },
+      "PendingAuthorityAmendment": {
+        "additionalProperties": false,
+        "properties": {
+          "authority_id": {
+            "title": "Authority Id",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "expected_change_at": {
+            "format": "date-time",
+            "title": "Expected Change At",
+            "type": "string"
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Ref"
+          },
+          "status": {
+            "default": "pending",
+            "enum": [
+              "pending",
+              "consultation",
+              "enacted-not-effective"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authority_id",
+          "expected_change_at",
+          "description"
+        ],
+        "title": "PendingAuthorityAmendment",
+        "type": "object"
+      },
       "ReadyResponse": {
         "properties": {
           "kaypoh_client_importable": {
@@ -324,6 +370,21 @@
         "title": "RecallRequest",
         "type": "object"
       },
+      "ReferenceExtractionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "ReferenceExtractionRequest",
+        "type": "object"
+      },
       "SourceKind": {
         "enum": [
           "partner",
@@ -334,6 +395,40 @@
         ],
         "title": "SourceKind",
         "type": "string"
+      },
+      "StalenessPredictionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "lookahead_days": {
+            "default": 180,
+            "minimum": 1.0,
+            "title": "Lookahead Days",
+            "type": "integer"
+          },
+          "pending_amendments": {
+            "items": {
+              "$ref": "#/components/schemas/PendingAuthorityAmendment"
+            },
+            "title": "Pending Amendments",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pending_amendments"
+        ],
+        "title": "StalenessPredictionRequest",
+        "type": "object"
       },
       "ValidationError": {
         "properties": {
@@ -572,6 +667,78 @@
         "summary": "Diagnostics"
       }
     },
+    "/graph": {
+      "get": {
+        "operationId": "dependency_graph_graph_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "output_format",
+            "required": false,
+            "schema": {
+              "default": "mermaid",
+              "title": "Output Format",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "matter_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Matter Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Client Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dependency Graph"
+      }
+    },
     "/health": {
       "get": {
         "operationId": "health_health_get",
@@ -730,6 +897,86 @@
           }
         },
         "summary": "Recall"
+      }
+    },
+    "/references/extract": {
+      "post": {
+        "operationId": "extract_references_references_extract_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReferenceExtractionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Extract References References Extract Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Extract References"
+      }
+    },
+    "/staleness/predict": {
+      "post": {
+        "operationId": "predict_staleness_staleness_predict_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StalenessPredictionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Predict Staleness Staleness Predict Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Predict Staleness"
       }
     },
     "/timeline": {

@@ -17,10 +17,13 @@ from solomon.currency.engine import (
     register_authority_change,
 )
 from solomon.currency.models import KnowledgeItem, KnowledgeKind, Provenance, SourceKind
+from solomon.currency.prediction import PendingAuthorityAmendment, StalenessRiskReport, predict_staleness_risk
 from solomon.errors import NotFoundError
 from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
 from solomon.graph.propagation import CurrencyPropagator
 from solomon.graph.store import GraphStore
+from solomon.graph.suggestions import ReferenceExtraction, extract_defined_terms_and_citations
+from solomon.graph.visualization import GraphFormat, dependency_graph_view, render_dependency_graph
 from solomon.orchestrator.retrieval import MatterContext, RecallOptions, RetrievalOrchestrator, SQLiteRetrievalIndex
 from solomon.store.sqlite import ItemNotFoundError, SQLiteKnowledgeStore
 
@@ -52,6 +55,16 @@ class VerificationRequest(SolomonModel):
 class AuthorityChangeRequest(SolomonModel):
     new_version: str
     changed_at: str
+
+
+class ReferenceExtractionRequest(SolomonModel):
+    content: str = Field(min_length=1)
+
+
+class StalenessPredictionRequest(SolomonModel):
+    pending_amendments: list[PendingAuthorityAmendment]
+    lookahead_days: int = Field(default=180, ge=1)
+    as_of: str | None = None
 
 
 class DependencyRequest(SolomonModel):
@@ -159,6 +172,30 @@ class SolomonService:
 
     def impact_query(self, authority_id: str) -> dict[str, Any]:
         return CurrencyPropagator(graph=self.graph, store=self.store).impact_query(authority_id).model_dump(mode="json")
+
+    def dependency_graph(
+        self,
+        *,
+        output_format: GraphFormat = "mermaid",
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> str:
+        view = dependency_graph_view(graph=self.graph, store=self.store, matter_id=matter_id, client_id=client_id)
+        return render_dependency_graph(view, output_format=output_format)
+
+    def extract_references(self, request: ReferenceExtractionRequest) -> ReferenceExtraction:
+        return extract_defined_terms_and_citations(content=request.content)
+
+    def predict_staleness(self, request: StalenessPredictionRequest) -> StalenessRiskReport:
+        from datetime import datetime
+
+        return predict_staleness_risk(
+            request.pending_amendments,
+            graph=self.graph,
+            store=self.store,
+            as_of=datetime.fromisoformat(request.as_of) if request.as_of else None,
+            lookahead_days=request.lookahead_days,
+        )
 
     def why(self, item_id: str) -> WhyTrace:
         item = self._get_item(item_id)

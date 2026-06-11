@@ -8,7 +8,12 @@ from typing import Any
 from solomon.api.service import DependencyRequest, SolomonService
 from solomon.boundary.kaypoh import KaypohBoundary
 from solomon.graph.models import EdgeConfidence, EdgeType
-from solomon.graph.suggestions import confirm_suggestion, reject_suggestion, suggest_authority_dependencies
+from solomon.graph.suggestions import (
+    confirm_suggestion,
+    extract_defined_terms_and_citations,
+    reject_suggestion,
+    suggest_authority_dependencies,
+)
 
 
 class SuggestionKaypohClient:
@@ -61,3 +66,19 @@ def test_suggest_confirm_and_reject_dependencies() -> None:
     assert confirmed.confidence is EdgeConfidence.HUMAN_CONFIRMED
     assert rejected.decision.value == "rejected"
 
+
+def test_extract_defined_terms_and_citations_after_boundary_sanitization() -> None:
+    boundary = KaypohBoundary(SuggestionKaypohClient())
+
+    extraction = extract_defined_terms_and_citations(
+        content=(
+            '"Restricted Person" means any adviser in the group. '
+            "The memo relies on Regulation R section 12 and Alpha Pte Ltd v. Beta LLC [2024] SGHC 12."
+        ),
+        boundary=boundary,
+    )
+
+    assert extraction.sanitized is True
+    assert extraction.defined_terms[0].term == "Restricted Person"
+    assert {citation.kind for citation in extraction.citations} == {"authority", "case"}
+    assert "regulation-r-section-12" in {citation.normalized_id for citation in extraction.citations}

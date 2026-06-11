@@ -8,6 +8,7 @@ from pathlib import Path
 
 from solomon.currency.feeds import apply_authority_changes, load_authority_changes
 from solomon.currency.models import KnowledgeItem, KnowledgeKind, Provenance, SourceKind
+from solomon.currency.prediction import load_pending_amendments, predict_staleness_risk
 from solomon.currency.report import currency_report
 from solomon.currency.supersession import confirm_supersession, propose_supersession
 from solomon.graph.models import DependencyEdge, EdgeType
@@ -85,3 +86,57 @@ def test_authority_json_feed_and_currency_report(tmp_path: Path) -> None:
     assert impacts[0].stale_item_ids == ["item-1"]
     assert report.items[0]["item_id"] == "item-1"
     assert report.items[0]["dependencies"][0]["target_id"] == "reg-r-12"
+
+
+def test_pending_amendment_predicts_transitive_staleness_risk(tmp_path: Path) -> None:
+    db = tmp_path / "solomon.sqlite3"
+    store = SQLiteKnowledgeStore(db)
+    graph = GraphStore(db)
+    store.write_item(_item("item-1", "direct dependency", 2023))
+    store.write_item(_item("item-2", "relies on item 1", 2023))
+    graph.add_dependency(
+        DependencyEdge(
+            id="edge-ext",
+            source_id="item-1",
+            target_id="reg-r-12",
+            edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+            target_kind="external_authority",
+        )
+    )
+    graph.add_dependency(
+        DependencyEdge(
+            id="edge-internal",
+            source_id="item-2",
+            target_id="item-1",
+            edge_type=EdgeType.INTERNAL_DEPENDS_ON_INTERNAL,
+            target_kind="knowledge_item",
+        )
+    )
+    feed = tmp_path / "pending.json"
+    feed.write_text(
+        json.dumps(
+            {
+                "pending_amendments": [
+                    {
+                        "authority_id": "reg-r-12",
+                        "expected_change_at": "2024-01-20T00:00:00+00:00",
+                        "description": "consultation closes and amendment is expected",
+                        "source_ref": "regulator-update",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = predict_staleness_risk(
+        load_pending_amendments(feed),
+        graph=graph,
+        store=store,
+        as_of=_dt(2024),
+        lookahead_days=60,
+    )
+
+    assert [risk.item_id for risk in report.risks] == ["item-1", "item-2"]
+    assert {risk.risk_level for risk in report.risks} == {"high"}
+    assert report.risks[1].dependency_path == ["edge-ext", "edge-internal"]

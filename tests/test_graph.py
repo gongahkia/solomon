@@ -16,6 +16,7 @@ from solomon.currency.models import (
 from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
 from solomon.graph.propagation import CurrencyPropagator
 from solomon.graph.store import GraphStore
+from solomon.graph.visualization import dependency_graph_view, render_dependency_graph
 from solomon.store.sqlite import SQLiteKnowledgeStore
 
 
@@ -131,3 +132,19 @@ def test_subgraph_for_matter_scope(tmp_path: Path) -> None:
     scoped = graph.subgraph_for_scope(store=store, matter_id="matter-a")
 
     assert [edge.id for edge in scoped] == ["edge-a"]
+
+
+def test_dependency_graph_visualization_renders_authorities_pointing_to_internal_knowledge(tmp_path: Path) -> None:
+    db = tmp_path / "solomon.sqlite3"
+    store = SQLiteKnowledgeStore(db)
+    graph = GraphStore(db)
+    store.write_item(_item("item-1", "House view under Regulation R section 12"))
+    graph.add_dependency(_external_edge("item-1", "reg-r-12", edge_id="edge-1"))
+
+    view = dependency_graph_view(graph=graph, store=store)
+    mermaid = render_dependency_graph(view, output_format="mermaid")
+    dot = render_dependency_graph(view, output_format="dot")
+
+    assert 'authority_reg_r_12["reg-r-12"]:::authority' in mermaid
+    assert "authority_reg_r_12 -->|relied on by| item_item_1" in mermaid
+    assert '"external_authority:reg-r-12" -> "knowledge_item:item-1"' in dot

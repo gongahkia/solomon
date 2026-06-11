@@ -294,12 +294,14 @@ impl MemoryWriteEvent {
         valid_from: OffsetDateTime,
         ingested_at: OffsetDateTime,
     ) -> Self {
+        let tier = default_ingest_tier(provenance.source_kind);
+
         Self {
             content: content.into(),
             provenance,
             valid_from,
             ingested_at,
-            tier: Tier::Warm,
+            tier,
             credence: None,
             significance: 0.0,
             credence_floor: Tier::Cold,
@@ -348,6 +350,13 @@ impl MemoryWriteEvent {
             credence_floor: self.credence_floor,
             access_events: Vec::new(),
         }
+    }
+}
+
+const fn default_ingest_tier(source_kind: SourceKind) -> Tier {
+    match source_kind {
+        SourceKind::Agent | SourceKind::Web => Tier::Cold,
+        SourceKind::User | SourceKind::File | SourceKind::Tool => Tier::Warm,
     }
 }
 
@@ -2288,6 +2297,37 @@ mod tests {
 
             assert_eq!(item.provenance.source_kind, source_kind);
             assert_eq!(item.credence, expected_credence);
+        }
+    }
+
+    #[test]
+    fn write_event_quarantines_agent_and_web_sources_by_default() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let cases = [
+            (SourceKind::Agent, Tier::Cold, CredenceTier::ModelInferred),
+            (SourceKind::Web, Tier::Cold, CredenceTier::Unverified),
+            (
+                SourceKind::User,
+                Tier::Warm,
+                CredenceTier::FirmAuthoritative,
+            ),
+            (SourceKind::File, Tier::Warm, CredenceTier::VerifiedSource),
+            (SourceKind::Tool, Tier::Warm, CredenceTier::ModelInferred),
+        ];
+
+        for (source_kind, expected_tier, expected_credence) in cases {
+            let event = MemoryWriteEvent::new(
+                format!("content from {source_kind:?}"),
+                Provenance::new(source_kind, None, "ingest-test"),
+                OffsetDateTime::UNIX_EPOCH,
+                OffsetDateTime::UNIX_EPOCH,
+            );
+            let (_, item) = store.write_event(event).expect("write event should ingest");
+
+            assert_eq!(item.tier, expected_tier);
+            assert_eq!(item.credence, expected_credence);
+            assert_eq!(item.credence_floor, Tier::Cold);
         }
     }
 

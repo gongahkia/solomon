@@ -15,3 +15,6 @@ categories.workspace = true
 [lib]
 name = "shibahama_core"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

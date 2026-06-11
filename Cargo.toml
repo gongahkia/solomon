@@ -19,3 +19,12 @@ categories = ["database", "data-structures"]
 
 [workspace.dependencies]
 shibahama-core = { path = "core" }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = "warn"
+unwrap_used = "warn"

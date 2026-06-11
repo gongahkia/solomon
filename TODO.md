@@ -75,7 +75,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P1) Distinguish "surfaced" from "actually used" (caller signals which retrieved items mattered)
 - [x] (P1) Capture outcome signal: did the action after recall succeed / was the memory cited in output
 - [x] (P1) Capture contradiction events (a new fact conflicts with this one)
-- [ ] (P2) Lightweight, privacy-safe query-context fingerprint (hash, not raw text) per access
+- [x] (P2) Lightweight, privacy-safe query-context fingerprint (hash, not raw text) per access
 
 ### Significance computation
 - [x] (P0) Implement time-decay function over time-since-last-use (configurable half-life)

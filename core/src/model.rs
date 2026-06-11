@@ -212,6 +212,31 @@ impl AccessOutcome {
     }
 }
 
+/// Privacy-safe fingerprint of recall/query context.
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct QueryContextHash(String);
+
+impl QueryContextHash {
+    /// Hashes raw query context into a stable non-reversible fingerprint.
+    #[must_use]
+    pub fn from_raw(raw_context: &str) -> Self {
+        Self(blake3::hash(raw_context.as_bytes()).to_hex().to_string())
+    }
+
+    /// Returns the hexadecimal fingerprint.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<QueryContextHash> for String {
+    fn from(value: QueryContextHash) -> Self {
+        value.0
+    }
+}
+
 /// Usage signal captured for a memory item.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AccessEvent {
@@ -236,6 +261,20 @@ impl AccessEvent {
             query_context_hash: query_context_hash.into(),
             outcome,
         }
+    }
+
+    /// Creates an access event by hashing raw query context before storage.
+    #[must_use]
+    pub fn with_raw_query_context(
+        timestamp: OffsetDateTime,
+        raw_context: &str,
+        outcome: AccessOutcome,
+    ) -> Self {
+        Self::new(
+            timestamp,
+            Some(String::from(QueryContextHash::from_raw(raw_context))),
+            outcome,
+        )
     }
 }
 
@@ -389,6 +428,22 @@ mod tests {
         assert_eq!(event.timestamp, OffsetDateTime::UNIX_EPOCH);
         assert_eq!(event.query_context_hash.as_deref(), Some("query-hash"));
         assert_eq!(event.outcome, AccessOutcome::Cited);
+    }
+
+    #[test]
+    fn query_context_hash_does_not_store_raw_query() {
+        let raw_query = "what changed in auth/session.ts?";
+        let first = QueryContextHash::from_raw(raw_query);
+        let second = QueryContextHash::from_raw(raw_query);
+        let event = AccessEvent::with_raw_query_context(
+            OffsetDateTime::UNIX_EPOCH,
+            raw_query,
+            AccessOutcome::Surfaced,
+        );
+
+        assert_eq!(first, second);
+        assert_ne!(first.as_str(), raw_query);
+        assert_eq!(event.query_context_hash.as_deref(), Some(first.as_str()));
     }
 
     #[test]

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 [package]
 name = "shibahama-cli"
 description = "Command-line interface for Shibahama."

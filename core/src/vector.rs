@@ -60,6 +60,19 @@ pub trait VectorIndex {
     /// Returns an error when the backend cannot remove the vector.
     fn delete_by_id(&mut self, id: MemoryId) -> Result<(), VectorIndexError>;
 
+    /// Adds or replaces many vectors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any vector is invalid or the backend cannot store the batch.
+    fn batch_upsert(&mut self, vectors: &[(MemoryId, Vec<f32>)]) -> Result<(), VectorIndexError> {
+        for (id, vector) in vectors {
+            self.add(*id, vector)?;
+        }
+
+        Ok(())
+    }
+
     /// Returns the configured vector dimensionality.
     fn dimensions(&self) -> usize;
 }
@@ -435,5 +448,20 @@ mod tests {
 
         assert_eq!(results[0].id, far);
         assert!(transport.collections.iter().all(|name| name == "memories"));
+    }
+
+    #[test]
+    fn batch_upsert_indexes_multiple_vectors() {
+        let mut index = HnswVectorIndex::with_capacity(2, 8);
+        let first = MemoryId::new_v7();
+        let second = MemoryId::new_v7();
+
+        index
+            .batch_upsert(&[(first, vec![0.0, 0.0]), (second, vec![4.0, 4.0])])
+            .expect("batch upsert should work");
+
+        let results = index.search(&[3.9, 3.9], 1).expect("search should work");
+
+        assert_eq!(results[0].id, second);
     }
 }

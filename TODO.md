@@ -63,7 +63,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Wire embedding storage so item ↔ vector stay consistent on invalidate
 - [x] (P1) Implement second backend (qdrant or pgvector) to prove the trait is real
 - [x] (P1) Handle embedding model/version metadata so re-embeds are detectable
-- [ ] (P2) Batch upsert path for bulk ingestion
+- [x] (P2) Batch upsert path for bulk ingestion
 
 ---
 

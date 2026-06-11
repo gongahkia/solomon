@@ -202,14 +202,14 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 11 — Headline demo: the stale house-view (🆕 P1)
 
-- [ ] (P0) Build a scripted, reproducible scenario fixture: 2023 house-view memo depending on Regulation R §12, relied on in a Client A matter
-- [ ] (P0) Script the 2025 regulatory change + propagation to StalePendingReverification
-- [ ] (P1) 2026 associate query → Solomon flags the memo (depends on R §12 changed 2025; not re-verified; last relied on in Client A; recommend re-check)
-- [ ] (P1) Verify the model never saw the client identity (assert Kaypoh round-trip masked/demasked correctly)
-- [ ] (P1) **Warehouse-KM baseline**: a similarity-only retriever that returns the 2023 memo confidently with no staleness signal — the side-by-side
-- [ ] (P1) Audit view rendering the full chain (known-since → dependency → change event → flag → verification prompt)
+- [x] (P0) Build a scripted, reproducible scenario fixture: 2023 house-view memo depending on Regulation R §12, relied on in a Client A matter
+- [x] (P0) Script the 2025 regulatory change + propagation to StalePendingReverification
+- [x] (P1) 2026 associate query → Solomon flags the memo (depends on R §12 changed 2025; not re-verified; last relied on in Client A; recommend re-check)
+- [x] (P1) Verify the model never saw the client identity (assert Kaypoh round-trip masked/demasked correctly)
+- [x] (P1) **Warehouse-KM baseline**: a similarity-only retriever that returns the 2023 memo confidently with no staleness signal — the side-by-side
+- [x] (P1) Audit view rendering the full chain (known-since → dependency → change event → flag → verification prompt)
 - [ ] (P2) Record the run for the README GIF
-- [ ] (P2) Package as a runnable `examples/stale-house-view/` (clone, bring up kaypoh-local, run)
+- [x] (P2) Package as a runnable `examples/stale-house-view/` (clone, bring up kaypoh-local, run)
 - [ ] (P3) A second scenario (e.g. internal supersession: a 2024 position quietly overriding a 2022 one) to show supersession reasoning
 
 ---

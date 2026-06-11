@@ -134,7 +134,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 
 - [x] (P0) Define the reconstruction trigger: recall of a flagged stale-but-significant memory
 - [x] (P0) Implement the gate — reconstruction NEVER fires automatically as a side effect of a plain read
-- [ ] (P1) Implement re-validation hooks: re-read source (file/tool/graph) or surface to caller for confirmation
+- [x] (P1) Implement re-validation hooks: re-read source (file/tool/graph) or surface to caller for confirmation
 - [ ] (P1) Implement quarantine: proposed updates enter at LOWER credence, tagged, not promoted
 - [ ] (P1) Implement corroboration rule: promotion needs a 2nd consistent observation / human confirm / high-credence source
 - [ ] (P1) Implement invalidate-not-overwrite on the superseded version (preserve history)

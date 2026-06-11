@@ -2,7 +2,7 @@
 
 //! Reconstruction trigger and gating primitives.
 
-use crate::model::MemoryId;
+use crate::model::{MemoryId, Provenance, SourceKind};
 use crate::retrieval::RecallCandidate;
 
 /// Reason a memory should be considered for reconstruction.
@@ -39,6 +39,80 @@ pub struct ReconstructionGateDecision {
     pub triggers: Vec<ReconstructionTrigger>,
     /// Whether reconstruction work is allowed to run now.
     pub may_run: bool,
+}
+
+/// Planned re-validation action for a reconstruction trigger.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RevalidationAction {
+    /// Re-read an external source reference.
+    ReReadSource {
+        /// Memory being re-validated.
+        memory_id: MemoryId,
+        /// Source kind to re-read.
+        source_kind: SourceKind,
+        /// Stable source reference.
+        source_ref: String,
+    },
+    /// Re-query the graph substrate for the memory.
+    QueryGraph {
+        /// Memory being re-validated.
+        memory_id: MemoryId,
+        /// Graph reference or query key.
+        graph_ref: String,
+    },
+    /// Ask the caller or a human to confirm the memory.
+    SurfaceToCaller {
+        /// Memory needing confirmation.
+        memory_id: MemoryId,
+    },
+}
+
+/// Re-validation hook that plans how a trigger should be checked.
+pub trait RevalidationHook {
+    /// Plans a re-validation action.
+    fn plan_revalidation(
+        &self,
+        trigger: &ReconstructionTrigger,
+        provenance: &Provenance,
+    ) -> RevalidationAction;
+}
+
+/// Default provenance-driven re-validation planner.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DefaultRevalidationHook;
+
+impl RevalidationHook for DefaultRevalidationHook {
+    fn plan_revalidation(
+        &self,
+        trigger: &ReconstructionTrigger,
+        provenance: &Provenance,
+    ) -> RevalidationAction {
+        let Some(source_ref) = provenance.source_ref.clone() else {
+            return RevalidationAction::SurfaceToCaller {
+                memory_id: trigger.memory_id,
+            };
+        };
+
+        if source_ref.starts_with("graph:") {
+            return RevalidationAction::QueryGraph {
+                memory_id: trigger.memory_id,
+                graph_ref: source_ref,
+            };
+        }
+
+        match provenance.source_kind {
+            SourceKind::File | SourceKind::Tool | SourceKind::Web => {
+                RevalidationAction::ReReadSource {
+                    memory_id: trigger.memory_id,
+                    source_kind: provenance.source_kind,
+                    source_ref,
+                }
+            }
+            SourceKind::User | SourceKind::Agent => RevalidationAction::SurfaceToCaller {
+                memory_id: trigger.memory_id,
+            },
+        }
+    }
 }
 
 /// Derives reconstruction triggers from recall candidates without running reconstruction.
@@ -138,5 +212,37 @@ mod tests {
         assert!(!plain_read.may_run);
         assert_eq!(plain_read.triggers.len(), 1);
         assert!(explicit.may_run);
+    }
+
+    #[test]
+    fn default_revalidation_hook_plans_source_graph_or_caller_checks() {
+        let stale = candidate(true);
+        let trigger = triggers_from_recall(&[stale])[0];
+        let hook = DefaultRevalidationHook;
+        let file = Provenance::new(SourceKind::File, Some("/tmp/source.md".to_owned()), "test");
+        let graph = Provenance::new(SourceKind::Tool, Some("graph:claim:123".to_owned()), "test");
+        let user = Provenance::new(SourceKind::User, None, "test");
+
+        assert_eq!(
+            hook.plan_revalidation(&trigger, &file),
+            RevalidationAction::ReReadSource {
+                memory_id: trigger.memory_id,
+                source_kind: SourceKind::File,
+                source_ref: "/tmp/source.md".to_owned(),
+            }
+        );
+        assert_eq!(
+            hook.plan_revalidation(&trigger, &graph),
+            RevalidationAction::QueryGraph {
+                memory_id: trigger.memory_id,
+                graph_ref: "graph:claim:123".to_owned(),
+            }
+        );
+        assert_eq!(
+            hook.plan_revalidation(&trigger, &user),
+            RevalidationAction::SurfaceToCaller {
+                memory_id: trigger.memory_id,
+            }
+        );
     }
 }

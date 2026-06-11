@@ -57,6 +57,22 @@ impl Default for SignificanceConfig {
     }
 }
 
+/// Pluggable significance scoring policy.
+pub trait SignificanceFunction {
+    /// Computes an explainable significance breakdown for `item`.
+    fn explain(&self, item: &MemoryItem, now: OffsetDateTime) -> SignificanceBreakdown;
+
+    /// Recomputes the materialized significance score for `item`.
+    fn recompute(&self, item: &MemoryItem, now: OffsetDateTime) -> f64 {
+        self.explain(item, now).final_score
+    }
+
+    /// Applies policy-specific tier clamping.
+    fn clamp_tier_to_credence_floor(&self, item: &MemoryItem, proposed_tier: Tier) -> Tier {
+        proposed_tier.max(item.credence_floor)
+    }
+}
+
 impl SignificanceConfig {
     /// Computes a decay multiplier from `last_used_at` to `now`.
     ///
@@ -150,6 +166,12 @@ impl SignificanceConfig {
     #[must_use]
     pub fn clamp_tier_to_credence_floor(self, item: &MemoryItem, proposed_tier: Tier) -> Tier {
         proposed_tier.max(item.credence_floor)
+    }
+}
+
+impl SignificanceFunction for SignificanceConfig {
+    fn explain(&self, item: &MemoryItem, now: OffsetDateTime) -> SignificanceBreakdown {
+        (*self).explain(item, now)
     }
 }
 
@@ -290,5 +312,32 @@ mod tests {
             config.clamp_tier_to_credence_floor(&item, Tier::Cold),
             Tier::Warm
         );
+    }
+
+    #[test]
+    fn significance_function_trait_supports_swappable_policy() {
+        let config = SignificanceConfig::default();
+        let policy: &dyn SignificanceFunction = &config;
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let item = MemoryItem {
+            schema_version: crate::model::CURRENT_MEMORY_SCHEMA_VERSION,
+            id: crate::model::MemoryId::new_v7(),
+            content: "policy".to_owned(),
+            compaction: None,
+            embedding_ref: None,
+            provenance: crate::model::Provenance::new(
+                crate::model::SourceKind::User,
+                None,
+                "significance-test",
+            ),
+            timestamps: crate::model::TemporalBounds::open_from(now, now),
+            tier: crate::model::Tier::Warm,
+            credence: crate::model::CredenceTier::VerifiedSource,
+            significance: 1.0,
+            credence_floor: crate::model::Tier::Cold,
+            access_events: Vec::new(),
+        };
+
+        assert!((policy.recompute(&item, now) - config.recompute(&item, now)).abs() < f64::EPSILON);
     }
 }

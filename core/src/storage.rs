@@ -615,6 +615,68 @@ impl RedbMemoryStore {
         Ok(record)
     }
 
+    /// Appends an access event to a memory item.
+    ///
+    /// Returns `Ok(None)` when the memory id is unknown.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read or written, or stored state cannot be decoded.
+    pub fn reinforce(
+        &self,
+        id: MemoryId,
+        outcome: crate::model::AccessOutcome,
+    ) -> Result<Option<EventRecord>, StorageError> {
+        let access_event = AccessEvent::new(OffsetDateTime::now_utc(), None, outcome);
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let sequence = {
+            let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+            let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let key = id.to_string();
+            let mut item: MemoryItem = {
+                let Some(value) = item_table.get(key.as_str()).map_err(embed)? else {
+                    return Ok(None);
+                };
+
+                serde_json::from_slice(value.value())?
+            };
+
+            item.access_events.push(access_event.clone());
+
+            let sequence = event_table.len().map_err(embed)?;
+            let record = EventRecord {
+                sequence,
+                recorded_at: OffsetDateTime::now_utc(),
+                event: MemoryEvent::AccessRecorded {
+                    id,
+                    event: access_event,
+                },
+            };
+            let event_bytes = serde_json::to_vec(&record)?;
+            let item_bytes = serde_json::to_vec(&item)?;
+
+            event_table
+                .insert(sequence, event_bytes.as_slice())
+                .map_err(embed)?;
+            item_table
+                .insert(key.as_str(), item_bytes.as_slice())
+                .map_err(embed)?;
+
+            sequence
+        };
+
+        write_txn.commit().map_err(embed)?;
+
+        self.event(sequence)?
+            .ok_or_else(|| {
+                StorageError::Embedded("committed access event was not readable".to_owned())
+            })
+            .map(Some)
+    }
+
     /// Compacts inline content for a cold-tier item into compressed storage.
     ///
     /// Returns `Ok(false)` when the item is missing, is not cold, or is already compacted.
@@ -1103,6 +1165,43 @@ mod tests {
             .expect("search should work");
 
         assert!(search_after.is_empty());
+    }
+
+    #[test]
+    fn reinforce_appends_access_event_to_log_and_item() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let item = test_item("reinforce me");
+        let item_id = item.id;
+
+        store.write(&item).expect("item should write");
+
+        let record = store
+            .reinforce(item_id, crate::model::AccessOutcome::LedSomewhere)
+            .expect("reinforce should write")
+            .expect("item should exist");
+
+        assert!(matches!(
+            record.event,
+            MemoryEvent::AccessRecorded {
+                id,
+                event: AccessEvent {
+                    outcome: crate::model::AccessOutcome::LedSomewhere,
+                    ..
+                }
+            } if id == item_id
+        ));
+
+        let stored = store
+            .get(item_id)
+            .expect("item should read")
+            .expect("item should exist");
+
+        assert_eq!(stored.access_events.len(), 1);
+        assert_eq!(
+            stored.access_events[0].outcome,
+            crate::model::AccessOutcome::LedSomewhere
+        );
     }
 
     #[test]

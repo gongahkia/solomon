@@ -173,3 +173,29 @@ export interface WriteOptions {
   model?: string
   modelVersion?: string
 }
+
+// Shibahama JavaScript shims
+export type EmbedFunction = (text: string) => Array<number> | Promise<Array<number>>
+
+export interface LangChainMemoryOptions {
+  embed: EmbedFunction
+  memoryKey?: string
+  inputKey?: string
+  outputKey?: string
+  topK?: number
+}
+
+export declare class LangChainMemory {
+  constructor(engine: Shibahama, options: LangChainMemoryOptions)
+  readonly engine: Shibahama
+  readonly embed: EmbedFunction
+  readonly memoryKey: string
+  readonly inputKey: string
+  readonly outputKey: string
+  readonly topK: number
+  readonly memoryKeys: Array<string>
+  readonly memoryVariables: Array<string>
+  loadMemoryVariables(inputs: Record<string, unknown>): Promise<Record<string, string>>
+  saveContext(inputs: Record<string, unknown>, outputs: Record<string, unknown>): Promise<void>
+  clear(): Promise<void>
+}

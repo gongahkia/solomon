@@ -183,7 +183,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Expose the full API with TS types
 - [ ] (P0) Publish a working `npm install`
 - [x] (P1) ESM + CJS dual package
-- [ ] (P2) Integration shim for a JS agent framework
+- [x] (P2) Integration shim for a JS agent framework
 
 ### CLI
 - [ ] (P1) `shibahama` CLI: init a store, write, recall, why, inspect, export

@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import shibahama, { Shibahama, version } from "../index.mjs";
+import shibahama, { LangChainMemory, Shibahama, version } from "../index.mjs";
 
 const require = createRequire(import.meta.url);
 const cjs = require("../index.cjs");
@@ -46,6 +46,16 @@ try {
   assert.equal(engine.reinforce(item.id, "cited"), true);
   assert.equal(why.item.id, item.id);
   assert.ok(items.some((memory) => memory.id === item.id));
+
+  const embed = (text) => [Number(text.includes("adapters")), Number(text.includes("async"))];
+  const memory = new LangChainMemory(engine, { embed, topK: 3 });
+  await memory.saveContext({ input: "remember adapters" }, { output: "stored" });
+  const loaded = await memory.loadMemoryVariables({ input: "adapters" });
+
+  assert.deepEqual(memory.memoryKeys, ["history"]);
+  assert.deepEqual(memory.memoryVariables, ["history"]);
+  assert.ok(loaded.history.includes("Human: remember adapters"));
+  await memory.clear();
 } finally {
   await rm(dir, { force: true, recursive: true });
 }

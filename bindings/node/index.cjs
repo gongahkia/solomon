@@ -19,4 +19,10 @@ if (!nativePath) {
   throw new Error("Unable to find the Shibahama native Node.js binding. Run `npm run build`.");
 }
 
-module.exports = require(nativePath);
+const native = require(nativePath);
+const { LangChainMemory } = require("./langchain-memory.cjs");
+
+module.exports = {
+  ...native,
+  LangChainMemory,
+};

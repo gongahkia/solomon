@@ -19,12 +19,13 @@
     "index.cjs",
     "index.d.ts",
     "index.mjs",
+    "langchain-memory.cjs",
     "*.node",
     "README.md"
   ],
   "scripts": {
-    "build": "napi build --release --platform",
-    "build:debug": "napi build --platform",
+    "build": "napi build --release --platform && node scripts/augment-types.mjs",
+    "build:debug": "napi build --platform && node scripts/augment-types.mjs",
     "test": "node test/smoke.mjs"
   },
   "devDependencies": {

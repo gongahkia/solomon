@@ -230,6 +230,26 @@ impl RedbMemoryStore {
             .map(|value| serde_json::from_slice(value.value()).map_err(StorageError::from))
             .transpose()
     }
+
+    /// Returns the current materialized state for `id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the item table cannot be read or a stored item cannot be decoded.
+    pub fn get(&self, id: MemoryId) -> Result<Option<MemoryItem>, StorageError> {
+        self.materialized_item(id)
+    }
+
+    /// Returns current materialized states for `ids`, preserving input order.
+    ///
+    /// Missing items are represented as `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the item table cannot be read or a stored item cannot be decoded.
+    pub fn get_many(&self, ids: &[MemoryId]) -> Result<Vec<Option<MemoryItem>>, StorageError> {
+        ids.iter().map(|id| self.get(*id)).collect()
+    }
 }
 
 fn embed(error: impl std::error::Error) -> StorageError {
@@ -361,5 +381,28 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert_eq!(stored, item);
+    }
+
+    #[test]
+    fn get_and_get_many_read_materialized_items() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let first = test_item("first");
+        let second = test_item("second");
+        let missing = MemoryId::new_v7();
+
+        store.write(&first).expect("first should write");
+        store.write(&second).expect("second should write");
+
+        assert_eq!(
+            store.get(first.id).expect("get should read"),
+            Some(first.clone())
+        );
+
+        let items = store
+            .get_many(&[second.id, missing, first.id])
+            .expect("get_many should read");
+
+        assert_eq!(items, vec![Some(second), None, Some(first)]);
     }
 }

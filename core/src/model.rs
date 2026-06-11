@@ -222,6 +222,42 @@ impl AccessEvent {
     }
 }
 
+/// Reference to a vector stored outside the materialized memory item.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct EmbeddingRef {
+    /// Name of the vector index backend or logical index.
+    pub index: String,
+    /// Backend-specific vector identifier.
+    pub vector_id: String,
+    /// Embedding model or model-version identifier.
+    pub model: String,
+    /// Number of dimensions in the referenced vector.
+    pub dimensions: usize,
+}
+
+/// Persisted memory item materialized from the event log.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct MemoryItem {
+    /// Stable time-ordered item id.
+    pub id: MemoryId,
+    /// Stored memory content.
+    pub content: String,
+    /// Optional reference to the associated vector embedding.
+    pub embedding_ref: Option<EmbeddingRef>,
+    /// Provenance for the observation that produced this memory version.
+    pub provenance: Provenance,
+    /// Bi-temporal validity and ingestion timestamps.
+    pub timestamps: TemporalBounds,
+    /// Current accessibility tier.
+    pub tier: Tier,
+    /// Current trust tier.
+    pub credence: CredenceTier,
+    /// Current materialized significance score.
+    pub significance: f64,
+    /// Captured usage events for this memory.
+    pub access_events: Vec<AccessEvent>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,5 +335,38 @@ mod tests {
         assert_eq!(event.timestamp, OffsetDateTime::UNIX_EPOCH);
         assert_eq!(event.query_context_hash.as_deref(), Some("query-hash"));
         assert_eq!(event.outcome, AccessOutcome::Cited);
+    }
+
+    #[test]
+    fn memory_item_carries_core_representation_fields() {
+        let item = MemoryItem {
+            id: MemoryId::new_v7(),
+            content: "Use the Rust core as the source of truth.".to_owned(),
+            embedding_ref: Some(EmbeddingRef {
+                index: "default".to_owned(),
+                vector_id: "vec-1".to_owned(),
+                model: "test-embedding-model".to_owned(),
+                dimensions: 3,
+            }),
+            provenance: Provenance::new(SourceKind::User, None, "unit-test"),
+            timestamps: TemporalBounds::open_from(
+                OffsetDateTime::UNIX_EPOCH,
+                OffsetDateTime::UNIX_EPOCH,
+            ),
+            tier: Tier::Warm,
+            credence: CredenceTier::FirmAuthoritative,
+            significance: 1.0,
+            access_events: Vec::new(),
+        };
+
+        assert_eq!(
+            item.embedding_ref
+                .as_ref()
+                .map(|embedding| embedding.dimensions),
+            Some(3)
+        );
+        assert_eq!(item.tier, Tier::Warm);
+        assert_eq!(item.credence, CredenceTier::FirmAuthoritative);
+        assert!((item.significance - 1.0).abs() < f64::EPSILON);
     }
 }

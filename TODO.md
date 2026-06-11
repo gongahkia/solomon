@@ -35,7 +35,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 ## Phase 1 — Core data model & storage substrate (Rust)
 
 ### Memory item representation
-- [ ] (P0) Define `MemoryItem` struct: id, content, embedding ref, provenance, timestamps, tier, credence, significance
+- [x] (P0) Define `MemoryItem` struct: id, content, embedding ref, provenance, timestamps, tier, credence, significance
 - [x] (P0) Implement stable ID generation (UUID v7 for time-orderability)
 - [x] (P0) Define `Provenance` type: source kind (user / agent / file / web / tool), source ref, ingested-by
 - [x] (P0) Define bi-temporal fields: `valid_from`, `valid_to` (nullable = open interval), `ingested_at`

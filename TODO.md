@@ -259,12 +259,12 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 15 — Security & governance (♻️ mirror Kaypoh series)
 
-- [ ] (P1) Threat model doc (`docs/threat-model.md`) — esp. the boundary, the store, and poisoning (ASI06)
-- [ ] (P1) Fail-closed egress everywhere; document the trust boundary precisely
-- [ ] (P1) Treat the knowledge store as an untrusted input surface on read (sanitise stored instructions)
-- [ ] (P2) Auth/tenancy (♻️ Kaypoh `auth.py` patterns) for server SKU
-- [ ] (P2) Mapping/volatile-memory hygiene: assert no sanitisation mapping is ever persisted by Solomon
-- [ ] (P2) `docs/known-limitations.md` and `docs/assumption.md` (♻️ Kaypoh's design-honesty docs)
+- [x] (P1) Threat model doc (`docs/threat-model.md`) — esp. the boundary, the store, and poisoning (ASI06)
+- [x] (P1) Fail-closed egress everywhere; document the trust boundary precisely
+- [x] (P1) Treat the knowledge store as an untrusted input surface on read (sanitise stored instructions)
+- [x] (P2) Auth/tenancy (♻️ Kaypoh `auth.py` patterns) for server SKU
+- [x] (P2) Mapping/volatile-memory hygiene: assert no sanitisation mapping is ever persisted by Solomon
+- [x] (P2) `docs/known-limitations.md` and `docs/assumption.md` (♻️ Kaypoh's design-honesty docs)
 - [ ] (P3) Independent boundary audit checklist
 
 ---

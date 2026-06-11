@@ -52,6 +52,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = resolved_settings
     app.state.service = service
 
+    @app.middleware("http")
+    async def server_api_key_middleware(request: Request, call_next: Any) -> Any:
+        if (
+            resolved_settings.sku == "server"
+            and resolved_settings.server_api_key
+            and request.url.path not in {"/health", "/ready"}
+        ):
+            supplied = request.headers.get("x-api-key")
+            if supplied != resolved_settings.server_api_key:
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": {"code": "unauthorized", "message": "invalid or missing API key"}},
+                )
+            request.state.tenant_id = request.headers.get("x-tenant-id", "default")
+        return await call_next(request)
+
     @app.exception_handler(SolomonError)
     def solomon_error_handler(_request: Request, exc: SolomonError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content={"error": {"code": exc.code, "message": exc.message}})

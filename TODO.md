@@ -151,7 +151,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Assign credence on ingest based on source kind (agent/web/tool default to lower)
 - [x] (P1) Quarantine model-generated and web-sourced content at low credence by default
 - [x] (P1) Enforce: low-credence items can never outrank authoritative ones in retrieval
-- [ ] (P1) Bound auto-consolidation/summarisation to limit semantic drift (cap re-summarisation depth)
+- [x] (P1) Bound auto-consolidation/summarisation to limit semantic drift (cap re-summarisation depth)
 - [ ] (P1) Treat the memory store as an untrusted input surface — sanitise/validate on read of stored instructions
 - [ ] (P2) Separate "facts" from "instructions" so retrieved memory can't inject directives
 - [ ] (P2) Anomaly flags: sudden burst of contradictory writes, suspicious provenance

@@ -341,6 +341,7 @@ impl MemoryWriteEvent {
             id: MemoryId::new_v7(),
             content: self.content,
             compaction: None,
+            consolidation: None,
             embedding_ref: None,
             provenance: self.provenance,
             timestamps: TemporalBounds::open_from(self.valid_from, self.ingested_at),
@@ -2094,6 +2095,7 @@ mod tests {
             id: MemoryId::new_v7(),
             content: content.to_owned(),
             compaction: None,
+            consolidation: None,
             embedding_ref: None,
             provenance: Provenance::new(SourceKind::User, None, "storage-test"),
             timestamps: TemporalBounds::open_from(

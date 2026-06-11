@@ -610,6 +610,7 @@ mod tests {
             id: MemoryId::new_v7(),
             content: "memory".to_owned(),
             compaction: None,
+            consolidation: None,
             embedding_ref: None,
             provenance: Provenance::new(SourceKind::User, None, "reconstruction-test"),
             timestamps: TemporalBounds::open_from(now, now),

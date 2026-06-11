@@ -584,6 +584,7 @@ mod tests {
             id: MemoryId::new_v7(),
             content: content.to_owned(),
             compaction: None,
+            consolidation: None,
             embedding_ref: None,
             provenance: Provenance::new(SourceKind::User, None, "retrieval-test"),
             timestamps: TemporalBounds::open_from(now, now),

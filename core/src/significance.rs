@@ -343,6 +343,7 @@ mod tests {
             id: crate::model::MemoryId::new_v7(),
             content: "score me".to_owned(),
             compaction: None,
+            consolidation: None,
             embedding_ref: None,
             provenance: crate::model::Provenance::new(
                 crate::model::SourceKind::User,
@@ -380,6 +381,7 @@ mod tests {
             id: crate::model::MemoryId::new_v7(),
             content: "central".to_owned(),
             compaction: None,
+            consolidation: None,
             embedding_ref: None,
             provenance: crate::model::Provenance::new(
                 crate::model::SourceKind::User,
@@ -411,6 +413,7 @@ mod tests {
             id: crate::model::MemoryId::new_v7(),
             content: "floor me".to_owned(),
             compaction: None,
+            consolidation: None,
             embedding_ref: None,
             provenance: crate::model::Provenance::new(
                 crate::model::SourceKind::User,
@@ -471,6 +474,7 @@ mod tests {
             id: crate::model::MemoryId::new_v7(),
             content: "policy".to_owned(),
             compaction: None,
+            consolidation: None,
             embedding_ref: None,
             provenance: crate::model::Provenance::new(
                 crate::model::SourceKind::User,

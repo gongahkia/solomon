@@ -470,6 +470,15 @@ pub struct CompactionRef {
     pub compressed_bytes: u64,
 }
 
+/// Metadata for a memory produced by consolidation or summarisation.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ConsolidationRef {
+    /// Source memories that were consolidated into this item.
+    pub source_memory_ids: Vec<MemoryId>,
+    /// Number of summarisation/consolidation generations from raw observations.
+    pub resummarization_depth: u16,
+}
+
 /// Persisted memory item materialized from the event log.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MemoryItem {
@@ -481,6 +490,9 @@ pub struct MemoryItem {
     pub content: String,
     /// Pointer to compressed cold content when content has been moved out of this row.
     pub compaction: Option<CompactionRef>,
+    /// Consolidation lineage, when this item is an auto-generated summary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consolidation: Option<ConsolidationRef>,
     /// Optional reference to the associated vector embedding.
     pub embedding_ref: Option<EmbeddingRef>,
     /// Provenance for the observation that produced this memory version.
@@ -696,6 +708,7 @@ mod tests {
             id: MemoryId::new_v7(),
             content: "Use the Rust core as the source of truth.".to_owned(),
             compaction: None,
+            consolidation: None,
             embedding_ref: Some(EmbeddingRef {
                 index: "default".to_owned(),
                 vector_id: "vec-1".to_owned(),
@@ -750,6 +763,7 @@ mod tests {
             id: MemoryId::new_v7(),
             content: "Do not reintroduce the rejected cache design.".to_owned(),
             compaction: None,
+            consolidation: None,
             embedding_ref: None,
             provenance: Provenance::new(SourceKind::User, None, "unit-test"),
             timestamps: TemporalBounds::open_from(

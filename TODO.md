@@ -16,7 +16,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Set up GitHub Actions: build + test matrix (linux/mac), lint, and binding smoke tests
 - [x] (P0) Choose and pin a licence (MIT or Apache-2.0); add `LICENSE` and SPDX headers
 - [x] (P0) Write minimal `README.md` stub (replaced properly in M4) and `CONTRIBUTING.md`
-- [ ] (P1) Add `CODEOWNERS`, issue templates, and a PR template
+- [x] (P1) Add `CODEOWNERS`, issue templates, and a PR template
 - [ ] (P1) Set up semantic versioning + `CHANGELOG.md` (keep-a-changelog format)
 - [ ] (P2) Pre-commit hooks (fmt, clippy, secret scanning)
 - [ ] (P2) Reproducible dev environment (devcontainer or Nix flake)

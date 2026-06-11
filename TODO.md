@@ -46,7 +46,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P1) Add schema version field to every persisted item for forward migration
 
 ### Storage engine
-- [ ] (P0) Implement append-only event log (writes never destroy; the source of truth)
+- [x] (P0) Implement append-only event log (writes never destroy; the source of truth)
 - [ ] (P0) Implement primary KV store for current materialised item state (e.g. redb / sled / rocksdb — pick in ADR)
 - [ ] (P0) Implement `write(item)` → persists event + updates materialised state
 - [ ] (P0) Implement `get(id)` and `get_many(ids)`

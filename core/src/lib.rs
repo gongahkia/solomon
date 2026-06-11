@@ -3,6 +3,7 @@
 #![doc = include_str!("../README.md")]
 
 pub mod model;
+pub mod storage;
 
 /// Current crate version, kept available to bindings and smoke tests.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

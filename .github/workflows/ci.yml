@@ -1,196 +1,58 @@
-# SPDX-License-Identifier: Apache-2.0
-
 name: CI
 
 on:
-  pull_request:
   push:
     branches:
       - main
-  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  lint-type-test:
-    name: Lint, type-check, and test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+  build-test-lint:
+    name: build, test, lint (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - uses: astral-sh/setup-uv@v5
-      - run: uv sync --locked --extra dev
-      - run: uv run ruff check .
-      - run: uv run python scripts/check_license_headers.py
-      - run: uv run python scripts/check_file_lengths.py
-      - run: uv run mypy src
-      - run: uv run bandit -r src/solomon --baseline .bandit-baseline.json
-      - name: Audit dependencies and generate SBOM
-        run: |
-          mkdir -p artifacts
-          uv run pip-audit --skip-editable
-          uv run cyclonedx-py environment --output-format json --output-file artifacts/sbom.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sbom-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: artifacts/sbom.json
-      - run: uv run pytest --cov=src/solomon
-      - run: uv run python benchmarks/performance_budget.py
-      - run: uv run python benchmarks/currency_regression.py
+        os:
+          - ubuntu-latest
+          - macos-latest
 
-  boundary-smoke:
-    name: Vendored boundary smoke
-    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
-      - name: Run Solomon vendored boundary smoke
-        run: |
-          uv sync --locked --extra dev
-          uv run python scripts/boundary_smoke.py
+          components: rustfmt, clippy
 
-  nix-macos:
-    name: Nix development shell (macOS)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v25
-      - run: nix flake check --all-systems
-      - run: nix develop .#default --command sh -c 'python --version && uv --version && gitleaks version'
-
-  dependency-propagation-benchmark:
-    name: Dependency propagation regression
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Install Python
+        uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
-      - run: uv sync --locked --extra dev
-      - run: uv run python benchmarks/perf/dependency_propagation.py --sizes 1000,10000,100000 --max-p95-ms 2000
+          python-version: "3.14"
 
-  typescript-sdk:
-    name: TypeScript SDK
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/solomon-ts
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Install Node.js
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: packages/solomon-ts/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
 
-  console-browser-smoke:
-    name: Curator console browser smoke
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - run: uv sync --locked
-      - name: Install pinned Playwright CLI and Chromium
-        run: |
-          npm install --prefix /tmp/solomon-playwright --no-save @playwright/cli@0.1.17
-          /tmp/solomon-playwright/node_modules/.bin/playwright install --with-deps chromium
-      - run: uv run python scripts/console_browser_smoke.py --playwright-cli /tmp/solomon-playwright/node_modules/.bin/playwright-cli
+          version: 10.32.1
 
-  local-binary-smoke:
-    name: Offline local binary smoke (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
-      - run: uv sync --locked --extra packaging
-      - run: uv run pyinstaller packaging/solomon-local.spec --noconfirm --clean
-      - run: uv run python scripts/smoke_local_binary.py --binary dist/solomon-local
+      - name: Rust format, lint, and tests
+        run: scripts/ci/rust.sh
 
-  postgres-pgvector-migrations:
-    name: PostgreSQL, pgvector, and migrations
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: pgvector/pgvector:0.8.2-pg16-bookworm
-        env:
-          POSTGRES_DB: solomon
-          POSTGRES_USER: solomon
-          POSTGRES_PASSWORD: test-postgres-password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U solomon -d solomon"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
-      - run: uv sync --locked --extra dev --extra server
-      - name: Run SQLite and live PostgreSQL migration coverage
-        env:
-          SOLOMON_TEST_POSTGRES_DSN: postgresql://solomon:test-postgres-password@localhost:5432/solomon
-        run: uv run pytest tests/test_migrations.py tests/test_postgres_live_integration.py -q
+      - name: Python binding smoke test
+        run: scripts/ci/python-binding-smoke.sh
 
-  production-compose-smoke:
-    name: Production Compose smoke
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker compose version
-      - run: scripts/production_compose_smoke.sh
-
-  helm-template:
-    name: Helm template validation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v5
-        with:
-          version: v4.2.3
-      - run: scripts/check_helm_chart.sh
-      - run: helm package charts/solomon --destination /tmp
-
-  release-quality-gates:
-    name: Pilot-readiness quality gates
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
-      - run: uv sync --locked --extra dev
-      - run: uv run python scripts/release_quality_gates.py --output artifacts/release-quality-gates.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-quality-gates
-          path: artifacts/release-quality-gates.json
+      - name: Node binding smoke test
+        run: scripts/ci/node-binding-smoke.sh

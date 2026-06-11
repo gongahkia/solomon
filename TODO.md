@@ -13,7 +13,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Initialise monorepo: `core/` (Rust), `bindings/python/`, `bindings/node/`, `tideline/` (TS/React), `benchmarks/`, `examples/`, `docs/`
 - [x] (P0) Set up Cargo workspace with the core crate and a `shibahama-cli` crate
 - [x] (P0) Configure `rustfmt`, `clippy`, and deny-warnings in CI
-- [ ] (P0) Set up GitHub Actions: build + test matrix (linux/mac), lint, and binding smoke tests
+- [x] (P0) Set up GitHub Actions: build + test matrix (linux/mac), lint, and binding smoke tests
 - [ ] (P0) Choose and pin a licence (MIT or Apache-2.0); add `LICENSE` and SPDX headers
 - [ ] (P0) Write minimal `README.md` stub (replaced properly in M4) and `CONTRIBUTING.md`
 - [ ] (P1) Add `CODEOWNERS`, issue templates, and a PR template

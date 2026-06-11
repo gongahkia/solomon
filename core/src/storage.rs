@@ -3,8 +3,8 @@
 //! Durable storage primitives for Shibahama.
 
 use crate::model::{
-    AccessEvent, CompactionRef, EmbeddingRef, Entity, EntityId, MemoryId, MemoryItem, Relation,
-    RelationId, Tier,
+    AccessEvent, CURRENT_MEMORY_SCHEMA_VERSION, CompactionRef, CredenceTier, EmbeddingRef, Entity,
+    EntityId, MemoryId, MemoryItem, Provenance, Relation, RelationId, TemporalBounds, Tier,
 };
 use crate::significance::{SignificanceBreakdown, SignificanceConfig, SignificanceFunction};
 use crate::vector::{VectorIndex, VectorIndexError};
@@ -263,6 +263,69 @@ pub struct ColdContentRecord {
     pub bytes: Vec<u8>,
 }
 
+/// Caller-supplied memory write event before it is assigned an id and materialized.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemoryWriteEvent {
+    /// Stored memory content.
+    pub content: String,
+    /// Mandatory provenance for the observation.
+    pub provenance: Provenance,
+    /// Start of the interval where the fact is claimed valid.
+    pub valid_from: OffsetDateTime,
+    /// Time at which Shibahama accepted the observation.
+    pub ingested_at: OffsetDateTime,
+    /// Initial accessibility tier.
+    pub tier: Tier,
+    /// Initial credence tier.
+    pub credence: CredenceTier,
+    /// Initial significance score.
+    pub significance: f64,
+    /// Coldest tier this memory may occupy after demotion.
+    pub credence_floor: Tier,
+}
+
+impl MemoryWriteEvent {
+    /// Creates a write event with mandatory provenance and explicit trust/tier inputs.
+    #[must_use]
+    pub fn new(
+        content: impl Into<String>,
+        provenance: Provenance,
+        valid_from: OffsetDateTime,
+        ingested_at: OffsetDateTime,
+        tier: Tier,
+        credence: CredenceTier,
+        credence_floor: Tier,
+    ) -> Self {
+        Self {
+            content: content.into(),
+            provenance,
+            valid_from,
+            ingested_at,
+            tier,
+            credence,
+            significance: 0.0,
+            credence_floor,
+        }
+    }
+
+    fn into_item(self) -> MemoryItem {
+        MemoryItem {
+            schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+            id: MemoryId::new_v7(),
+            content: self.content,
+            compaction: None,
+            embedding_ref: None,
+            provenance: self.provenance,
+            timestamps: TemporalBounds::open_from(self.valid_from, self.ingested_at),
+            tier: self.tier,
+            credence: self.credence,
+            significance: self.significance,
+            credence_floor: self.credence_floor,
+            access_events: Vec::new(),
+        }
+    }
+}
+
 /// Storage backend contract for durable Shibahama memory state.
 pub trait MemoryStore {
     /// Appends an event to the source-of-truth log.
@@ -278,6 +341,16 @@ pub trait MemoryStore {
     ///
     /// Returns an error when the backend cannot durably write the event and current state.
     fn write(&self, item: &MemoryItem) -> Result<EventRecord, StorageError>;
+
+    /// Ingests a caller-supplied write event with mandatory provenance.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot durably materialize and write the event.
+    fn write_event(
+        &self,
+        event: MemoryWriteEvent,
+    ) -> Result<(EventRecord, MemoryItem), StorageError>;
 
     /// Reads current materialized state for one memory id.
     ///
@@ -418,6 +491,21 @@ impl RedbMemoryStore {
         self.event(sequence)?.ok_or_else(|| {
             StorageError::Embedded("committed write event was not readable".to_owned())
         })
+    }
+
+    /// Ingests a caller-supplied write event by assigning an id and writing a memory item.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the event cannot be materialized, written, committed, or read back.
+    pub fn write_event(
+        &self,
+        event: MemoryWriteEvent,
+    ) -> Result<(EventRecord, MemoryItem), StorageError> {
+        let item = event.into_item();
+        let record = self.write(&item)?;
+
+        Ok((record, item))
     }
 
     /// Writes an item and its embedding, keeping item metadata and vector index in sync.
@@ -1812,6 +1900,13 @@ impl MemoryStore for RedbMemoryStore {
         RedbMemoryStore::write(self, item)
     }
 
+    fn write_event(
+        &self,
+        event: MemoryWriteEvent,
+    ) -> Result<(EventRecord, MemoryItem), StorageError> {
+        RedbMemoryStore::write_event(self, event)
+    }
+
     fn get(&self, id: MemoryId) -> Result<Option<MemoryItem>, StorageError> {
         RedbMemoryStore::get(self, id)
     }
@@ -2056,6 +2151,51 @@ mod tests {
             .expect("item should exist");
 
         assert_eq!(events.len(), 1);
+        assert_eq!(stored, item);
+    }
+
+    #[test]
+    fn write_event_ingests_memory_with_mandatory_provenance() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let provenance = Provenance::new(
+            SourceKind::File,
+            Some("/repo/README.md".to_owned()),
+            "ingest-test",
+        );
+        let event = MemoryWriteEvent::new(
+            "ingested from file",
+            provenance.clone(),
+            OffsetDateTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH + time::Duration::seconds(1),
+            Tier::Warm,
+            CredenceTier::VerifiedSource,
+            Tier::Cold,
+        );
+
+        let (record, item) = store.write_event(event).expect("write event should ingest");
+        let stored = store
+            .get(item.id)
+            .expect("stored item should read")
+            .expect("stored item should exist");
+
+        assert_eq!(item.schema_version, CURRENT_MEMORY_SCHEMA_VERSION);
+        assert_eq!(item.content, "ingested from file");
+        assert_eq!(item.provenance, provenance);
+        assert_eq!(item.timestamps.valid_from, OffsetDateTime::UNIX_EPOCH);
+        assert_eq!(
+            item.timestamps.ingested_at,
+            OffsetDateTime::UNIX_EPOCH + time::Duration::seconds(1)
+        );
+        assert_eq!(item.timestamps.valid_to, None);
+        assert_eq!(item.credence, CredenceTier::VerifiedSource);
+        assert_eq!(item.credence_floor, Tier::Cold);
+        assert_eq!(
+            record.event,
+            MemoryEvent::MemoryWritten {
+                item: Box::new(item.clone())
+            }
+        );
         assert_eq!(stored, item);
     }
 
@@ -3230,10 +3370,31 @@ mod tests {
                 .expect("item should exist")
         }
 
+        fn write_event_and_get(store: &dyn MemoryStore, event: MemoryWriteEvent) -> MemoryItem {
+            let (_, item) = store
+                .write_event(event)
+                .expect("trait write_event should work");
+
+            store
+                .get(item.id)
+                .expect("trait event get should read")
+                .expect("event item should exist")
+        }
+
         let file = NamedTempFile::new().expect("tempfile should be created");
         let store = RedbMemoryStore::open(file.path()).expect("store should open");
         let item = test_item("trait-backed");
+        let event = MemoryWriteEvent::new(
+            "trait event",
+            Provenance::new(SourceKind::Tool, Some("tool:1".to_owned()), "trait-test"),
+            OffsetDateTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
+            Tier::Warm,
+            CredenceTier::ModelInferred,
+            Tier::Cold,
+        );
 
         assert_eq!(write_and_get(&store, &item), item);
+        assert_eq!(write_event_and_get(&store, event).content, "trait event");
     }
 }

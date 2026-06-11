@@ -108,16 +108,16 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 4 — Boundary integration with Kaypoh (🔌 P1 #4 — wire, don't build)
 
-- [ ] (P0) Import `KaypohClient` from `../kaypoh`; config for kaypoh-local vs kaypoh-server base URL
-- [ ] (P0) **Ingestion gate**: every new KnowledgeItem passes Kaypoh `/review` before storage; capture findings (MNPI markers, severity) onto the item's provenance
-- [ ] (P0) Refuse or quarantine items Kaypoh flags as unsafe-to-store per policy (configurable)
-- [ ] (P0) **Outbound sanitisation**: any context assembled for a model call goes through Kaypoh `/pseudonymize`; keep the returned mapping in volatile memory only
-- [ ] (P0) **Inbound demasking**: model response → Kaypoh `/reidentify` using the volatile mapping; flush mapping after
-- [ ] (P1) Use `KAYPOH_LLM_INPUT_MODE=structured_tokens` semantics — never send raw_text by default; gate raw_text behind explicit per-matter opt-in
-- [ ] (P1) Handle Kaypoh degraded-mode / unavailability: fail CLOSED (no egress if the boundary is down)
-- [ ] (P1) Pass source+destination jurisdiction to Kaypoh so the strictest rule resolves correctly
-- [ ] (P2) Reconcile demasking correctness when the model rephrases/reasons over tokens (test that placeholders survive paraphrase; flag when a token is dropped/mangled)
-- [ ] (P2) Document-scrub path for ingested files (🔌 Kaypoh `/documents/scrub`) before extraction
+- [x] (P0) Import `KaypohClient` from `../kaypoh`; config for kaypoh-local vs kaypoh-server base URL
+- [x] (P0) **Ingestion gate**: every new KnowledgeItem passes Kaypoh `/review` before storage; capture findings (MNPI markers, severity) onto the item's provenance
+- [x] (P0) Refuse or quarantine items Kaypoh flags as unsafe-to-store per policy (configurable)
+- [x] (P0) **Outbound sanitisation**: any context assembled for a model call goes through Kaypoh `/pseudonymize`; keep the returned mapping in volatile memory only
+- [x] (P0) **Inbound demasking**: model response → Kaypoh `/reidentify` using the volatile mapping; flush mapping after
+- [x] (P1) Use `KAYPOH_LLM_INPUT_MODE=structured_tokens` semantics — never send raw_text by default; gate raw_text behind explicit per-matter opt-in
+- [x] (P1) Handle Kaypoh degraded-mode / unavailability: fail CLOSED (no egress if the boundary is down)
+- [x] (P1) Pass source+destination jurisdiction to Kaypoh so the strictest rule resolves correctly
+- [x] (P2) Reconcile demasking correctness when the model rephrases/reasons over tokens (test that placeholders survive paraphrase; flag when a token is dropped/mangled)
+- [x] (P2) Document-scrub path for ingested files (🔌 Kaypoh `/documents/scrub`) before extraction
 - [ ] (P3) Reuse Kaypoh's Word/Outlook add-in surfaces as optional Solomon front-ends (🔌 `../kaypoh/packaging/word_addin`)
 
 ---

@@ -1,26 +1,26 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.16
-    hooks:
-      - id: ruff-check
-        args: ["--fix"]
-      - id: ruff-format
   - repo: local
     hooks:
-      - id: mypy
-        name: mypy
-        entry: uv run mypy src
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all -- --check
         language: system
         pass_filenames: false
-      - id: pytest-fast
-        name: pytest-fast
-        entry: uv run pytest -q
+        types_or:
+          - rust
+          - toml
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --workspace --all-targets -- -D warnings
         language: system
         pass_filenames: false
-      - id: conventional-commit
-        name: conventional commit message
-        entry: uv run python scripts/check_conventional_commit.py
+        types:
+          - rust
+      - id: secret-scan
+        name: secret scan
+        entry: scripts/ci/secrets-scan.sh
         language: system
-        stages: [commit-msg]
+        pass_filenames: false
+        always_run: true

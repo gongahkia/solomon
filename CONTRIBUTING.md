@@ -13,6 +13,13 @@ scripts/ci/python-binding-smoke.sh
 scripts/ci/node-binding-smoke.sh
 ```
 
+Optional pre-commit hooks are provided through `pre-commit`:
+
+```sh
+pre-commit install
+pre-commit run --all-files
+```
+
 ## Commit Scope
 
 Keep changes focused. Architecture, storage format, public API, and benchmark changes should

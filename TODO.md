@@ -18,7 +18,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Write minimal `README.md` stub (replaced properly in M4) and `CONTRIBUTING.md`
 - [x] (P1) Add `CODEOWNERS`, issue templates, and a PR template
 - [x] (P1) Set up semantic versioning + `CHANGELOG.md` (keep-a-changelog format)
-- [ ] (P2) Pre-commit hooks (fmt, clippy, secret scanning)
+- [x] (P2) Pre-commit hooks (fmt, clippy, secret scanning)
 - [ ] (P2) Reproducible dev environment (devcontainer or Nix flake)
 
 ### Core architectural decisions (write these down in `docs/adr/`)

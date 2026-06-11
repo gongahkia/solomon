@@ -33,6 +33,8 @@ pub struct RecallRequest<'a> {
     pub now: OffsetDateTime,
     /// Ranking weights applied to retrieved candidates.
     pub ranking: RecallRankingConfig,
+    /// Policy for flagging load-bearing but possibly stale memories.
+    pub staleness: RecallStalenessConfig,
     /// Optional related-memory provider used for graph expansion.
     pub related_memory_provider: Option<&'a dyn RelatedMemoryProvider>,
 }
@@ -47,6 +49,7 @@ impl<'a> RecallRequest<'a> {
             top_k,
             now,
             ranking: RecallRankingConfig::default(),
+            staleness: RecallStalenessConfig::default(),
             related_memory_provider: None,
         }
     }
@@ -62,6 +65,13 @@ impl<'a> RecallRequest<'a> {
     #[must_use]
     pub const fn with_ranking(mut self, ranking: RecallRankingConfig) -> Self {
         self.ranking = ranking;
+        self
+    }
+
+    /// Overrides stale-load-bearing detection policy for this request.
+    #[must_use]
+    pub const fn with_staleness(mut self, staleness: RecallStalenessConfig) -> Self {
+        self.staleness = staleness;
         self
     }
 
@@ -104,6 +114,24 @@ impl Default for RecallRankingConfig {
     }
 }
 
+/// Policy for identifying important memories that may need re-validation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RecallStalenessConfig {
+    /// Minimum significance for a memory to be considered load-bearing.
+    pub load_bearing_significance_threshold: f64,
+    /// Age in seconds after which the last validation-like signal is considered stale.
+    pub stale_after_seconds: f64,
+}
+
+impl Default for RecallStalenessConfig {
+    fn default() -> Self {
+        Self {
+            load_bearing_significance_threshold: 2.0,
+            stale_after_seconds: 30.0 * 24.0 * 60.0 * 60.0,
+        }
+    }
+}
+
 /// Ranked memory returned from recall.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RecallCandidate {
@@ -117,6 +145,8 @@ pub struct RecallCandidate {
     pub tier: Tier,
     /// Validity state at the recall instant.
     pub currency: RecallCandidateCurrency,
+    /// True when this is significant, old, and lacks a recent validation-like access signal.
+    pub load_bearing_possibly_stale: bool,
     /// Vector distance from the query, where lower is closer.
     pub vector_distance: f32,
     /// Normalized similarity contribution derived from vector distance.
@@ -190,6 +220,7 @@ pub fn recall(
                 result.distance,
                 RecallCandidateSource::Vector,
                 request.ranking,
+                request.staleness,
                 request.now,
             ))
         })
@@ -229,6 +260,7 @@ pub fn recall(
                     f32::INFINITY,
                     RecallCandidateSource::GraphExpansion { anchor },
                     request.ranking,
+                    request.staleness,
                     request.now,
                 ));
             }
@@ -268,6 +300,7 @@ fn candidate_from_item(
     vector_distance: f32,
     source: RecallCandidateSource,
     ranking: RecallRankingConfig,
+    staleness: RecallStalenessConfig,
     now: OffsetDateTime,
 ) -> RecallCandidate {
     let similarity_score = similarity_from_distance(vector_distance);
@@ -277,6 +310,7 @@ fn candidate_from_item(
     let provenance = item.provenance.clone();
     let tier = item.tier;
     let currency = candidate_currency(&item, now);
+    let load_bearing_possibly_stale = load_bearing_possibly_stale(&item, staleness, now);
 
     RecallCandidate {
         id,
@@ -284,6 +318,7 @@ fn candidate_from_item(
         provenance,
         tier,
         currency,
+        load_bearing_possibly_stale,
         vector_distance,
         similarity_score,
         significance_score,
@@ -306,6 +341,30 @@ fn candidate_currency(item: &MemoryItem, now: OffsetDateTime) -> RecallCandidate
     }
 
     RecallCandidateCurrency::Current
+}
+
+fn load_bearing_possibly_stale(
+    item: &MemoryItem,
+    staleness: RecallStalenessConfig,
+    now: OffsetDateTime,
+) -> bool {
+    if item.significance < staleness.load_bearing_significance_threshold {
+        return false;
+    }
+
+    let last_validation_like_signal = item
+        .access_events
+        .iter()
+        .filter(|event| event.outcome.is_actual_use())
+        .map(|event| event.timestamp)
+        .max()
+        .unwrap_or(item.timestamps.ingested_at);
+
+    if now <= last_validation_like_signal {
+        return false;
+    }
+
+    (now - last_validation_like_signal).as_seconds_f64() >= staleness.stale_after_seconds
 }
 
 fn similarity_from_distance(distance: f32) -> f64 {
@@ -534,5 +593,60 @@ mod tests {
             stored_related.access_events[0].outcome,
             AccessOutcome::Surfaced
         );
+    }
+
+    #[test]
+    fn recall_flags_load_bearing_but_possibly_stale_candidates() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let ingested_at = OffsetDateTime::UNIX_EPOCH;
+        let now = ingested_at + Duration::days(60);
+        let mut stale = test_item("stale load bearing", ingested_at);
+        let mut recently_validated = test_item("recently used", ingested_at);
+
+        stale.significance = 3.0;
+        recently_validated.significance = 3.0;
+        recently_validated.access_events.push(AccessEvent::new(
+            now - Duration::days(1),
+            None,
+            AccessOutcome::Cited,
+        ));
+
+        store
+            .write_embedded(
+                &mut stale,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("stale should write");
+        store
+            .write_embedded(
+                &mut recently_validated,
+                &mut vector_index,
+                &[1.0, 1.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("recently validated should write");
+
+        let query = [0.0, 0.0];
+        let request = RecallRequest::new(&query, 2, now);
+        let candidates = recall(&store, &vector_index, &request).expect("recall should work");
+        let stale_candidate = candidates
+            .iter()
+            .find(|candidate| candidate.id == stale.id)
+            .expect("stale candidate should be present");
+        let recently_validated_candidate = candidates
+            .iter()
+            .find(|candidate| candidate.id == recently_validated.id)
+            .expect("recently validated candidate should be present");
+
+        assert!(stale_candidate.load_bearing_possibly_stale);
+        assert!(!recently_validated_candidate.load_bearing_possibly_stale);
     }
 }

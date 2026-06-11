@@ -95,6 +95,48 @@ impl Tier {
     }
 }
 
+/// Origin class for a memory observation.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub enum SourceKind {
+    /// Direct user-provided information or instruction.
+    User,
+    /// Agent-authored or model-authored observation.
+    Agent,
+    /// File-system source such as repository content.
+    File,
+    /// Web source or imported web content.
+    Web,
+    /// Tool output produced by an integration.
+    Tool,
+}
+
+/// Provenance attached to every persisted memory.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Provenance {
+    /// Kind of source that produced the memory.
+    pub source_kind: SourceKind,
+    /// Stable source reference, such as a file path, URL, tool-call id, or external record id.
+    pub source_ref: Option<String>,
+    /// Actor, process, or integration that ingested the memory.
+    pub ingested_by: String,
+}
+
+impl Provenance {
+    /// Creates a provenance record.
+    #[must_use]
+    pub fn new(
+        source_kind: SourceKind,
+        source_ref: impl Into<Option<String>>,
+        ingested_by: impl Into<String>,
+    ) -> Self {
+        Self {
+            source_kind,
+            source_ref: source_ref.into(),
+            ingested_by: ingested_by.into(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,5 +173,18 @@ mod tests {
         assert_eq!(Tier::Hot.demote(), Tier::Warm);
         assert_eq!(Tier::Warm.demote(), Tier::Cold);
         assert_eq!(Tier::Cold.demote(), Tier::Cold);
+    }
+
+    #[test]
+    fn provenance_keeps_source_and_ingester() {
+        let provenance = Provenance::new(
+            SourceKind::File,
+            Some("core/src/model.rs".to_owned()),
+            "unit-test",
+        );
+
+        assert_eq!(provenance.source_kind, SourceKind::File);
+        assert_eq!(provenance.source_ref.as_deref(), Some("core/src/model.rs"));
+        assert_eq!(provenance.ingested_by, "unit-test");
     }
 }

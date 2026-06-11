@@ -83,6 +83,9 @@ pub enum MemoryEvent {
         from: Tier,
         /// New tier.
         to: Tier,
+        /// Why the tier changed.
+        #[serde(default)]
+        cause: TierChangeCause,
     },
     /// A cold memory's content was moved to compressed storage.
     ContentCompacted {
@@ -100,6 +103,82 @@ pub enum MemoryEvent {
         /// Timestamp that closes the superseded memory's valid-time interval.
         valid_to: OffsetDateTime,
     },
+}
+
+/// Cause attached to tier-transition events.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum TierChangeCause {
+    /// Cause was not recorded by an older event.
+    #[default]
+    Unknown,
+    /// Tier changed because access reinforced significance.
+    AccessReinforcement,
+    /// Tier changed because significance was refreshed lazily.
+    SignificanceRefresh,
+    /// Tier changed because a tier capacity policy demoted the item.
+    CapacityEnforcement,
+}
+
+/// Cause shown in an item's audit trail.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MemoryAuditCause {
+    /// Initial item write assigned the value.
+    InitialWrite,
+    /// A direct write changed the value for an already-known id.
+    DirectWrite,
+    /// Tier changed because access reinforced significance.
+    AccessReinforcement,
+    /// Tier changed because significance was refreshed lazily.
+    SignificanceRefresh,
+    /// Tier changed because a tier capacity policy demoted the item.
+    CapacityEnforcement,
+    /// Cause was not recorded by an older event.
+    Unknown,
+}
+
+impl From<TierChangeCause> for MemoryAuditCause {
+    fn from(value: TierChangeCause) -> Self {
+        match value {
+            TierChangeCause::Unknown => Self::Unknown,
+            TierChangeCause::AccessReinforcement => Self::AccessReinforcement,
+            TierChangeCause::SignificanceRefresh => Self::SignificanceRefresh,
+            TierChangeCause::CapacityEnforcement => Self::CapacityEnforcement,
+        }
+    }
+}
+
+/// Audited memory field change.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MemoryAuditChange {
+    /// Credence changed.
+    Credence {
+        /// Previous credence, or `None` for initial assignment.
+        from: Option<CredenceTier>,
+        /// New credence.
+        to: CredenceTier,
+    },
+    /// Accessibility tier changed.
+    Tier {
+        /// Previous tier, or `None` for initial assignment.
+        from: Option<Tier>,
+        /// New tier.
+        to: Tier,
+    },
+}
+
+/// One per-item audit-trail entry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MemoryAuditEntry {
+    /// Event-log sequence that produced this audit entry.
+    pub sequence: u64,
+    /// Time the source event was recorded.
+    pub recorded_at: OffsetDateTime,
+    /// Memory this audit entry describes.
+    pub memory_id: MemoryId,
+    /// Field change.
+    pub change: MemoryAuditChange,
+    /// Why the change happened.
+    pub cause: MemoryAuditCause,
 }
 
 /// Durable event-log record with a monotonic sequence number.
@@ -753,6 +832,78 @@ impl RedbMemoryStore {
         }
 
         Ok(flags)
+    }
+
+    /// Returns the credence/tier audit trail for one memory id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when event-log records cannot be read.
+    pub fn audit_trail(&self, id: MemoryId) -> Result<Vec<MemoryAuditEntry>, StorageError> {
+        let mut entries = Vec::new();
+        let mut previous_credence = None;
+        let mut previous_tier = None;
+
+        for record in self.events()? {
+            match record.event {
+                MemoryEvent::MemoryWritten { item } if item.id == id => {
+                    let cause = if previous_credence.is_none() && previous_tier.is_none() {
+                        MemoryAuditCause::InitialWrite
+                    } else {
+                        MemoryAuditCause::DirectWrite
+                    };
+
+                    if previous_credence != Some(item.credence) {
+                        entries.push(MemoryAuditEntry {
+                            sequence: record.sequence,
+                            recorded_at: record.recorded_at,
+                            memory_id: id,
+                            change: MemoryAuditChange::Credence {
+                                from: previous_credence,
+                                to: item.credence,
+                            },
+                            cause,
+                        });
+                        previous_credence = Some(item.credence);
+                    }
+
+                    if previous_tier != Some(item.tier) {
+                        entries.push(MemoryAuditEntry {
+                            sequence: record.sequence,
+                            recorded_at: record.recorded_at,
+                            memory_id: id,
+                            change: MemoryAuditChange::Tier {
+                                from: previous_tier,
+                                to: item.tier,
+                            },
+                            cause,
+                        });
+                        previous_tier = Some(item.tier);
+                    }
+                }
+                MemoryEvent::TierChanged {
+                    id: changed_id,
+                    from,
+                    to,
+                    cause,
+                } if changed_id == id => {
+                    entries.push(MemoryAuditEntry {
+                        sequence: record.sequence,
+                        recorded_at: record.recorded_at,
+                        memory_id: id,
+                        change: MemoryAuditChange::Tier {
+                            from: Some(from),
+                            to,
+                        },
+                        cause: MemoryAuditCause::from(cause),
+                    });
+                    previous_tier = Some(to);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(entries)
     }
 
     /// Writes a full snapshot of event log, materialized state, and cold content to one file.
@@ -1619,6 +1770,7 @@ impl RedbMemoryStore {
                         id,
                         from: previous_tier,
                         to: item.tier,
+                        cause: TierChangeCause::AccessReinforcement,
                     },
                 };
                 let tier_event_bytes = serde_json::to_vec(&tier_record)?;
@@ -1717,6 +1869,7 @@ impl RedbMemoryStore {
                         id,
                         from: previous_tier,
                         to: item.tier,
+                        cause: TierChangeCause::SignificanceRefresh,
                     },
                 };
                 let event_bytes = serde_json::to_vec(&record)?;
@@ -1876,6 +2029,7 @@ impl RedbMemoryStore {
                         id,
                         from: Tier::Hot,
                         to: Tier::Warm,
+                        cause: TierChangeCause::CapacityEnforcement,
                     },
                 };
                 let event_bytes = serde_json::to_vec(&event_record)?;
@@ -3325,8 +3479,50 @@ mod tests {
                 id,
                 from: Tier::Warm,
                 to: Tier::Hot,
+                cause: TierChangeCause::AccessReinforcement,
             } if id == item_id
         ));
+    }
+
+    #[test]
+    fn audit_trail_records_credence_and_tier_changes_with_causes() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let item = test_item("audit me");
+        let item_id = item.id;
+
+        store.write(&item).expect("item should write");
+        store
+            .reinforce(item_id, crate::model::AccessOutcome::LedSomewhere)
+            .expect("reinforce should write");
+
+        let audit = store.audit_trail(item_id).expect("audit trail should read");
+
+        assert_eq!(audit.len(), 3);
+        assert_eq!(
+            audit[0].change,
+            MemoryAuditChange::Credence {
+                from: None,
+                to: CredenceTier::FirmAuthoritative,
+            }
+        );
+        assert_eq!(audit[0].cause, MemoryAuditCause::InitialWrite);
+        assert_eq!(
+            audit[1].change,
+            MemoryAuditChange::Tier {
+                from: None,
+                to: Tier::Warm,
+            }
+        );
+        assert_eq!(audit[1].cause, MemoryAuditCause::InitialWrite);
+        assert_eq!(
+            audit[2].change,
+            MemoryAuditChange::Tier {
+                from: Some(Tier::Warm),
+                to: Tier::Hot,
+            }
+        );
+        assert_eq!(audit[2].cause, MemoryAuditCause::AccessReinforcement);
     }
 
     #[test]
@@ -3539,6 +3735,7 @@ mod tests {
                 id,
                 from: Tier::Hot,
                 to: Tier::Cold,
+                cause: TierChangeCause::SignificanceRefresh,
             } if id == item.id
         ));
     }
@@ -3598,6 +3795,7 @@ mod tests {
                 id,
                 from: Tier::Hot,
                 to: Tier::Warm,
+                cause: TierChangeCause::CapacityEnforcement,
             } if id == low.id
         ));
         assert_eq!(

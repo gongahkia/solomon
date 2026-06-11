@@ -2,7 +2,8 @@
 
 //! Durable storage primitives for Shibahama.
 
-use crate::model::{AccessEvent, MemoryId, MemoryItem, Tier};
+use crate::model::{AccessEvent, CompactionRef, MemoryId, MemoryItem, Tier};
+use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use redb::{Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -11,6 +12,8 @@ use time::OffsetDateTime;
 
 const EVENT_LOG_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("event_log");
 const MEMORY_ITEMS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("memory_items");
+const COLD_CONTENT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("cold_content");
+const LZ4_SIZE_PREPENDED: &str = "lz4-size-prepended";
 
 /// Error returned by storage backends.
 #[derive(Debug, Error)]
@@ -21,6 +24,9 @@ pub enum StorageError {
     /// Event or item serialization failed.
     #[error("serialization failed: {0}")]
     Serialization(#[from] serde_json::Error),
+    /// Compression or decompression failed.
+    #[error("compression failed: {0}")]
+    Compression(String),
 }
 
 /// Append-only event describing a durable memory-state change.
@@ -53,6 +59,13 @@ pub enum MemoryEvent {
         from: Tier,
         /// New tier.
         to: Tier,
+    },
+    /// A cold memory's content was moved to compressed storage.
+    ContentCompacted {
+        /// Memory id.
+        id: MemoryId,
+        /// Pointer to compressed content.
+        pointer: CompactionRef,
     },
 }
 
@@ -306,10 +319,113 @@ impl RedbMemoryStore {
             })
             .map(Some)
     }
+
+    /// Compacts inline content for a cold-tier item into compressed storage.
+    ///
+    /// Returns `Ok(false)` when the item is missing, is not cold, or is already compacted.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read or written, serialization fails, or compressed
+    /// content cannot be represented.
+    pub fn compact_cold_item(&self, id: MemoryId) -> Result<bool, StorageError> {
+        let write_txn = self.db.begin_write().map_err(embed)?;
+        {
+            let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+            let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let mut cold_table = write_txn.open_table(COLD_CONTENT_TABLE).map_err(embed)?;
+            let key = id.to_string();
+            let mut item: MemoryItem = {
+                let Some(value) = item_table.get(key.as_str()).map_err(embed)? else {
+                    return Ok(false);
+                };
+
+                serde_json::from_slice(value.value())?
+            };
+
+            if item.tier != Tier::Cold || item.compaction.is_some() {
+                return Ok(false);
+            }
+
+            let content_bytes = item.content.as_bytes();
+            let compressed = compress_prepend_size(content_bytes);
+            let pointer = CompactionRef {
+                codec: LZ4_SIZE_PREPENDED.to_owned(),
+                storage_key: key.clone(),
+                original_bytes: u64::try_from(content_bytes.len()).map_err(compression)?,
+                compressed_bytes: u64::try_from(compressed.len()).map_err(compression)?,
+            };
+            let sequence = event_table.len().map_err(embed)?;
+            let record = EventRecord {
+                sequence,
+                recorded_at: OffsetDateTime::now_utc(),
+                event: MemoryEvent::ContentCompacted {
+                    id,
+                    pointer: pointer.clone(),
+                },
+            };
+
+            item.content.clear();
+            item.compaction = Some(pointer);
+
+            let event_bytes = serde_json::to_vec(&record)?;
+            let item_bytes = serde_json::to_vec(&item)?;
+
+            cold_table
+                .insert(key.as_str(), compressed.as_slice())
+                .map_err(embed)?;
+            event_table
+                .insert(sequence, event_bytes.as_slice())
+                .map_err(embed)?;
+            item_table
+                .insert(key.as_str(), item_bytes.as_slice())
+                .map_err(embed)?;
+        }
+
+        write_txn.commit().map_err(embed)?;
+
+        Ok(true)
+    }
+
+    /// Reads and decompresses content referenced by a compaction pointer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read, decompression fails, or the content is not
+    /// valid UTF-8.
+    pub fn read_compacted_content(
+        &self,
+        pointer: &CompactionRef,
+    ) -> Result<Option<String>, StorageError> {
+        if pointer.codec != LZ4_SIZE_PREPENDED {
+            return Err(StorageError::Compression(format!(
+                "unsupported codec {}",
+                pointer.codec
+            )));
+        }
+
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(COLD_CONTENT_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(error) => return Err(embed(error)),
+        };
+        let Some(value) = table.get(pointer.storage_key.as_str()).map_err(embed)? else {
+            return Ok(None);
+        };
+        let decompressed = decompress_size_prepended(value.value()).map_err(compression)?;
+        let content = String::from_utf8(decompressed).map_err(compression)?;
+
+        Ok(Some(content))
+    }
 }
 
 fn embed(error: impl std::error::Error) -> StorageError {
     StorageError::Embedded(error.to_string())
+}
+
+fn compression(error: impl std::fmt::Display) -> StorageError {
+    StorageError::Compression(error.to_string())
 }
 
 #[cfg(test)]
@@ -325,6 +441,7 @@ mod tests {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             id: MemoryId::new_v7(),
             content: content.to_owned(),
+            compaction: None,
             embedding_ref: None,
             provenance: Provenance::new(SourceKind::User, None, "storage-test"),
             timestamps: TemporalBounds::open_from(
@@ -498,5 +615,43 @@ mod tests {
             events[1].event,
             MemoryEvent::MemoryInvalidated { .. }
         ));
+    }
+
+    #[test]
+    fn compact_cold_item_moves_content_to_compressed_storage() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut item = test_item("large cold content that should move out of the hot row");
+
+        item.tier = Tier::Cold;
+        store.write(&item).expect("item should write");
+
+        assert!(
+            store
+                .compact_cold_item(item.id)
+                .expect("compaction should run")
+        );
+
+        let compacted = store
+            .get(item.id)
+            .expect("item should read")
+            .expect("item should exist");
+        let pointer = compacted.compaction.as_ref().expect("pointer should exist");
+        let restored = store
+            .read_compacted_content(pointer)
+            .expect("content should read");
+        let events = store.events().expect("events should read");
+
+        assert_eq!(compacted.content, "");
+        assert_eq!(
+            restored.as_deref(),
+            Some("large cold content that should move out of the hot row")
+        );
+        assert!(pointer.compressed_bytes > 0);
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event.event, MemoryEvent::ContentCompacted { .. }))
+        );
     }
 }

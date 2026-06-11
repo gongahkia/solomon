@@ -238,6 +238,19 @@ pub struct EmbeddingRef {
     pub dimensions: usize,
 }
 
+/// Pointer to content moved out of the hot materialized item row.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CompactionRef {
+    /// Compression codec used for the stored payload.
+    pub codec: String,
+    /// Backend key for the compressed content payload.
+    pub storage_key: String,
+    /// Original uncompressed byte length.
+    pub original_bytes: u64,
+    /// Compressed byte length.
+    pub compressed_bytes: u64,
+}
+
 /// Persisted memory item materialized from the event log.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MemoryItem {
@@ -247,6 +260,8 @@ pub struct MemoryItem {
     pub id: MemoryId,
     /// Stored memory content.
     pub content: String,
+    /// Pointer to compressed cold content when content has been moved out of this row.
+    pub compaction: Option<CompactionRef>,
     /// Optional reference to the associated vector embedding.
     pub embedding_ref: Option<EmbeddingRef>,
     /// Provenance for the observation that produced this memory version.
@@ -358,6 +373,7 @@ mod tests {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             id: MemoryId::new_v7(),
             content: "Use the Rust core as the source of truth.".to_owned(),
+            compaction: None,
             embedding_ref: Some(EmbeddingRef {
                 index: "default".to_owned(),
                 vector_id: "vec-1".to_owned(),
@@ -394,6 +410,7 @@ mod tests {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             id: MemoryId::new_v7(),
             content: "Do not reintroduce the rejected cache design.".to_owned(),
+            compaction: None,
             embedding_ref: None,
             provenance: Provenance::new(SourceKind::User, None, "unit-test"),
             timestamps: TemporalBounds::open_from(

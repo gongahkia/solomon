@@ -1,0 +1,882 @@
+{
+  "components": {
+    "schemas": {
+      "AuthorityChangeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "changed_at": {
+            "title": "Changed At",
+            "type": "string"
+          },
+          "new_version": {
+            "title": "New Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_version",
+          "changed_at"
+        ],
+        "title": "AuthorityChangeRequest",
+        "type": "object"
+      },
+      "DependencyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "$ref": "#/components/schemas/EdgeConfidence",
+            "default": "human_asserted"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "edge_type": {
+            "$ref": "#/components/schemas/EdgeType"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_kind": {
+            "title": "Target Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "target_id",
+          "edge_type",
+          "target_kind"
+        ],
+        "title": "DependencyRequest",
+        "type": "object"
+      },
+      "DiagnosticsResponse": {
+        "properties": {
+          "kaypoh": {
+            "$ref": "#/components/schemas/KaypohImportStatus"
+          },
+          "service": {
+            "default": "solomon",
+            "title": "Service",
+            "type": "string"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "title": "Settings",
+            "type": "object"
+          },
+          "version": {
+            "default": "0.1.0",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kaypoh",
+          "settings"
+        ],
+        "title": "DiagnosticsResponse",
+        "type": "object"
+      },
+      "EdgeConfidence": {
+        "enum": [
+          "human_asserted",
+          "human_confirmed",
+          "llm_suggested"
+        ],
+        "title": "EdgeConfidence",
+        "type": "string"
+      },
+      "EdgeType": {
+        "enum": [
+          "internal_depends_on_external",
+          "internal_depends_on_internal",
+          "supersedes"
+        ],
+        "title": "EdgeType",
+        "type": "string"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
+          "service": {
+            "default": "solomon",
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "examples": [
+              "ok"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "default": "0.1.0",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "IngestRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "content": {
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/KnowledgeKind"
+          },
+          "matter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matter Id"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/SourceKind"
+          },
+          "source_ref": {
+            "minLength": 1,
+            "title": "Source Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "content",
+          "source_kind",
+          "source_ref"
+        ],
+        "title": "IngestRequest",
+        "type": "object"
+      },
+      "KaypohImportStatus": {
+        "properties": {
+          "client_path": {
+            "title": "Client Path",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "importable": {
+            "title": "Importable",
+            "type": "boolean"
+          },
+          "repo_path": {
+            "title": "Repo Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "importable",
+          "repo_path",
+          "client_path",
+          "detail"
+        ],
+        "title": "KaypohImportStatus",
+        "type": "object"
+      },
+      "KnowledgeKind": {
+        "enum": [
+          "position",
+          "clause",
+          "house-view",
+          "advice",
+          "note"
+        ],
+        "title": "KnowledgeKind",
+        "type": "string"
+      },
+      "ReadyResponse": {
+        "properties": {
+          "kaypoh_client_importable": {
+            "title": "Kaypoh Client Importable",
+            "type": "boolean"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready",
+          "kaypoh_client_importable"
+        ],
+        "title": "ReadyResponse",
+        "type": "object"
+      },
+      "RecallRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "limit": {
+            "default": 10,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "matter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matter Id"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "review_mode": {
+            "default": false,
+            "title": "Review Mode",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "RecallRequest",
+        "type": "object"
+      },
+      "SourceKind": {
+        "enum": [
+          "partner",
+          "associate",
+          "matter-doc",
+          "external-feed",
+          "model"
+        ],
+        "title": "SourceKind",
+        "type": "string"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VerificationOutcome": {
+        "enum": [
+          "reaffirm",
+          "supersede",
+          "retire"
+        ],
+        "title": "VerificationOutcome",
+        "type": "string"
+      },
+      "VerificationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "by": {
+            "title": "By",
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/VerificationOutcome"
+          },
+          "successor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Successor Id"
+          }
+        },
+        "required": [
+          "by",
+          "outcome"
+        ],
+        "title": "VerificationRequest",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "summary": "Good-law engine for firm knowledge behind a Kaypoh boundary.",
+    "title": "Solomon",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/authorities/{authority_id}/changes": {
+      "post": {
+        "operationId": "authority_change_authorities__authority_id__changes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "authority_id",
+            "required": true,
+            "schema": {
+              "title": "Authority Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorityChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Authority Change Authorities  Authority Id  Changes Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Authority Change"
+      }
+    },
+    "/currency/{item_id}": {
+      "get": {
+        "operationId": "currency_currency__item_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Currency Currency  Item Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Currency"
+      }
+    },
+    "/dependencies": {
+      "post": {
+        "operationId": "add_dependency_dependencies_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DependencyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Add Dependency Dependencies Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Dependency"
+      }
+    },
+    "/diagnostics": {
+      "get": {
+        "operationId": "diagnostics_diagnostics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosticsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Diagnostics"
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/impact/{authority_id}": {
+      "get": {
+        "operationId": "impact_impact__authority_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "authority_id",
+            "required": true,
+            "schema": {
+              "title": "Authority Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Impact Impact  Authority Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Impact"
+      }
+    },
+    "/ingest": {
+      "post": {
+        "operationId": "ingest_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ingest Ingest Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest"
+      }
+    },
+    "/ready": {
+      "get": {
+        "operationId": "ready_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ready"
+      }
+    },
+    "/recall": {
+      "post": {
+        "operationId": "recall_recall_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Recall Recall Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recall"
+      }
+    },
+    "/timeline": {
+      "post": {
+        "operationId": "timeline_timeline_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "as_of",
+            "required": true,
+            "schema": {
+              "title": "As Of",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Timeline Timeline Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Timeline"
+      }
+    },
+    "/verification/{item_id}": {
+      "post": {
+        "operationId": "verification_verification__item_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Verification Verification  Item Id  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verification"
+      }
+    },
+    "/why/{item_id}": {
+      "get": {
+        "operationId": "why_why__item_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Why Why  Item Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Why"
+      }
+    }
+  }
+}

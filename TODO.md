@@ -208,7 +208,7 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P1) Verify the model never saw the client identity (assert Kaypoh round-trip masked/demasked correctly)
 - [x] (P1) **Warehouse-KM baseline**: a similarity-only retriever that returns the 2023 memo confidently with no staleness signal — the side-by-side
 - [x] (P1) Audit view rendering the full chain (known-since → dependency → change event → flag → verification prompt)
-- [ ] (P2) Record the run for the README GIF
+- [x] (P2) Record the run for the README GIF
 - [x] (P2) Package as a runnable `examples/stale-house-view/` (clone, bring up kaypoh-local, run)
 - [ ] (P3) A second scenario (e.g. internal supersession: a 2024 position quietly overriding a 2022 one) to show supersession reasoning
 
@@ -271,12 +271,12 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 16 — Docs inside the repo (P1, minimal, repo-internal)
 
-- [ ] (P0) Deep `README.md` — the writeup: the triad framing (Kaypoh/Shibahama/Solomon table), the wedge, architecture diagram, stale-house-view demo GIF, warehouse baseline comparison, honest limitations (README IS the paper)
-- [ ] (P1) `docs/architecture.md`: components, data model, request lifecycle, the boundary
-- [ ] (P1) `docs/concepts.md`: currency vs significance, bi-temporality, dependency graph, credence, verification — in plain language
-- [ ] (P1) `docs/kaypoh-integration.md`: exactly what Solomon reuses, what it builds, how to run both together
-- [ ] (P1) Generated API reference (FastAPI/OpenAPI export, ♻️ Kaypoh's `export_openapi_examples` approach)
-- [ ] (P1) `examples/` runnable per scenario
+- [x] (P0) Deep `README.md` — the writeup: the triad framing (Kaypoh/Shibahama/Solomon table), the wedge, architecture diagram, stale-house-view demo GIF, warehouse baseline comparison, honest limitations (README IS the paper)
+- [x] (P1) `docs/architecture.md`: components, data model, request lifecycle, the boundary
+- [x] (P1) `docs/concepts.md`: currency vs significance, bi-temporality, dependency graph, credence, verification — in plain language
+- [x] (P1) `docs/kaypoh-integration.md`: exactly what Solomon reuses, what it builds, how to run both together
+- [x] (P1) Generated API reference (FastAPI/OpenAPI export, ♻️ Kaypoh's `export_openapi_examples` approach)
+- [x] (P1) `examples/` runnable per scenario
 - [x] (P2) `docs/benchmarks.md`: methodology + reproduce instructions
 - [x] (P2) ADR index kept current
 - [ ] (P3) `docs/why-solomon.md`: the triad story + why decay was rejected (the judgment narrative for a reviewer)
@@ -286,9 +286,9 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 ## Phase 17 — Launch (P1/P2)
 
 - [ ] (P0) Tag `v0.1.0`; publish (pip; desktop bundle for local SKU)
-- [ ] (P1) Record the stale-house-view demo GIF (Solomon flag vs warehouse miss)
-- [ ] (P1) Write the launch post leading with the wedge: "every firm checks if a *case* is still good law; nobody checks if *their own* knowledge is — Solomon does, behind a zero-retention boundary"
-- [ ] (P1) FAQ for predictable objections (isn't this KM? how is it not Shibahama? does it decide the law? what if Kaypoh mis-detects?)
-- [ ] (P1) The triad writeup: one diagram showing Kaypoh + Shibahama + Solomon and what each proves (the FDE-application centrepiece)
-- [ ] (P2) Early-user outreach; collect first issues
+- [x] (P1) Record the stale-house-view demo GIF (Solomon flag vs warehouse miss)
+- [x] (P1) Write the launch post leading with the wedge: "every firm checks if a *case* is still good law; nobody checks if *their own* knowledge is — Solomon does, behind a zero-retention boundary"
+- [x] (P1) FAQ for predictable objections (isn't this KM? how is it not Shibahama? does it decide the law? what if Kaypoh mis-detects?)
+- [x] (P1) The triad writeup: one diagram showing Kaypoh + Shibahama + Solomon and what each proves (the FDE-application centrepiece)
+- [x] (P2) Early-user outreach; collect first issues
 - [ ] (P3) Submit the currency-eval writeup somewhere citable

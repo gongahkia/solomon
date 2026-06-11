@@ -2,85 +2,117 @@
 
 # Solomon
 
+![Stale house-view demo](docs/assets/stale-house-view-demo.gif)
+
 Solomon is a good-law engine for a firm's own knowledge. It tracks whether internal positions, clauses,
 house views, notes, and prior advice are still live, what they depend on, and why re-verification is due,
-while keeping firm knowledge behind a Kaypoh sanitisation boundary.
+while keeping firm knowledge behind a Kaypoh zero-retention boundary.
 
-Solomon is expected to live at `./solomon/` beside an untouched Kaypoh checkout at `../kaypoh/`.
-Solomon may import Kaypoh's Python client from `../kaypoh/src/kaypoh/client.py` or call a running
-Kaypoh service, but it does not modify Kaypoh source.
+The wedge is simple: every law firm checks whether a published case is still good law; very few systems
+check whether the firm's own knowledge is still good law. Current legal KM products are strong at search,
+tagging, precedent retrieval, and workflow. Solomon adds temporal truth: dependency edges, supersession,
+credence, verification, and an audit trail.
 
-## Triad
+## Why Now
+
+Legal AI adoption is now mainstream, while courts keep seeing hallucinated or stale citations. Damien
+Charlotin's public tracker is one of the core references for AI hallucination decisions, and 2026 legal
+coverage reports more than a thousand documented incidents globally. At the same time, legal KM remains
+framed around surfacing and reusing knowledge assets, not proving whether an internal memo still holds.
+
+Sources:
+
+- Damien Charlotin, [AI Hallucination Cases Database](https://www.damiencharlotin.com/hallucinations/)
+- Legaltech Hub, [Knowledge Management overview](https://www.legaltechnologyhub.com/topics/knowledge-management/)
+- Clio, [Legal Knowledge Management AI](https://www.clio.com/resources/ai-for-lawyers/legal-knoweldge-management-ai/)
+- The Guardian, [AI hallucinations found in high-profile Wall Street law firm filing](https://www.theguardian.com/technology/2026/apr/22/ai-hallucinations-found-in-high-profile-wall-street-law-firm-filing)
+
+## The Triad
 
 | Project | Question | Memory stance | Solomon relationship |
 |---|---|---|---|
-| Kaypoh | What is safe to let leave the building? | Stateless boundary | Solomon calls its review, pseudonymize, reidentify, and document scrub endpoints. |
-| Shibahama | What is worth remembering? | Adaptive decay | Solomon rejects decay for law-firm knowledge because old does not mean stale. |
+| Kaypoh | What is safe to let leave the building? | Stateless boundary | Solomon calls `/review`, `/pseudonymize`, `/reidentify`, and `/documents/scrub`. |
+| Shibahama | What is worth remembering? | Adaptive decay | Solomon rejects decay because old legal knowledge is not automatically stale. |
 | Solomon | Is what we know still true, and can we prove it? | Permanent, bi-temporal, currency-aware | This repo. |
+
+Solomon is expected to live at `./solomon/` beside an untouched Kaypoh checkout at `../kaypoh/`.
+Solomon may import Kaypoh's Python client from `../kaypoh/src/kaypoh/client.py` or call a running Kaypoh
+service, but it does not modify Kaypoh source.
 
 ## Architecture
 
-Solomon is a Python 3.10+ `uv` project with a FastAPI service, Pydantic v2 schemas, a bi-temporal
-knowledge store, a dependency graph, a currency engine, a credence ledger, a retrieval orchestrator,
-a metadata-only audit journal, and a Kaypoh boundary adapter.
-
-The first invariant is conservative: Solomon flags moved dependencies and stale verification, but it
-does not adjudicate whether a legal position is wrong. A human reviewer decides; Solomon preserves the
-evidence chain.
-
 ```text
-Lawyer query
-  -> Solomon recall/evaluate/why API
-  -> bi-temporal knowledge store + dependency graph + credence policy
-  -> Kaypoh pseudonymize before model egress
-  -> remote ZDR or local model endpoint, chosen by sensitivity policy
-  -> Kaypoh reidentify with volatile mapping
-  -> metadata-only audit journal
+Lawyer / API / CLI
+  -> ingest / recall / why / timeline
+  -> bi-temporal SQLite event store
+  -> dependency graph and currency engine
+  -> credence ledger and verification guard
+  -> Kaypoh boundary for model-bound context
+  -> local model or remote ZDR endpoint by sensitivity policy
+  -> hash-chained metadata-only audit journal
 ```
 
-## Install
+Core invariants:
+
+- Supersede, never delete, knowledge items.
+- Live items are returned by default; stale and superseded items require review mode or explicit queries.
+- Solomon flags moved dependencies; it does not adjudicate the law.
+- `ModelInferred` content cannot outrank firm-authoritative content as a settled answer.
+- Kaypoh mappings are volatile and flushed after reidentification.
+- Audit logs store metadata and hashes, not privileged prompt content.
+
+## Demo
+
+Run the headline scenario:
+
+```bash
+uv run python examples/stale-house-view/run.py
+```
+
+The scenario creates a 2023 house-view memo that depends on Regulation R section 12, registers a 2025
+authority change, and shows the 2026 query outcome:
+
+- Warehouse baseline: returns the memo with no staleness signal.
+- Solomon: returns the memo flagged `StalePendingReverification`, with the dependency reason.
+- Boundary assertion: the model-facing prompt contains `[CLIENT_1]`, not the client identity.
+
+## Install And Verify
 
 ```bash
 uv sync --extra dev
-uv run pytest
 uv run ruff check .
-uv run mypy src tests scripts
+uv run mypy src tests scripts examples/stale-house-view/run.py benchmarks/performance_budget.py
+uv run pytest
 ```
 
-Kaypoh integration expects a sibling checkout:
-
-```bash
-cd ..
-git clone <kaypoh-repo-url> kaypoh
-cd solomon
-uv run python scripts/kaypoh_smoke.py --base-url http://127.0.0.1:8131
-```
-
-The smoke command assumes Kaypoh is already running. CI starts Kaypoh local from the sibling checkout
-before running the smoke script.
-
-## API
-
-The service entry point is `solomon.api.app:create_app`.
+Start the API:
 
 ```bash
 uv run uvicorn solomon.api.app:create_app --factory --host 127.0.0.1 --port 8140
 ```
 
-Initial health endpoints:
+Use the CLI:
 
-- `GET /health`
-- `GET /ready`
-- `GET /diagnostics`
+```bash
+uv run solomon diagnostics
+uv run solomon ingest "Structure X relies on Regulation R section 12." --source-ref memo-1
+uv run solomon recall "structure X regulation"
+```
 
-Product verbs are reserved around the public contract in `TODO.md`: `ingest`, `recall`,
-`evaluate_currency`, `record_verification`, `register_authority_change`, `impact_query`, `why`, and
-`timeline`.
+## Honest Limitations
 
-## Development Discipline
+- External monitoring is intentionally narrow: manual and structured feeds, not Shepard's-scale coverage.
+- The default local retrieval index is deterministic and lightweight; production semantic backends can be
+  swapped in.
+- Solomon does not decide whether a legal position is wrong. It flags re-verification triggers.
+- Boundary correctness depends on Kaypoh's detection and tokenization behavior.
 
-- Solomon code is Apache-2.0 and carries SPDX headers.
-- Kaypoh is a read-only sibling dependency.
-- Ruff, mypy, and pytest run in CI with warnings treated as failures.
-- Audit logs are metadata-only by design; model prompts must be Kaypoh-sanitised before egress.
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Concepts](docs/concepts.md)
+- [Kaypoh integration](docs/kaypoh-integration.md)
+- [Threat model](docs/threat-model.md)
+- [Benchmarks](docs/benchmarks.md)
+- [ADRs](docs/adr/README.md)
 

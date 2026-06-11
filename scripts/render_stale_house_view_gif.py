@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
 
-def _font(size: int) -> ImageFont.ImageFont:
+def _font(size: int) -> Any:
     try:
         return ImageFont.truetype("DejaVuSans.ttf", size)
     except OSError:
@@ -75,4 +76,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

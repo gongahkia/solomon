@@ -23,6 +23,24 @@ pub struct ReconstructionTrigger {
     pub significance_score: f64,
 }
 
+/// Caller mode used by the reconstruction gate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReconstructionMode {
+    /// Ordinary recall/read path. Reconstruction must not run.
+    PlainRead,
+    /// Caller explicitly requested a re-validation/reconstruction step.
+    ExplicitRevalidation,
+}
+
+/// Result of evaluating reconstruction triggers against the gate.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReconstructionGateDecision {
+    /// Triggers considered by the gate.
+    pub triggers: Vec<ReconstructionTrigger>,
+    /// Whether reconstruction work is allowed to run now.
+    pub may_run: bool,
+}
+
 /// Derives reconstruction triggers from recall candidates without running reconstruction.
 #[must_use]
 pub fn triggers_from_recall(candidates: &[RecallCandidate]) -> Vec<ReconstructionTrigger> {
@@ -35,6 +53,18 @@ pub fn triggers_from_recall(candidates: &[RecallCandidate]) -> Vec<Reconstructio
             significance_score: candidate.significance_score,
         })
         .collect()
+}
+
+/// Evaluates reconstruction triggers without executing reconstruction.
+#[must_use]
+pub fn evaluate_reconstruction_gate(
+    triggers: &[ReconstructionTrigger],
+    mode: ReconstructionMode,
+) -> ReconstructionGateDecision {
+    ReconstructionGateDecision {
+        triggers: triggers.to_vec(),
+        may_run: mode == ReconstructionMode::ExplicitRevalidation && !triggers.is_empty(),
+    }
 }
 
 #[cfg(test)]
@@ -95,5 +125,18 @@ mod tests {
             ReconstructionTriggerReason::LoadBearingPossiblyStale
         );
         assert!((triggers[0].significance_score - 3.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn reconstruction_gate_never_runs_on_plain_read() {
+        let stale = candidate(true);
+        let triggers = triggers_from_recall(&[stale]);
+        let plain_read = evaluate_reconstruction_gate(&triggers, ReconstructionMode::PlainRead);
+        let explicit =
+            evaluate_reconstruction_gate(&triggers, ReconstructionMode::ExplicitRevalidation);
+
+        assert!(!plain_read.may_run);
+        assert_eq!(plain_read.triggers.len(), 1);
+        assert!(explicit.may_run);
     }
 }

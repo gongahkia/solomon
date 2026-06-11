@@ -250,6 +250,62 @@ impl RedbMemoryStore {
     pub fn get_many(&self, ids: &[MemoryId]) -> Result<Vec<Option<MemoryItem>>, StorageError> {
         ids.iter().map(|id| self.get(*id)).collect()
     }
+
+    /// Soft-invalidates a memory by closing its valid-time interval without deleting history.
+    ///
+    /// Returns `Ok(None)` when the item does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read or written, or when stored state cannot be
+    /// decoded.
+    pub fn soft_invalidate(
+        &self,
+        id: MemoryId,
+        valid_to: OffsetDateTime,
+    ) -> Result<Option<EventRecord>, StorageError> {
+        let write_txn = self.db.begin_write().map_err(embed)?;
+        let sequence = {
+            let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+            let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let key = id.to_string();
+            let mut item: MemoryItem = {
+                let Some(value) = item_table.get(key.as_str()).map_err(embed)? else {
+                    return Ok(None);
+                };
+
+                serde_json::from_slice(value.value())?
+            };
+
+            item.timestamps = item.timestamps.closed_at(valid_to);
+
+            let sequence = event_table.len().map_err(embed)?;
+            let record = EventRecord {
+                sequence,
+                recorded_at: OffsetDateTime::now_utc(),
+                event: MemoryEvent::MemoryInvalidated { id, valid_to },
+            };
+            let event_bytes = serde_json::to_vec(&record)?;
+            let item_bytes = serde_json::to_vec(&item)?;
+
+            event_table
+                .insert(sequence, event_bytes.as_slice())
+                .map_err(embed)?;
+            item_table
+                .insert(key.as_str(), item_bytes.as_slice())
+                .map_err(embed)?;
+
+            sequence
+        };
+
+        write_txn.commit().map_err(embed)?;
+
+        self.event(sequence)?
+            .ok_or_else(|| {
+                StorageError::Embedded("committed invalidation event was not readable".to_owned())
+            })
+            .map(Some)
+    }
 }
 
 fn embed(error: impl std::error::Error) -> StorageError {
@@ -404,5 +460,43 @@ mod tests {
             .expect("get_many should read");
 
         assert_eq!(items, vec![Some(second), None, Some(first)]);
+    }
+
+    #[test]
+    fn soft_invalidate_closes_validity_and_preserves_events() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let item = test_item("invalidate me");
+        let item_id = item.id;
+        let valid_to = OffsetDateTime::UNIX_EPOCH + time::Duration::days(7);
+
+        store.write(&item).expect("item should write");
+
+        let record = store
+            .soft_invalidate(item_id, valid_to)
+            .expect("invalidation should write")
+            .expect("item should exist");
+
+        assert_eq!(
+            record.event,
+            MemoryEvent::MemoryInvalidated {
+                id: item_id,
+                valid_to
+            }
+        );
+
+        let stored = store
+            .get(item_id)
+            .expect("item should read")
+            .expect("item should still exist");
+        let events = store.events().expect("events should read");
+
+        assert_eq!(stored.timestamps.valid_to, Some(valid_to));
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0].event, MemoryEvent::MemoryWritten { .. }));
+        assert!(matches!(
+            events[1].event,
+            MemoryEvent::MemoryInvalidated { .. }
+        ));
     }
 }

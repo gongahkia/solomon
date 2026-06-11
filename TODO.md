@@ -50,7 +50,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Implement primary KV store for current materialised item state (e.g. redb / sled / rocksdb — pick in ADR)
 - [x] (P0) Implement `write(item)` → persists event + updates materialised state
 - [x] (P0) Implement `get(id)` and `get_many(ids)`
-- [ ] (P0) Implement soft-invalidate: close `valid_to`, never delete the row
+- [x] (P0) Implement soft-invalidate: close `valid_to`, never delete the row
 - [ ] (P1) Implement compaction for cold-tier items (compress content, keep metadata + pointer)
 - [ ] (P1) Implement crash-safe writes (fsync policy / WAL) and a recovery path on startup
 - [ ] (P1) Snapshot + restore of full memory state to a single file (portability, SQLite-like ergonomics)

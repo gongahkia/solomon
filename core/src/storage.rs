@@ -2,6 +2,9 @@
 
 //! Durable storage primitives for Shibahama.
 
+use crate::anomaly::{
+    AnomalyConfig, AnomalyFlag, detect_contradiction_bursts, inspect_suspicious_provenance,
+};
 use crate::model::{
     AccessEvent, CURRENT_MEMORY_SCHEMA_VERSION, CompactionRef, CredenceTier, EmbeddingRef, Entity,
     EntityId, MemoryId, MemoryItem, MemoryKind, Provenance, Relation, RelationId, SourceKind,
@@ -731,6 +734,25 @@ impl RedbMemoryStore {
             written_item_count: written_ids.len(),
             compacted_content_count: cold_content_records.len(),
         })
+    }
+
+    /// Returns anomaly flags detected from current materialized state and event history.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when event-log or materialized item state cannot be read.
+    pub fn anomaly_flags(
+        &self,
+        config: AnomalyConfig,
+        now: OffsetDateTime,
+    ) -> Result<Vec<AnomalyFlag>, StorageError> {
+        let mut flags = detect_contradiction_bursts(&self.events()?, now, config);
+
+        for item in self.materialized_items()? {
+            flags.extend(inspect_suspicious_provenance(&item));
+        }
+
+        Ok(flags)
     }
 
     /// Writes a full snapshot of event log, materialized state, and cold content to one file.
@@ -3351,6 +3373,60 @@ mod tests {
             stored.access_events[0].outcome,
             crate::model::AccessOutcome::Contradicted
         );
+    }
+
+    #[test]
+    fn anomaly_flags_report_contradiction_bursts_and_suspicious_provenance() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let now = OffsetDateTime::UNIX_EPOCH + time::Duration::minutes(10);
+        let mut item = test_item("suspicious web memory");
+
+        item.provenance = Provenance::new(SourceKind::Web, None, "storage-test");
+        item.credence = CredenceTier::Unverified;
+        store.write(&item).expect("item should write");
+
+        for seconds_ago in [10, 20, 30] {
+            store
+                .record_access(
+                    item.id,
+                    AccessEvent::new(
+                        now - time::Duration::seconds(seconds_ago),
+                        None,
+                        crate::model::AccessOutcome::Contradicted,
+                    ),
+                )
+                .expect("contradiction should record");
+        }
+
+        let flags = store
+            .anomaly_flags(
+                AnomalyConfig {
+                    contradiction_burst_window: time::Duration::minutes(1),
+                    contradiction_burst_threshold: 3,
+                },
+                now,
+            )
+            .expect("anomaly flags should read");
+
+        assert!(flags.iter().any(|flag| matches!(
+            flag,
+            AnomalyFlag::ContradictionBurst {
+                memory_id,
+                count: 3,
+                ..
+            } if *memory_id == item.id
+        )));
+        assert!(flags.iter().any(|flag| matches!(
+            flag,
+            AnomalyFlag::SuspiciousProvenance {
+                memory_id,
+                reason:
+                    crate::anomaly::SuspiciousProvenanceReason::MissingExternalSourceRef {
+                        source_kind: SourceKind::Web,
+                    },
+            } if *memory_id == item.id
+        )));
     }
 
     #[test]

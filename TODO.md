@@ -154,7 +154,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P1) Bound auto-consolidation/summarisation to limit semantic drift (cap re-summarisation depth)
 - [x] (P1) Treat the memory store as an untrusted input surface — sanitise/validate on read of stored instructions
 - [x] (P2) Separate "facts" from "instructions" so retrieved memory can't inject directives
-- [ ] (P2) Anomaly flags: sudden burst of contradictory writes, suspicious provenance
+- [x] (P2) Anomaly flags: sudden burst of contradictory writes, suspicious provenance
 - [ ] (P2) Per-item audit trail of all credence/tier changes with cause
 - [ ] (P3) Optional signed provenance (write attribution that can't be forged)
 

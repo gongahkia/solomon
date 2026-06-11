@@ -186,7 +186,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P2) Integration shim for a JS agent framework
 
 ### CLI
-- [ ] (P1) `shibahama` CLI: init a store, write, recall, why, inspect, export
+- [x] (P1) `shibahama` CLI: init a store, write, recall, why, inspect, export
 - [ ] (P1) `shibahama serve` — start the optional server mode
 - [ ] (P2) Pretty terminal output for `why` (a text version of the Tideline trace)
 

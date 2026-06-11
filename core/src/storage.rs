@@ -25,6 +25,7 @@ use time::OffsetDateTime;
 
 const EVENT_LOG_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("event_log");
 const MEMORY_ITEMS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("memory_items");
+const EMBEDDINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("embeddings");
 const COLD_CONTENT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("cold_content");
 const GRAPH_ENTITIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("graph_entities");
 const GRAPH_RELATIONS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("graph_relations");
@@ -329,12 +330,30 @@ pub struct StoreSnapshot {
     pub events: Vec<EventRecord>,
     /// Current materialized memory items.
     pub materialized_items: Vec<MemoryItem>,
+    /// Persisted embedding vectors used to hydrate local vector indexes.
+    #[serde(default)]
+    pub embeddings: Vec<StoredEmbedding>,
     /// Compressed cold-content payloads.
     pub cold_contents: Vec<ColdContentRecord>,
     /// Current graph entities.
     pub graph_entities: Vec<Entity>,
     /// Current graph relations.
     pub graph_relations: Vec<Relation>,
+}
+
+/// Persisted embedding vector for local index hydration.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct StoredEmbedding {
+    /// Memory id this embedding belongs to.
+    pub memory_id: MemoryId,
+    /// Embedding vector.
+    pub vector: Vec<f32>,
+    /// Logical vector index name.
+    pub index_name: String,
+    /// Embedding model identifier.
+    pub model: String,
+    /// Embedding model version identifier.
+    pub model_version: String,
 }
 
 /// Compressed cold-content payload included in a snapshot.
@@ -721,25 +740,114 @@ impl RedbMemoryStore {
         model: impl Into<String>,
         model_version: impl Into<String>,
     ) -> Result<EventRecord, StorageError> {
+        let index_name = index_name.into();
+        let model = model.into();
+        let model_version = model_version.into();
+
         vector_index
             .add(item.id, vector)
             .map_err(StorageError::from)?;
 
         item.embedding_ref = Some(EmbeddingRef {
-            index: index_name.into(),
+            index: index_name.clone(),
             vector_id: item.id.to_string(),
-            model: model.into(),
-            model_version: model_version.into(),
+            model: model.clone(),
+            model_version: model_version.clone(),
             dimensions: vector_index.dimensions(),
         });
 
-        match self.write(item) {
-            Ok(record) => Ok(record),
-            Err(error) => {
-                let _ = vector_index.delete_by_id(item.id);
-                Err(error)
-            }
+        let result = (|| {
+            let mut write_txn = self.db.begin_write().map_err(embed)?;
+            write_txn
+                .set_durability(Durability::Immediate)
+                .map_err(embed)?;
+            let sequence = {
+                let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+                let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+                let mut embedding_table = write_txn.open_table(EMBEDDINGS_TABLE).map_err(embed)?;
+                let sequence = event_table.len().map_err(embed)?;
+                let event = MemoryEvent::MemoryWritten {
+                    item: Box::new(item.clone()),
+                };
+                let record = EventRecord {
+                    sequence,
+                    recorded_at: OffsetDateTime::now_utc(),
+                    event,
+                };
+                let embedding = StoredEmbedding {
+                    memory_id: item.id,
+                    vector: vector.to_vec(),
+                    index_name,
+                    model,
+                    model_version,
+                };
+                let event_bytes = serde_json::to_vec(&record)?;
+                let item_bytes = serde_json::to_vec(&item)?;
+                let embedding_bytes = serde_json::to_vec(&embedding)?;
+                let item_key = item.id.to_string();
+
+                event_table
+                    .insert(sequence, event_bytes.as_slice())
+                    .map_err(embed)?;
+                item_table
+                    .insert(item_key.as_str(), item_bytes.as_slice())
+                    .map_err(embed)?;
+                embedding_table
+                    .insert(item_key.as_str(), embedding_bytes.as_slice())
+                    .map_err(embed)?;
+
+                sequence
+            };
+
+            write_txn.commit().map_err(embed)?;
+
+            self.event(sequence)?.ok_or_else(|| {
+                StorageError::Embedded("committed write event was not readable".to_owned())
+            })
+        })();
+
+        if result.is_err() {
+            let _ = vector_index.delete_by_id(item.id);
         }
+
+        result
+    }
+
+    /// Returns all persisted embedding rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the embedding table cannot be read or decoded.
+    pub fn stored_embeddings(&self) -> Result<Vec<StoredEmbedding>, StorageError> {
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(EMBEDDINGS_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(error) => return Err(embed(error)),
+        };
+        let mut embeddings = Vec::new();
+
+        for row in table.iter().map_err(embed)? {
+            let (_, value) = row.map_err(embed)?;
+            embeddings.push(serde_json::from_slice(value.value())?);
+        }
+
+        Ok(embeddings)
+    }
+
+    fn delete_embedding(&self, id: MemoryId) -> Result<(), StorageError> {
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        {
+            let mut table = write_txn.open_table(EMBEDDINGS_TABLE).map_err(embed)?;
+            let key = id.to_string();
+
+            table.remove(key.as_str()).map_err(embed)?;
+        }
+
+        write_txn.commit().map_err(embed)
     }
 
     /// Returns all event-log records in sequence order.
@@ -773,6 +881,7 @@ impl RedbMemoryStore {
     pub fn recover(&self) -> Result<RecoveryReport, StorageError> {
         let events = self.events()?;
         let materialized_items = self.materialized_items()?;
+        let _stored_embeddings = self.stored_embeddings()?;
         let _graph_entities = self.graph_entities()?;
         let _graph_relations = self.graph_relations()?;
 
@@ -944,6 +1053,7 @@ impl RedbMemoryStore {
             schema_version: 1,
             events: self.events()?,
             materialized_items: self.materialized_items()?,
+            embeddings: self.stored_embeddings()?,
             cold_contents: self.cold_content_records()?,
             graph_entities: self.graph_entities()?,
             graph_relations: self.graph_relations()?,
@@ -1121,6 +1231,7 @@ impl RedbMemoryStore {
         {
             let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
             let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let mut embedding_table = write_txn.open_table(EMBEDDINGS_TABLE).map_err(embed)?;
             let mut cold_table = write_txn.open_table(COLD_CONTENT_TABLE).map_err(embed)?;
             let mut entity_table = write_txn.open_table(GRAPH_ENTITIES_TABLE).map_err(embed)?;
             let mut relation_table = write_txn.open_table(GRAPH_RELATIONS_TABLE).map_err(embed)?;
@@ -1138,6 +1249,15 @@ impl RedbMemoryStore {
                 let bytes = serde_json::to_vec(&item)?;
 
                 item_table
+                    .insert(key.as_str(), bytes.as_slice())
+                    .map_err(embed)?;
+            }
+
+            for embedding in snapshot.embeddings {
+                let key = embedding.memory_id.to_string();
+                let bytes = serde_json::to_vec(&embedding)?;
+
+                embedding_table
                     .insert(key.as_str(), bytes.as_slice())
                     .map_err(embed)?;
             }
@@ -1739,6 +1859,7 @@ impl RedbMemoryStore {
 
         if record.is_some() {
             vector_index.delete_by_id(id).map_err(StorageError::from)?;
+            self.delete_embedding(id)?;
         }
 
         Ok(record)

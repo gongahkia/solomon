@@ -528,11 +528,15 @@ impl<V: VectorIndex> Shibahama<V> {
         vector_index: V,
         config: ShibahamaConfig,
     ) -> Result<Self, ShibahamaError> {
-        Ok(Self {
+        let mut engine = Self {
             store: RedbMemoryStore::open(path)?,
             vector_index,
             config,
-        })
+        };
+
+        engine.hydrate_vector_index()?;
+
+        Ok(engine)
     }
 
     /// Returns the underlying store for lower-level operations.
@@ -550,6 +554,15 @@ impl<V: VectorIndex> Shibahama<V> {
     /// Replaces this engine's active config.
     pub fn set_config(&mut self, config: ShibahamaConfig) {
         self.config = config;
+    }
+
+    fn hydrate_vector_index(&mut self) -> Result<(), ShibahamaError> {
+        for embedding in self.store.stored_embeddings()? {
+            self.vector_index
+                .add(embedding.memory_id, &embedding.vector)?;
+        }
+
+        Ok(())
     }
 
     /// Builds a recall request from this engine's recall defaults.
@@ -994,6 +1007,39 @@ mod tests {
         assert!((why.significance.base_score - why.item.significance).abs() < f64::EPSILON);
         assert_eq!(why.audit_trail.len(), why.tier.audit.len());
         assert!(why.audit_trail.len() >= 2);
+    }
+
+    #[test]
+    fn facade_hydrates_embeddings_after_reopen() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let mut shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let event = MemoryWriteEvent::new(
+            "reopened memory",
+            Provenance::new(SourceKind::User, None, "api-test"),
+            OffsetDateTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
+        );
+        let item = shibahama
+            .write_with_embedding(
+                event,
+                WriteEmbedding {
+                    vector: &[0.0, 0.0],
+                    index_name: "api-test",
+                    model: "embedding-model",
+                    model_version: "v1",
+                },
+            )
+            .expect("write should work");
+        drop(shibahama);
+
+        let reopened = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should reopen and hydrate embeddings");
+        let query = [0.0, 0.0];
+        let request = RecallRequest::new(&query, 1, OffsetDateTime::UNIX_EPOCH);
+        let recalled = reopened.recall(&request).expect("recall should work");
+
+        assert_eq!(recalled[0].id, item.id);
     }
 
     #[test]

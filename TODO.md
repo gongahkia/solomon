@@ -191,11 +191,11 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 10 — Local vs server SKU (♻️ mirror Kaypoh's SKU model)
 
-- [ ] (P1) `solomon-local`: offline-default, SQLite, local model, talks to kaypoh-local; no outbound HTTP except the configured local model
-- [ ] (P1) `solomon-server`: Postgres option, remote-ZDR endpoint allowed, talks to kaypoh-server; env-gated egress
-- [ ] (P1) Env-gating for any egress (♻️ Kaypoh's explicit-opt-in discipline: nothing leaves without a flag)
-- [ ] (P2) PyInstaller desktop packaging for solomon-local (♻️ Kaypoh `packaging/` approach)
-- [ ] (P2) Docker compose for server (♻️ mirror Kaypoh compose files)
+- [x] (P1) `solomon-local`: offline-default, SQLite, local model, talks to kaypoh-local; no outbound HTTP except the configured local model
+- [x] (P1) `solomon-server`: Postgres option, remote-ZDR endpoint allowed, talks to kaypoh-server; env-gated egress
+- [x] (P1) Env-gating for any egress (♻️ Kaypoh's explicit-opt-in discipline: nothing leaves without a flag)
+- [x] (P2) PyInstaller desktop packaging for solomon-local (♻️ Kaypoh `packaging/` approach)
+- [x] (P2) Docker compose for server (♻️ mirror Kaypoh compose files)
 - [ ] (P3) Multi-tenant namespace isolation on server
 
 ---

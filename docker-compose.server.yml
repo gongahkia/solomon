@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+
+services:
+  solomon-server:
+    image: python:3.12-slim
+    working_dir: /app
+    command: >
+      sh -c "pip install uv &&
+             uv sync --extra dev &&
+             uv run uvicorn solomon.api.app:create_app --factory --host 0.0.0.0 --port 8140"
+    volumes:
+      - .:/app
+      - solomon-data:/app/solomon-data
+      - solomon-journal:/app/solomon-journal
+    environment:
+      SOLOMON_SKU: server
+      SOLOMON_ZERO_EGRESS_MODE: "false"
+      SOLOMON_ALLOW_REMOTE_EGRESS: "${SOLOMON_ALLOW_REMOTE_EGRESS:-false}"
+      SOLOMON_REMOTE_MODEL_URL: "${SOLOMON_REMOTE_MODEL_URL:-}"
+      SOLOMON_KAYPOH_BASE_URL: "${SOLOMON_KAYPOH_BASE_URL:-http://kaypoh-server:8000}"
+    ports:
+      - "8140:8140"
+
+volumes:
+  solomon-data:
+  solomon-journal:
+

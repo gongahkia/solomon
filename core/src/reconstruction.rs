@@ -4,7 +4,8 @@
 
 use crate::model::{CredenceTier, MemoryId, MemoryItem, Provenance, SourceKind, Tier};
 use crate::retrieval::RecallCandidate;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use time::{Duration, OffsetDateTime};
 
 /// Tag attached to reconstruction proposals that have not been corroborated.
 pub const QUARANTINE_TAG: &str = "reconstruction:quarantine";
@@ -43,6 +44,97 @@ pub struct ReconstructionGateDecision {
     pub triggers: Vec<ReconstructionTrigger>,
     /// Whether reconstruction work is allowed to run now.
     pub may_run: bool,
+}
+
+/// Windowed reconstruction budget configuration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReconstructionBudgetConfig {
+    /// Maximum number of re-validations allowed inside the budget window.
+    pub max_revalidations_per_window: usize,
+    /// Maximum estimated cost units allowed inside the budget window.
+    pub max_cost_per_window: u64,
+    /// Cost used when a trigger has no explicit cost estimate.
+    pub default_cost_per_revalidation: u64,
+    /// Window used for rate and cost accounting.
+    pub window: Duration,
+}
+
+impl Default for ReconstructionBudgetConfig {
+    fn default() -> Self {
+        Self {
+            max_revalidations_per_window: 8,
+            max_cost_per_window: 100,
+            default_cost_per_revalidation: 1,
+            window: Duration::minutes(1),
+        }
+    }
+}
+
+/// A reconstruction or re-validation already attempted inside a budget window.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReconstructionAttempt {
+    /// Time the attempt was started.
+    pub occurred_at: OffsetDateTime,
+    /// Estimated cost units consumed by the attempt.
+    pub estimated_cost: u64,
+}
+
+/// Estimated cost for a pending reconstruction trigger.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReconstructionCostEstimate {
+    /// Trigger memory id.
+    pub memory_id: MemoryId,
+    /// Estimated cost units for re-validating this memory.
+    pub estimated_cost: u64,
+}
+
+/// Reason a reconstruction trigger was deferred by the budget.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReconstructionBudgetDenial {
+    /// The rate limit for the window has already been reached.
+    RateLimitExceeded {
+        /// Maximum allowed re-validations for the window.
+        max_revalidations_per_window: usize,
+        /// Re-validations already used or reserved in the window.
+        used_revalidations: usize,
+    },
+    /// The estimated cost cap for the window has already been reached.
+    CostCapExceeded {
+        /// Maximum allowed estimated cost units for the window.
+        max_cost_per_window: u64,
+        /// Estimated cost units already used or reserved in the window.
+        used_cost: u64,
+        /// Estimated cost units requested by the deferred trigger.
+        requested_cost: u64,
+    },
+}
+
+/// Reconstruction trigger deferred by the budget.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeferredReconstructionTrigger {
+    /// Trigger that was not allowed to run now.
+    pub trigger: ReconstructionTrigger,
+    /// Estimated cost units for this trigger.
+    pub estimated_cost: u64,
+    /// Budget reason for deferring this trigger.
+    pub reason: ReconstructionBudgetDenial,
+}
+
+/// Result of applying rate and cost limits to reconstruction triggers.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReconstructionBudgetDecision {
+    /// Triggers allowed to run now.
+    pub allowed: Vec<ReconstructionTrigger>,
+    /// Triggers deferred by rate or cost budget.
+    pub deferred: Vec<DeferredReconstructionTrigger>,
+    /// Re-validations already present in the active window before this decision.
+    pub used_revalidations_before: usize,
+    /// Estimated cost already present in the active window before this decision.
+    pub used_cost_before: u64,
+    /// Re-validations used after reserving allowed triggers.
+    pub used_revalidations_after: usize,
+    /// Estimated cost used after reserving allowed triggers.
+    pub used_cost_after: u64,
 }
 
 /// Quarantined reconstruction proposal.
@@ -328,6 +420,89 @@ pub fn evaluate_reconstruction_gate(
     }
 }
 
+/// Applies rate and cost budget limits to pending reconstruction triggers.
+#[must_use]
+pub fn apply_reconstruction_budget(
+    triggers: &[ReconstructionTrigger],
+    cost_estimates: &[ReconstructionCostEstimate],
+    recent_attempts: &[ReconstructionAttempt],
+    now: OffsetDateTime,
+    config: ReconstructionBudgetConfig,
+) -> ReconstructionBudgetDecision {
+    let cost_by_memory_id = cost_estimates
+        .iter()
+        .map(|estimate| (estimate.memory_id, estimate.estimated_cost))
+        .collect::<BTreeMap<_, _>>();
+    let active_attempts = recent_attempts
+        .iter()
+        .filter(|attempt| attempt_in_budget_window(**attempt, now, config.window));
+    let mut used_revalidations = 0;
+    let mut used_cost = 0_u64;
+
+    for attempt in active_attempts {
+        used_revalidations += 1;
+        used_cost = used_cost.saturating_add(attempt.estimated_cost);
+    }
+
+    let used_revalidations_before = used_revalidations;
+    let used_cost_before = used_cost;
+    let mut allowed = Vec::new();
+    let mut deferred = Vec::new();
+
+    for trigger in triggers {
+        let estimated_cost = cost_by_memory_id
+            .get(&trigger.memory_id)
+            .copied()
+            .unwrap_or(config.default_cost_per_revalidation);
+
+        if used_revalidations >= config.max_revalidations_per_window {
+            deferred.push(DeferredReconstructionTrigger {
+                trigger: *trigger,
+                estimated_cost,
+                reason: ReconstructionBudgetDenial::RateLimitExceeded {
+                    max_revalidations_per_window: config.max_revalidations_per_window,
+                    used_revalidations,
+                },
+            });
+            continue;
+        }
+
+        if used_cost.saturating_add(estimated_cost) > config.max_cost_per_window {
+            deferred.push(DeferredReconstructionTrigger {
+                trigger: *trigger,
+                estimated_cost,
+                reason: ReconstructionBudgetDenial::CostCapExceeded {
+                    max_cost_per_window: config.max_cost_per_window,
+                    used_cost,
+                    requested_cost: estimated_cost,
+                },
+            });
+            continue;
+        }
+
+        allowed.push(*trigger);
+        used_revalidations += 1;
+        used_cost = used_cost.saturating_add(estimated_cost);
+    }
+
+    ReconstructionBudgetDecision {
+        allowed,
+        deferred,
+        used_revalidations_before,
+        used_cost_before,
+        used_revalidations_after: used_revalidations,
+        used_cost_after: used_cost,
+    }
+}
+
+fn attempt_in_budget_window(
+    attempt: ReconstructionAttempt,
+    now: OffsetDateTime,
+    window: Duration,
+) -> bool {
+    window > Duration::ZERO && attempt.occurred_at <= now && attempt.occurred_at >= now - window
+}
+
 /// Quarantines a proposed reconstruction update.
 #[must_use]
 pub fn quarantine_proposal(mut item: MemoryItem, supersedes: MemoryId) -> QuarantinedProposal {
@@ -463,6 +638,14 @@ mod tests {
         }
     }
 
+    fn trigger() -> ReconstructionTrigger {
+        ReconstructionTrigger {
+            memory_id: MemoryId::new_v7(),
+            reason: ReconstructionTriggerReason::LoadBearingPossiblyStale,
+            significance_score: 3.0,
+        }
+    }
+
     #[test]
     fn triggers_from_recall_only_uses_stale_load_bearing_candidates() {
         let stale = candidate(true);
@@ -489,6 +672,115 @@ mod tests {
         assert!(!plain_read.may_run);
         assert_eq!(plain_read.triggers.len(), 1);
         assert!(explicit.may_run);
+    }
+
+    #[test]
+    fn reconstruction_budget_limits_revalidation_count() {
+        let triggers = vec![trigger(), trigger(), trigger()];
+        let decision = apply_reconstruction_budget(
+            &triggers,
+            &[],
+            &[],
+            OffsetDateTime::UNIX_EPOCH,
+            ReconstructionBudgetConfig {
+                max_revalidations_per_window: 2,
+                max_cost_per_window: 10,
+                default_cost_per_revalidation: 1,
+                window: time::Duration::minutes(1),
+            },
+        );
+
+        assert_eq!(decision.allowed, triggers[..2]);
+        assert_eq!(decision.deferred.len(), 1);
+        assert_eq!(decision.used_revalidations_after, 2);
+        assert_eq!(
+            decision.deferred[0].reason,
+            ReconstructionBudgetDenial::RateLimitExceeded {
+                max_revalidations_per_window: 2,
+                used_revalidations: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn reconstruction_budget_limits_estimated_cost_with_recent_attempts() {
+        let now = OffsetDateTime::UNIX_EPOCH + time::Duration::minutes(5);
+        let triggers = vec![trigger()];
+        let recent_attempts = vec![
+            ReconstructionAttempt {
+                occurred_at: now - time::Duration::seconds(30),
+                estimated_cost: 4,
+            },
+            ReconstructionAttempt {
+                occurred_at: now - time::Duration::minutes(2),
+                estimated_cost: 100,
+            },
+        ];
+        let decision = apply_reconstruction_budget(
+            &triggers,
+            &[],
+            &recent_attempts,
+            now,
+            ReconstructionBudgetConfig {
+                max_revalidations_per_window: 10,
+                max_cost_per_window: 5,
+                default_cost_per_revalidation: 2,
+                window: time::Duration::minutes(1),
+            },
+        );
+
+        assert!(decision.allowed.is_empty());
+        assert_eq!(decision.deferred.len(), 1);
+        assert_eq!(decision.used_revalidations_before, 1);
+        assert_eq!(decision.used_cost_before, 4);
+        assert_eq!(
+            decision.deferred[0].reason,
+            ReconstructionBudgetDenial::CostCapExceeded {
+                max_cost_per_window: 5,
+                used_cost: 4,
+                requested_cost: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn reconstruction_budget_uses_explicit_cost_estimates() {
+        let triggers = vec![trigger(), trigger()];
+        let estimates = vec![
+            ReconstructionCostEstimate {
+                memory_id: triggers[0].memory_id,
+                estimated_cost: 2,
+            },
+            ReconstructionCostEstimate {
+                memory_id: triggers[1].memory_id,
+                estimated_cost: 5,
+            },
+        ];
+        let decision = apply_reconstruction_budget(
+            &triggers,
+            &estimates,
+            &[],
+            OffsetDateTime::UNIX_EPOCH,
+            ReconstructionBudgetConfig {
+                max_revalidations_per_window: 10,
+                max_cost_per_window: 6,
+                default_cost_per_revalidation: 10,
+                window: time::Duration::minutes(1),
+            },
+        );
+
+        assert_eq!(decision.allowed, vec![triggers[0]]);
+        assert_eq!(decision.used_cost_after, 2);
+        assert_eq!(decision.deferred.len(), 1);
+        assert_eq!(decision.deferred[0].trigger, triggers[1]);
+        assert_eq!(
+            decision.deferred[0].reason,
+            ReconstructionBudgetDenial::CostCapExceeded {
+                max_cost_per_window: 6,
+                used_cost: 2,
+                requested_cost: 5,
+            }
+        );
     }
 
     #[test]

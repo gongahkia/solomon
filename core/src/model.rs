@@ -180,6 +180,48 @@ impl TemporalBounds {
     }
 }
 
+/// Outcome signal recorded after a memory is surfaced or used.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub enum AccessOutcome {
+    /// The memory was surfaced as a candidate but no stronger usage signal was reported.
+    Surfaced,
+    /// The memory helped the caller take a useful next step.
+    LedSomewhere,
+    /// The memory was cited in generated output or otherwise used explicitly.
+    Cited,
+    /// The memory was surfaced but ignored by the caller.
+    Ignored,
+    /// The access exposed or recorded a contradiction.
+    Contradicted,
+}
+
+/// Usage signal captured for a memory item.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AccessEvent {
+    /// Time at which access occurred.
+    pub timestamp: OffsetDateTime,
+    /// Privacy-safe query-context hash, not raw query text.
+    pub query_context_hash: Option<String>,
+    /// Caller-provided or system-derived outcome signal.
+    pub outcome: AccessOutcome,
+}
+
+impl AccessEvent {
+    /// Creates an access event.
+    #[must_use]
+    pub fn new(
+        timestamp: OffsetDateTime,
+        query_context_hash: impl Into<Option<String>>,
+        outcome: AccessOutcome,
+    ) -> Self {
+        Self {
+            timestamp,
+            query_context_hash: query_context_hash.into(),
+            outcome,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,5 +286,18 @@ mod tests {
 
         assert!(closed.is_valid_at(valid_from));
         assert!(!closed.is_valid_at(valid_from + time::Duration::days(1)));
+    }
+
+    #[test]
+    fn access_event_keeps_timestamp_context_hash_and_outcome() {
+        let event = AccessEvent::new(
+            OffsetDateTime::UNIX_EPOCH,
+            Some("query-hash".to_owned()),
+            AccessOutcome::Cited,
+        );
+
+        assert_eq!(event.timestamp, OffsetDateTime::UNIX_EPOCH);
+        assert_eq!(event.query_context_hash.as_deref(), Some("query-hash"));
+        assert_eq!(event.outcome, AccessOutcome::Cited);
     }
 }

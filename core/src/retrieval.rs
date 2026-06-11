@@ -37,6 +37,8 @@ pub struct RecallRequest<'a> {
     pub ranking: RecallRankingConfig,
     /// Policy for flagging load-bearing but possibly stale memories.
     pub staleness: RecallStalenessConfig,
+    /// Policy for suppressing near-duplicate results.
+    pub diversification: RecallDiversificationConfig,
     /// Optional related-memory provider used for graph expansion.
     pub related_memory_provider: Option<&'a dyn RelatedMemoryProvider>,
 }
@@ -53,6 +55,7 @@ impl<'a> RecallRequest<'a> {
             include_cold: false,
             ranking: RecallRankingConfig::default(),
             staleness: RecallStalenessConfig::default(),
+            diversification: RecallDiversificationConfig::default(),
             related_memory_provider: None,
         }
     }
@@ -82,6 +85,16 @@ impl<'a> RecallRequest<'a> {
     #[must_use]
     pub const fn with_staleness(mut self, staleness: RecallStalenessConfig) -> Self {
         self.staleness = staleness;
+        self
+    }
+
+    /// Overrides result diversification policy for this request.
+    #[must_use]
+    pub const fn with_diversification(
+        mut self,
+        diversification: RecallDiversificationConfig,
+    ) -> Self {
+        self.diversification = diversification;
         self
     }
 
@@ -144,6 +157,24 @@ impl Default for RecallStalenessConfig {
         Self {
             load_bearing_significance_threshold: 2.0,
             stale_after_seconds: 30.0 * 24.0 * 60.0 * 60.0,
+        }
+    }
+}
+
+/// Policy for suppressing near-duplicate recall results.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RecallDiversificationConfig {
+    /// Whether near-duplicate suppression is enabled.
+    pub enabled: bool,
+    /// Jaccard content-similarity threshold at or above which a lower-ranked item is suppressed.
+    pub near_duplicate_threshold: f64,
+}
+
+impl Default for RecallDiversificationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            near_duplicate_threshold: 0.9,
         }
     }
 }
@@ -324,6 +355,8 @@ fn recall_inner(
             .then_with(|| left.id.cmp(&right.id))
     });
 
+    candidates = diversify_candidates(candidates, request.diversification);
+
     if record_surface_access {
         for candidate in &candidates {
             let access_event = request.raw_query_context.map_or_else(
@@ -342,6 +375,59 @@ fn recall_inner(
     }
 
     Ok(candidates)
+}
+
+fn diversify_candidates(
+    candidates: Vec<RecallCandidate>,
+    config: RecallDiversificationConfig,
+) -> Vec<RecallCandidate> {
+    if !config.enabled {
+        return candidates;
+    }
+
+    let mut diversified: Vec<RecallCandidate> = Vec::with_capacity(candidates.len());
+
+    'candidate: for candidate in candidates {
+        for selected in &diversified {
+            if content_similarity(&candidate.item.content, &selected.item.content)
+                >= config.near_duplicate_threshold
+            {
+                continue 'candidate;
+            }
+        }
+
+        diversified.push(candidate);
+    }
+
+    diversified
+}
+
+fn content_similarity(left: &str, right: &str) -> f64 {
+    let left_terms = normalized_terms(left);
+    let right_terms = normalized_terms(right);
+
+    if left_terms.is_empty() && right_terms.is_empty() {
+        return 1.0;
+    }
+
+    let intersection_count = left_terms.intersection(&right_terms).count();
+    let union_count = left_terms.union(&right_terms).count();
+
+    if union_count == 0 {
+        return 0.0;
+    }
+
+    let intersection_count = u32::try_from(intersection_count).unwrap_or(u32::MAX);
+    let union_count = u32::try_from(union_count).unwrap_or(u32::MAX);
+
+    f64::from(intersection_count) / f64::from(union_count)
+}
+
+fn normalized_terms(content: &str) -> BTreeSet<String> {
+    content
+        .split_whitespace()
+        .map(str::to_ascii_lowercase)
+        .collect()
 }
 
 fn candidate_from_item(
@@ -650,6 +736,62 @@ mod tests {
         );
         assert!(cold_candidate.cold_tier_retrieval);
         assert_eq!(cold_candidate.tier, Tier::Cold);
+    }
+
+    #[test]
+    fn recall_diversifies_near_duplicate_results() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(1);
+        let mut first = test_item("alpha beta gamma", OffsetDateTime::UNIX_EPOCH);
+        let mut duplicate = test_item("alpha beta gamma", OffsetDateTime::UNIX_EPOCH);
+        let mut distinct = test_item("delta epsilon", OffsetDateTime::UNIX_EPOCH);
+
+        first.significance = 0.0;
+        duplicate.significance = 0.0;
+        distinct.significance = 0.0;
+
+        store
+            .write_embedded(
+                &mut first,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("first should write");
+        store
+            .write_embedded(
+                &mut duplicate,
+                &mut vector_index,
+                &[0.01, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("duplicate should write");
+        store
+            .write_embedded(
+                &mut distinct,
+                &mut vector_index,
+                &[0.02, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("distinct should write");
+
+        let query = [0.0, 0.0];
+        let request = RecallRequest::new(&query, 3, now);
+        let candidates = recall(&store, &vector_index, &request).expect("recall should work");
+        let ids = candidates
+            .iter()
+            .map(|candidate| candidate.id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, vec![first.id, distinct.id]);
     }
 
     #[test]

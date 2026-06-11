@@ -72,13 +72,13 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 2 — Dependency graph (🆕 the technically interesting structure)
 
-- [ ] (P0) Define edge types: `internal_depends_on_external` (item → ExternalAuthority §), `internal_depends_on_internal` (item → item), `supersedes` (item → item)
-- [ ] (P0) Graph storage co-located with the knowledge store; edges are bi-temporal too (a dependency was valid for a period)
-- [ ] (P0) `add_dependency()`, `get_dependencies(item)`, `get_dependents(authority_or_item)`
-- [ ] (P1) **Propagation engine**: when an ExternalAuthority version changes or an item is superseded, walk dependents and set StalePendingReverification (transitively, with cycle protection)
-- [ ] (P1) Record *why* an item is stale (which dependency moved, when) — feeds the flag explanation and the audit chain
-- [ ] (P1) `impact_query(authority)`: "the regulation changed — everything that now needs re-checking" (the query no warehouse KM can answer)
-- [ ] (P2) Confidence on dependency edges (human-asserted vs LLM-suggested) — affects how aggressively staleness propagates
+- [x] (P0) Define edge types: `internal_depends_on_external` (item → ExternalAuthority §), `internal_depends_on_internal` (item → item), `supersedes` (item → item)
+- [x] (P0) Graph storage co-located with the knowledge store; edges are bi-temporal too (a dependency was valid for a period)
+- [x] (P0) `add_dependency()`, `get_dependencies(item)`, `get_dependents(authority_or_item)`
+- [x] (P1) **Propagation engine**: when an ExternalAuthority version changes or an item is superseded, walk dependents and set StalePendingReverification (transitively, with cycle protection)
+- [x] (P1) Record *why* an item is stale (which dependency moved, when) — feeds the flag explanation and the audit chain
+- [x] (P1) `impact_query(authority)`: "the regulation changed — everything that now needs re-checking" (the query no warehouse KM can answer)
+- [x] (P2) Confidence on dependency edges (human-asserted vs LLM-suggested) — affects how aggressively staleness propagates
 - [ ] (P2) Graph centrality as an input to surfacing order (well-depended-on positions rank earlier when relevant)
 - [ ] (P2) Subgraph extraction per matter/client for scoped review
 - [ ] (P3) Visualise the dependency graph (internal knowledge hanging off external authorities)

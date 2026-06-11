@@ -94,6 +94,23 @@ class SQLiteKnowledgeStore:
             self._upsert_current(item)
         return item
 
+    def update_item(
+        self,
+        item: KnowledgeItem,
+        *,
+        event_type: str = "knowledge_item_updated",
+        occurred_at: datetime | None = None,
+    ) -> KnowledgeItem:
+        with self._conn:
+            self._append_event(
+                event_type=event_type,
+                item_id=item.id,
+                occurred_at=occurred_at or now_utc(),
+                payload={"item": item.model_dump(mode="json")},
+            )
+            self._upsert_current(item)
+        return item
+
     def get_item(self, item_id: str) -> KnowledgeItem:
         row = self._conn.execute(
             "SELECT item_json FROM knowledge_items WHERE item_id = ?",
@@ -175,7 +192,7 @@ class SQLiteKnowledgeStore:
         for row in rows:
             payload = json.loads(str(row["payload_json"]))
             event_type = str(row["event_type"])
-            if event_type == "knowledge_item_written":
+            if event_type in {"knowledge_item_written", "knowledge_item_updated", "knowledge_item_stale_flagged"}:
                 item = KnowledgeItem.model_validate(payload["item"])
                 state[item.id] = item
             elif event_type == "knowledge_item_superseded":
@@ -235,7 +252,7 @@ class SQLiteKnowledgeStore:
         for row in rows:
             payload = json.loads(str(row["payload_json"]))
             event_type = str(row["event_type"])
-            if event_type == "knowledge_item_written":
+            if event_type in {"knowledge_item_written", "knowledge_item_updated", "knowledge_item_stale_flagged"}:
                 item = KnowledgeItem.model_validate(payload["item"])
                 state[item.id] = item
             elif event_type == "knowledge_item_superseded":

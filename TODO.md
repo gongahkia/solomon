@@ -98,10 +98,10 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P0) Default query path returns Live items; Stale/Superseded surface only with explicit flags or in review mode
 - [x] (P1) `verification_due(item)` policy: configurable max age since `last_verified_at`, shorter for high-stakes kinds
 - [x] (P1) `record_verification(item, by, outcome)`: refresh `last_verified_at`; outcome can re-affirm, supersede, or retire
-- [ ] (P1) Supersession reasoning: when a newer item contradicts an older one on the same (topic, jurisdiction), propose supersession (human confirms — flag, don't adjudicate)
+- [x] (P1) Supersession reasoning: when a newer item contradicts an older one on the same (topic, jurisdiction), propose supersession (human confirms — flag, don't adjudicate)
 - [x] (P1) External-change ingestion: `register_authority_change(authority, new_version, date)` → triggers Phase-2 propagation
-- [ ] (P2) Simple external feeds (manual entry + a couple of structured regulatory-update sources); NOT comprehensive monitoring (out of scope, that's Shepard's-scale)
-- [ ] (P2) Currency report for a matter/client: everything we've relied on and its current state
+- [x] (P2) Simple external feeds (manual entry + a couple of structured regulatory-update sources); NOT comprehensive monitoring (out of scope, that's Shepard's-scale)
+- [x] (P2) Currency report for a matter/client: everything we've relied on and its current state
 - [ ] (P3) Predictive "likely to go stale soon" heuristic (authority with pending amendments)
 
 ---

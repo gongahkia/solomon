@@ -13,7 +13,7 @@ use redb::{
     Database, Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::path::Path;
 use thiserror::Error;
@@ -136,6 +136,55 @@ pub struct RelationContradiction {
     pub existing: Relation,
     /// Proposed relation that conflicts with the existing one.
     pub proposed: Relation,
+}
+
+/// Request for typed graph traversal.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraphTraversalRequest {
+    /// Entity where traversal starts.
+    pub start_entity: EntityId,
+    /// Maximum number of relation hops to traverse.
+    pub max_hops: usize,
+    /// Optional relation-type allow-list.
+    pub relation_types: BTreeSet<String>,
+    /// Optional bi-temporal instant used to filter relation edges.
+    pub as_of: Option<OffsetDateTime>,
+}
+
+impl GraphTraversalRequest {
+    /// Creates a traversal request from `start_entity`.
+    #[must_use]
+    pub fn new(start_entity: EntityId, max_hops: usize) -> Self {
+        Self {
+            start_entity,
+            max_hops,
+            relation_types: BTreeSet::new(),
+            as_of: None,
+        }
+    }
+
+    /// Restricts traversal to relation types in `relation_types`.
+    #[must_use]
+    pub fn with_relation_types(mut self, relation_types: impl IntoIterator<Item = String>) -> Self {
+        self.relation_types = relation_types.into_iter().collect();
+        self
+    }
+
+    /// Applies bi-temporal filtering to traversed relations.
+    #[must_use]
+    pub const fn as_of(mut self, as_of: OffsetDateTime) -> Self {
+        self.as_of = Some(as_of);
+        self
+    }
+}
+
+/// Entities and relations discovered by graph traversal.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraphTraversalResult {
+    /// Entities reached by traversal, including the start entity when present.
+    pub entities: Vec<Entity>,
+    /// Relations followed during traversal.
+    pub relations: Vec<Relation>,
 }
 
 /// Full durable store snapshot.
@@ -894,6 +943,75 @@ impl RedbMemoryStore {
         Ok(superseded_relation_id)
     }
 
+    /// Traverses graph relations from a start entity.
+    ///
+    /// Traversal treats relations as navigable in either direction, applies the optional relation
+    /// type allow-list, and applies `as_of` bi-temporal filtering when present.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph entity or relation rows cannot be read or decoded.
+    pub fn traverse_graph(
+        &self,
+        request: &GraphTraversalRequest,
+    ) -> Result<GraphTraversalResult, StorageError> {
+        let entities_by_id = self
+            .graph_entities()?
+            .into_iter()
+            .map(|entity| (entity.id, entity))
+            .collect::<BTreeMap<_, _>>();
+        let relations = self.graph_relations()?;
+        let mut visited_entities = BTreeSet::new();
+        let mut selected_relation_ids = BTreeSet::new();
+        let mut queue = VecDeque::from([(request.start_entity, 0_usize)]);
+        let mut result_entities = Vec::new();
+        let mut result_relations = Vec::new();
+
+        while let Some((entity_id, depth)) = queue.pop_front() {
+            if !visited_entities.insert(entity_id) {
+                continue;
+            }
+
+            if let Some(entity) = entities_by_id.get(&entity_id) {
+                result_entities.push(entity.clone());
+            }
+
+            if depth >= request.max_hops {
+                continue;
+            }
+
+            for relation in &relations {
+                if !relation_touches_entity(relation, entity_id)
+                    || !relation_matches_traversal(relation, request)
+                {
+                    continue;
+                }
+
+                if selected_relation_ids.insert(relation.id) {
+                    result_relations.push(relation.clone());
+                }
+
+                let next_entity = if relation.from_entity == entity_id {
+                    relation.to_entity
+                } else {
+                    relation.from_entity
+                };
+
+                if !visited_entities.contains(&next_entity) {
+                    queue.push_back((next_entity, depth + 1));
+                }
+            }
+        }
+
+        result_entities.sort_by_key(|entity| entity.id);
+        result_relations.sort_by_key(|relation| relation.id);
+
+        Ok(GraphTraversalResult {
+            entities: result_entities,
+            relations: result_relations,
+        })
+    }
+
     /// Soft-invalidates a memory by closing its valid-time interval without deleting history.
     ///
     /// Returns `Ok(None)` when the item does not exist.
@@ -1412,6 +1530,20 @@ fn relation_believed_at(relation: &Relation, as_of: OffsetDateTime) -> bool {
     relation.timestamps.ingested_at <= as_of && relation.timestamps.is_valid_at(as_of)
 }
 
+fn relation_touches_entity(relation: &Relation, entity_id: EntityId) -> bool {
+    relation.from_entity == entity_id || relation.to_entity == entity_id
+}
+
+fn relation_matches_traversal(relation: &Relation, request: &GraphTraversalRequest) -> bool {
+    let type_allowed = request.relation_types.is_empty()
+        || request.relation_types.contains(&relation.relation_type);
+    let time_allowed = request
+        .as_of
+        .is_none_or(|instant| relation_believed_at(relation, instant));
+
+    type_allowed && time_allowed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1829,6 +1961,86 @@ mod tests {
                 .expect("relations should read"),
             vec![stored_proposed]
         );
+    }
+
+    #[test]
+    fn traverse_graph_walks_n_hops_with_type_filter() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let start = Entity::new(
+            "Claim",
+            "start",
+            "claim:start",
+            TemporalBounds::open_from(now, now),
+        );
+        let middle = Entity::new(
+            "Claim",
+            "middle",
+            "claim:middle",
+            TemporalBounds::open_from(now, now),
+        );
+        let end = Entity::new(
+            "Claim",
+            "end",
+            "claim:end",
+            TemporalBounds::open_from(now, now),
+        );
+        let blocked = Entity::new(
+            "Claim",
+            "blocked",
+            "claim:blocked",
+            TemporalBounds::open_from(now, now),
+        );
+        let first = Relation::new(
+            "supports",
+            start.id,
+            middle.id,
+            None,
+            TemporalBounds::open_from(now, now),
+        );
+        let second = Relation::new(
+            "supports",
+            middle.id,
+            end.id,
+            None,
+            TemporalBounds::open_from(now, now),
+        );
+        let blocked_relation = Relation::new(
+            "blocks",
+            start.id,
+            blocked.id,
+            None,
+            TemporalBounds::open_from(now, now),
+        );
+
+        for entity in [&start, &middle, &end, &blocked] {
+            store.put_entity(entity).expect("entity should write");
+        }
+
+        for relation in [&first, &second, &blocked_relation] {
+            store.put_relation(relation).expect("relation should write");
+        }
+
+        let request = GraphTraversalRequest::new(start.id, 2)
+            .with_relation_types(["supports".to_owned()])
+            .as_of(now);
+        let result = store
+            .traverse_graph(&request)
+            .expect("traversal should read");
+        let entity_ids = result
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect::<BTreeSet<_>>();
+        let relation_ids = result
+            .relations
+            .iter()
+            .map(|relation| relation.id)
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(entity_ids, BTreeSet::from([start.id, middle.id, end.id]));
+        assert_eq!(relation_ids, BTreeSet::from([first.id, second.id]));
     }
 
     #[test]

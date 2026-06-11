@@ -122,7 +122,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Implement edge bi-temporality (relationships also have valid-time)
 - [x] (P1) Implement contradiction detection: new fact vs existing fact on same (entity, attribute)
 - [x] (P1) On contradiction → invalidate old (close valid_to), insert new, link them (supersedes edge)
-- [ ] (P1) Implement graph traversal API for retrieval expansion (n-hop, typed)
+- [x] (P1) Implement graph traversal API for retrieval expansion (n-hop, typed)
 - [ ] (P1) Implement graph centrality as a significance input (well-connected facts matter more)
 - [ ] (P2) Entity resolution / dedup (same entity referred to differently)
 - [ ] (P2) Subgraph extraction for a given matter/namespace/scope

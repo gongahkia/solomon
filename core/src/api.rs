@@ -15,16 +15,111 @@ use time::OffsetDateTime;
 
 /// Error returned by the high-level Shibahama API.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ShibahamaError {
     /// Storage operation failed.
-    #[error(transparent)]
-    Storage(#[from] StorageError),
+    #[error(
+        "[SHIBA_STORAGE] storage operation failed: {0}; action: verify the store path and durable state are accessible, then retry or restore from a snapshot"
+    )]
+    Storage(#[source] StorageError),
     /// Recall operation failed.
-    #[error(transparent)]
-    Recall(#[from] RecallError),
+    #[error(
+        "[SHIBA_RECALL] recall operation failed: {0}; action: verify the query embedding, vector index, and store availability before retrying"
+    )]
+    Recall(#[source] RecallError),
     /// Vector operation failed.
-    #[error(transparent)]
-    Vector(#[from] VectorIndexError),
+    #[error(
+        "[SHIBA_VECTOR] vector index operation failed: {0}; action: verify embedding dimensionality and vector backend availability before retrying"
+    )]
+    Vector(#[source] VectorIndexError),
+}
+
+impl From<StorageError> for ShibahamaError {
+    fn from(error: StorageError) -> Self {
+        match error {
+            StorageError::Vector(error) => Self::Vector(error),
+            error => Self::Storage(error),
+        }
+    }
+}
+
+impl From<RecallError> for ShibahamaError {
+    fn from(error: RecallError) -> Self {
+        match error {
+            RecallError::Storage(error) => Self::from(error),
+            RecallError::Vector(error) => Self::Vector(error),
+        }
+    }
+}
+
+impl From<VectorIndexError> for ShibahamaError {
+    fn from(error: VectorIndexError) -> Self {
+        Self::Vector(error)
+    }
+}
+
+/// Stable high-level error category for bindings and applications.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ShibahamaErrorKind {
+    /// Durable storage or snapshot state failed.
+    Storage,
+    /// Recall orchestration failed.
+    Recall,
+    /// Vector index or embedding dimensionality failed.
+    Vector,
+}
+
+impl ShibahamaErrorKind {
+    /// Stable machine-readable code for this error category.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Storage => "SHIBA_STORAGE",
+            Self::Recall => "SHIBA_RECALL",
+            Self::Vector => "SHIBA_VECTOR",
+        }
+    }
+
+    /// Human-readable recovery guidance for this error category.
+    #[must_use]
+    pub const fn action(self) -> &'static str {
+        match self {
+            Self::Storage => {
+                "verify the store path and durable state are accessible, then retry or restore from a snapshot"
+            }
+            Self::Recall => {
+                "verify the query embedding, vector index, and store availability before retrying"
+            }
+            Self::Vector => {
+                "verify embedding dimensionality and vector backend availability before retrying"
+            }
+        }
+    }
+}
+
+impl ShibahamaError {
+    /// Stable high-level category for this error.
+    #[must_use]
+    pub const fn kind(&self) -> ShibahamaErrorKind {
+        match self {
+            Self::Storage(_) => ShibahamaErrorKind::Storage,
+            Self::Recall(_) => ShibahamaErrorKind::Recall,
+            Self::Vector(_) => ShibahamaErrorKind::Vector,
+        }
+    }
+
+    /// Stable machine-readable code for this error.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        self.kind().code()
+    }
+
+    /// Human-readable recovery guidance for this error.
+    #[must_use]
+    pub const fn action(&self) -> &'static str {
+        self.kind().action()
+    }
 }
 
 /// Embedding metadata supplied to `write_with_embedding`.
@@ -343,5 +438,40 @@ mod tests {
 
         assert_eq!(why.currency.state, RecallCandidateCurrency::Invalidated);
         assert_eq!(why.currency.valid_to, Some(valid_to));
+    }
+
+    #[test]
+    fn facade_errors_expose_stable_kind_code_and_action() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let mut shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let event = MemoryWriteEvent::new(
+            "bad embedding",
+            Provenance::new(SourceKind::User, None, "api-test"),
+            OffsetDateTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
+        );
+
+        let error = shibahama
+            .write_with_embedding(
+                event,
+                WriteEmbedding {
+                    vector: &[0.0],
+                    index_name: "api-test",
+                    model: "embedding-model",
+                    model_version: "v1",
+                },
+            )
+            .expect_err("dimension mismatch should fail");
+
+        assert_eq!(error.kind(), ShibahamaErrorKind::Vector);
+        assert_eq!(error.code(), "SHIBA_VECTOR");
+        assert_eq!(error.action(), ShibahamaErrorKind::Vector.action());
+        assert!(error.to_string().contains("[SHIBA_VECTOR]"));
+        assert!(
+            error
+                .to_string()
+                .contains("action: verify embedding dimensionality")
+        );
     }
 }

@@ -23,6 +23,8 @@ pub struct SignificanceConfig {
     pub ignored_weight: f64,
     /// Penalty for contradiction outcomes.
     pub contradicted_weight: f64,
+    /// Weight applied to graph centrality supplied by graph storage.
+    pub graph_centrality_weight: f64,
     /// Score at or above which cold items may promote to warm.
     pub warm_threshold: f64,
     /// Score at or above which warm items may promote to hot.
@@ -48,6 +50,8 @@ pub struct SignificanceBreakdown {
     pub outcome_bonus: f64,
     /// Positive penalty from contradiction outcomes.
     pub contradiction_penalty: f64,
+    /// Weighted graph-centrality contribution.
+    pub graph_centrality: f64,
     /// Final score after all transparent terms.
     pub final_score: f64,
 }
@@ -62,6 +66,7 @@ impl Default for SignificanceConfig {
             cited_weight: 1.25,
             ignored_weight: -0.05,
             contradicted_weight: -2.0,
+            graph_centrality_weight: 0.0,
             warm_threshold: 1.0,
             hot_threshold: 2.0,
             warm_demotion_threshold: 0.8,
@@ -151,6 +156,17 @@ impl SignificanceConfig {
     /// Computes a full significance explanation for an item at `now`.
     #[must_use]
     pub fn explain(self, item: &MemoryItem, now: OffsetDateTime) -> SignificanceBreakdown {
+        self.explain_with_graph_centrality(item, now, 0.0)
+    }
+
+    /// Computes a full significance explanation with an external graph-centrality score.
+    #[must_use]
+    pub fn explain_with_graph_centrality(
+        self,
+        item: &MemoryItem,
+        now: OffsetDateTime,
+        graph_centrality_score: f64,
+    ) -> SignificanceBreakdown {
         let last_used_at = item
             .access_events
             .iter()
@@ -162,7 +178,9 @@ impl SignificanceConfig {
         let reinforcement = self.reinforcement(item.access_events.len());
         let outcome_bonus = self.outcome_bonus(&item.access_events);
         let contradiction_penalty = self.contradiction_penalty(&item.access_events);
-        let final_score = decayed_base + reinforcement + outcome_bonus - contradiction_penalty;
+        let graph_centrality = self.graph_centrality_weight * graph_centrality_score;
+        let final_score =
+            decayed_base + reinforcement + outcome_bonus + graph_centrality - contradiction_penalty;
 
         SignificanceBreakdown {
             base_score: item.significance,
@@ -171,6 +189,7 @@ impl SignificanceConfig {
             reinforcement,
             outcome_bonus,
             contradiction_penalty,
+            graph_centrality,
             final_score,
         }
     }
@@ -179,6 +198,18 @@ impl SignificanceConfig {
     #[must_use]
     pub fn recompute(self, item: &MemoryItem, now: OffsetDateTime) -> f64 {
         self.explain(item, now).final_score
+    }
+
+    /// Recomputes the materialized significance score with an external graph-centrality score.
+    #[must_use]
+    pub fn recompute_with_graph_centrality(
+        self,
+        item: &MemoryItem,
+        now: OffsetDateTime,
+        graph_centrality_score: f64,
+    ) -> f64 {
+        self.explain_with_graph_centrality(item, now, graph_centrality_score)
+            .final_score
     }
 
     /// Applies the item's credence floor to a proposed tier.
@@ -333,7 +364,42 @@ mod tests {
 
         assert!(breakdown.reinforcement > 0.0);
         assert!(breakdown.outcome_bonus > 0.0);
+        assert!(breakdown.graph_centrality.abs() < f64::EPSILON);
         assert!((config.recompute(&item, now) - breakdown.final_score).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn graph_centrality_can_contribute_to_significance() {
+        let config = SignificanceConfig {
+            graph_centrality_weight: 2.0,
+            ..SignificanceConfig::default()
+        };
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let item = MemoryItem {
+            schema_version: crate::model::CURRENT_MEMORY_SCHEMA_VERSION,
+            id: crate::model::MemoryId::new_v7(),
+            content: "central".to_owned(),
+            compaction: None,
+            embedding_ref: None,
+            provenance: crate::model::Provenance::new(
+                crate::model::SourceKind::User,
+                None,
+                "significance-test",
+            ),
+            timestamps: crate::model::TemporalBounds::open_from(now, now),
+            tier: crate::model::Tier::Warm,
+            credence: crate::model::CredenceTier::VerifiedSource,
+            significance: 1.0,
+            credence_floor: crate::model::Tier::Cold,
+            access_events: Vec::new(),
+        };
+        let breakdown = config.explain_with_graph_centrality(&item, now, 3.0);
+
+        assert!((breakdown.graph_centrality - 6.0).abs() < f64::EPSILON);
+        assert!(
+            (config.recompute_with_graph_centrality(&item, now, 3.0) - breakdown.final_score).abs()
+                < f64::EPSILON
+        );
     }
 
     #[test]

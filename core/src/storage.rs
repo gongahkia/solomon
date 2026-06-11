@@ -1290,6 +1290,54 @@ impl RedbMemoryStore {
             .map(|maybe_item| maybe_item.map(|item| policy.explain(&item, now)))
     }
 
+    /// Computes a graph-centrality score for memory-backed relations.
+    ///
+    /// The score is the natural log of one plus the number of distinct entities touched by
+    /// relations citing `id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph relation rows cannot be read or decoded.
+    pub fn graph_centrality_for_memory(&self, id: MemoryId) -> Result<f64, StorageError> {
+        let mut entity_ids = BTreeSet::new();
+
+        for relation in self.graph_relations()? {
+            if relation.memory_id == Some(id) {
+                entity_ids.insert(relation.from_entity);
+                entity_ids.insert(relation.to_entity);
+            }
+        }
+
+        let degree = u32::try_from(entity_ids.len()).unwrap_or(u32::MAX);
+
+        Ok(f64::from(degree).ln_1p())
+    }
+
+    /// Explains significance with graph centrality supplied from memory-backed relations.
+    ///
+    /// Returns `Ok(None)` when the memory id is unknown.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when current item state or graph relation rows cannot be read or decoded.
+    pub fn explain_significance_with_graph_centrality(
+        &self,
+        id: MemoryId,
+        policy: SignificanceConfig,
+        now: OffsetDateTime,
+    ) -> Result<Option<SignificanceBreakdown>, StorageError> {
+        let Some(item) = self.get(id)? else {
+            return Ok(None);
+        };
+        let graph_centrality = self.graph_centrality_for_memory(id)?;
+
+        Ok(Some(policy.explain_with_graph_centrality(
+            &item,
+            now,
+            graph_centrality,
+        )))
+    }
+
     /// Enforces configured tier capacity limits by demoting the least-significant hot items.
     ///
     /// Hot-tier capacity is optional. When configured and the hot tier is over budget, this method
@@ -2467,6 +2515,56 @@ mod tests {
 
         assert_eq!(first, second);
         assert!(first.decay_multiplier <= 1.0);
+    }
+
+    #[test]
+    fn explain_significance_can_use_graph_centrality() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let item = test_item("central memory");
+        let item_id = item.id;
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let source = Entity::new(
+            "Claim",
+            "source",
+            "claim:source",
+            TemporalBounds::open_from(now, now),
+        );
+        let target = Entity::new(
+            "Claim",
+            "target",
+            "claim:target",
+            TemporalBounds::open_from(now, now),
+        );
+        let relation = Relation::new(
+            "supports",
+            source.id,
+            target.id,
+            item_id,
+            TemporalBounds::open_from(now, now),
+        );
+        let policy = SignificanceConfig {
+            graph_centrality_weight: 2.0,
+            ..SignificanceConfig::default()
+        };
+
+        store.write(&item).expect("item should write");
+        store.put_entity(&source).expect("source should write");
+        store.put_entity(&target).expect("target should write");
+        store
+            .put_relation(&relation)
+            .expect("relation should write");
+
+        let centrality = store
+            .graph_centrality_for_memory(item_id)
+            .expect("centrality should read");
+        let breakdown = store
+            .explain_significance_with_graph_centrality(item_id, policy, now)
+            .expect("explain should read")
+            .expect("item should exist");
+
+        assert!(centrality > 0.0);
+        assert!((breakdown.graph_centrality - (2.0 * centrality)).abs() < f64::EPSILON);
     }
 
     #[test]

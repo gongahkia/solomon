@@ -4,6 +4,7 @@
 
 pub mod encryption;
 pub mod model;
+pub mod significance;
 pub mod storage;
 pub mod vector;
 

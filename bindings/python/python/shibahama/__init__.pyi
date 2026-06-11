@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 
-from collections.abc import Iterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
 from typing import Literal
 
 SourceKind = Literal["user", "agent", "file", "web", "tool"]
@@ -100,7 +100,30 @@ class Shibahama:
         model: str = "unknown",
         model_version: str = "unknown",
     ) -> MemoryItem: ...
+    async def async_write(
+        self,
+        content: str,
+        vector: Sequence[float] | None = None,
+        source_kind: SourceKind = "user",
+        source_ref: str | None = None,
+        ingested_by: str = "python",
+        valid_from_unix: int | None = None,
+        ingested_at_unix: int | None = None,
+        kind: MemoryKind = "fact",
+        index_name: str = "default",
+        model: str = "unknown",
+        model_version: str = "unknown",
+    ) -> MemoryItem: ...
     def recall(
+        self,
+        query_vector: Sequence[float],
+        top_k: int,
+        now_unix: int | None = None,
+        raw_query_context: str | None = None,
+        include_cold: bool = False,
+        include_instructions: bool = False,
+    ) -> list[RecallCandidate]: ...
+    async def async_recall(
         self,
         query_vector: Sequence[float],
         top_k: int,
@@ -118,7 +141,24 @@ class Shibahama:
         include_cold: bool = False,
         include_instructions: bool = False,
     ) -> RecallStream: ...
+    async def async_stream_recall(
+        self,
+        query_vector: Sequence[float],
+        top_k: int,
+        now_unix: int | None = None,
+        raw_query_context: str | None = None,
+        include_cold: bool = False,
+        include_instructions: bool = False,
+    ) -> AsyncIterator[RecallCandidate]: ...
     def timeline(
+        self,
+        query_vector: Sequence[float],
+        top_k: int,
+        as_of_unix: int,
+        include_cold: bool = False,
+        include_instructions: bool = False,
+    ) -> list[RecallCandidate]: ...
+    async def async_timeline(
         self,
         query_vector: Sequence[float],
         top_k: int,
@@ -134,5 +174,19 @@ class Shibahama:
         include_cold: bool = False,
         include_instructions: bool = False,
     ) -> RecallStream: ...
+    async def async_stream_timeline(
+        self,
+        query_vector: Sequence[float],
+        top_k: int,
+        as_of_unix: int,
+        include_cold: bool = False,
+        include_instructions: bool = False,
+    ) -> AsyncIterator[RecallCandidate]: ...
     def reinforce(self, memory_id: str, outcome: AccessOutcome = "cited") -> bool: ...
+    async def async_reinforce(
+        self, memory_id: str, outcome: AccessOutcome = "cited"
+    ) -> bool: ...
     def why(self, memory_id: str, now_unix: int | None = None) -> WhyTrace | None: ...
+    async def async_why(
+        self, memory_id: str, now_unix: int | None = None
+    ) -> WhyTrace | None: ...

@@ -7,6 +7,9 @@ use std::fmt::{self, Display, Formatter};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+/// Current schema version for persisted memory items.
+pub const CURRENT_MEMORY_SCHEMA_VERSION: u16 = 1;
+
 /// Stable identifier for a persisted memory item.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
@@ -238,6 +241,8 @@ pub struct EmbeddingRef {
 /// Persisted memory item materialized from the event log.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MemoryItem {
+    /// Persisted schema version for forward migration.
+    pub schema_version: u16,
     /// Stable time-ordered item id.
     pub id: MemoryId,
     /// Stored memory content.
@@ -350,6 +355,7 @@ mod tests {
     #[test]
     fn memory_item_carries_core_representation_fields() {
         let item = MemoryItem {
+            schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             id: MemoryId::new_v7(),
             content: "Use the Rust core as the source of truth.".to_owned(),
             embedding_ref: Some(EmbeddingRef {
@@ -378,12 +384,14 @@ mod tests {
         );
         assert_eq!(item.tier, Tier::Warm);
         assert_eq!(item.credence, CredenceTier::FirmAuthoritative);
+        assert_eq!(item.schema_version, CURRENT_MEMORY_SCHEMA_VERSION);
         assert!((item.significance - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn memory_item_clamps_proposed_tier_to_credence_floor() {
         let item = MemoryItem {
+            schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             id: MemoryId::new_v7(),
             content: "Do not reintroduce the rejected cache design.".to_owned(),
             embedding_ref: None,

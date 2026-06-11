@@ -43,7 +43,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Define `Tier` enum: Hot / Warm / Cold
 - [x] (P0) Define `AccessEvent`: timestamp, query-context hash, outcome signal (led-somewhere / cited / ignored / contradicted)
 - [x] (P1) Define `credence_floor` per item (clamp below which significance cannot push tier)
-- [ ] (P1) Add schema version field to every persisted item for forward migration
+- [x] (P1) Add schema version field to every persisted item for forward migration
 
 ### Storage engine
 - [ ] (P0) Implement append-only event log (writes never destroy; the source of truth)

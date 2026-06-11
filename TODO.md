@@ -22,7 +22,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P2) Reproducible dev environment (devcontainer or Nix flake)
 
 ### Core architectural decisions (write these down in `docs/adr/`)
-- [ ] (P0) ADR: storage substrate choice (embedded KV + pluggable vector index)
+- [x] (P0) ADR: storage substrate choice (embedded KV + pluggable vector index)
 - [ ] (P0) ADR: bi-temporal model (valid-time vs ingestion-time semantics)
 - [ ] (P0) ADR: tier model (hot/warm/cold; never-delete invariant)
 - [ ] (P0) ADR: in-process-first, optional-server deployment shape

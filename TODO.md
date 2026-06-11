@@ -178,14 +178,14 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 9 — Public API & CLI (🆕)
 
-- [ ] (P0) Finalise API verbs: `ingest`, `recall`, `evaluate_currency`, `record_verification`, `register_authority_change`, `impact_query`, `why(item)`, `timeline`
-- [ ] (P0) Make `why(item)` first-class: full currency + dependency + credence + verification + provenance trace
-- [ ] (P0) FastAPI surface (♻️ Kaypoh-style schemas, auth, health/ready/diagnostics endpoints)
-- [ ] (P1) `solomon` CLI: ingest a doc, ask, show currency, register a regulatory change, run an impact query, export audit pack
-- [ ] (P1) Stable error types; fail-closed behaviour surfaced clearly
-- [ ] (P1) Config object with sane defaults (verification-due ages, routing thresholds, credence policy)
-- [ ] (P2) Python client (♻️ mirror Kaypoh's `client.py` ergonomics: sync + async over httpx)
-- [ ] (P2) Pretty terminal `why` output (text version of the currency trace)
+- [x] (P0) Finalise API verbs: `ingest`, `recall`, `evaluate_currency`, `record_verification`, `register_authority_change`, `impact_query`, `why(item)`, `timeline`
+- [x] (P0) Make `why(item)` first-class: full currency + dependency + credence + verification + provenance trace
+- [x] (P0) FastAPI surface (♻️ Kaypoh-style schemas, auth, health/ready/diagnostics endpoints)
+- [x] (P1) `solomon` CLI: ingest a doc, ask, show currency, register a regulatory change, run an impact query, export audit pack
+- [x] (P1) Stable error types; fail-closed behaviour surfaced clearly
+- [x] (P1) Config object with sane defaults (verification-due ages, routing thresholds, credence policy)
+- [x] (P2) Python client (♻️ mirror Kaypoh's `client.py` ergonomics: sync + async over httpx)
+- [x] (P2) Pretty terminal `why` output (text version of the currency trace)
 
 ---
 

@@ -7,3 +7,6 @@
 - [0003: Flag, Do Not Adjudicate](0003-flag-dont-adjudicate.md)
 - [0004: Kaypoh as the Boundary](0004-kaypoh-boundary.md)
 - [0005: SQLite Local Store with a Postgres Server Option](0005-sqlite-default-postgres-option.md)
+- [0006: Credence Taxonomy](0006-credence-taxonomy.md)
+- [0007: Dual Endpoint Routing](0007-dual-endpoint-routing.md)
+- [0008: Audit Journal Design](0008-audit-journal.md)

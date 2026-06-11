@@ -32,9 +32,9 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P0) ADR: bi-temporal model (valid-time vs ingestion-time) and the supersede-not-delete invariant
 - [x] (P0) ADR: **flag, don't adjudicate** — Solomon never asserts a position is legally broken, only that a dependency moved and re-verification is due
 - [x] (P0) ADR: Kaypoh as boundary — reuse vs reimplement decision table (point to PRD §4)
-- [ ] (P1) ADR: credence taxonomy + the "model-inferred never outranks firm-authoritative" rule
-- [ ] (P1) ADR: dual-endpoint routing (remote ZDR vs local model) and the sensitivity classification that drives it
-- [ ] (P1) ADR: audit-journal design (♻️ mirror Kaypoh's append-only journal + verification)
+- [x] (P1) ADR: credence taxonomy + the "model-inferred never outranks firm-authoritative" rule
+- [x] (P1) ADR: dual-endpoint routing (remote ZDR vs local model) and the sensitivity classification that drives it
+- [x] (P1) ADR: audit-journal design (♻️ mirror Kaypoh's append-only journal + verification)
 
 ---
 
@@ -278,7 +278,7 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [ ] (P1) Generated API reference (FastAPI/OpenAPI export, ♻️ Kaypoh's `export_openapi_examples` approach)
 - [ ] (P1) `examples/` runnable per scenario
 - [x] (P2) `docs/benchmarks.md`: methodology + reproduce instructions
-- [ ] (P2) ADR index kept current
+- [x] (P2) ADR index kept current
 - [ ] (P3) `docs/why-solomon.md`: the triad story + why decay was rejected (the judgment narrative for a reviewer)
 
 ---

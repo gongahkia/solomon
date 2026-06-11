@@ -2,12 +2,17 @@
 
 //! Small public API facade.
 
+use crate::anomaly::AnomalyConfig;
 use crate::model::{AccessOutcome, CredenceTier, MemoryId, MemoryItem, Provenance, Tier};
+use crate::reconstruction::ReconstructionBudgetConfig;
 use crate::retrieval::{
-    RecallCandidate, RecallCandidateCurrency, RecallError, RecallRequest, recall, timeline,
+    RecallCandidate, RecallCandidateCurrency, RecallDiversificationConfig, RecallError,
+    RecallRankingConfig, RecallRequest, RecallStalenessConfig, recall, timeline,
 };
 use crate::significance::{SignificanceBreakdown, SignificanceConfig};
-use crate::storage::{MemoryAuditEntry, MemoryWriteEvent, RedbMemoryStore, StorageError};
+use crate::storage::{
+    MemoryAuditEntry, MemoryWriteEvent, RedbMemoryStore, StorageError, TierCapacityConfig,
+};
 use crate::vector::{VectorIndex, VectorIndexError};
 use std::path::Path;
 use thiserror::Error;
@@ -122,6 +127,41 @@ impl ShibahamaError {
     }
 }
 
+/// Sane-default configuration for a Shibahama engine.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ShibahamaConfig {
+    /// Transparent significance scoring and tier-promotion thresholds.
+    pub significance: SignificanceConfig,
+    /// Default recall ranking weights.
+    pub recall_ranking: RecallRankingConfig,
+    /// Default stale-load-bearing recall detection thresholds.
+    pub recall_staleness: RecallStalenessConfig,
+    /// Default near-duplicate suppression policy.
+    pub recall_diversification: RecallDiversificationConfig,
+    /// Default anomaly detection thresholds.
+    pub anomaly: AnomalyConfig,
+    /// Default reconstruction rate/cost budget.
+    pub reconstruction_budget: ReconstructionBudgetConfig,
+    /// Default tier residency budgets.
+    pub tier_capacity: TierCapacityConfig,
+}
+
+impl ShibahamaConfig {
+    /// Builds a recall request populated with this config's recall defaults.
+    #[must_use]
+    pub fn recall_request(
+        self,
+        query_vector: &[f32],
+        top_k: usize,
+        now: OffsetDateTime,
+    ) -> RecallRequest<'_> {
+        RecallRequest::new(query_vector, top_k, now)
+            .with_ranking(self.recall_ranking)
+            .with_staleness(self.recall_staleness)
+            .with_diversification(self.recall_diversification)
+    }
+}
+
 /// Embedding metadata supplied to `write_with_embedding`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WriteEmbedding<'a> {
@@ -208,6 +248,7 @@ impl WhyCurrencyTrace {
 pub struct Shibahama<V> {
     store: RedbMemoryStore,
     vector_index: V,
+    config: ShibahamaConfig,
 }
 
 impl<V: VectorIndex> Shibahama<V> {
@@ -217,9 +258,23 @@ impl<V: VectorIndex> Shibahama<V> {
     ///
     /// Returns an error when the durable store cannot be opened.
     pub fn open(path: impl AsRef<Path>, vector_index: V) -> Result<Self, ShibahamaError> {
+        Self::open_with_config(path, vector_index, ShibahamaConfig::default())
+    }
+
+    /// Opens a Shibahama store with an explicit engine config.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the durable store cannot be opened.
+    pub fn open_with_config(
+        path: impl AsRef<Path>,
+        vector_index: V,
+        config: ShibahamaConfig,
+    ) -> Result<Self, ShibahamaError> {
         Ok(Self {
             store: RedbMemoryStore::open(path)?,
             vector_index,
+            config,
         })
     }
 
@@ -227,6 +282,28 @@ impl<V: VectorIndex> Shibahama<V> {
     #[must_use]
     pub const fn store(&self) -> &RedbMemoryStore {
         &self.store
+    }
+
+    /// Returns this engine's active config.
+    #[must_use]
+    pub const fn config(&self) -> ShibahamaConfig {
+        self.config
+    }
+
+    /// Replaces this engine's active config.
+    pub fn set_config(&mut self, config: ShibahamaConfig) {
+        self.config = config;
+    }
+
+    /// Builds a recall request from this engine's recall defaults.
+    #[must_use]
+    pub fn recall_request<'a>(
+        &self,
+        query_vector: &'a [f32],
+        top_k: usize,
+        now: OffsetDateTime,
+    ) -> RecallRequest<'a> {
+        self.config.recall_request(query_vector, top_k, now)
     }
 
     /// Writes a memory event without adding an embedding.
@@ -314,7 +391,7 @@ impl<V: VectorIndex> Shibahama<V> {
         id: MemoryId,
         now: OffsetDateTime,
     ) -> Result<Option<WhyTrace>, ShibahamaError> {
-        self.why_with_significance_policy(id, now, SignificanceConfig::default())
+        self.why_with_significance_policy(id, now, self.config.significance)
     }
 
     /// Returns a full explanation using a caller-supplied significance policy.
@@ -473,5 +550,46 @@ mod tests {
                 .to_string()
                 .contains("action: verify embedding dimensionality")
         );
+    }
+
+    #[test]
+    fn config_defaults_capture_decay_thresholds_and_tier_budget() {
+        let config = ShibahamaConfig::default();
+        let thirty_days = 30.0 * 24.0 * 60.0 * 60.0;
+
+        assert!((config.significance.half_life_seconds - thirty_days).abs() < f64::EPSILON);
+        assert!((config.significance.warm_threshold - 1.0).abs() < f64::EPSILON);
+        assert!((config.significance.hot_threshold - 2.0).abs() < f64::EPSILON);
+        assert!(
+            (config.recall_staleness.load_bearing_significance_threshold - 2.0).abs()
+                < f64::EPSILON
+        );
+        assert_eq!(config.tier_capacity.hot_capacity, None);
+        assert_eq!(config.reconstruction_budget.max_revalidations_per_window, 8);
+    }
+
+    #[test]
+    fn engine_config_seeds_recall_requests() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let mut config = ShibahamaConfig::default();
+        config.significance.half_life_seconds = 60.0;
+        config.recall_ranking.similarity_weight = 2.0;
+        config.recall_staleness.load_bearing_significance_threshold = 3.0;
+        config.recall_diversification.enabled = false;
+        config.tier_capacity.hot_capacity = Some(64);
+        let mut shibahama =
+            Shibahama::open_with_config(file.path(), HnswVectorIndex::with_capacity(2, 8), config)
+                .expect("api should open");
+        let query = [0.0, 0.0];
+        let request = shibahama.recall_request(&query, 3, OffsetDateTime::UNIX_EPOCH);
+
+        assert!((shibahama.config().significance.half_life_seconds - 60.0).abs() < f64::EPSILON);
+        assert!((request.ranking.similarity_weight - 2.0).abs() < f64::EPSILON);
+        assert!((request.staleness.load_bearing_significance_threshold - 3.0).abs() < f64::EPSILON);
+        assert!(!request.diversification.enabled);
+        assert_eq!(shibahama.config().tier_capacity.hot_capacity, Some(64));
+
+        shibahama.set_config(ShibahamaConfig::default());
+        assert_eq!(shibahama.config().tier_capacity.hot_capacity, None);
     }
 }

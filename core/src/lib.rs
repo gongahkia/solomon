@@ -5,6 +5,7 @@
 pub mod consolidation;
 pub mod encryption;
 pub mod model;
+pub mod read_safety;
 pub mod reconstruction;
 pub mod retrieval;
 pub mod significance;

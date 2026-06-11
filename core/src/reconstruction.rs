@@ -636,6 +636,7 @@ mod tests {
             graph_score: 0.0,
             source: RecallCandidateSource::Vector,
             rank_score: 4.0,
+            read_safety_findings: Vec::new(),
         }
     }
 

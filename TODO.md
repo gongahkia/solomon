@@ -71,7 +71,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 
 ### Usage signal capture
 - [x] (P0) Implement `reinforce(memory_id, outcome)` API that appends an `AccessEvent`
-- [ ] (P0) Capture access on every `recall()` automatically (which items were surfaced)
+- [x] (P0) Capture access on every `recall()` automatically (which items were surfaced)
 - [x] (P1) Distinguish "surfaced" from "actually used" (caller signals which retrieved items mattered)
 - [x] (P1) Capture outcome signal: did the action after recall succeed / was the memory cited in output
 - [x] (P1) Capture contradiction events (a new fact conflicts with this one)
@@ -100,9 +100,9 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 
 ## Phase 3 — Retrieval orchestrator (P1)
 
-- [ ] (P0) Implement `recall(query, context)` returning ranked candidates
-- [ ] (P0) Stage 1: vector similarity retrieval (top-k candidates)
-- [ ] (P0) Stage 2: temporal filter — default to "valid now"; exclude invalidated facts from default results
+- [x] (P0) Implement `recall(query, context)` returning ranked candidates
+- [x] (P0) Stage 1: vector similarity retrieval (top-k candidates)
+- [x] (P0) Stage 2: temporal filter — default to "valid now"; exclude invalidated facts from default results
 - [ ] (P1) Stage 3: significance weighting in the ranking score
 - [ ] (P1) Stage 4: graph-relationship expansion (pull in connected facts)
 - [ ] (P1) Attach provenance + tier + currency-flag to every returned candidate (never bare text)

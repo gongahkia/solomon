@@ -700,19 +700,18 @@ impl RedbMemoryStore {
         Ok(record)
     }
 
-    /// Appends an access event to a memory item.
+    /// Appends a caller-supplied access event to a memory item.
     ///
     /// Returns `Ok(None)` when the memory id is unknown.
     ///
     /// # Errors
     ///
     /// Returns an error when storage cannot be read or written, or stored state cannot be decoded.
-    pub fn reinforce(
+    pub fn record_access(
         &self,
         id: MemoryId,
-        outcome: crate::model::AccessOutcome,
+        access_event: AccessEvent,
     ) -> Result<Option<EventRecord>, StorageError> {
-        let access_event = AccessEvent::new(OffsetDateTime::now_utc(), None, outcome);
         let mut write_txn = self.db.begin_write().map_err(embed)?;
         write_txn
             .set_durability(Durability::Immediate)
@@ -786,6 +785,24 @@ impl RedbMemoryStore {
                 StorageError::Embedded("committed access event was not readable".to_owned())
             })
             .map(Some)
+    }
+
+    /// Appends an outcome signal to a memory item.
+    ///
+    /// Returns `Ok(None)` when the memory id is unknown.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read or written, or stored state cannot be decoded.
+    pub fn reinforce(
+        &self,
+        id: MemoryId,
+        outcome: crate::model::AccessOutcome,
+    ) -> Result<Option<EventRecord>, StorageError> {
+        self.record_access(
+            id,
+            AccessEvent::new(OffsetDateTime::now_utc(), None, outcome),
+        )
     }
 
     /// Records that a memory was contradicted by a newer observation.

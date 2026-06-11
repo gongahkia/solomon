@@ -3,6 +3,7 @@
 //! Core data model types shared by storage, retrieval, bindings, and the CLI.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -43,6 +44,80 @@ impl From<Uuid> for MemoryId {
 
 impl From<MemoryId> for Uuid {
     fn from(value: MemoryId) -> Self {
+        value.0
+    }
+}
+
+/// Stable identifier for a graph entity.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct EntityId(Uuid);
+
+impl EntityId {
+    /// Generates a new time-ordered `UUIDv7` entity identifier.
+    #[must_use]
+    pub fn new_v7() -> Self {
+        Self(Uuid::now_v7())
+    }
+
+    /// Returns the underlying UUID value.
+    #[must_use]
+    pub const fn as_uuid(self) -> Uuid {
+        self.0
+    }
+}
+
+impl Display for EntityId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl From<Uuid> for EntityId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl From<EntityId> for Uuid {
+    fn from(value: EntityId) -> Self {
+        value.0
+    }
+}
+
+/// Stable identifier for a graph relation edge.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct RelationId(Uuid);
+
+impl RelationId {
+    /// Generates a new time-ordered `UUIDv7` relation identifier.
+    #[must_use]
+    pub fn new_v7() -> Self {
+        Self(Uuid::now_v7())
+    }
+
+    /// Returns the underlying UUID value.
+    #[must_use]
+    pub const fn as_uuid(self) -> Uuid {
+        self.0
+    }
+}
+
+impl Display for RelationId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl From<Uuid> for RelationId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl From<RelationId> for Uuid {
+    fn from(value: RelationId) -> Self {
         value.0
     }
 }
@@ -150,6 +225,84 @@ pub struct TemporalBounds {
     pub valid_to: Option<OffsetDateTime>,
     /// Time at which Shibahama ingested the observation.
     pub ingested_at: OffsetDateTime,
+}
+
+/// Typed graph entity extracted from or linked to memories.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Entity {
+    /// Stable entity id.
+    pub id: EntityId,
+    /// Caller-defined entity type, such as `Person`, `Project`, or `Claim`.
+    pub entity_type: String,
+    /// Canonical display label.
+    pub label: String,
+    /// Stable resolution key within the entity type.
+    pub stable_key: String,
+    /// Optional attributes used by typed graph integrations.
+    pub attributes: BTreeMap<String, String>,
+    /// Entity validity and ingestion timestamps.
+    pub timestamps: TemporalBounds,
+}
+
+impl Entity {
+    /// Creates a typed graph entity.
+    #[must_use]
+    pub fn new(
+        entity_type: impl Into<String>,
+        label: impl Into<String>,
+        stable_key: impl Into<String>,
+        timestamps: TemporalBounds,
+    ) -> Self {
+        Self {
+            id: EntityId::new_v7(),
+            entity_type: entity_type.into(),
+            label: label.into(),
+            stable_key: stable_key.into(),
+            attributes: BTreeMap::new(),
+            timestamps,
+        }
+    }
+}
+
+/// Typed directed relation edge between graph entities.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Relation {
+    /// Stable relation id.
+    pub id: RelationId,
+    /// Caller-defined relation type, such as `owns`, `contradicts`, or `supersedes`.
+    pub relation_type: String,
+    /// Source entity id.
+    pub from_entity: EntityId,
+    /// Target entity id.
+    pub to_entity: EntityId,
+    /// Optional memory that supports this edge.
+    pub memory_id: Option<MemoryId>,
+    /// Optional attributes used by typed graph integrations.
+    pub attributes: BTreeMap<String, String>,
+    /// Relation validity and ingestion timestamps.
+    pub timestamps: TemporalBounds,
+}
+
+impl Relation {
+    /// Creates a typed directed relation edge.
+    #[must_use]
+    pub fn new(
+        relation_type: impl Into<String>,
+        from_entity: EntityId,
+        to_entity: EntityId,
+        memory_id: impl Into<Option<MemoryId>>,
+        timestamps: TemporalBounds,
+    ) -> Self {
+        Self {
+            id: RelationId::new_v7(),
+            relation_type: relation_type.into(),
+            from_entity,
+            to_entity,
+            memory_id: memory_id.into(),
+            attributes: BTreeMap::new(),
+            timestamps,
+        }
+    }
 }
 
 impl TemporalBounds {
@@ -363,6 +516,15 @@ mod tests {
     }
 
     #[test]
+    fn graph_ids_are_uuid_v7() {
+        let entity_id = EntityId::new_v7();
+        let relation_id = RelationId::new_v7();
+
+        assert_eq!(entity_id.as_uuid().get_version_num(), 7);
+        assert_eq!(relation_id.as_uuid().get_version_num(), 7);
+    }
+
+    #[test]
     fn generated_memory_ids_are_time_orderable() {
         let first = MemoryId::new_v7();
         let second = MemoryId::new_v7();
@@ -415,6 +577,74 @@ mod tests {
 
         assert!(closed.is_valid_at(valid_from));
         assert!(!closed.is_valid_at(valid_from + time::Duration::days(1)));
+    }
+
+    #[test]
+    fn graph_entity_carries_type_key_attributes_and_time() {
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let mut entity = Entity::new(
+            "Project",
+            "Shibahama",
+            "project:shibahama",
+            TemporalBounds::open_from(now, now),
+        );
+
+        entity
+            .attributes
+            .insert("namespace".to_owned(), "core".to_owned());
+
+        assert_eq!(entity.entity_type, "Project");
+        assert_eq!(entity.label, "Shibahama");
+        assert_eq!(entity.stable_key, "project:shibahama");
+        assert_eq!(
+            entity.attributes.get("namespace").map(String::as_str),
+            Some("core")
+        );
+        assert!(entity.timestamps.is_valid_at(now));
+    }
+
+    #[test]
+    fn graph_relation_is_typed_directed_and_bitemporal() {
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let source = Entity::new(
+            "Claim",
+            "old fact",
+            "claim:old",
+            TemporalBounds::open_from(now, now),
+        );
+        let target = Entity::new(
+            "Claim",
+            "new fact",
+            "claim:new",
+            TemporalBounds::open_from(now, now),
+        );
+        let memory_id = MemoryId::new_v7();
+        let mut relation = Relation::new(
+            "supersedes",
+            source.id,
+            target.id,
+            memory_id,
+            TemporalBounds::open_from(now, now).closed_at(now + time::Duration::days(1)),
+        );
+
+        relation
+            .attributes
+            .insert("reason".to_owned(), "contradiction".to_owned());
+
+        assert_eq!(relation.relation_type, "supersedes");
+        assert_eq!(relation.from_entity, source.id);
+        assert_eq!(relation.to_entity, target.id);
+        assert_eq!(relation.memory_id, Some(memory_id));
+        assert_eq!(
+            relation.attributes.get("reason").map(String::as_str),
+            Some("contradiction")
+        );
+        assert!(relation.timestamps.is_valid_at(now));
+        assert!(
+            !relation
+                .timestamps
+                .is_valid_at(now + time::Duration::days(1))
+        );
     }
 
     #[test]

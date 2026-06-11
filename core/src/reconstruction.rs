@@ -2,8 +2,12 @@
 
 //! Reconstruction trigger and gating primitives.
 
-use crate::model::{MemoryId, Provenance, SourceKind};
+use crate::model::{CredenceTier, MemoryId, MemoryItem, Provenance, SourceKind, Tier};
 use crate::retrieval::RecallCandidate;
+use std::collections::BTreeSet;
+
+/// Tag attached to reconstruction proposals that have not been corroborated.
+pub const QUARANTINE_TAG: &str = "reconstruction:quarantine";
 
 /// Reason a memory should be considered for reconstruction.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -39,6 +43,17 @@ pub struct ReconstructionGateDecision {
     pub triggers: Vec<ReconstructionTrigger>,
     /// Whether reconstruction work is allowed to run now.
     pub may_run: bool,
+}
+
+/// Quarantined reconstruction proposal.
+#[derive(Clone, Debug, PartialEq)]
+pub struct QuarantinedProposal {
+    /// Proposed memory update, held at low trust and cold accessibility.
+    pub item: MemoryItem,
+    /// Existing memory this proposal may supersede after corroboration.
+    pub supersedes: MemoryId,
+    /// Tags carried by this proposal.
+    pub tags: BTreeSet<String>,
 }
 
 /// Planned re-validation action for a reconstruction trigger.
@@ -138,6 +153,20 @@ pub fn evaluate_reconstruction_gate(
     ReconstructionGateDecision {
         triggers: triggers.to_vec(),
         may_run: mode == ReconstructionMode::ExplicitRevalidation && !triggers.is_empty(),
+    }
+}
+
+/// Quarantines a proposed reconstruction update.
+#[must_use]
+pub fn quarantine_proposal(mut item: MemoryItem, supersedes: MemoryId) -> QuarantinedProposal {
+    item.credence = CredenceTier::Unverified;
+    item.tier = Tier::Cold;
+    item.credence_floor = Tier::Cold;
+
+    QuarantinedProposal {
+        item,
+        supersedes,
+        tags: BTreeSet::from([QUARANTINE_TAG.to_owned()]),
     }
 }
 
@@ -244,5 +273,18 @@ mod tests {
                 memory_id: trigger.memory_id,
             }
         );
+    }
+
+    #[test]
+    fn quarantine_proposal_downgrades_and_tags_update() {
+        let proposed = candidate(false).item;
+        let superseded = MemoryId::new_v7();
+        let quarantined = quarantine_proposal(proposed, superseded);
+
+        assert_eq!(quarantined.item.credence, CredenceTier::Unverified);
+        assert_eq!(quarantined.item.tier, Tier::Cold);
+        assert_eq!(quarantined.item.credence_floor, Tier::Cold);
+        assert_eq!(quarantined.supersedes, superseded);
+        assert!(quarantined.tags.contains(QUARANTINE_TAG));
     }
 }

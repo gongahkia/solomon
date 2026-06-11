@@ -93,7 +93,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Implement threshold-based demotion (hot→warm→cold) as significance decays, lazily
 - [x] (P1) Enforce the never-delete invariant in code + a test that asserts no path deletes
 - [x] (P1) Emit tier-transition events to the event log (so the Tideline can replay them)
-- [ ] (P2) Hysteresis / cooldown so items don't thrash between tiers
+- [x] (P2) Hysteresis / cooldown so items don't thrash between tiers
 - [ ] (P2) Configurable tier-capacity limits (hot tier has a budget) with significance-based eviction-to-warm
 
 ---

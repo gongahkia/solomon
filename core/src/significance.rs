@@ -27,6 +27,10 @@ pub struct SignificanceConfig {
     pub warm_threshold: f64,
     /// Score at or above which warm items may promote to hot.
     pub hot_threshold: f64,
+    /// Score below which warm items demote to cold.
+    pub warm_demotion_threshold: f64,
+    /// Score below which hot items demote to warm.
+    pub hot_demotion_threshold: f64,
 }
 
 /// Deterministic contribution breakdown for a significance score.
@@ -60,6 +64,8 @@ impl Default for SignificanceConfig {
             contradicted_weight: -2.0,
             warm_threshold: 1.0,
             hot_threshold: 2.0,
+            warm_demotion_threshold: 0.8,
+            hot_demotion_threshold: 1.8,
         }
     }
 }
@@ -196,9 +202,9 @@ impl SignificanceConfig {
     /// Applies threshold-based demotion as significance decays.
     #[must_use]
     pub fn demote_for_score(self, current_tier: Tier, score: f64) -> Tier {
-        if score < self.warm_threshold {
+        if score < self.warm_demotion_threshold {
             Tier::Cold
-        } else if score < self.hot_threshold && current_tier == Tier::Hot {
+        } else if score < self.hot_demotion_threshold && current_tier == Tier::Hot {
             Tier::Warm
         } else {
             current_tier
@@ -375,6 +381,18 @@ mod tests {
         assert_eq!(config.demote_for_score(Tier::Hot, 1.0), Tier::Warm);
         assert_eq!(config.demote_for_score(Tier::Warm, 0.1), Tier::Cold);
         assert_eq!(config.demote_for_score(Tier::Cold, 0.1), Tier::Cold);
+    }
+
+    #[test]
+    fn demotion_thresholds_create_hysteresis_gap() {
+        let config = SignificanceConfig::default();
+
+        assert_eq!(config.promote_on_access(Tier::Warm, 2.0), Tier::Hot);
+        assert_eq!(config.demote_for_score(Tier::Hot, 1.9), Tier::Hot);
+        assert_eq!(config.demote_for_score(Tier::Hot, 1.7), Tier::Warm);
+        assert_eq!(config.promote_on_access(Tier::Cold, 1.0), Tier::Warm);
+        assert_eq!(config.demote_for_score(Tier::Warm, 0.9), Tier::Warm);
+        assert_eq!(config.demote_for_score(Tier::Warm, 0.7), Tier::Cold);
     }
 
     #[test]

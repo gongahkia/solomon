@@ -306,6 +306,16 @@ impl PyShibahama {
         Ok(PyMemoryItem::from(item))
     }
 
+    /// Soft-invalidates a memory at a valid-time end.
+    #[pyo3(signature = (memory_id, valid_to_unix))]
+    fn invalidate(&self, memory_id: &str, valid_to_unix: i64) -> PyResult<bool> {
+        let id = parse_memory_id(memory_id)?;
+        let valid_to = time_from_optional_unix(Some(valid_to_unix))?;
+        let mut inner = self.inner.lock().map_err(lock_error)?;
+
+        inner.invalidate(id, valid_to).map_err(py_error)
+    }
+
     /// Recalls current fact memories for a query embedding.
     #[pyo3(signature = (
         query_vector,

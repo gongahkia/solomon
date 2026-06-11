@@ -58,6 +58,12 @@ class Shibahama:
     async def async_write(self, *args, **kwargs) -> MemoryItem:
         return await asyncio.to_thread(self.write, *args, **kwargs)
 
+    def invalidate(self, memory_id: str, valid_to_unix: int) -> bool:
+        return self._inner.invalidate(memory_id, valid_to_unix)
+
+    async def async_invalidate(self, *args, **kwargs) -> bool:
+        return await asyncio.to_thread(self.invalidate, *args, **kwargs)
+
     def recall(
         self,
         query_vector,

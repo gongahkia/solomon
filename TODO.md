@@ -229,21 +229,21 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 ## Phase 10 — Proof: benchmarks (P1/P2)
 
 ### Harness
-- [ ] (P0) Build a benchmark harness (Python) that drives Shibahama, Mem0, and Zep through identical tasks
-- [ ] (P0) Implement adapters for Mem0 and Zep so comparisons are apples-to-apples
-- [ ] (P1) Deterministic seeds + logged configs so results are reproducible
-- [ ] (P1) Metrics: recall accuracy, retrieval token cost, latency, stale-answer rate
+- [x] (P0) Build a benchmark harness (Python) that drives Shibahama, Mem0, and Zep through identical tasks
+- [x] (P0) Implement adapters for Mem0 and Zep so comparisons are apples-to-apples
+- [x] (P1) Deterministic seeds + logged configs so results are reproducible
+- [x] (P1) Metrics: recall accuracy, retrieval token cost, latency, stale-answer rate
 
 ### Existing suites
 - [ ] (P1) Wire up LoCoMo and run all systems
 - [ ] (P1) Wire up LongMemEval and run all systems
-- [ ] (P1) Build a long-horizon coding-agent memory task (the headline scenario)
-- [ ] (P1) Produce a results table (accuracy vs token-cost frontier) for the README
+- [x] (P1) Build a long-horizon coding-agent memory task (the headline scenario)
+- [x] (P1) Produce a results table (accuracy vs token-cost frontier) for the README
 - [ ] (P2) Ablations: significance on/off, reconstruction on/off, graph on/off — isolate what each contributes
 
 ### CurrencyBench (P2/P3, the defensible new artifact)
-- [ ] (P2) Design `CurrencyBench`: long-horizon task that injects fact CHANGES mid-stream
-- [ ] (P2) Metrics: stale-answer rate, time-to-correction after a fact changes
+- [x] (P2) Design `CurrencyBench`: long-horizon task that injects fact CHANGES mid-stream
+- [x] (P2) Metrics: stale-answer rate, time-to-correction after a fact changes
 - [ ] (P2) Run all systems; show the gap Shibahama is built to win
 - [ ] (P3) Write up CurrencyBench as its own `benchmarks/currencybench/README.md` for citability
 - [ ] (P3) Release the CurrencyBench dataset/generator so others can reproduce

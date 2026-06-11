@@ -24,6 +24,17 @@ Versions follow Semantic Versioning. Release notes are maintained in `CHANGELOG.
 - `examples/`: Runnable demos.
 - `docs/`: Architecture notes and ADRs.
 
+## Benchmark Snapshot
+
+Current local CurrencyBench smoke result:
+
+| Suite | System | Queries | Accuracy | Stale Answer Rate | Mean Token Cost |
+| --- | --- | ---: | ---: | ---: | ---: |
+| currencybench | shibahama | 4 | 1.000 | 0.000 | 5.750 |
+| currencybench | warehouse | 4 | 0.000 | 1.000 | 11.500 |
+
+Full JSON and latency/correction-lag summary: `benchmarks/results/currencybench-local.json`.
+
 ## Development
 
 Run the Rust gate locally:

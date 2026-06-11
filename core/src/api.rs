@@ -610,6 +610,23 @@ impl<V: VectorIndex> Shibahama<V> {
         Ok(item)
     }
 
+    /// Soft-invalidates a memory at `valid_to` and removes its stored embedding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when invalidation cannot be persisted or the vector index cannot be
+    /// updated.
+    pub fn invalidate(
+        &mut self,
+        id: MemoryId,
+        valid_to: OffsetDateTime,
+    ) -> Result<bool, ShibahamaError> {
+        Ok(self
+            .store
+            .soft_invalidate_with_vector(id, valid_to, &mut self.vector_index)?
+            .is_some())
+    }
+
     /// Returns all current materialized memory rows.
     ///
     /// # Errors
@@ -843,6 +860,22 @@ where
                 .write_with_embedding(event, embedding.as_write_embedding())
         })
         .await?
+    }
+
+    /// Soft-invalidates a memory at `valid_to` and removes its stored embedding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when invalidation cannot be persisted, the vector index cannot be updated,
+    /// or the blocking task fails.
+    pub async fn invalidate(
+        &self,
+        id: MemoryId,
+        valid_to: OffsetDateTime,
+    ) -> Result<bool, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().invalidate(id, valid_to)).await?
     }
 
     /// Returns all current materialized memory rows.

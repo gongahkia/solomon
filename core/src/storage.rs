@@ -8,6 +8,7 @@ use redb::{
     Database, Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition,
 };
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::Path;
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -29,6 +30,9 @@ pub enum StorageError {
     /// Compression or decompression failed.
     #[error("compression failed: {0}")]
     Compression(String),
+    /// File I/O failed.
+    #[error("file I/O failed: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// Append-only event describing a durable memory-state change.
@@ -89,6 +93,28 @@ pub struct RecoveryReport {
     pub event_count: usize,
     /// Number of materialized memory items decoded successfully.
     pub materialized_item_count: usize,
+}
+
+/// Full durable store snapshot.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct StoreSnapshot {
+    /// Snapshot schema version.
+    pub schema_version: u16,
+    /// Event-log records.
+    pub events: Vec<EventRecord>,
+    /// Current materialized memory items.
+    pub materialized_items: Vec<MemoryItem>,
+    /// Compressed cold-content payloads.
+    pub cold_contents: Vec<ColdContentRecord>,
+}
+
+/// Compressed cold-content payload included in a snapshot.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ColdContentRecord {
+    /// Storage key referenced by `CompactionRef`.
+    pub storage_key: String,
+    /// Compressed payload bytes.
+    pub bytes: Vec<u8>,
 }
 
 /// `redb`-backed store for event log and materialized memory state.
@@ -224,6 +250,45 @@ impl RedbMemoryStore {
         })
     }
 
+    /// Writes a full snapshot of event log, materialized state, and cold content to one file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when store tables cannot be read, the snapshot cannot be encoded, or the
+    /// destination file cannot be written.
+    pub fn snapshot(&self, path: impl AsRef<Path>) -> Result<(), StorageError> {
+        let snapshot = StoreSnapshot {
+            schema_version: 1,
+            events: self.events()?,
+            materialized_items: self.materialized_items()?,
+            cold_contents: self.cold_content_records()?,
+        };
+        let bytes = serde_json::to_vec_pretty(&snapshot)?;
+
+        fs::write(path, bytes)?;
+
+        Ok(())
+    }
+
+    /// Restores a snapshot into a store at `db_path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the snapshot cannot be read or decoded, the destination store cannot
+    /// be opened, or restored records cannot be written.
+    pub fn restore_from_snapshot(
+        db_path: impl AsRef<Path>,
+        snapshot_path: impl AsRef<Path>,
+    ) -> Result<Self, StorageError> {
+        let bytes = fs::read(snapshot_path)?;
+        let snapshot: StoreSnapshot = serde_json::from_slice(&bytes)?;
+        let store = Self::open(db_path)?;
+
+        store.restore(snapshot)?;
+
+        Ok(store)
+    }
+
     fn event(&self, sequence: u64) -> Result<Option<EventRecord>, StorageError> {
         let read_txn = self.db.begin_read().map_err(embed)?;
         let table = match read_txn.open_table(EVENT_LOG_TABLE) {
@@ -298,6 +363,66 @@ impl RedbMemoryStore {
         }
 
         Ok(items)
+    }
+
+    fn cold_content_records(&self) -> Result<Vec<ColdContentRecord>, StorageError> {
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(COLD_CONTENT_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(error) => return Err(embed(error)),
+        };
+        let mut records = Vec::new();
+
+        for row in table.iter().map_err(embed)? {
+            let (key, value) = row.map_err(embed)?;
+            records.push(ColdContentRecord {
+                storage_key: key.value().to_owned(),
+                bytes: value.value().to_vec(),
+            });
+        }
+
+        Ok(records)
+    }
+
+    fn restore(&self, snapshot: StoreSnapshot) -> Result<(), StorageError> {
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        {
+            let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+            let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let mut cold_table = write_txn.open_table(COLD_CONTENT_TABLE).map_err(embed)?;
+
+            for event in snapshot.events {
+                let bytes = serde_json::to_vec(&event)?;
+
+                event_table
+                    .insert(event.sequence, bytes.as_slice())
+                    .map_err(embed)?;
+            }
+
+            for item in snapshot.materialized_items {
+                let key = item.id.to_string();
+                let bytes = serde_json::to_vec(&item)?;
+
+                item_table
+                    .insert(key.as_str(), bytes.as_slice())
+                    .map_err(embed)?;
+            }
+
+            for cold_content in snapshot.cold_contents {
+                cold_table
+                    .insert(
+                        cold_content.storage_key.as_str(),
+                        cold_content.bytes.as_slice(),
+                    )
+                    .map_err(embed)?;
+            }
+        }
+
+        write_txn.commit().map_err(embed)
     }
 
     /// Returns the current materialized state for `id`.
@@ -497,6 +622,7 @@ mod tests {
         CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, Provenance, SourceKind, TemporalBounds,
     };
     use tempfile::NamedTempFile;
+    use tempfile::tempdir;
 
     fn test_item(content: &str) -> MemoryItem {
         MemoryItem {
@@ -743,5 +869,49 @@ mod tests {
                 materialized_item_count: 2
             }
         );
+    }
+
+    #[test]
+    fn snapshot_and_restore_round_trip_full_store_state() {
+        let source_db = NamedTempFile::new().expect("source tempfile should be created");
+        let snapshot_file = NamedTempFile::new().expect("snapshot tempfile should be created");
+        let restore_dir = tempdir().expect("restore dir should be created");
+        let restored_db = restore_dir.path().join("restored.redb");
+        let source = RedbMemoryStore::open(source_db.path()).expect("source should open");
+        let hot = test_item("hot content");
+        let mut cold = test_item("cold content");
+
+        cold.tier = Tier::Cold;
+        source.write(&hot).expect("hot should write");
+        source.write(&cold).expect("cold should write");
+        source
+            .compact_cold_item(cold.id)
+            .expect("cold should compact");
+        source
+            .snapshot(snapshot_file.path())
+            .expect("snapshot should write");
+
+        let restored = RedbMemoryStore::restore_from_snapshot(&restored_db, snapshot_file.path())
+            .expect("snapshot should restore");
+        let restored_hot = restored
+            .get(hot.id)
+            .expect("hot should read")
+            .expect("hot should exist");
+        let restored_cold = restored
+            .get(cold.id)
+            .expect("cold should read")
+            .expect("cold should exist");
+        let restored_pointer = restored_cold
+            .compaction
+            .as_ref()
+            .expect("cold pointer should exist");
+        let restored_cold_content = restored
+            .read_compacted_content(restored_pointer)
+            .expect("cold content should read");
+
+        assert_eq!(restored_hot.content, "hot content");
+        assert_eq!(restored_cold.content, "");
+        assert_eq!(restored_cold_content.as_deref(), Some("cold content"));
+        assert_eq!(restored.events().expect("events should read").len(), 3);
     }
 }

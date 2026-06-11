@@ -8,6 +8,11 @@
 bindings/node/node_modules/
 bindings/node/*.node
 bindings/node/index.js
+tideline/dist/
+tideline/node_modules/
+tideline/*.tsbuildinfo
+tideline/vite.config.d.ts
+tideline/vite.config.js
 __pycache__/
 *.so
 

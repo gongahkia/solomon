@@ -7,6 +7,7 @@
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::{HeaderMap, StatusCode};
+use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -21,8 +22,10 @@ use shibahama_core::retrieval::{
     RecallCandidate, RecallCandidateCurrency, RecallCandidateSource, RecallRequest,
 };
 use shibahama_core::significance::SignificanceBreakdown;
-use shibahama_core::storage::{MemoryWriteEvent, RedbMemoryStore};
+use shibahama_core::storage::{EventRecord, MemoryEvent, MemoryWriteEvent, RedbMemoryStore};
 use shibahama_core::vector::HnswVectorIndex;
+use std::collections::BTreeSet;
+use std::convert::Infallible;
 use std::env;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -31,7 +34,12 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use time::OffsetDateTime;
+use tokio_stream::Stream;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::IntervalStream;
+use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
 
 type CliResult<T> = Result<T, Box<dyn Error>>;
@@ -292,6 +300,61 @@ struct WhyTraceDto {
     audit_trail: Vec<String>,
 }
 
+#[derive(Serialize)]
+struct TidelineSnapshotDto {
+    schema_version: u32,
+    version: &'static str,
+    path: String,
+    namespace: String,
+    generated_at_unix: i64,
+    as_of_unix: Option<i64>,
+    memory_count: usize,
+    event_count: usize,
+    last_sequence: Option<u64>,
+    memories: Vec<MemoryItemDto>,
+    events: Vec<TidelineEventDto>,
+    graph: TidelineGraphDto,
+}
+
+#[derive(Serialize)]
+struct TidelineEventDto {
+    sequence: u64,
+    recorded_at_unix: i64,
+    kind: String,
+    memory_ids: Vec<String>,
+    tier_from: Option<String>,
+    tier_to: Option<String>,
+    access_outcome: Option<String>,
+    valid_to_unix: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct TidelineGraphDto {
+    nodes: Vec<TidelineGraphNodeDto>,
+    edges: Vec<TidelineGraphEdgeDto>,
+}
+
+#[derive(Serialize)]
+struct TidelineGraphNodeDto {
+    id: String,
+    label: String,
+    tier: String,
+    credence: String,
+    significance: f64,
+    valid_from_unix: i64,
+    valid_to_unix: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct TidelineGraphEdgeDto {
+    id: String,
+    from: String,
+    to: String,
+    kind: String,
+    valid_from_unix: Option<i64>,
+    valid_to_unix: Option<i64>,
+}
+
 #[derive(Clone)]
 struct ServerState {
     engine: Arc<Mutex<Shibahama<HnswVectorIndex>>>,
@@ -334,6 +397,11 @@ struct ServerRecallRequest {
 #[derive(Deserialize)]
 struct WhyQuery {
     now_unix: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct TidelineQuery {
+    as_of_unix: Option<i64>,
 }
 
 #[derive(Debug)]
@@ -552,6 +620,15 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
         .route("/write", post(server_write))
         .route("/recall", post(server_recall))
         .route("/why/{memory_id}", get(server_why))
+        .route("/tideline/snapshot", get(server_tideline_snapshot))
+        .route("/tideline/recording", get(server_tideline_recording))
+        .route("/tideline/live", get(server_tideline_live))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(command.bind).await?;
     let local_addr = listener.local_addr()?;
@@ -679,6 +756,233 @@ fn memory_in_namespace(item: &MemoryItem, namespace: &str) -> bool {
         .source_ref
         .as_deref()
         .is_some_and(|source_ref| source_ref.starts_with(&prefix))
+}
+
+fn optional_time_from_unix(value: Option<i64>) -> Result<Option<OffsetDateTime>, ServerError> {
+    value
+        .map(OffsetDateTime::from_unix_timestamp)
+        .transpose()
+        .map_err(ServerError::bad_request)
+}
+
+fn tideline_snapshot_for_namespace(
+    state: &ServerState,
+    namespace: &str,
+    as_of: Option<OffsetDateTime>,
+) -> Result<TidelineSnapshotDto, ServerError> {
+    let engine = state
+        .engine
+        .lock()
+        .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+    let namespace_memories = engine
+        .memory_items()
+        .map_err(ServerError::internal)?
+        .into_iter()
+        .filter(|item| memory_in_namespace(item, namespace))
+        .filter(|item| as_of.is_none_or(|instant| memory_believed_at(item, instant)))
+        .collect::<Vec<_>>();
+    let namespace_ids = namespace_memories
+        .iter()
+        .map(|item| item.id)
+        .collect::<BTreeSet<_>>();
+    let event_records = engine
+        .event_records()
+        .map_err(ServerError::internal)?
+        .into_iter()
+        .filter(|record| as_of.is_none_or(|instant| record.recorded_at <= instant))
+        .filter(|record| event_touches_namespace(record, &namespace_ids, namespace))
+        .collect::<Vec<_>>();
+    let last_sequence = event_records.last().map(|record| record.sequence);
+    let graph = tideline_graph(&namespace_memories, &event_records);
+    let event_count = event_records.len();
+    let memories = namespace_memories
+        .into_iter()
+        .map(MemoryItemDto::from)
+        .collect::<Vec<_>>();
+    let events = event_records
+        .into_iter()
+        .map(tideline_event_from_record)
+        .collect::<Vec<_>>();
+
+    Ok(TidelineSnapshotDto {
+        schema_version: 1,
+        version: shibahama_core::version(),
+        path: state.path.clone(),
+        namespace: namespace.to_owned(),
+        generated_at_unix: OffsetDateTime::now_utc().unix_timestamp(),
+        as_of_unix: as_of.map(OffsetDateTime::unix_timestamp),
+        memory_count: memories.len(),
+        event_count,
+        last_sequence,
+        memories,
+        events,
+        graph,
+    })
+}
+
+fn memory_believed_at(item: &MemoryItem, as_of: OffsetDateTime) -> bool {
+    item.timestamps.ingested_at <= as_of && item.timestamps.is_valid_at(as_of)
+}
+
+fn event_touches_namespace(
+    record: &EventRecord,
+    namespace_ids: &BTreeSet<MemoryId>,
+    namespace: &str,
+) -> bool {
+    match &record.event {
+        MemoryEvent::MemoryWritten { item } => memory_in_namespace(item, namespace),
+        MemoryEvent::MemoryInvalidated { id, .. }
+        | MemoryEvent::AccessRecorded { id, .. }
+        | MemoryEvent::TierChanged { id, .. }
+        | MemoryEvent::ContentCompacted { id, .. } => namespace_ids.contains(id),
+        MemoryEvent::ReconstructionApplied {
+            superseded_id,
+            replacement_id,
+            ..
+        } => namespace_ids.contains(superseded_id) || namespace_ids.contains(replacement_id),
+    }
+}
+
+fn tideline_event_from_record(record: EventRecord) -> TidelineEventDto {
+    match record.event {
+        MemoryEvent::MemoryWritten { item } => TidelineEventDto {
+            sequence: record.sequence,
+            recorded_at_unix: record.recorded_at.unix_timestamp(),
+            kind: "memory_written".to_owned(),
+            memory_ids: vec![item.id.to_string()],
+            tier_from: None,
+            tier_to: Some(tier_str(item.tier).to_owned()),
+            access_outcome: None,
+            valid_to_unix: item.timestamps.valid_to.map(OffsetDateTime::unix_timestamp),
+        },
+        MemoryEvent::MemoryInvalidated { id, valid_to } => TidelineEventDto {
+            sequence: record.sequence,
+            recorded_at_unix: record.recorded_at.unix_timestamp(),
+            kind: "memory_invalidated".to_owned(),
+            memory_ids: vec![id.to_string()],
+            tier_from: None,
+            tier_to: None,
+            access_outcome: None,
+            valid_to_unix: Some(valid_to.unix_timestamp()),
+        },
+        MemoryEvent::AccessRecorded { id, event } => TidelineEventDto {
+            sequence: record.sequence,
+            recorded_at_unix: record.recorded_at.unix_timestamp(),
+            kind: "access_recorded".to_owned(),
+            memory_ids: vec![id.to_string()],
+            tier_from: None,
+            tier_to: None,
+            access_outcome: Some(format!("{:?}", event.outcome)),
+            valid_to_unix: None,
+        },
+        MemoryEvent::TierChanged { id, from, to, .. } => TidelineEventDto {
+            sequence: record.sequence,
+            recorded_at_unix: record.recorded_at.unix_timestamp(),
+            kind: "tier_changed".to_owned(),
+            memory_ids: vec![id.to_string()],
+            tier_from: Some(tier_str(from).to_owned()),
+            tier_to: Some(tier_str(to).to_owned()),
+            access_outcome: None,
+            valid_to_unix: None,
+        },
+        MemoryEvent::ContentCompacted { id, .. } => TidelineEventDto {
+            sequence: record.sequence,
+            recorded_at_unix: record.recorded_at.unix_timestamp(),
+            kind: "content_compacted".to_owned(),
+            memory_ids: vec![id.to_string()],
+            tier_from: None,
+            tier_to: Some("cold".to_owned()),
+            access_outcome: None,
+            valid_to_unix: None,
+        },
+        MemoryEvent::ReconstructionApplied {
+            superseded_id,
+            replacement_id,
+            valid_to,
+        } => TidelineEventDto {
+            sequence: record.sequence,
+            recorded_at_unix: record.recorded_at.unix_timestamp(),
+            kind: "reconstruction_applied".to_owned(),
+            memory_ids: vec![superseded_id.to_string(), replacement_id.to_string()],
+            tier_from: None,
+            tier_to: None,
+            access_outcome: None,
+            valid_to_unix: Some(valid_to.unix_timestamp()),
+        },
+    }
+}
+
+fn tideline_graph(memories: &[MemoryItem], event_records: &[EventRecord]) -> TidelineGraphDto {
+    let nodes = memories
+        .iter()
+        .map(|item| TidelineGraphNodeDto {
+            id: item.id.to_string(),
+            label: memory_label(&item.content),
+            tier: tier_str(item.tier).to_owned(),
+            credence: credence_str(item.credence).to_owned(),
+            significance: item.significance,
+            valid_from_unix: item.timestamps.valid_from.unix_timestamp(),
+            valid_to_unix: item.timestamps.valid_to.map(OffsetDateTime::unix_timestamp),
+        })
+        .collect::<Vec<_>>();
+    let namespace_ids = memories.iter().map(|item| item.id).collect::<BTreeSet<_>>();
+    let mut edges = Vec::new();
+
+    for record in event_records {
+        match &record.event {
+            MemoryEvent::MemoryInvalidated { id, valid_to } if namespace_ids.contains(id) => {
+                edges.push(TidelineGraphEdgeDto {
+                    id: format!("event-{}-invalidated", record.sequence),
+                    from: id.to_string(),
+                    to: id.to_string(),
+                    kind: "invalidated".to_owned(),
+                    valid_from_unix: None,
+                    valid_to_unix: Some(valid_to.unix_timestamp()),
+                });
+            }
+            MemoryEvent::ReconstructionApplied {
+                superseded_id,
+                replacement_id,
+                valid_to,
+            } if namespace_ids.contains(superseded_id)
+                || namespace_ids.contains(replacement_id) =>
+            {
+                edges.push(TidelineGraphEdgeDto {
+                    id: format!("event-{}-reconstruction", record.sequence),
+                    from: superseded_id.to_string(),
+                    to: replacement_id.to_string(),
+                    kind: "reconstruction".to_owned(),
+                    valid_from_unix: None,
+                    valid_to_unix: Some(valid_to.unix_timestamp()),
+                });
+            }
+            MemoryEvent::TierChanged { id, .. } if namespace_ids.contains(id) => {
+                edges.push(TidelineGraphEdgeDto {
+                    id: format!("event-{}-tier", record.sequence),
+                    from: id.to_string(),
+                    to: id.to_string(),
+                    kind: "tier_transition".to_owned(),
+                    valid_from_unix: Some(record.recorded_at.unix_timestamp()),
+                    valid_to_unix: None,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    TidelineGraphDto { nodes, edges }
+}
+
+fn memory_label(content: &str) -> String {
+    let normalized = content.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    if normalized.chars().count() <= 64 {
+        normalized
+    } else {
+        let mut label = normalized.chars().take(61).collect::<String>();
+        label.push_str("...");
+        label
+    }
 }
 
 fn log_server_request(
@@ -1058,6 +1362,135 @@ async fn server_why(
             Err(error)
         }
     }
+}
+
+async fn server_tideline_snapshot(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Query(query): Query<TidelineQuery>,
+) -> Result<Json<TidelineSnapshotDto>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "GET", "/tideline/snapshot")?;
+    let result: Result<(Json<TidelineSnapshotDto>, serde_json::Value), ServerError> = (|| {
+        let as_of = optional_time_from_unix(query.as_of_unix)?;
+        let snapshot = tideline_snapshot_for_namespace(&state, &context.namespace, as_of)?;
+        let cost = json!({
+            "request_units": 1,
+            "memories_returned": snapshot.memory_count,
+            "events_returned": snapshot.event_count,
+        });
+
+        Ok((Json(snapshot), cost))
+    })();
+
+    match result {
+        Ok((response, cost)) => {
+            log_server_request(
+                "GET",
+                "/tideline/snapshot",
+                Some(&context.namespace),
+                context.principal,
+                StatusCode::OK,
+                cost,
+            );
+            Ok(response)
+        }
+        Err(error) => {
+            log_server_request(
+                "GET",
+                "/tideline/snapshot",
+                Some(&context.namespace),
+                context.principal,
+                error.status,
+                json!({ "request_units": 1 }),
+            );
+            Err(error)
+        }
+    }
+}
+
+async fn server_tideline_recording(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Query(query): Query<TidelineQuery>,
+) -> Result<Json<TidelineSnapshotDto>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "GET", "/tideline/recording")?;
+    let result: Result<(Json<TidelineSnapshotDto>, serde_json::Value), ServerError> = (|| {
+        let as_of = optional_time_from_unix(query.as_of_unix)?;
+        let snapshot = tideline_snapshot_for_namespace(&state, &context.namespace, as_of)?;
+        let cost = json!({
+            "request_units": 1,
+            "recording_schema_version": snapshot.schema_version,
+            "memories_returned": snapshot.memory_count,
+            "events_returned": snapshot.event_count,
+        });
+
+        Ok((Json(snapshot), cost))
+    })();
+
+    match result {
+        Ok((response, cost)) => {
+            log_server_request(
+                "GET",
+                "/tideline/recording",
+                Some(&context.namespace),
+                context.principal,
+                StatusCode::OK,
+                cost,
+            );
+            Ok(response)
+        }
+        Err(error) => {
+            log_server_request(
+                "GET",
+                "/tideline/recording",
+                Some(&context.namespace),
+                context.principal,
+                error.status,
+                json!({ "request_units": 1 }),
+            );
+            Err(error)
+        }
+    }
+}
+
+async fn server_tideline_live(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Query(query): Query<TidelineQuery>,
+) -> Result<Sse<impl Stream<Item = Result<SseEvent, Infallible>>>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "GET", "/tideline/live")?;
+    let as_of = optional_time_from_unix(query.as_of_unix)?;
+
+    log_server_request(
+        "GET",
+        "/tideline/live",
+        Some(&context.namespace),
+        context.principal,
+        StatusCode::OK,
+        json!({ "request_units": 1, "stream": "sse" }),
+    );
+
+    let state_for_stream = state.clone();
+    let namespace = context.namespace;
+    let mut interval = tokio::time::interval(Duration::from_secs(1));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let stream = IntervalStream::new(interval).map(move |_| {
+        let event = match tideline_snapshot_for_namespace(&state_for_stream, &namespace, as_of) {
+            Ok(snapshot) => match serde_json::to_string(&snapshot) {
+                Ok(data) => SseEvent::default().event("snapshot").data(data),
+                Err(error) => SseEvent::default()
+                    .event("error")
+                    .data(json!({ "error": error.to_string() }).to_string()),
+            },
+            Err(error) => SseEvent::default()
+                .event("error")
+                .data(json!({ "error": error.message }).to_string()),
+        };
+
+        Ok(event)
+    });
+
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
 fn open_engine(

@@ -11,7 +11,8 @@ use crate::retrieval::{
 };
 use crate::significance::{SignificanceBreakdown, SignificanceConfig};
 use crate::storage::{
-    MemoryAuditEntry, MemoryWriteEvent, RedbMemoryStore, StorageError, TierCapacityConfig,
+    EventRecord, MemoryAuditEntry, MemoryWriteEvent, RedbMemoryStore, StorageError,
+    TierCapacityConfig,
 };
 use crate::vector::{VectorIndex, VectorIndexError};
 use std::iter::FusedIterator;
@@ -618,6 +619,15 @@ impl<V: VectorIndex> Shibahama<V> {
         Ok(self.store.memory_items()?)
     }
 
+    /// Returns all durable event-log records in sequence order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when event-log records cannot be read.
+    pub fn event_records(&self) -> Result<Vec<EventRecord>, ShibahamaError> {
+        Ok(self.store.events()?)
+    }
+
     /// Recalls current fact memories for a query embedding.
     ///
     /// # Errors
@@ -844,6 +854,17 @@ where
         let inner = Arc::clone(&self.inner);
 
         tokio::task::spawn_blocking(move || inner.blocking_lock().memory_items()).await?
+    }
+
+    /// Returns all durable event-log records in sequence order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when event-log records cannot be read or the blocking task fails.
+    pub async fn event_records(&self) -> Result<Vec<EventRecord>, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().event_records()).await?
     }
 
     /// Recalls current fact memories for an owned query embedding.

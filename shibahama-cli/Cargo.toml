@@ -25,7 +25,9 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 shibahama-core.workspace = true
 time = { version = "0.3.47", features = ["serde"] }
-tokio = { version = "1.52.3", features = ["macros", "net", "rt-multi-thread", "signal"] }
+tokio = { version = "1.52.3", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio-stream = "0.1.17"
+tower-http = { version = "0.6.7", features = ["cors"] }
 uuid = "1.23.3"
 
 [lints]

@@ -207,20 +207,20 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 ## Phase 9 — The Tideline (visual debugger, P1 centrepiece)
 
 ### Plumbing
-- [ ] (P0) Define a read-only event/state stream API the UI consumes (replay + live)
-- [ ] (P0) Scaffold the TS/React app (Vite), connect to core via server mode or a local bridge
-- [ ] (P1) Session recording format so a run can be saved and replayed in the UI
-- [ ] (P1) Time-scrubber control (play/pause/seek over a session timeline)
+- [x] (P0) Define a read-only event/state stream API the UI consumes (replay + live)
+- [x] (P0) Scaffold the TS/React app (Vite), connect to core via server mode or a local bridge
+- [x] (P1) Session recording format so a run can be saved and replayed in the UI
+- [x] (P1) Time-scrubber control (play/pause/seek over a session timeline)
 
 ### Views
-- [ ] (P1) Tier map: memories as nodes, positioned by significance, coloured by tier
-- [ ] (P1) Live drift animation: nodes move hot→warm→cold and snap back on access
-- [ ] (P1) "Why did I get this?" panel: click a recalled memory → full `why()` trace
-- [ ] (P1) Significance breakdown viz: decay curve + reinforcement events over time for one item
-- [ ] (P1) The Shibahama-moment view: old fact invalidating, quarantined new fact entering at lower credence
-- [ ] (P2) Poisoning view: quarantined/low-credence items visually walled off; show they can't outrank
-- [ ] (P2) Bi-temporal scrubber: "show me the memory state as of date X"
-- [ ] (P2) Graph view: entities + relationships with valid-time edges
+- [x] (P1) Tier map: memories as nodes, positioned by significance, coloured by tier
+- [x] (P1) Live drift animation: nodes move hot→warm→cold and snap back on access
+- [x] (P1) "Why did I get this?" panel: click a recalled memory → full `why()` trace
+- [x] (P1) Significance breakdown viz: decay curve + reinforcement events over time for one item
+- [x] (P1) The Shibahama-moment view: old fact invalidating, quarantined new fact entering at lower credence
+- [x] (P2) Poisoning view: quarantined/low-credence items visually walled off; show they can't outrank
+- [x] (P2) Bi-temporal scrubber: "show me the memory state as of date X"
+- [x] (P2) Graph view: entities + relationships with valid-time edges
 - [ ] (P3) Diff view between two points in a session
 - [ ] (P3) Export a view as the README GIF / shareable clip
 

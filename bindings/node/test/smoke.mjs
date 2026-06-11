@@ -2,18 +2,24 @@
 
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import shibahama, { Shibahama, version } from "../index.mjs";
 
+const require = createRequire(import.meta.url);
+const cjs = require("../index.cjs");
 const dir = await mkdtemp(join(tmpdir(), "shibahama-node-"));
 
 try {
   const engine = new Shibahama(join(dir, "store.redb"), 2);
+  const cjsEngine = new cjs.Shibahama(join(dir, "cjs-store.redb"), 2);
 
   assert.equal(version(), shibahama.version());
+  assert.equal(cjs.version(), version());
   assert.equal(engine.isOpen(), true);
+  assert.equal(cjsEngine.isOpen(), true);
 
   const item = engine.write("Node binding memory", {
     vector: [0, 0],

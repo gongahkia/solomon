@@ -31,6 +31,7 @@ class SQLiteKnowledgeStore:
         self._conn = sqlite3.connect(self.path)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self.initialize()
 
@@ -303,6 +304,12 @@ class SQLiteKnowledgeStore:
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_knowledge_items_scope ON knowledge_items(matter_id, client_id)"
         )
+
+    def pragma(self, name: str) -> Any:
+        row = self._conn.execute(f"PRAGMA {name}").fetchone()  # noqa: S608
+        if row is None:
+            return None
+        return row[0]
 
     def _append_event(
         self,

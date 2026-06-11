@@ -248,11 +248,11 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 14 — Performance & hardening (P2)
 
-- [ ] (P1) Recall + currency-evaluation latency budget (p50/p95)
-- [ ] (P1) Ensure propagation is incremental (a change touches only dependents, no full-graph rescan)
-- [ ] (P2) Index the dependency graph for fast `impact_query`
-- [ ] (P2) Concurrency: safe multi-reader/single-writer (or MVCC) on the store
-- [ ] (P2) Memory/footprint budget for solomon-local
+- [x] (P1) Recall + currency-evaluation latency budget (p50/p95)
+- [x] (P1) Ensure propagation is incremental (a change touches only dependents, no full-graph rescan)
+- [x] (P2) Index the dependency graph for fast `impact_query`
+- [x] (P2) Concurrency: safe multi-reader/single-writer (or MVCC) on the store
+- [x] (P2) Memory/footprint budget for solomon-local
 - [ ] (P3) Caching of currency evaluations with correct invalidation on dependency change
 
 ---

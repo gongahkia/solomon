@@ -1,0 +1,20 @@
+[package]
+name = "shibahama-cli"
+description = "Command-line interface for Shibahama."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme = "../README.md"
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "shibahama"
+path = "src/main.rs"
+
+[dependencies]
+shibahama-core.workspace = true

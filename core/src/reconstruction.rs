@@ -56,6 +56,87 @@ pub struct QuarantinedProposal {
     pub tags: BTreeSet<String>,
 }
 
+/// Evidence that may corroborate a quarantined reconstruction proposal.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CorroborationSignal {
+    /// Independent observation that agrees with the proposal.
+    ConsistentObservation {
+        /// Source kind that produced the observation.
+        source_kind: SourceKind,
+    },
+    /// Human or caller explicitly confirmed the proposal.
+    HumanConfirmed,
+    /// A trusted source produced the same observation.
+    HighCredenceSource {
+        /// Source kind that produced the observation.
+        source_kind: SourceKind,
+        /// Credence assigned to that source.
+        credence: CredenceTier,
+    },
+}
+
+/// Policy controlling when quarantined proposals may be promoted.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CorroborationPolicy {
+    /// Minimum number of independent consistent observations needed for promotion.
+    pub required_consistent_observations: usize,
+    /// Minimum credence that allows a single high-credence source to promote.
+    pub high_credence_threshold: CredenceTier,
+    /// Credence assigned when promotion is based on repeated consistent observations.
+    pub observation_promotion_credence: CredenceTier,
+    /// Accessibility tier assigned to promoted proposals.
+    pub promoted_tier: Tier,
+}
+
+impl Default for CorroborationPolicy {
+    fn default() -> Self {
+        Self {
+            required_consistent_observations: 2,
+            high_credence_threshold: CredenceTier::VerifiedSource,
+            observation_promotion_credence: CredenceTier::ModelInferred,
+            promoted_tier: Tier::Warm,
+        }
+    }
+}
+
+/// Why a quarantined proposal satisfied corroboration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CorroborationBasis {
+    /// Human or caller confirmation.
+    HumanConfirmation,
+    /// A high-credence source confirmed the proposal.
+    HighCredenceSource {
+        /// Source kind that confirmed the proposal.
+        source_kind: SourceKind,
+        /// Credence assigned to that source.
+        credence: CredenceTier,
+    },
+    /// Enough independent consistent observations agreed with the proposal.
+    ConsistentObservations {
+        /// Number of observations counted.
+        count: usize,
+    },
+}
+
+/// Result of evaluating proposal corroboration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CorroborationDecision {
+    /// Evidence basis that allowed promotion, if any.
+    pub basis: Option<CorroborationBasis>,
+    /// Credence the proposal may receive after promotion.
+    pub promoted_credence: Option<CredenceTier>,
+    /// Tier the proposal may enter after promotion.
+    pub promoted_tier: Option<Tier>,
+}
+
+impl CorroborationDecision {
+    /// Returns true when the proposal may leave quarantine.
+    #[must_use]
+    pub const fn may_promote(self) -> bool {
+        self.promoted_credence.is_some()
+    }
+}
+
 /// Planned re-validation action for a reconstruction trigger.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RevalidationAction {
@@ -168,6 +249,82 @@ pub fn quarantine_proposal(mut item: MemoryItem, supersedes: MemoryId) -> Quaran
         supersedes,
         tags: BTreeSet::from([QUARANTINE_TAG.to_owned()]),
     }
+}
+
+/// Evaluates whether corroboration signals are enough to promote a proposal.
+#[must_use]
+pub fn evaluate_corroboration(
+    signals: &[CorroborationSignal],
+    policy: CorroborationPolicy,
+) -> CorroborationDecision {
+    let human_confirmed = signals
+        .iter()
+        .any(|signal| matches!(signal, CorroborationSignal::HumanConfirmed));
+    if human_confirmed {
+        return CorroborationDecision {
+            basis: Some(CorroborationBasis::HumanConfirmation),
+            promoted_credence: Some(CredenceTier::FirmAuthoritative),
+            promoted_tier: Some(policy.promoted_tier),
+        };
+    }
+
+    if let Some((source_kind, credence)) = signals.iter().find_map(|signal| match signal {
+        CorroborationSignal::HighCredenceSource {
+            source_kind,
+            credence,
+        } if *credence >= policy.high_credence_threshold => Some((*source_kind, *credence)),
+        _ => None,
+    }) {
+        return CorroborationDecision {
+            basis: Some(CorroborationBasis::HighCredenceSource {
+                source_kind,
+                credence,
+            }),
+            promoted_credence: Some(credence),
+            promoted_tier: Some(policy.promoted_tier),
+        };
+    }
+
+    let consistent_observations = signals
+        .iter()
+        .filter(|signal| matches!(signal, CorroborationSignal::ConsistentObservation { .. }))
+        .count();
+    let required_observations = policy.required_consistent_observations.max(2);
+    if consistent_observations >= required_observations {
+        return CorroborationDecision {
+            basis: Some(CorroborationBasis::ConsistentObservations {
+                count: consistent_observations,
+            }),
+            promoted_credence: Some(policy.observation_promotion_credence),
+            promoted_tier: Some(policy.promoted_tier),
+        };
+    }
+
+    CorroborationDecision {
+        basis: None,
+        promoted_credence: None,
+        promoted_tier: None,
+    }
+}
+
+/// Returns a promoted copy of a quarantined proposal when corroboration permits it.
+#[must_use]
+pub fn promote_corroborated_proposal(
+    proposal: &QuarantinedProposal,
+    signals: &[CorroborationSignal],
+    policy: CorroborationPolicy,
+) -> Option<MemoryItem> {
+    let decision = evaluate_corroboration(signals, policy);
+    let (Some(promoted_credence), Some(promoted_tier)) =
+        (decision.promoted_credence, decision.promoted_tier)
+    else {
+        return None;
+    };
+
+    let mut item = proposal.item.clone();
+    item.credence = promoted_credence;
+    item.tier = item.clamp_tier_to_floor(promoted_tier);
+    Some(item)
 }
 
 #[cfg(test)]
@@ -286,5 +443,99 @@ mod tests {
         assert_eq!(quarantined.item.credence_floor, Tier::Cold);
         assert_eq!(quarantined.supersedes, superseded);
         assert!(quarantined.tags.contains(QUARANTINE_TAG));
+    }
+
+    #[test]
+    fn corroboration_rejects_single_consistent_observation() {
+        let decision = evaluate_corroboration(
+            &[CorroborationSignal::ConsistentObservation {
+                source_kind: SourceKind::Tool,
+            }],
+            CorroborationPolicy::default(),
+        );
+
+        assert!(!decision.may_promote());
+        assert_eq!(decision.basis, None);
+    }
+
+    #[test]
+    fn corroboration_allows_second_consistent_observation() {
+        let decision = evaluate_corroboration(
+            &[
+                CorroborationSignal::ConsistentObservation {
+                    source_kind: SourceKind::File,
+                },
+                CorroborationSignal::ConsistentObservation {
+                    source_kind: SourceKind::Tool,
+                },
+            ],
+            CorroborationPolicy::default(),
+        );
+
+        assert!(decision.may_promote());
+        assert_eq!(
+            decision.basis,
+            Some(CorroborationBasis::ConsistentObservations { count: 2 })
+        );
+        assert_eq!(
+            decision.promoted_credence,
+            Some(CredenceTier::ModelInferred)
+        );
+    }
+
+    #[test]
+    fn corroboration_allows_human_confirmation() {
+        let decision = evaluate_corroboration(
+            &[CorroborationSignal::HumanConfirmed],
+            CorroborationPolicy::default(),
+        );
+
+        assert!(decision.may_promote());
+        assert_eq!(decision.basis, Some(CorroborationBasis::HumanConfirmation));
+        assert_eq!(
+            decision.promoted_credence,
+            Some(CredenceTier::FirmAuthoritative)
+        );
+    }
+
+    #[test]
+    fn corroboration_allows_high_credence_source() {
+        let decision = evaluate_corroboration(
+            &[CorroborationSignal::HighCredenceSource {
+                source_kind: SourceKind::File,
+                credence: CredenceTier::VerifiedSource,
+            }],
+            CorroborationPolicy::default(),
+        );
+
+        assert!(decision.may_promote());
+        assert_eq!(
+            decision.basis,
+            Some(CorroborationBasis::HighCredenceSource {
+                source_kind: SourceKind::File,
+                credence: CredenceTier::VerifiedSource,
+            })
+        );
+        assert_eq!(
+            decision.promoted_credence,
+            Some(CredenceTier::VerifiedSource)
+        );
+    }
+
+    #[test]
+    fn promote_corroborated_proposal_returns_promoted_copy() {
+        let quarantined = quarantine_proposal(candidate(false).item, MemoryId::new_v7());
+        let promoted = promote_corroborated_proposal(
+            &quarantined,
+            &[CorroborationSignal::HumanConfirmed],
+            CorroborationPolicy::default(),
+        )
+        .expect("human confirmation should promote proposal");
+
+        assert_eq!(promoted.id, quarantined.item.id);
+        assert_eq!(promoted.credence, CredenceTier::FirmAuthoritative);
+        assert_eq!(promoted.tier, Tier::Warm);
+        assert_eq!(quarantined.item.credence, CredenceTier::Unverified);
+        assert_eq!(quarantined.item.tier, Tier::Cold);
     }
 }

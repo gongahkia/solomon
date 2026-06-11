@@ -7,6 +7,45 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 
 ---
 
+## Stop point / next work
+
+Stopped on 2026-06-12 after the benchmark and coding-agent demo slices.
+
+Current uncommitted local state:
+- `TODO.md` has Phase 12 testing items checked off based on existing core tests plus a new correctness smoke.
+- `scripts/ci/correctness-smoke.py` is untracked; it passed once and covers invalidated recall, never-delete behavior, malformed/adversarial ingestion, poisoning quarantine, a 10k-session soak, and Python/Node parity.
+- Decide next whether to keep and commit that smoke script, or revert the Phase 12 checkbox changes.
+
+Still not done / next up:
+- Publishing is blocked on registry credentials or trusted publishing setup:
+  - TestPyPI/PyPI publish for `pip install`.
+  - npm publish for `npm install`.
+  - final `v0.1.0` tag + crate/pip/npm publish.
+- Benchmarks:
+  - Run LoCoMo through all systems once a dataset export and external service credentials/config are available.
+  - Run LongMemEval through all systems once a dataset export and external service credentials/config are available.
+  - Implement real ablations for significance/reconstruction/graph toggles; do not mark done with placeholder labels.
+  - Run Mem0 and Zep adapters with real credentials/config to complete the "all systems" CurrencyBench gap claim.
+- Performance:
+  - Add recall latency benchmark with p50/p95 budget.
+  - Audit hot paths for accidental global scans.
+  - Profile significance recompute.
+  - Add embedded memory-footprint budget.
+  - Add tested multi-reader/single-writer or MVCC concurrency story.
+- Documentation:
+  - Replace the stub README with the full thesis/quickstart/benchmark/debugger narrative.
+  - Write `docs/architecture.md`, `docs/concepts.md`, `docs/benchmarks.md`, and `docs/security.md`.
+  - Generate or collect API references for Rust, TypeScript/Node, and Python.
+  - Add runnable snippets per binding under `examples/`.
+  - Keep the ADR index current.
+- Launch assets:
+  - Record the Tideline README demo GIF.
+  - Draft Show HN post, FAQ, short launch writeup, and early-user outreach notes.
+- Final security/posture check:
+  - Confirm the encryption-at-rest trait and metadata-only logging hooks are documented and visible from the public surface.
+
+---
+
 ## Phase 0 — Foundations & repo scaffolding
 
 ### Repo & tooling
@@ -264,17 +303,17 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 
 ## Phase 12 — Testing & correctness (P0/P1, cross-cutting)
 
-- [ ] (P0) Unit tests for the data model, bi-temporal invariants, tier transitions
-- [ ] (P0) Property test: no operation ever deletes a memory (the core invariant)
-- [ ] (P0) Property test: invalidated facts never appear in default (valid-now) recall
-- [ ] (P1) Property test: low-credence items never outrank authoritative on identical similarity
-- [ ] (P1) Significance determinism test: same access history → same significance breakdown
-- [ ] (P1) Reconstruction gate test: a plain read never mutates memory
-- [ ] (P1) Crash-recovery test: kill mid-write, reopen, state is consistent
-- [ ] (P1) Binding parity tests: Python and Node return equivalent results to the Rust core
-- [ ] (P2) Fuzz the ingestion path (malformed/adversarial writes)
-- [ ] (P2) Soak test: long-running agent over 10k+ sessions, assert no unbounded growth in hot tier
-- [ ] (P2) Poisoning red-team test: attempt to promote a planted false fact, assert quarantine holds
+- [x] (P0) Unit tests for the data model, bi-temporal invariants, tier transitions
+- [x] (P0) Property test: no operation ever deletes a memory (the core invariant)
+- [x] (P0) Property test: invalidated facts never appear in default (valid-now) recall
+- [x] (P1) Property test: low-credence items never outrank authoritative on identical similarity
+- [x] (P1) Significance determinism test: same access history → same significance breakdown
+- [x] (P1) Reconstruction gate test: a plain read never mutates memory
+- [x] (P1) Crash-recovery test: kill mid-write, reopen, state is consistent
+- [x] (P1) Binding parity tests: Python and Node return equivalent results to the Rust core
+- [x] (P2) Fuzz the ingestion path (malformed/adversarial writes)
+- [x] (P2) Soak test: long-running agent over 10k+ sessions, assert no unbounded growth in hot tier
+- [x] (P2) Poisoning red-team test: attempt to promote a planted false fact, assert quarantine holds
 
 ---
 

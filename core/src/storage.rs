@@ -87,6 +87,15 @@ pub enum MemoryEvent {
         /// Pointer to compressed content.
         pointer: CompactionRef,
     },
+    /// A reconstructed memory replaced a superseded memory without overwriting history.
+    ReconstructionApplied {
+        /// Superseded memory id whose valid-time interval was closed.
+        superseded_id: MemoryId,
+        /// Replacement memory id written as a separate row.
+        replacement_id: MemoryId,
+        /// Timestamp that closes the superseded memory's valid-time interval.
+        valid_to: OffsetDateTime,
+    },
 }
 
 /// Durable event-log record with a monotonic sequence number.
@@ -129,6 +138,8 @@ pub struct ReconstructionReplacementRecord {
     pub invalidation: EventRecord,
     /// Event writing the replacement memory as a separate row.
     pub replacement_write: EventRecord,
+    /// Reconstruction marker event for replay/debugger consumers.
+    pub reconstruction: EventRecord,
 }
 
 /// Tier residency limits for materialized memory state.
@@ -1234,7 +1245,7 @@ impl RedbMemoryStore {
         write_txn
             .set_durability(Durability::Immediate)
             .map_err(embed)?;
-        let (invalidation_sequence, write_sequence) = {
+        let (invalidation_sequence, write_sequence, reconstruction_sequence) = {
             let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
             let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
             let superseded_key = superseded_id.to_string();
@@ -1260,26 +1271,19 @@ impl RedbMemoryStore {
 
             superseded.timestamps = superseded.timestamps.closed_at(valid_to);
 
-            let invalidation_sequence = event_table.len().map_err(embed)?;
-            let write_sequence = invalidation_sequence + 1;
-            let recorded_at = OffsetDateTime::now_utc();
-            let invalidation_record = EventRecord {
-                sequence: invalidation_sequence,
-                recorded_at,
-                event: MemoryEvent::MemoryInvalidated {
-                    id: superseded_id,
+            let (invalidation_record, write_record, reconstruction_record) =
+                reconstruction_replacement_events(
+                    event_table.len().map_err(embed)?,
+                    superseded_id,
+                    replacement,
                     valid_to,
-                },
-            };
-            let write_record = EventRecord {
-                sequence: write_sequence,
-                recorded_at,
-                event: MemoryEvent::MemoryWritten {
-                    item: Box::new(replacement.clone()),
-                },
-            };
+                );
+            let invalidation_sequence = invalidation_record.sequence;
+            let write_sequence = write_record.sequence;
+            let reconstruction_sequence = reconstruction_record.sequence;
             let invalidation_event_bytes = serde_json::to_vec(&invalidation_record)?;
             let write_event_bytes = serde_json::to_vec(&write_record)?;
+            let reconstruction_event_bytes = serde_json::to_vec(&reconstruction_record)?;
             let superseded_bytes = serde_json::to_vec(&superseded)?;
             let replacement_bytes = serde_json::to_vec(replacement)?;
 
@@ -1289,6 +1293,12 @@ impl RedbMemoryStore {
             event_table
                 .insert(write_sequence, write_event_bytes.as_slice())
                 .map_err(embed)?;
+            event_table
+                .insert(
+                    reconstruction_sequence,
+                    reconstruction_event_bytes.as_slice(),
+                )
+                .map_err(embed)?;
             item_table
                 .insert(superseded_key.as_str(), superseded_bytes.as_slice())
                 .map_err(embed)?;
@@ -1296,7 +1306,11 @@ impl RedbMemoryStore {
                 .insert(replacement_key.as_str(), replacement_bytes.as_slice())
                 .map_err(embed)?;
 
-            (invalidation_sequence, write_sequence)
+            (
+                invalidation_sequence,
+                write_sequence,
+                reconstruction_sequence,
+            )
         };
 
         write_txn.commit().map_err(embed)?;
@@ -1311,10 +1325,16 @@ impl RedbMemoryStore {
                 "committed reconstruction write event was not readable".to_owned(),
             )
         })?;
+        let reconstruction = self.event(reconstruction_sequence)?.ok_or_else(|| {
+            StorageError::Embedded(
+                "committed reconstruction marker event was not readable".to_owned(),
+            )
+        })?;
 
         Ok(Some(ReconstructionReplacementRecord {
             invalidation,
             replacement_write,
+            reconstruction,
         }))
     }
 
@@ -1825,6 +1845,41 @@ impl MemoryStore for RedbMemoryStore {
     fn events(&self) -> Result<Vec<EventRecord>, StorageError> {
         RedbMemoryStore::events(self)
     }
+}
+
+fn reconstruction_replacement_events(
+    first_sequence: u64,
+    superseded_id: MemoryId,
+    replacement: &MemoryItem,
+    valid_to: OffsetDateTime,
+) -> (EventRecord, EventRecord, EventRecord) {
+    let recorded_at = OffsetDateTime::now_utc();
+    let invalidation = EventRecord {
+        sequence: first_sequence,
+        recorded_at,
+        event: MemoryEvent::MemoryInvalidated {
+            id: superseded_id,
+            valid_to,
+        },
+    };
+    let replacement_write = EventRecord {
+        sequence: first_sequence + 1,
+        recorded_at,
+        event: MemoryEvent::MemoryWritten {
+            item: Box::new(replacement.clone()),
+        },
+    };
+    let reconstruction = EventRecord {
+        sequence: first_sequence + 2,
+        recorded_at,
+        event: MemoryEvent::ReconstructionApplied {
+            superseded_id,
+            replacement_id: replacement.id,
+            valid_to,
+        },
+    };
+
+    (invalidation, replacement_write, reconstruction)
 }
 
 fn embed(error: impl std::error::Error) -> StorageError {
@@ -2623,6 +2678,7 @@ mod tests {
         assert_eq!(stored_replacement.timestamps.valid_to, None);
         assert_eq!(record.invalidation.sequence, 1);
         assert_eq!(record.replacement_write.sequence, 2);
+        assert_eq!(record.reconstruction.sequence, 3);
         assert_eq!(
             record.invalidation.event,
             MemoryEvent::MemoryInvalidated {
@@ -2636,14 +2692,26 @@ mod tests {
                 item: Box::new(replacement.clone())
             }
         );
-        assert_eq!(events.len(), 3);
+        assert_eq!(
+            record.reconstruction.event,
+            MemoryEvent::ReconstructionApplied {
+                superseded_id: superseded.id,
+                replacement_id: replacement.id,
+                valid_to,
+            }
+        );
+        assert_eq!(events.len(), 4);
         assert!(matches!(events[0].event, MemoryEvent::MemoryWritten { .. }));
         assert!(matches!(
             events[1].event,
             MemoryEvent::MemoryInvalidated { .. }
         ));
         assert!(matches!(events[2].event, MemoryEvent::MemoryWritten { .. }));
-        assert_eq!(report.event_count, 3);
+        assert!(matches!(
+            events[3].event,
+            MemoryEvent::ReconstructionApplied { .. }
+        ));
+        assert_eq!(report.event_count, 4);
     }
 
     #[test]

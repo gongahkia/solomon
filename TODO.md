@@ -59,8 +59,8 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P1) `as_of(timestamp)` query: reconstruct the knowledge state at any past date (bi-temporal core capability)
 - [x] (P1) Crash-safe writes + recovery on startup
 - [x] (P1) Snapshot/restore of full firm-knowledge state to a portable file
-- [ ] (P2) Encryption-at-rest (♻️ mirror Kaypoh `mapping-store-hardening` patterns)
-- [ ] (P2) Pluggable backend so SQLite↔Postgres is a config switch
+- [x] (P2) Encryption-at-rest (♻️ mirror Kaypoh `mapping-store-hardening` patterns)
+- [x] (P2) Pluggable backend so SQLite↔Postgres is a config switch
 
 ### Vector / retrieval index
 - [x] (P0) Define embedding strategy and an index backend (local: sqlite-vss/lancedb; server: pgvector/qdrant)

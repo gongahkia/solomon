@@ -10,6 +10,7 @@ use thiserror::Error;
 use time::OffsetDateTime;
 
 const EVENT_LOG_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("event_log");
+const MEMORY_ITEMS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("memory_items");
 
 /// Error returned by storage backends.
 #[derive(Debug, Error)]
@@ -147,6 +148,47 @@ impl RedbMemoryStore {
             .map(|value| serde_json::from_slice(value.value()).map_err(StorageError::from))
             .transpose()
     }
+
+    /// Stores the current materialized state for a memory item.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the item cannot be serialized, written, or committed.
+    pub fn put_materialized_item(&self, item: &MemoryItem) -> Result<(), StorageError> {
+        let write_txn = self.db.begin_write().map_err(embed)?;
+        {
+            let mut table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let key = item.id.to_string();
+            let bytes = serde_json::to_vec(item)?;
+
+            table
+                .insert(key.as_str(), bytes.as_slice())
+                .map_err(embed)?;
+        }
+
+        write_txn.commit().map_err(embed)
+    }
+
+    /// Returns the current materialized state for a memory id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the item table cannot be read or a stored item cannot be decoded.
+    pub fn materialized_item(&self, id: MemoryId) -> Result<Option<MemoryItem>, StorageError> {
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(MEMORY_ITEMS_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(error) => return Err(embed(error)),
+        };
+        let key = id.to_string();
+
+        table
+            .get(key.as_str())
+            .map_err(embed)?
+            .map(|value| serde_json::from_slice(value.value()).map_err(StorageError::from))
+            .transpose()
+    }
 }
 
 fn embed(error: impl std::error::Error) -> StorageError {
@@ -221,5 +263,35 @@ mod tests {
                 item: Box::new(second_item)
             }
         );
+    }
+
+    #[test]
+    fn materialized_item_table_persists_current_state() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let path = file.path();
+        let mut item = test_item("current");
+        let item_id = item.id;
+
+        {
+            let store = RedbMemoryStore::open(path).expect("store should open");
+
+            store
+                .put_materialized_item(&item)
+                .expect("item should materialize");
+
+            item.significance = 2.0;
+            store
+                .put_materialized_item(&item)
+                .expect("item should update materialized state");
+        }
+
+        let reopened = RedbMemoryStore::open(path).expect("store should reopen");
+        let stored = reopened
+            .materialized_item(item_id)
+            .expect("item should read")
+            .expect("item should exist");
+
+        assert!((stored.significance - 2.0).abs() < f64::EPSILON);
+        assert_eq!(stored.content, "current");
     }
 }

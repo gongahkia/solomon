@@ -3,6 +3,7 @@
 //! Durable storage primitives for Shibahama.
 
 use crate::model::{AccessEvent, CompactionRef, EmbeddingRef, MemoryId, MemoryItem, Tier};
+use crate::significance::SignificanceConfig;
 use crate::vector::{VectorIndex, VectorIndexError};
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use redb::{
@@ -645,6 +646,8 @@ impl RedbMemoryStore {
             };
 
             item.access_events.push(access_event.clone());
+            item.significance =
+                SignificanceConfig::default().recompute(&item, access_event.timestamp);
 
             let sequence = event_table.len().map_err(embed)?;
             let record = EventRecord {
@@ -1202,6 +1205,7 @@ mod tests {
             stored.access_events[0].outcome,
             crate::model::AccessOutcome::LedSomewhere
         );
+        assert!(stored.significance > item.significance);
     }
 
     #[test]

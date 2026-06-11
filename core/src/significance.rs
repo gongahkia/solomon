@@ -2,7 +2,7 @@
 
 //! Significance scoring primitives.
 
-use crate::model::{AccessEvent, AccessOutcome};
+use crate::model::{AccessEvent, AccessOutcome, MemoryItem};
 use time::OffsetDateTime;
 
 /// Configuration for the transparent significance function.
@@ -22,6 +22,25 @@ pub struct SignificanceConfig {
     pub ignored_weight: f64,
     /// Penalty for contradiction outcomes.
     pub contradicted_weight: f64,
+}
+
+/// Deterministic contribution breakdown for a significance score.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SignificanceBreakdown {
+    /// Base score before access-derived adjustments.
+    pub base_score: f64,
+    /// Time-decay multiplier applied to the base score.
+    pub decay_multiplier: f64,
+    /// Base score after decay.
+    pub decayed_base: f64,
+    /// Diminishing-returns access reinforcement.
+    pub reinforcement: f64,
+    /// Weighted access-outcome contribution.
+    pub outcome_bonus: f64,
+    /// Positive penalty from contradiction outcomes.
+    pub contradiction_penalty: f64,
+    /// Final score after all transparent terms.
+    pub final_score: f64,
 }
 
 impl Default for SignificanceConfig {
@@ -92,6 +111,39 @@ impl SignificanceConfig {
         let capped_count = u32::try_from(contradiction_count).unwrap_or(u32::MAX);
 
         f64::from(capped_count) * self.contradicted_weight.abs()
+    }
+
+    /// Computes a full significance explanation for an item at `now`.
+    #[must_use]
+    pub fn explain(self, item: &MemoryItem, now: OffsetDateTime) -> SignificanceBreakdown {
+        let last_used_at = item
+            .access_events
+            .iter()
+            .map(|event| event.timestamp)
+            .max()
+            .unwrap_or(item.timestamps.ingested_at);
+        let decay_multiplier = self.time_decay(last_used_at, now);
+        let decayed_base = item.significance * decay_multiplier;
+        let reinforcement = self.reinforcement(item.access_events.len());
+        let outcome_bonus = self.outcome_bonus(&item.access_events);
+        let contradiction_penalty = self.contradiction_penalty(&item.access_events);
+        let final_score = decayed_base + reinforcement + outcome_bonus - contradiction_penalty;
+
+        SignificanceBreakdown {
+            base_score: item.significance,
+            decay_multiplier,
+            decayed_base,
+            reinforcement,
+            outcome_bonus,
+            contradiction_penalty,
+            final_score,
+        }
+    }
+
+    /// Recomputes the materialized significance score for an item at `now`.
+    #[must_use]
+    pub fn recompute(self, item: &MemoryItem, now: OffsetDateTime) -> f64 {
+        self.explain(item, now).final_score
     }
 }
 
@@ -170,5 +222,38 @@ mod tests {
         let expected = config.contradicted_weight.abs() * 2.0;
 
         assert!((config.contradiction_penalty(&events) - expected).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn explain_recomputes_score_from_access_log_lazily() {
+        let config = SignificanceConfig::default();
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let mut item = MemoryItem {
+            schema_version: crate::model::CURRENT_MEMORY_SCHEMA_VERSION,
+            id: crate::model::MemoryId::new_v7(),
+            content: "score me".to_owned(),
+            compaction: None,
+            embedding_ref: None,
+            provenance: crate::model::Provenance::new(
+                crate::model::SourceKind::User,
+                None,
+                "significance-test",
+            ),
+            timestamps: crate::model::TemporalBounds::open_from(now, now),
+            tier: crate::model::Tier::Warm,
+            credence: crate::model::CredenceTier::VerifiedSource,
+            significance: 1.0,
+            credence_floor: crate::model::Tier::Cold,
+            access_events: Vec::new(),
+        };
+
+        item.access_events
+            .push(AccessEvent::new(now, None, AccessOutcome::LedSomewhere));
+
+        let breakdown = config.explain(&item, now);
+
+        assert!(breakdown.reinforcement > 0.0);
+        assert!(breakdown.outcome_bonus > 0.0);
+        assert!((config.recompute(&item, now) - breakdown.final_score).abs() < f64::EPSILON);
     }
 }

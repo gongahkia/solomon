@@ -82,7 +82,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Implement reinforcement term: each access boosts significance (with diminishing returns)
 - [x] (P1) Implement outcome-weighting: "led somewhere" boosts more than passive surfacing
 - [x] (P1) Implement contradiction penalty
-- [ ] (P1) Implement recompute-on-access (lazy) so there is NO global maintenance scan
+- [x] (P1) Implement recompute-on-access (lazy) so there is NO global maintenance scan
 - [ ] (P1) Implement the credence-floor clamp (significance may fall, tier cannot drop below floor)
 - [ ] (P2) Make the significance function pluggable/parameterised via config
 - [ ] (P2) Expose a deterministic "explain significance" breakdown (powers `why()` + the debugger)

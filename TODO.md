@@ -39,7 +39,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Implement stable ID generation (UUID v7 for time-orderability)
 - [ ] (P0) Define `Provenance` type: source kind (user / agent / file / web / tool), source ref, ingested-by
 - [ ] (P0) Define bi-temporal fields: `valid_from`, `valid_to` (nullable = open interval), `ingested_at`
-- [ ] (P0) Define `CredenceTier` enum: FirmAuthoritative / VerifiedSource / ModelInferred / Unverified (generic names for OSS)
+- [x] (P0) Define `CredenceTier` enum: FirmAuthoritative / VerifiedSource / ModelInferred / Unverified (generic names for OSS)
 - [ ] (P0) Define `Tier` enum: Hot / Warm / Cold
 - [ ] (P0) Define `AccessEvent`: timestamp, query-context hash, outcome signal (led-somewhere / cited / ignored / contradicted)
 - [ ] (P1) Define `credence_floor` per item (clamp below which significance cannot push tier)

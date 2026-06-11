@@ -43,6 +43,27 @@ impl From<MemoryId> for Uuid {
     }
 }
 
+/// Trust class assigned to a memory from its provenance and corroboration state.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub enum CredenceTier {
+    /// Unconfirmed content, including web imports and quarantined reconstruction proposals.
+    Unverified,
+    /// Agent or model inference not directly asserted by a trusted source.
+    ModelInferred,
+    /// Observation from a source Shibahama can re-read or otherwise verify.
+    VerifiedSource,
+    /// Explicit user instruction, pinned project decision, or other authoritative assertion.
+    FirmAuthoritative,
+}
+
+impl CredenceTier {
+    /// Returns true when this tier may be treated as authoritative for conflict resolution.
+    #[must_use]
+    pub const fn is_authoritative(self) -> bool {
+        matches!(self, Self::FirmAuthoritative)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,5 +81,13 @@ mod tests {
         let second = MemoryId::new_v7();
 
         assert!(first < second);
+    }
+
+    #[test]
+    fn credence_tiers_order_from_weakest_to_strongest() {
+        assert!(CredenceTier::Unverified < CredenceTier::ModelInferred);
+        assert!(CredenceTier::ModelInferred < CredenceTier::VerifiedSource);
+        assert!(CredenceTier::VerifiedSource < CredenceTier::FirmAuthoritative);
+        assert!(CredenceTier::FirmAuthoritative.is_authoritative());
     }
 }

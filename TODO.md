@@ -48,7 +48,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 ### Storage engine
 - [x] (P0) Implement append-only event log (writes never destroy; the source of truth)
 - [x] (P0) Implement primary KV store for current materialised item state (e.g. redb / sled / rocksdb — pick in ADR)
-- [ ] (P0) Implement `write(item)` → persists event + updates materialised state
+- [x] (P0) Implement `write(item)` → persists event + updates materialised state
 - [ ] (P0) Implement `get(id)` and `get_many(ids)`
 - [ ] (P0) Implement soft-invalidate: close `valid_to`, never delete the row
 - [ ] (P1) Implement compaction for cold-tier items (compress content, keep metadata + pointer)

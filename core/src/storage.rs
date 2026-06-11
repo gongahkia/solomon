@@ -112,6 +112,47 @@ impl RedbMemoryStore {
             .ok_or_else(|| StorageError::Embedded("committed event was not readable".to_owned()))
     }
 
+    /// Writes a memory item by appending a source event and updating materialized state atomically.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the item or event cannot be serialized, written, committed, or read
+    /// back.
+    pub fn write(&self, item: &MemoryItem) -> Result<EventRecord, StorageError> {
+        let write_txn = self.db.begin_write().map_err(embed)?;
+        let sequence = {
+            let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+            let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let sequence = event_table.len().map_err(embed)?;
+            let event = MemoryEvent::MemoryWritten {
+                item: Box::new(item.clone()),
+            };
+            let record = EventRecord {
+                sequence,
+                recorded_at: OffsetDateTime::now_utc(),
+                event,
+            };
+            let event_bytes = serde_json::to_vec(&record)?;
+            let item_bytes = serde_json::to_vec(&item)?;
+            let item_key = item.id.to_string();
+
+            event_table
+                .insert(sequence, event_bytes.as_slice())
+                .map_err(embed)?;
+            item_table
+                .insert(item_key.as_str(), item_bytes.as_slice())
+                .map_err(embed)?;
+
+            sequence
+        };
+
+        write_txn.commit().map_err(embed)?;
+
+        self.event(sequence)?.ok_or_else(|| {
+            StorageError::Embedded("committed write event was not readable".to_owned())
+        })
+    }
+
     /// Returns all event-log records in sequence order.
     ///
     /// # Errors
@@ -293,5 +334,32 @@ mod tests {
 
         assert!((stored.significance - 2.0).abs() < f64::EPSILON);
         assert_eq!(stored.content, "current");
+    }
+
+    #[test]
+    fn write_appends_event_and_updates_materialized_state() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let item = test_item("write-through");
+        let item_id = item.id;
+
+        let record = store.write(&item).expect("item should write");
+
+        assert_eq!(record.sequence, 0);
+        assert_eq!(
+            record.event,
+            MemoryEvent::MemoryWritten {
+                item: Box::new(item.clone())
+            }
+        );
+
+        let events = store.events().expect("events should read");
+        let stored = store
+            .materialized_item(item_id)
+            .expect("item should read")
+            .expect("item should exist");
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(stored, item);
     }
 }

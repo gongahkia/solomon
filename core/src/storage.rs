@@ -279,6 +279,7 @@ impl RedbMemoryStore {
         vector: &[f32],
         index_name: impl Into<String>,
         model: impl Into<String>,
+        model_version: impl Into<String>,
     ) -> Result<EventRecord, StorageError> {
         vector_index
             .add(item.id, vector)
@@ -288,6 +289,7 @@ impl RedbMemoryStore {
             index: index_name.into(),
             vector_id: item.id.to_string(),
             model: model.into(),
+            model_version: model_version.into(),
             dimensions: vector_index.dimensions(),
         });
 
@@ -1069,7 +1071,8 @@ mod tests {
                 &mut vector_index,
                 &[0.0, 0.0],
                 "hnsw-test",
-                "embedding-model@v1",
+                "embedding-model",
+                "v1",
             )
             .expect("embedded write should work");
 

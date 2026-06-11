@@ -232,10 +232,20 @@ pub struct EmbeddingRef {
     pub index: String,
     /// Backend-specific vector identifier.
     pub vector_id: String,
-    /// Embedding model or model-version identifier.
+    /// Embedding model identifier.
     pub model: String,
+    /// Embedding model version identifier.
+    pub model_version: String,
     /// Number of dimensions in the referenced vector.
     pub dimensions: usize,
+}
+
+impl EmbeddingRef {
+    /// Returns true when this reference was produced by a different embedding model contract.
+    #[must_use]
+    pub fn requires_reembed(&self, model: &str, model_version: &str, dimensions: usize) -> bool {
+        self.model != model || self.model_version != model_version || self.dimensions != dimensions
+    }
 }
 
 /// Pointer to content moved out of the hot materialized item row.
@@ -378,6 +388,7 @@ mod tests {
                 index: "default".to_owned(),
                 vector_id: "vec-1".to_owned(),
                 model: "test-embedding-model".to_owned(),
+                model_version: "v1".to_owned(),
                 dimensions: 3,
             }),
             provenance: Provenance::new(SourceKind::User, None, "unit-test"),
@@ -402,6 +413,22 @@ mod tests {
         assert_eq!(item.credence, CredenceTier::FirmAuthoritative);
         assert_eq!(item.schema_version, CURRENT_MEMORY_SCHEMA_VERSION);
         assert!((item.significance - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn embedding_ref_detects_reembed_requirements() {
+        let embedding = EmbeddingRef {
+            index: "default".to_owned(),
+            vector_id: "vec-1".to_owned(),
+            model: "model-a".to_owned(),
+            model_version: "v1".to_owned(),
+            dimensions: 3,
+        };
+
+        assert!(!embedding.requires_reembed("model-a", "v1", 3));
+        assert!(embedding.requires_reembed("model-a", "v2", 3));
+        assert!(embedding.requires_reembed("model-b", "v1", 3));
+        assert!(embedding.requires_reembed("model-a", "v1", 4));
     }
 
     #[test]

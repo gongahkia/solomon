@@ -711,6 +711,8 @@ dependencies = [
  "napi-build",
  "napi-derive",
  "shibahama-core",
+ "time",
+ "uuid",
 ]
 
 [[package]]

@@ -14,6 +14,32 @@ try {
 
   assert.equal(version(), shibahama.version());
   assert.equal(engine.isOpen(), true);
+
+  const item = engine.write("Node binding memory", {
+    vector: [0, 0],
+    sourceKind: "user",
+    sourceRef: "smoke",
+    validFromUnix: 0,
+    ingestedAtUnix: 0,
+  });
+  const recalled = engine.recall([0, 0], 1, { nowUnix: 0 });
+  const streamed = engine.streamRecall([0, 0], 1, { nowUnix: 0 });
+  const timeline = engine.timeline([0, 0], 1, 0);
+  const timelineStream = engine.streamTimeline([0, 0], 1, 0);
+  const why = engine.why(item.id, 0);
+  const items = engine.memoryItems();
+
+  assert.equal(item.content, "Node binding memory");
+  assert.equal(item.provenance.sourceKind, "user");
+  assert.equal(recalled[0].id, item.id);
+  assert.equal(streamed.next().id, item.id);
+  assert.equal(streamed.next(), null);
+  assert.equal(streamed.remaining(), 0);
+  assert.equal(timeline[0].id, item.id);
+  assert.equal(timelineStream.next().id, item.id);
+  assert.equal(engine.reinforce(item.id, "cited"), true);
+  assert.equal(why.item.id, item.id);
+  assert.ok(items.some((memory) => memory.id === item.id));
 } finally {
   await rm(dir, { force: true, recursive: true });
 }

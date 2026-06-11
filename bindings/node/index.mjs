@@ -5,5 +5,5 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const native = require("./index.cjs");
 
-export const { Shibahama, version } = native;
+export const { RecallStream, Shibahama, version } = native;
 export default native;

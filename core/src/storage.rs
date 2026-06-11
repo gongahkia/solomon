@@ -4,7 +4,8 @@
 
 use crate::model::{
     AccessEvent, CURRENT_MEMORY_SCHEMA_VERSION, CompactionRef, CredenceTier, EmbeddingRef, Entity,
-    EntityId, MemoryId, MemoryItem, Provenance, Relation, RelationId, TemporalBounds, Tier,
+    EntityId, MemoryId, MemoryItem, Provenance, Relation, RelationId, SourceKind, TemporalBounds,
+    Tier,
 };
 use crate::significance::{SignificanceBreakdown, SignificanceConfig, SignificanceFunction};
 use crate::vector::{VectorIndex, VectorIndexError};
@@ -276,8 +277,8 @@ pub struct MemoryWriteEvent {
     pub ingested_at: OffsetDateTime,
     /// Initial accessibility tier.
     pub tier: Tier,
-    /// Initial credence tier.
-    pub credence: CredenceTier,
+    /// Optional credence override; `None` assigns credence from provenance during ingest.
+    pub credence: Option<CredenceTier>,
     /// Initial significance score.
     pub significance: f64,
     /// Coldest tier this memory may occupy after demotion.
@@ -285,9 +286,29 @@ pub struct MemoryWriteEvent {
 }
 
 impl MemoryWriteEvent {
-    /// Creates a write event with mandatory provenance and explicit trust/tier inputs.
+    /// Creates a write event with mandatory provenance and source-kind credence assignment.
     #[must_use]
     pub fn new(
+        content: impl Into<String>,
+        provenance: Provenance,
+        valid_from: OffsetDateTime,
+        ingested_at: OffsetDateTime,
+    ) -> Self {
+        Self {
+            content: content.into(),
+            provenance,
+            valid_from,
+            ingested_at,
+            tier: Tier::Warm,
+            credence: None,
+            significance: 0.0,
+            credence_floor: Tier::Cold,
+        }
+    }
+
+    /// Creates a write event with mandatory provenance and an explicit credence override.
+    #[must_use]
+    pub fn with_explicit_credence(
         content: impl Into<String>,
         provenance: Provenance,
         valid_from: OffsetDateTime,
@@ -302,13 +323,17 @@ impl MemoryWriteEvent {
             valid_from,
             ingested_at,
             tier,
-            credence,
+            credence: Some(credence),
             significance: 0.0,
             credence_floor,
         }
     }
 
-    fn into_item(self) -> MemoryItem {
+    fn into_item(self, policy: IngestCredencePolicy) -> MemoryItem {
+        let credence = self
+            .credence
+            .unwrap_or_else(|| policy.credence_for(self.provenance.source_kind));
+
         MemoryItem {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             id: MemoryId::new_v7(),
@@ -318,10 +343,51 @@ impl MemoryWriteEvent {
             provenance: self.provenance,
             timestamps: TemporalBounds::open_from(self.valid_from, self.ingested_at),
             tier: self.tier,
-            credence: self.credence,
+            credence,
             significance: self.significance,
             credence_floor: self.credence_floor,
             access_events: Vec::new(),
+        }
+    }
+}
+
+/// Credence defaults assigned by source kind during ingestion.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IngestCredencePolicy {
+    /// Credence for user-provided memories.
+    pub user: CredenceTier,
+    /// Credence for agent-authored memories.
+    pub agent: CredenceTier,
+    /// Credence for file-backed memories.
+    pub file: CredenceTier,
+    /// Credence for web-backed memories.
+    pub web: CredenceTier,
+    /// Credence for tool-output memories.
+    pub tool: CredenceTier,
+}
+
+impl Default for IngestCredencePolicy {
+    fn default() -> Self {
+        Self {
+            user: CredenceTier::FirmAuthoritative,
+            agent: CredenceTier::ModelInferred,
+            file: CredenceTier::VerifiedSource,
+            web: CredenceTier::Unverified,
+            tool: CredenceTier::ModelInferred,
+        }
+    }
+}
+
+impl IngestCredencePolicy {
+    /// Returns the default credence for a source kind.
+    #[must_use]
+    pub const fn credence_for(self, source_kind: SourceKind) -> CredenceTier {
+        match source_kind {
+            SourceKind::User => self.user,
+            SourceKind::Agent => self.agent,
+            SourceKind::File => self.file,
+            SourceKind::Web => self.web,
+            SourceKind::Tool => self.tool,
         }
     }
 }
@@ -502,7 +568,7 @@ impl RedbMemoryStore {
         &self,
         event: MemoryWriteEvent,
     ) -> Result<(EventRecord, MemoryItem), StorageError> {
-        let item = event.into_item();
+        let item = event.into_item(IngestCredencePolicy::default());
         let record = self.write(&item)?;
 
         Ok((record, item))
@@ -2163,7 +2229,7 @@ mod tests {
             Some("/repo/README.md".to_owned()),
             "ingest-test",
         );
-        let event = MemoryWriteEvent::new(
+        let event = MemoryWriteEvent::with_explicit_credence(
             "ingested from file",
             provenance.clone(),
             OffsetDateTime::UNIX_EPOCH,
@@ -2197,6 +2263,32 @@ mod tests {
             }
         );
         assert_eq!(stored, item);
+    }
+
+    #[test]
+    fn write_event_assigns_credence_from_source_kind() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let cases = [
+            (SourceKind::User, CredenceTier::FirmAuthoritative),
+            (SourceKind::File, CredenceTier::VerifiedSource),
+            (SourceKind::Agent, CredenceTier::ModelInferred),
+            (SourceKind::Tool, CredenceTier::ModelInferred),
+            (SourceKind::Web, CredenceTier::Unverified),
+        ];
+
+        for (source_kind, expected_credence) in cases {
+            let event = MemoryWriteEvent::new(
+                format!("content from {source_kind:?}"),
+                Provenance::new(source_kind, None, "ingest-test"),
+                OffsetDateTime::UNIX_EPOCH,
+                OffsetDateTime::UNIX_EPOCH,
+            );
+            let (_, item) = store.write_event(event).expect("write event should ingest");
+
+            assert_eq!(item.provenance.source_kind, source_kind);
+            assert_eq!(item.credence, expected_credence);
+        }
     }
 
     #[test]
@@ -3384,7 +3476,7 @@ mod tests {
         let file = NamedTempFile::new().expect("tempfile should be created");
         let store = RedbMemoryStore::open(file.path()).expect("store should open");
         let item = test_item("trait-backed");
-        let event = MemoryWriteEvent::new(
+        let event = MemoryWriteEvent::with_explicit_credence(
             "trait event",
             Provenance::new(SourceKind::Tool, Some("tool:1".to_owned()), "trait-test"),
             OffsetDateTime::UNIX_EPOCH,

@@ -148,7 +148,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 ## Phase 6 — Ingestion gate & poisoning resistance (P1, OWASP ASI06)
 
 - [x] (P0) Implement `write(event)` ingestion path with mandatory provenance
-- [ ] (P0) Assign credence on ingest based on source kind (agent/web/tool default to lower)
+- [x] (P0) Assign credence on ingest based on source kind (agent/web/tool default to lower)
 - [ ] (P1) Quarantine model-generated and web-sourced content at low credence by default
 - [ ] (P1) Enforce: low-credence items can never outrank authoritative ones in retrieval
 - [ ] (P1) Bound auto-consolidation/summarisation to limit semantic drift (cap re-summarisation depth)

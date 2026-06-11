@@ -117,6 +117,13 @@ pub struct NeverDeleteInvariantReport {
     pub compacted_content_count: usize,
 }
 
+/// Tier residency limits for materialized memory state.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TierCapacityConfig {
+    /// Maximum number of hot-tier memories to retain, or `None` for no hot-tier limit.
+    pub hot_capacity: Option<usize>,
+}
+
 /// Full durable store snapshot.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct StoreSnapshot {
@@ -872,6 +879,101 @@ impl RedbMemoryStore {
     ) -> Result<Option<SignificanceBreakdown>, StorageError> {
         self.get(id)
             .map(|maybe_item| maybe_item.map(|item| policy.explain(&item, now)))
+    }
+
+    /// Enforces configured tier capacity limits by demoting the least-significant hot items.
+    ///
+    /// Hot-tier capacity is optional. When configured and the hot tier is over budget, this method
+    /// demotes the lowest-significance hot memories to warm and appends one `TierChanged` event for
+    /// each demotion. It never deletes rows or event history.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when materialized state cannot be read, decoded, updated, or logged.
+    pub fn enforce_tier_capacity(
+        &self,
+        config: TierCapacityConfig,
+    ) -> Result<Vec<MemoryId>, StorageError> {
+        let Some(hot_capacity) = config.hot_capacity else {
+            return Ok(Vec::new());
+        };
+        let mut hot_items = self
+            .materialized_items()?
+            .into_iter()
+            .filter(|item| item.tier == Tier::Hot)
+            .collect::<Vec<_>>();
+
+        if hot_items.len() <= hot_capacity {
+            return Ok(Vec::new());
+        }
+
+        hot_items.sort_by(|left, right| {
+            left.significance
+                .total_cmp(&right.significance)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+
+        let demotion_count = hot_items.len() - hot_capacity;
+        let victims = hot_items
+            .into_iter()
+            .take(demotion_count)
+            .map(|item| item.id)
+            .collect::<Vec<_>>();
+        let mut demoted = Vec::with_capacity(victims.len());
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+
+        {
+            let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+            let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let mut next_sequence = event_table.len().map_err(embed)?;
+
+            for id in victims {
+                let key = id.to_string();
+                let mut item: MemoryItem = {
+                    let Some(value) = item_table.get(key.as_str()).map_err(embed)? else {
+                        continue;
+                    };
+
+                    serde_json::from_slice(value.value())?
+                };
+
+                if item.tier != Tier::Hot {
+                    continue;
+                }
+
+                item.tier = Tier::Warm;
+
+                let event_record = EventRecord {
+                    sequence: next_sequence,
+                    recorded_at: OffsetDateTime::now_utc(),
+                    event: MemoryEvent::TierChanged {
+                        id,
+                        from: Tier::Hot,
+                        to: Tier::Warm,
+                    },
+                };
+                let event_bytes = serde_json::to_vec(&event_record)?;
+                let item_bytes = serde_json::to_vec(&item)?;
+
+                event_table
+                    .insert(next_sequence, event_bytes.as_slice())
+                    .map_err(embed)?;
+                item_table
+                    .insert(key.as_str(), item_bytes.as_slice())
+                    .map_err(embed)?;
+
+                next_sequence += 1;
+                demoted.push(id);
+            }
+        }
+
+        write_txn.commit().map_err(embed)?;
+
+        Ok(demoted)
     }
 
     /// Compacts inline content for a cold-tier item into compressed storage.
@@ -1653,6 +1755,72 @@ mod tests {
                 to: Tier::Cold,
             } if id == item.id
         ));
+    }
+
+    #[test]
+    fn enforce_tier_capacity_demotes_lowest_significance_hot_items() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut low = test_item("low");
+        let mut middle = test_item("middle");
+        let mut high = test_item("high");
+
+        low.tier = Tier::Hot;
+        low.significance = 1.0;
+        middle.tier = Tier::Hot;
+        middle.significance = 5.0;
+        high.tier = Tier::Hot;
+        high.significance = 10.0;
+
+        store.write(&low).expect("low should write");
+        store.write(&middle).expect("middle should write");
+        store.write(&high).expect("high should write");
+
+        assert!(
+            store
+                .enforce_tier_capacity(TierCapacityConfig::default())
+                .expect("unbounded capacity should work")
+                .is_empty()
+        );
+
+        let demoted = store
+            .enforce_tier_capacity(TierCapacityConfig {
+                hot_capacity: Some(2),
+            })
+            .expect("capacity should enforce");
+        let stored_low = store
+            .get(low.id)
+            .expect("low should read")
+            .expect("low should exist");
+        let stored_middle = store
+            .get(middle.id)
+            .expect("middle should read")
+            .expect("middle should exist");
+        let stored_high = store
+            .get(high.id)
+            .expect("high should read")
+            .expect("high should exist");
+        let events = store.events().expect("events should read");
+
+        assert_eq!(demoted, vec![low.id]);
+        assert_eq!(stored_low.tier, Tier::Warm);
+        assert_eq!(stored_middle.tier, Tier::Hot);
+        assert_eq!(stored_high.tier, Tier::Hot);
+        assert!(matches!(
+            events[3].event,
+            MemoryEvent::TierChanged {
+                id,
+                from: Tier::Hot,
+                to: Tier::Warm,
+            } if id == low.id
+        ));
+        assert_eq!(
+            store
+                .verify_never_delete_invariant()
+                .expect("never-delete invariant should hold")
+                .materialized_item_count,
+            3
+        );
     }
 
     #[test]

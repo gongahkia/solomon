@@ -2,7 +2,7 @@
 
 //! Significance scoring primitives.
 
-use crate::model::{AccessEvent, AccessOutcome, MemoryItem};
+use crate::model::{AccessEvent, AccessOutcome, MemoryItem, Tier};
 use time::OffsetDateTime;
 
 /// Configuration for the transparent significance function.
@@ -145,6 +145,12 @@ impl SignificanceConfig {
     pub fn recompute(self, item: &MemoryItem, now: OffsetDateTime) -> f64 {
         self.explain(item, now).final_score
     }
+
+    /// Applies the item's credence floor to a proposed tier.
+    #[must_use]
+    pub fn clamp_tier_to_credence_floor(self, item: &MemoryItem, proposed_tier: Tier) -> Tier {
+        proposed_tier.max(item.credence_floor)
+    }
 }
 
 #[cfg(test)]
@@ -255,5 +261,34 @@ mod tests {
         assert!(breakdown.reinforcement > 0.0);
         assert!(breakdown.outcome_bonus > 0.0);
         assert!((config.recompute(&item, now) - breakdown.final_score).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn significance_policy_respects_credence_floor() {
+        let config = SignificanceConfig::default();
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let item = MemoryItem {
+            schema_version: crate::model::CURRENT_MEMORY_SCHEMA_VERSION,
+            id: crate::model::MemoryId::new_v7(),
+            content: "floor me".to_owned(),
+            compaction: None,
+            embedding_ref: None,
+            provenance: crate::model::Provenance::new(
+                crate::model::SourceKind::User,
+                None,
+                "significance-test",
+            ),
+            timestamps: crate::model::TemporalBounds::open_from(now, now),
+            tier: crate::model::Tier::Hot,
+            credence: crate::model::CredenceTier::FirmAuthoritative,
+            significance: 0.0,
+            credence_floor: crate::model::Tier::Warm,
+            access_events: Vec::new(),
+        };
+
+        assert_eq!(
+            config.clamp_tier_to_credence_floor(&item, Tier::Cold),
+            Tier::Warm
+        );
     }
 }

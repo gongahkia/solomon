@@ -55,7 +55,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P1) Implement crash-safe writes (fsync policy / WAL) and a recovery path on startup
 - [x] (P1) Snapshot + restore of full memory state to a single file (portability, SQLite-like ergonomics)
 - [x] (P2) Pluggable storage backend trait so users can swap the KV engine
-- [ ] (P2) Encryption-at-rest hook (needed later for the legal variant; stub the trait now)
+- [x] (P2) Encryption-at-rest hook (needed later for the legal variant; stub the trait now)
 
 ### Vector index integration
 - [ ] (P0) Define `VectorIndex` trait (add, search, delete-by-id, dimensions)

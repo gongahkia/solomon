@@ -2,6 +2,7 @@
 
 #![doc = include_str!("../README.md")]
 
+pub mod encryption;
 pub mod model;
 pub mod storage;
 

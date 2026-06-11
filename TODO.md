@@ -27,7 +27,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) ADR: tier model (hot/warm/cold; never-delete invariant)
 - [x] (P0) ADR: in-process-first, optional-server deployment shape
 - [x] (P1) ADR: significance function v0 (transparent, hand-tuned, not learned)
-- [ ] (P1) ADR: credence taxonomy and the credence-floor invariant
+- [x] (P1) ADR: credence taxonomy and the credence-floor invariant
 - [ ] (P1) ADR: error model (recoverable vs fatal; how recall degrades gracefully)
 
 ---

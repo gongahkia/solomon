@@ -24,7 +24,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 ### Core architectural decisions (write these down in `docs/adr/`)
 - [x] (P0) ADR: storage substrate choice (embedded KV + pluggable vector index)
 - [x] (P0) ADR: bi-temporal model (valid-time vs ingestion-time semantics)
-- [ ] (P0) ADR: tier model (hot/warm/cold; never-delete invariant)
+- [x] (P0) ADR: tier model (hot/warm/cold; never-delete invariant)
 - [ ] (P0) ADR: in-process-first, optional-server deployment shape
 - [ ] (P1) ADR: significance function v0 (transparent, hand-tuned, not learned)
 - [ ] (P1) ADR: credence taxonomy and the credence-floor invariant

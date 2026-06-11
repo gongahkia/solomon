@@ -117,6 +117,55 @@ pub struct ColdContentRecord {
     pub bytes: Vec<u8>,
 }
 
+/// Storage backend contract for durable Shibahama memory state.
+pub trait MemoryStore {
+    /// Appends an event to the source-of-truth log.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot durably append the event.
+    fn append_event(&self, event: MemoryEvent) -> Result<EventRecord, StorageError>;
+
+    /// Writes a memory item and updates current materialized state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot durably write the event and current state.
+    fn write(&self, item: &MemoryItem) -> Result<EventRecord, StorageError>;
+
+    /// Reads current materialized state for one memory id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot read or decode current state.
+    fn get(&self, id: MemoryId) -> Result<Option<MemoryItem>, StorageError>;
+
+    /// Reads current materialized state for many ids, preserving input order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot read or decode current state.
+    fn get_many(&self, ids: &[MemoryId]) -> Result<Vec<Option<MemoryItem>>, StorageError>;
+
+    /// Soft-invalidates a memory without deleting it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot durably write the invalidation.
+    fn soft_invalidate(
+        &self,
+        id: MemoryId,
+        valid_to: OffsetDateTime,
+    ) -> Result<Option<EventRecord>, StorageError>;
+
+    /// Replays the event log in sequence order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot read or decode event records.
+    fn events(&self) -> Result<Vec<EventRecord>, StorageError>;
+}
+
 /// `redb`-backed store for event log and materialized memory state.
 pub struct RedbMemoryStore {
     db: Database,
@@ -607,6 +656,36 @@ impl RedbMemoryStore {
     }
 }
 
+impl MemoryStore for RedbMemoryStore {
+    fn append_event(&self, event: MemoryEvent) -> Result<EventRecord, StorageError> {
+        RedbMemoryStore::append_event(self, event)
+    }
+
+    fn write(&self, item: &MemoryItem) -> Result<EventRecord, StorageError> {
+        RedbMemoryStore::write(self, item)
+    }
+
+    fn get(&self, id: MemoryId) -> Result<Option<MemoryItem>, StorageError> {
+        RedbMemoryStore::get(self, id)
+    }
+
+    fn get_many(&self, ids: &[MemoryId]) -> Result<Vec<Option<MemoryItem>>, StorageError> {
+        RedbMemoryStore::get_many(self, ids)
+    }
+
+    fn soft_invalidate(
+        &self,
+        id: MemoryId,
+        valid_to: OffsetDateTime,
+    ) -> Result<Option<EventRecord>, StorageError> {
+        RedbMemoryStore::soft_invalidate(self, id, valid_to)
+    }
+
+    fn events(&self) -> Result<Vec<EventRecord>, StorageError> {
+        RedbMemoryStore::events(self)
+    }
+}
+
 fn embed(error: impl std::error::Error) -> StorageError {
     StorageError::Embedded(error.to_string())
 }
@@ -913,5 +992,23 @@ mod tests {
         assert_eq!(restored_cold.content, "");
         assert_eq!(restored_cold_content.as_deref(), Some("cold content"));
         assert_eq!(restored.events().expect("events should read").len(), 3);
+    }
+
+    #[test]
+    fn redb_store_satisfies_memory_store_trait() {
+        fn write_and_get(store: &dyn MemoryStore, item: &MemoryItem) -> MemoryItem {
+            store.write(item).expect("trait write should work");
+
+            store
+                .get(item.id)
+                .expect("trait get should read")
+                .expect("item should exist")
+        }
+
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let item = test_item("trait-backed");
+
+        assert_eq!(write_and_get(&store, &item), item);
     }
 }

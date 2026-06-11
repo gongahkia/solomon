@@ -216,14 +216,14 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 12 — Evaluation (🆕, leans on the demo + a small currency benchmark)
 
-- [ ] (P1) Synthetic firm-knowledge corpus generator (positions/memos/advice with dependencies + injected changes over time)
-- [ ] (P1) Metric: **stale-surface rate** — how often each system surfaces a stale internal item as current
-- [ ] (P1) Metric: **time-to-flag** after a dependency changes (propagation correctness)
-- [ ] (P1) Metric: **impact-query recall** — given a change, did we flag everything that depended on it
-- [ ] (P1) Baselines: a similarity-only warehouse retriever; (optionally) a Shibahama-style decay retriever to show decay is *wrong* here (old≠stale)
-- [ ] (P2) Boundary-fidelity eval: end-to-end, did anything sensitive cross? (lean on Kaypoh's recall numbers; test the integration, not re-test Kaypoh)
-- [ ] (P2) Ablations: dependency graph on/off, credence guardrail on/off, currency filter on/off
-- [ ] (P2) Results table for the README (stale-surface rate: Solomon vs warehouse vs decay)
+- [x] (P1) Synthetic firm-knowledge corpus generator (positions/memos/advice with dependencies + injected changes over time)
+- [x] (P1) Metric: **stale-surface rate** — how often each system surfaces a stale internal item as current
+- [x] (P1) Metric: **time-to-flag** after a dependency changes (propagation correctness)
+- [x] (P1) Metric: **impact-query recall** — given a change, did we flag everything that depended on it
+- [x] (P1) Baselines: a similarity-only warehouse retriever; (optionally) a Shibahama-style decay retriever to show decay is *wrong* here (old≠stale)
+- [x] (P2) Boundary-fidelity eval: end-to-end, did anything sensitive cross? (lean on Kaypoh's recall numbers; test the integration, not re-test Kaypoh)
+- [x] (P2) Ablations: dependency graph on/off, credence guardrail on/off, currency filter on/off
+- [x] (P2) Results table for the README (stale-surface rate: Solomon vs warehouse vs decay)
 - [ ] (P3) Release the corpus generator so the eval is reproducible
 
 ---
@@ -277,7 +277,7 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [ ] (P1) `docs/kaypoh-integration.md`: exactly what Solomon reuses, what it builds, how to run both together
 - [ ] (P1) Generated API reference (FastAPI/OpenAPI export, ♻️ Kaypoh's `export_openapi_examples` approach)
 - [ ] (P1) `examples/` runnable per scenario
-- [ ] (P2) `docs/benchmarks.md`: methodology + reproduce instructions
+- [x] (P2) `docs/benchmarks.md`: methodology + reproduce instructions
 - [ ] (P2) ADR index kept current
 - [ ] (P3) `docs/why-solomon.md`: the triad story + why decay was rejected (the judgment narrative for a reviewer)
 

@@ -30,17 +30,20 @@ pub struct RecallRequest<'a> {
     pub top_k: usize,
     /// Valid-time instant used for default current-fact filtering.
     pub now: OffsetDateTime,
+    /// Ranking weights applied to retrieved candidates.
+    pub ranking: RecallRankingConfig,
 }
 
 impl<'a> RecallRequest<'a> {
     /// Creates a recall request for a query vector.
     #[must_use]
-    pub const fn new(query_vector: &'a [f32], top_k: usize, now: OffsetDateTime) -> Self {
+    pub fn new(query_vector: &'a [f32], top_k: usize, now: OffsetDateTime) -> Self {
         Self {
             query_vector,
             raw_query_context: None,
             top_k,
             now,
+            ranking: RecallRankingConfig::default(),
         }
     }
 
@@ -49,6 +52,31 @@ impl<'a> RecallRequest<'a> {
     pub const fn with_raw_query_context(mut self, raw_query_context: &'a str) -> Self {
         self.raw_query_context = Some(raw_query_context);
         self
+    }
+
+    /// Overrides ranking weights for this request.
+    #[must_use]
+    pub const fn with_ranking(mut self, ranking: RecallRankingConfig) -> Self {
+        self.ranking = ranking;
+        self
+    }
+}
+
+/// Active ranking weights for vector recall.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RecallRankingConfig {
+    /// Weight applied to normalized vector similarity.
+    pub similarity_weight: f64,
+    /// Weight applied to materialized significance.
+    pub significance_weight: f64,
+}
+
+impl Default for RecallRankingConfig {
+    fn default() -> Self {
+        Self {
+            similarity_weight: 1.0,
+            significance_weight: 1.0,
+        }
     }
 }
 
@@ -61,6 +89,10 @@ pub struct RecallCandidate {
     pub item: MemoryItem,
     /// Vector distance from the query, where lower is closer.
     pub vector_distance: f32,
+    /// Normalized similarity contribution derived from vector distance.
+    pub similarity_score: f64,
+    /// Materialized significance contribution used by ranking.
+    pub significance_score: f64,
     /// Current rank score, where higher is better.
     pub rank_score: f64,
 }
@@ -92,14 +124,23 @@ pub fn recall(
         .filter_map(|(result, item)| {
             let item = item?;
 
-            item.timestamps
-                .is_valid_at(request.now)
-                .then_some(RecallCandidate {
-                    id: result.id,
-                    item,
-                    vector_distance: result.distance,
-                    rank_score: -f64::from(result.distance),
-                })
+            if !item.timestamps.is_valid_at(request.now) {
+                return None;
+            }
+
+            let similarity_score = similarity_from_distance(result.distance);
+            let significance_score = item.significance;
+            let rank_score = request.ranking.similarity_weight * similarity_score
+                + request.ranking.significance_weight * significance_score;
+
+            Some(RecallCandidate {
+                id: result.id,
+                item,
+                vector_distance: result.distance,
+                similarity_score,
+                significance_score,
+                rank_score,
+            })
         })
         .collect::<Vec<_>>();
 
@@ -126,6 +167,16 @@ pub fn recall(
     }
 
     Ok(candidates)
+}
+
+fn similarity_from_distance(distance: f32) -> f64 {
+    let distance = f64::from(distance);
+
+    if !distance.is_finite() || distance < 0.0 {
+        return 0.0;
+    }
+
+    1.0 / (1.0 + distance)
 }
 
 #[cfg(test)]
@@ -240,5 +291,47 @@ mod tests {
             events.last().map(|record| &record.event),
             Some(MemoryEvent::AccessRecorded { id, .. }) if *id == far.id
         ));
+    }
+
+    #[test]
+    fn recall_rank_score_includes_materialized_significance() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(1);
+        let mut near = test_item("near but low value", OffsetDateTime::UNIX_EPOCH);
+        let mut far = test_item("far but important", OffsetDateTime::UNIX_EPOCH);
+
+        near.significance = 0.0;
+        far.significance = 10.0;
+
+        store
+            .write_embedded(
+                &mut near,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("near should write");
+        store
+            .write_embedded(
+                &mut far,
+                &mut vector_index,
+                &[5.0, 5.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("far should write");
+
+        let query = [0.0, 0.0];
+        let request = RecallRequest::new(&query, 2, now);
+        let candidates = recall(&store, &vector_index, &request).expect("recall should work");
+
+        assert_eq!(candidates[0].id, far.id);
+        assert!((candidates[0].significance_score - 10.0).abs() < f64::EPSILON);
+        assert!(candidates[0].rank_score > candidates[1].rank_score);
     }
 }

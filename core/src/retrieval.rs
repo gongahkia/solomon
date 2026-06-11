@@ -350,8 +350,10 @@ fn recall_inner(
 
     candidates.sort_by(|left, right| {
         right
-            .rank_score
-            .total_cmp(&left.rank_score)
+            .item
+            .credence
+            .cmp(&left.item.credence)
+            .then_with(|| right.rank_score.total_cmp(&left.rank_score))
             .then_with(|| left.id.cmp(&right.id))
     });
 
@@ -834,6 +836,59 @@ mod tests {
         assert_eq!(candidates[0].id, far.id);
         assert!((candidates[0].significance_score - 10.0).abs() < f64::EPSILON);
         assert!(candidates[0].rank_score > candidates[1].rank_score);
+    }
+
+    #[test]
+    fn low_credence_items_never_outrank_authoritative_recall_candidates() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(1);
+        let mut authoritative =
+            test_item("authoritative project decision", OffsetDateTime::UNIX_EPOCH);
+        let mut unverified = test_item("unverified close match", OffsetDateTime::UNIX_EPOCH);
+
+        authoritative.credence = CredenceTier::FirmAuthoritative;
+        authoritative.significance = 0.0;
+        unverified.credence = CredenceTier::Unverified;
+        unverified.significance = 100.0;
+
+        store
+            .write_embedded(
+                &mut authoritative,
+                &mut vector_index,
+                &[5.0, 5.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("authoritative should write");
+        store
+            .write_embedded(
+                &mut unverified,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("unverified should write");
+
+        let query = [0.0, 0.0];
+        let request = RecallRequest::new(&query, 2, now).with_ranking(RecallRankingConfig {
+            similarity_weight: 1.0,
+            significance_weight: 1.0,
+            recency_weight: 0.0,
+            graph_weight: 0.0,
+        });
+        let candidates = recall(&store, &vector_index, &request).expect("recall should work");
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].id, authoritative.id);
+        assert_eq!(candidates[0].item.credence, CredenceTier::FirmAuthoritative);
+        assert_eq!(candidates[1].id, unverified.id);
+        assert_eq!(candidates[1].item.credence, CredenceTier::Unverified);
+        assert!(candidates[1].rank_score > candidates[0].rank_score);
     }
 
     #[test]

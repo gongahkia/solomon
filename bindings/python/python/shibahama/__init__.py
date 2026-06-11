@@ -4,6 +4,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import Any, Callable, Mapping, Sequence
 
 from ._shibahama import (
     __version__,
@@ -156,8 +157,85 @@ class Shibahama:
         return await asyncio.to_thread(self.why, *args, **kwargs)
 
 
+class LangChainMemory:
+    """Dependency-free LangChain-style memory adapter."""
+
+    __slots__ = (
+        "embed",
+        "engine",
+        "input_key",
+        "memory_key",
+        "output_key",
+        "top_k",
+    )
+
+    def __init__(
+        self,
+        engine: Shibahama,
+        embed: Callable[[str], Sequence[float]],
+        memory_key: str = "history",
+        input_key: str = "input",
+        output_key: str = "output",
+        top_k: int = 5,
+    ) -> None:
+        self.engine = engine
+        self.embed = embed
+        self.memory_key = memory_key
+        self.input_key = input_key
+        self.output_key = output_key
+        self.top_k = top_k
+
+    @property
+    def memory_variables(self) -> list[str]:
+        return [self.memory_key]
+
+    def load_memory_variables(self, inputs: Mapping[str, Any]) -> dict[str, str]:
+        query = _mapping_text(inputs, self.input_key)
+        candidates = self.engine.recall(self.embed(query), self.top_k)
+        history = "\n".join(candidate.item.content for candidate in candidates)
+
+        return {self.memory_key: history}
+
+    async def aload_memory_variables(self, inputs: Mapping[str, Any]) -> dict[str, str]:
+        return await asyncio.to_thread(self.load_memory_variables, inputs)
+
+    def save_context(self, inputs: Mapping[str, Any], outputs: Mapping[str, Any]) -> None:
+        user_text = _mapping_text(inputs, self.input_key)
+        assistant_text = _mapping_text(outputs, self.output_key)
+        content = f"Human: {user_text}\nAI: {assistant_text}"
+
+        self.engine.write(
+            content,
+            vector=self.embed(content),
+            source_kind="tool",
+            source_ref="langchain",
+            ingested_by="langchain",
+        )
+
+    async def asave_context(
+        self, inputs: Mapping[str, Any], outputs: Mapping[str, Any]
+    ) -> None:
+        await asyncio.to_thread(self.save_context, inputs, outputs)
+
+    def clear(self) -> None:
+        return None
+
+    async def aclear(self) -> None:
+        return None
+
+
+def _mapping_text(mapping: Mapping[str, Any], preferred_key: str) -> str:
+    if preferred_key in mapping:
+        return str(mapping[preferred_key])
+    if mapping:
+        return str(next(iter(mapping.values())))
+
+    return ""
+
+
 __all__ = [
     "__version__",
+    "LangChainMemory",
     "MemoryItem",
     "Provenance",
     "RecallCandidate",

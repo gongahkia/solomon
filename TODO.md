@@ -175,7 +175,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Expose the full API with Pythonic types and type stubs (.pyi)
 - [ ] (P0) Publish a working `pip install` from TestPyPI, then PyPI
 - [x] (P1) Async support that plays well with asyncio
-- [ ] (P1) Integration shim for a popular agent framework (LangChain/LlamaIndex memory interface)
+- [x] (P1) Integration shim for a popular agent framework (LangChain/LlamaIndex memory interface)
 - [ ] (P2) Pandas/Arrow export of memory state for analysis
 
 ### TypeScript / Node bindings (`npm install shibahama`)

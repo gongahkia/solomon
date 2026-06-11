@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 
-from collections.abc import AsyncIterator, Iterator, Sequence
-from typing import Literal
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
+from typing import Any, Literal
 
 SourceKind = Literal["user", "agent", "file", "web", "tool"]
 MemoryKind = Literal["fact", "instruction"]
@@ -190,3 +190,32 @@ class Shibahama:
     async def async_why(
         self, memory_id: str, now_unix: int | None = None
     ) -> WhyTrace | None: ...
+
+class LangChainMemory:
+    engine: Shibahama
+    embed: Callable[[str], Sequence[float]]
+    memory_key: str
+    input_key: str
+    output_key: str
+    top_k: int
+    def __init__(
+        self,
+        engine: Shibahama,
+        embed: Callable[[str], Sequence[float]],
+        memory_key: str = "history",
+        input_key: str = "input",
+        output_key: str = "output",
+        top_k: int = 5,
+    ) -> None: ...
+    @property
+    def memory_variables(self) -> list[str]: ...
+    def load_memory_variables(self, inputs: Mapping[str, Any]) -> dict[str, str]: ...
+    async def aload_memory_variables(self, inputs: Mapping[str, Any]) -> dict[str, str]: ...
+    def save_context(
+        self, inputs: Mapping[str, Any], outputs: Mapping[str, Any]
+    ) -> None: ...
+    async def asave_context(
+        self, inputs: Mapping[str, Any], outputs: Mapping[str, Any]
+    ) -> None: ...
+    def clear(self) -> None: ...
+    async def aclear(self) -> None: ...

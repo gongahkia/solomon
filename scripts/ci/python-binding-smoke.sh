@@ -61,10 +61,10 @@ with tempfile.NamedTemporaryFile() as db:
             valid_from_unix=0,
             ingested_at_unix=0,
         )
-        async_recalled = await engine.async_recall([1.0, 1.0], 2, now_unix=0)
-        async_timeline = await engine.async_timeline([1.0, 1.0], 2, as_of_unix=0)
+        async_recalled = await engine.async_recall([1.0, 1.0], 3, now_unix=0)
+        async_timeline = await engine.async_timeline([1.0, 1.0], 3, as_of_unix=0)
         async_streamed = [
-            candidate async for candidate in engine.async_stream_recall([1.0, 1.0], 2, now_unix=0)
+            candidate async for candidate in engine.async_stream_recall([1.0, 1.0], 3, now_unix=0)
         ]
         async_why = await engine.async_why(async_item.id, now_unix=0)
 
@@ -76,6 +76,24 @@ with tempfile.NamedTemporaryFile() as db:
         assert async_why.item.id == async_item.id
 
     asyncio.run(check_async_api())
+
+    def embed(text: str) -> list[float]:
+        return [float("adapters" in text), float("async" in text)]
+
+    memory = shibahama.LangChainMemory(engine, embed=embed, top_k=3)
+    memory.save_context({"input": "remember adapters"}, {"output": "stored"})
+    loaded = memory.load_memory_variables({"input": "adapters"})
+    assert memory.memory_variables == ["history"]
+    assert "Human: remember adapters" in loaded["history"]
+
+    async def check_langchain_async() -> None:
+        await memory.asave_context({"input": "async adapters"}, {"output": "stored"})
+        async_loaded = await memory.aload_memory_variables({"input": "async"})
+        await memory.aclear()
+
+        assert "async adapters" in async_loaded["history"]
+
+    asyncio.run(check_langchain_async())
 
 print("python binding lane passed")
 PY

@@ -2,6 +2,7 @@
 
 //! Significance scoring primitives.
 
+use crate::model::{AccessEvent, AccessOutcome};
 use time::OffsetDateTime;
 
 /// Configuration for the transparent significance function.
@@ -11,6 +12,16 @@ pub struct SignificanceConfig {
     pub half_life_seconds: f64,
     /// Weight applied to the diminishing-returns access reinforcement term.
     pub reinforcement_weight: f64,
+    /// Bonus for a memory merely surfaced by recall.
+    pub surfaced_weight: f64,
+    /// Bonus for a memory that led to useful work.
+    pub led_somewhere_weight: f64,
+    /// Bonus for a memory cited in output.
+    pub cited_weight: f64,
+    /// Penalty for a surfaced memory ignored by the caller.
+    pub ignored_weight: f64,
+    /// Penalty for contradiction outcomes.
+    pub contradicted_weight: f64,
 }
 
 impl Default for SignificanceConfig {
@@ -18,6 +29,11 @@ impl Default for SignificanceConfig {
         Self {
             half_life_seconds: 30.0 * 24.0 * 60.0 * 60.0,
             reinforcement_weight: 1.0,
+            surfaced_weight: 0.1,
+            led_somewhere_weight: 1.0,
+            cited_weight: 1.25,
+            ignored_weight: -0.05,
+            contradicted_weight: -2.0,
         }
     }
 }
@@ -43,6 +59,27 @@ impl SignificanceConfig {
         let capped_count = u32::try_from(access_count).unwrap_or(u32::MAX);
 
         self.reinforcement_weight * f64::from(capped_count).ln_1p()
+    }
+
+    /// Returns the configured score contribution for one access outcome.
+    #[must_use]
+    pub fn outcome_weight(self, outcome: AccessOutcome) -> f64 {
+        match outcome {
+            AccessOutcome::Surfaced => self.surfaced_weight,
+            AccessOutcome::LedSomewhere => self.led_somewhere_weight,
+            AccessOutcome::Cited => self.cited_weight,
+            AccessOutcome::Ignored => self.ignored_weight,
+            AccessOutcome::Contradicted => self.contradicted_weight,
+        }
+    }
+
+    /// Computes total outcome contribution for access events.
+    #[must_use]
+    pub fn outcome_bonus(self, events: &[AccessEvent]) -> f64 {
+        events
+            .iter()
+            .map(|event| self.outcome_weight(event.outcome))
+            .sum()
     }
 }
 
@@ -88,5 +125,23 @@ mod tests {
         assert!(second > first);
         assert!(tenth > second);
         assert!((second - first) > (tenth - config.reinforcement(9)));
+    }
+
+    #[test]
+    fn outcome_weighting_rewards_use_more_than_surfacing() {
+        let config = SignificanceConfig::default();
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let events = vec![
+            AccessEvent::new(now, None, AccessOutcome::Surfaced),
+            AccessEvent::new(now, None, AccessOutcome::LedSomewhere),
+            AccessEvent::new(now, None, AccessOutcome::Cited),
+        ];
+
+        assert!(
+            config.outcome_weight(AccessOutcome::LedSomewhere)
+                > config.outcome_weight(AccessOutcome::Surfaced)
+        );
+        assert!(config.outcome_bonus(&events) > config.outcome_weight(AccessOutcome::Surfaced));
+        assert!(config.outcome_weight(AccessOutcome::Contradicted) < 0.0);
     }
 }

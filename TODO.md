@@ -80,7 +80,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 ### Significance computation
 - [x] (P0) Implement time-decay function over time-since-last-use (configurable half-life)
 - [x] (P0) Implement reinforcement term: each access boosts significance (with diminishing returns)
-- [ ] (P1) Implement outcome-weighting: "led somewhere" boosts more than passive surfacing
+- [x] (P1) Implement outcome-weighting: "led somewhere" boosts more than passive surfacing
 - [ ] (P1) Implement contradiction penalty
 - [ ] (P1) Implement recompute-on-access (lazy) so there is NO global maintenance scan
 - [ ] (P1) Implement the credence-floor clamp (significance may fall, tier cannot drop below floor)

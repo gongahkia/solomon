@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use Solomon's currency evaluation, cite this repository and version."
+title: "Solomon Currency Evaluation"
+version: "0.1.0"
+date-released: "2026-06-11"
+url: "https://github.com/gongahkia/solomon"
+authors:
+  - name: "Solomon contributors"
+preferred-citation:
+  type: software
+  title: "Solomon Currency Evaluation"
+  version: "0.1.0"
+  date-released: "2026-06-11"
+  url: "https://github.com/gongahkia/solomon"
+  authors:
+    - name: "Solomon contributors"

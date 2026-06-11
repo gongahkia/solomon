@@ -265,7 +265,7 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P2) Auth/tenancy (♻️ Kaypoh `auth.py` patterns) for server SKU
 - [x] (P2) Mapping/volatile-memory hygiene: assert no sanitisation mapping is ever persisted by Solomon
 - [x] (P2) `docs/known-limitations.md` and `docs/assumption.md` (♻️ Kaypoh's design-honesty docs)
-- [ ] (P3) Independent boundary audit checklist
+- [x] (P3) Independent boundary audit checklist
 
 ---
 
@@ -279,7 +279,7 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P1) `examples/` runnable per scenario
 - [x] (P2) `docs/benchmarks.md`: methodology + reproduce instructions
 - [x] (P2) ADR index kept current
-- [ ] (P3) `docs/why-solomon.md`: the triad story + why decay was rejected (the judgment narrative for a reviewer)
+- [x] (P3) `docs/why-solomon.md`: the triad story + why decay was rejected (the judgment narrative for a reviewer)
 
 ---
 
@@ -291,4 +291,4 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P1) FAQ for predictable objections (isn't this KM? how is it not Shibahama? does it decide the law? what if Kaypoh mis-detects?)
 - [x] (P1) The triad writeup: one diagram showing Kaypoh + Shibahama + Solomon and what each proves (the FDE-application centrepiece)
 - [x] (P2) Early-user outreach; collect first issues
-- [ ] (P3) Submit the currency-eval writeup somewhere citable
+- [x] (P3) Submit the currency-eval writeup somewhere citable

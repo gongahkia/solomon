@@ -14,24 +14,24 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 ## Phase 0 — Foundations, repo, and the triad story
 
 ### Repo & tooling
-- [ ] (P0) Initialise `solomon/` as a sibling to `../kaypoh/`; confirm relative-path assumption in README
-- [ ] (P0) Python 3.10+ project managed by `uv` (♻️ match Kaypoh's toolchain for a coherent triad)
-- [ ] (P0) Layout: `src/solomon/{currency,graph,store,credence,boundary,orchestrator,audit,api,cli}/`, `tests/`, `examples/`, `docs/`, `benchmarks/`
-- [ ] (P0) FastAPI + Pydantic v2 app skeleton (♻️ mirror Kaypoh's `backend/` shape so the two read as a family)
-- [ ] (P0) `pyproject.toml` with a path dependency or documented import of `../kaypoh` client
-- [ ] (P0) `ruff` + `mypy` + `pytest` configured; deny-warnings in CI
-- [ ] (P0) GitHub Actions: lint, type-check, test, and a Kaypoh-integration smoke job (spins up kaypoh-local)
-- [ ] (P0) Licence + SPDX headers; `CONTRIBUTING.md`; minimal README stub (full README in Phase 16)
-- [ ] (P1) `CHANGELOG.md` (keep-a-changelog); semver
-- [ ] (P1) Issue/PR templates; `CODEOWNERS`
-- [ ] (P2) Pre-commit hooks (ruff, mypy, secret scan)
-- [ ] (P2) Devcontainer / Nix flake that brings up both Solomon and a kaypoh-local instance
+- [x] (P0) Initialise `solomon/` as a sibling to `../kaypoh/`; confirm relative-path assumption in README
+- [x] (P0) Python 3.10+ project managed by `uv` (♻️ match Kaypoh's toolchain for a coherent triad)
+- [x] (P0) Layout: `src/solomon/{currency,graph,store,credence,boundary,orchestrator,audit,api,cli}/`, `tests/`, `examples/`, `docs/`, `benchmarks/`
+- [x] (P0) FastAPI + Pydantic v2 app skeleton (♻️ mirror Kaypoh's `backend/` shape so the two read as a family)
+- [x] (P0) `pyproject.toml` with a path dependency or documented import of `../kaypoh` client
+- [x] (P0) `ruff` + `mypy` + `pytest` configured; deny-warnings in CI
+- [x] (P0) GitHub Actions: lint, type-check, test, and a Kaypoh-integration smoke job (spins up kaypoh-local)
+- [x] (P0) Licence + SPDX headers; `CONTRIBUTING.md`; minimal README stub (full README in Phase 16)
+- [x] (P1) `CHANGELOG.md` (keep-a-changelog); semver
+- [x] (P1) Issue/PR templates; `CODEOWNERS`
+- [x] (P2) Pre-commit hooks (ruff, mypy, secret scan)
+- [x] (P2) Devcontainer / Nix flake that brings up both Solomon and a kaypoh-local instance
 
 ### ADRs (write in `docs/adr/`) — these encode the judgment a reviewer will probe
-- [ ] (P0) ADR: **why reject decay** (Shibahama's mechanism) in favour of dependency-driven currency
-- [ ] (P0) ADR: bi-temporal model (valid-time vs ingestion-time) and the supersede-not-delete invariant
-- [ ] (P0) ADR: **flag, don't adjudicate** — Solomon never asserts a position is legally broken, only that a dependency moved and re-verification is due
-- [ ] (P0) ADR: Kaypoh as boundary — reuse vs reimplement decision table (point to PRD §4)
+- [x] (P0) ADR: **why reject decay** (Shibahama's mechanism) in favour of dependency-driven currency
+- [x] (P0) ADR: bi-temporal model (valid-time vs ingestion-time) and the supersede-not-delete invariant
+- [x] (P0) ADR: **flag, don't adjudicate** — Solomon never asserts a position is legally broken, only that a dependency moved and re-verification is due
+- [x] (P0) ADR: Kaypoh as boundary — reuse vs reimplement decision table (point to PRD §4)
 - [ ] (P1) ADR: credence taxonomy + the "model-inferred never outranks firm-authoritative" rule
 - [ ] (P1) ADR: dual-endpoint routing (remote ZDR vs local model) and the sensitivity classification that drives it
 - [ ] (P1) ADR: audit-journal design (♻️ mirror Kaypoh's append-only journal + verification)

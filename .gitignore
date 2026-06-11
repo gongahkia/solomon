@@ -1,4 +1,19 @@
-/dist/
-/coverage.out
-/solomon
-AGENTS.md
+# SPDX-License-Identifier: Apache-2.0
+
+.DS_Store
+.coverage
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+__pycache__/
+*.egg-info/
+build/
+dist/
+htmlcov/
+solomon-data/
+solomon-journal/
+*.db
+*.sqlite
+*.sqlite3
+

@@ -1,0 +1,19 @@
+{
+  "name": "Solomon",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "postCreateCommand": "curl -LsSf https://astral.sh/uv/install.sh | sh && /home/vscode/.local/bin/uv sync --extra dev",
+  "workspaceFolder": "/workspaces/solomon",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "charliermarsh.ruff",
+        "ms-python.mypy-type-checker",
+        "ms-python.python"
+      ]
+    }
+  }
+}
+

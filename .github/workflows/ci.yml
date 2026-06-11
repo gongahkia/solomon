@@ -1,118 +1,73 @@
-name: ci
+# SPDX-License-Identifier: Apache-2.0
+
+name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
-
-permissions:
-  contents: read
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
-  quality:
+  lint-type-test:
+    name: Lint, type-check, and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          go-version: '1.26.6'
-      - run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - run: go vet ./...
-      - run: go test -race -count=1 -timeout=2m ./...
-      - run: go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
-      - run: $(go env GOPATH)/bin/staticcheck ./...
-      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-      - run: $(go env GOPATH)/bin/govulncheck ./...
-      - run: go install github.com/securego/gosec/v2/cmd/gosec@v2.23.0
-      - run: $(go env GOPATH)/bin/gosec ./...
-      - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
-      - run: $(go env GOPATH)/bin/actionlint
-      - run: shellcheck scripts/*.sh
-  test:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev
+      - run: uv run ruff check .
+      - run: uv run mypy src tests scripts
+      - run: uv run pytest
+
+  kaypoh-integration-smoke:
+    name: Kaypoh local integration smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - run: sudo apt-get update && sudo apt-get install -y expect
-
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+      - uses: actions/checkout@v4
         with:
-          go-version: '1.26.6'
-      - run: make ci
-      - run: make latency-gate
-
-  macos-integration:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+          path: solomon
+      - uses: actions/checkout@v4
         with:
-          go-version: '1.26.6'
-      - run: make ci
-      - run: ./solomon version
-      - run: |
-          set +e
-          ./solomon check
-          result_code=$?
-          set -e
-          test "$result_code" -eq 2
-
-  linux-integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - run: sudo apt-get update && sudo apt-get install -y expect fish zsh
-
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+          repository: ${{ github.repository_owner }}/kaypoh
+          path: kaypoh
+      - uses: actions/setup-python@v5
         with:
-          go-version: '1.26.6'
-      - run: make ci
-      - run: ./solomon version
-      - run: |
-          set +e
-          ./solomon check
-          result_code=$?
-          set -e
-          test "$result_code" -eq 2
-
-  shell-integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - run: sudo apt-get update && sudo apt-get install -y expect fish zsh
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
-        with:
-          go-version: '1.26.6'
-      - run: go test -race -count=1 -timeout=2m ./internal/shell
-
-  windows-integration:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
-        with:
-          go-version: '1.26.6'
-      - shell: pwsh
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - name: Install Kaypoh
+        working-directory: kaypoh
         run: |
-          go vet ./...
-          go test -race ./...
-          go build -trimpath -buildvcs=false -mod=readonly -ldflags "-X main.version=dev -X main.commit=unknown" -o solomon.exe ./cmd/solomon
-      - shell: pwsh
+          uv sync --extra dev
+          uv run python -m spacy download en_core_web_sm
+      - name: Start Kaypoh local
+        working-directory: kaypoh
         run: |
-          & .\solomon.exe version
-          if ($LASTEXITCODE -ne 0) { throw "version failed: $LASTEXITCODE" }
-          & .\solomon.exe check
-          if ($LASTEXITCODE -ne 2) { throw "expected invalid-input exit 2, got $LASTEXITCODE" }
-
-  race-leak:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - run: sudo apt-get update && sudo apt-get install -y expect
-
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+          uv run uvicorn kaypoh.backend.main:app --host 127.0.0.1 --port 8131 > ../kaypoh.log 2>&1 &
+          echo "$!" > ../kaypoh.pid
+      - name: Wait for Kaypoh readiness
+        working-directory: solomon
+        run: python scripts/wait_http.py http://127.0.0.1:8131/ready --expect-key ready --expect-value true
+      - name: Run Solomon smoke against Kaypoh
+        working-directory: solomon
+        run: |
+          uv sync --extra dev
+          uv run python scripts/kaypoh_smoke.py --base-url http://127.0.0.1:8131
+      - name: Stop Kaypoh
+        if: always()
+        run: |
+          if [ -f kaypoh.pid ]; then
+            kill "$(cat kaypoh.pid)" || true
+          fi
+      - name: Upload Kaypoh log
+        uses: actions/upload-artifact@v4
+        if: always()
         with:
-          go-version: '1.26.6'
-      - run: go test -race -count=1 -timeout=2m ./...
+          name: kaypoh-smoke-log
+          path: kaypoh.log
+          if-no-files-found: ignore
+

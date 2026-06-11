@@ -1,14 +1,14 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 ## Summary
 
-Describe the problem and the change.
+## TODO item or issue
 
 ## Verification
 
-- [ ] I ran the narrowest relevant tests.
-- [ ] I ran `make ci` when the change affects Go code, scripts, or workflow behavior.
-- [ ] I ran `make latency-gate` when the change can affect diagnosis latency.
-- [ ] I did not include credentials, tokens, private URLs, or unredacted terminal output.
+- [ ] `uv run ruff check .`
+- [ ] `uv run mypy src tests scripts`
+- [ ] `uv run pytest`
 
-## Safety impact
+## Boundary / audit impact
 
-State whether this changes command execution, shell integration, data persistence, redaction, package trust, or release artifacts.

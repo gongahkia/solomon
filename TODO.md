@@ -179,7 +179,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P2) Pandas/Arrow export of memory state for analysis
 
 ### TypeScript / Node bindings (`npm install shibahama`)
-- [ ] (P0) Set up napi-rs build
+- [x] (P0) Set up napi-rs build
 - [ ] (P0) Expose the full API with TS types
 - [ ] (P0) Publish a working `npm install`
 - [ ] (P1) ESM + CJS dual package

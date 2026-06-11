@@ -1,0 +1,36 @@
+{
+  "name": "shibahama",
+  "version": "0.1.0",
+  "description": "Node.js bindings for Shibahama.",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.cjs",
+  "module": "index.mjs",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.mjs",
+      "require": "./index.cjs",
+      "default": "./index.mjs"
+    }
+  },
+  "files": [
+    "index.cjs",
+    "index.d.ts",
+    "index.mjs",
+    "*.node",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "napi build --release --platform",
+    "build:debug": "napi build --platform",
+    "test": "node test/smoke.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.7.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

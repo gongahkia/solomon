@@ -5,6 +5,9 @@
 /.venv/
 /dist/
 /node_modules/
+bindings/node/node_modules/
+bindings/node/*.node
+bindings/node/index.js
 __pycache__/
 *.so
 

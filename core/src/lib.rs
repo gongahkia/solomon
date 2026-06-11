@@ -5,6 +5,7 @@
 pub mod encryption;
 pub mod model;
 pub mod storage;
+pub mod vector;
 
 /// Current crate version, kept available to bindings and smoke tests.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

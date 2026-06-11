@@ -58,7 +58,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P2) Encryption-at-rest hook (needed later for the legal variant; stub the trait now)
 
 ### Vector index integration
-- [ ] (P0) Define `VectorIndex` trait (add, search, delete-by-id, dimensions)
+- [x] (P0) Define `VectorIndex` trait (add, search, delete-by-id, dimensions)
 - [ ] (P0) Implement one concrete backend (lancedb or in-process HNSW) behind the trait
 - [ ] (P0) Wire embedding storage so item ↔ vector stay consistent on invalidate
 - [ ] (P1) Implement second backend (qdrant or pgvector) to prove the trait is real

@@ -252,13 +252,13 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 
 ## Phase 11 — Headline demo: the long-lived coding agent (P1)
 
-- [ ] (P0) Build a minimal coding agent that uses Shibahama as its memory
-- [ ] (P1) Seed it with a realistic multi-session repo history (decisions, rejections, file moves)
-- [ ] (P1) Scenario A: agent does NOT re-suggest a previously rejected approach (credence floor working)
-- [ ] (P1) Scenario B: agent re-validates a moved/renamed file before citing it (reconstruction working)
-- [ ] (P1) Record the run so it replays in the Tideline (the demo GIF source)
-- [ ] (P2) Side-by-side: same agent on a warehouse baseline failing both scenarios
-- [ ] (P2) Package as a runnable `examples/coding-agent/` anyone can `clone && run`
+- [x] (P0) Build a minimal coding agent that uses Shibahama as its memory
+- [x] (P1) Seed it with a realistic multi-session repo history (decisions, rejections, file moves)
+- [x] (P1) Scenario A: agent does NOT re-suggest a previously rejected approach (credence floor working)
+- [x] (P1) Scenario B: agent re-validates a moved/renamed file before citing it (reconstruction working)
+- [x] (P1) Record the run so it replays in the Tideline (the demo GIF source)
+- [x] (P2) Side-by-side: same agent on a warehouse baseline failing both scenarios
+- [x] (P2) Package as a runnable `examples/coding-agent/` anyone can `clone && run`
 
 ---
 

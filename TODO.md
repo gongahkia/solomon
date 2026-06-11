@@ -124,14 +124,14 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 5 — Dual model endpoint & routing (🆕)
 
-- [ ] (P0) Define `ModelEndpoint` abstraction: remote-ZDR provider and local in-perimeter model behind one interface
-- [ ] (P0) Implement a remote ZDR-eligible provider client (assume ZDR terms; send only sanitised context)
-- [ ] (P0) Implement a local model client (e.g. vLLM/Ollama-compatible, in-perimeter)
-- [ ] (P1) **Sensitivity classifier / router**: matter sensitivity decides remote-vs-local; strict matters never egress even sanitised (local-only)
-- [ ] (P1) Make the routing decision auditable (log which endpoint, why, what crossed — metadata only)
-- [ ] (P1) Graceful degradation: if remote unavailable and matter allows, fall back to local with a quality caveat
-- [ ] (P2) Local-only zero-egress mode for the strictest tier (no sanitised egress at all)
-- [ ] (P2) Cost/latency metadata per call (♻️ Kaypoh-style metrics, content-free)
+- [x] (P0) Define `ModelEndpoint` abstraction: remote-ZDR provider and local in-perimeter model behind one interface
+- [x] (P0) Implement a remote ZDR-eligible provider client (assume ZDR terms; send only sanitised context)
+- [x] (P0) Implement a local model client (e.g. vLLM/Ollama-compatible, in-perimeter)
+- [x] (P1) **Sensitivity classifier / router**: matter sensitivity decides remote-vs-local; strict matters never egress even sanitised (local-only)
+- [x] (P1) Make the routing decision auditable (log which endpoint, why, what crossed — metadata only)
+- [x] (P1) Graceful degradation: if remote unavailable and matter allows, fall back to local with a quality caveat
+- [x] (P2) Local-only zero-egress mode for the strictest tier (no sanitised egress at all)
+- [x] (P2) Cost/latency metadata per call (♻️ Kaypoh-style metrics, content-free)
 
 ---
 

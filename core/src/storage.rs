@@ -837,6 +837,63 @@ impl RedbMemoryStore {
         }))
     }
 
+    /// Inserts `proposed`, resolving any active contradiction on the same entity and relation type.
+    ///
+    /// When a contradiction exists, the old relation's valid interval is closed at
+    /// `proposed.timestamps.valid_from`, the proposed relation is linked to it through
+    /// `Relation::supersedes`, and both rows are written atomically.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when relation rows cannot be read, serialized, written, or committed.
+    pub fn put_relation_resolving_contradiction(
+        &self,
+        proposed: &mut Relation,
+    ) -> Result<Option<RelationId>, StorageError> {
+        let contradiction =
+            self.detect_relation_contradiction(proposed, proposed.timestamps.valid_from)?;
+        let superseded_relation_id = contradiction
+            .as_ref()
+            .map(|contradiction| contradiction.existing.id);
+
+        if let Some(superseded_relation_id) = superseded_relation_id {
+            proposed.supersedes = Some(superseded_relation_id);
+        }
+
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        {
+            let mut relation_table = write_txn.open_table(GRAPH_RELATIONS_TABLE).map_err(embed)?;
+
+            if let Some(contradiction) = contradiction {
+                let mut existing = contradiction.existing;
+                let existing_key = existing.id.to_string();
+
+                existing.timestamps = existing
+                    .timestamps
+                    .closed_at(proposed.timestamps.valid_from);
+
+                let existing_bytes = serde_json::to_vec(&existing)?;
+                relation_table
+                    .insert(existing_key.as_str(), existing_bytes.as_slice())
+                    .map_err(embed)?;
+            }
+
+            let proposed_key = proposed.id.to_string();
+            let proposed_bytes = serde_json::to_vec(proposed)?;
+
+            relation_table
+                .insert(proposed_key.as_str(), proposed_bytes.as_slice())
+                .map_err(embed)?;
+        }
+
+        write_txn.commit().map_err(embed)?;
+
+        Ok(superseded_relation_id)
+    }
+
     /// Soft-invalidates a memory by closing its valid-time interval without deleting history.
     ///
     /// Returns `Ok(None)` when the item does not exist.
@@ -1691,6 +1748,86 @@ mod tests {
                 .detect_relation_contradiction(&consistent, now)
                 .expect("detection should read")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn resolving_relation_contradiction_invalidates_old_and_links_new() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let replacement_time = now + time::Duration::days(1);
+        let subject = Entity::new(
+            "Project",
+            "Shibahama",
+            "project:shibahama",
+            TemporalBounds::open_from(now, now),
+        );
+        let old_value = Entity::new(
+            "Value",
+            "red",
+            "value:red",
+            TemporalBounds::open_from(now, now),
+        );
+        let new_value = Entity::new(
+            "Value",
+            "blue",
+            "value:blue",
+            TemporalBounds::open_from(now, now),
+        );
+        let existing = Relation::new(
+            "status",
+            subject.id,
+            old_value.id,
+            None,
+            TemporalBounds::open_from(now, now),
+        );
+        let mut proposed = Relation::new(
+            "status",
+            subject.id,
+            new_value.id,
+            None,
+            TemporalBounds::open_from(replacement_time, replacement_time),
+        );
+
+        store.put_entity(&subject).expect("subject should write");
+        store
+            .put_entity(&old_value)
+            .expect("old value should write");
+        store
+            .put_entity(&new_value)
+            .expect("new value should write");
+        store
+            .put_relation(&existing)
+            .expect("existing relation should write");
+
+        let superseded = store
+            .put_relation_resolving_contradiction(&mut proposed)
+            .expect("resolution should write");
+        let stored_existing = store
+            .get_relation(existing.id)
+            .expect("existing should read")
+            .expect("existing should exist");
+        let stored_proposed = store
+            .get_relation(proposed.id)
+            .expect("proposed should read")
+            .expect("proposed should exist");
+
+        assert_eq!(superseded, Some(existing.id));
+        assert_eq!(stored_existing.timestamps.valid_to, Some(replacement_time));
+        assert_eq!(stored_proposed.supersedes, Some(existing.id));
+        assert_eq!(proposed.supersedes, Some(existing.id));
+        assert_eq!(
+            store
+                .relations_for_entity(subject.id, Some(now))
+                .expect("relations should read"),
+            vec![stored_existing]
+        );
+        assert_eq!(
+            store
+                .relations_for_entity(subject.id, Some(replacement_time))
+                .expect("relations should read"),
+            vec![stored_proposed]
         );
     }
 

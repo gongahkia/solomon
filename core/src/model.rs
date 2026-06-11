@@ -277,6 +277,8 @@ pub struct Relation {
     pub to_entity: EntityId,
     /// Optional memory that supports this edge.
     pub memory_id: Option<MemoryId>,
+    /// Relation this edge supersedes, when inserted as a contradiction resolution.
+    pub supersedes: Option<RelationId>,
     /// Optional attributes used by typed graph integrations.
     pub attributes: BTreeMap<String, String>,
     /// Relation validity and ingestion timestamps.
@@ -299,6 +301,7 @@ impl Relation {
             from_entity,
             to_entity,
             memory_id: memory_id.into(),
+            supersedes: None,
             attributes: BTreeMap::new(),
             timestamps,
         }
@@ -635,6 +638,7 @@ mod tests {
         assert_eq!(relation.from_entity, source.id);
         assert_eq!(relation.to_entity, target.id);
         assert_eq!(relation.memory_id, Some(memory_id));
+        assert_eq!(relation.supersedes, None);
         assert_eq!(
             relation.attributes.get("reason").map(String::as_str),
             Some("contradiction")

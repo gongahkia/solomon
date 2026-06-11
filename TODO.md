@@ -59,7 +59,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 
 ### Vector index integration
 - [x] (P0) Define `VectorIndex` trait (add, search, delete-by-id, dimensions)
-- [ ] (P0) Implement one concrete backend (lancedb or in-process HNSW) behind the trait
+- [x] (P0) Implement one concrete backend (lancedb or in-process HNSW) behind the trait
 - [ ] (P0) Wire embedding storage so item ↔ vector stay consistent on invalidate
 - [ ] (P1) Implement second backend (qdrant or pgvector) to prove the trait is real
 - [ ] (P1) Handle embedding model/version metadata so re-embeds are detectable

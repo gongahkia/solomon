@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from pydantic import Field
+
 from solomon.api.schemas import SolomonModel
 from solomon.audit.journal import AuditJournal
 from solomon.credence.policy import CredenceLedger
@@ -24,9 +26,9 @@ from solomon.store.sqlite import ItemNotFoundError, SQLiteKnowledgeStore
 
 class IngestRequest(SolomonModel):
     kind: KnowledgeKind
-    content: str
+    content: str = Field(min_length=1)
     source_kind: SourceKind
-    source_ref: str
+    source_ref: str = Field(min_length=1)
     author: str | None = None
     matter_id: str | None = None
     client_id: str | None = None

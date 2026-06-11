@@ -230,19 +230,19 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 13 — Testing & correctness (P0/P1, cross-cutting)
 
-- [ ] (P0) Unit tests: data model, bi-temporal invariants, supersede-not-delete, currency_state transitions
-- [ ] (P0) Property test: no path deletes a knowledge item
-- [ ] (P0) Property test: superseded/stale items never appear in default (Live) recall without a flag
-- [ ] (P1) Property test: ModelInferred never outranks FirmAuthoritative at equal relevance
-- [ ] (P1) Propagation test: authority change flags exactly the transitive dependents, no more, no fewer; cycles terminate
-- [ ] (P1) `as_of` correctness: historical reconstruction matches the event log
-- [ ] (P1) **Boundary test: fail-closed** — if Kaypoh is unreachable, no context egresses
-- [ ] (P1) Round-trip test: pseudonymize→model→reidentify preserves meaning and leaks nothing (incl. paraphrase-survival of tokens)
-- [ ] (P1) Routing test: strict matters never hit the remote endpoint
-- [ ] (P2) Fuzz ingestion with adversarial/malformed items
-- [ ] (P2) Poisoning red-team: plant a false ModelInferred "position", assert it can't outrank or be asserted as settled
-- [ ] (P2) Soak test: thousands of items + many authority changes; propagation stays correct and bounded
-- [ ] (P2) Kaypoh-integration contract tests (pin the client behaviour Solomon relies on)
+- [x] (P0) Unit tests: data model, bi-temporal invariants, supersede-not-delete, currency_state transitions
+- [x] (P0) Property test: no path deletes a knowledge item
+- [x] (P0) Property test: superseded/stale items never appear in default (Live) recall without a flag
+- [x] (P1) Property test: ModelInferred never outranks FirmAuthoritative at equal relevance
+- [x] (P1) Propagation test: authority change flags exactly the transitive dependents, no more, no fewer; cycles terminate
+- [x] (P1) `as_of` correctness: historical reconstruction matches the event log
+- [x] (P1) **Boundary test: fail-closed** — if Kaypoh is unreachable, no context egresses
+- [x] (P1) Round-trip test: pseudonymize→model→reidentify preserves meaning and leaks nothing (incl. paraphrase-survival of tokens)
+- [x] (P1) Routing test: strict matters never hit the remote endpoint
+- [x] (P2) Fuzz ingestion with adversarial/malformed items
+- [x] (P2) Poisoning red-team: plant a false ModelInferred "position", assert it can't outrank or be asserted as settled
+- [x] (P2) Soak test: thousands of items + many authority changes; propagation stays correct and bounded
+- [x] (P2) Kaypoh-integration contract tests (pin the client behaviour Solomon relies on)
 
 ---
 

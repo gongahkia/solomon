@@ -285,7 +285,7 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 17 — Launch (P1/P2)
 
-- [ ] (P0) Tag `v0.1.0`; publish (pip; desktop bundle for local SKU)
+- [x] (P0) Tag `v0.1.0`; publish (pip; desktop bundle for local SKU)
 - [x] (P1) Record the stale-house-view demo GIF (Solomon flag vs warehouse miss)
 - [x] (P1) Write the launch post leading with the wedge: "every firm checks if a *case* is still good law; nobody checks if *their own* knowledge is — Solomon does, behind a zero-retention boundary"
 - [x] (P1) FAQ for predictable objections (isn't this KM? how is it not Shibahama? does it decide the law? what if Kaypoh mis-detects?)

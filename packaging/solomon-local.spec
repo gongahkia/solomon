@@ -2,9 +2,14 @@
 
 # PyInstaller spec for the offline-default Solomon local SKU.
 
+from pathlib import Path
+
+project_root = Path(SPECPATH).parent
+src_root = project_root / "src"
+
 a = Analysis(
-    ["src/solomon/cli/main.py"],
-    pathex=[],
+    [str(src_root / "solomon" / "cli" / "main.py")],
+    pathex=[str(src_root)],
     binaries=[],
     datas=[],
     hiddenimports=[],
@@ -28,4 +33,3 @@ exe = EXE(
     upx=True,
     console=True,
 )
-

@@ -130,3 +130,7 @@ def why(item_id: str) -> None:
 @app.command("export-audit-pack")
 def export_audit_pack(destination: Annotated[Path, typer.Argument(help="Destination directory.")]) -> None:
     console.print(str(_service().export_audit_pack(destination)))
+
+
+if __name__ == "__main__":
+    app()

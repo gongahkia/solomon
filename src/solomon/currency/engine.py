@@ -99,8 +99,11 @@ def evaluate_currency(
             stale_reasons=stale_reasons,
         )
 
-    if stale_reasons:
-        explanation.append("one or more dependencies moved and require human re-verification")
+    if item.currency_state is CurrencyState.STALE_PENDING_REVERIFICATION or stale_reasons:
+        if stale_reasons:
+            explanation.append("one or more dependencies moved and require human re-verification")
+        else:
+            explanation.append("item is already marked stale-pending-reverification")
         return CurrencyEvaluation(
             item_id=item.id,
             currency_state=CurrencyState.STALE_PENDING_REVERIFICATION,
@@ -200,4 +203,3 @@ def register_authority_change(
         changed_at=changed_at,
         reason=reason,
     )
-

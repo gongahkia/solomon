@@ -57,6 +57,12 @@ class VerifiedState(str, Enum):
     REJECTED = "Rejected"
 
 
+class KnowledgeContentRole(str, Enum):
+    FACT = "fact"
+    POSITION = "position"
+    INSTRUCTION = "instruction"
+
+
 class AuthorityKind(str, Enum):
     STATUTE = "statute"
     REGULATION = "regulation"
@@ -145,6 +151,7 @@ class KnowledgeItem(SolomonModel):
     id: str = Field(default_factory=new_uuid7)
     schema_version: int = SCHEMA_VERSION
     kind: KnowledgeKind
+    content_role: KnowledgeContentRole = KnowledgeContentRole.POSITION
     content: str
     embedding_ref: str | None = None
     provenance: Provenance

@@ -137,14 +137,14 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 6 — Credence ledger & verification step (🆕 P1 #2)
 
-- [ ] (P0) Credence tier assigned on ingest by source kind (partner-signed → FirmAuthoritative; model output → ModelInferred; etc.)
-- [ ] (P0) Per-item `verified_state` + `last_verified_at` + `verified_by`
-- [ ] (P1) **Retrieval guardrail**: ModelInferred/Unverified items can never outrank FirmAuthoritative on equal relevance
-- [ ] (P1) **Verification step before load-bearing output**: surface source pointer + currency state; refuse to present a stale/low-credence item as settled
-- [ ] (P1) Quarantine model-generated facts at low credence; promotion needs corroboration or human confirm (♻️ skeptical-by-default, OWASP ASI06 posture)
-- [ ] (P1) Separate "facts/positions" from "instructions" so retrieved knowledge can't inject directives into the prompt
-- [ ] (P2) Credence-change audit (who raised/lowered a tier and why)
-- [ ] (P2) Configurable per-firm credence policy
+- [x] (P0) Credence tier assigned on ingest by source kind (partner-signed → FirmAuthoritative; model output → ModelInferred; etc.)
+- [x] (P0) Per-item `verified_state` + `last_verified_at` + `verified_by`
+- [x] (P1) **Retrieval guardrail**: ModelInferred/Unverified items can never outrank FirmAuthoritative on equal relevance
+- [x] (P1) **Verification step before load-bearing output**: surface source pointer + currency state; refuse to present a stale/low-credence item as settled
+- [x] (P1) Quarantine model-generated facts at low credence; promotion needs corroboration or human confirm (♻️ skeptical-by-default, OWASP ASI06 posture)
+- [x] (P1) Separate "facts/positions" from "instructions" so retrieved knowledge can't inject directives into the prompt
+- [x] (P2) Credence-change audit (who raised/lowered a tier and why)
+- [x] (P2) Configurable per-firm credence policy
 
 ---
 

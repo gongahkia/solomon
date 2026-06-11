@@ -187,19 +187,19 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 
 ### CLI
 - [x] (P1) `shibahama` CLI: init a store, write, recall, why, inspect, export
-- [ ] (P1) `shibahama serve` — start the optional server mode
+- [x] (P1) `shibahama serve` — start the optional server mode
 - [ ] (P2) Pretty terminal output for `why` (a text version of the Tideline trace)
 
 ---
 
 ## Phase 8 — Optional server mode (P2)
 
-- [ ] (P1) Implement a thin HTTP/gRPC server wrapping the same core API
+- [x] (P1) Implement a thin HTTP/gRPC server wrapping the same core API
 - [ ] (P1) Namespace/scope isolation (multi-agent, multi-project)
 - [ ] (P1) AuthN/AuthZ stub (API keys; pluggable for the legal variant)
 - [ ] (P2) Per-namespace config + quotas
 - [ ] (P2) Metadata-only request logging (who/when/cost, never content — matters for legal reuse)
-- [ ] (P2) Health/readiness endpoints + graceful shutdown
+- [x] (P2) Health/readiness endpoints + graceful shutdown
 - [ ] (P3) Horizontal-scale story (sharding by namespace)
 
 ---

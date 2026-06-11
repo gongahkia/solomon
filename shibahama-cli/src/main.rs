@@ -4,8 +4,14 @@
 
 #![allow(clippy::needless_pass_by_value)]
 
+use axum::extract::{Path as AxumPath, Query, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use shibahama_core::api::{Shibahama, WhyTrace, WriteEmbedding};
 use shibahama_core::model::{
     CredenceTier, MemoryId, MemoryItem, MemoryKind, Provenance, SourceKind, Tier,
@@ -19,8 +25,10 @@ use shibahama_core::vector::HnswVectorIndex;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::io::{self, Write};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::{Arc, Mutex};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -47,6 +55,8 @@ enum Command {
     Inspect(InspectCommand),
     /// Export materialized memory state.
     Export(ExportCommand),
+    /// Start the optional HTTP server mode.
+    Serve(ServeCommand),
 }
 
 #[derive(Args)]
@@ -158,6 +168,15 @@ struct ExportCommand {
     format: ExportFormat,
 }
 
+#[derive(Args)]
+struct ServeCommand {
+    #[command(flatten)]
+    store: StoreArgs,
+    /// Address to bind.
+    #[arg(long, default_value = "127.0.0.1:8765")]
+    bind: SocketAddr,
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 enum ExportFormat {
     /// Pretty JSON array.
@@ -251,6 +270,76 @@ struct WhyTraceDto {
     audit_trail: Vec<String>,
 }
 
+#[derive(Clone)]
+struct ServerState {
+    engine: Arc<Mutex<Shibahama<HnswVectorIndex>>>,
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct ServerWriteRequest {
+    content: String,
+    vector: Option<Vec<f32>>,
+    source_kind: Option<String>,
+    source_ref: Option<String>,
+    ingested_by: Option<String>,
+    valid_from_unix: Option<i64>,
+    ingested_at_unix: Option<i64>,
+    kind: Option<String>,
+    index_name: Option<String>,
+    model: Option<String>,
+    model_version: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ServerRecallRequest {
+    query_vector: Vec<f32>,
+    top_k: Option<usize>,
+    now_unix: Option<i64>,
+    raw_query_context: Option<String>,
+    include_cold: Option<bool>,
+    include_instructions: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct WhyQuery {
+    now_unix: Option<i64>,
+}
+
+#[derive(Debug)]
+struct ServerError {
+    status: StatusCode,
+    message: String,
+}
+
+impl ServerError {
+    fn internal(error: impl Display) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: error.to_string(),
+        }
+    }
+
+    fn bad_request(error: impl Display) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: error.to_string(),
+        }
+    }
+}
+
+impl IntoResponse for ServerError {
+    fn into_response(self) -> Response {
+        (
+            self.status,
+            Json(json!({
+                "error": self.message,
+            })),
+        )
+            .into_response()
+    }
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -271,6 +360,7 @@ fn run() -> CliResult<()> {
         Command::Why(command) => why(command),
         Command::Inspect(command) => inspect(command),
         Command::Export(command) => export(command),
+        Command::Serve(command) => serve(command),
     }
 }
 
@@ -384,6 +474,186 @@ fn export(command: ExportCommand) -> CliResult<()> {
         ExportFormat::Json => write_json(&memories),
         ExportFormat::Jsonl => write_jsonl(&memories),
     }
+}
+
+fn serve(command: ServeCommand) -> CliResult<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+
+    runtime.block_on(serve_async(command))
+}
+
+async fn serve_async(command: ServeCommand) -> CliResult<()> {
+    let engine = open_engine(&command.store, None)?;
+    let state = ServerState {
+        engine: Arc::new(Mutex::new(engine)),
+        path: command.store.path.display().to_string(),
+    };
+    let app = Router::new()
+        .route("/healthz", get(server_health))
+        .route("/readyz", get(server_ready))
+        .route("/inspect", get(server_inspect))
+        .route("/write", post(server_write))
+        .route("/recall", post(server_recall))
+        .route("/why/{memory_id}", get(server_why))
+        .with_state(state);
+    let listener = tokio::net::TcpListener::bind(command.bind).await?;
+    let local_addr = listener.local_addr()?;
+
+    eprintln!("shibahama serve listening on http://{local_addr}");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+
+    Ok(())
+}
+
+async fn shutdown_signal() {
+    if let Err(error) = tokio::signal::ctrl_c().await {
+        eprintln!("failed to listen for shutdown signal: {error}");
+    }
+}
+
+async fn server_health() -> Json<serde_json::Value> {
+    Json(json!({
+        "status": "ok",
+        "version": shibahama_core::version(),
+    }))
+}
+
+async fn server_ready(
+    State(state): State<ServerState>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let engine = state
+        .engine
+        .lock()
+        .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+    let memory_count = engine.memory_items().map_err(ServerError::internal)?.len();
+
+    Ok(Json(json!({
+        "status": "ready",
+        "path": state.path,
+        "memory_count": memory_count,
+    })))
+}
+
+async fn server_inspect(
+    State(state): State<ServerState>,
+) -> Result<Json<InspectOutput>, ServerError> {
+    let engine = state
+        .engine
+        .lock()
+        .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+    let memories = engine
+        .memory_items()
+        .map_err(ServerError::internal)?
+        .into_iter()
+        .map(MemoryItemDto::from)
+        .collect::<Vec<_>>();
+
+    Ok(Json(InspectOutput {
+        version: shibahama_core::version(),
+        path: state.path,
+        memory_count: memories.len(),
+        memories,
+    }))
+}
+
+async fn server_write(
+    State(state): State<ServerState>,
+    Json(body): Json<ServerWriteRequest>,
+) -> Result<Json<MemoryItemDto>, ServerError> {
+    let mut event = write_event(
+        body.content,
+        body.source_kind.as_deref().unwrap_or("user"),
+        body.source_ref,
+        body.ingested_by.as_deref().unwrap_or("server"),
+        body.valid_from_unix,
+        body.ingested_at_unix,
+    )
+    .map_err(ServerError::bad_request)?;
+
+    if parse_memory_kind(body.kind.as_deref().unwrap_or("fact"))
+        .map_err(ServerError::bad_request)?
+        == MemoryKind::Instruction
+    {
+        event = event.as_instruction();
+    }
+
+    let mut engine = state
+        .engine
+        .lock()
+        .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+    let item = if let Some(vector) = body.vector.as_deref() {
+        engine.write_with_embedding(
+            event,
+            WriteEmbedding {
+                vector,
+                index_name: body.index_name.as_deref().unwrap_or("default"),
+                model: body.model.as_deref().unwrap_or("unknown"),
+                model_version: body.model_version.as_deref().unwrap_or("unknown"),
+            },
+        )
+    } else {
+        engine.write(event)
+    }
+    .map_err(ServerError::internal)?;
+
+    Ok(Json(MemoryItemDto::from(item)))
+}
+
+async fn server_recall(
+    State(state): State<ServerState>,
+    Json(body): Json<ServerRecallRequest>,
+) -> Result<Json<Vec<RecallCandidateDto>>, ServerError> {
+    let mut request = RecallRequest::new(
+        &body.query_vector,
+        body.top_k.unwrap_or(5),
+        time_from_optional_unix(body.now_unix).map_err(ServerError::bad_request)?,
+    );
+
+    if let Some(raw_query_context) = body.raw_query_context.as_deref() {
+        request = request.with_raw_query_context(raw_query_context);
+    }
+    if body.include_cold.unwrap_or(false) {
+        request = request.include_cold();
+    }
+    if body.include_instructions.unwrap_or(false) {
+        request = request.include_instructions();
+    }
+
+    let engine = state
+        .engine
+        .lock()
+        .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+    let candidates = engine
+        .recall(&request)
+        .map_err(ServerError::internal)?
+        .into_iter()
+        .map(RecallCandidateDto::from)
+        .collect::<Vec<_>>();
+
+    Ok(Json(candidates))
+}
+
+async fn server_why(
+    State(state): State<ServerState>,
+    AxumPath(memory_id): AxumPath<String>,
+    Query(query): Query<WhyQuery>,
+) -> Result<Json<Option<WhyTraceDto>>, ServerError> {
+    let id = parse_memory_id(&memory_id).map_err(ServerError::bad_request)?;
+    let now = time_from_optional_unix(query.now_unix).map_err(ServerError::bad_request)?;
+    let engine = state
+        .engine
+        .lock()
+        .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+    let trace = engine
+        .why_at(id, now)
+        .map_err(ServerError::internal)?
+        .map(WhyTraceDto::from);
+
+    Ok(Json(trace))
 }
 
 fn open_engine(

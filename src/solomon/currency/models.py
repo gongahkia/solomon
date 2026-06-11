@@ -7,6 +7,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
+from threading import Lock
 from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
@@ -14,6 +15,9 @@ from pydantic import Field, field_validator, model_validator
 from solomon.api.schemas import SolomonModel
 
 SCHEMA_VERSION = 1
+_uuid7_lock = Lock()
+_last_uuid7_ms = -1
+_last_uuid7_counter = 0
 
 
 class KnowledgeKind(str, Enum):
@@ -76,8 +80,18 @@ def new_uuid7() -> str:
     if uuid7 is not None:
         return str(uuid7())
 
-    timestamp_ms = int(time.time() * 1000) & ((1 << 48) - 1)
-    rand_a = secrets.randbits(12)
+    global _last_uuid7_counter, _last_uuid7_ms
+    with _uuid7_lock:
+        timestamp_ms = int(time.time() * 1000) & ((1 << 48) - 1)
+        if timestamp_ms <= _last_uuid7_ms:
+            timestamp_ms = _last_uuid7_ms
+            _last_uuid7_counter = (_last_uuid7_counter + 1) & 0xFFF
+            if _last_uuid7_counter == 0:
+                timestamp_ms = (_last_uuid7_ms + 1) & ((1 << 48) - 1)
+        else:
+            _last_uuid7_counter = secrets.randbits(12)
+        _last_uuid7_ms = timestamp_ms
+        rand_a = _last_uuid7_counter
     rand_b = secrets.randbits(62)
     value = (timestamp_ms << 80) | (0x7 << 76) | (rand_a << 64) | (0b10 << 62) | rand_b
     return str(uuid.UUID(int=value))

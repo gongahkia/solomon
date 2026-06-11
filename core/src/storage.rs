@@ -789,6 +789,42 @@ impl RedbMemoryStore {
             .transpose()
     }
 
+    /// Finds an entity by type and stable key.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph entity rows cannot be read or decoded.
+    pub fn find_entity_by_stable_key(
+        &self,
+        entity_type: &str,
+        stable_key: &str,
+    ) -> Result<Option<Entity>, StorageError> {
+        Ok(self
+            .graph_entities()?
+            .into_iter()
+            .find(|entity| entity.entity_type == entity_type && entity.stable_key == stable_key))
+    }
+
+    /// Resolves `entity` to an existing entity with the same type and stable key, or stores it.
+    ///
+    /// This is the graph deduplication boundary for aliases or alternate labels that refer to the
+    /// same typed entity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph entity rows cannot be read, written, or decoded.
+    pub fn resolve_entity(&self, entity: &Entity) -> Result<Entity, StorageError> {
+        if let Some(existing) =
+            self.find_entity_by_stable_key(&entity.entity_type, &entity.stable_key)?
+        {
+            return Ok(existing);
+        }
+
+        self.put_entity(entity)?;
+
+        Ok(entity.clone())
+    }
+
     /// Stores or replaces a graph relation edge in the same redb database as memories.
     ///
     /// # Errors
@@ -1812,6 +1848,45 @@ mod tests {
                 .get_relation(relation.id)
                 .expect("relation should read"),
             Some(relation)
+        );
+    }
+
+    #[test]
+    fn resolve_entity_deduplicates_by_type_and_stable_key() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let canonical = Entity::new(
+            "Project",
+            "Shibahama",
+            "project:shibahama",
+            TemporalBounds::open_from(now, now),
+        );
+        let alias = Entity::new(
+            "Project",
+            "shibahama repo",
+            "project:shibahama",
+            TemporalBounds::open_from(now, now),
+        );
+
+        let first = store
+            .resolve_entity(&canonical)
+            .expect("canonical should resolve");
+        let second = store.resolve_entity(&alias).expect("alias should resolve");
+        let found = store
+            .find_entity_by_stable_key("Project", "project:shibahama")
+            .expect("entity should search")
+            .expect("entity should exist");
+
+        assert_eq!(first, canonical);
+        assert_eq!(second.id, canonical.id);
+        assert_eq!(second.label, "Shibahama");
+        assert_eq!(found.id, canonical.id);
+        assert!(
+            store
+                .get_entity(alias.id)
+                .expect("alias id should read")
+                .is_none()
         );
     }
 

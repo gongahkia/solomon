@@ -85,7 +85,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P1) Implement recompute-on-access (lazy) so there is NO global maintenance scan
 - [x] (P1) Implement the credence-floor clamp (significance may fall, tier cannot drop below floor)
 - [x] (P2) Make the significance function pluggable/parameterised via config
-- [ ] (P2) Expose a deterministic "explain significance" breakdown (powers `why()` + the debugger)
+- [x] (P2) Expose a deterministic "explain significance" breakdown (powers `why()` + the debugger)
 - [ ] (P3) Experiment harness to compare significance-function variants offline
 
 ### Tier transitions

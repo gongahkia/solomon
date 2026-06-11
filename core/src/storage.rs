@@ -3,7 +3,7 @@
 //! Durable storage primitives for Shibahama.
 
 use crate::model::{AccessEvent, CompactionRef, EmbeddingRef, MemoryId, MemoryItem, Tier};
-use crate::significance::SignificanceConfig;
+use crate::significance::{SignificanceBreakdown, SignificanceConfig, SignificanceFunction};
 use crate::vector::{VectorIndex, VectorIndexError};
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use redb::{
@@ -680,6 +680,23 @@ impl RedbMemoryStore {
             .map(Some)
     }
 
+    /// Explains the current significance score for an item.
+    ///
+    /// Returns `Ok(None)` when the memory id is unknown.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when current item state cannot be read or decoded.
+    pub fn explain_significance(
+        &self,
+        id: MemoryId,
+        policy: &dyn SignificanceFunction,
+        now: OffsetDateTime,
+    ) -> Result<Option<SignificanceBreakdown>, StorageError> {
+        self.get(id)
+            .map(|maybe_item| maybe_item.map(|item| policy.explain(&item, now)))
+    }
+
     /// Compacts inline content for a cold-tier item into compressed storage.
     ///
     /// Returns `Ok(false)` when the item is missing, is not cold, or is already compacted.
@@ -1206,6 +1223,30 @@ mod tests {
             crate::model::AccessOutcome::LedSomewhere
         );
         assert!(stored.significance > item.significance);
+    }
+
+    #[test]
+    fn explain_significance_returns_deterministic_breakdown() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let item = test_item("explain me");
+        let item_id = item.id;
+        let now = OffsetDateTime::UNIX_EPOCH + time::Duration::days(1);
+        let policy = SignificanceConfig::default();
+
+        store.write(&item).expect("item should write");
+
+        let first = store
+            .explain_significance(item_id, &policy, now)
+            .expect("explain should read")
+            .expect("item should exist");
+        let second = store
+            .explain_significance(item_id, &policy, now)
+            .expect("explain should read")
+            .expect("item should exist");
+
+        assert_eq!(first, second);
+        assert!(first.decay_multiplier <= 1.0);
     }
 
     #[test]

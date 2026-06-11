@@ -3,6 +3,7 @@
 //! Significance scoring primitives.
 
 use crate::model::{AccessEvent, AccessOutcome, MemoryItem, Tier};
+use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 /// Configuration for the transparent significance function.
@@ -25,7 +26,7 @@ pub struct SignificanceConfig {
 }
 
 /// Deterministic contribution breakdown for a significance score.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SignificanceBreakdown {
     /// Base score before access-derived adjustments.
     pub base_score: f64,

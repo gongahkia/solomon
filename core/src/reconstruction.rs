@@ -163,6 +163,82 @@ pub enum RevalidationAction {
     },
 }
 
+/// Strategy used to re-validate a memory from a provenance type.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RevalidationStrategy {
+    /// Re-read the provenance source reference.
+    ReReadSource,
+    /// Query the graph substrate using the provenance source reference.
+    QueryGraph,
+    /// Ask the caller or a human to confirm the memory.
+    SurfaceToCaller,
+}
+
+impl RevalidationStrategy {
+    fn plan(
+        self,
+        trigger: &ReconstructionTrigger,
+        provenance: &Provenance,
+        source_ref: Option<String>,
+    ) -> RevalidationAction {
+        match (self, source_ref) {
+            (Self::ReReadSource, Some(source_ref)) => RevalidationAction::ReReadSource {
+                memory_id: trigger.memory_id,
+                source_kind: provenance.source_kind,
+                source_ref,
+            },
+            (Self::QueryGraph, Some(graph_ref)) => RevalidationAction::QueryGraph {
+                memory_id: trigger.memory_id,
+                graph_ref,
+            },
+            _ => RevalidationAction::SurfaceToCaller {
+                memory_id: trigger.memory_id,
+            },
+        }
+    }
+}
+
+/// Re-validation strategies selected by provenance source kind.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RevalidationStrategyConfig {
+    /// Strategy for user-provided memories.
+    pub user: RevalidationStrategy,
+    /// Strategy for agent-authored memories.
+    pub agent: RevalidationStrategy,
+    /// Strategy for file-backed memories.
+    pub file: RevalidationStrategy,
+    /// Strategy for web-backed memories.
+    pub web: RevalidationStrategy,
+    /// Strategy for tool-output memories.
+    pub tool: RevalidationStrategy,
+}
+
+impl Default for RevalidationStrategyConfig {
+    fn default() -> Self {
+        Self {
+            user: RevalidationStrategy::SurfaceToCaller,
+            agent: RevalidationStrategy::SurfaceToCaller,
+            file: RevalidationStrategy::ReReadSource,
+            web: RevalidationStrategy::ReReadSource,
+            tool: RevalidationStrategy::ReReadSource,
+        }
+    }
+}
+
+impl RevalidationStrategyConfig {
+    /// Returns the configured strategy for a source kind.
+    #[must_use]
+    pub const fn strategy_for(&self, source_kind: SourceKind) -> RevalidationStrategy {
+        match source_kind {
+            SourceKind::User => self.user,
+            SourceKind::Agent => self.agent,
+            SourceKind::File => self.file,
+            SourceKind::Web => self.web,
+            SourceKind::Tool => self.tool,
+        }
+    }
+}
+
 /// Re-validation hook that plans how a trigger should be checked.
 pub trait RevalidationHook {
     /// Plans a re-validation action.
@@ -171,6 +247,45 @@ pub trait RevalidationHook {
         trigger: &ReconstructionTrigger,
         provenance: &Provenance,
     ) -> RevalidationAction;
+}
+
+/// Configurable provenance-driven re-validation planner.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ConfigurableRevalidationHook {
+    /// Per-provenance re-validation strategy config.
+    pub config: RevalidationStrategyConfig,
+}
+
+impl ConfigurableRevalidationHook {
+    /// Creates a configurable re-validation hook.
+    #[must_use]
+    pub const fn new(config: RevalidationStrategyConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl RevalidationHook for ConfigurableRevalidationHook {
+    fn plan_revalidation(
+        &self,
+        trigger: &ReconstructionTrigger,
+        provenance: &Provenance,
+    ) -> RevalidationAction {
+        let source_ref = provenance.source_ref.clone();
+
+        if let Some(graph_ref) = source_ref
+            .as_ref()
+            .filter(|source_ref| source_ref.starts_with("graph:"))
+        {
+            return RevalidationAction::QueryGraph {
+                memory_id: trigger.memory_id,
+                graph_ref: graph_ref.clone(),
+            };
+        }
+
+        self.config
+            .strategy_for(provenance.source_kind)
+            .plan(trigger, provenance, source_ref)
+    }
 }
 
 /// Default provenance-driven re-validation planner.
@@ -183,31 +298,7 @@ impl RevalidationHook for DefaultRevalidationHook {
         trigger: &ReconstructionTrigger,
         provenance: &Provenance,
     ) -> RevalidationAction {
-        let Some(source_ref) = provenance.source_ref.clone() else {
-            return RevalidationAction::SurfaceToCaller {
-                memory_id: trigger.memory_id,
-            };
-        };
-
-        if source_ref.starts_with("graph:") {
-            return RevalidationAction::QueryGraph {
-                memory_id: trigger.memory_id,
-                graph_ref: source_ref,
-            };
-        }
-
-        match provenance.source_kind {
-            SourceKind::File | SourceKind::Tool | SourceKind::Web => {
-                RevalidationAction::ReReadSource {
-                    memory_id: trigger.memory_id,
-                    source_kind: provenance.source_kind,
-                    source_ref,
-                }
-            }
-            SourceKind::User | SourceKind::Agent => RevalidationAction::SurfaceToCaller {
-                memory_id: trigger.memory_id,
-            },
-        }
+        ConfigurableRevalidationHook::default().plan_revalidation(trigger, provenance)
     }
 }
 
@@ -428,6 +519,74 @@ mod tests {
             hook.plan_revalidation(&trigger, &user),
             RevalidationAction::SurfaceToCaller {
                 memory_id: trigger.memory_id,
+            }
+        );
+    }
+
+    #[test]
+    fn configurable_revalidation_hook_overrides_strategy_by_source_kind() {
+        let stale = candidate(true);
+        let trigger = triggers_from_recall(&[stale])[0];
+        let hook = ConfigurableRevalidationHook::new(RevalidationStrategyConfig {
+            web: RevalidationStrategy::SurfaceToCaller,
+            file: RevalidationStrategy::QueryGraph,
+            ..RevalidationStrategyConfig::default()
+        });
+        let web = Provenance::new(
+            SourceKind::Web,
+            Some("https://example.test/fact".to_owned()),
+            "test",
+        );
+        let file = Provenance::new(SourceKind::File, Some("repo:path".to_owned()), "test");
+
+        assert_eq!(
+            hook.plan_revalidation(&trigger, &web),
+            RevalidationAction::SurfaceToCaller {
+                memory_id: trigger.memory_id,
+            }
+        );
+        assert_eq!(
+            hook.plan_revalidation(&trigger, &file),
+            RevalidationAction::QueryGraph {
+                memory_id: trigger.memory_id,
+                graph_ref: "repo:path".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn revalidation_strategy_with_missing_ref_surfaces_to_caller() {
+        let stale = candidate(true);
+        let trigger = triggers_from_recall(&[stale])[0];
+        let hook = ConfigurableRevalidationHook::new(RevalidationStrategyConfig {
+            user: RevalidationStrategy::ReReadSource,
+            ..RevalidationStrategyConfig::default()
+        });
+        let user = Provenance::new(SourceKind::User, None, "test");
+
+        assert_eq!(
+            hook.plan_revalidation(&trigger, &user),
+            RevalidationAction::SurfaceToCaller {
+                memory_id: trigger.memory_id,
+            }
+        );
+    }
+
+    #[test]
+    fn graph_refs_still_use_graph_revalidation() {
+        let stale = candidate(true);
+        let trigger = triggers_from_recall(&[stale])[0];
+        let hook = ConfigurableRevalidationHook::new(RevalidationStrategyConfig {
+            tool: RevalidationStrategy::SurfaceToCaller,
+            ..RevalidationStrategyConfig::default()
+        });
+        let graph = Provenance::new(SourceKind::Tool, Some("graph:claim:123".to_owned()), "test");
+
+        assert_eq!(
+            hook.plan_revalidation(&trigger, &graph),
+            RevalidationAction::QueryGraph {
+                memory_id: trigger.memory_id,
+                graph_ref: "graph:claim:123".to_owned(),
             }
         );
     }

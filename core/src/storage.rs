@@ -691,6 +691,51 @@ impl RedbMemoryStore {
         self.reinforce(id, crate::model::AccessOutcome::Contradicted)
     }
 
+    /// Lazily recomputes significance and applies decay-based tier demotion.
+    ///
+    /// Returns `Ok(None)` when the memory id is unknown.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when current item state cannot be read, decoded, or written.
+    pub fn refresh_significance(
+        &self,
+        id: MemoryId,
+        policy: &dyn SignificanceFunction,
+        now: OffsetDateTime,
+    ) -> Result<Option<MemoryItem>, StorageError> {
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let refreshed = {
+            let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let key = id.to_string();
+            let mut item: MemoryItem = {
+                let Some(value) = item_table.get(key.as_str()).map_err(embed)? else {
+                    return Ok(None);
+                };
+
+                serde_json::from_slice(value.value())?
+            };
+
+            item.significance = policy.recompute(&item, now);
+            let demoted = policy.demote_for_score(item.tier, item.significance);
+            item.tier = policy.clamp_tier_to_credence_floor(&item, demoted);
+
+            let bytes = serde_json::to_vec(&item)?;
+            item_table
+                .insert(key.as_str(), bytes.as_slice())
+                .map_err(embed)?;
+
+            item
+        };
+
+        write_txn.commit().map_err(embed)?;
+
+        Ok(Some(refreshed))
+    }
+
     /// Explains the current significance score for an item.
     ///
     /// Returns `Ok(None)` when the memory id is unknown.
@@ -1305,6 +1350,34 @@ mod tests {
 
         assert_eq!(first, second);
         assert!(first.decay_multiplier <= 1.0);
+    }
+
+    #[test]
+    fn refresh_significance_demotes_lazily_as_score_decays() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut item = test_item("decay me");
+        let policy = SignificanceConfig {
+            half_life_seconds: 1.0,
+            ..SignificanceConfig::default()
+        };
+
+        item.tier = Tier::Hot;
+        item.significance = 1.0;
+        item.credence_floor = Tier::Cold;
+        store.write(&item).expect("item should write");
+
+        let refreshed = store
+            .refresh_significance(
+                item.id,
+                &policy,
+                OffsetDateTime::UNIX_EPOCH + time::Duration::seconds(10),
+            )
+            .expect("refresh should work")
+            .expect("item should exist");
+
+        assert_eq!(refreshed.tier, Tier::Cold);
+        assert!(refreshed.significance < policy.warm_threshold);
     }
 
     #[test]

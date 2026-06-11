@@ -78,6 +78,12 @@ pub trait SignificanceFunction {
     fn clamp_tier_to_credence_floor(&self, item: &MemoryItem, proposed_tier: Tier) -> Tier {
         proposed_tier.max(item.credence_floor)
     }
+
+    /// Applies policy-specific access promotion thresholds.
+    fn promote_on_access(&self, current_tier: Tier, score: f64) -> Tier;
+
+    /// Applies policy-specific decay demotion thresholds.
+    fn demote_for_score(&self, current_tier: Tier, score: f64) -> Tier;
 }
 
 impl SignificanceConfig {
@@ -186,11 +192,31 @@ impl SignificanceConfig {
             current_tier
         }
     }
+
+    /// Applies threshold-based demotion as significance decays.
+    #[must_use]
+    pub fn demote_for_score(self, current_tier: Tier, score: f64) -> Tier {
+        if score < self.warm_threshold {
+            Tier::Cold
+        } else if score < self.hot_threshold && current_tier == Tier::Hot {
+            Tier::Warm
+        } else {
+            current_tier
+        }
+    }
 }
 
 impl SignificanceFunction for SignificanceConfig {
     fn explain(&self, item: &MemoryItem, now: OffsetDateTime) -> SignificanceBreakdown {
         (*self).explain(item, now)
+    }
+
+    fn promote_on_access(&self, current_tier: Tier, score: f64) -> Tier {
+        (*self).promote_on_access(current_tier, score)
+    }
+
+    fn demote_for_score(&self, current_tier: Tier, score: f64) -> Tier {
+        (*self).demote_for_score(current_tier, score)
     }
 }
 
@@ -340,6 +366,15 @@ mod tests {
         assert_eq!(config.promote_on_access(Tier::Cold, 1.0), Tier::Warm);
         assert_eq!(config.promote_on_access(Tier::Warm, 2.0), Tier::Hot);
         assert_eq!(config.promote_on_access(Tier::Cold, 0.1), Tier::Cold);
+    }
+
+    #[test]
+    fn demote_for_score_uses_decay_thresholds() {
+        let config = SignificanceConfig::default();
+
+        assert_eq!(config.demote_for_score(Tier::Hot, 1.0), Tier::Warm);
+        assert_eq!(config.demote_for_score(Tier::Warm, 0.1), Tier::Cold);
+        assert_eq!(config.demote_for_score(Tier::Cold, 0.1), Tier::Cold);
     }
 
     #[test]

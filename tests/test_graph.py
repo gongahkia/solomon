@@ -35,6 +35,10 @@ def _item(item_id: str, content: str) -> KnowledgeItem:
     )
 
 
+def _scoped_item(item_id: str, content: str, *, matter_id: str) -> KnowledgeItem:
+    return _item(item_id, content).model_copy(update={"matter_id": matter_id})
+
+
 def _external_edge(source: str, target: str, *, edge_id: str = "edge-1") -> DependencyEdge:
     return DependencyEdge(
         id=edge_id,
@@ -114,3 +118,16 @@ def test_impact_query_centrality_and_subgraph(tmp_path: Path) -> None:
     assert {edge.id for edge in graph.subgraph_for_items(["item-1"])} == {"edge-1"}
     assert graph.get_edge("edge-2").confidence is EdgeConfidence.HUMAN_ASSERTED
 
+
+def test_subgraph_for_matter_scope(tmp_path: Path) -> None:
+    db = tmp_path / "solomon.sqlite3"
+    store = SQLiteKnowledgeStore(db)
+    graph = GraphStore(db)
+    store.write_item(_scoped_item("item-1", "matter a", matter_id="matter-a"))
+    store.write_item(_scoped_item("item-2", "matter b", matter_id="matter-b"))
+    graph.add_dependency(_external_edge("item-1", "reg-r-12", edge_id="edge-a"))
+    graph.add_dependency(_external_edge("item-2", "reg-r-12", edge_id="edge-b"))
+
+    scoped = graph.subgraph_for_scope(store=store, matter_id="matter-a")
+
+    assert [edge.id for edge in scoped] == ["edge-a"]

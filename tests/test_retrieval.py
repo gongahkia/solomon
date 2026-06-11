@@ -1,0 +1,144 @@
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+from solomon.credence.policy import CredenceLedger
+from solomon.currency.models import (
+    CredenceTier,
+    CurrencyState,
+    KnowledgeItem,
+    KnowledgeKind,
+    Provenance,
+    SourceKind,
+)
+from solomon.graph.models import DependencyEdge, EdgeType
+from solomon.graph.store import GraphStore
+from solomon.orchestrator.retrieval import (
+    MatterContext,
+    RecallOptions,
+    RetrievalOrchestrator,
+    SQLiteRetrievalIndex,
+)
+from solomon.store.sqlite import SQLiteKnowledgeStore
+
+
+def _dt(year: int, month: int, day: int) -> datetime:
+    return datetime(year, month, day, tzinfo=timezone.utc)
+
+
+def _item(
+    item_id: str,
+    content: str,
+    *,
+    tier: CredenceTier = CredenceTier.VERIFIED,
+    state: CurrencyState = CurrencyState.LIVE,
+    matter_id: str | None = None,
+) -> KnowledgeItem:
+    return KnowledgeItem(
+        id=item_id,
+        kind=KnowledgeKind.POSITION,
+        content=content,
+        provenance=Provenance(source_kind=SourceKind.PARTNER, source_ref=item_id),
+        valid_from=_dt(2023, 1, 1),
+        ingested_at=_dt(2023, 1, 1),
+        last_verified_at=_dt(2026, 1, 1),
+        credence_tier=tier,
+        currency_state=state,
+        matter_id=matter_id,
+    )
+
+
+def _orchestrator(tmp_path: Path) -> RetrievalOrchestrator:
+    db = tmp_path / "solomon.sqlite3"
+    return RetrievalOrchestrator(
+        store=SQLiteKnowledgeStore(db),
+        graph=GraphStore(db),
+        index=SQLiteRetrievalIndex(db),
+        credence=CredenceLedger(),
+    )
+
+
+def test_recall_returns_live_items_by_default_and_stale_in_review_mode(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    live = _item("live", "structure x regulation r section 12")
+    stale = _item("stale", "structure x regulation r section 12", state=CurrencyState.STALE_PENDING_REVERIFICATION)
+    orchestrator.store.write_item(live)
+    orchestrator.store.write_item(stale)
+    orchestrator.index_items([live, stale])
+
+    default = orchestrator.recall("structure x regulation")
+    review = orchestrator.recall(
+        "structure x regulation",
+        options=RecallOptions(review_mode=True, dedupe_near_identical=False),
+    )
+
+    assert [result.item.id for result in default] == ["live"]
+    assert {result.item.id for result in review} == {"live", "stale"}
+
+
+def test_recall_attaches_dependencies_provenance_currency_and_last_verified(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    item = _item("item-1", "house view depends on regulation r section 12")
+    edge = DependencyEdge(
+        id="edge-1",
+        source_id="item-1",
+        target_id="reg-r-12",
+        edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+        target_kind="external_authority",
+        valid_from=_dt(2023, 1, 1),
+        created_at=_dt(2023, 1, 1),
+    )
+    orchestrator.store.write_item(item)
+    orchestrator.graph.add_dependency(edge)
+    orchestrator.index_items([item])
+
+    result = orchestrator.recall("regulation r section 12")[0]
+
+    assert result.currency_state is CurrencyState.LIVE
+    assert result.provenance["source_ref"] == "item-1"
+    assert result.dependencies[0].id == "edge-1"
+    assert result.last_verified_at == _dt(2026, 1, 1)
+
+
+def test_credence_guardrail_and_dedupe_affect_ranking(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    firm = _item("firm", "same position alpha", tier=CredenceTier.FIRM_AUTHORITATIVE)
+    model = _item("model", "same position alpha", tier=CredenceTier.MODEL_INFERRED)
+    orchestrator.store.write_item(firm)
+    orchestrator.store.write_item(model)
+    orchestrator.index_items([firm, model])
+
+    result = orchestrator.recall("same position alpha")
+
+    assert [entry.item.id for entry in result] == ["firm"]
+
+
+def test_timeline_uses_historical_state(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    old = _item("old", "structure x allowed under old rule")
+    new = _item("new", "structure x requires review under new rule")
+    orchestrator.store.write_item(old)
+    orchestrator.store.supersede("old", new, superseded_at=_dt(2025, 1, 1))
+
+    before = orchestrator.timeline("structure x allowed", as_of=_dt(2024, 1, 1))
+    after = orchestrator.timeline("structure x review", as_of=_dt(2026, 1, 1))
+
+    assert [result.item.id for result in before] == ["old"]
+    assert {result.item.id for result in after} == {"old", "new"}
+
+
+def test_batch_index_stores_embedding_ref_and_scope_filtering(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    a = _item("a", "client a structure x", matter_id="matter-a")
+    b = _item("b", "client b structure x", matter_id="matter-b")
+    orchestrator.store.write_item(a)
+    orchestrator.store.write_item(b)
+    indexed = orchestrator.index_items([a, b])
+
+    scoped = orchestrator.recall("structure x", matter_context=MatterContext(matter_id="matter-a"))
+
+    assert all(item.embedding_ref == "lexical-token-set:1" for item in indexed)
+    assert [result.item.id for result in scoped] == ["a"]

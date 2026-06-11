@@ -63,10 +63,10 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [ ] (P2) Pluggable backend so SQLite↔Postgres is a config switch
 
 ### Vector / retrieval index
-- [ ] (P0) Define embedding strategy and an index backend (local: sqlite-vss/lancedb; server: pgvector/qdrant)
-- [ ] (P0) Keep item↔vector consistent through supersession (superseded items leave default retrieval but stay queryable)
-- [ ] (P1) Store embedding model + version so re-embeds are detectable
-- [ ] (P2) Batch ingestion path
+- [x] (P0) Define embedding strategy and an index backend (local: sqlite-vss/lancedb; server: pgvector/qdrant)
+- [x] (P0) Keep item↔vector consistent through supersession (superseded items leave default retrieval but stay queryable)
+- [x] (P1) Store embedding model + version so re-embeds are detectable
+- [x] (P2) Batch ingestion path
 
 ---
 
@@ -79,8 +79,8 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P1) Record *why* an item is stale (which dependency moved, when) — feeds the flag explanation and the audit chain
 - [x] (P1) `impact_query(authority)`: "the regulation changed — everything that now needs re-checking" (the query no warehouse KM can answer)
 - [x] (P2) Confidence on dependency edges (human-asserted vs LLM-suggested) — affects how aggressively staleness propagates
-- [ ] (P2) Graph centrality as an input to surfacing order (well-depended-on positions rank earlier when relevant)
-- [ ] (P2) Subgraph extraction per matter/client for scoped review
+- [x] (P2) Graph centrality as an input to surfacing order (well-depended-on positions rank earlier when relevant)
+- [x] (P2) Subgraph extraction per matter/client for scoped review
 - [ ] (P3) Visualise the dependency graph (internal knowledge hanging off external authorities)
 
 ### Dependency capture (honest about the manual cost)
@@ -150,15 +150,15 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 7 — Retrieval orchestrator (🆕)
 
-- [ ] (P0) `recall(query, matter_context)` → ranked KnowledgeItems with currency_state + provenance + dependencies (never bare text)
-- [ ] (P0) Stage 1: semantic similarity retrieval
-- [ ] (P0) Stage 2: currency filter (Live by default; annotate, don't silently drop, when surfacing stale in review mode)
-- [ ] (P1) Stage 3: dependency-graph expansion (pull in what an item relies on, and flag if any dependency moved)
-- [ ] (P1) Stage 4: credence weighting
-- [ ] (P1) Attach to every result: currency_state, what it depends on, what superseded it (if any), last_verified
-- [ ] (P1) `timeline(query, as_of)`: what did the firm believe on date X (bi-temporal query surfaced to users)
-- [ ] (P2) Tunable ranking weights (similarity ⊕ currency ⊕ credence ⊕ centrality)
-- [ ] (P2) De-duplication of near-identical positions across matters
+- [x] (P0) `recall(query, matter_context)` → ranked KnowledgeItems with currency_state + provenance + dependencies (never bare text)
+- [x] (P0) Stage 1: semantic similarity retrieval
+- [x] (P0) Stage 2: currency filter (Live by default; annotate, don't silently drop, when surfacing stale in review mode)
+- [x] (P1) Stage 3: dependency-graph expansion (pull in what an item relies on, and flag if any dependency moved)
+- [x] (P1) Stage 4: credence weighting
+- [x] (P1) Attach to every result: currency_state, what it depends on, what superseded it (if any), last_verified
+- [x] (P1) `timeline(query, as_of)`: what did the firm believe on date X (bi-temporal query surfaced to users)
+- [x] (P2) Tunable ranking weights (similarity ⊕ currency ⊕ credence ⊕ centrality)
+- [x] (P2) De-duplication of near-identical positions across matters
 - [ ] (P3) Query budget controls (max context tokens assembled before sanitisation)
 
 ---

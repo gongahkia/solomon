@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from solomon.graph.models import DependencyEdge, EdgeType
+from solomon.store.sqlite import SQLiteKnowledgeStore
 
 
 class GraphStore:
@@ -144,6 +145,16 @@ class GraphStore:
         ).fetchall()
         return [DependencyEdge.model_validate_json(str(row["edge_json"])) for row in rows]
 
+    def subgraph_for_scope(
+        self,
+        *,
+        store: SQLiteKnowledgeStore,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[DependencyEdge]:
+        scoped_items = store.get_many(matter_id=matter_id, client_id=client_id)
+        return self.subgraph_for_items(item.id for item in scoped_items)
+
     def _select_edges(self, clause: str, params: list[Any], *, at: datetime | None) -> list[DependencyEdge]:
         time_clause = "valid_to IS NULL" if at is None else "valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)"
         time_params = [] if at is None else [at.isoformat(), at.isoformat()]
@@ -220,4 +231,3 @@ def supersedes_edge(source_id: str, target_id: str, *, created_by: str | None = 
         target_kind="knowledge_item",
         created_by=created_by,
     )
-

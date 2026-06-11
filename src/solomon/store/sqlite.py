@@ -125,6 +125,8 @@ class SQLiteKnowledgeStore:
         item_ids: Iterable[str] | None = None,
         *,
         include_states: set[CurrencyState] | None = None,
+        matter_id: str | None = None,
+        client_id: str | None = None,
     ) -> list[KnowledgeItem]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -142,6 +144,12 @@ class SQLiteKnowledgeStore:
             placeholders = ",".join("?" for _ in states)
             clauses.append(f"currency_state IN ({placeholders})")
             params.extend(states)
+        if matter_id is not None:
+            clauses.append("matter_id = ?")
+            params.append(matter_id)
+        if client_id is not None:
+            clauses.append("client_id = ?")
+            params.append(client_id)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self._conn.execute(
             f"SELECT item_json FROM knowledge_items {where} ORDER BY ingested_at, item_id",  # noqa: S608
@@ -192,7 +200,12 @@ class SQLiteKnowledgeStore:
         for row in rows:
             payload = json.loads(str(row["payload_json"]))
             event_type = str(row["event_type"])
-            if event_type in {"knowledge_item_written", "knowledge_item_updated", "knowledge_item_stale_flagged"}:
+            if event_type in {
+                "knowledge_item_written",
+                "knowledge_item_updated",
+                "knowledge_item_stale_flagged",
+                "knowledge_item_indexed",
+            }:
                 item = KnowledgeItem.model_validate(payload["item"])
                 state[item.id] = item
             elif event_type == "knowledge_item_superseded":
@@ -252,7 +265,12 @@ class SQLiteKnowledgeStore:
         for row in rows:
             payload = json.loads(str(row["payload_json"]))
             event_type = str(row["event_type"])
-            if event_type in {"knowledge_item_written", "knowledge_item_updated", "knowledge_item_stale_flagged"}:
+            if event_type in {
+                "knowledge_item_written",
+                "knowledge_item_updated",
+                "knowledge_item_stale_flagged",
+                "knowledge_item_indexed",
+            }:
                 item = KnowledgeItem.model_validate(payload["item"])
                 state[item.id] = item
             elif event_type == "knowledge_item_superseded":

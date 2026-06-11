@@ -31,6 +31,8 @@ pub struct RecallRequest<'a> {
     pub top_k: usize,
     /// Valid-time instant used for default current-fact filtering.
     pub now: OffsetDateTime,
+    /// Whether recall may return cold-tier memories.
+    pub include_cold: bool,
     /// Ranking weights applied to retrieved candidates.
     pub ranking: RecallRankingConfig,
     /// Policy for flagging load-bearing but possibly stale memories.
@@ -48,6 +50,7 @@ impl<'a> RecallRequest<'a> {
             raw_query_context: None,
             top_k,
             now,
+            include_cold: false,
             ranking: RecallRankingConfig::default(),
             staleness: RecallStalenessConfig::default(),
             related_memory_provider: None,
@@ -58,6 +61,13 @@ impl<'a> RecallRequest<'a> {
     #[must_use]
     pub const fn with_raw_query_context(mut self, raw_query_context: &'a str) -> Self {
         self.raw_query_context = Some(raw_query_context);
+        self
+    }
+
+    /// Allows cold-tier memories to be returned.
+    #[must_use]
+    pub const fn include_cold(mut self) -> Self {
+        self.include_cold = true;
         self
     }
 
@@ -153,6 +163,8 @@ pub struct RecallCandidate {
     pub currency: RecallCandidateCurrency,
     /// True when this is significant, old, and lacks a recent validation-like access signal.
     pub load_bearing_possibly_stale: bool,
+    /// True when this result was returned from cold-tier storage by explicit opt-in.
+    pub cold_tier_retrieval: bool,
     /// Vector distance from the query, where lower is closer.
     pub vector_distance: f32,
     /// Normalized similarity contribution derived from vector distance.
@@ -246,7 +258,7 @@ fn recall_inner(
         .filter_map(|(result, item)| {
             let item = item?;
 
-            if !is_believed_at(&item, request.now) {
+            if !is_recallable_item(&item, request) {
                 return None;
             }
 
@@ -286,7 +298,7 @@ fn recall_inner(
                     continue;
                 };
 
-                if !is_believed_at(&item, request.now) {
+                if !is_recallable_item(&item, request) {
                     continue;
                 }
 
@@ -353,6 +365,7 @@ fn candidate_from_item(
     let tier = item.tier;
     let currency = candidate_currency(&item, now);
     let load_bearing_possibly_stale = load_bearing_possibly_stale(&item, staleness, now);
+    let cold_tier_retrieval = tier == Tier::Cold;
 
     RecallCandidate {
         id,
@@ -361,6 +374,7 @@ fn candidate_from_item(
         tier,
         currency,
         load_bearing_possibly_stale,
+        cold_tier_retrieval,
         vector_distance,
         similarity_score,
         significance_score,
@@ -413,6 +427,10 @@ fn candidate_currency(item: &MemoryItem, now: OffsetDateTime) -> RecallCandidate
 
 fn is_believed_at(item: &MemoryItem, as_of: OffsetDateTime) -> bool {
     item.timestamps.ingested_at <= as_of && item.timestamps.is_valid_at(as_of)
+}
+
+fn is_recallable_item(item: &MemoryItem, request: &RecallRequest<'_>) -> bool {
+    is_believed_at(item, request.now) && (request.include_cold || item.tier != Tier::Cold)
 }
 
 fn load_bearing_possibly_stale(
@@ -576,6 +594,62 @@ mod tests {
             events.last().map(|record| &record.event),
             Some(MemoryEvent::AccessRecorded { id, .. }) if *id == far.id
         ));
+    }
+
+    #[test]
+    fn recall_requires_explicit_cold_tier_opt_in() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(1);
+        let mut cold = test_item("cold", OffsetDateTime::UNIX_EPOCH);
+        let mut warm = test_item("warm", OffsetDateTime::UNIX_EPOCH);
+
+        cold.tier = Tier::Cold;
+        cold.credence_floor = Tier::Cold;
+
+        store
+            .write_embedded(
+                &mut cold,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("cold should write");
+        store
+            .write_embedded(
+                &mut warm,
+                &mut vector_index,
+                &[5.0, 5.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("warm should write");
+
+        let query = [0.0, 0.0];
+        let default_request = RecallRequest::new(&query, 2, now);
+        let cold_request = RecallRequest::new(&query, 2, now).include_cold();
+        let default_candidates =
+            recall(&store, &vector_index, &default_request).expect("recall should work");
+        let cold_candidates =
+            recall(&store, &vector_index, &cold_request).expect("cold recall should work");
+        let cold_candidate = cold_candidates
+            .iter()
+            .find(|candidate| candidate.id == cold.id)
+            .expect("cold candidate should be present when opted in");
+
+        assert_eq!(
+            default_candidates
+                .iter()
+                .map(|candidate| candidate.id)
+                .collect::<Vec<_>>(),
+            vec![warm.id]
+        );
+        assert!(cold_candidate.cold_tier_retrieval);
+        assert_eq!(cold_candidate.tier, Tier::Cold);
     }
 
     #[test]

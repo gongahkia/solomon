@@ -25,3 +25,5 @@ workspace = true
 [dependencies]
 pyo3 = { version = "0.28.3", features = ["extension-module"] }
 shibahama-core.workspace = true
+time = { version = "0.3.47", features = ["serde"] }
+uuid = "1.23.3"

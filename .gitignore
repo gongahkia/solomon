@@ -5,5 +5,7 @@
 /.venv/
 /dist/
 /node_modules/
+__pycache__/
+*.so
 
 *.log

@@ -597,8 +597,8 @@ pub fn promote_corroborated_proposal(
 mod tests {
     use super::*;
     use crate::model::{
-        CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, MemoryItem, Provenance, SourceKind,
-        TemporalBounds, Tier,
+        CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, MemoryItem, MemoryKind, Provenance,
+        SourceKind, TemporalBounds, Tier,
     };
     use crate::retrieval::{RecallCandidate, RecallCandidateCurrency, RecallCandidateSource};
     use time::OffsetDateTime;
@@ -609,6 +609,7 @@ mod tests {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             id: MemoryId::new_v7(),
             content: "memory".to_owned(),
+            kind: MemoryKind::Fact,
             compaction: None,
             consolidation: None,
             embedding_ref: None,
@@ -624,6 +625,7 @@ mod tests {
         RecallCandidate {
             id: item.id,
             item: item.clone(),
+            kind: item.kind,
             provenance: item.provenance.clone(),
             tier: item.tier,
             currency: RecallCandidateCurrency::Current,

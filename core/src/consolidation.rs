@@ -80,7 +80,7 @@ pub fn plan_consolidation(
 mod tests {
     use super::*;
     use crate::model::{
-        CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, MemoryId, Provenance, SourceKind,
+        CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, MemoryId, MemoryKind, Provenance, SourceKind,
         TemporalBounds, Tier,
     };
     use time::OffsetDateTime;
@@ -90,6 +90,7 @@ mod tests {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             id: MemoryId::new_v7(),
             content: content.to_owned(),
+            kind: MemoryKind::Fact,
             compaction: None,
             consolidation,
             embedding_ref: None,

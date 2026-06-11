@@ -2,7 +2,9 @@
 
 //! Retrieval orchestration for recall.
 
-use crate::model::{AccessEvent, AccessOutcome, MemoryId, MemoryItem, Provenance, Tier};
+use crate::model::{
+    AccessEvent, AccessOutcome, MemoryId, MemoryItem, MemoryKind, Provenance, Tier,
+};
 use crate::read_safety::{StoredContentFinding, sanitize_memory_for_read};
 use crate::storage::{RedbMemoryStore, StorageError};
 use crate::vector::{VectorIndex, VectorIndexError};
@@ -34,6 +36,8 @@ pub struct RecallRequest<'a> {
     pub now: OffsetDateTime,
     /// Whether recall may return cold-tier memories.
     pub include_cold: bool,
+    /// Whether recall may return instruction/directive memories.
+    pub include_instructions: bool,
     /// Ranking weights applied to retrieved candidates.
     pub ranking: RecallRankingConfig,
     /// Policy for flagging load-bearing but possibly stale memories.
@@ -54,6 +58,7 @@ impl<'a> RecallRequest<'a> {
             top_k,
             now,
             include_cold: false,
+            include_instructions: false,
             ranking: RecallRankingConfig::default(),
             staleness: RecallStalenessConfig::default(),
             diversification: RecallDiversificationConfig::default(),
@@ -72,6 +77,13 @@ impl<'a> RecallRequest<'a> {
     #[must_use]
     pub const fn include_cold(mut self) -> Self {
         self.include_cold = true;
+        self
+    }
+
+    /// Allows instruction/directive memories to be returned.
+    #[must_use]
+    pub const fn include_instructions(mut self) -> Self {
+        self.include_instructions = true;
         self
     }
 
@@ -187,6 +199,8 @@ pub struct RecallCandidate {
     pub id: MemoryId,
     /// Full materialized memory item, including provenance, tier, and validity metadata.
     pub item: MemoryItem,
+    /// Semantic class copied to the candidate boundary.
+    pub kind: MemoryKind,
     /// Provenance copied to the candidate boundary so recall never returns bare text.
     pub provenance: Provenance,
     /// Accessibility tier copied to the candidate boundary.
@@ -454,6 +468,7 @@ fn candidate_from_item(
         + ranking.recency_weight * recency_score
         + ranking.graph_weight * graph_score;
     let provenance = item.provenance.clone();
+    let kind = item.kind;
     let tier = item.tier;
     let currency = candidate_currency(&item, now);
     let load_bearing_possibly_stale = load_bearing_possibly_stale(&item, staleness, now);
@@ -462,6 +477,7 @@ fn candidate_from_item(
     RecallCandidate {
         id,
         item,
+        kind,
         provenance,
         tier,
         currency,
@@ -523,7 +539,9 @@ fn is_believed_at(item: &MemoryItem, as_of: OffsetDateTime) -> bool {
 }
 
 fn is_recallable_item(item: &MemoryItem, request: &RecallRequest<'_>) -> bool {
-    is_believed_at(item, request.now) && (request.include_cold || item.tier != Tier::Cold)
+    is_believed_at(item, request.now)
+        && (request.include_cold || item.tier != Tier::Cold)
+        && (request.include_instructions || item.kind == MemoryKind::Fact)
 }
 
 fn load_bearing_possibly_stale(
@@ -588,6 +606,7 @@ mod tests {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             id: MemoryId::new_v7(),
             content: content.to_owned(),
+            kind: MemoryKind::Fact,
             compaction: None,
             consolidation: None,
             embedding_ref: None,
@@ -744,6 +763,61 @@ mod tests {
         );
         assert!(cold_candidate.cold_tier_retrieval);
         assert_eq!(cold_candidate.tier, Tier::Cold);
+    }
+
+    #[test]
+    fn recall_requires_explicit_instruction_opt_in() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(1);
+        let mut fact = test_item("fact", OffsetDateTime::UNIX_EPOCH);
+        let mut instruction = test_item("instruction", OffsetDateTime::UNIX_EPOCH);
+
+        instruction.kind = MemoryKind::Instruction;
+
+        store
+            .write_embedded(
+                &mut instruction,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("instruction should write");
+        store
+            .write_embedded(
+                &mut fact,
+                &mut vector_index,
+                &[5.0, 5.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("fact should write");
+
+        let query = [0.0, 0.0];
+        let default_request = RecallRequest::new(&query, 2, now);
+        let instruction_request = RecallRequest::new(&query, 2, now).include_instructions();
+        let default_candidates =
+            recall(&store, &vector_index, &default_request).expect("recall should work");
+        let instruction_candidates =
+            recall(&store, &vector_index, &instruction_request).expect("recall should work");
+
+        assert_eq!(
+            default_candidates
+                .iter()
+                .map(|candidate| candidate.id)
+                .collect::<Vec<_>>(),
+            vec![fact.id]
+        );
+        assert!(
+            instruction_candidates
+                .iter()
+                .any(|candidate| candidate.id == instruction.id
+                    && candidate.kind == MemoryKind::Instruction)
+        );
     }
 
     #[test]

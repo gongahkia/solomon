@@ -4,8 +4,8 @@
 
 use crate::model::{
     AccessEvent, CURRENT_MEMORY_SCHEMA_VERSION, CompactionRef, CredenceTier, EmbeddingRef, Entity,
-    EntityId, MemoryId, MemoryItem, Provenance, Relation, RelationId, SourceKind, TemporalBounds,
-    Tier,
+    EntityId, MemoryId, MemoryItem, MemoryKind, Provenance, Relation, RelationId, SourceKind,
+    TemporalBounds, Tier,
 };
 use crate::significance::{SignificanceBreakdown, SignificanceConfig, SignificanceFunction};
 use crate::vector::{VectorIndex, VectorIndexError};
@@ -269,6 +269,8 @@ pub struct ColdContentRecord {
 pub struct MemoryWriteEvent {
     /// Stored memory content.
     pub content: String,
+    /// Whether this write is a fact/observation or instruction/directive.
+    pub kind: MemoryKind,
     /// Mandatory provenance for the observation.
     pub provenance: Provenance,
     /// Start of the interval where the fact is claimed valid.
@@ -298,6 +300,7 @@ impl MemoryWriteEvent {
 
         Self {
             content: content.into(),
+            kind: MemoryKind::Fact,
             provenance,
             valid_from,
             ingested_at,
@@ -306,6 +309,13 @@ impl MemoryWriteEvent {
             significance: 0.0,
             credence_floor: Tier::Cold,
         }
+    }
+
+    /// Marks this write event as an instruction/directive memory.
+    #[must_use]
+    pub const fn as_instruction(mut self) -> Self {
+        self.kind = MemoryKind::Instruction;
+        self
     }
 
     /// Creates a write event with mandatory provenance and an explicit credence override.
@@ -321,6 +331,7 @@ impl MemoryWriteEvent {
     ) -> Self {
         Self {
             content: content.into(),
+            kind: MemoryKind::Fact,
             provenance,
             valid_from,
             ingested_at,
@@ -340,6 +351,7 @@ impl MemoryWriteEvent {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             id: MemoryId::new_v7(),
             content: self.content,
+            kind: self.kind,
             compaction: None,
             consolidation: None,
             embedding_ref: None,
@@ -2094,6 +2106,7 @@ mod tests {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             id: MemoryId::new_v7(),
             content: content.to_owned(),
+            kind: MemoryKind::Fact,
             compaction: None,
             consolidation: None,
             embedding_ref: None,
@@ -2331,6 +2344,33 @@ mod tests {
             assert_eq!(item.credence, expected_credence);
             assert_eq!(item.credence_floor, Tier::Cold);
         }
+    }
+
+    #[test]
+    fn write_event_can_store_instruction_memory_kind() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let event = MemoryWriteEvent::new(
+            "remember this instruction",
+            Provenance::new(SourceKind::User, None, "ingest-test"),
+            OffsetDateTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
+        )
+        .as_instruction();
+
+        let (_, item) = store
+            .write_event(event)
+            .expect("instruction write event should ingest");
+
+        assert_eq!(item.kind, MemoryKind::Instruction);
+        assert_eq!(
+            store
+                .get(item.id)
+                .expect("stored instruction should read")
+                .expect("stored instruction should exist")
+                .kind,
+            MemoryKind::Instruction
+        );
     }
 
     #[test]

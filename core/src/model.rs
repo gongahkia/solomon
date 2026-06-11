@@ -189,6 +189,16 @@ pub enum SourceKind {
     Tool,
 }
 
+/// Semantic class for stored memory content.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub enum MemoryKind {
+    /// Descriptive fact or observation.
+    #[default]
+    Fact,
+    /// Instruction or directive that must not be mixed into fact recall by default.
+    Instruction,
+}
+
 /// Provenance attached to every persisted memory.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Provenance {
@@ -488,6 +498,9 @@ pub struct MemoryItem {
     pub id: MemoryId,
     /// Stored memory content.
     pub content: String,
+    /// Whether this memory is a fact/observation or an instruction/directive.
+    #[serde(default)]
+    pub kind: MemoryKind,
     /// Pointer to compressed cold content when content has been moved out of this row.
     pub compaction: Option<CompactionRef>,
     /// Consolidation lineage, when this item is an auto-generated summary.
@@ -707,6 +720,7 @@ mod tests {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             id: MemoryId::new_v7(),
             content: "Use the Rust core as the source of truth.".to_owned(),
+            kind: MemoryKind::Fact,
             compaction: None,
             consolidation: None,
             embedding_ref: Some(EmbeddingRef {
@@ -735,6 +749,7 @@ mod tests {
             Some(3)
         );
         assert_eq!(item.tier, Tier::Warm);
+        assert_eq!(item.kind, MemoryKind::Fact);
         assert_eq!(item.credence, CredenceTier::FirmAuthoritative);
         assert_eq!(item.schema_version, CURRENT_MEMORY_SCHEMA_VERSION);
         assert!((item.significance - 1.0).abs() < f64::EPSILON);
@@ -762,6 +777,7 @@ mod tests {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             id: MemoryId::new_v7(),
             content: "Do not reintroduce the rejected cache design.".to_owned(),
+            kind: MemoryKind::Instruction,
             compaction: None,
             consolidation: None,
             embedding_ref: None,

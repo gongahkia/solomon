@@ -74,7 +74,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [ ] (P0) Capture access on every `recall()` automatically (which items were surfaced)
 - [x] (P1) Distinguish "surfaced" from "actually used" (caller signals which retrieved items mattered)
 - [x] (P1) Capture outcome signal: did the action after recall succeed / was the memory cited in output
-- [ ] (P1) Capture contradiction events (a new fact conflicts with this one)
+- [x] (P1) Capture contradiction events (a new fact conflicts with this one)
 - [ ] (P2) Lightweight, privacy-safe query-context fingerprint (hash, not raw text) per access
 
 ### Significance computation

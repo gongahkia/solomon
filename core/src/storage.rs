@@ -680,6 +680,15 @@ impl RedbMemoryStore {
             .map(Some)
     }
 
+    /// Records that a memory was contradicted by a newer observation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the contradiction event cannot be durably recorded.
+    pub fn record_contradiction(&self, id: MemoryId) -> Result<Option<EventRecord>, StorageError> {
+        self.reinforce(id, crate::model::AccessOutcome::Contradicted)
+    }
+
     /// Explains the current significance score for an item.
     ///
     /// Returns `Ok(None)` when the memory id is unknown.
@@ -1245,6 +1254,29 @@ mod tests {
         assert_eq!(
             stored.access_events[0].outcome,
             crate::model::AccessOutcome::Cited
+        );
+    }
+
+    #[test]
+    fn record_contradiction_captures_contradicted_outcome() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let item = test_item("contradict me");
+        let item_id = item.id;
+
+        store.write(&item).expect("item should write");
+        store
+            .record_contradiction(item_id)
+            .expect("contradiction should write");
+
+        let stored = store
+            .get(item_id)
+            .expect("item should read")
+            .expect("item should exist");
+
+        assert_eq!(
+            stored.access_events[0].outcome,
+            crate::model::AccessOutcome::Contradicted
         );
     }
 

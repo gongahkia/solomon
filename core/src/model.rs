@@ -254,8 +254,18 @@ pub struct MemoryItem {
     pub credence: CredenceTier,
     /// Current materialized significance score.
     pub significance: f64,
+    /// Coldest tier this memory may occupy after significance-based demotion.
+    pub credence_floor: Tier,
     /// Captured usage events for this memory.
     pub access_events: Vec<AccessEvent>,
+}
+
+impl MemoryItem {
+    /// Applies this item's credence floor to a proposed tier.
+    #[must_use]
+    pub fn clamp_tier_to_floor(&self, proposed_tier: Tier) -> Tier {
+        proposed_tier.max(self.credence_floor)
+    }
 }
 
 #[cfg(test)]
@@ -356,6 +366,7 @@ mod tests {
             tier: Tier::Warm,
             credence: CredenceTier::FirmAuthoritative,
             significance: 1.0,
+            credence_floor: Tier::Warm,
             access_events: Vec::new(),
         };
 
@@ -368,5 +379,27 @@ mod tests {
         assert_eq!(item.tier, Tier::Warm);
         assert_eq!(item.credence, CredenceTier::FirmAuthoritative);
         assert!((item.significance - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn memory_item_clamps_proposed_tier_to_credence_floor() {
+        let item = MemoryItem {
+            id: MemoryId::new_v7(),
+            content: "Do not reintroduce the rejected cache design.".to_owned(),
+            embedding_ref: None,
+            provenance: Provenance::new(SourceKind::User, None, "unit-test"),
+            timestamps: TemporalBounds::open_from(
+                OffsetDateTime::UNIX_EPOCH,
+                OffsetDateTime::UNIX_EPOCH,
+            ),
+            tier: Tier::Hot,
+            credence: CredenceTier::FirmAuthoritative,
+            significance: 0.0,
+            credence_floor: Tier::Warm,
+            access_events: Vec::new(),
+        };
+
+        assert_eq!(item.clamp_tier_to_floor(Tier::Cold), Tier::Warm);
+        assert_eq!(item.clamp_tier_to_floor(Tier::Hot), Tier::Hot);
     }
 }

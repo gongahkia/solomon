@@ -2,7 +2,8 @@
 
 //! Durable storage primitives for Shibahama.
 
-use crate::model::{AccessEvent, CompactionRef, MemoryId, MemoryItem, Tier};
+use crate::model::{AccessEvent, CompactionRef, EmbeddingRef, MemoryId, MemoryItem, Tier};
+use crate::vector::{VectorIndex, VectorIndexError};
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use redb::{
     Database, Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition,
@@ -33,6 +34,9 @@ pub enum StorageError {
     /// File I/O failed.
     #[error("file I/O failed: {0}")]
     Io(#[from] std::io::Error),
+    /// Vector index operation failed.
+    #[error(transparent)]
+    Vector(#[from] VectorIndexError),
 }
 
 /// Append-only event describing a durable memory-state change.
@@ -259,6 +263,41 @@ impl RedbMemoryStore {
         self.event(sequence)?.ok_or_else(|| {
             StorageError::Embedded("committed write event was not readable".to_owned())
         })
+    }
+
+    /// Writes an item and its embedding, keeping item metadata and vector index in sync.
+    ///
+    /// If durable item write fails after vector insertion, the vector insertion is rolled back.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when vector insertion fails or the item cannot be durably written.
+    pub fn write_embedded(
+        &self,
+        item: &mut MemoryItem,
+        vector_index: &mut dyn VectorIndex,
+        vector: &[f32],
+        index_name: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Result<EventRecord, StorageError> {
+        vector_index
+            .add(item.id, vector)
+            .map_err(StorageError::from)?;
+
+        item.embedding_ref = Some(EmbeddingRef {
+            index: index_name.into(),
+            vector_id: item.id.to_string(),
+            model: model.into(),
+            dimensions: vector_index.dimensions(),
+        });
+
+        match self.write(item) {
+            Ok(record) => Ok(record),
+            Err(error) => {
+                let _ = vector_index.delete_by_id(item.id);
+                Err(error)
+            }
+        }
     }
 
     /// Returns all event-log records in sequence order.
@@ -553,6 +592,27 @@ impl RedbMemoryStore {
             .map(Some)
     }
 
+    /// Soft-invalidates an item and removes its vector from the index.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when invalidation cannot be written or the vector index cannot remove the
+    /// invalidated id.
+    pub fn soft_invalidate_with_vector(
+        &self,
+        id: MemoryId,
+        valid_to: OffsetDateTime,
+        vector_index: &mut dyn VectorIndex,
+    ) -> Result<Option<EventRecord>, StorageError> {
+        let record = self.soft_invalidate(id, valid_to)?;
+
+        if record.is_some() {
+            vector_index.delete_by_id(id).map_err(StorageError::from)?;
+        }
+
+        Ok(record)
+    }
+
     /// Compacts inline content for a cold-tier item into compressed storage.
     ///
     /// Returns `Ok(false)` when the item is missing, is not cold, or is already compacted.
@@ -700,6 +760,7 @@ mod tests {
     use crate::model::{
         CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, Provenance, SourceKind, TemporalBounds,
     };
+    use crate::vector::{HnswVectorIndex, VectorIndex};
     use tempfile::NamedTempFile;
     use tempfile::tempdir;
 
@@ -992,6 +1053,53 @@ mod tests {
         assert_eq!(restored_cold.content, "");
         assert_eq!(restored_cold_content.as_deref(), Some("cold content"));
         assert_eq!(restored.events().expect("events should read").len(), 3);
+    }
+
+    #[test]
+    fn embedded_write_and_invalidate_keep_vector_index_consistent() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let mut item = test_item("embedded");
+        let item_id = item.id;
+
+        store
+            .write_embedded(
+                &mut item,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model@v1",
+            )
+            .expect("embedded write should work");
+
+        let stored = store
+            .get(item_id)
+            .expect("item should read")
+            .expect("item should exist");
+        let search_before = vector_index
+            .search(&[0.0, 0.0], 1)
+            .expect("search should work");
+
+        assert_eq!(
+            stored.embedding_ref.as_ref().map(|eref| eref.dimensions),
+            Some(2)
+        );
+        assert_eq!(search_before[0].id, item_id);
+
+        store
+            .soft_invalidate_with_vector(
+                item_id,
+                OffsetDateTime::UNIX_EPOCH + time::Duration::days(1),
+                &mut vector_index,
+            )
+            .expect("invalidate should work");
+
+        let search_after = vector_index
+            .search(&[0.0, 0.0], 1)
+            .expect("search should work");
+
+        assert!(search_after.is_empty());
     }
 
     #[test]

@@ -165,13 +165,13 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 
 ## Phase 8 — Audit & privilege evidence chain (🆕 P1 #3, ♻️ Kaypoh journal)
 
-- [ ] (P0) Append-only audit journal (♻️ mirror `../kaypoh` journal + `verify_journal` pattern)
-- [ ] (P0) Log per query: what was known, currency states surfaced, what verification ran, which endpoint, what crossed the boundary (metadata only — never content)
-- [ ] (P1) Log the full dependency/staleness chain for any flagged item (the "why was this stale" record)
-- [ ] (P1) Audit-pack export + verify (♻️ Kaypoh `export_audit_pack` / `verify_audit_pack` patterns) — the defensibility artifact
-- [ ] (P1) Tamper-evidence on the journal (hash chaining)
-- [ ] (P2) "What did we know and when" report for a given matter/client (privilege defence narrative)
-- [ ] (P2) Right-to-erasure handling for stored knowledge where lawful (♻️ Kaypoh `erase_subject` philosophy), reconciled with the never-delete-for-audit tension (document the resolution)
+- [x] (P0) Append-only audit journal (♻️ mirror `../kaypoh` journal + `verify_journal` pattern)
+- [x] (P0) Log per query: what was known, currency states surfaced, what verification ran, which endpoint, what crossed the boundary (metadata only — never content)
+- [x] (P1) Log the full dependency/staleness chain for any flagged item (the "why was this stale" record)
+- [x] (P1) Audit-pack export + verify (♻️ Kaypoh `export_audit_pack` / `verify_audit_pack` patterns) — the defensibility artifact
+- [x] (P1) Tamper-evidence on the journal (hash chaining)
+- [x] (P2) "What did we know and when" report for a given matter/client (privilege defence narrative)
+- [x] (P2) Right-to-erasure handling for stored knowledge where lawful (♻️ Kaypoh `erase_subject` philosophy), reconciled with the never-delete-for-audit tension (document the resolution)
 - [ ] (P3) Signed verification attestations (who verified, cryptographically)
 
 ---

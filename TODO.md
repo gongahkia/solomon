@@ -52,7 +52,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Implement `get(id)` and `get_many(ids)`
 - [x] (P0) Implement soft-invalidate: close `valid_to`, never delete the row
 - [x] (P1) Implement compaction for cold-tier items (compress content, keep metadata + pointer)
-- [ ] (P1) Implement crash-safe writes (fsync policy / WAL) and a recovery path on startup
+- [x] (P1) Implement crash-safe writes (fsync policy / WAL) and a recovery path on startup
 - [ ] (P1) Snapshot + restore of full memory state to a single file (portability, SQLite-like ergonomics)
 - [ ] (P2) Pluggable storage backend trait so users can swap the KV engine
 - [ ] (P2) Encryption-at-rest hook (needed later for the legal variant; stub the trait now)

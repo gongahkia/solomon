@@ -4,7 +4,9 @@
 
 use crate::model::{AccessEvent, CompactionRef, MemoryId, MemoryItem, Tier};
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
-use redb::{Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
+use redb::{
+    Database, Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition,
+};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use thiserror::Error;
@@ -80,6 +82,15 @@ pub struct EventRecord {
     pub event: MemoryEvent,
 }
 
+/// Summary of startup recovery validation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RecoveryReport {
+    /// Number of event-log records decoded successfully.
+    pub event_count: usize,
+    /// Number of materialized memory items decoded successfully.
+    pub materialized_item_count: usize,
+}
+
 /// `redb`-backed store for event log and materialized memory state.
 pub struct RedbMemoryStore {
     db: Database,
@@ -93,8 +104,11 @@ impl RedbMemoryStore {
     /// Returns an error when the embedded database cannot be created or opened.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let db = Database::create(path).map_err(embed)?;
+        let store = Self { db };
 
-        Ok(Self { db })
+        store.recover()?;
+
+        Ok(store)
     }
 
     /// Appends an event and returns its durable record.
@@ -103,7 +117,10 @@ impl RedbMemoryStore {
     ///
     /// Returns an error when the event cannot be serialized, appended, committed, or read back.
     pub fn append_event(&self, event: MemoryEvent) -> Result<EventRecord, StorageError> {
-        let write_txn = self.db.begin_write().map_err(embed)?;
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
         let sequence = {
             let mut table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
             let sequence = table.len().map_err(embed)?;
@@ -132,7 +149,10 @@ impl RedbMemoryStore {
     /// Returns an error when the item or event cannot be serialized, written, committed, or read
     /// back.
     pub fn write(&self, item: &MemoryItem) -> Result<EventRecord, StorageError> {
-        let write_txn = self.db.begin_write().map_err(embed)?;
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
         let sequence = {
             let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
             let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
@@ -188,6 +208,22 @@ impl RedbMemoryStore {
         Ok(records)
     }
 
+    /// Validates persisted tables after opening the store.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when stored event-log or materialized item records cannot be read or
+    /// decoded.
+    pub fn recover(&self) -> Result<RecoveryReport, StorageError> {
+        let events = self.events()?;
+        let materialized_items = self.materialized_items()?;
+
+        Ok(RecoveryReport {
+            event_count: events.len(),
+            materialized_item_count: materialized_items.len(),
+        })
+    }
+
     fn event(&self, sequence: u64) -> Result<Option<EventRecord>, StorageError> {
         let read_txn = self.db.begin_read().map_err(embed)?;
         let table = match read_txn.open_table(EVENT_LOG_TABLE) {
@@ -209,7 +245,10 @@ impl RedbMemoryStore {
     ///
     /// Returns an error when the item cannot be serialized, written, or committed.
     pub fn put_materialized_item(&self, item: &MemoryItem) -> Result<(), StorageError> {
-        let write_txn = self.db.begin_write().map_err(embed)?;
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
         {
             let mut table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
             let key = item.id.to_string();
@@ -242,6 +281,23 @@ impl RedbMemoryStore {
             .map_err(embed)?
             .map(|value| serde_json::from_slice(value.value()).map_err(StorageError::from))
             .transpose()
+    }
+
+    fn materialized_items(&self) -> Result<Vec<MemoryItem>, StorageError> {
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(MEMORY_ITEMS_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(error) => return Err(embed(error)),
+        };
+        let mut items = Vec::new();
+
+        for row in table.iter().map_err(embed)? {
+            let (_, value) = row.map_err(embed)?;
+            items.push(serde_json::from_slice(value.value())?);
+        }
+
+        Ok(items)
     }
 
     /// Returns the current materialized state for `id`.
@@ -277,7 +333,10 @@ impl RedbMemoryStore {
         id: MemoryId,
         valid_to: OffsetDateTime,
     ) -> Result<Option<EventRecord>, StorageError> {
-        let write_txn = self.db.begin_write().map_err(embed)?;
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
         let sequence = {
             let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
             let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
@@ -329,7 +388,10 @@ impl RedbMemoryStore {
     /// Returns an error when storage cannot be read or written, serialization fails, or compressed
     /// content cannot be represented.
     pub fn compact_cold_item(&self, id: MemoryId) -> Result<bool, StorageError> {
-        let write_txn = self.db.begin_write().map_err(embed)?;
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
         {
             let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
             let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
@@ -652,6 +714,34 @@ mod tests {
             events
                 .iter()
                 .any(|event| matches!(event.event, MemoryEvent::ContentCompacted { .. }))
+        );
+    }
+
+    #[test]
+    fn recovery_decodes_persisted_event_log_and_materialized_items() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let path = file.path();
+
+        {
+            let store = RedbMemoryStore::open(path).expect("store should open");
+
+            store
+                .write(&test_item("first"))
+                .expect("first should write");
+            store
+                .write(&test_item("second"))
+                .expect("second should write");
+        }
+
+        let reopened = RedbMemoryStore::open(path).expect("store should recover on open");
+        let report = reopened.recover().expect("recovery should report");
+
+        assert_eq!(
+            report,
+            RecoveryReport {
+                event_count: 2,
+                materialized_item_count: 2
+            }
         );
     }
 }

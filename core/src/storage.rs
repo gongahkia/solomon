@@ -10,6 +10,7 @@ use redb::{
     Database, Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use thiserror::Error;
@@ -38,6 +39,9 @@ pub enum StorageError {
     /// Vector index operation failed.
     #[error(transparent)]
     Vector(#[from] VectorIndexError),
+    /// Durable store invariants were violated.
+    #[error("storage invariant violated: {0}")]
+    InvariantViolation(String),
 }
 
 /// Append-only event describing a durable memory-state change.
@@ -98,6 +102,19 @@ pub struct RecoveryReport {
     pub event_count: usize,
     /// Number of materialized memory items decoded successfully.
     pub materialized_item_count: usize,
+}
+
+/// Summary returned after checking that memory-state paths have not deleted durable data.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NeverDeleteInvariantReport {
+    /// Number of event-log records that remain replayable.
+    pub event_count: usize,
+    /// Number of currently materialized memory rows.
+    pub materialized_item_count: usize,
+    /// Number of distinct memory ids with source write events.
+    pub written_item_count: usize,
+    /// Number of compressed cold-content payloads still present.
+    pub compacted_content_count: usize,
 }
 
 /// Full durable store snapshot.
@@ -338,6 +355,66 @@ impl RedbMemoryStore {
         Ok(RecoveryReport {
             event_count: events.len(),
             materialized_item_count: materialized_items.len(),
+        })
+    }
+
+    /// Verifies the memory never-delete invariant for durable state.
+    ///
+    /// The invariant is scoped to memory state: writes, invalidation, significance refresh,
+    /// reinforcement, compaction, and future tier eviction must preserve memory rows, event-log
+    /// history, provenance, and any compacted cold content. Vector indexes may tombstone
+    /// invalidated ids because vectors are secondary retrieval indexes, not memory history.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when store state cannot be read or when a written memory id is missing
+    /// from materialized state, or compacted content referenced by a materialized row is missing.
+    pub fn verify_never_delete_invariant(
+        &self,
+    ) -> Result<NeverDeleteInvariantReport, StorageError> {
+        let events = self.events()?;
+        let materialized_items = self.materialized_items()?;
+        let cold_content_records = self.cold_content_records()?;
+        let materialized_ids = materialized_items
+            .iter()
+            .map(|item| item.id)
+            .collect::<BTreeSet<_>>();
+        let written_ids = events
+            .iter()
+            .filter_map(|record| match &record.event {
+                MemoryEvent::MemoryWritten { item } => Some(item.id),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        let cold_content_keys = cold_content_records
+            .iter()
+            .map(|record| record.storage_key.as_str())
+            .collect::<BTreeSet<_>>();
+
+        for written_id in &written_ids {
+            if !materialized_ids.contains(written_id) {
+                return Err(StorageError::InvariantViolation(format!(
+                    "memory {written_id} was written but is missing from materialized state"
+                )));
+            }
+        }
+
+        for item in &materialized_items {
+            if let Some(pointer) = &item.compaction
+                && !cold_content_keys.contains(pointer.storage_key.as_str())
+            {
+                return Err(StorageError::InvariantViolation(format!(
+                    "memory {} references missing compacted content {}",
+                    item.id, pointer.storage_key
+                )));
+            }
+        }
+
+        Ok(NeverDeleteInvariantReport {
+            event_count: events.len(),
+            materialized_item_count: materialized_items.len(),
+            written_item_count: written_ids.len(),
+            compacted_content_count: cold_content_records.len(),
         })
     }
 
@@ -924,6 +1001,27 @@ mod tests {
         }
     }
 
+    fn assert_memory_ids_survive(
+        store: &RedbMemoryStore,
+        ids: &[MemoryId],
+    ) -> NeverDeleteInvariantReport {
+        let report = store
+            .verify_never_delete_invariant()
+            .expect("never-delete invariant should hold");
+
+        for id in ids {
+            assert!(
+                store.get(*id).expect("memory row should read").is_some(),
+                "memory {id} should remain materialized"
+            );
+        }
+
+        assert_eq!(report.materialized_item_count, ids.len());
+        assert_eq!(report.written_item_count, ids.len());
+
+        report
+    }
+
     #[test]
     fn append_only_event_log_replays_after_reopen() {
         let file = NamedTempFile::new().expect("tempfile should be created");
@@ -1045,6 +1143,93 @@ mod tests {
             .expect("get_many should read");
 
         assert_eq!(items, vec![Some(second), None, Some(first)]);
+    }
+
+    #[test]
+    fn mutation_paths_preserve_memory_rows_events_and_cold_content() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let mut active = test_item("active item");
+        let mut cold = test_item("cold item content");
+        let valid_to = OffsetDateTime::UNIX_EPOCH + time::Duration::days(7);
+        let demotion_policy = SignificanceConfig {
+            half_life_seconds: 1.0,
+            ..SignificanceConfig::default()
+        };
+
+        cold.tier = Tier::Cold;
+        cold.credence_floor = Tier::Cold;
+
+        store
+            .write_embedded(
+                &mut active,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("embedded write should work");
+        store.write(&cold).expect("cold item should write");
+
+        let ids = [active.id, cold.id];
+        let initial_report = assert_memory_ids_survive(&store, &ids);
+
+        assert_eq!(initial_report.event_count, 2);
+
+        store
+            .reinforce(active.id, crate::model::AccessOutcome::LedSomewhere)
+            .expect("reinforce should preserve row");
+        assert_memory_ids_survive(&store, &ids);
+
+        store
+            .refresh_significance(
+                active.id,
+                &demotion_policy,
+                OffsetDateTime::UNIX_EPOCH + time::Duration::seconds(10),
+            )
+            .expect("refresh should preserve row");
+        assert_memory_ids_survive(&store, &ids);
+
+        store
+            .soft_invalidate_with_vector(active.id, valid_to, &mut vector_index)
+            .expect("soft invalidation should preserve row");
+        assert_memory_ids_survive(&store, &ids);
+
+        assert!(
+            vector_index
+                .search(&[0.0, 0.0], 1)
+                .expect("vector search should work")
+                .is_empty()
+        );
+
+        assert!(
+            store
+                .compact_cold_item(cold.id)
+                .expect("compaction should preserve row")
+        );
+
+        let final_report = assert_memory_ids_survive(&store, &ids);
+        let compacted = store
+            .get(cold.id)
+            .expect("cold row should read")
+            .expect("cold row should exist");
+        let pointer = compacted
+            .compaction
+            .as_ref()
+            .expect("cold content pointer should exist");
+
+        assert_eq!(final_report.compacted_content_count, 1);
+        assert!(final_report.event_count >= 5);
+        assert_eq!(compacted.content, "");
+        assert_eq!(
+            store
+                .read_compacted_content(pointer)
+                .expect("compacted content should read")
+                .as_deref(),
+            Some("cold item content")
+        );
     }
 
     #[test]

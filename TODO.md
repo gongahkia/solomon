@@ -195,10 +195,10 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 ## Phase 8 — Optional server mode (P2)
 
 - [x] (P1) Implement a thin HTTP/gRPC server wrapping the same core API
-- [ ] (P1) Namespace/scope isolation (multi-agent, multi-project)
-- [ ] (P1) AuthN/AuthZ stub (API keys; pluggable for the legal variant)
-- [ ] (P2) Per-namespace config + quotas
-- [ ] (P2) Metadata-only request logging (who/when/cost, never content — matters for legal reuse)
+- [x] (P1) Namespace/scope isolation (multi-agent, multi-project)
+- [x] (P1) AuthN/AuthZ stub (API keys; pluggable for the legal variant)
+- [x] (P2) Per-namespace config + quotas
+- [x] (P2) Metadata-only request logging (who/when/cost, never content — matters for legal reuse)
 - [x] (P2) Health/readiness endpoints + graceful shutdown
 - [ ] (P3) Horizontal-scale story (sharding by namespace)
 

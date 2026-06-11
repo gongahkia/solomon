@@ -46,6 +46,8 @@ pub struct RecallRequest<'a> {
     pub diversification: RecallDiversificationConfig,
     /// Optional related-memory provider used for graph expansion.
     pub related_memory_provider: Option<&'a dyn RelatedMemoryProvider>,
+    /// Optional provenance source-ref prefix that candidate items must match.
+    pub source_ref_prefix: Option<&'a str>,
 }
 
 impl<'a> RecallRequest<'a> {
@@ -63,6 +65,7 @@ impl<'a> RecallRequest<'a> {
             staleness: RecallStalenessConfig::default(),
             diversification: RecallDiversificationConfig::default(),
             related_memory_provider: None,
+            source_ref_prefix: None,
         }
     }
 
@@ -118,6 +121,13 @@ impl<'a> RecallRequest<'a> {
         related_memory_provider: &'a dyn RelatedMemoryProvider,
     ) -> Self {
         self.related_memory_provider = Some(related_memory_provider);
+        self
+    }
+
+    /// Restricts recall to items whose provenance source ref starts with `prefix`.
+    #[must_use]
+    pub const fn with_source_ref_prefix(mut self, prefix: &'a str) -> Self {
+        self.source_ref_prefix = Some(prefix);
         self
     }
 }
@@ -542,6 +552,12 @@ fn is_recallable_item(item: &MemoryItem, request: &RecallRequest<'_>) -> bool {
     is_believed_at(item, request.now)
         && (request.include_cold || item.tier != Tier::Cold)
         && (request.include_instructions || item.kind == MemoryKind::Fact)
+        && request.source_ref_prefix.is_none_or(|prefix| {
+            item.provenance
+                .source_ref
+                .as_deref()
+                .is_some_and(|source_ref| source_ref.starts_with(prefix))
+        })
 }
 
 fn load_bearing_possibly_stale(
@@ -707,6 +723,71 @@ mod tests {
             events.last().map(|record| &record.event),
             Some(MemoryEvent::AccessRecorded { id, .. }) if *id == far.id
         ));
+    }
+
+    #[test]
+    fn recall_source_ref_prefix_filters_before_recording_surface_access() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(1);
+        let mut alpha = test_item("alpha namespace memory", OffsetDateTime::UNIX_EPOCH);
+        let mut beta = test_item("beta namespace memory", OffsetDateTime::UNIX_EPOCH);
+
+        alpha.provenance = Provenance::new(
+            SourceKind::User,
+            Some("shibahama-server:namespace=alpha;source-a".to_owned()),
+            "retrieval-test",
+        );
+        beta.provenance = Provenance::new(
+            SourceKind::User,
+            Some("shibahama-server:namespace=beta;source-b".to_owned()),
+            "retrieval-test",
+        );
+
+        store
+            .write_embedded(
+                &mut alpha,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("alpha should write");
+        store
+            .write_embedded(
+                &mut beta,
+                &mut vector_index,
+                &[0.1, 0.1],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("beta should write");
+
+        let query = [0.0, 0.0];
+        let request = RecallRequest::new(&query, 2, now)
+            .with_source_ref_prefix("shibahama-server:namespace=alpha;");
+        let candidates = recall(&store, &vector_index, &request).expect("recall should work");
+        let stored_alpha = store
+            .get(alpha.id)
+            .expect("alpha should read")
+            .expect("alpha should exist");
+        let stored_beta = store
+            .get(beta.id)
+            .expect("beta should read")
+            .expect("beta should exist");
+
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.id)
+                .collect::<Vec<_>>(),
+            vec![alpha.id]
+        );
+        assert_eq!(stored_alpha.access_events.len(), 1);
+        assert!(stored_beta.access_events.is_empty());
     }
 
     #[test]

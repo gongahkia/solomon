@@ -5,7 +5,8 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use axum::extract::{Path as AxumPath, Query, State};
-use axum::http::StatusCode;
+use axum::http::header::AUTHORIZATION;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -22,6 +23,7 @@ use shibahama_core::retrieval::{
 use shibahama_core::significance::SignificanceBreakdown;
 use shibahama_core::storage::{MemoryWriteEvent, RedbMemoryStore};
 use shibahama_core::vector::HnswVectorIndex;
+use std::env;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::io::{self, Write};
@@ -178,6 +180,15 @@ struct ServeCommand {
     /// Address to bind.
     #[arg(long, default_value = "127.0.0.1:8765")]
     bind: SocketAddr,
+    /// Default namespace when x-shibahama-namespace is absent.
+    #[arg(long, default_value = "default")]
+    namespace: String,
+    /// Optional API key. Also falls back to `SHIBAHAMA_API_KEY`.
+    #[arg(long)]
+    api_key: Option<String>,
+    /// Maximum materialized memories allowed per namespace.
+    #[arg(long, default_value_t = 10_000)]
+    max_memories_per_namespace: usize,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -285,6 +296,14 @@ struct WhyTraceDto {
 struct ServerState {
     engine: Arc<Mutex<Shibahama<HnswVectorIndex>>>,
     path: String,
+    default_namespace: String,
+    api_key: Option<String>,
+    max_memories_per_namespace: usize,
+}
+
+struct ServerRequestContext {
+    namespace: String,
+    principal: &'static str,
 }
 
 #[derive(Deserialize)]
@@ -334,6 +353,20 @@ impl ServerError {
     fn bad_request(error: impl Display) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
+            message: error.to_string(),
+        }
+    }
+
+    fn unauthorized(error: impl Display) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            message: error.to_string(),
+        }
+    }
+
+    fn too_many_requests(error: impl Display) -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
             message: error.to_string(),
         }
     }
@@ -499,10 +532,18 @@ fn serve(command: ServeCommand) -> CliResult<()> {
 }
 
 async fn serve_async(command: ServeCommand) -> CliResult<()> {
+    validate_namespace(&command.namespace)?;
     let engine = open_engine(&command.store, None)?;
+    let api_key = command
+        .api_key
+        .or_else(|| env::var("SHIBAHAMA_API_KEY").ok())
+        .filter(|value| !value.is_empty());
     let state = ServerState {
         engine: Arc::new(Mutex::new(engine)),
         path: command.store.path.display().to_string(),
+        default_namespace: command.namespace,
+        api_key,
+        max_memories_per_namespace: command.max_memories_per_namespace,
     };
     let app = Router::new()
         .route("/healthz", get(server_health))
@@ -529,6 +570,139 @@ async fn shutdown_signal() {
     }
 }
 
+fn server_context(
+    headers: &HeaderMap,
+    state: &ServerState,
+) -> Result<ServerRequestContext, ServerError> {
+    let principal = authorize_server_request(headers, state)?;
+    let namespace = request_namespace(headers, state)?;
+
+    Ok(ServerRequestContext {
+        namespace,
+        principal,
+    })
+}
+
+fn server_context_or_log(
+    headers: &HeaderMap,
+    state: &ServerState,
+    method: &str,
+    route: &str,
+) -> Result<ServerRequestContext, ServerError> {
+    match server_context(headers, state) {
+        Ok(context) => Ok(context),
+        Err(error) => {
+            let namespace = request_namespace(headers, state)
+                .ok()
+                .unwrap_or_else(|| "unknown".to_owned());
+            log_server_request(
+                method,
+                route,
+                Some(&namespace),
+                "rejected",
+                error.status,
+                json!({ "request_units": 1 }),
+            );
+            Err(error)
+        }
+    }
+}
+
+fn authorize_server_request(
+    headers: &HeaderMap,
+    state: &ServerState,
+) -> Result<&'static str, ServerError> {
+    let Some(api_key) = state.api_key.as_deref() else {
+        return Ok("anonymous");
+    };
+
+    let bearer_key = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    let header_key = headers
+        .get("x-api-key")
+        .and_then(|value| value.to_str().ok());
+
+    if bearer_key == Some(api_key) || header_key == Some(api_key) {
+        Ok("api_key")
+    } else {
+        Err(ServerError::unauthorized("missing or invalid API key"))
+    }
+}
+
+fn request_namespace(headers: &HeaderMap, state: &ServerState) -> Result<String, ServerError> {
+    let namespace = headers
+        .get("x-shibahama-namespace")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or(&state.default_namespace);
+
+    validate_namespace(namespace).map_err(ServerError::bad_request)?;
+
+    Ok(namespace.to_owned())
+}
+
+fn validate_namespace(namespace: &str) -> CliResult<()> {
+    let valid = !namespace.is_empty()
+        && namespace.len() <= 128
+        && namespace.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        });
+
+    if valid {
+        Ok(())
+    } else {
+        Err(Box::new(CliError(
+            "namespace must be 1-128 characters using only ASCII letters, digits, '.', '_', or '-'"
+                .to_owned(),
+        )))
+    }
+}
+
+fn namespace_source_prefix(namespace: &str) -> String {
+    format!("shibahama-server:namespace={namespace};")
+}
+
+fn namespaced_source_ref(namespace: &str, source_ref: Option<String>) -> String {
+    let prefix = namespace_source_prefix(namespace);
+
+    match source_ref {
+        Some(source_ref) if !source_ref.is_empty() => format!("{prefix}{source_ref}"),
+        _ => prefix,
+    }
+}
+
+fn memory_in_namespace(item: &MemoryItem, namespace: &str) -> bool {
+    let prefix = namespace_source_prefix(namespace);
+
+    item.provenance
+        .source_ref
+        .as_deref()
+        .is_some_and(|source_ref| source_ref.starts_with(&prefix))
+}
+
+fn log_server_request(
+    method: &str,
+    route: &str,
+    namespace: Option<&str>,
+    principal: &str,
+    status: StatusCode,
+    cost: serde_json::Value,
+) {
+    let record = json!({
+        "event": "shibahama_http_request",
+        "at_unix": OffsetDateTime::now_utc().unix_timestamp(),
+        "method": method,
+        "route": route,
+        "namespace": namespace.unwrap_or("unknown"),
+        "principal": principal,
+        "status": status.as_u16(),
+        "cost": cost,
+    });
+
+    eprintln!("{record}");
+}
+
 async fn server_health() -> Json<serde_json::Value> {
     Json(json!({
         "status": "ok",
@@ -538,136 +712,352 @@ async fn server_health() -> Json<serde_json::Value> {
 
 async fn server_ready(
     State(state): State<ServerState>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    let engine = state
-        .engine
-        .lock()
-        .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
-    let memory_count = engine.memory_items().map_err(ServerError::internal)?.len();
+    let context = server_context_or_log(&headers, &state, "GET", "/readyz")?;
+    let result: Result<(Json<serde_json::Value>, serde_json::Value), ServerError> = (|| {
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let memories = engine.memory_items().map_err(ServerError::internal)?;
+        let memory_count = memories
+            .iter()
+            .filter(|item| memory_in_namespace(item, &context.namespace))
+            .count();
 
-    Ok(Json(json!({
-        "status": "ready",
-        "path": state.path,
-        "memory_count": memory_count,
-    })))
+        Ok((
+            Json(json!({
+                "status": "ready",
+                "path": state.path,
+                "namespace": context.namespace,
+                "memory_count": memory_count,
+                "max_memories_per_namespace": state.max_memories_per_namespace,
+            })),
+            json!({
+                "request_units": 1,
+                "memories_scanned": memories.len(),
+                "namespace_memory_count": memory_count,
+            }),
+        ))
+    })();
+
+    match result {
+        Ok((response, cost)) => {
+            log_server_request(
+                "GET",
+                "/readyz",
+                Some(&context.namespace),
+                context.principal,
+                StatusCode::OK,
+                cost,
+            );
+            Ok(response)
+        }
+        Err(error) => {
+            log_server_request(
+                "GET",
+                "/readyz",
+                Some(&context.namespace),
+                context.principal,
+                error.status,
+                json!({ "request_units": 1 }),
+            );
+            Err(error)
+        }
+    }
 }
 
 async fn server_inspect(
     State(state): State<ServerState>,
+    headers: HeaderMap,
 ) -> Result<Json<InspectOutput>, ServerError> {
-    let engine = state
-        .engine
-        .lock()
-        .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
-    let memories = engine
-        .memory_items()
-        .map_err(ServerError::internal)?
-        .into_iter()
-        .map(MemoryItemDto::from)
-        .collect::<Vec<_>>();
+    let context = server_context_or_log(&headers, &state, "GET", "/inspect")?;
+    let result: Result<(Json<InspectOutput>, serde_json::Value), ServerError> = (|| {
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let all_memories = engine.memory_items().map_err(ServerError::internal)?;
+        let memories = all_memories
+            .iter()
+            .filter(|item| memory_in_namespace(item, &context.namespace))
+            .cloned()
+            .map(MemoryItemDto::from)
+            .collect::<Vec<_>>();
 
-    Ok(Json(InspectOutput {
-        version: shibahama_core::version(),
-        path: state.path,
-        memory_count: memories.len(),
-        memories,
-    }))
+        Ok((
+            Json(InspectOutput {
+                version: shibahama_core::version(),
+                path: state.path,
+                memory_count: memories.len(),
+                memories,
+            }),
+            json!({
+                "request_units": 1,
+                "memories_scanned": all_memories.len(),
+            }),
+        ))
+    })();
+
+    match result {
+        Ok((response, cost)) => {
+            log_server_request(
+                "GET",
+                "/inspect",
+                Some(&context.namespace),
+                context.principal,
+                StatusCode::OK,
+                cost,
+            );
+            Ok(response)
+        }
+        Err(error) => {
+            log_server_request(
+                "GET",
+                "/inspect",
+                Some(&context.namespace),
+                context.principal,
+                error.status,
+                json!({ "request_units": 1 }),
+            );
+            Err(error)
+        }
+    }
 }
 
 async fn server_write(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(body): Json<ServerWriteRequest>,
 ) -> Result<Json<MemoryItemDto>, ServerError> {
-    let mut event = write_event(
-        body.content,
-        body.source_kind.as_deref().unwrap_or("user"),
-        body.source_ref,
-        body.ingested_by.as_deref().unwrap_or("server"),
-        body.valid_from_unix,
-        body.ingested_at_unix,
-    )
-    .map_err(ServerError::bad_request)?;
-
-    if parse_memory_kind(body.kind.as_deref().unwrap_or("fact"))
-        .map_err(ServerError::bad_request)?
-        == MemoryKind::Instruction
-    {
-        event = event.as_instruction();
-    }
-
-    let mut engine = state
-        .engine
-        .lock()
-        .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
-    let item = if let Some(vector) = body.vector.as_deref() {
-        engine.write_with_embedding(
-            event,
-            WriteEmbedding {
-                vector,
-                index_name: body.index_name.as_deref().unwrap_or("default"),
-                model: body.model.as_deref().unwrap_or("unknown"),
-                model_version: body.model_version.as_deref().unwrap_or("unknown"),
-            },
+    let context = server_context_or_log(&headers, &state, "POST", "/write")?;
+    let result: Result<(Json<MemoryItemDto>, serde_json::Value), ServerError> = (|| {
+        let mut event = write_event(
+            body.content,
+            body.source_kind.as_deref().unwrap_or("user"),
+            Some(namespaced_source_ref(&context.namespace, body.source_ref)),
+            body.ingested_by.as_deref().unwrap_or("server"),
+            body.valid_from_unix,
+            body.ingested_at_unix,
         )
-    } else {
-        engine.write(event)
-    }
-    .map_err(ServerError::internal)?;
+        .map_err(ServerError::bad_request)?;
 
-    Ok(Json(MemoryItemDto::from(item)))
+        if parse_memory_kind(body.kind.as_deref().unwrap_or("fact"))
+            .map_err(ServerError::bad_request)?
+            == MemoryKind::Instruction
+        {
+            event = event.as_instruction();
+        }
+
+        let mut engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let namespace_memory_count = engine
+            .memory_items()
+            .map_err(ServerError::internal)?
+            .iter()
+            .filter(|item| memory_in_namespace(item, &context.namespace))
+            .count();
+
+        if namespace_memory_count >= state.max_memories_per_namespace {
+            return Err(ServerError::too_many_requests(format!(
+                "namespace `{}` has reached the configured memory quota of {}",
+                context.namespace, state.max_memories_per_namespace
+            )));
+        }
+
+        let item = if let Some(vector) = body.vector.as_deref() {
+            engine.write_with_embedding(
+                event,
+                WriteEmbedding {
+                    vector,
+                    index_name: body.index_name.as_deref().unwrap_or("default"),
+                    model: body.model.as_deref().unwrap_or("unknown"),
+                    model_version: body.model_version.as_deref().unwrap_or("unknown"),
+                },
+            )
+        } else {
+            engine.write(event)
+        }
+        .map_err(ServerError::internal)?;
+
+        Ok((
+            Json(MemoryItemDto::from(item)),
+            json!({
+                "request_units": 1,
+                "memory_writes": 1,
+                "namespace_memory_count_before": namespace_memory_count,
+                "vector_dimensions": body.vector.as_ref().map_or(0, Vec::len),
+            }),
+        ))
+    })();
+
+    match result {
+        Ok((response, cost)) => {
+            log_server_request(
+                "POST",
+                "/write",
+                Some(&context.namespace),
+                context.principal,
+                StatusCode::OK,
+                cost,
+            );
+            Ok(response)
+        }
+        Err(error) => {
+            log_server_request(
+                "POST",
+                "/write",
+                Some(&context.namespace),
+                context.principal,
+                error.status,
+                json!({ "request_units": 1, "memory_writes": 0 }),
+            );
+            Err(error)
+        }
+    }
 }
 
 async fn server_recall(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(body): Json<ServerRecallRequest>,
 ) -> Result<Json<Vec<RecallCandidateDto>>, ServerError> {
-    let mut request = RecallRequest::new(
-        &body.query_vector,
-        body.top_k.unwrap_or(5),
-        time_from_optional_unix(body.now_unix).map_err(ServerError::bad_request)?,
-    );
+    let context = server_context_or_log(&headers, &state, "POST", "/recall")?;
+    let result: Result<(Json<Vec<RecallCandidateDto>>, serde_json::Value), ServerError> = (|| {
+        let requested_top_k = body.top_k.unwrap_or(5);
+        let now = time_from_optional_unix(body.now_unix).map_err(ServerError::bad_request)?;
+        let namespace_prefix = namespace_source_prefix(&context.namespace);
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let all_memories = engine.memory_items().map_err(ServerError::internal)?;
+        let namespace_memory_count = all_memories
+            .iter()
+            .filter(|item| memory_in_namespace(item, &context.namespace))
+            .count();
+        let search_top_k = all_memories.len().max(requested_top_k);
+        let mut request = RecallRequest::new(&body.query_vector, search_top_k, now)
+            .with_source_ref_prefix(&namespace_prefix);
 
-    if let Some(raw_query_context) = body.raw_query_context.as_deref() {
-        request = request.with_raw_query_context(raw_query_context);
-    }
-    if body.include_cold.unwrap_or(false) {
-        request = request.include_cold();
-    }
-    if body.include_instructions.unwrap_or(false) {
-        request = request.include_instructions();
-    }
+        if let Some(raw_query_context) = body.raw_query_context.as_deref() {
+            request = request.with_raw_query_context(raw_query_context);
+        }
+        if body.include_cold.unwrap_or(false) {
+            request = request.include_cold();
+        }
+        if body.include_instructions.unwrap_or(false) {
+            request = request.include_instructions();
+        }
 
-    let engine = state
-        .engine
-        .lock()
-        .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
-    let candidates = engine
-        .recall(&request)
-        .map_err(ServerError::internal)?
-        .into_iter()
-        .map(RecallCandidateDto::from)
-        .collect::<Vec<_>>();
+        let mut candidates = engine.recall(&request).map_err(ServerError::internal)?;
+        candidates.truncate(requested_top_k);
+        let returned = candidates.len();
+        let candidates = candidates
+            .into_iter()
+            .map(RecallCandidateDto::from)
+            .collect::<Vec<_>>();
 
-    Ok(Json(candidates))
+        Ok((
+            Json(candidates),
+            json!({
+                "request_units": 1,
+                "query_dimensions": body.query_vector.len(),
+                "requested_top_k": requested_top_k,
+                "searched_top_k": search_top_k,
+                "namespace_memory_count": namespace_memory_count,
+                "returned": returned,
+            }),
+        ))
+    })();
+
+    match result {
+        Ok((response, cost)) => {
+            log_server_request(
+                "POST",
+                "/recall",
+                Some(&context.namespace),
+                context.principal,
+                StatusCode::OK,
+                cost,
+            );
+            Ok(response)
+        }
+        Err(error) => {
+            log_server_request(
+                "POST",
+                "/recall",
+                Some(&context.namespace),
+                context.principal,
+                error.status,
+                json!({
+                    "request_units": 1,
+                    "query_dimensions": body.query_vector.len(),
+                }),
+            );
+            Err(error)
+        }
+    }
 }
 
 async fn server_why(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     AxumPath(memory_id): AxumPath<String>,
     Query(query): Query<WhyQuery>,
 ) -> Result<Json<Option<WhyTraceDto>>, ServerError> {
-    let id = parse_memory_id(&memory_id).map_err(ServerError::bad_request)?;
-    let now = time_from_optional_unix(query.now_unix).map_err(ServerError::bad_request)?;
-    let engine = state
-        .engine
-        .lock()
-        .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
-    let trace = engine
-        .why_at(id, now)
-        .map_err(ServerError::internal)?
-        .map(WhyTraceDto::from);
+    let context = server_context_or_log(&headers, &state, "GET", "/why/{memory_id}")?;
+    let result: Result<(Json<Option<WhyTraceDto>>, serde_json::Value), ServerError> = (|| {
+        let id = parse_memory_id(&memory_id).map_err(ServerError::bad_request)?;
+        let now = time_from_optional_unix(query.now_unix).map_err(ServerError::bad_request)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let trace = engine
+            .why_at(id, now)
+            .map_err(ServerError::internal)?
+            .filter(|trace| memory_in_namespace(&trace.item, &context.namespace))
+            .map(WhyTraceDto::from);
+        let found = trace.is_some();
 
-    Ok(Json(trace))
+        Ok((
+            Json(trace),
+            json!({
+                "request_units": 1,
+                "trace_lookup": 1,
+                "found": found,
+            }),
+        ))
+    })();
+
+    match result {
+        Ok((response, cost)) => {
+            log_server_request(
+                "GET",
+                "/why/{memory_id}",
+                Some(&context.namespace),
+                context.principal,
+                StatusCode::OK,
+                cost,
+            );
+            Ok(response)
+        }
+        Err(error) => {
+            log_server_request(
+                "GET",
+                "/why/{memory_id}",
+                Some(&context.namespace),
+                context.principal,
+                error.status,
+                json!({ "request_units": 1, "trace_lookup": 1 }),
+            );
+            Err(error)
+        }
+    }
 }
 
 fn open_engine(

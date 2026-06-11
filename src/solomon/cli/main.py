@@ -10,10 +10,11 @@ import typer
 from rich.console import Console
 
 from solomon import __version__
-from solomon.api.service import AuthorityChangeRequest, IngestRequest, RecallRequest, SolomonService
+from solomon.api.service import AuthorityChangeRequest, DependencyRequest, IngestRequest, RecallRequest, SolomonService
 from solomon.boundary.kaypoh import probe_kaypoh_client
 from solomon.config import get_settings
 from solomon.currency.models import KnowledgeKind, SourceKind
+from solomon.graph.models import EdgeConfidence, EdgeType
 
 app = typer.Typer(help="Solomon command-line interface.")
 console = Console()
@@ -95,6 +96,26 @@ def register_authority_change(
         AuthorityChangeRequest(new_version=new_version, changed_at=changed_at),
     )
     console.print(json.dumps(result, indent=2, sort_keys=True))
+
+
+@app.command("add-dependency")
+def add_dependency(
+    source_id: Annotated[str, typer.Option("--source-id", help="Knowledge item id.")],
+    target_id: Annotated[str, typer.Option("--target-id", help="Authority or item id.")],
+    edge_type: Annotated[EdgeType, typer.Option("--edge-type")] = EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+    target_kind: Annotated[str, typer.Option("--target-kind")] = "external_authority",
+    confidence: Annotated[EdgeConfidence, typer.Option("--confidence")] = EdgeConfidence.HUMAN_ASSERTED,
+) -> None:
+    edge = _service().add_dependency(
+        DependencyRequest(
+            source_id=source_id,
+            target_id=target_id,
+            edge_type=edge_type,
+            target_kind=target_kind,
+            confidence=confidence,
+        )
+    )
+    console.print(edge.model_dump_json(indent=2))
 
 
 @app.command("why")

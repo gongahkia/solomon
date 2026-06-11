@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from solomon import __version__
 from solomon.api.service import (
     AuthorityChangeRequest,
+    DependencyRequest,
     IngestRequest,
     RecallRequest,
     SolomonService,
@@ -107,6 +108,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/authorities/{authority_id}/changes")
     def authority_change(authority_id: str, request: AuthorityChangeRequest) -> dict[str, Any]:
         return service.register_authority_change(authority_id, request)
+
+    @app.post("/dependencies")
+    def add_dependency(request: DependencyRequest) -> dict[str, Any]:
+        return service.add_dependency(request).model_dump(mode="json")
 
     @app.get("/impact/{authority_id}")
     def impact(authority_id: str) -> dict[str, Any]:

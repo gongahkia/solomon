@@ -18,6 +18,7 @@ from solomon.currency.engine import (
 )
 from solomon.currency.models import KnowledgeItem, KnowledgeKind, Provenance, SourceKind
 from solomon.errors import NotFoundError
+from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
 from solomon.graph.propagation import CurrencyPropagator
 from solomon.graph.store import GraphStore
 from solomon.orchestrator.retrieval import MatterContext, RecallOptions, RetrievalOrchestrator, SQLiteRetrievalIndex
@@ -51,6 +52,16 @@ class VerificationRequest(SolomonModel):
 class AuthorityChangeRequest(SolomonModel):
     new_version: str
     changed_at: str
+
+
+class DependencyRequest(SolomonModel):
+    source_id: str
+    target_id: str
+    edge_type: EdgeType
+    target_kind: str
+    confidence: EdgeConfidence = EdgeConfidence.HUMAN_ASSERTED
+    created_by: str | None = None
+    reason: str | None = None
 
 
 class WhyTrace(SolomonModel):
@@ -133,6 +144,18 @@ class SolomonService:
         )
         self.audit.log_impact(impact)
         return impact.model_dump(mode="json")
+
+    def add_dependency(self, request: DependencyRequest) -> DependencyEdge:
+        edge = DependencyEdge(
+            source_id=request.source_id,
+            target_id=request.target_id,
+            edge_type=request.edge_type,
+            target_kind=request.target_kind,  # type: ignore[arg-type]
+            confidence=request.confidence,
+            created_by=request.created_by,
+            reason=request.reason,
+        )
+        return self.graph.add_dependency(edge)
 
     def impact_query(self, authority_id: str) -> dict[str, Any]:
         return CurrencyPropagator(graph=self.graph, store=self.store).impact_query(authority_id).model_dump(mode="json")

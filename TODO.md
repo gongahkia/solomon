@@ -84,9 +84,9 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [ ] (P3) Visualise the dependency graph (internal knowledge hanging off external authorities)
 
 ### Dependency capture (honest about the manual cost)
-- [ ] (P1) Manual dependency tagging API + CLI (the baseline; the market already pays a curator to do this)
-- [ ] (P2) LLM-assisted dependency suggestion: extract candidate authority references from an item (routed through Kaypoh first — see Phase 4)
-- [ ] (P2) Human-in-the-loop confirm/reject for suggested dependencies (suggested = lower edge confidence until confirmed)
+- [x] (P1) Manual dependency tagging API + CLI (the baseline; the market already pays a curator to do this)
+- [x] (P2) LLM-assisted dependency suggestion: extract candidate authority references from an item (routed through Kaypoh first — see Phase 4)
+- [x] (P2) Human-in-the-loop confirm/reject for suggested dependencies (suggested = lower edge confidence until confirmed)
 - [ ] (P3) Defined-term / citation extraction (could 🔌 reuse Kaypoh's `defined_terms` / `citations` patterns as a reference)
 
 ---

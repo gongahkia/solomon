@@ -103,6 +103,10 @@ pub struct RecallRankingConfig {
     pub similarity_weight: f64,
     /// Weight applied to materialized significance.
     pub significance_weight: f64,
+    /// Weight applied to recency of the last access or ingestion.
+    pub recency_weight: f64,
+    /// Weight applied when a candidate comes from graph expansion.
+    pub graph_weight: f64,
 }
 
 impl Default for RecallRankingConfig {
@@ -110,6 +114,8 @@ impl Default for RecallRankingConfig {
         Self {
             similarity_weight: 1.0,
             significance_weight: 1.0,
+            recency_weight: 0.0,
+            graph_weight: 0.0,
         }
     }
 }
@@ -153,6 +159,10 @@ pub struct RecallCandidate {
     pub similarity_score: f64,
     /// Materialized significance contribution used by ranking.
     pub significance_score: f64,
+    /// Recency contribution derived from last access or ingestion.
+    pub recency_score: f64,
+    /// Graph-expansion contribution.
+    pub graph_score: f64,
     /// How this candidate entered the recall result set.
     pub source: RecallCandidateSource,
     /// Current rank score, where higher is better.
@@ -333,8 +343,12 @@ fn candidate_from_item(
 ) -> RecallCandidate {
     let similarity_score = similarity_from_distance(vector_distance);
     let significance_score = item.significance;
+    let recency_score = recency_score(&item, now);
+    let graph_score = graph_score(source);
     let rank_score = ranking.similarity_weight * similarity_score
-        + ranking.significance_weight * significance_score;
+        + ranking.significance_weight * significance_score
+        + ranking.recency_weight * recency_score
+        + ranking.graph_weight * graph_score;
     let provenance = item.provenance.clone();
     let tier = item.tier;
     let currency = candidate_currency(&item, now);
@@ -350,8 +364,34 @@ fn candidate_from_item(
         vector_distance,
         similarity_score,
         significance_score,
+        recency_score,
+        graph_score,
         source,
         rank_score,
+    }
+}
+
+fn recency_score(item: &MemoryItem, now: OffsetDateTime) -> f64 {
+    let last_seen_at = item
+        .access_events
+        .iter()
+        .map(|event| event.timestamp)
+        .max()
+        .unwrap_or(item.timestamps.ingested_at);
+
+    if now <= last_seen_at {
+        return 1.0;
+    }
+
+    let age_days = (now - last_seen_at).as_seconds_f64() / (24.0 * 60.0 * 60.0);
+
+    1.0 / (1.0 + age_days)
+}
+
+fn graph_score(source: RecallCandidateSource) -> f64 {
+    match source {
+        RecallCandidateSource::Vector => 0.0,
+        RecallCandidateSource::GraphExpansion { .. } => 1.0,
     }
 }
 
@@ -581,6 +621,52 @@ mod tests {
     }
 
     #[test]
+    fn recall_ranking_can_be_tuned_by_recency() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(30);
+        let mut old = test_item("old", OffsetDateTime::UNIX_EPOCH);
+        let mut recent = test_item("recent", now - Duration::days(1));
+
+        old.significance = 0.0;
+        recent.significance = 0.0;
+
+        store
+            .write_embedded(
+                &mut old,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("old should write");
+        store
+            .write_embedded(
+                &mut recent,
+                &mut vector_index,
+                &[5.0, 5.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("recent should write");
+
+        let query = [0.0, 0.0];
+        let request = RecallRequest::new(&query, 2, now).with_ranking(RecallRankingConfig {
+            similarity_weight: 0.0,
+            significance_weight: 0.0,
+            recency_weight: 1.0,
+            graph_weight: 0.0,
+        });
+        let candidates = recall(&store, &vector_index, &request).expect("recall should work");
+
+        assert_eq!(candidates[0].id, recent.id);
+        assert!(candidates[0].recency_score > candidates[1].recency_score);
+    }
+
+    #[test]
     fn recall_expands_graph_related_memories() {
         let file = NamedTempFile::new().expect("tempfile should be created");
         let store = RedbMemoryStore::open(file.path()).expect("store should open");
@@ -625,6 +711,46 @@ mod tests {
             stored_related.access_events[0].outcome,
             AccessOutcome::Surfaced
         );
+    }
+
+    #[test]
+    fn recall_ranking_can_be_tuned_by_graph_expansion() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(1);
+        let mut anchor = test_item("anchor", OffsetDateTime::UNIX_EPOCH);
+        let related = test_item("related", OffsetDateTime::UNIX_EPOCH);
+        let mut provider = StaticRelatedMemoryProvider::default();
+
+        anchor.significance = 0.0;
+        provider.related.insert(anchor.id, vec![related.id]);
+
+        store
+            .write_embedded(
+                &mut anchor,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("anchor should write");
+        store.write(&related).expect("related should write");
+
+        let query = [0.0, 0.0];
+        let request = RecallRequest::new(&query, 1, now)
+            .with_related_memory_provider(&provider)
+            .with_ranking(RecallRankingConfig {
+                similarity_weight: 0.0,
+                significance_weight: 0.0,
+                recency_weight: 0.0,
+                graph_weight: 1.0,
+            });
+        let candidates = recall(&store, &vector_index, &request).expect("recall should work");
+
+        assert_eq!(candidates[0].id, related.id);
+        assert!(candidates[0].graph_score > candidates[1].graph_score);
     }
 
     #[test]

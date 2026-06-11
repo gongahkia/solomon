@@ -23,6 +23,10 @@ pub struct SignificanceConfig {
     pub ignored_weight: f64,
     /// Penalty for contradiction outcomes.
     pub contradicted_weight: f64,
+    /// Score at or above which cold items may promote to warm.
+    pub warm_threshold: f64,
+    /// Score at or above which warm items may promote to hot.
+    pub hot_threshold: f64,
 }
 
 /// Deterministic contribution breakdown for a significance score.
@@ -54,6 +58,8 @@ impl Default for SignificanceConfig {
             cited_weight: 1.25,
             ignored_weight: -0.05,
             contradicted_weight: -2.0,
+            warm_threshold: 1.0,
+            hot_threshold: 2.0,
         }
     }
 }
@@ -167,6 +173,18 @@ impl SignificanceConfig {
     #[must_use]
     pub fn clamp_tier_to_credence_floor(self, item: &MemoryItem, proposed_tier: Tier) -> Tier {
         proposed_tier.max(item.credence_floor)
+    }
+
+    /// Applies threshold-based promotion after access.
+    #[must_use]
+    pub fn promote_on_access(self, current_tier: Tier, score: f64) -> Tier {
+        if score >= self.hot_threshold {
+            Tier::Hot
+        } else if score >= self.warm_threshold {
+            current_tier.max(Tier::Warm)
+        } else {
+            current_tier
+        }
     }
 }
 
@@ -313,6 +331,15 @@ mod tests {
             config.clamp_tier_to_credence_floor(&item, Tier::Cold),
             Tier::Warm
         );
+    }
+
+    #[test]
+    fn promote_on_access_uses_score_thresholds() {
+        let config = SignificanceConfig::default();
+
+        assert_eq!(config.promote_on_access(Tier::Cold, 1.0), Tier::Warm);
+        assert_eq!(config.promote_on_access(Tier::Warm, 2.0), Tier::Hot);
+        assert_eq!(config.promote_on_access(Tier::Cold, 0.1), Tier::Cold);
     }
 
     #[test]

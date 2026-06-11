@@ -648,6 +648,8 @@ impl RedbMemoryStore {
             item.access_events.push(access_event.clone());
             item.significance =
                 SignificanceConfig::default().recompute(&item, access_event.timestamp);
+            item.tier =
+                SignificanceConfig::default().promote_on_access(item.tier, item.significance);
 
             let sequence = event_table.len().map_err(embed)?;
             let record = EventRecord {
@@ -1232,6 +1234,7 @@ mod tests {
             crate::model::AccessOutcome::LedSomewhere
         );
         assert!(stored.significance > item.significance);
+        assert_eq!(stored.tier, Tier::Hot);
     }
 
     #[test]

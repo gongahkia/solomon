@@ -1226,6 +1226,29 @@ mod tests {
     }
 
     #[test]
+    fn reinforce_captures_cited_outcome_signal() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let item = test_item("cite me");
+        let item_id = item.id;
+
+        store.write(&item).expect("item should write");
+        store
+            .reinforce(item_id, crate::model::AccessOutcome::Cited)
+            .expect("cited outcome should write");
+
+        let stored = store
+            .get(item_id)
+            .expect("item should read")
+            .expect("item should exist");
+
+        assert_eq!(
+            stored.access_events[0].outcome,
+            crate::model::AccessOutcome::Cited
+        );
+    }
+
+    #[test]
     fn explain_significance_returns_deterministic_breakdown() {
         let file = NamedTempFile::new().expect("tempfile should be created");
         let store = RedbMemoryStore::open(file.path()).expect("store should open");

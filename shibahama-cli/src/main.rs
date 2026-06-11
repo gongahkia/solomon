@@ -151,6 +151,9 @@ struct WhyCommand {
     /// Explanation instant as Unix seconds.
     #[arg(long)]
     now_unix: Option<i64>,
+    /// Output format.
+    #[arg(long, default_value = "text")]
+    format: WhyFormat,
 }
 
 #[derive(Args)]
@@ -183,6 +186,14 @@ enum ExportFormat {
     Json,
     /// Newline-delimited JSON records.
     Jsonl,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum WhyFormat {
+    /// Human-readable terminal output.
+    Text,
+    /// JSON object.
+    Json,
 }
 
 #[derive(Debug)]
@@ -441,9 +452,12 @@ fn why(command: WhyCommand) -> CliResult<()> {
     let engine = open_engine(&command.store, None)?;
     let id = parse_memory_id(&command.memory_id)?;
     let now = time_from_optional_unix(command.now_unix)?;
-    let trace = engine.why_at(id, now)?.map(WhyTraceDto::from);
+    let trace = engine.why_at(id, now)?;
 
-    write_json(&trace)
+    match command.format {
+        WhyFormat::Text => write_why_text(id, trace.as_ref()),
+        WhyFormat::Json => write_json(&trace.map(WhyTraceDto::from)),
+    }
 }
 
 fn inspect(command: InspectCommand) -> CliResult<()> {
@@ -828,6 +842,90 @@ fn write_jsonl<T: Serialize>(values: &[T]) -> CliResult<()> {
     for value in values {
         serde_json::to_writer(&mut handle, value)?;
         writeln!(handle)?;
+    }
+
+    Ok(())
+}
+
+fn write_why_text(id: MemoryId, trace: Option<&WhyTrace>) -> CliResult<()> {
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+
+    let Some(trace) = trace else {
+        writeln!(handle, "memory {id} was not found")?;
+        return Ok(());
+    };
+
+    writeln!(handle, "Memory {id}")?;
+    writeln!(handle, "Content: {}", trace.item.content)?;
+    writeln!(handle)?;
+    writeln!(handle, "State")?;
+    writeln!(handle, "  currency: {}", currency_str(trace.currency.state))?;
+    writeln!(handle, "  as of: {}", trace.currency.as_of)?;
+    writeln!(handle, "  valid from: {}", trace.currency.valid_from)?;
+    match trace.currency.valid_to {
+        Some(valid_to) => writeln!(handle, "  valid to: {valid_to}")?,
+        None => writeln!(handle, "  valid to: open")?,
+    }
+    writeln!(handle, "  ingested at: {}", trace.currency.ingested_at)?;
+    writeln!(handle)?;
+    writeln!(handle, "Tier")?;
+    writeln!(handle, "  current: {}", tier_str(trace.tier.current))?;
+    writeln!(handle, "  credence: {}", credence_str(trace.tier.credence))?;
+    writeln!(
+        handle,
+        "  credence floor: {}",
+        tier_str(trace.tier.credence_floor)
+    )?;
+    writeln!(handle)?;
+    writeln!(handle, "Significance")?;
+    writeln!(handle, "  base: {:.4}", trace.significance.base_score)?;
+    writeln!(
+        handle,
+        "  decay multiplier: {:.4}",
+        trace.significance.decay_multiplier
+    )?;
+    writeln!(
+        handle,
+        "  reinforcement: {:.4}",
+        trace.significance.reinforcement
+    )?;
+    writeln!(
+        handle,
+        "  outcome bonus: {:.4}",
+        trace.significance.outcome_bonus
+    )?;
+    writeln!(
+        handle,
+        "  contradiction penalty: {:.4}",
+        trace.significance.contradiction_penalty
+    )?;
+    writeln!(handle, "  final: {:.4}", trace.significance.final_score)?;
+    writeln!(handle)?;
+    writeln!(handle, "Provenance")?;
+    writeln!(
+        handle,
+        "  source kind: {}",
+        source_kind_str(trace.provenance.source_kind)
+    )?;
+    writeln!(
+        handle,
+        "  source ref: {}",
+        trace.provenance.source_ref.as_deref().unwrap_or("none")
+    )?;
+    writeln!(handle, "  ingested by: {}", trace.provenance.ingested_by)?;
+    writeln!(handle)?;
+    writeln!(handle, "Audit trail")?;
+    if trace.audit_trail.is_empty() {
+        writeln!(handle, "  none")?;
+    } else {
+        for entry in &trace.audit_trail {
+            writeln!(
+                handle,
+                "  - sequence={} recorded_at={} cause={:?} change={:?}",
+                entry.sequence, entry.recorded_at, entry.cause, entry.change
+            )?;
+        }
     }
 
     Ok(())

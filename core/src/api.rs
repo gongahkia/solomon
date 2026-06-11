@@ -2,12 +2,16 @@
 
 //! Small public API facade.
 
-use crate::model::{AccessOutcome, MemoryId, MemoryItem};
-use crate::retrieval::{RecallCandidate, RecallError, RecallRequest, recall, timeline};
-use crate::storage::{MemoryWriteEvent, RedbMemoryStore, StorageError};
+use crate::model::{AccessOutcome, CredenceTier, MemoryId, MemoryItem, Provenance, Tier};
+use crate::retrieval::{
+    RecallCandidate, RecallCandidateCurrency, RecallError, RecallRequest, recall, timeline,
+};
+use crate::significance::{SignificanceBreakdown, SignificanceConfig};
+use crate::storage::{MemoryAuditEntry, MemoryWriteEvent, RedbMemoryStore, StorageError};
 use crate::vector::{VectorIndex, VectorIndexError};
 use std::path::Path;
 use thiserror::Error;
+use time::OffsetDateTime;
 
 /// Error returned by the high-level Shibahama API.
 #[derive(Debug, Error)]
@@ -34,6 +38,75 @@ pub struct WriteEmbedding<'a> {
     pub model: &'a str,
     /// Embedding model version.
     pub model_version: &'a str,
+}
+
+/// Structured explanation for why a memory currently has its state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WhyTrace {
+    /// Current materialized memory item.
+    pub item: MemoryItem,
+    /// Deterministic significance score breakdown at `currency.as_of`.
+    pub significance: SignificanceBreakdown,
+    /// Current provenance copied to the trace boundary.
+    pub provenance: Provenance,
+    /// Current tier, credence floor, and tier/credence audit entries.
+    pub tier: WhyTierTrace,
+    /// Validity and ingestion state at the explanation instant.
+    pub currency: WhyCurrencyTrace,
+    /// Complete credence/tier audit trail for this memory.
+    pub audit_trail: Vec<MemoryAuditEntry>,
+}
+
+/// Tier and credence portion of a `why` explanation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WhyTierTrace {
+    /// Current accessibility tier.
+    pub current: Tier,
+    /// Current credence tier.
+    pub credence: CredenceTier,
+    /// Lowest tier allowed by the memory's credence.
+    pub credence_floor: Tier,
+    /// Audit entries that changed this memory's tier or credence.
+    pub audit: Vec<MemoryAuditEntry>,
+}
+
+/// Currency portion of a `why` explanation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WhyCurrencyTrace {
+    /// Instant the currency state was evaluated against.
+    pub as_of: OffsetDateTime,
+    /// Whether the memory is current, not-yet-valid, or invalidated at `as_of`.
+    pub state: RecallCandidateCurrency,
+    /// Valid-time start for this memory.
+    pub valid_from: OffsetDateTime,
+    /// Valid-time end, if the memory was superseded or invalidated.
+    pub valid_to: Option<OffsetDateTime>,
+    /// Time Shibahama ingested the observation.
+    pub ingested_at: OffsetDateTime,
+}
+
+impl WhyCurrencyTrace {
+    fn from_item(item: &MemoryItem, as_of: OffsetDateTime) -> Self {
+        let state = if as_of < item.timestamps.valid_from {
+            RecallCandidateCurrency::NotYetValid
+        } else if item
+            .timestamps
+            .valid_to
+            .is_some_and(|valid_to| as_of >= valid_to)
+        {
+            RecallCandidateCurrency::Invalidated
+        } else {
+            RecallCandidateCurrency::Current
+        };
+
+        Self {
+            as_of,
+            state,
+            valid_from: item.timestamps.valid_from,
+            valid_to: item.timestamps.valid_to,
+            ingested_at: item.timestamps.ingested_at,
+        }
+    }
 }
 
 /// In-process Shibahama engine over a store and vector index.
@@ -127,13 +200,59 @@ impl<V: VectorIndex> Shibahama<V> {
         Ok(self.store.reinforce(id, outcome)?.is_some())
     }
 
-    /// Returns the current materialized memory for `id`.
+    /// Returns a full explanation for the current memory state.
     ///
     /// # Errors
     ///
-    /// Returns an error when the item cannot be read.
-    pub fn why(&self, id: MemoryId) -> Result<Option<MemoryItem>, ShibahamaError> {
-        Ok(self.store.get(id)?)
+    /// Returns an error when the item, significance inputs, or audit trail cannot be read.
+    pub fn why(&self, id: MemoryId) -> Result<Option<WhyTrace>, ShibahamaError> {
+        self.why_at(id, OffsetDateTime::now_utc())
+    }
+
+    /// Returns a full explanation for the memory state at `now`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the item, significance inputs, or audit trail cannot be read.
+    pub fn why_at(
+        &self,
+        id: MemoryId,
+        now: OffsetDateTime,
+    ) -> Result<Option<WhyTrace>, ShibahamaError> {
+        self.why_with_significance_policy(id, now, SignificanceConfig::default())
+    }
+
+    /// Returns a full explanation using a caller-supplied significance policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the item, graph centrality, or audit trail cannot be read.
+    pub fn why_with_significance_policy(
+        &self,
+        id: MemoryId,
+        now: OffsetDateTime,
+        policy: SignificanceConfig,
+    ) -> Result<Option<WhyTrace>, ShibahamaError> {
+        let Some(item) = self.store.get(id)? else {
+            return Ok(None);
+        };
+        let graph_centrality = self.store.graph_centrality_for_memory(id)?;
+        let significance = policy.explain_with_graph_centrality(&item, now, graph_centrality);
+        let audit_trail = self.store.audit_trail(id)?;
+
+        Ok(Some(WhyTrace {
+            provenance: item.provenance.clone(),
+            tier: WhyTierTrace {
+                current: item.tier,
+                credence: item.credence,
+                credence_floor: item.credence_floor,
+                audit: audit_trail.clone(),
+            },
+            currency: WhyCurrencyTrace::from_item(&item, now),
+            item,
+            significance,
+            audit_trail,
+        }))
     }
 }
 
@@ -141,7 +260,7 @@ impl<V: VectorIndex> Shibahama<V> {
 mod tests {
     use super::*;
     use crate::model::{Provenance, SourceKind};
-    use crate::retrieval::RecallRequest;
+    use crate::retrieval::{RecallCandidateCurrency, RecallRequest};
     use crate::vector::HnswVectorIndex;
     use tempfile::NamedTempFile;
     use time::OffsetDateTime;
@@ -180,13 +299,49 @@ mod tests {
                 .reinforce(item.id, AccessOutcome::Cited)
                 .expect("reinforce should work")
         );
-        assert_eq!(
-            shibahama
-                .why(item.id)
-                .expect("why should read")
-                .expect("item should exist")
-                .content,
-            "facade memory"
-        );
+        let why = shibahama
+            .why_at(item.id, OffsetDateTime::UNIX_EPOCH)
+            .expect("why should read")
+            .expect("item should exist");
+
+        assert_eq!(why.item.content, "facade memory");
+        assert_eq!(why.provenance.source_kind, SourceKind::User);
+        assert_eq!(why.tier.current, why.item.tier);
+        assert_eq!(why.tier.credence, why.item.credence);
+        assert_eq!(why.currency.state, RecallCandidateCurrency::Current);
+        assert_eq!(why.currency.valid_from, item.timestamps.valid_from);
+        assert!((why.significance.base_score - why.item.significance).abs() < f64::EPSILON);
+        assert_eq!(why.audit_trail.len(), why.tier.audit.len());
+        assert!(why.audit_trail.len() >= 2);
+    }
+
+    #[test]
+    fn why_trace_reports_invalidated_currency() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let valid_from = OffsetDateTime::UNIX_EPOCH;
+        let valid_to = valid_from + time::Duration::days(1);
+        let item = shibahama
+            .write(MemoryWriteEvent::new(
+                "old facade memory",
+                Provenance::new(SourceKind::User, None, "api-test"),
+                valid_from,
+                valid_from,
+            ))
+            .expect("write should work");
+
+        shibahama
+            .store()
+            .soft_invalidate(item.id, valid_to)
+            .expect("invalidate should work");
+
+        let why = shibahama
+            .why_at(item.id, valid_to)
+            .expect("why should read")
+            .expect("item should exist");
+
+        assert_eq!(why.currency.state, RecallCandidateCurrency::Invalidated);
+        assert_eq!(why.currency.valid_to, Some(valid_to));
     }
 }

@@ -197,6 +197,32 @@ pub fn recall(
     vector_index: &dyn VectorIndex,
     request: &RecallRequest<'_>,
 ) -> Result<Vec<RecallCandidate>, RecallError> {
+    recall_inner(store, vector_index, request, true)
+}
+
+/// Reconstructs query results as they were believed at `request.now`.
+///
+/// Unlike `recall`, this is a read-only timeline query: it does not record surfaced access events.
+/// Both valid-time and ingestion-time must be in scope, so an observation valid on a date but
+/// ingested later is not returned for that earlier `as_of` instant.
+///
+/// # Errors
+///
+/// Returns an error when vector search or storage reads fail.
+pub fn timeline(
+    store: &RedbMemoryStore,
+    vector_index: &dyn VectorIndex,
+    request: &RecallRequest<'_>,
+) -> Result<Vec<RecallCandidate>, RecallError> {
+    recall_inner(store, vector_index, request, false)
+}
+
+fn recall_inner(
+    store: &RedbMemoryStore,
+    vector_index: &dyn VectorIndex,
+    request: &RecallRequest<'_>,
+    record_surface_access: bool,
+) -> Result<Vec<RecallCandidate>, RecallError> {
     let vector_results = vector_index.search(request.query_vector, request.top_k)?;
     let ids = vector_results
         .iter()
@@ -210,7 +236,7 @@ pub fn recall(
         .filter_map(|(result, item)| {
             let item = item?;
 
-            if !item.timestamps.is_valid_at(request.now) {
+            if !is_believed_at(&item, request.now) {
                 return None;
             }
 
@@ -250,7 +276,7 @@ pub fn recall(
                     continue;
                 };
 
-                if !item.timestamps.is_valid_at(request.now) {
+                if !is_believed_at(&item, request.now) {
                     continue;
                 }
 
@@ -276,19 +302,21 @@ pub fn recall(
             .then_with(|| left.id.cmp(&right.id))
     });
 
-    for candidate in &candidates {
-        let access_event = request.raw_query_context.map_or_else(
-            || AccessEvent::new(request.now, None, AccessOutcome::Surfaced),
-            |raw_context| {
-                AccessEvent::with_raw_query_context(
-                    request.now,
-                    raw_context,
-                    AccessOutcome::Surfaced,
-                )
-            },
-        );
+    if record_surface_access {
+        for candidate in &candidates {
+            let access_event = request.raw_query_context.map_or_else(
+                || AccessEvent::new(request.now, None, AccessOutcome::Surfaced),
+                |raw_context| {
+                    AccessEvent::with_raw_query_context(
+                        request.now,
+                        raw_context,
+                        AccessOutcome::Surfaced,
+                    )
+                },
+            );
 
-        store.record_access(candidate.id, access_event)?;
+            store.record_access(candidate.id, access_event)?;
+        }
     }
 
     Ok(candidates)
@@ -341,6 +369,10 @@ fn candidate_currency(item: &MemoryItem, now: OffsetDateTime) -> RecallCandidate
     }
 
     RecallCandidateCurrency::Current
+}
+
+fn is_believed_at(item: &MemoryItem, as_of: OffsetDateTime) -> bool {
+    item.timestamps.ingested_at <= as_of && item.timestamps.is_valid_at(as_of)
 }
 
 fn load_bearing_possibly_stale(
@@ -648,5 +680,58 @@ mod tests {
 
         assert!(stale_candidate.load_bearing_possibly_stale);
         assert!(!recently_validated_candidate.load_bearing_possibly_stale);
+    }
+
+    #[test]
+    fn timeline_returns_believed_candidates_as_of_without_recording_access() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let ingested_at = OffsetDateTime::UNIX_EPOCH + Duration::days(1);
+        let valid_to = ingested_at + Duration::days(10);
+        let mut item = test_item("historical", ingested_at);
+
+        item.timestamps = item.timestamps.closed_at(valid_to);
+
+        store
+            .write_embedded(
+                &mut item,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("item should write");
+
+        let query = [0.0, 0.0];
+        let before_ingest = RecallRequest::new(&query, 1, ingested_at - Duration::seconds(1));
+        let while_valid = RecallRequest::new(&query, 1, ingested_at + Duration::days(1));
+        let after_invalid = RecallRequest::new(&query, 1, valid_to + Duration::seconds(1));
+
+        assert!(
+            timeline(&store, &vector_index, &before_ingest)
+                .expect("timeline should read")
+                .is_empty()
+        );
+
+        let historical =
+            timeline(&store, &vector_index, &while_valid).expect("timeline should read");
+
+        assert_eq!(historical.len(), 1);
+        assert_eq!(historical[0].id, item.id);
+        assert_eq!(historical[0].currency, RecallCandidateCurrency::Current);
+        assert!(
+            timeline(&store, &vector_index, &after_invalid)
+                .expect("timeline should read")
+                .is_empty()
+        );
+
+        let stored = store
+            .get(item.id)
+            .expect("item should read")
+            .expect("item should exist");
+
+        assert!(stored.access_events.is_empty());
     }
 }

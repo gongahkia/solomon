@@ -107,7 +107,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P1) Stage 4: graph-relationship expansion (pull in connected facts)
 - [x] (P1) Attach provenance + tier + currency-flag to every returned candidate (never bare text)
 - [x] (P1) Flag candidates that are "load-bearing but possibly stale" (significant + old + not recently validated)
-- [ ] (P1) Implement `timeline(query, as_of)` — bi-temporal "what did I believe on date X"
+- [x] (P1) Implement `timeline(query, as_of)` — bi-temporal "what did I believe on date X"
 - [ ] (P2) Tunable ranking weights (similarity ⊕ significance ⊕ recency ⊕ graph) via config
 - [ ] (P2) Cold-tier retrieval requires explicit opt-in / costs a flag (so callers know they paid for it)
 - [ ] (P2) Result diversification so near-duplicate memories don't dominate

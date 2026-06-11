@@ -5,7 +5,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from solomon.audit.journal import AuditJournal, knowledge_metadata_snapshot, what_did_we_know_report
+from solomon.audit.journal import (
+    AuditJournal,
+    knowledge_metadata_snapshot,
+    sign_verification_attestation,
+    verify_verification_attestation,
+    what_did_we_know_report,
+)
 from solomon.currency.models import CredenceTier, KnowledgeItem, KnowledgeKind, Provenance, SourceKind
 from solomon.orchestrator.models import EndpointKind, ModelCallAudit
 
@@ -84,3 +90,19 @@ def test_what_did_we_know_report_scopes_by_matter() -> None:
 
     assert report.matter_id == "matter-a"
     assert [entry["item_id"] for entry in report.items] == ["item-1"]
+
+
+def test_signed_verification_attestation_verifies_and_detects_tamper() -> None:
+    item = _item().model_copy(update={"verified_by": "Partner A", "last_verified_at": _item().ingested_at})
+
+    attestation = sign_verification_attestation(
+        item,
+        verified_by="Partner A",
+        outcome="reaffirm",
+        signing_key="test-secret",
+        key_id="unit-test",
+    )
+    tampered = attestation.model_copy(update={"outcome": "retire"})
+
+    assert verify_verification_attestation(attestation, signing_key="test-secret") is True
+    assert verify_verification_attestation(tampered, signing_key="test-secret") is False

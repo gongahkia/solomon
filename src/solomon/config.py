@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     remote_model_url: str | None = None
     allow_remote_egress: bool = False
     zero_egress_mode: bool = True
+    verification_attestation_key: str | None = None
 
     @model_validator(mode="after")
     def validate_egress_policy(self) -> Settings:
@@ -52,6 +53,7 @@ class Settings(BaseSettings):
             "remote_model_configured": self.remote_model_url is not None,
             "allow_remote_egress": self.allow_remote_egress,
             "zero_egress_mode": self.zero_egress_mode,
+            "verification_attestation_key_configured": self.verification_attestation_key is not None,
         }
 
 

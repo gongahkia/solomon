@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import Field
 
 from solomon.api.schemas import SolomonModel
-from solomon.audit.journal import AuditJournal
+from solomon.audit.journal import AuditJournal, sign_verification_attestation
 from solomon.credence.policy import CredenceLedger
 from solomon.currency.cache import CurrencyEvaluationCache
 from solomon.currency.engine import (
@@ -90,7 +90,7 @@ class WhyTrace(SolomonModel):
 
 
 class SolomonService:
-    def __init__(self, *, data_dir: Path, journal_dir: Path) -> None:
+    def __init__(self, *, data_dir: Path, journal_dir: Path, attestation_key: str | None = None) -> None:
         data_dir.mkdir(parents=True, exist_ok=True)
         journal_dir.mkdir(parents=True, exist_ok=True)
         db = data_dir / "solomon.sqlite3"
@@ -106,6 +106,7 @@ class SolomonService:
             credence=self.credence,
         )
         self.audit = AuditJournal(journal_dir / "journal.jsonl")
+        self.attestation_key = attestation_key
 
     def ingest(self, request: IngestRequest) -> KnowledgeItem:
         item = KnowledgeItem(
@@ -151,6 +152,14 @@ class SolomonService:
         )
         self.store.update_item(recorded.item, event_type="knowledge_item_verified")
         self.currency_cache.invalidate({item_id})
+        if self.attestation_key is not None:
+            attestation = sign_verification_attestation(
+                recorded.item,
+                verified_by=request.by,
+                outcome=request.outcome.value,
+                signing_key=self.attestation_key,
+            )
+            self.audit.log_verification_attestation(attestation)
         return recorded.item
 
     def register_authority_change(self, authority_id: str, request: AuthorityChangeRequest) -> dict[str, Any]:

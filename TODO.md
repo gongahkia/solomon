@@ -118,7 +118,7 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P1) Pass source+destination jurisdiction to Kaypoh so the strictest rule resolves correctly
 - [x] (P2) Reconcile demasking correctness when the model rephrases/reasons over tokens (test that placeholders survive paraphrase; flag when a token is dropped/mangled)
 - [x] (P2) Document-scrub path for ingested files (🔌 Kaypoh `/documents/scrub`) before extraction
-- [ ] (P3) Reuse Kaypoh's Word/Outlook add-in surfaces as optional Solomon front-ends (🔌 `../kaypoh/packaging/word_addin`)
+- [x] (P3) Reuse Kaypoh's Word/Outlook add-in surfaces as optional Solomon front-ends (🔌 `../kaypoh/packaging/word_addin`)
 
 ---
 
@@ -172,7 +172,7 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P1) Tamper-evidence on the journal (hash chaining)
 - [x] (P2) "What did we know and when" report for a given matter/client (privilege defence narrative)
 - [x] (P2) Right-to-erasure handling for stored knowledge where lawful (♻️ Kaypoh `erase_subject` philosophy), reconciled with the never-delete-for-audit tension (document the resolution)
-- [ ] (P3) Signed verification attestations (who verified, cryptographically)
+- [x] (P3) Signed verification attestations (who verified, cryptographically)
 
 ---
 
@@ -196,7 +196,7 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P1) Env-gating for any egress (♻️ Kaypoh's explicit-opt-in discipline: nothing leaves without a flag)
 - [x] (P2) PyInstaller desktop packaging for solomon-local (♻️ Kaypoh `packaging/` approach)
 - [x] (P2) Docker compose for server (♻️ mirror Kaypoh compose files)
-- [ ] (P3) Multi-tenant namespace isolation on server
+- [x] (P3) Multi-tenant namespace isolation on server
 
 ---
 

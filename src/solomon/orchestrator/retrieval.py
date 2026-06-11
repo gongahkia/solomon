@@ -48,7 +48,7 @@ class SQLiteRetrievalIndex:
         self.path = Path(path)
         self.strategy = strategy or EmbeddingStrategy()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.path)
+        self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self.initialize()
 

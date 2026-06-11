@@ -60,7 +60,11 @@ def diagnostics() -> None:
 
 def _service() -> SolomonService:
     settings = get_settings()
-    return SolomonService(data_dir=settings.data_dir, journal_dir=settings.journal_dir)
+    return SolomonService(
+        data_dir=settings.data_dir,
+        journal_dir=settings.journal_dir,
+        attestation_key=settings.verification_attestation_key,
+    )
 
 
 @app.command()

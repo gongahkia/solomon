@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import shutil
 from dataclasses import dataclass
@@ -57,6 +58,24 @@ class KnowledgeReport(SolomonModel):
     matter_id: str | None = None
     client_id: str | None = None
     items: list[dict[str, Any]]
+
+
+class VerificationAttestation(SolomonModel):
+    schema_id: str = "solomon.verification_attestation.v1"
+    item_id: str
+    verified_by: str
+    outcome: str
+    recorded_at: datetime
+    item_sha256: str
+    key_id: str
+    signature: str
+
+    @field_validator("recorded_at")
+    @classmethod
+    def normalize_recorded_at(cls, value: datetime) -> datetime:
+        from solomon.currency.models import _ensure_aware_utc
+
+        return _ensure_aware_utc(value)
 
 
 def _canonical_event(seq: int, event_type: str, occurred_at: datetime, payload: dict[str, Any], prev_hash: str) -> str:
@@ -143,6 +162,9 @@ class AuditJournal:
 
     def log_impact(self, impact: ImpactResult) -> AuditEntry:
         return self.append("impact", impact.model_dump(mode="json"))
+
+    def log_verification_attestation(self, attestation: VerificationAttestation) -> AuditEntry:
+        return self.append("verification_attestation", attestation.model_dump(mode="json"))
 
     def record_erasure_tombstone(self, *, subject_ref: str, lawful_basis: str, by: str) -> AuditEntry:
         return self.append(
@@ -261,3 +283,84 @@ def what_did_we_know_report(
         client_id=client_id,
         items=knowledge_metadata_snapshot(scoped),
     )
+
+
+def sign_verification_attestation(
+    item: KnowledgeItem,
+    *,
+    verified_by: str,
+    outcome: str,
+    signing_key: str,
+    key_id: str = "local-hmac",
+) -> VerificationAttestation:
+    recorded_at = item.last_verified_at or now_utc()
+    item_hash = _item_attestation_hash(item)
+    payload = _attestation_payload(
+        item_id=item.id,
+        verified_by=verified_by,
+        outcome=outcome,
+        recorded_at=recorded_at,
+        item_sha256=item_hash,
+        key_id=key_id,
+    )
+    signature = hmac.new(signing_key.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+    return VerificationAttestation(
+        item_id=item.id,
+        verified_by=verified_by,
+        outcome=outcome,
+        recorded_at=recorded_at,
+        item_sha256=item_hash,
+        key_id=key_id,
+        signature=signature,
+    )
+
+
+def verify_verification_attestation(attestation: VerificationAttestation, *, signing_key: str) -> bool:
+    payload = _attestation_payload(
+        item_id=attestation.item_id,
+        verified_by=attestation.verified_by,
+        outcome=attestation.outcome,
+        recorded_at=attestation.recorded_at,
+        item_sha256=attestation.item_sha256,
+        key_id=attestation.key_id,
+    )
+    expected = hmac.new(signing_key.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, attestation.signature)
+
+
+def _item_attestation_hash(item: KnowledgeItem) -> str:
+    payload = {
+        "item_id": item.id,
+        "content_sha256": hashlib.sha256(item.content.encode("utf-8")).hexdigest(),
+        "currency_state": item.currency_state.value,
+        "verified_state": item.verified_state.value,
+        "last_verified_at": item.last_verified_at.isoformat() if item.last_verified_at else None,
+        "verified_by": item.verified_by,
+        "valid_to": item.valid_to.isoformat() if item.valid_to else None,
+        "successor_id": item.successor_id,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _attestation_payload(
+    *,
+    item_id: str,
+    verified_by: str,
+    outcome: str,
+    recorded_at: datetime,
+    item_sha256: str,
+    key_id: str,
+) -> bytes:
+    return json.dumps(
+        {
+            "schema": "solomon.verification_attestation.v1",
+            "item_id": item_id,
+            "verified_by": verified_by,
+            "outcome": outcome,
+            "recorded_at": recorded_at.isoformat(),
+            "item_sha256": item_sha256,
+            "key_id": key_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")

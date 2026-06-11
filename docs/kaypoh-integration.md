@@ -27,3 +27,7 @@ uv run python scripts/kaypoh_smoke.py --base-url http://127.0.0.1:8131
 
 If Kaypoh is unavailable, Solomon refuses ingestion or egress paths that require the boundary.
 
+## Optional Office Surfaces
+
+Solomon can reuse Kaypoh's existing Word and Office taskpanes as thin clients without editing Kaypoh source.
+The Solomon-side adapter contract is documented in [office-frontends.md](office-frontends.md).

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, cast
 
 from fastapi import FastAPI, Request
@@ -24,6 +25,9 @@ from solomon.config import Settings, get_settings
 from solomon.errors import SolomonError
 from solomon.graph.visualization import GraphFormat
 
+PUBLIC_PATHS = {"/health", "/ready", "/docs", "/redoc", "/openapi.json"}
+TENANT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+
 
 class HealthResponse(BaseModel):
     status: str = Field(..., examples=["ok"])
@@ -45,7 +49,31 @@ class DiagnosticsResponse(BaseModel):
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
-    service = SolomonService(data_dir=resolved_settings.data_dir, journal_dir=resolved_settings.journal_dir)
+    service = SolomonService(
+        data_dir=resolved_settings.data_dir,
+        journal_dir=resolved_settings.journal_dir,
+        attestation_key=resolved_settings.verification_attestation_key,
+    )
+    tenant_services: dict[str, SolomonService] = {}
+
+    def service_for_tenant(tenant_id: str) -> SolomonService:
+        existing = tenant_services.get(tenant_id)
+        if existing is not None:
+            return existing
+        tenant_service = SolomonService(
+            data_dir=resolved_settings.data_dir / "tenants" / tenant_id,
+            journal_dir=resolved_settings.journal_dir / "tenants" / tenant_id,
+            attestation_key=resolved_settings.verification_attestation_key,
+        )
+        tenant_services[tenant_id] = tenant_service
+        return tenant_service
+
+    def active_service(request: Request) -> SolomonService:
+        resolved = getattr(request.state, "service", None)
+        if isinstance(resolved, SolomonService):
+            return resolved
+        return service
+
     app = FastAPI(
         title="Solomon",
         version=__version__,
@@ -58,18 +86,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def server_api_key_middleware(request: Request, call_next: Any) -> Any:
-        if (
-            resolved_settings.sku == "server"
-            and resolved_settings.server_api_key
-            and request.url.path not in {"/health", "/ready"}
-        ):
-            supplied = request.headers.get("x-api-key")
-            if supplied != resolved_settings.server_api_key:
+        request.state.tenant_id = "local"
+        request.state.service = service
+        if resolved_settings.sku == "server" and request.url.path not in PUBLIC_PATHS:
+            if resolved_settings.server_api_key:
+                supplied = request.headers.get("x-api-key")
+                if supplied != resolved_settings.server_api_key:
+                    return JSONResponse(
+                        status_code=401,
+                        content={"error": {"code": "unauthorized", "message": "invalid or missing API key"}},
+                    )
+            tenant_id = request.headers.get("x-tenant-id")
+            if tenant_id is None or not TENANT_ID_RE.fullmatch(tenant_id):
                 return JSONResponse(
-                    status_code=401,
-                    content={"error": {"code": "unauthorized", "message": "invalid or missing API key"}},
+                    status_code=400,
+                    content={"error": {"code": "invalid_tenant", "message": "valid x-tenant-id header required"}},
                 )
-            request.state.tenant_id = request.headers.get("x-tenant-id", "default")
+            request.state.tenant_id = tenant_id
+            request.state.service = service_for_tenant(tenant_id)
         return await call_next(request)
 
     @app.exception_handler(SolomonError)
@@ -93,62 +127,63 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.post("/ingest")
-    def ingest(request: IngestRequest) -> dict[str, Any]:
-        return service.ingest(request).model_dump(mode="json")
+    def ingest(request: Request, payload: IngestRequest) -> dict[str, Any]:
+        return active_service(request).ingest(payload).model_dump(mode="json")
 
     @app.post("/recall")
-    def recall(request: RecallRequest) -> list[dict[str, Any]]:
-        return service.recall(request)
+    def recall(request: Request, payload: RecallRequest) -> list[dict[str, Any]]:
+        return active_service(request).recall(payload)
 
     @app.get("/currency/{item_id}")
-    def currency(item_id: str) -> dict[str, Any]:
-        return service.evaluate_currency(item_id)
+    def currency(request: Request, item_id: str) -> dict[str, Any]:
+        return active_service(request).evaluate_currency(item_id)
 
     @app.post("/verification/{item_id}")
-    def verification(item_id: str, request: VerificationRequest) -> dict[str, Any]:
-        return service.record_verification(item_id, request).model_dump(mode="json")
+    def verification(request: Request, item_id: str, payload: VerificationRequest) -> dict[str, Any]:
+        return active_service(request).record_verification(item_id, payload).model_dump(mode="json")
 
     @app.post("/authorities/{authority_id}/changes")
-    def authority_change(authority_id: str, request: AuthorityChangeRequest) -> dict[str, Any]:
-        return service.register_authority_change(authority_id, request)
+    def authority_change(request: Request, authority_id: str, payload: AuthorityChangeRequest) -> dict[str, Any]:
+        return active_service(request).register_authority_change(authority_id, payload)
 
     @app.post("/dependencies")
-    def add_dependency(request: DependencyRequest) -> dict[str, Any]:
-        return service.add_dependency(request).model_dump(mode="json")
+    def add_dependency(request: Request, payload: DependencyRequest) -> dict[str, Any]:
+        return active_service(request).add_dependency(payload).model_dump(mode="json")
 
     @app.get("/impact/{authority_id}")
-    def impact(authority_id: str) -> dict[str, Any]:
-        return service.impact_query(authority_id)
+    def impact(request: Request, authority_id: str) -> dict[str, Any]:
+        return active_service(request).impact_query(authority_id)
 
     @app.get("/graph", response_class=PlainTextResponse)
     def dependency_graph(
+        request: Request,
         output_format: str = "mermaid",
         matter_id: str | None = None,
         client_id: str | None = None,
     ) -> str:
         if output_format not in {"mermaid", "dot"}:
             return "unsupported graph format"
-        return service.dependency_graph(
+        return active_service(request).dependency_graph(
             output_format=cast(GraphFormat, output_format),
             matter_id=matter_id,
             client_id=client_id,
         )
 
     @app.post("/references/extract")
-    def extract_references(request: ReferenceExtractionRequest) -> dict[str, Any]:
-        return service.extract_references(request).model_dump(mode="json")
+    def extract_references(request: Request, payload: ReferenceExtractionRequest) -> dict[str, Any]:
+        return active_service(request).extract_references(payload).model_dump(mode="json")
 
     @app.post("/staleness/predict")
-    def predict_staleness(request: StalenessPredictionRequest) -> dict[str, Any]:
-        return service.predict_staleness(request).model_dump(mode="json")
+    def predict_staleness(request: Request, payload: StalenessPredictionRequest) -> dict[str, Any]:
+        return active_service(request).predict_staleness(payload).model_dump(mode="json")
 
     @app.get("/why/{item_id}")
-    def why(item_id: str) -> dict[str, Any]:
-        return service.why(item_id).model_dump(mode="json")
+    def why(request: Request, item_id: str) -> dict[str, Any]:
+        return active_service(request).why(item_id).model_dump(mode="json")
 
     @app.post("/timeline")
-    def timeline(request: RecallRequest, as_of: str) -> list[dict[str, Any]]:
-        return service.timeline(request, as_of=as_of)
+    def timeline(request: Request, payload: RecallRequest, as_of: str) -> list[dict[str, Any]]:
+        return active_service(request).timeline(payload, as_of=as_of)
 
     return app
 

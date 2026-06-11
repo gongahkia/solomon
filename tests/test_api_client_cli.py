@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -9,9 +10,17 @@ from typing import Any
 import httpx
 
 from solomon.api.app import create_app
-from solomon.api.service import AuthorityChangeRequest, DependencyRequest, IngestRequest, RecallRequest, SolomonService
+from solomon.api.service import (
+    AuthorityChangeRequest,
+    DependencyRequest,
+    IngestRequest,
+    RecallRequest,
+    SolomonService,
+    VerificationRequest,
+)
 from solomon.client import SolomonClient
 from solomon.config import Settings
+from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.graph.models import EdgeType
 
@@ -67,6 +76,28 @@ def test_service_currency_cache_invalidates_after_dependency_change(tmp_path: Pa
     assert service.evaluate_currency(item.id)["currency_state"] == "StalePendingReverification"
 
 
+def test_service_records_signed_verification_attestation_when_configured(tmp_path: Path) -> None:
+    service = SolomonService(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        attestation_key="test-secret",
+    )
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="verified position",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo",
+        )
+    )
+
+    service.record_verification(item.id, VerificationRequest(by="Partner A", outcome=VerificationOutcome.REAFFIRM))
+
+    raw = (tmp_path / "journal" / "journal.jsonl").read_text(encoding="utf-8")
+    assert "verification_attestation" in raw
+    assert "verified position" not in raw
+
+
 def test_fastapi_app_exposes_public_verbs(tmp_path: Path) -> None:
     app = create_app(Settings(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal"))
     paths = {getattr(route, "path", "") for route in app.routes}
@@ -84,6 +115,52 @@ def test_fastapi_app_exposes_public_verbs(tmp_path: Path) -> None:
         "/why/{item_id}",
         "/timeline",
     }.issubset(paths)
+
+
+def test_server_mode_requires_and_isolates_tenants(tmp_path: Path) -> None:
+    app = create_app(
+        Settings(
+            sku="server",
+            zero_egress_mode=False,
+            data_dir=tmp_path / "data",
+            journal_dir=tmp_path / "journal",
+            server_api_key="secret",
+        )
+    )
+    tenant_a = {"x-api-key": "secret", "x-tenant-id": "tenant-a"}
+    tenant_b = {"x-api-key": "secret", "x-tenant-id": "tenant-b"}
+    payload = {
+        "kind": "position",
+        "content": "tenant alpha position",
+        "source_kind": "partner",
+        "source_ref": "memo-a",
+    }
+
+    async def exercise() -> tuple[httpx.Response, httpx.Response, httpx.Response, httpx.Response]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            missing_tenant = await client.post("/ingest", headers={"x-api-key": "secret"}, json=payload)
+            created = await client.post("/ingest", headers=tenant_a, json=payload)
+            tenant_a_recall = await client.post(
+                "/recall",
+                headers=tenant_a,
+                json={"query": "tenant alpha", "review_mode": True},
+            )
+            tenant_b_recall = await client.post(
+                "/recall",
+                headers=tenant_b,
+                json={"query": "tenant alpha", "review_mode": True},
+            )
+            return missing_tenant, created, tenant_a_recall, tenant_b_recall
+
+    missing_tenant, created, tenant_a_recall, tenant_b_recall = asyncio.run(exercise())
+
+    assert missing_tenant.status_code == 400
+    assert created.status_code == 200
+    assert len(tenant_a_recall.json()) == 1
+    assert tenant_b_recall.json() == []
+    assert (tmp_path / "data" / "tenants" / "tenant-a" / "solomon.sqlite3").exists()
+    assert (tmp_path / "data" / "tenants" / "tenant-b" / "solomon.sqlite3").exists()
 
 
 def test_sync_client_uses_httpx_transport() -> None:

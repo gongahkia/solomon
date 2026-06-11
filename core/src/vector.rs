@@ -167,12 +167,161 @@ impl VectorIndex for HnswVectorIndex {
     }
 }
 
+/// Transport boundary used by the Qdrant vector backend adapter.
+pub trait QdrantTransport {
+    /// Upserts a vector into `collection`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the remote backend rejects the upsert.
+    fn upsert(
+        &mut self,
+        collection: &str,
+        id: MemoryId,
+        vector: &[f32],
+    ) -> Result<(), VectorIndexError>;
+
+    /// Searches `collection` for nearest vectors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the remote backend rejects the search.
+    fn search(
+        &self,
+        collection: &str,
+        query: &[f32],
+        top_k: usize,
+    ) -> Result<Vec<VectorSearchResult>, VectorIndexError>;
+
+    /// Deletes a vector from `collection`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the remote backend rejects the delete.
+    fn delete(&mut self, collection: &str, id: MemoryId) -> Result<(), VectorIndexError>;
+}
+
+/// Qdrant-backed vector index adapter.
+pub struct QdrantVectorIndex<T> {
+    collection: String,
+    dimensions: usize,
+    transport: T,
+}
+
+impl<T> QdrantVectorIndex<T> {
+    /// Creates a Qdrant adapter over an injected transport.
+    pub fn new(collection: impl Into<String>, dimensions: usize, transport: T) -> Self {
+        Self {
+            collection: collection.into(),
+            dimensions,
+            transport,
+        }
+    }
+
+    /// Consumes the adapter and returns its transport.
+    pub fn into_transport(self) -> T {
+        self.transport
+    }
+
+    fn ensure_dimensions(&self, vector: &[f32]) -> Result<(), VectorIndexError> {
+        if vector.len() != self.dimensions {
+            return Err(VectorIndexError::DimensionMismatch {
+                expected: self.dimensions,
+                actual: vector.len(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+impl<T: QdrantTransport> VectorIndex for QdrantVectorIndex<T> {
+    fn add(&mut self, id: MemoryId, vector: &[f32]) -> Result<(), VectorIndexError> {
+        self.ensure_dimensions(vector)?;
+        self.transport.upsert(&self.collection, id, vector)
+    }
+
+    fn search(
+        &self,
+        query: &[f32],
+        top_k: usize,
+    ) -> Result<Vec<VectorSearchResult>, VectorIndexError> {
+        self.ensure_dimensions(query)?;
+        self.transport.search(&self.collection, query, top_k)
+    }
+
+    fn delete_by_id(&mut self, id: MemoryId) -> Result<(), VectorIndexError> {
+        self.transport.delete(&self.collection, id)
+    }
+
+    fn dimensions(&self) -> usize {
+        self.dimensions
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     struct EmptyIndex {
         dimensions: usize,
+    }
+
+    #[derive(Default)]
+    struct FakeQdrantTransport {
+        vectors: HashMap<MemoryId, Vec<f32>>,
+        collections: Vec<String>,
+    }
+
+    impl QdrantTransport for FakeQdrantTransport {
+        fn upsert(
+            &mut self,
+            collection: &str,
+            id: MemoryId,
+            vector: &[f32],
+        ) -> Result<(), VectorIndexError> {
+            self.collections.push(collection.to_owned());
+            self.vectors.insert(id, vector.to_vec());
+
+            Ok(())
+        }
+
+        fn search(
+            &self,
+            collection: &str,
+            query: &[f32],
+            top_k: usize,
+        ) -> Result<Vec<VectorSearchResult>, VectorIndexError> {
+            let mut results = self
+                .vectors
+                .iter()
+                .map(|(id, vector)| VectorSearchResult {
+                    id: *id,
+                    distance: euclidean_distance(vector, query),
+                })
+                .collect::<Vec<_>>();
+
+            assert_eq!(collection, "memories");
+            results.sort_by(|left, right| left.distance.total_cmp(&right.distance));
+            results.truncate(top_k);
+
+            Ok(results)
+        }
+
+        fn delete(&mut self, collection: &str, id: MemoryId) -> Result<(), VectorIndexError> {
+            self.collections.push(collection.to_owned());
+            self.vectors.remove(&id);
+
+            Ok(())
+        }
+    }
+
+    fn euclidean_distance(left: &[f32], right: &[f32]) -> f32 {
+        left.iter()
+            .zip(right)
+            .map(|(left, right)| (left - right).powi(2))
+            .sum::<f32>()
+            .sqrt()
     }
 
     impl VectorIndex for EmptyIndex {
@@ -263,5 +412,28 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, remaining);
+    }
+
+    #[test]
+    fn qdrant_adapter_satisfies_vector_index_trait() {
+        let transport = FakeQdrantTransport::default();
+        let mut index = QdrantVectorIndex::new("memories", 2, transport);
+        let near = MemoryId::new_v7();
+        let far = MemoryId::new_v7();
+
+        index.add(near, &[0.0, 0.0]).expect("near should add");
+        index.add(far, &[5.0, 5.0]).expect("far should add");
+
+        let results = index.search(&[0.1, 0.1], 1).expect("search should work");
+
+        assert_eq!(results[0].id, near);
+
+        index.delete_by_id(near).expect("delete should work");
+
+        let results = index.search(&[0.1, 0.1], 1).expect("search should work");
+        let transport = index.into_transport();
+
+        assert_eq!(results[0].id, far);
+        assert!(transport.collections.iter().all(|name| name == "memories"));
     }
 }

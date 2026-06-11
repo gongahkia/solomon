@@ -10,7 +10,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 ## Phase 0 — Foundations & repo scaffolding
 
 ### Repo & tooling
-- [ ] (P0) Initialise monorepo: `core/` (Rust), `bindings/python/`, `bindings/node/`, `tideline/` (TS/React), `benchmarks/`, `examples/`, `docs/`
+- [x] (P0) Initialise monorepo: `core/` (Rust), `bindings/python/`, `bindings/node/`, `tideline/` (TS/React), `benchmarks/`, `examples/`, `docs/`
 - [ ] (P0) Set up Cargo workspace with the core crate and a `shibahama-cli` crate
 - [ ] (P0) Configure `rustfmt`, `clippy`, and deny-warnings in CI
 - [ ] (P0) Set up GitHub Actions: build + test matrix (linux/mac), lint, and binding smoke tests

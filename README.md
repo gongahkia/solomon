@@ -11,6 +11,8 @@ and the Tideline visual debugger.
 This project is pre-release. Core APIs and storage formats are expected to change until the
 first public alpha.
 
+Versions follow Semantic Versioning. Release notes are maintained in `CHANGELOG.md`.
+
 ## Repository Layout
 
 - `core/`: Rust core library.

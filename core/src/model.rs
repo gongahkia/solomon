@@ -198,6 +198,20 @@ pub enum AccessOutcome {
     Contradicted,
 }
 
+impl AccessOutcome {
+    /// Returns true when the memory was surfaced but not confirmed as useful.
+    #[must_use]
+    pub const fn is_surface_only(self) -> bool {
+        matches!(self, Self::Surfaced | Self::Ignored)
+    }
+
+    /// Returns true when the caller indicated the memory materially mattered.
+    #[must_use]
+    pub const fn is_actual_use(self) -> bool {
+        matches!(self, Self::LedSomewhere | Self::Cited)
+    }
+}
+
 /// Usage signal captured for a memory item.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AccessEvent {
@@ -375,6 +389,15 @@ mod tests {
         assert_eq!(event.timestamp, OffsetDateTime::UNIX_EPOCH);
         assert_eq!(event.query_context_hash.as_deref(), Some("query-hash"));
         assert_eq!(event.outcome, AccessOutcome::Cited);
+    }
+
+    #[test]
+    fn access_outcomes_distinguish_surfaced_from_used() {
+        assert!(AccessOutcome::Surfaced.is_surface_only());
+        assert!(AccessOutcome::Ignored.is_surface_only());
+        assert!(AccessOutcome::LedSomewhere.is_actual_use());
+        assert!(AccessOutcome::Cited.is_actual_use());
+        assert!(!AccessOutcome::Contradicted.is_actual_use());
     }
 
     #[test]

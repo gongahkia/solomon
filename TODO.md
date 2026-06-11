@@ -41,24 +41,24 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 ## Phase 1 — Bi-temporal knowledge store (🆕 core substrate)
 
 ### Data model
-- [ ] (P0) Define `KnowledgeItem`: id, kind (position/clause/house-view/advice/note), content, embedding ref, provenance, `valid_from`, `valid_to` (nullable=open), `ingested_at`, credence_tier, currency_state, `last_verified_at`, `verified_by`
-- [ ] (P0) Define `currency_state` enum: Live / StalePendingReverification / Superseded / Retired
-- [ ] (P0) Define `Provenance`: source kind (partner/associate/matter-doc/external-feed/model), source ref, author, matter id
-- [ ] (P0) Define `CredenceTier` enum: FirmAuthoritative / Verified / ModelInferred / Unverified
-- [ ] (P0) UUID v7 ids (time-orderable); schema version field on every persisted item
-- [ ] (P1) Define `Matter` and `Client` scoping entities (knowledge is scoped; cross-matter queries are explicit)
-- [ ] (P1) Define `ExternalAuthority`: statute/regulation/case ref, jurisdiction, current version, version history
+- [x] (P0) Define `KnowledgeItem`: id, kind (position/clause/house-view/advice/note), content, embedding ref, provenance, `valid_from`, `valid_to` (nullable=open), `ingested_at`, credence_tier, currency_state, `last_verified_at`, `verified_by`
+- [x] (P0) Define `currency_state` enum: Live / StalePendingReverification / Superseded / Retired
+- [x] (P0) Define `Provenance`: source kind (partner/associate/matter-doc/external-feed/model), source ref, author, matter id
+- [x] (P0) Define `CredenceTier` enum: FirmAuthoritative / Verified / ModelInferred / Unverified
+- [x] (P0) UUID v7 ids (time-orderable); schema version field on every persisted item
+- [x] (P1) Define `Matter` and `Client` scoping entities (knowledge is scoped; cross-matter queries are explicit)
+- [x] (P1) Define `ExternalAuthority`: statute/regulation/case ref, jurisdiction, current version, version history
 
 ### Storage engine
-- [ ] (P0) Choose store (SQLite default for local SKU; Postgres option for server) — write ADR
-- [ ] (P0) Append-only event log as source of truth (♻️ Kaypoh journal philosophy: nothing destructive)
-- [ ] (P0) Materialised current-state table derived from the log
-- [ ] (P0) `write_item()`, `get_item()`, `get_many()`
-- [ ] (P0) **Supersede operation**: close `valid_to`, set Superseded, link successor — never DELETE
-- [ ] (P0) Invariant test: no code path deletes a knowledge item
-- [ ] (P1) `as_of(timestamp)` query: reconstruct the knowledge state at any past date (bi-temporal core capability)
-- [ ] (P1) Crash-safe writes + recovery on startup
-- [ ] (P1) Snapshot/restore of full firm-knowledge state to a portable file
+- [x] (P0) Choose store (SQLite default for local SKU; Postgres option for server) — write ADR
+- [x] (P0) Append-only event log as source of truth (♻️ Kaypoh journal philosophy: nothing destructive)
+- [x] (P0) Materialised current-state table derived from the log
+- [x] (P0) `write_item()`, `get_item()`, `get_many()`
+- [x] (P0) **Supersede operation**: close `valid_to`, set Superseded, link successor — never DELETE
+- [x] (P0) Invariant test: no code path deletes a knowledge item
+- [x] (P1) `as_of(timestamp)` query: reconstruct the knowledge state at any past date (bi-temporal core capability)
+- [x] (P1) Crash-safe writes + recovery on startup
+- [x] (P1) Snapshot/restore of full firm-knowledge state to a portable file
 - [ ] (P2) Encryption-at-rest (♻️ mirror Kaypoh `mapping-store-hardening` patterns)
 - [ ] (P2) Pluggable backend so SQLite↔Postgres is a config switch
 

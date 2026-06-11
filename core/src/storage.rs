@@ -678,6 +678,33 @@ impl RedbMemoryStore {
         Ok((record, item))
     }
 
+    /// Ingests a caller-supplied write event and vector embedding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the vector cannot be indexed or the event cannot be durably written.
+    pub fn write_event_embedded(
+        &self,
+        event: MemoryWriteEvent,
+        vector_index: &mut dyn VectorIndex,
+        vector: &[f32],
+        index_name: impl Into<String>,
+        model: impl Into<String>,
+        model_version: impl Into<String>,
+    ) -> Result<(EventRecord, MemoryItem), StorageError> {
+        let mut item = event.into_item(IngestCredencePolicy::default());
+        let record = self.write_embedded(
+            &mut item,
+            vector_index,
+            vector,
+            index_name,
+            model,
+            model_version,
+        )?;
+
+        Ok((record, item))
+    }
+
     /// Writes an item and its embedding, keeping item metadata and vector index in sync.
     ///
     /// If durable item write fails after vector insertion, the vector insertion is rolled back.

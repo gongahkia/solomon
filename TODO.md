@@ -163,7 +163,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 ## Phase 7 — Public API & developer experience (P1, DX is priority #1)
 
 ### API surface
-- [ ] (P0) Finalise the small API: `write`, `recall`, `reinforce`, `why`, `timeline`
+- [x] (P0) Finalise the small API: `write`, `recall`, `reinforce`, `why`, `timeline`
 - [ ] (P0) Make `why(memory_id)` first-class: full significance/tier/provenance/currency trace
 - [ ] (P1) Stable error types with actionable messages
 - [ ] (P1) Config object with sane defaults (decay half-life, thresholds, tier budgets)

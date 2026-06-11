@@ -3,6 +3,7 @@
 #![doc = include_str!("../README.md")]
 
 pub mod anomaly;
+pub mod api;
 pub mod consolidation;
 pub mod encryption;
 pub mod model;

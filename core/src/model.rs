@@ -64,6 +64,37 @@ impl CredenceTier {
     }
 }
 
+/// Accessibility tier for a memory item.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub enum Tier {
+    /// Retained but excluded from default recall unless explicitly requested.
+    Cold,
+    /// Indexed and normally searchable.
+    Warm,
+    /// Highly significant and cheap to surface.
+    Hot,
+}
+
+impl Tier {
+    /// Returns the next hotter tier, or this tier if already hot.
+    #[must_use]
+    pub const fn promote(self) -> Self {
+        match self {
+            Self::Cold => Self::Warm,
+            Self::Warm | Self::Hot => Self::Hot,
+        }
+    }
+
+    /// Returns the next colder tier, or this tier if already cold.
+    #[must_use]
+    pub const fn demote(self) -> Self {
+        match self {
+            Self::Hot => Self::Warm,
+            Self::Warm | Self::Cold => Self::Cold,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,5 +120,16 @@ mod tests {
         assert!(CredenceTier::ModelInferred < CredenceTier::VerifiedSource);
         assert!(CredenceTier::VerifiedSource < CredenceTier::FirmAuthoritative);
         assert!(CredenceTier::FirmAuthoritative.is_authoritative());
+    }
+
+    #[test]
+    fn tier_transitions_are_bounded() {
+        assert_eq!(Tier::Cold.promote(), Tier::Warm);
+        assert_eq!(Tier::Warm.promote(), Tier::Hot);
+        assert_eq!(Tier::Hot.promote(), Tier::Hot);
+
+        assert_eq!(Tier::Hot.demote(), Tier::Warm);
+        assert_eq!(Tier::Warm.demote(), Tier::Cold);
+        assert_eq!(Tier::Cold.demote(), Tier::Cold);
     }
 }

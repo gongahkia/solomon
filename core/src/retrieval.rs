@@ -5,6 +5,7 @@
 use crate::model::{AccessEvent, AccessOutcome, MemoryId, MemoryItem};
 use crate::storage::{RedbMemoryStore, StorageError};
 use crate::vector::{VectorIndex, VectorIndexError};
+use std::collections::BTreeSet;
 use thiserror::Error;
 use time::OffsetDateTime;
 
@@ -20,7 +21,7 @@ pub enum RecallError {
 }
 
 /// Recall request over a pre-computed query embedding.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct RecallRequest<'a> {
     /// Query embedding supplied by the caller's embedding model.
     pub query_vector: &'a [f32],
@@ -32,6 +33,8 @@ pub struct RecallRequest<'a> {
     pub now: OffsetDateTime,
     /// Ranking weights applied to retrieved candidates.
     pub ranking: RecallRankingConfig,
+    /// Optional related-memory provider used for graph expansion.
+    pub related_memory_provider: Option<&'a dyn RelatedMemoryProvider>,
 }
 
 impl<'a> RecallRequest<'a> {
@@ -44,6 +47,7 @@ impl<'a> RecallRequest<'a> {
             top_k,
             now,
             ranking: RecallRankingConfig::default(),
+            related_memory_provider: None,
         }
     }
 
@@ -60,6 +64,26 @@ impl<'a> RecallRequest<'a> {
         self.ranking = ranking;
         self
     }
+
+    /// Adds a related-memory provider for graph expansion.
+    #[must_use]
+    pub const fn with_related_memory_provider(
+        mut self,
+        related_memory_provider: &'a dyn RelatedMemoryProvider,
+    ) -> Self {
+        self.related_memory_provider = Some(related_memory_provider);
+        self
+    }
+}
+
+/// Provides graph-related memory ids for recall expansion.
+pub trait RelatedMemoryProvider {
+    /// Returns memory ids related to `id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when related ids cannot be loaded.
+    fn related_memory_ids(&self, id: MemoryId) -> Result<Vec<MemoryId>, StorageError>;
 }
 
 /// Active ranking weights for vector recall.
@@ -93,8 +117,22 @@ pub struct RecallCandidate {
     pub similarity_score: f64,
     /// Materialized significance contribution used by ranking.
     pub significance_score: f64,
+    /// How this candidate entered the recall result set.
+    pub source: RecallCandidateSource,
     /// Current rank score, where higher is better.
     pub rank_score: f64,
+}
+
+/// Source stage that contributed a recall candidate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecallCandidateSource {
+    /// Candidate came directly from vector similarity search.
+    Vector,
+    /// Candidate was pulled in because it is related to a vector or graph-expanded anchor.
+    GraphExpansion {
+        /// Anchor memory that supplied this related candidate.
+        anchor: MemoryId,
+    },
 }
 
 /// Recalls ranked candidates by vector similarity and records surfaced access.
@@ -118,6 +156,7 @@ pub fn recall(
         .map(|result| result.id)
         .collect::<Vec<_>>();
     let items = store.get_many(&ids)?;
+    let mut seen_ids = BTreeSet::new();
     let mut candidates = vector_results
         .into_iter()
         .zip(items)
@@ -128,21 +167,56 @@ pub fn recall(
                 return None;
             }
 
-            let similarity_score = similarity_from_distance(result.distance);
-            let significance_score = item.significance;
-            let rank_score = request.ranking.similarity_weight * similarity_score
-                + request.ranking.significance_weight * significance_score;
-
-            Some(RecallCandidate {
-                id: result.id,
+            Some(candidate_from_item(
+                result.id,
                 item,
-                vector_distance: result.distance,
-                similarity_score,
-                significance_score,
-                rank_score,
-            })
+                result.distance,
+                RecallCandidateSource::Vector,
+                request.ranking,
+            ))
         })
         .collect::<Vec<_>>();
+
+    for candidate in &candidates {
+        seen_ids.insert(candidate.id);
+    }
+
+    if let Some(provider) = request.related_memory_provider {
+        let anchors = candidates
+            .iter()
+            .map(|candidate| candidate.id)
+            .collect::<Vec<_>>();
+        let mut expanded_candidates = Vec::new();
+
+        for anchor in anchors {
+            let related_ids = provider.related_memory_ids(anchor)?;
+            let related_items = store.get_many(&related_ids)?;
+
+            for (related_id, related_item) in related_ids.into_iter().zip(related_items) {
+                if !seen_ids.insert(related_id) {
+                    continue;
+                }
+
+                let Some(item) = related_item else {
+                    continue;
+                };
+
+                if !item.timestamps.is_valid_at(request.now) {
+                    continue;
+                }
+
+                expanded_candidates.push(candidate_from_item(
+                    related_id,
+                    item,
+                    f32::INFINITY,
+                    RecallCandidateSource::GraphExpansion { anchor },
+                    request.ranking,
+                ));
+            }
+        }
+
+        candidates.extend(expanded_candidates);
+    }
 
     candidates.sort_by(|left, right| {
         right
@@ -169,6 +243,29 @@ pub fn recall(
     Ok(candidates)
 }
 
+fn candidate_from_item(
+    id: MemoryId,
+    item: MemoryItem,
+    vector_distance: f32,
+    source: RecallCandidateSource,
+    ranking: RecallRankingConfig,
+) -> RecallCandidate {
+    let similarity_score = similarity_from_distance(vector_distance);
+    let significance_score = item.significance;
+    let rank_score = ranking.similarity_weight * similarity_score
+        + ranking.significance_weight * significance_score;
+
+    RecallCandidate {
+        id,
+        item,
+        vector_distance,
+        similarity_score,
+        significance_score,
+        source,
+        rank_score,
+    }
+}
+
 fn similarity_from_distance(distance: f32) -> f64 {
     let distance = f64::from(distance);
 
@@ -187,8 +284,20 @@ mod tests {
     };
     use crate::storage::MemoryEvent;
     use crate::vector::HnswVectorIndex;
+    use std::collections::BTreeMap;
     use tempfile::NamedTempFile;
     use time::Duration;
+
+    #[derive(Default)]
+    struct StaticRelatedMemoryProvider {
+        related: BTreeMap<MemoryId, Vec<MemoryId>>,
+    }
+
+    impl RelatedMemoryProvider for StaticRelatedMemoryProvider {
+        fn related_memory_ids(&self, id: MemoryId) -> Result<Vec<MemoryId>, StorageError> {
+            Ok(self.related.get(&id).cloned().unwrap_or_default())
+        }
+    }
 
     fn test_item(content: &str, now: OffsetDateTime) -> MemoryItem {
         MemoryItem {
@@ -333,5 +442,52 @@ mod tests {
         assert_eq!(candidates[0].id, far.id);
         assert!((candidates[0].significance_score - 10.0).abs() < f64::EPSILON);
         assert!(candidates[0].rank_score > candidates[1].rank_score);
+    }
+
+    #[test]
+    fn recall_expands_graph_related_memories() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(1);
+        let mut anchor = test_item("anchor", OffsetDateTime::UNIX_EPOCH);
+        let related = test_item("related", OffsetDateTime::UNIX_EPOCH);
+        let mut provider = StaticRelatedMemoryProvider::default();
+
+        provider.related.insert(anchor.id, vec![related.id]);
+
+        store
+            .write_embedded(
+                &mut anchor,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("anchor should write");
+        store.write(&related).expect("related should write");
+
+        let query = [0.0, 0.0];
+        let request = RecallRequest::new(&query, 1, now).with_related_memory_provider(&provider);
+        let candidates = recall(&store, &vector_index, &request).expect("recall should work");
+        let related_candidate = candidates
+            .iter()
+            .find(|candidate| candidate.id == related.id)
+            .expect("related candidate should be present");
+        let stored_related = store
+            .get(related.id)
+            .expect("related should read")
+            .expect("related should exist");
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(
+            related_candidate.source,
+            RecallCandidateSource::GraphExpansion { anchor: anchor.id }
+        );
+        assert_eq!(
+            stored_related.access_events[0].outcome,
+            AccessOutcome::Surfaced
+        );
     }
 }

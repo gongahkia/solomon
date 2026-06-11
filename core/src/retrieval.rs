@@ -2,7 +2,7 @@
 
 //! Retrieval orchestration for recall.
 
-use crate::model::{AccessEvent, AccessOutcome, MemoryId, MemoryItem};
+use crate::model::{AccessEvent, AccessOutcome, MemoryId, MemoryItem, Provenance, Tier};
 use crate::storage::{RedbMemoryStore, StorageError};
 use crate::vector::{VectorIndex, VectorIndexError};
 use std::collections::BTreeSet;
@@ -111,6 +111,12 @@ pub struct RecallCandidate {
     pub id: MemoryId,
     /// Full materialized memory item, including provenance, tier, and validity metadata.
     pub item: MemoryItem,
+    /// Provenance copied to the candidate boundary so recall never returns bare text.
+    pub provenance: Provenance,
+    /// Accessibility tier copied to the candidate boundary.
+    pub tier: Tier,
+    /// Validity state at the recall instant.
+    pub currency: RecallCandidateCurrency,
     /// Vector distance from the query, where lower is closer.
     pub vector_distance: f32,
     /// Normalized similarity contribution derived from vector distance.
@@ -133,6 +139,17 @@ pub enum RecallCandidateSource {
         /// Anchor memory that supplied this related candidate.
         anchor: MemoryId,
     },
+}
+
+/// Validity state attached to a recalled candidate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecallCandidateCurrency {
+    /// Candidate is valid at the recall instant.
+    Current,
+    /// Candidate is not valid yet at the recall instant.
+    NotYetValid,
+    /// Candidate has been invalidated before or at the recall instant.
+    Invalidated,
 }
 
 /// Recalls ranked candidates by vector similarity and records surfaced access.
@@ -173,6 +190,7 @@ pub fn recall(
                 result.distance,
                 RecallCandidateSource::Vector,
                 request.ranking,
+                request.now,
             ))
         })
         .collect::<Vec<_>>();
@@ -211,6 +229,7 @@ pub fn recall(
                     f32::INFINITY,
                     RecallCandidateSource::GraphExpansion { anchor },
                     request.ranking,
+                    request.now,
                 ));
             }
         }
@@ -249,21 +268,44 @@ fn candidate_from_item(
     vector_distance: f32,
     source: RecallCandidateSource,
     ranking: RecallRankingConfig,
+    now: OffsetDateTime,
 ) -> RecallCandidate {
     let similarity_score = similarity_from_distance(vector_distance);
     let significance_score = item.significance;
     let rank_score = ranking.similarity_weight * similarity_score
         + ranking.significance_weight * significance_score;
+    let provenance = item.provenance.clone();
+    let tier = item.tier;
+    let currency = candidate_currency(&item, now);
 
     RecallCandidate {
         id,
         item,
+        provenance,
+        tier,
+        currency,
         vector_distance,
         similarity_score,
         significance_score,
         source,
         rank_score,
     }
+}
+
+fn candidate_currency(item: &MemoryItem, now: OffsetDateTime) -> RecallCandidateCurrency {
+    if now < item.timestamps.valid_from {
+        return RecallCandidateCurrency::NotYetValid;
+    }
+
+    if item
+        .timestamps
+        .valid_to
+        .is_some_and(|valid_to| now >= valid_to)
+    {
+        return RecallCandidateCurrency::Invalidated;
+    }
+
+    RecallCandidateCurrency::Current
 }
 
 fn similarity_from_distance(distance: f32) -> f64 {
@@ -384,6 +426,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![near.id, far.id]
         );
+        assert_eq!(candidates[0].provenance, near.provenance);
+        assert_eq!(candidates[0].tier, Tier::Warm);
+        assert_eq!(candidates[0].currency, RecallCandidateCurrency::Current);
         assert!(candidates[0].rank_score > candidates[1].rank_score);
         assert_eq!(stored_near.access_events.len(), 1);
         assert_eq!(stored_far.access_events.len(), 1);

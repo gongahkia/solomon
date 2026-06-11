@@ -105,7 +105,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P0) Stage 2: temporal filter — default to "valid now"; exclude invalidated facts from default results
 - [x] (P1) Stage 3: significance weighting in the ranking score
 - [x] (P1) Stage 4: graph-relationship expansion (pull in connected facts)
-- [ ] (P1) Attach provenance + tier + currency-flag to every returned candidate (never bare text)
+- [x] (P1) Attach provenance + tier + currency-flag to every returned candidate (never bare text)
 - [ ] (P1) Flag candidates that are "load-bearing but possibly stale" (significant + old + not recently validated)
 - [ ] (P1) Implement `timeline(query, as_of)` — bi-temporal "what did I believe on date X"
 - [ ] (P2) Tunable ranking weights (similarity ⊕ significance ⊕ recency ⊕ graph) via config

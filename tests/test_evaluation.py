@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 from solomon.currency.models import CurrencyState
 from solomon.evaluation import (
@@ -11,12 +12,14 @@ from solomon.evaluation import (
     boundary_fidelity_eval,
     decay_baseline,
     evaluate_ablation,
+    export_synthetic_corpus,
     generate_synthetic_corpus,
     impact_query_recall,
     render_results_table,
     stale_surface_rate,
     time_to_flag,
     warehouse_similarity_baseline,
+    write_synthetic_corpus,
 )
 
 
@@ -57,3 +60,14 @@ def test_boundary_fidelity_eval_flags_leaks() -> None:
     assert result.ok is False
     assert result.leaked_event_ids == ["leak"]
 
+
+def test_synthetic_corpus_export_is_reproducible(tmp_path: Path) -> None:
+    corpus = generate_synthetic_corpus(size=4)
+    exported = export_synthetic_corpus(corpus)
+    target = tmp_path / "corpus.json"
+
+    write_synthetic_corpus(str(target), size=4)
+
+    assert exported.schema_id == "solomon.synthetic_corpus.v1"
+    assert exported.expected_stale_item_ids == ["item-0", "item-2"]
+    assert '"expected_stale_item_ids": [' in target.read_text(encoding="utf-8")

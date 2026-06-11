@@ -210,7 +210,7 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P1) Audit view rendering the full chain (known-since → dependency → change event → flag → verification prompt)
 - [x] (P2) Record the run for the README GIF
 - [x] (P2) Package as a runnable `examples/stale-house-view/` (clone, bring up kaypoh-local, run)
-- [ ] (P3) A second scenario (e.g. internal supersession: a 2024 position quietly overriding a 2022 one) to show supersession reasoning
+- [x] (P3) A second scenario (e.g. internal supersession: a 2024 position quietly overriding a 2022 one) to show supersession reasoning
 
 ---
 
@@ -224,7 +224,7 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P2) Boundary-fidelity eval: end-to-end, did anything sensitive cross? (lean on Kaypoh's recall numbers; test the integration, not re-test Kaypoh)
 - [x] (P2) Ablations: dependency graph on/off, credence guardrail on/off, currency filter on/off
 - [x] (P2) Results table for the README (stale-surface rate: Solomon vs warehouse vs decay)
-- [ ] (P3) Release the corpus generator so the eval is reproducible
+- [x] (P3) Release the corpus generator so the eval is reproducible
 
 ---
 

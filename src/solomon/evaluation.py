@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from pydantic import Field
 
@@ -26,6 +27,15 @@ class SyntheticCorpus:
     dependencies: list[DependencyEdge]
     changed_authority_id: str
     expected_stale_item_ids: set[str]
+
+
+class SyntheticCorpusExport(SolomonModel):
+    schema_id: str = "solomon.synthetic_corpus.v1"
+    size: int
+    changed_authority_id: str
+    expected_stale_item_ids: list[str]
+    items: list[dict[str, Any]]
+    dependencies: list[dict[str, Any]]
 
 
 class EvaluationMetrics(SolomonModel):
@@ -84,6 +94,25 @@ def generate_synthetic_corpus(size: int = 10) -> SyntheticCorpus:
         changed_authority_id=authority,
         expected_stale_item_ids=expected,
     )
+
+
+def export_synthetic_corpus(corpus: SyntheticCorpus) -> SyntheticCorpusExport:
+    return SyntheticCorpusExport(
+        size=len(corpus.items),
+        changed_authority_id=corpus.changed_authority_id,
+        expected_stale_item_ids=sorted(corpus.expected_stale_item_ids),
+        items=[item.model_dump(mode="json") for item in corpus.items],
+        dependencies=[edge.model_dump(mode="json") for edge in corpus.dependencies],
+    )
+
+
+def write_synthetic_corpus(path: str, *, size: int = 10) -> None:
+    from pathlib import Path
+
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = export_synthetic_corpus(generate_synthetic_corpus(size=size)).model_dump(mode="json")
+    target.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def stale_surface_rate(results: list[KnowledgeItem]) -> float:

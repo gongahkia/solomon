@@ -596,6 +596,15 @@ impl<V: VectorIndex> Shibahama<V> {
         Ok(item)
     }
 
+    /// Returns all current materialized memory rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when current item state cannot be read.
+    pub fn memory_items(&self) -> Result<Vec<MemoryItem>, ShibahamaError> {
+        Ok(self.store.memory_items()?)
+    }
+
     /// Recalls current fact memories for a query embedding.
     ///
     /// # Errors
@@ -811,6 +820,17 @@ where
                 .write_with_embedding(event, embedding.as_write_embedding())
         })
         .await?
+    }
+
+    /// Returns all current materialized memory rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when current item state cannot be read or the blocking task fails.
+    pub async fn memory_items(&self) -> Result<Vec<MemoryItem>, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().memory_items()).await?
     }
 
     /// Recalls current fact memories for an owned query embedding.

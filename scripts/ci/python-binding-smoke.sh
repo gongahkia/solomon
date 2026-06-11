@@ -20,7 +20,9 @@ python -m pip install --disable-pip-version-check --quiet maturin==1.13.3
 
 python - <<'PY'
 import asyncio
+import sys
 import tempfile
+import types
 from pathlib import Path
 
 import shibahama
@@ -52,6 +54,35 @@ with tempfile.NamedTemporaryFile() as db:
     assert engine.reinforce(item.id, "cited")
     assert why is not None
     assert why.item.id == item.id
+
+    records = engine.export_records()
+    items = engine.memory_items()
+
+    assert records and records[0]["id"]
+    assert items and items[0].id
+    assert any(record["content"] == "Python binding memory" for record in records)
+
+    class FakeDataFrame:
+        @staticmethod
+        def from_records(records):
+            return ("pandas", list(records))
+
+    sys.modules["pandas"] = types.SimpleNamespace(DataFrame=FakeDataFrame)
+    pandas_result = engine.to_pandas()
+    assert pandas_result[0] == "pandas"
+    assert pandas_result[1][0]["content"]
+
+    class FakeTable:
+        @staticmethod
+        def from_pylist(records):
+            return ("arrow", list(records))
+
+    sys.modules["pyarrow"] = types.SimpleNamespace(Table=FakeTable)
+    arrow_result = engine.to_arrow()
+    assert arrow_result[0] == "arrow"
+    assert arrow_result[1][0]["content"]
+    sys.modules.pop("pandas", None)
+    sys.modules.pop("pyarrow", None)
 
     async def check_async_api() -> None:
         async_item = await engine.async_write(

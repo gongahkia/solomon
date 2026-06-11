@@ -341,6 +341,14 @@ impl PyShibahama {
             .collect())
     }
 
+    /// Returns all current materialized memory rows.
+    fn memory_items(&self) -> PyResult<Vec<PyMemoryItem>> {
+        let inner = self.inner.lock().map_err(lock_error)?;
+        let items = inner.memory_items().map_err(py_error)?;
+
+        Ok(items.into_iter().map(PyMemoryItem::from).collect())
+    }
+
     /// Streams current fact memories for a query embedding.
     #[pyo3(signature = (
         query_vector,

@@ -21,6 +21,11 @@ classifiers = [
 ]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+pandas = ["pandas>=2"]
+arrow = ["pyarrow>=16"]
+analysis = ["pandas>=2", "pyarrow>=16"]
+
 [tool.maturin]
 python-source = "python"
 module-name = "shibahama._shibahama"

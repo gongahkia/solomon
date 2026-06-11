@@ -79,6 +79,39 @@ class Shibahama:
     async def async_recall(self, *args, **kwargs) -> list[RecallCandidate]:
         return await asyncio.to_thread(self.recall, *args, **kwargs)
 
+    def memory_items(self) -> list[MemoryItem]:
+        return self._inner.memory_items()
+
+    def export_records(self) -> list[dict[str, object]]:
+        return [
+            {
+                "id": item.id,
+                "content": item.content,
+                "kind": item.kind,
+                "source_kind": item.provenance.source_kind,
+                "source_ref": item.provenance.source_ref,
+                "ingested_by": item.provenance.ingested_by,
+                "tier": item.tier,
+                "credence": item.credence,
+                "significance": item.significance,
+                "credence_floor": item.credence_floor,
+                "valid_from_unix": item.valid_from_unix,
+                "valid_to_unix": item.valid_to_unix,
+                "ingested_at_unix": item.ingested_at_unix,
+            }
+            for item in self.memory_items()
+        ]
+
+    def to_pandas(self):
+        import pandas as pd
+
+        return pd.DataFrame.from_records(self.export_records())
+
+    def to_arrow(self):
+        import pyarrow as pa
+
+        return pa.Table.from_pylist(self.export_records())
+
     def stream_recall(
         self,
         query_vector,

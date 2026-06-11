@@ -1033,6 +1033,15 @@ impl RedbMemoryStore {
             .transpose()
     }
 
+    /// Returns all current materialized memory rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the item table cannot be read or a stored item cannot be decoded.
+    pub fn memory_items(&self) -> Result<Vec<MemoryItem>, StorageError> {
+        self.materialized_items()
+    }
+
     fn materialized_items(&self) -> Result<Vec<MemoryItem>, StorageError> {
         let read_txn = self.db.begin_read().map_err(embed)?;
         let table = match read_txn.open_table(MEMORY_ITEMS_TABLE) {

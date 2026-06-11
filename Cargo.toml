@@ -2,6 +2,7 @@
 
 [workspace]
 members = [
+    "bindings/python",
     "core",
     "shibahama-cli",
 ]

@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "shibahama-python"
+description = "Python bindings for Shibahama."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "_shibahama"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+pyo3 = { version = "0.28.3", features = ["extension-module"] }
+shibahama-core.workspace = true

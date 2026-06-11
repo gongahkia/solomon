@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT
+
+[build-system]
+requires = ["maturin>=1.13,<2"]
+build-backend = "maturin"
+
+[project]
+name = "shibahama"
+description = "Python bindings for Shibahama."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Shibahama contributors" }]
+keywords = ["agent", "memory", "retrieval", "llm", "temporal"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dynamic = ["version"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "shibahama._shibahama"
+features = ["pyo3/extension-module"]

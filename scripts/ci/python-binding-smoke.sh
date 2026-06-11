@@ -3,15 +3,26 @@
 
 set -euo pipefail
 
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+python -m venv "$tmpdir/venv"
+export VIRTUAL_ENV="$tmpdir/venv"
+export PATH="$VIRTUAL_ENV/bin:$PATH"
+
+python -m pip install --disable-pip-version-check --quiet --upgrade pip
+python -m pip install --disable-pip-version-check --quiet maturin==1.13.3
+
+(
+  cd bindings/python
+  python -m maturin develop --quiet
+)
+
 python - <<'PY'
-from pathlib import Path
+import shibahama
 
-root = Path("bindings/python")
-readme = root / "README.md"
+assert shibahama.version() == shibahama.__version__
+assert shibahama.version()
 
-assert root.is_dir(), "bindings/python directory is missing"
-assert readme.is_file(), "bindings/python README.md is missing"
-assert "Python" in readme.read_text(encoding="utf-8")
-
-print("python binding lane present")
+print("python binding lane passed")
 PY

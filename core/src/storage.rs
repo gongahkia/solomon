@@ -122,6 +122,15 @@ pub struct NeverDeleteInvariantReport {
     pub compacted_content_count: usize,
 }
 
+/// Events produced by a reconstruction replacement.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReconstructionReplacementRecord {
+    /// Event closing the superseded memory's valid-time interval.
+    pub invalidation: EventRecord,
+    /// Event writing the replacement memory as a separate row.
+    pub replacement_write: EventRecord,
+}
+
 /// Tier residency limits for materialized memory state.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct TierCapacityConfig {
@@ -283,6 +292,19 @@ pub trait MemoryStore {
         id: MemoryId,
         valid_to: OffsetDateTime,
     ) -> Result<Option<EventRecord>, StorageError>;
+
+    /// Atomically closes a superseded memory and writes its reconstructed replacement.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot durably write both events and materialized rows,
+    /// or when the replacement would overwrite the superseded memory.
+    fn insert_reconstruction_replacement(
+        &self,
+        superseded_id: MemoryId,
+        replacement: &MemoryItem,
+        valid_to: OffsetDateTime,
+    ) -> Result<Option<ReconstructionReplacementRecord>, StorageError>;
 
     /// Replays the event log in sequence order.
     ///
@@ -1185,6 +1207,117 @@ impl RedbMemoryStore {
             .map(Some)
     }
 
+    /// Atomically invalidates a superseded memory and writes a reconstructed replacement.
+    ///
+    /// The replacement must use a distinct id so the superseded row remains readable for
+    /// historical queries and invariant checks.
+    ///
+    /// Returns `Ok(None)` when the superseded item does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read or written, stored state cannot be decoded, or
+    /// the replacement would overwrite an existing memory row.
+    pub fn insert_reconstruction_replacement(
+        &self,
+        superseded_id: MemoryId,
+        replacement: &MemoryItem,
+        valid_to: OffsetDateTime,
+    ) -> Result<Option<ReconstructionReplacementRecord>, StorageError> {
+        if superseded_id == replacement.id {
+            return Err(StorageError::InvariantViolation(
+                "reconstruction replacement must use a distinct memory id".to_owned(),
+            ));
+        }
+
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let (invalidation_sequence, write_sequence) = {
+            let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+            let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let superseded_key = superseded_id.to_string();
+            let replacement_key = replacement.id.to_string();
+            let mut superseded: MemoryItem = {
+                let Some(value) = item_table.get(superseded_key.as_str()).map_err(embed)? else {
+                    return Ok(None);
+                };
+
+                serde_json::from_slice(value.value())?
+            };
+
+            if item_table
+                .get(replacement_key.as_str())
+                .map_err(embed)?
+                .is_some()
+            {
+                return Err(StorageError::InvariantViolation(format!(
+                    "reconstruction replacement {} already exists",
+                    replacement.id
+                )));
+            }
+
+            superseded.timestamps = superseded.timestamps.closed_at(valid_to);
+
+            let invalidation_sequence = event_table.len().map_err(embed)?;
+            let write_sequence = invalidation_sequence + 1;
+            let recorded_at = OffsetDateTime::now_utc();
+            let invalidation_record = EventRecord {
+                sequence: invalidation_sequence,
+                recorded_at,
+                event: MemoryEvent::MemoryInvalidated {
+                    id: superseded_id,
+                    valid_to,
+                },
+            };
+            let write_record = EventRecord {
+                sequence: write_sequence,
+                recorded_at,
+                event: MemoryEvent::MemoryWritten {
+                    item: Box::new(replacement.clone()),
+                },
+            };
+            let invalidation_event_bytes = serde_json::to_vec(&invalidation_record)?;
+            let write_event_bytes = serde_json::to_vec(&write_record)?;
+            let superseded_bytes = serde_json::to_vec(&superseded)?;
+            let replacement_bytes = serde_json::to_vec(replacement)?;
+
+            event_table
+                .insert(invalidation_sequence, invalidation_event_bytes.as_slice())
+                .map_err(embed)?;
+            event_table
+                .insert(write_sequence, write_event_bytes.as_slice())
+                .map_err(embed)?;
+            item_table
+                .insert(superseded_key.as_str(), superseded_bytes.as_slice())
+                .map_err(embed)?;
+            item_table
+                .insert(replacement_key.as_str(), replacement_bytes.as_slice())
+                .map_err(embed)?;
+
+            (invalidation_sequence, write_sequence)
+        };
+
+        write_txn.commit().map_err(embed)?;
+
+        let invalidation = self.event(invalidation_sequence)?.ok_or_else(|| {
+            StorageError::Embedded(
+                "committed reconstruction invalidation event was not readable".to_owned(),
+            )
+        })?;
+        let replacement_write = self.event(write_sequence)?.ok_or_else(|| {
+            StorageError::Embedded(
+                "committed reconstruction write event was not readable".to_owned(),
+            )
+        })?;
+
+        Ok(Some(ReconstructionReplacementRecord {
+            invalidation,
+            replacement_write,
+        }))
+    }
+
     /// Soft-invalidates an item and removes its vector from the index.
     ///
     /// # Errors
@@ -1673,6 +1806,20 @@ impl MemoryStore for RedbMemoryStore {
         valid_to: OffsetDateTime,
     ) -> Result<Option<EventRecord>, StorageError> {
         RedbMemoryStore::soft_invalidate(self, id, valid_to)
+    }
+
+    fn insert_reconstruction_replacement(
+        &self,
+        superseded_id: MemoryId,
+        replacement: &MemoryItem,
+        valid_to: OffsetDateTime,
+    ) -> Result<Option<ReconstructionReplacementRecord>, StorageError> {
+        RedbMemoryStore::insert_reconstruction_replacement(
+            self,
+            superseded_id,
+            replacement,
+            valid_to,
+        )
     }
 
     fn events(&self) -> Result<Vec<EventRecord>, StorageError> {
@@ -2441,6 +2588,110 @@ mod tests {
             events[1].event,
             MemoryEvent::MemoryInvalidated { .. }
         ));
+    }
+
+    #[test]
+    fn reconstruction_replacement_invalidates_without_overwriting_superseded_memory() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let superseded = test_item("old fact");
+        let replacement = test_item("new fact");
+        let valid_to = OffsetDateTime::UNIX_EPOCH + time::Duration::days(10);
+
+        store
+            .write(&superseded)
+            .expect("superseded item should write");
+
+        let record = store
+            .insert_reconstruction_replacement(superseded.id, &replacement, valid_to)
+            .expect("replacement should write")
+            .expect("superseded item should exist");
+        let stored_superseded = store
+            .get(superseded.id)
+            .expect("superseded should read")
+            .expect("superseded row should remain");
+        let stored_replacement = store
+            .get(replacement.id)
+            .expect("replacement should read")
+            .expect("replacement row should exist");
+        let events = store.events().expect("events should read");
+        let report = assert_memory_ids_survive(&store, &[superseded.id, replacement.id]);
+
+        assert_eq!(stored_superseded.content, "old fact");
+        assert_eq!(stored_superseded.timestamps.valid_to, Some(valid_to));
+        assert_eq!(stored_replacement.content, "new fact");
+        assert_eq!(stored_replacement.timestamps.valid_to, None);
+        assert_eq!(record.invalidation.sequence, 1);
+        assert_eq!(record.replacement_write.sequence, 2);
+        assert_eq!(
+            record.invalidation.event,
+            MemoryEvent::MemoryInvalidated {
+                id: superseded.id,
+                valid_to
+            }
+        );
+        assert_eq!(
+            record.replacement_write.event,
+            MemoryEvent::MemoryWritten {
+                item: Box::new(replacement.clone())
+            }
+        );
+        assert_eq!(events.len(), 3);
+        assert!(matches!(events[0].event, MemoryEvent::MemoryWritten { .. }));
+        assert!(matches!(
+            events[1].event,
+            MemoryEvent::MemoryInvalidated { .. }
+        ));
+        assert!(matches!(events[2].event, MemoryEvent::MemoryWritten { .. }));
+        assert_eq!(report.event_count, 3);
+    }
+
+    #[test]
+    fn reconstruction_replacement_does_not_write_when_superseded_missing() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let replacement = test_item("new fact");
+        let valid_to = OffsetDateTime::UNIX_EPOCH + time::Duration::days(10);
+
+        let record = store
+            .insert_reconstruction_replacement(MemoryId::new_v7(), &replacement, valid_to)
+            .expect("missing superseded id should be handled");
+
+        assert!(record.is_none());
+        assert!(
+            store
+                .get(replacement.id)
+                .expect("replacement lookup should succeed")
+                .is_none()
+        );
+        assert!(store.events().expect("events should read").is_empty());
+    }
+
+    #[test]
+    fn reconstruction_replacement_rejects_same_id_overwrite() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let superseded = test_item("old fact");
+        let mut replacement = test_item("same id replacement");
+        let valid_to = OffsetDateTime::UNIX_EPOCH + time::Duration::days(10);
+
+        replacement.id = superseded.id;
+        store
+            .write(&superseded)
+            .expect("superseded item should write");
+
+        let error = store
+            .insert_reconstruction_replacement(superseded.id, &replacement, valid_to)
+            .expect_err("same id replacement should be rejected");
+        let stored = store
+            .get(superseded.id)
+            .expect("superseded should read")
+            .expect("superseded should remain");
+
+        assert!(matches!(error, StorageError::InvariantViolation(_)));
+        assert_eq!(stored.content, "old fact");
+        assert_eq!(stored.timestamps.valid_to, None);
+        assert_eq!(store.events().expect("events should read").len(), 1);
     }
 
     #[test]

@@ -16,6 +16,10 @@ use crate::storage::{
 use crate::vector::{VectorIndex, VectorIndexError};
 use std::iter::FusedIterator;
 use std::path::Path;
+#[cfg(feature = "tokio")]
+use std::path::PathBuf;
+#[cfg(feature = "tokio")]
+use std::sync::Arc;
 use thiserror::Error;
 use time::OffsetDateTime;
 
@@ -38,6 +42,15 @@ pub enum ShibahamaError {
         "[SHIBA_VECTOR] vector index operation failed: {0}; action: verify embedding dimensionality and vector backend availability before retrying"
     )]
     Vector(#[source] VectorIndexError),
+    /// Caller supplied an unsupported or internally inconsistent request.
+    #[error("[SHIBA_INVALID_REQUEST] invalid request: {0}; action: adjust the request and retry")]
+    InvalidRequest(String),
+    /// Tokio task failed before returning an API result.
+    #[cfg(feature = "tokio")]
+    #[error(
+        "[SHIBA_TASK] async task failed: {0}; action: inspect the runtime for cancellation or panic before retrying"
+    )]
+    Task(#[source] tokio::task::JoinError),
 }
 
 impl From<StorageError> for ShibahamaError {
@@ -64,6 +77,13 @@ impl From<VectorIndexError> for ShibahamaError {
     }
 }
 
+#[cfg(feature = "tokio")]
+impl From<tokio::task::JoinError> for ShibahamaError {
+    fn from(error: tokio::task::JoinError) -> Self {
+        Self::Task(error)
+    }
+}
+
 /// Stable high-level error category for bindings and applications.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -74,6 +94,11 @@ pub enum ShibahamaErrorKind {
     Recall,
     /// Vector index or embedding dimensionality failed.
     Vector,
+    /// Caller supplied an unsupported or internally inconsistent request.
+    InvalidRequest,
+    /// Tokio task failed before returning an API result.
+    #[cfg(feature = "tokio")]
+    Task,
 }
 
 impl ShibahamaErrorKind {
@@ -84,6 +109,9 @@ impl ShibahamaErrorKind {
             Self::Storage => "SHIBA_STORAGE",
             Self::Recall => "SHIBA_RECALL",
             Self::Vector => "SHIBA_VECTOR",
+            Self::InvalidRequest => "SHIBA_INVALID_REQUEST",
+            #[cfg(feature = "tokio")]
+            Self::Task => "SHIBA_TASK",
         }
     }
 
@@ -100,6 +128,9 @@ impl ShibahamaErrorKind {
             Self::Vector => {
                 "verify embedding dimensionality and vector backend availability before retrying"
             }
+            Self::InvalidRequest => "adjust the request and retry",
+            #[cfg(feature = "tokio")]
+            Self::Task => "inspect the runtime for cancellation or panic before retrying",
         }
     }
 }
@@ -112,6 +143,9 @@ impl ShibahamaError {
             Self::Storage(_) => ShibahamaErrorKind::Storage,
             Self::Recall(_) => ShibahamaErrorKind::Recall,
             Self::Vector(_) => ShibahamaErrorKind::Vector,
+            Self::InvalidRequest(_) => ShibahamaErrorKind::InvalidRequest,
+            #[cfg(feature = "tokio")]
+            Self::Task(_) => ShibahamaErrorKind::Task,
         }
     }
 
@@ -174,6 +208,188 @@ pub struct WriteEmbedding<'a> {
     pub model: &'a str,
     /// Embedding model version.
     pub model_version: &'a str,
+}
+
+/// Owned embedding metadata for async write calls.
+#[cfg(feature = "tokio")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AsyncWriteEmbedding {
+    /// Embedding vector.
+    pub vector: Vec<f32>,
+    /// Logical vector index name.
+    pub index_name: String,
+    /// Embedding model name.
+    pub model: String,
+    /// Embedding model version.
+    pub model_version: String,
+}
+
+#[cfg(feature = "tokio")]
+impl AsyncWriteEmbedding {
+    /// Creates owned embedding metadata for async writes.
+    #[must_use]
+    pub fn new(
+        vector: impl Into<Vec<f32>>,
+        index_name: impl Into<String>,
+        model: impl Into<String>,
+        model_version: impl Into<String>,
+    ) -> Self {
+        Self {
+            vector: vector.into(),
+            index_name: index_name.into(),
+            model: model.into(),
+            model_version: model_version.into(),
+        }
+    }
+
+    fn as_write_embedding(&self) -> WriteEmbedding<'_> {
+        WriteEmbedding {
+            vector: &self.vector,
+            index_name: &self.index_name,
+            model: &self.model,
+            model_version: &self.model_version,
+        }
+    }
+}
+
+#[cfg(feature = "tokio")]
+impl From<WriteEmbedding<'_>> for AsyncWriteEmbedding {
+    fn from(value: WriteEmbedding<'_>) -> Self {
+        Self::new(
+            value.vector.to_vec(),
+            value.index_name,
+            value.model,
+            value.model_version,
+        )
+    }
+}
+
+/// Owned recall request for async task boundaries.
+#[cfg(feature = "tokio")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AsyncRecallRequest {
+    /// Query embedding supplied by the caller's embedding model.
+    pub query_vector: Vec<f32>,
+    /// Optional raw query/context text to hash into surfaced access events.
+    pub raw_query_context: Option<String>,
+    /// Maximum number of vector candidates to inspect.
+    pub top_k: usize,
+    /// Valid-time instant used for default current-fact filtering.
+    pub now: OffsetDateTime,
+    /// Whether recall may return cold-tier memories.
+    pub include_cold: bool,
+    /// Whether recall may return instruction/directive memories.
+    pub include_instructions: bool,
+    /// Ranking weights applied to retrieved candidates.
+    pub ranking: RecallRankingConfig,
+    /// Policy for flagging load-bearing but possibly stale memories.
+    pub staleness: RecallStalenessConfig,
+    /// Policy for suppressing near-duplicate results.
+    pub diversification: RecallDiversificationConfig,
+}
+
+#[cfg(feature = "tokio")]
+impl AsyncRecallRequest {
+    /// Creates an owned async recall request for a query vector.
+    #[must_use]
+    pub fn new(query_vector: impl Into<Vec<f32>>, top_k: usize, now: OffsetDateTime) -> Self {
+        let request = RecallRequest::new(&[], top_k, now);
+
+        Self {
+            query_vector: query_vector.into(),
+            raw_query_context: None,
+            top_k,
+            now,
+            include_cold: request.include_cold,
+            include_instructions: request.include_instructions,
+            ranking: request.ranking,
+            staleness: request.staleness,
+            diversification: request.diversification,
+        }
+    }
+
+    /// Copies a borrowed sync recall request into an owned async request.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the borrowed request uses a related-memory provider, which cannot
+    /// safely cross the async blocking-task boundary.
+    pub fn try_from_recall_request(request: &RecallRequest<'_>) -> Result<Self, ShibahamaError> {
+        if request.related_memory_provider.is_some() {
+            return Err(ShibahamaError::InvalidRequest(
+                "async recall requests must own their data; related-memory providers are only supported by the sync API".to_owned(),
+            ));
+        }
+
+        Ok(Self {
+            query_vector: request.query_vector.to_vec(),
+            raw_query_context: request.raw_query_context.map(str::to_owned),
+            top_k: request.top_k,
+            now: request.now,
+            include_cold: request.include_cold,
+            include_instructions: request.include_instructions,
+            ranking: request.ranking,
+            staleness: request.staleness,
+            diversification: request.diversification,
+        })
+    }
+
+    /// Adds raw query context that will be hashed before storage.
+    #[must_use]
+    pub fn with_raw_query_context(mut self, raw_query_context: impl Into<String>) -> Self {
+        self.raw_query_context = Some(raw_query_context.into());
+        self
+    }
+
+    /// Allows cold-tier memories to be returned.
+    #[must_use]
+    pub const fn include_cold(mut self) -> Self {
+        self.include_cold = true;
+        self
+    }
+
+    /// Allows instruction/directive memories to be returned.
+    #[must_use]
+    pub const fn include_instructions(mut self) -> Self {
+        self.include_instructions = true;
+        self
+    }
+
+    /// Overrides ranking weights for this request.
+    #[must_use]
+    pub const fn with_ranking(mut self, ranking: RecallRankingConfig) -> Self {
+        self.ranking = ranking;
+        self
+    }
+
+    /// Overrides stale-load-bearing detection policy for this request.
+    #[must_use]
+    pub const fn with_staleness(mut self, staleness: RecallStalenessConfig) -> Self {
+        self.staleness = staleness;
+        self
+    }
+
+    /// Overrides result diversification policy for this request.
+    #[must_use]
+    pub const fn with_diversification(
+        mut self,
+        diversification: RecallDiversificationConfig,
+    ) -> Self {
+        self.diversification = diversification;
+        self
+    }
+
+    fn as_recall_request(&self) -> RecallRequest<'_> {
+        let mut request = RecallRequest::new(&self.query_vector, self.top_k, self.now);
+        request.raw_query_context = self.raw_query_context.as_deref();
+        request.include_cold = self.include_cold;
+        request.include_instructions = self.include_instructions;
+        request.ranking = self.ranking;
+        request.staleness = self.staleness;
+        request.diversification = self.diversification;
+
+        request
+    }
 }
 
 /// Owning iterator over ranked recall candidates.
@@ -493,6 +709,214 @@ impl<V: VectorIndex> Shibahama<V> {
     }
 }
 
+/// Tokio-compatible async API facade around the sync engine.
+#[cfg(feature = "tokio")]
+#[derive(Clone)]
+pub struct AsyncShibahama<V> {
+    inner: Arc<tokio::sync::Mutex<Shibahama<V>>>,
+}
+
+#[cfg(feature = "tokio")]
+impl<V> AsyncShibahama<V>
+where
+    V: VectorIndex + Send + 'static,
+{
+    /// Wraps an existing sync engine in the async facade.
+    #[must_use]
+    pub fn from_sync(engine: Shibahama<V>) -> Self {
+        Self {
+            inner: Arc::new(tokio::sync::Mutex::new(engine)),
+        }
+    }
+
+    /// Opens a Shibahama store with a caller-supplied vector index.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the durable store cannot be opened or the blocking task fails.
+    pub async fn open(path: impl AsRef<Path>, vector_index: V) -> Result<Self, ShibahamaError> {
+        Self::open_with_config(path, vector_index, ShibahamaConfig::default()).await
+    }
+
+    /// Opens a Shibahama store with an explicit engine config.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the durable store cannot be opened or the blocking task fails.
+    pub async fn open_with_config(
+        path: impl AsRef<Path>,
+        vector_index: V,
+        config: ShibahamaConfig,
+    ) -> Result<Self, ShibahamaError> {
+        let path = PathBuf::from(path.as_ref());
+
+        tokio::task::spawn_blocking(move || {
+            Shibahama::open_with_config(path, vector_index, config).map(Self::from_sync)
+        })
+        .await?
+    }
+
+    /// Returns this engine's active config.
+    pub async fn config(&self) -> ShibahamaConfig {
+        self.inner.lock().await.config()
+    }
+
+    /// Replaces this engine's active config.
+    pub async fn set_config(&self, config: ShibahamaConfig) {
+        self.inner.lock().await.set_config(config);
+    }
+
+    /// Builds an owned async recall request from this engine's recall defaults.
+    pub async fn recall_request(
+        &self,
+        query_vector: impl Into<Vec<f32>>,
+        top_k: usize,
+        now: OffsetDateTime,
+    ) -> AsyncRecallRequest {
+        let config = self.config().await;
+        AsyncRecallRequest::new(query_vector, top_k, now)
+            .with_ranking(config.recall_ranking)
+            .with_staleness(config.recall_staleness)
+            .with_diversification(config.recall_diversification)
+    }
+
+    /// Writes a memory event without adding an embedding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the write cannot be persisted or the blocking task fails.
+    pub async fn write(&self, event: MemoryWriteEvent) -> Result<MemoryItem, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().write(event)).await?
+    }
+
+    /// Writes a memory event and indexes its embedding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the vector cannot be indexed, the write cannot be persisted, or the
+    /// blocking task fails.
+    pub async fn write_with_embedding(
+        &self,
+        event: MemoryWriteEvent,
+        embedding: WriteEmbedding<'_>,
+    ) -> Result<MemoryItem, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+        let embedding = AsyncWriteEmbedding::from(embedding);
+
+        tokio::task::spawn_blocking(move || {
+            inner
+                .blocking_lock()
+                .write_with_embedding(event, embedding.as_write_embedding())
+        })
+        .await?
+    }
+
+    /// Recalls current fact memories for an owned query embedding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when vector search, storage reads, access recording, or the blocking task
+    /// fails.
+    pub async fn recall(
+        &self,
+        request: AsyncRecallRequest,
+    ) -> Result<Vec<RecallCandidate>, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || {
+            let request = request.as_recall_request();
+
+            inner.blocking_lock().recall(&request)
+        })
+        .await?
+    }
+
+    /// Recalls current fact memories and returns an owning iterator over ranked candidates.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when vector search, storage reads, access recording, or the blocking task
+    /// fails.
+    pub async fn stream_recall(
+        &self,
+        request: AsyncRecallRequest,
+    ) -> Result<RecallStream, ShibahamaError> {
+        Ok(RecallStream::new(self.recall(request).await?))
+    }
+
+    /// Replays recalled memories as they were believed at `request.now`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when vector search, storage reads, or the blocking task fails.
+    pub async fn timeline(
+        &self,
+        request: AsyncRecallRequest,
+    ) -> Result<Vec<RecallCandidate>, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || {
+            let request = request.as_recall_request();
+
+            inner.blocking_lock().timeline(&request)
+        })
+        .await?
+    }
+
+    /// Replays timeline recall and returns an owning iterator over ranked candidates.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when vector search, storage reads, or the blocking task fails.
+    pub async fn stream_timeline(
+        &self,
+        request: AsyncRecallRequest,
+    ) -> Result<RecallStream, ShibahamaError> {
+        Ok(RecallStream::new(self.timeline(request).await?))
+    }
+
+    /// Reinforces a memory with a usage outcome.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the access event cannot be persisted or the blocking task fails.
+    pub async fn reinforce(
+        &self,
+        id: MemoryId,
+        outcome: AccessOutcome,
+    ) -> Result<bool, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().reinforce(id, outcome)).await?
+    }
+
+    /// Returns a full explanation for the current memory state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the item, significance inputs, audit trail, or blocking task fails.
+    pub async fn why(&self, id: MemoryId) -> Result<Option<WhyTrace>, ShibahamaError> {
+        self.why_at(id, OffsetDateTime::now_utc()).await
+    }
+
+    /// Returns a full explanation for the memory state at `now`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the item, significance inputs, audit trail, or blocking task fails.
+    pub async fn why_at(
+        &self,
+        id: MemoryId,
+        now: OffsetDateTime,
+    ) -> Result<Option<WhyTrace>, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().why_at(id, now)).await?
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -724,5 +1148,84 @@ mod tests {
         assert_eq!(stream.by_ref().count(), 2);
         assert_eq!(stream.remaining(), 0);
         assert!(stream.next().is_none());
+    }
+
+    #[cfg(feature = "tokio")]
+    #[tokio::test]
+    async fn async_facade_write_recall_reinforce_why_and_stream_work() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let shibahama = AsyncShibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .await
+            .expect("api should open");
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let item = shibahama
+            .write_with_embedding(
+                MemoryWriteEvent::new(
+                    "async facade memory",
+                    Provenance::new(SourceKind::User, None, "api-test"),
+                    now,
+                    now,
+                ),
+                WriteEmbedding {
+                    vector: &[0.0, 0.0],
+                    index_name: "api-test",
+                    model: "embedding-model",
+                    model_version: "v1",
+                },
+            )
+            .await
+            .expect("write should work");
+        let request = shibahama.recall_request(vec![0.0, 0.0], 1, now).await;
+        let recalled = shibahama
+            .recall(request.clone())
+            .await
+            .expect("recall should work");
+        let timeline = shibahama
+            .timeline(request.clone())
+            .await
+            .expect("timeline should work");
+        let mut stream = shibahama
+            .stream_recall(request)
+            .await
+            .expect("stream should work");
+
+        assert_eq!(recalled[0].id, item.id);
+        assert_eq!(timeline[0].id, item.id);
+        assert_eq!(stream.remaining(), 1);
+        assert_eq!(stream.next().expect("stream candidate").id, item.id);
+        assert!(
+            shibahama
+                .reinforce(item.id, AccessOutcome::Cited)
+                .await
+                .expect("reinforce should work")
+        );
+        assert_eq!(
+            shibahama
+                .why_at(item.id, now)
+                .await
+                .expect("why should read")
+                .expect("item should exist")
+                .item
+                .content,
+            "async facade memory"
+        );
+    }
+
+    #[cfg(feature = "tokio")]
+    #[tokio::test]
+    async fn async_recall_request_copies_supported_sync_request() {
+        let query = [0.0, 0.0];
+        let sync_request = RecallRequest::new(&query, 4, OffsetDateTime::UNIX_EPOCH)
+            .include_cold()
+            .include_instructions()
+            .with_raw_query_context("hello");
+        let async_request = AsyncRecallRequest::try_from_recall_request(&sync_request)
+            .expect("request should copy");
+
+        assert_eq!(async_request.query_vector, query);
+        assert_eq!(async_request.top_k, 4);
+        assert_eq!(async_request.raw_query_context.as_deref(), Some("hello"));
+        assert!(async_request.include_cold);
+        assert!(async_request.include_instructions);
     }
 }

@@ -168,7 +168,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 - [x] (P1) Stable error types with actionable messages
 - [x] (P1) Config object with sane defaults (decay half-life, thresholds, tier budgets)
 - [x] (P1) Streaming/iterator recall for large result sets
-- [ ] (P2) Async API surface (tokio) alongside sync
+- [x] (P2) Async API surface (tokio) alongside sync
 
 ### Python bindings (`pip install shibahama`)
 - [ ] (P0) Set up PyO3 + maturin build

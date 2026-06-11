@@ -4,5 +4,5 @@
 set -euo pipefail
 
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-RUSTFLAGS="-Dwarnings" cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+RUSTFLAGS="-Dwarnings" cargo test --workspace --all-targets --all-features

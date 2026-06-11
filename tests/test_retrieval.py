@@ -142,3 +142,20 @@ def test_batch_index_stores_embedding_ref_and_scope_filtering(tmp_path: Path) ->
 
     assert all(item.embedding_ref == "lexical-token-set:1" for item in indexed)
     assert [result.item.id for result in scoped] == ["a"]
+
+
+def test_recall_context_budget_caps_results_before_sanitisation(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    short = _item("short", "alpha beta")
+    long = _item("long", "alpha beta gamma delta")
+    orchestrator.store.write_item(short)
+    orchestrator.store.write_item(long)
+    orchestrator.index_items([short, long])
+
+    results = orchestrator.recall(
+        "alpha beta",
+        options=RecallOptions(max_context_tokens=2, dedupe_near_identical=False),
+    )
+
+    assert [result.item.id for result in results] == ["short"]
+    assert sum(result.estimated_context_tokens for result in results) <= 2

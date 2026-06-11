@@ -159,7 +159,7 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P1) `timeline(query, as_of)`: what did the firm believe on date X (bi-temporal query surfaced to users)
 - [x] (P2) Tunable ranking weights (similarity ⊕ currency ⊕ credence ⊕ centrality)
 - [x] (P2) De-duplication of near-identical positions across matters
-- [ ] (P3) Query budget controls (max context tokens assembled before sanitisation)
+- [x] (P3) Query budget controls (max context tokens assembled before sanitisation)
 
 ---
 
@@ -253,7 +253,7 @@ Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new t
 - [x] (P2) Index the dependency graph for fast `impact_query`
 - [x] (P2) Concurrency: safe multi-reader/single-writer (or MVCC) on the store
 - [x] (P2) Memory/footprint budget for solomon-local
-- [ ] (P3) Caching of currency evaluations with correct invalidation on dependency change
+- [x] (P3) Caching of currency evaluations with correct invalidation on dependency change
 
 ---
 

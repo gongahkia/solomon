@@ -354,6 +354,18 @@
             ],
             "title": "Matter Id"
           },
+          "max_context_tokens": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Context Tokens"
+          },
           "query": {
             "title": "Query",
             "type": "string"

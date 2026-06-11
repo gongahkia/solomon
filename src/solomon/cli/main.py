@@ -80,8 +80,14 @@ def ingest(
 def recall(
     query: Annotated[str, typer.Argument(help="Question or search query.")],
     review_mode: Annotated[bool, typer.Option("--review-mode")] = False,
+    max_context_tokens: Annotated[
+        int | None,
+        typer.Option("--max-context-tokens", min=1, help="Maximum estimated context tokens to assemble."),
+    ] = None,
 ) -> None:
-    results = _service().recall(RecallRequest(query=query, review_mode=review_mode))
+    results = _service().recall(
+        RecallRequest(query=query, review_mode=review_mode, max_context_tokens=max_context_tokens)
+    )
     console.print(json.dumps(results, indent=2, sort_keys=True))
 
 

@@ -10,6 +10,7 @@ from pydantic import Field
 from solomon.api.schemas import SolomonModel
 from solomon.audit.journal import AuditJournal
 from solomon.credence.policy import CredenceLedger
+from solomon.currency.cache import CurrencyEvaluationCache
 from solomon.currency.engine import (
     VerificationOutcome,
     evaluate_currency,
@@ -44,6 +45,7 @@ class RecallRequest(SolomonModel):
     client_id: str | None = None
     review_mode: bool = False
     limit: int = 10
+    max_context_tokens: int | None = Field(default=None, ge=1)
 
 
 class VerificationRequest(SolomonModel):
@@ -96,6 +98,7 @@ class SolomonService:
         self.graph = GraphStore(db)
         self.index = SQLiteRetrievalIndex(db)
         self.credence = CredenceLedger()
+        self.currency_cache = CurrencyEvaluationCache()
         self.retrieval = RetrievalOrchestrator(
             store=self.store,
             graph=self.graph,
@@ -126,13 +129,17 @@ class SolomonService:
         results = self.retrieval.recall(
             request.query,
             matter_context=MatterContext(matter_id=request.matter_id, client_id=request.client_id),
-            options=RecallOptions(limit=request.limit, review_mode=request.review_mode),
+            options=RecallOptions(
+                limit=request.limit,
+                review_mode=request.review_mode,
+                max_context_tokens=request.max_context_tokens,
+            ),
         )
         self.audit.log_query(query_id=request.query, results=results)
         return [result.model_dump(mode="json") for result in results]
 
     def evaluate_currency(self, item_id: str) -> dict[str, Any]:
-        return evaluate_currency(self._get_item(item_id)).model_dump(mode="json")
+        return self.currency_cache.get_or_evaluate(self._get_item(item_id)).model_dump(mode="json")
 
     def record_verification(self, item_id: str, request: VerificationRequest) -> KnowledgeItem:
         item = self._get_item(item_id)
@@ -143,6 +150,7 @@ class SolomonService:
             successor_id=request.successor_id,
         )
         self.store.update_item(recorded.item, event_type="knowledge_item_verified")
+        self.currency_cache.invalidate({item_id})
         return recorded.item
 
     def register_authority_change(self, authority_id: str, request: AuthorityChangeRequest) -> dict[str, Any]:
@@ -155,6 +163,7 @@ class SolomonService:
             graph=self.graph,
             store=self.store,
         )
+        self.currency_cache.invalidate(set(impact.stale_item_ids))
         self.audit.log_impact(impact)
         return impact.model_dump(mode="json")
 
@@ -219,7 +228,11 @@ class SolomonService:
         results = self.retrieval.timeline(
             request.query,
             as_of=datetime.fromisoformat(as_of),
-            options=RecallOptions(limit=request.limit, review_mode=True),
+            options=RecallOptions(
+                limit=request.limit,
+                review_mode=True,
+                max_context_tokens=request.max_context_tokens,
+            ),
         )
         return [result.model_dump(mode="json") for result in results]
 

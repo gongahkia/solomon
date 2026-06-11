@@ -121,6 +121,7 @@ class RecallOptions(SolomonModel):
     review_mode: bool = False
     weights: RecallWeights = Field(default_factory=RecallWeights)
     dedupe_near_identical: bool = True
+    max_context_tokens: int | None = Field(default=None, ge=1)
 
 
 class RecallResult(SolomonModel):
@@ -133,6 +134,7 @@ class RecallResult(SolomonModel):
     superseded_by: str | None
     last_verified_at: datetime | None
     stale_reasons: list[dict[str, Any]]
+    estimated_context_tokens: int
 
 
 @dataclass(frozen=True)
@@ -191,9 +193,10 @@ class RetrievalOrchestrator:
         ranked = self.credence.rank(candidates)
         results = [
             self._build_result(candidate, hit_by_id[candidate.item.id], resolved_options.weights)
-            for candidate in ranked[: resolved_options.limit]
+            for candidate in ranked
         ]
-        return sorted(results, key=lambda result: result.score, reverse=True)
+        ranked_results = sorted(results, key=lambda result: result.score, reverse=True)
+        return self._apply_limit_and_budget(ranked_results, resolved_options)
 
     def timeline(
         self,
@@ -223,10 +226,11 @@ class RetrievalOrchestrator:
             if item.id in hits
         ]
         ranked = self.credence.rank(candidates)
-        return [
+        results = [
             self._build_result(candidate, hits[candidate.item.id], resolved_options.weights)
-            for candidate in ranked[: resolved_options.limit]
+            for candidate in ranked
         ]
+        return self._apply_limit_and_budget(results, resolved_options)
 
     def _build_result(
         self,
@@ -255,7 +259,22 @@ class RetrievalOrchestrator:
             superseded_by=item.successor_id,
             last_verified_at=item.last_verified_at,
             stale_reasons=[dict(reason) for reason in evaluation.stale_reasons],
+            estimated_context_tokens=estimate_context_tokens(item),
         )
+
+    def _apply_limit_and_budget(self, results: list[RecallResult], options: RecallOptions) -> list[RecallResult]:
+        selected: list[RecallResult] = []
+        used_tokens = 0
+        for result in results:
+            if len(selected) >= options.limit:
+                break
+            if options.max_context_tokens is not None:
+                next_total = used_tokens + result.estimated_context_tokens
+                if next_total > options.max_context_tokens:
+                    continue
+                used_tokens = next_total
+            selected.append(result)
+        return selected
 
     def _dedupe(self, items: list[KnowledgeItem]) -> list[KnowledgeItem]:
         by_content: dict[str, list[KnowledgeItem]] = defaultdict(list)
@@ -276,3 +295,6 @@ class RetrievalOrchestrator:
             )
         return deduped
 
+
+def estimate_context_tokens(item: KnowledgeItem) -> int:
+    return max(1, len(tokenize(item.content)))

@@ -43,7 +43,7 @@ checkout is required at runtime.
 - [x] `record_verification()` supports reaffirm, retire, and supersede; `register_authority_change()` triggers propagation.
 - [x] JSON authority-change feed and matter/client currency report exist.
 - [x] External monitoring includes an HTTP authority-change feed poller with ETag/Last-Modified conditional requests and 304 handling, in addition to local JSON/CSV feeds.
-- [ ] Predictive staleness is a simple pending-amendment heuristic, not a legal-change forecasting system.
+- [x] Predictive staleness now uses a feature-scored forecast over pending amendments, status, dependency confidence, graph centrality, and authority change history.
 
 ## Phase 4 — Boundary integration
 

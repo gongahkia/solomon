@@ -10,7 +10,7 @@ import httpx
 
 from solomon.currency.feeds import apply_authority_changes, load_authority_changes, poll_authority_change_feed
 from solomon.currency.models import KnowledgeItem, KnowledgeKind, Provenance, SourceKind
-from solomon.currency.prediction import load_pending_amendments, predict_staleness_risk
+from solomon.currency.prediction import AuthorityChangeHistory, load_pending_amendments, predict_staleness_risk
 from solomon.currency.report import currency_report
 from solomon.currency.supersession import confirm_supersession, propose_supersession
 from solomon.graph.models import DependencyEdge, EdgeType
@@ -181,3 +181,58 @@ def test_pending_amendment_predicts_transitive_staleness_risk(tmp_path: Path) ->
     assert [risk.item_id for risk in report.risks] == ["item-1", "item-2"]
     assert {risk.risk_level for risk in report.risks} == {"high"}
     assert report.risks[1].dependency_path == ["edge-ext", "edge-internal"]
+
+
+def test_staleness_forecast_uses_authority_change_history(tmp_path: Path) -> None:
+    db = tmp_path / "solomon.sqlite3"
+    store = SQLiteKnowledgeStore(db)
+    graph = GraphStore(db)
+    store.write_item(_item("item-1", "direct dependency", 2023))
+    graph.add_dependency(
+        DependencyEdge(
+            source_id="item-1",
+            target_id="reg-r-12",
+            edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+            target_kind="external_authority",
+        )
+    )
+    amendment = load_pending_amendments(
+        tmp_path / "pending.json"
+        if (tmp_path / "pending.json").exists()
+        else _write_pending_feed(tmp_path / "pending.json")
+    )
+
+    without_history = predict_staleness_risk(amendment, graph=graph, store=store, as_of=_dt(2024), lookahead_days=60)
+    with_history = predict_staleness_risk(
+        amendment,
+        graph=graph,
+        store=store,
+        history=[
+            AuthorityChangeHistory(authority_id="reg-r-12", changed_at="2023-01-01T00:00:00+00:00"),
+            AuthorityChangeHistory(authority_id="reg-r-12", changed_at="2023-06-01T00:00:00+00:00"),
+        ],
+        as_of=_dt(2024),
+        lookahead_days=60,
+    )
+
+    assert with_history.risks[0].historical_change_count == 2
+    assert with_history.risks[0].forecast_score > without_history.risks[0].forecast_score
+    assert "2 prior changes" in with_history.risks[0].reason
+
+
+def _write_pending_feed(path: Path) -> Path:
+    path.write_text(
+        json.dumps(
+            {
+                "pending_amendments": [
+                    {
+                        "authority_id": "reg-r-12",
+                        "expected_change_at": "2024-01-20T00:00:00+00:00",
+                        "description": "consultation closes and amendment is expected",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path

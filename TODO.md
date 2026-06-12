@@ -154,6 +154,6 @@ checkout is required at runtime.
 ## Phase 17 — Launch
 
 - [x] Launch post, FAQ, outreach docs, packaging README, and citation metadata exist.
-- [ ] No git tag is present in this worktree.
+- [x] Annotated git tag `v0.1.0` is present in this worktree for the current release state.
 - [ ] No built pip or desktop artifacts are present in `dist/`.
 - [ ] Early-user outreach and eval submission are docs, not externally verifiable release activity.

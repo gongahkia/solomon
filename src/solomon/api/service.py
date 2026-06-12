@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ from pydantic import Field
 
 from solomon.api.schemas import SolomonModel
 from solomon.audit.journal import AuditJournal, sign_verification_attestation
+from solomon.boundary.kaypoh import KaypohBoundary
 from solomon.credence.policy import CredenceLedger
 from solomon.currency.cache import CurrencyEvaluationCache
 from solomon.currency.engine import (
@@ -17,7 +19,15 @@ from solomon.currency.engine import (
     record_verification,
     register_authority_change,
 )
-from solomon.currency.models import KnowledgeItem, KnowledgeKind, Provenance, SourceKind
+from solomon.currency.models import (
+    CredenceTier,
+    KnowledgeItem,
+    KnowledgeKind,
+    Matter,
+    Provenance,
+    SourceKind,
+    VerifiedState,
+)
 from solomon.currency.prediction import PendingAuthorityAmendment, StalenessRiskReport, predict_staleness_risk
 from solomon.errors import NotFoundError
 from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
@@ -25,6 +35,7 @@ from solomon.graph.propagation import CurrencyPropagator
 from solomon.graph.store import GraphStore
 from solomon.graph.suggestions import ReferenceExtraction, extract_defined_terms_and_citations
 from solomon.graph.visualization import GraphFormat, dependency_graph_view, render_dependency_graph
+from solomon.orchestrator.models import ModelRequest, ModelRouter, RoutedModelResult
 from solomon.orchestrator.retrieval import MatterContext, RecallOptions, RetrievalOrchestrator, SQLiteRetrievalIndex
 from solomon.store.sqlite import ItemNotFoundError, SQLiteKnowledgeStore
 
@@ -37,6 +48,8 @@ class IngestRequest(SolomonModel):
     author: str | None = None
     matter_id: str | None = None
     client_id: str | None = None
+    valid_from: datetime | None = None
+    ingested_at: datetime | None = None
 
 
 class RecallRequest(SolomonModel):
@@ -90,7 +103,14 @@ class WhyTrace(SolomonModel):
 
 
 class SolomonService:
-    def __init__(self, *, data_dir: Path, journal_dir: Path, attestation_key: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        data_dir: Path,
+        journal_dir: Path,
+        attestation_key: str | None = None,
+        boundary: KaypohBoundary | None = None,
+    ) -> None:
         data_dir.mkdir(parents=True, exist_ok=True)
         journal_dir.mkdir(parents=True, exist_ok=True)
         db = data_dir / "solomon.sqlite3"
@@ -107,6 +127,7 @@ class SolomonService:
         )
         self.audit = AuditJournal(journal_dir / "journal.jsonl")
         self.attestation_key = attestation_key
+        self.boundary = boundary or KaypohBoundary()
 
     def ingest(self, request: IngestRequest) -> KnowledgeItem:
         item = KnowledgeItem(
@@ -118,10 +139,14 @@ class SolomonService:
                 author=request.author,
                 matter_id=request.matter_id,
             ),
+            valid_from=request.valid_from or datetime.now().astimezone(),
+            ingested_at=request.ingested_at or datetime.now().astimezone(),
             matter_id=request.matter_id,
             client_id=request.client_id,
         )
+        item, _review = self.boundary.review_for_ingest(item)
         item = self.credence.assign_on_ingest(item)
+        item = self._seed_verification_from_source(item)
         item = self.index.upsert_item(item)
         self.store.write_item(item)
         return item
@@ -138,6 +163,46 @@ class SolomonService:
         )
         self.audit.log_query(query_id=request.query, results=results)
         return [result.model_dump(mode="json") for result in results]
+
+    def complete_model_request(
+        self,
+        router: ModelRouter,
+        request: ModelRequest,
+        *,
+        matter: Matter | None = None,
+    ) -> RoutedModelResult:
+        context = self.boundary.sanitize_context(request.prompt, matter_id=request.matter_id)
+        routed = router.complete(request.model_copy(update={"prompt": context.sanitized_text}), matter=matter)
+        demasked = self.boundary.reidentify_response(context.context_id, routed.response.text)
+        response = routed.response.model_copy(
+            update={
+                "text": demasked.text,
+                "metadata": {
+                    **routed.response.metadata,
+                    "boundary": {
+                        "context_id": context.context_id,
+                        "mapping_count": context.mapping_count,
+                        "mapping_flushed": demasked.mapping_flushed,
+                        "source_jurisdiction": context.source_jurisdiction,
+                        "destination_jurisdiction": context.destination_jurisdiction,
+                        "input_mode": context.input_mode,
+                    },
+                },
+            }
+        )
+        self.audit.append(
+            "model_call",
+            {
+                "matter_id": request.matter_id,
+                "endpoint": routed.audit.endpoint.value,
+                "crossed_boundary": routed.audit.crossed_boundary,
+                "prompt_sha256": routed.audit.prompt_sha256,
+                "prompt_chars": routed.audit.prompt_chars,
+                "mapping_count": context.mapping_count,
+                "mapping_flushed": demasked.mapping_flushed,
+            },
+        )
+        return RoutedModelResult(response=response, audit=routed.audit)
 
     def evaluate_currency(self, item_id: str) -> dict[str, Any]:
         return self.currency_cache.get_or_evaluate(self._get_item(item_id)).model_dump(mode="json")
@@ -253,3 +318,14 @@ class SolomonService:
             return self.store.get_item(item_id)
         except ItemNotFoundError as exc:
             raise NotFoundError(f"knowledge item not found: {item_id}") from exc
+
+    def _seed_verification_from_source(self, item: KnowledgeItem) -> KnowledgeItem:
+        if item.credence_tier not in {CredenceTier.FIRM_AUTHORITATIVE, CredenceTier.VERIFIED}:
+            return item
+        return item.model_copy(
+            update={
+                "verified_state": VerifiedState.VERIFIED,
+                "last_verified_at": item.ingested_at,
+                "verified_by": item.provenance.author or f"source:{item.provenance.source_kind.value}",
+            }
+        )

@@ -1,294 +1,159 @@
-# Solomon — Implementation TODO
+# Solomon — Implementation TODO, reconciled to current ground truth
 
-A good-law engine for the firm's own knowledge, behind a zero-retention boundary.
+This file is the current-state TODO, not an aspirational completion ledger. A checked item means the current
+worktree has code and tests or runnable evidence for it. An unchecked item is partial, shallow, unverified, or
+not built yet. There is no Phase 18 in this plan.
 
-**Assumed layout:** Solomon lives at `./solomon/`, with Kaypoh as an untouched sibling at `../kaypoh/`. Solomon imports Kaypoh's Python client (`../kaypoh/src/kaypoh/client.py` → `KaypohClient`) and calls its running service; it never modifies Kaypoh source. Where a task says "reuse Kaypoh," it means call the API or mirror the pattern, not fork the code.
-
-Priority scale: **P0** = must exist to function · **P1** = core thesis / launch-credible · **P2** = strong differentiator · **P3** = polish / stretch.
-Phases are ordered but P-tags cut across; clear P0s in a phase before P2s in the same phase.
-
-Legend for Kaypoh touchpoints: 🔌 = integrates with Kaypoh · 🆕 = net-new to Solomon · ♻️ = mirror a Kaypoh pattern in Solomon's own code.
+Kaypoh boundary status: Solomon is now self-contained. The local boundary engine is vendored under
+`src/solomon/boundary/engine/` from Kaypoh commit `7415069e57d69398e2c44ef6ababafb0c04a988b`; no `../kaypoh`
+checkout is required at runtime.
 
 ---
 
 ## Phase 0 — Foundations, repo, and the triad story
 
-### Repo & tooling
-- [x] (P0) Initialise `solomon/` as a sibling to `../kaypoh/`; confirm relative-path assumption in README
-- [x] (P0) Python 3.10+ project managed by `uv` (♻️ match Kaypoh's toolchain for a coherent triad)
-- [x] (P0) Layout: `src/solomon/{currency,graph,store,credence,boundary,orchestrator,audit,api,cli}/`, `tests/`, `examples/`, `docs/`, `benchmarks/`
-- [x] (P0) FastAPI + Pydantic v2 app skeleton (♻️ mirror Kaypoh's `backend/` shape so the two read as a family)
-- [x] (P0) `pyproject.toml` with a path dependency or documented import of `../kaypoh` client
-- [x] (P0) `ruff` + `mypy` + `pytest` configured; deny-warnings in CI
-- [x] (P0) GitHub Actions: lint, type-check, test, and a Kaypoh-integration smoke job (spins up kaypoh-local)
-- [x] (P0) Licence + SPDX headers; `CONTRIBUTING.md`; minimal README stub (full README in Phase 16)
-- [x] (P1) `CHANGELOG.md` (keep-a-changelog); semver
-- [x] (P1) Issue/PR templates; `CODEOWNERS`
-- [x] (P2) Pre-commit hooks (ruff, mypy, secret scan)
-- [x] (P2) Devcontainer / Nix flake that brings up both Solomon and a kaypoh-local instance
+- [x] Python 3.10+ `uv` project with `src/solomon/{currency,graph,store,credence,boundary,orchestrator,audit,api,cli}/`, tests, examples, docs, and benchmarks.
+- [x] FastAPI + Pydantic v2 service skeleton, CLI entrypoint, ruff/mypy/pytest config, GitHub Actions, issue/PR templates, CODEOWNERS, license, changelog, devcontainer/Nix files.
+- [x] ADRs exist for decay rejection, bi-temporal supersession, flag-don't-adjudicate, boundary, credence, routing, and audit.
+- [x] Boundary assumption updated from sibling Kaypoh import to vendored in-process boundary.
 
-### ADRs (write in `docs/adr/`) — these encode the judgment a reviewer will probe
-- [x] (P0) ADR: **why reject decay** (Shibahama's mechanism) in favour of dependency-driven currency
-- [x] (P0) ADR: bi-temporal model (valid-time vs ingestion-time) and the supersede-not-delete invariant
-- [x] (P0) ADR: **flag, don't adjudicate** — Solomon never asserts a position is legally broken, only that a dependency moved and re-verification is due
-- [x] (P0) ADR: Kaypoh as boundary — reuse vs reimplement decision table (point to PRD §4)
-- [x] (P1) ADR: credence taxonomy + the "model-inferred never outranks firm-authoritative" rule
-- [x] (P1) ADR: dual-endpoint routing (remote ZDR vs local model) and the sensitivity classification that drives it
-- [x] (P1) ADR: audit-journal design (♻️ mirror Kaypoh's append-only journal + verification)
+## Phase 1 — Bi-temporal knowledge store
 
----
+- [x] `KnowledgeItem`, provenance, credence, currency state, matter/client, and external-authority models exist.
+- [x] SQLite append-only event log, materialized current table, `write_item()`, `get_item()`, `get_many()`, supersede-not-delete, `as_of()`, snapshot/restore, and no-delete tests exist.
+- [x] Encryption helper for portable artifacts exists.
+- [ ] Postgres backend is not implemented; `create_knowledge_store()` rejects Postgres with `UnsupportedStoreBackend`.
+- [ ] Retrieval index is lexical token-set, not sqlite-vss/LanceDB/pgvector/Qdrant.
+- [ ] Embedding lifecycle is minimal: model/version is stored as an `embedding_ref`, but there is no real re-embed pipeline.
 
-## Phase 1 — Bi-temporal knowledge store (🆕 core substrate)
+## Phase 2 — Dependency graph
 
-### Data model
-- [x] (P0) Define `KnowledgeItem`: id, kind (position/clause/house-view/advice/note), content, embedding ref, provenance, `valid_from`, `valid_to` (nullable=open), `ingested_at`, credence_tier, currency_state, `last_verified_at`, `verified_by`
-- [x] (P0) Define `currency_state` enum: Live / StalePendingReverification / Superseded / Retired
-- [x] (P0) Define `Provenance`: source kind (partner/associate/matter-doc/external-feed/model), source ref, author, matter id
-- [x] (P0) Define `CredenceTier` enum: FirmAuthoritative / Verified / ModelInferred / Unverified
-- [x] (P0) UUID v7 ids (time-orderable); schema version field on every persisted item
-- [x] (P1) Define `Matter` and `Client` scoping entities (knowledge is scoped; cross-matter queries are explicit)
-- [x] (P1) Define `ExternalAuthority`: statute/regulation/case ref, jurisdiction, current version, version history
+- [x] Three edge types exist: external dependency, internal dependency, and supersedes.
+- [x] Graph storage is co-located in SQLite and supports valid-time reads, `add_dependency()`, `get_dependencies()`, and `get_dependents()`.
+- [x] Propagation is real: external changes flag transitive dependents and cycle protection is tested.
+- [x] `impact_query()` now returns the transitive dependent set without mutating store state.
+- [x] Manual dependency tagging, confidence levels, centrality, scoped subgraphs, and basic Mermaid/DOT visualization exist.
+- [ ] LLM-assisted dependency capture is deterministic regex extraction over boundary-sanitized text, not an actual LLM workflow.
+- [ ] Defined-term/citation extraction is conservative regex extraction, not a full legal parser.
 
-### Storage engine
-- [x] (P0) Choose store (SQLite default for local SKU; Postgres option for server) — write ADR
-- [x] (P0) Append-only event log as source of truth (♻️ Kaypoh journal philosophy: nothing destructive)
-- [x] (P0) Materialised current-state table derived from the log
-- [x] (P0) `write_item()`, `get_item()`, `get_many()`
-- [x] (P0) **Supersede operation**: close `valid_to`, set Superseded, link successor — never DELETE
-- [x] (P0) Invariant test: no code path deletes a knowledge item
-- [x] (P1) `as_of(timestamp)` query: reconstruct the knowledge state at any past date (bi-temporal core capability)
-- [x] (P1) Crash-safe writes + recovery on startup
-- [x] (P1) Snapshot/restore of full firm-knowledge state to a portable file
-- [x] (P2) Encryption-at-rest (♻️ mirror Kaypoh `mapping-store-hardening` patterns)
-- [x] (P2) Pluggable backend so SQLite↔Postgres is a config switch
+## Phase 3 — Currency engine
 
-### Vector / retrieval index
-- [x] (P0) Define embedding strategy and an index backend (local: sqlite-vss/lancedb; server: pgvector/qdrant)
-- [x] (P0) Keep item↔vector consistent through supersession (superseded items leave default retrieval but stay queryable)
-- [x] (P1) Store embedding model + version so re-embeds are detectable
-- [x] (P2) Batch ingestion path
+- [x] `evaluate_currency()` computes from `valid_to`, stored stale/superseded/retired state, staleness reasons, and verification age.
+- [x] Default recall now filters on computed currency and avoids returning items whose displayed currency contradicts the filter.
+- [x] `record_verification()` supports reaffirm, retire, and supersede; `register_authority_change()` triggers propagation.
+- [x] JSON authority-change feed and matter/client currency report exist.
+- [ ] External monitoring is manual/JSON only, not comprehensive regulatory monitoring.
+- [ ] Predictive staleness is a simple pending-amendment heuristic, not a legal-change forecasting system.
 
----
+## Phase 4 — Boundary integration
 
-## Phase 2 — Dependency graph (🆕 the technically interesting structure)
+- [x] Kaypoh-derived review, pseudonymize/anonymize/reidentify, volatile mapping, jurisdiction pack, document scrub, and client surfaces are vendored under Solomon's namespace.
+- [x] Vendored `NOTICE` records the Kaypoh source commit and README/docs state the provenance.
+- [x] `SolomonService.ingest()` calls boundary review before store/index writes and captures findings on provenance.
+- [x] `SolomonService.complete_model_request()` sanitizes before router/model egress, reidentifies inbound text, and flushes mappings.
+- [x] Service-level fail-closed tests prove vendored boundary failure blocks ingestion and model egress before endpoint calls.
+- [ ] Vendored boundary is intentionally compact and deterministic; it is not full Kaypoh feature parity.
 
-- [x] (P0) Define edge types: `internal_depends_on_external` (item → ExternalAuthority §), `internal_depends_on_internal` (item → item), `supersedes` (item → item)
-- [x] (P0) Graph storage co-located with the knowledge store; edges are bi-temporal too (a dependency was valid for a period)
-- [x] (P0) `add_dependency()`, `get_dependencies(item)`, `get_dependents(authority_or_item)`
-- [x] (P1) **Propagation engine**: when an ExternalAuthority version changes or an item is superseded, walk dependents and set StalePendingReverification (transitively, with cycle protection)
-- [x] (P1) Record *why* an item is stale (which dependency moved, when) — feeds the flag explanation and the audit chain
-- [x] (P1) `impact_query(authority)`: "the regulation changed — everything that now needs re-checking" (the query no warehouse KM can answer)
-- [x] (P2) Confidence on dependency edges (human-asserted vs LLM-suggested) — affects how aggressively staleness propagates
-- [x] (P2) Graph centrality as an input to surfacing order (well-depended-on positions rank earlier when relevant)
-- [x] (P2) Subgraph extraction per matter/client for scoped review
-- [x] (P3) Visualise the dependency graph (internal knowledge hanging off external authorities)
+## Phase 5 — Dual model endpoint and routing
 
-### Dependency capture (honest about the manual cost)
-- [x] (P1) Manual dependency tagging API + CLI (the baseline; the market already pays a curator to do this)
-- [x] (P2) LLM-assisted dependency suggestion: extract candidate authority references from an item (routed through Kaypoh first — see Phase 4)
-- [x] (P2) Human-in-the-loop confirm/reject for suggested dependencies (suggested = lower edge confidence until confirmed)
-- [x] (P3) Defined-term / citation extraction (could 🔌 reuse Kaypoh's `defined_terms` / `citations` patterns as a reference)
+- [x] Remote-ZDR and local endpoint abstractions exist with model-call metadata.
+- [x] Sensitivity router sends strict and zero-egress matters local-only, with tests proving the remote endpoint is not called.
+- [x] Remote failure can fall back to local when policy allows.
+- [ ] There is no public API endpoint that runs a full recall -> boundary -> router -> model answer workflow.
+- [ ] Provider clients are minimal HTTP wrappers, not production provider integrations.
 
----
+## Phase 6 — Credence ledger and verification
 
-## Phase 3 — Currency engine (🆕 the good-law-for-firm-knowledge core, P1 #1)
+- [x] Credence tier is assigned from source kind; model output is low credence and needs review.
+- [x] `ModelInferred` cannot outrank `FirmAuthoritative` at equal relevance, with unit and property tests.
+- [x] Load-bearing decision helper refuses stale or low-credence items; instruction-role content is excluded from prompt context.
+- [x] Credence changes are audited in memory.
+- [ ] Load-bearing refusal is not enforced globally across every API path.
+- [ ] Credence audit is not persisted to the main audit journal by default.
 
-- [x] (P0) Define currency as a function of (validity of all dependencies) × (staleness of verification) × (item own valid_to)
-- [x] (P0) `evaluate_currency(item)` → currency_state + explanation (what's live/stale/superseded and why)
-- [x] (P0) Default query path returns Live items; Stale/Superseded surface only with explicit flags or in review mode
-- [x] (P1) `verification_due(item)` policy: configurable max age since `last_verified_at`, shorter for high-stakes kinds
-- [x] (P1) `record_verification(item, by, outcome)`: refresh `last_verified_at`; outcome can re-affirm, supersede, or retire
-- [x] (P1) Supersession reasoning: when a newer item contradicts an older one on the same (topic, jurisdiction), propose supersession (human confirms — flag, don't adjudicate)
-- [x] (P1) External-change ingestion: `register_authority_change(authority, new_version, date)` → triggers Phase-2 propagation
-- [x] (P2) Simple external feeds (manual entry + a couple of structured regulatory-update sources); NOT comprehensive monitoring (out of scope, that's Shepard's-scale)
-- [x] (P2) Currency report for a matter/client: everything we've relied on and its current state
-- [x] (P3) Predictive "likely to go stale soon" heuristic (authority with pending amendments)
+## Phase 7 — Retrieval orchestrator
 
----
+- [x] `recall()` returns ranked `KnowledgeItem` results with currency, provenance, dependencies, supersession, last verification, stale reasons, and token estimates.
+- [x] `timeline(query, as_of)` reconstructs historical state from the event log.
+- [x] Review mode surfaces stale/superseded items; default mode filters computed non-Live items.
+- [x] Scope filters, basic dedupe, centrality weighting, credence weighting, and context budget controls exist.
+- [ ] Retrieval is lexical token-set search, not semantic vector search.
+- [ ] Ranking weights are simple local scoring, not empirically tuned.
 
-## Phase 4 — Boundary integration with Kaypoh (🔌 P1 #4 — wire, don't build)
+## Phase 8 — Audit and privilege evidence chain
 
-- [x] (P0) Import `KaypohClient` from `../kaypoh`; config for kaypoh-local vs kaypoh-server base URL
-- [x] (P0) **Ingestion gate**: every new KnowledgeItem passes Kaypoh `/review` before storage; capture findings (MNPI markers, severity) onto the item's provenance
-- [x] (P0) Refuse or quarantine items Kaypoh flags as unsafe-to-store per policy (configurable)
-- [x] (P0) **Outbound sanitisation**: any context assembled for a model call goes through Kaypoh `/pseudonymize`; keep the returned mapping in volatile memory only
-- [x] (P0) **Inbound demasking**: model response → Kaypoh `/reidentify` using the volatile mapping; flush mapping after
-- [x] (P1) Use `KAYPOH_LLM_INPUT_MODE=structured_tokens` semantics — never send raw_text by default; gate raw_text behind explicit per-matter opt-in
-- [x] (P1) Handle Kaypoh degraded-mode / unavailability: fail CLOSED (no egress if the boundary is down)
-- [x] (P1) Pass source+destination jurisdiction to Kaypoh so the strictest rule resolves correctly
-- [x] (P2) Reconcile demasking correctness when the model rephrases/reasons over tokens (test that placeholders survive paraphrase; flag when a token is dropped/mangled)
-- [x] (P2) Document-scrub path for ingested files (🔌 Kaypoh `/documents/scrub`) before extraction
-- [x] (P3) Reuse Kaypoh's Word/Outlook add-in surfaces as optional Solomon front-ends (🔌 `../kaypoh/packaging/word_addin`)
+- [x] Append-only hash-chained audit journal, tamper verification, audit-pack export/verify, metadata-only query logging, erasure tombstones, and HMAC verification attestations exist.
+- [x] Stale-house-view demo now renders the dependency-change -> stale-flag -> verification-prompt chain.
+- [ ] Model-call audit is present for `complete_model_request()`, but recall/query/model workflows are not yet a single end-to-end audited transaction.
+- [ ] Signed attestations are HMAC-based local attestations, not public-key or external timestamp signatures.
 
----
+## Phase 9 — Public API and CLI
 
-## Phase 5 — Dual model endpoint & routing (🆕)
+- [x] API exposes ingest, recall, currency, verification, authority change, dependency add, impact, graph, references, staleness prediction, why, and timeline.
+- [x] Python sync/async client exists for ingest/recall/why.
+- [x] Server-mode middleware enforces API key and tenant isolation.
+- [ ] CLI exists but has no direct test coverage.
+- [x] OpenAPI export has been regenerated after boundary/ingest schema changes.
 
-- [x] (P0) Define `ModelEndpoint` abstraction: remote-ZDR provider and local in-perimeter model behind one interface
-- [x] (P0) Implement a remote ZDR-eligible provider client (assume ZDR terms; send only sanitised context)
-- [x] (P0) Implement a local model client (e.g. vLLM/Ollama-compatible, in-perimeter)
-- [x] (P1) **Sensitivity classifier / router**: matter sensitivity decides remote-vs-local; strict matters never egress even sanitised (local-only)
-- [x] (P1) Make the routing decision auditable (log which endpoint, why, what crossed — metadata only)
-- [x] (P1) Graceful degradation: if remote unavailable and matter allows, fall back to local with a quality caveat
-- [x] (P2) Local-only zero-egress mode for the strictest tier (no sanitised egress at all)
-- [x] (P2) Cost/latency metadata per call (♻️ Kaypoh-style metrics, content-free)
+## Phase 10 — Local vs server SKU
 
----
+- [x] Local SKU defaults to offline/zero-egress with SQLite and in-process boundary.
+- [x] Server settings require explicit remote model URL before remote egress.
+- [x] Docker compose and PyInstaller spec files exist.
+- [ ] Postgres server backend is not implemented.
+- [ ] PyInstaller and Docker artifacts are not built or verified in this worktree.
+- [ ] Server multi-tenancy is basic filesystem namespace isolation, not a full tenant-management system.
 
-## Phase 6 — Credence ledger & verification step (🆕 P1 #2)
+## Phase 11 — Headline demo: stale house-view
 
-- [x] (P0) Credence tier assigned on ingest by source kind (partner-signed → FirmAuthoritative; model output → ModelInferred; etc.)
-- [x] (P0) Per-item `verified_state` + `last_verified_at` + `verified_by`
-- [x] (P1) **Retrieval guardrail**: ModelInferred/Unverified items can never outrank FirmAuthoritative on equal relevance
-- [x] (P1) **Verification step before load-bearing output**: surface source pointer + currency state; refuse to present a stale/low-credence item as settled
-- [x] (P1) Quarantine model-generated facts at low credence; promotion needs corroboration or human confirm (♻️ skeptical-by-default, OWASP ASI06 posture)
-- [x] (P1) Separate "facts/positions" from "instructions" so retrieved knowledge can't inject directives into the prompt
-- [x] (P2) Credence-change audit (who raised/lowered a tier and why)
-- [x] (P2) Configurable per-firm credence policy
+- [x] `examples/stale-house-view/run.py` creates the 2023 memo, 2025 authority change, 2026 query, Solomon flag, warehouse-baseline miss, boundary masking proof, and audit chain.
+- [x] Demo uses the real vendored boundary, not a fake client.
+- [x] Internal supersession example exists.
+- [ ] README GIF may need rerecording after the demo output changes.
 
----
+## Phase 12 — Evaluation
 
-## Phase 7 — Retrieval orchestrator (🆕)
+- [x] Synthetic corpus generator exists and exports reproducible items, dependencies, changed authority, and oracle stale ids.
+- [x] Evaluation harness now actually writes the corpus to store/graph/index, runs propagation, recall, warehouse baseline, decay baseline, and timing.
+- [x] Metrics include stale-surface rate, time-to-flag, and impact-query recall.
+- [ ] Evaluation remains synthetic and curated; it is not a jurisdictional coverage benchmark or external-law-monitoring benchmark.
+- [ ] Boundary-fidelity evaluation is a small forbidden-term scan, not a full Kaypoh recall evaluation.
 
-- [x] (P0) `recall(query, matter_context)` → ranked KnowledgeItems with currency_state + provenance + dependencies (never bare text)
-- [x] (P0) Stage 1: semantic similarity retrieval
-- [x] (P0) Stage 2: currency filter (Live by default; annotate, don't silently drop, when surfacing stale in review mode)
-- [x] (P1) Stage 3: dependency-graph expansion (pull in what an item relies on, and flag if any dependency moved)
-- [x] (P1) Stage 4: credence weighting
-- [x] (P1) Attach to every result: currency_state, what it depends on, what superseded it (if any), last_verified
-- [x] (P1) `timeline(query, as_of)`: what did the firm believe on date X (bi-temporal query surfaced to users)
-- [x] (P2) Tunable ranking weights (similarity ⊕ currency ⊕ credence ⊕ centrality)
-- [x] (P2) De-duplication of near-identical positions across matters
-- [x] (P3) Query budget controls (max context tokens assembled before sanitisation)
+## Phase 13 — Testing and correctness
 
----
+- [x] Unit/property tests cover store invariants, supersede-not-delete, `as_of()`, recall filtering, credence ranking, propagation cycles, boundary fail-closed, routing, audit, demo, and evaluation helpers.
+- [x] Service-level boundary tests now cover ingestion and model egress fail-closed behavior with the vendored engine forced to fail.
+- [x] Soak test covers 300 direct dependents.
+- [ ] Fuzzing is minimal and focused on empty ingest content.
+- [ ] No browser/UI/desktop packaging tests exist.
 
-## Phase 8 — Audit & privilege evidence chain (🆕 P1 #3, ♻️ Kaypoh journal)
+## Phase 14 — Performance and hardening
 
-- [x] (P0) Append-only audit journal (♻️ mirror `../kaypoh` journal + `verify_journal` pattern)
-- [x] (P0) Log per query: what was known, currency states surfaced, what verification ran, which endpoint, what crossed the boundary (metadata only — never content)
-- [x] (P1) Log the full dependency/staleness chain for any flagged item (the "why was this stale" record)
-- [x] (P1) Audit-pack export + verify (♻️ Kaypoh `export_audit_pack` / `verify_audit_pack` patterns) — the defensibility artifact
-- [x] (P1) Tamper-evidence on the journal (hash chaining)
-- [x] (P2) "What did we know and when" report for a given matter/client (privilege defence narrative)
-- [x] (P2) Right-to-erasure handling for stored knowledge where lawful (♻️ Kaypoh `erase_subject` philosophy), reconciled with the never-delete-for-audit tension (document the resolution)
-- [x] (P3) Signed verification attestations (who verified, cryptographically)
+- [x] SQLite WAL and busy timeout are configured and tested.
+- [x] Latency/memory budget helper functions exist.
+- [x] Graph target indexes support fast direct dependent lookup.
+- [ ] No serious p50/p95 benchmark gate is enforced in CI.
+- [ ] Concurrency is SQLite WAL plus busy timeout, not a fully characterized multi-writer design.
+- [ ] Currency cache invalidation exists for authority changes, but cache correctness is narrowly tested.
 
----
+## Phase 15 — Security and governance
 
-## Phase 9 — Public API & CLI (🆕)
+- [x] Threat model, trust-boundary docs, known limitations, assumptions, erasure docs, and boundary audit checklist exist.
+- [x] Fail-closed boundary behavior is enforced in service-level tests.
+- [x] Volatile mapping hygiene is tested.
+- [ ] Auth/tenancy is basic API-key/header middleware, not a full auth system.
+- [ ] Stored-knowledge sanitization is limited to instruction-role separation and boundary-on-ingest, not deep content hardening.
 
-- [x] (P0) Finalise API verbs: `ingest`, `recall`, `evaluate_currency`, `record_verification`, `register_authority_change`, `impact_query`, `why(item)`, `timeline`
-- [x] (P0) Make `why(item)` first-class: full currency + dependency + credence + verification + provenance trace
-- [x] (P0) FastAPI surface (♻️ Kaypoh-style schemas, auth, health/ready/diagnostics endpoints)
-- [x] (P1) `solomon` CLI: ingest a doc, ask, show currency, register a regulatory change, run an impact query, export audit pack
-- [x] (P1) Stable error types; fail-closed behaviour surfaced clearly
-- [x] (P1) Config object with sane defaults (verification-due ages, routing thresholds, credence policy)
-- [x] (P2) Python client (♻️ mirror Kaypoh's `client.py` ergonomics: sync + async over httpx)
-- [x] (P2) Pretty terminal `why` output (text version of the currency trace)
+## Phase 16 — Repo docs
 
----
+- [x] README, architecture, concepts, Kaypoh integration, trust boundary, benchmark/evaluation, and ADR docs exist.
+- [x] Docs now describe the vendored boundary design and pinned source commit.
+- [x] Generated OpenAPI has been refreshed after schema/API changes.
+- [ ] Launch/readme media should be rerecorded if the changed stale-house-view output matters.
 
-## Phase 10 — Local vs server SKU (♻️ mirror Kaypoh's SKU model)
+## Phase 17 — Launch
 
-- [x] (P1) `solomon-local`: offline-default, SQLite, local model, talks to kaypoh-local; no outbound HTTP except the configured local model
-- [x] (P1) `solomon-server`: Postgres option, remote-ZDR endpoint allowed, talks to kaypoh-server; env-gated egress
-- [x] (P1) Env-gating for any egress (♻️ Kaypoh's explicit-opt-in discipline: nothing leaves without a flag)
-- [x] (P2) PyInstaller desktop packaging for solomon-local (♻️ Kaypoh `packaging/` approach)
-- [x] (P2) Docker compose for server (♻️ mirror Kaypoh compose files)
-- [x] (P3) Multi-tenant namespace isolation on server
-
----
-
-## Phase 11 — Headline demo: the stale house-view (🆕 P1)
-
-- [x] (P0) Build a scripted, reproducible scenario fixture: 2023 house-view memo depending on Regulation R §12, relied on in a Client A matter
-- [x] (P0) Script the 2025 regulatory change + propagation to StalePendingReverification
-- [x] (P1) 2026 associate query → Solomon flags the memo (depends on R §12 changed 2025; not re-verified; last relied on in Client A; recommend re-check)
-- [x] (P1) Verify the model never saw the client identity (assert Kaypoh round-trip masked/demasked correctly)
-- [x] (P1) **Warehouse-KM baseline**: a similarity-only retriever that returns the 2023 memo confidently with no staleness signal — the side-by-side
-- [x] (P1) Audit view rendering the full chain (known-since → dependency → change event → flag → verification prompt)
-- [x] (P2) Record the run for the README GIF
-- [x] (P2) Package as a runnable `examples/stale-house-view/` (clone, bring up kaypoh-local, run)
-- [x] (P3) A second scenario (e.g. internal supersession: a 2024 position quietly overriding a 2022 one) to show supersession reasoning
-
----
-
-## Phase 12 — Evaluation (🆕, leans on the demo + a small currency benchmark)
-
-- [x] (P1) Synthetic firm-knowledge corpus generator (positions/memos/advice with dependencies + injected changes over time)
-- [x] (P1) Metric: **stale-surface rate** — how often each system surfaces a stale internal item as current
-- [x] (P1) Metric: **time-to-flag** after a dependency changes (propagation correctness)
-- [x] (P1) Metric: **impact-query recall** — given a change, did we flag everything that depended on it
-- [x] (P1) Baselines: a similarity-only warehouse retriever; (optionally) a Shibahama-style decay retriever to show decay is *wrong* here (old≠stale)
-- [x] (P2) Boundary-fidelity eval: end-to-end, did anything sensitive cross? (lean on Kaypoh's recall numbers; test the integration, not re-test Kaypoh)
-- [x] (P2) Ablations: dependency graph on/off, credence guardrail on/off, currency filter on/off
-- [x] (P2) Results table for the README (stale-surface rate: Solomon vs warehouse vs decay)
-- [x] (P3) Release the corpus generator so the eval is reproducible
-
----
-
-## Phase 13 — Testing & correctness (P0/P1, cross-cutting)
-
-- [x] (P0) Unit tests: data model, bi-temporal invariants, supersede-not-delete, currency_state transitions
-- [x] (P0) Property test: no path deletes a knowledge item
-- [x] (P0) Property test: superseded/stale items never appear in default (Live) recall without a flag
-- [x] (P1) Property test: ModelInferred never outranks FirmAuthoritative at equal relevance
-- [x] (P1) Propagation test: authority change flags exactly the transitive dependents, no more, no fewer; cycles terminate
-- [x] (P1) `as_of` correctness: historical reconstruction matches the event log
-- [x] (P1) **Boundary test: fail-closed** — if Kaypoh is unreachable, no context egresses
-- [x] (P1) Round-trip test: pseudonymize→model→reidentify preserves meaning and leaks nothing (incl. paraphrase-survival of tokens)
-- [x] (P1) Routing test: strict matters never hit the remote endpoint
-- [x] (P2) Fuzz ingestion with adversarial/malformed items
-- [x] (P2) Poisoning red-team: plant a false ModelInferred "position", assert it can't outrank or be asserted as settled
-- [x] (P2) Soak test: thousands of items + many authority changes; propagation stays correct and bounded
-- [x] (P2) Kaypoh-integration contract tests (pin the client behaviour Solomon relies on)
-
----
-
-## Phase 14 — Performance & hardening (P2)
-
-- [x] (P1) Recall + currency-evaluation latency budget (p50/p95)
-- [x] (P1) Ensure propagation is incremental (a change touches only dependents, no full-graph rescan)
-- [x] (P2) Index the dependency graph for fast `impact_query`
-- [x] (P2) Concurrency: safe multi-reader/single-writer (or MVCC) on the store
-- [x] (P2) Memory/footprint budget for solomon-local
-- [x] (P3) Caching of currency evaluations with correct invalidation on dependency change
-
----
-
-## Phase 15 — Security & governance (♻️ mirror Kaypoh series)
-
-- [x] (P1) Threat model doc (`docs/threat-model.md`) — esp. the boundary, the store, and poisoning (ASI06)
-- [x] (P1) Fail-closed egress everywhere; document the trust boundary precisely
-- [x] (P1) Treat the knowledge store as an untrusted input surface on read (sanitise stored instructions)
-- [x] (P2) Auth/tenancy (♻️ Kaypoh `auth.py` patterns) for server SKU
-- [x] (P2) Mapping/volatile-memory hygiene: assert no sanitisation mapping is ever persisted by Solomon
-- [x] (P2) `docs/known-limitations.md` and `docs/assumption.md` (♻️ Kaypoh's design-honesty docs)
-- [x] (P3) Independent boundary audit checklist
-
----
-
-## Phase 16 — Docs inside the repo (P1, minimal, repo-internal)
-
-- [x] (P0) Deep `README.md` — the writeup: the triad framing (Kaypoh/Shibahama/Solomon table), the wedge, architecture diagram, stale-house-view demo GIF, warehouse baseline comparison, honest limitations (README IS the paper)
-- [x] (P1) `docs/architecture.md`: components, data model, request lifecycle, the boundary
-- [x] (P1) `docs/concepts.md`: currency vs significance, bi-temporality, dependency graph, credence, verification — in plain language
-- [x] (P1) `docs/kaypoh-integration.md`: exactly what Solomon reuses, what it builds, how to run both together
-- [x] (P1) Generated API reference (FastAPI/OpenAPI export, ♻️ Kaypoh's `export_openapi_examples` approach)
-- [x] (P1) `examples/` runnable per scenario
-- [x] (P2) `docs/benchmarks.md`: methodology + reproduce instructions
-- [x] (P2) ADR index kept current
-- [x] (P3) `docs/why-solomon.md`: the triad story + why decay was rejected (the judgment narrative for a reviewer)
-
----
-
-## Phase 17 — Launch (P1/P2)
-
-- [x] (P0) Tag `v0.1.0`; publish (pip; desktop bundle for local SKU)
-- [x] (P1) Record the stale-house-view demo GIF (Solomon flag vs warehouse miss)
-- [x] (P1) Write the launch post leading with the wedge: "every firm checks if a *case* is still good law; nobody checks if *their own* knowledge is — Solomon does, behind a zero-retention boundary"
-- [x] (P1) FAQ for predictable objections (isn't this KM? how is it not Shibahama? does it decide the law? what if Kaypoh mis-detects?)
-- [x] (P1) The triad writeup: one diagram showing Kaypoh + Shibahama + Solomon and what each proves (the FDE-application centrepiece)
-- [x] (P2) Early-user outreach; collect first issues
-- [x] (P3) Submit the currency-eval writeup somewhere citable
+- [x] Launch post, FAQ, outreach docs, packaging README, and citation metadata exist.
+- [ ] No git tag is present in this worktree.
+- [ ] No built pip or desktop artifacts are present in `dist/`.
+- [ ] Early-user outreach and eval submission are docs, not externally verifiable release activity.

@@ -73,7 +73,7 @@ packages = ["solomon"]
 addopts = "-ra --strict-config --strict-markers -W error"
 testpaths = ["tests"]
 markers = [
-  "integration: tests that require a running sibling service",
+  "integration: tests that require an external service",
 ]
 
 [tool.coverage.run]
@@ -84,7 +84,7 @@ source = ["src/solomon"]
 show_missing = true
 skip_covered = true
 
-[tool.solomon.kaypoh]
-path = "../kaypoh"
-client = "src/kaypoh/client.py"
-mode = "documented-relative-import"
+[tool.solomon.boundary]
+engine = "src/solomon/boundary/engine"
+source = "vendored-kaypoh-derived"
+source_commit = "7415069e57d69398e2c44ef6ababafb0c04a988b"

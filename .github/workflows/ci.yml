@@ -24,50 +24,16 @@ jobs:
       - run: uv run mypy src tests scripts
       - run: uv run pytest
 
-  kaypoh-integration-smoke:
-    name: Kaypoh local integration smoke
+  boundary-smoke:
+    name: Vendored boundary smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: solomon
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/kaypoh
-          path: kaypoh
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v5
-      - name: Install Kaypoh
-        working-directory: kaypoh
+      - name: Run Solomon vendored boundary smoke
         run: |
           uv sync --extra dev
-          uv run python -m spacy download en_core_web_sm
-      - name: Start Kaypoh local
-        working-directory: kaypoh
-        run: |
-          uv run uvicorn kaypoh.backend.main:app --host 127.0.0.1 --port 8131 > ../kaypoh.log 2>&1 &
-          echo "$!" > ../kaypoh.pid
-      - name: Wait for Kaypoh readiness
-        working-directory: solomon
-        run: python scripts/wait_http.py http://127.0.0.1:8131/ready --expect-key ready --expect-value true
-      - name: Run Solomon smoke against Kaypoh
-        working-directory: solomon
-        run: |
-          uv sync --extra dev
-          uv run python scripts/kaypoh_smoke.py --base-url http://127.0.0.1:8131
-      - name: Stop Kaypoh
-        if: always()
-        run: |
-          if [ -f kaypoh.pid ]; then
-            kill "$(cat kaypoh.pid)" || true
-          fi
-      - name: Upload Kaypoh log
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: kaypoh-smoke-log
-          path: kaypoh.log
-          if-no-files-found: ignore
-
+          uv run python scripts/kaypoh_smoke.py

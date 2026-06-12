@@ -120,6 +120,23 @@ def test_impact_query_centrality_and_subgraph(tmp_path: Path) -> None:
     assert graph.get_edge("edge-2").confidence is EdgeConfidence.HUMAN_ASSERTED
 
 
+def test_impact_query_returns_transitive_dependents_without_mutating_store(tmp_path: Path) -> None:
+    db = tmp_path / "solomon.sqlite3"
+    store = SQLiteKnowledgeStore(db)
+    graph = GraphStore(db)
+    for item_id in ["item-1", "item-2", "item-3"]:
+        store.write_item(_item(item_id, item_id))
+    graph.add_dependency(_external_edge("item-1", "reg-r-12", edge_id="edge-ext"))
+    graph.add_dependency(_internal_edge("item-2", "item-1", edge_id="edge-2-1"))
+    graph.add_dependency(_internal_edge("item-3", "item-2", edge_id="edge-3-2"))
+
+    impact = CurrencyPropagator(graph=graph, store=store).impact_query("reg-r-12")
+
+    assert impact.stale_item_ids == ["item-1", "item-2", "item-3"]
+    assert impact.reasons["item-2"][0].dependency_id == "item-1"
+    assert store.get_item("item-1").currency_state is CurrencyState.LIVE
+
+
 def test_subgraph_for_matter_scope(tmp_path: Path) -> None:
     db = tmp_path / "solomon.sqlite3"
     store = SQLiteKnowledgeStore(db)

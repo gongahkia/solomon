@@ -31,13 +31,12 @@ Sources:
 
 | Project | Question | Memory stance | Solomon relationship |
 |---|---|---|---|
-| Kaypoh | What is safe to let leave the building? | Stateless boundary | Solomon calls `/review`, `/pseudonymize`, `/reidentify`, and `/documents/scrub`. |
+| Kaypoh | What is safe to let leave the building? | Stateless boundary | Solomon vendors the local `/review`, `/pseudonymize`, `/reidentify`, and `/documents/scrub` surfaces it calls. |
 | Shibahama | What is worth remembering? | Adaptive decay | Solomon rejects decay because old legal knowledge is not automatically stale. |
 | Solomon | Is what we know still true, and can we prove it? | Permanent, bi-temporal, currency-aware | This repo. |
 
-Solomon is expected to live at `./solomon/` beside an untouched Kaypoh checkout at `../kaypoh/`.
-Solomon may import Kaypoh's Python client from `../kaypoh/src/kaypoh/client.py` or call a running Kaypoh
-service, but it does not modify Kaypoh source.
+Solomon is self-contained. The local boundary engine under `src/solomon/boundary/engine/` is vendored from
+Kaypoh commit `7415069e57d69398e2c44ef6ababafb0c04a988b`; no sibling `../kaypoh` checkout is required.
 
 ## Architecture
 
@@ -47,7 +46,7 @@ Lawyer / API / CLI
   -> bi-temporal SQLite event store
   -> dependency graph and currency engine
   -> credence ledger and verification guard
-  -> Kaypoh boundary for model-bound context
+  -> vendored Kaypoh-derived boundary for ingest and model-bound context
   -> local model or remote ZDR endpoint by sensitivity policy
   -> hash-chained metadata-only audit journal
 ```
@@ -115,4 +114,3 @@ uv run solomon recall "structure X regulation"
 - [Threat model](docs/threat-model.md)
 - [Benchmarks](docs/benchmarks.md)
 - [ADRs](docs/adr/README.md)
-

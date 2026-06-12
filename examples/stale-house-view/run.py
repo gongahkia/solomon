@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,29 +16,8 @@ from solomon.graph.models import DependencyEdge, EdgeType
 from solomon.orchestrator.retrieval import RecallOptions
 
 
-class DemoKaypohClient:
-    def __init__(self) -> None:
-        self.model_saw_text: str | None = None
-
-    def review(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return {"classification": "SAFE", "findings": [], "request_id": "demo-review"}
-
-    def pseudonymize(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        text = str(kwargs["request"]["text"])
-        sanitized = text.replace("Client A", "[CLIENT_1]")
-        self.model_saw_text = sanitized
-        return {
-            "pseudonymized_text": sanitized,
-            "mapping": [{"placeholder": "[CLIENT_1]", "original_text": "Client A"}],
-            "document_hash": "b" * 64,
-        }
-
-    def reidentify(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        text = str(kwargs["anonymized_text"]).replace("[CLIENT_1]", "Client A")
-        return {"reidentified_text": text, "replacement_count": 1}
-
-    def scrub_document(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return {"document_base64": kwargs["document_base64"], "metadata_findings": []}
+def _dt(year: int, month: int = 1, day: int = 1) -> datetime:
+    return datetime(year, month, day, tzinfo=timezone.utc)
 
 
 def warehouse_baseline(service: SolomonService, query: str) -> list[dict[str, Any]]:
@@ -57,9 +37,8 @@ def warehouse_baseline(service: SolomonService, query: str) -> list[dict[str, An
 
 
 def run_scenario(root: Path) -> dict[str, Any]:
-    service = SolomonService(data_dir=root / "data", journal_dir=root / "journal")
-    boundary_client = DemoKaypohClient()
-    boundary = KaypohBoundary(boundary_client)
+    boundary = KaypohBoundary()
+    service = SolomonService(data_dir=root / "data", journal_dir=root / "journal", boundary=boundary)
 
     memo = service.ingest(
         IngestRequest(
@@ -70,6 +49,8 @@ def run_scenario(root: Path) -> dict[str, Any]:
             author="Partner A",
             matter_id="client-a-2023",
             client_id="client-a",
+            valid_from=_dt(2023, 1, 1),
+            ingested_at=_dt(2023, 1, 2),
         )
     )
     service.graph.add_dependency(
@@ -78,6 +59,8 @@ def run_scenario(root: Path) -> dict[str, Any]:
             target_id="reg-r-12",
             edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
             target_kind="external_authority",
+            valid_from=_dt(2023, 1, 2),
+            created_at=_dt(2023, 1, 2),
         )
     )
     impact = service.register_authority_change(
@@ -94,13 +77,17 @@ def run_scenario(root: Path) -> dict[str, Any]:
     )
     if "Client A" in context.sanitized_text:
         raise RuntimeError("sanitized context leaked client identity")
-    if boundary_client.model_saw_text is None or "Client A" in boundary_client.model_saw_text:
-        raise RuntimeError("model-facing text leaked client identity")
+    model_saw_text = context.sanitized_text
 
     audit_report = what_did_we_know_report(
-        service.store.as_of(memo.ingested_at),
-        as_of=memo.ingested_at,
+        service.store.as_of(_dt(2026, 1, 1)),
+        as_of=_dt(2026, 1, 1),
         matter_id="client-a-2023",
+    )
+    stale_reasons = service.store.get_item(memo.id).metadata.get("staleness_reasons", [])
+    verification_prompt = (
+        "Re-verify before reuse: Regulation R section 12 changed in 2025 and this house view has not "
+        "been reaffirmed after the change."
     )
 
     return {
@@ -108,8 +95,16 @@ def run_scenario(root: Path) -> dict[str, Any]:
         "impact": impact,
         "solomon_review": solomon_review,
         "warehouse_baseline_top": baseline,
-        "model_saw_client_identity": "Client A" in (boundary_client.model_saw_text or ""),
+        "model_saw_client_identity": "Client A" in model_saw_text,
+        "model_saw_text": model_saw_text,
         "audit_report": audit_report.model_dump(mode="json"),
+        "audit_chain": {
+            "known_since": memo.ingested_at.isoformat(),
+            "dependency": "reg-r-12",
+            "dependency_change": impact["reasons"][memo.id][0],
+            "stale_flag": stale_reasons[0] if stale_reasons else None,
+            "verification_prompt": verification_prompt,
+        },
     }
 
 

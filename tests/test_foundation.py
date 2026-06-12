@@ -33,13 +33,9 @@ def test_app_health_and_diagnostics_do_not_expose_secrets(tmp_path: Path) -> Non
     assert "secret" not in str(payload)
 
 
-def test_kaypoh_client_probe_uses_sibling_without_modifying_it() -> None:
-    status = probe_kaypoh_client(Path("../kaypoh"))
-    if Path("../kaypoh/src/kaypoh/client.py").exists():
-        assert status.importable is True
-        assert (
-            status.client_path.endswith("../kaypoh/src/kaypoh/client.py")
-            or "kaypoh/src/kaypoh/client.py" in status.client_path
-        )
-    else:
-        assert status.importable is False
+def test_kaypoh_client_probe_uses_vendored_engine_without_sibling_path() -> None:
+    status = probe_kaypoh_client()
+
+    assert status.importable is True
+    assert status.repo_path == "vendored"
+    assert status.client_path == "src/solomon/boundary/engine/client.py"

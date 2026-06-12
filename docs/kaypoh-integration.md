@@ -2,15 +2,17 @@
 
 # Kaypoh Integration
 
-Solomon reuses Kaypoh as the boundary layer and does not modify Kaypoh source.
+Solomon vendors the Kaypoh-derived local boundary surfaces it calls and does not require a sibling Kaypoh
+checkout at runtime.
 
-Expected layout:
+Vendored source:
 
 ```text
-projects/
-  kaypoh/
-  solomon/
+src/solomon/boundary/engine/
 ```
+
+The vendored source is pinned in `src/solomon/boundary/engine/NOTICE` to Kaypoh commit
+`7415069e57d69398e2c44ef6ababafb0c04a988b`.
 
 Solomon uses:
 
@@ -22,10 +24,11 @@ Solomon uses:
 Run a local smoke test:
 
 ```bash
-uv run python scripts/kaypoh_smoke.py --base-url http://127.0.0.1:8131
+uv run python scripts/kaypoh_smoke.py
 ```
 
-If Kaypoh is unavailable, Solomon refuses ingestion or egress paths that require the boundary.
+If the vendored boundary engine is unavailable or errors, Solomon refuses ingestion or egress paths that require
+the boundary.
 
 ## Optional Office Surfaces
 

@@ -70,21 +70,29 @@ class CurrencyPropagator:
     def impact_query(self, authority_or_item_id: str) -> ImpactResult:
         reasons: dict[str, list[StalenessReason]] = {}
         stale_item_ids: list[str] = []
-        for edge in self.graph.get_dependents(authority_or_item_id):
-            item_id = edge.source_id
-            if item_id not in stale_item_ids:
-                stale_item_ids.append(item_id)
-            reasons.setdefault(item_id, []).append(
-                StalenessReason(
-                    dependency_id=authority_or_item_id,
-                    changed_at=now_utc(),
-                    reason="impact query candidate: dependency has current dependents",
-                    edge_id=edge.id,
+        timestamp = now_utc()
+        queue: deque[str] = deque([authority_or_item_id])
+        visited_dependencies: set[str] = set()
+        while queue:
+            dependency_id = queue.popleft()
+            if dependency_id in visited_dependencies:
+                continue
+            visited_dependencies.add(dependency_id)
+            for edge in self.graph.get_dependents(dependency_id):
+                item_id = edge.source_id
+                if item_id not in stale_item_ids:
+                    stale_item_ids.append(item_id)
+                reasons.setdefault(item_id, []).append(
+                    StalenessReason(
+                        dependency_id=dependency_id,
+                        changed_at=timestamp,
+                        reason="impact query candidate: dependency has current or transitive dependents",
+                        edge_id=edge.id,
+                    )
                 )
-            )
+                queue.append(item_id)
         return ImpactResult(
             changed_dependency_id=authority_or_item_id,
             stale_item_ids=stale_item_ids,
             reasons=reasons,
         )
-

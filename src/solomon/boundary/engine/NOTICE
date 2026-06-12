@@ -1,0 +1,8 @@
+Solomon vendored boundary engine
+================================
+
+This module derives from the Kaypoh codebase by the same author.
+Source commit: 7415069e57d69398e2c44ef6ababafb0c04a988b
+
+Only the local review, pseudonymization, reidentification, volatile mapping,
+jurisdiction-pack, and client-facing surfaces Solomon calls are vendored here.

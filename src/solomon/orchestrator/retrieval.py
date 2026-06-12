@@ -175,11 +175,12 @@ class RetrievalOrchestrator:
         if not hits:
             return []
         hit_by_id = {hit.item_id: hit for hit in hits}
-        states = None if resolved_options.review_mode else {CurrencyState.LIVE}
         item_ids = [hit.item_id for hit in hits]
         matter_id = matter_context.matter_id if matter_context else None
         client_id = matter_context.client_id if matter_context else None
-        items = self.store.get_many(item_ids, include_states=states, matter_id=matter_id, client_id=client_id)
+        items = self.store.get_many(item_ids, matter_id=matter_id, client_id=client_id)
+        if not resolved_options.review_mode:
+            items = [item for item in items if evaluate_currency(item).currency_state is CurrencyState.LIVE]
         items = self._dedupe(items) if resolved_options.dedupe_near_identical else items
         centrality = self.graph.centrality(item.id for item in items)
         candidates = [
@@ -240,6 +241,7 @@ class RetrievalOrchestrator:
     ) -> RecallResult:
         item = candidate.item
         evaluation = evaluate_currency(item)
+        item = item.model_copy(update={"currency_state": evaluation.currency_state})
         credence_rank = self.credence.policy.tier_rank[item.credence_tier] / max(
             self.credence.policy.tier_rank.values()
         )

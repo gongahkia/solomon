@@ -13,7 +13,7 @@ def test_local_sku_is_offline_default() -> None:
     assert settings.sku == "local"
     assert settings.allow_remote_egress is False
     assert settings.zero_egress_mode is True
-    assert settings.kaypoh_base_url.startswith("http://127.0.0.1")
+    assert settings.kaypoh_base_url == "in-process://solomon-boundary-engine"
 
 
 def test_local_sku_rejects_remote_egress() -> None:
@@ -28,4 +28,3 @@ def test_server_sku_requires_explicit_remote_model_for_egress() -> None:
     settings = server_settings(allow_remote_egress=True, remote_model_url="https://zdr.example.test/v1")
     assert settings.sku == "server"
     assert settings.allow_remote_egress is True
-

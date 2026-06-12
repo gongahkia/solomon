@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     sku: str = Field(default="local", pattern="^(local|server)$")
     data_dir: Path = Field(default=Path("./solomon-data"))
     journal_dir: Path = Field(default=Path("./solomon-journal"))
-    kaypoh_repo_path: Path = Field(default=Path("../kaypoh"))
-    kaypoh_base_url: str = "http://127.0.0.1:8000"
+    kaypoh_repo_path: Path = Field(default=Path("src/solomon/boundary/engine"))
+    kaypoh_base_url: str = "in-process://solomon-boundary-engine"
     kaypoh_api_key: str | None = None
     kaypoh_timeout_seconds: float = 30.0
     server_api_key: str | None = None

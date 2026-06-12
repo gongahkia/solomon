@@ -2,24 +2,24 @@
 
 # Optional Office Front-Ends
 
-Solomon does not fork or edit Kaypoh's Office add-ins. The optional front-end path is a thin Solomon
-adapter around the sibling Kaypoh surfaces:
+Solomon no longer requires Kaypoh's Office add-ins at runtime. An optional front-end can still mirror their
+review-before-send pattern:
 
-- `../kaypoh/packaging/word_addin/` is the Word taskpane review surface.
-- `../kaypoh/packaging/office_addin/` is the Outlook taskpane plus pre-send Smart Alerts surface.
+- A Word taskpane collects selected text and sends it to Solomon `/ingest`; Solomon's vendored boundary reviews
+  it before storage.
+- An Outlook taskpane can call Solomon `/recall` with reviewed text and must not bypass Solomon's model-egress
+  boundary.
 
-Those clients already know how to collect selected Word text or Outlook body text and send it to the local
-Kaypoh daemon. Solomon reuses that boundary by keeping the flow two-step:
+Keep the flow two-step:
 
-1. The add-in sends text to Kaypoh `/review` or `/redact` exactly as Kaypoh already defines it.
-2. Only reviewed or redacted text is passed to Solomon through `/ingest`, `/recall`, `/why/{item_id}`, or `/graph`.
+1. The add-in sends text to Solomon.
+2. Solomon calls the vendored boundary before storage or model egress.
 3. For server SKU deployments, the add-in must send `x-api-key` and `x-tenant-id` to Solomon; every tenant gets a
    separate Solomon data and journal namespace.
 
 ## Word Taskpane
 
-Use Kaypoh's `word_addin/taskpane.js` selection/body collection unchanged. Add a second configured endpoint for
-Solomon, for example `http://127.0.0.1:8140`, and call:
+Use a Word taskpane selection/body collection against Solomon, for example `http://127.0.0.1:8140`, and call:
 
 ```http
 POST /ingest
@@ -27,7 +27,7 @@ Content-Type: application/json
 
 {
   "kind": "note",
-  "content": "<kaypoh-reviewed text>",
+  "content": "<selected text>",
   "source_kind": "matter-doc",
   "source_ref": "word-selection"
 }
@@ -35,15 +35,14 @@ Content-Type: application/json
 
 ## Outlook Taskpane And Pre-Send
 
-Use Kaypoh's `office_addin/` Outlook surface for pre-send boundary review. Solomon should only be called after
-the Kaypoh taskpane has completed review or redaction. A common workflow is:
+Use an Outlook surface for pre-send review and recall. Solomon reviews/sanitizes in-process. A common workflow is:
 
 ```http
 POST /recall
 Content-Type: application/json
 
 {
-  "query": "<kaypoh-reviewed email body or selected issue>",
+  "query": "<reviewed email body or selected issue>",
   "review_mode": true,
   "max_context_tokens": 1200
 }
@@ -52,6 +51,6 @@ Content-Type: application/json
 ## Deployment Notes
 
 - Production deployment should still use Microsoft 365 admin-managed deployment for the add-in manifests.
-- Solomon-specific tenant headers belong in the add-in configuration store, next to Kaypoh's endpoint/token fields.
-- Do not persist Kaypoh pseudonymization mappings in the add-in or in Solomon.
-- Keep the default local flow loopback-only: Kaypoh on `127.0.0.1:8765`, Solomon on `127.0.0.1:8140`.
+- Solomon-specific tenant headers belong in the add-in configuration store.
+- Do not persist pseudonymization mappings in the add-in or in Solomon.
+- Keep the default local flow loopback-only: Solomon on `127.0.0.1:8140`.

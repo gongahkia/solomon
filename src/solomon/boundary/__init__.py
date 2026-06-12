@@ -1,4 +1,3 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""Kaypoh boundary integration."""
-
+"""Vendored Kaypoh-derived boundary integration."""

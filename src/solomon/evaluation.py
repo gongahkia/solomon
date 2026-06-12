@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import tempfile
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from pydantic import Field
@@ -19,6 +22,10 @@ from solomon.currency.models import (
     SourceKind,
 )
 from solomon.graph.models import DependencyEdge, EdgeType
+from solomon.graph.propagation import CurrencyPropagator
+from solomon.graph.store import GraphStore
+from solomon.orchestrator.retrieval import RecallOptions, RetrievalOrchestrator, SQLiteRetrievalIndex, tokenize
+from solomon.store.sqlite import SQLiteKnowledgeStore
 
 
 @dataclass(frozen=True)
@@ -132,8 +139,22 @@ def impact_query_recall(expected_ids: set[str], actual_ids: set[str]) -> float:
     return len(expected_ids & actual_ids) / len(expected_ids)
 
 
-def warehouse_similarity_baseline(items: list[KnowledgeItem], *, limit: int = 5) -> list[KnowledgeItem]:
-    return sorted(items, key=lambda item: item.ingested_at, reverse=True)[:limit]
+def warehouse_similarity_baseline(
+    items: list[KnowledgeItem],
+    *,
+    query: str = "structure X Regulation R section 12",
+    limit: int = 5,
+) -> list[KnowledgeItem]:
+    query_tokens = tokenize(query)
+    scored: list[tuple[KnowledgeItem, float]] = []
+    for item in items:
+        item_tokens = tokenize(item.content)
+        union = query_tokens | item_tokens
+        score = len(query_tokens & item_tokens) / len(union) if union else 0.0
+        if score > 0:
+            scored.append((item, score))
+    ranked = sorted(scored, key=lambda pair: (pair[1], pair[0].ingested_at), reverse=True)
+    return [item for item, _score in ranked[:limit]]
 
 
 def decay_baseline(items: list[KnowledgeItem], *, now: datetime) -> list[tuple[KnowledgeItem, float]]:
@@ -187,25 +208,66 @@ def evaluate_ablation(config: AblationConfig, *, base: EvaluationMetrics) -> Eva
     )
 
 
-def main() -> int:
-    corpus = generate_synthetic_corpus(size=10)
-    metrics = {
+def run_currency_evaluation(
+    *,
+    size: int = 10,
+    query: str = "structure X Regulation R section 12",
+) -> dict[str, EvaluationMetrics]:
+    corpus = generate_synthetic_corpus(size=size)
+    with tempfile.TemporaryDirectory(prefix="solomon-eval-") as tmp:
+        db = Path(tmp) / "solomon.sqlite3"
+        store = SQLiteKnowledgeStore(db)
+        graph = GraphStore(db)
+        index = SQLiteRetrievalIndex(db)
+        retrieval = RetrievalOrchestrator(store=store, graph=graph, index=index)
+        for item in corpus.items:
+            store.write_item(item)
+        for edge in corpus.dependencies:
+            graph.add_dependency(edge)
+        retrieval.index_items(corpus.items)
+
+        start = time.perf_counter()
+        impact = CurrencyPropagator(graph=graph, store=store).propagate_dependency_change(
+            corpus.changed_authority_id,
+            changed_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            reason=f"{corpus.changed_authority_id} changed during synthetic evaluation",
+        )
+        elapsed = time.perf_counter() - start
+        current_items = store.get_many()
+        solomon_results = retrieval.recall(
+            query,
+            options=RecallOptions(limit=size, review_mode=False, dedupe_near_identical=False),
+        )
+        warehouse_results = warehouse_similarity_baseline(current_items, query=query, limit=size)
+        decay_results = [
+            item
+            for item, _score in decay_baseline(
+                current_items,
+                now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            )
+        ]
+
+    return {
         "Solomon": EvaluationMetrics(
-            stale_surface_rate=0.0,
-            time_to_flag_seconds=0.0,
-            impact_query_recall=1.0,
+            stale_surface_rate=stale_surface_rate([result.item for result in solomon_results]),
+            time_to_flag_seconds=elapsed,
+            impact_query_recall=impact_query_recall(corpus.expected_stale_item_ids, set(impact.stale_item_ids)),
         ),
         "Warehouse": EvaluationMetrics(
-            stale_surface_rate=stale_surface_rate(warehouse_similarity_baseline(corpus.items)),
+            stale_surface_rate=stale_surface_rate(warehouse_results),
             time_to_flag_seconds=float("inf"),
             impact_query_recall=0.0,
         ),
         "Decay": EvaluationMetrics(
-            stale_surface_rate=0.4,
+            stale_surface_rate=stale_surface_rate(decay_results[:size]),
             time_to_flag_seconds=float("inf"),
             impact_query_recall=0.0,
         ),
     }
+
+
+def main() -> int:
+    metrics = run_currency_evaluation(size=10)
     print(json.dumps({"table": render_results_table(metrics)}, indent=2))
     return 0
 

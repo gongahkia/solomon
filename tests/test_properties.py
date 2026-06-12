@@ -177,11 +177,9 @@ def test_soak_many_items_propagation_stays_bounded(tmp_path: Path) -> None:
     assert len(impact.stale_item_ids) == expected
 
 
-def test_kaypoh_client_contract_if_sibling_is_present() -> None:
+def test_vendored_kaypoh_client_contract() -> None:
     from solomon.boundary.kaypoh import load_kaypoh_client_class
 
-    if not Path("../kaypoh/src/kaypoh/client.py").exists():
-        pytest.skip("kaypoh sibling not present")
-    client_class = load_kaypoh_client_class(Path("../kaypoh"))
+    client_class = load_kaypoh_client_class()
     for method in ["review", "pseudonymize", "reidentify", "scrub_document"]:
         assert hasattr(client_class, method)

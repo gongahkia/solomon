@@ -16,11 +16,11 @@ Solomon is a Python 3.10+ FastAPI service and CLI. It is organized around durabl
 ## Request Lifecycle
 
 1. Ingest creates a `KnowledgeItem` with provenance and source-derived credence.
-2. Kaypoh review can gate storage when the boundary adapter is used.
-3. Dependency edges are manually tagged or suggested from Kaypoh-sanitized text.
+2. The vendored Kaypoh-derived review engine gates storage before the item is written.
+3. Dependency edges are manually tagged or suggested from boundary-sanitized text.
 4. Authority changes propagate staleness through graph dependents.
 5. Recall searches the local index, filters Live items by default, expands dependencies, and applies credence.
-6. Model context is Kaypoh-pseudonymized before any remote endpoint.
+6. Model context is pseudonymized by the vendored boundary before any remote endpoint.
 7. The audit journal records metadata-only evidence.
 
 ## Store
@@ -31,6 +31,6 @@ or historical modes.
 
 ## Boundary
 
-Kaypoh is an external sibling dependency, not vendored source. Solomon imports its client from `../kaypoh`
-or calls a configured service URL. If Kaypoh is down, model egress fails closed.
-
+The boundary engine is vendored under `src/solomon/boundary/engine/` from Kaypoh commit
+`7415069e57d69398e2c44ef6ababafb0c04a988b`. If that in-process boundary errors, ingestion and model egress
+fail closed.

@@ -16,6 +16,7 @@ from solomon.evaluation import (
     generate_synthetic_corpus,
     impact_query_recall,
     render_results_table,
+    run_currency_evaluation,
     stale_surface_rate,
     time_to_flag,
     warehouse_similarity_baseline,
@@ -49,6 +50,16 @@ def test_baselines_and_ablation_table() -> None:
     assert decay[0][1] >= decay[-1][1]
     assert ablated.impact_query_recall == 0.0
     assert "| Solomon |" in table
+
+
+def test_currency_evaluation_harness_runs_real_propagation_and_recall() -> None:
+    metrics = run_currency_evaluation(size=6)
+
+    assert metrics["Solomon"].stale_surface_rate == 0.0
+    assert metrics["Solomon"].time_to_flag_seconds >= 0.0
+    assert metrics["Solomon"].time_to_flag_seconds != float("inf")
+    assert metrics["Solomon"].impact_query_recall == 1.0
+    assert metrics["Warehouse"].stale_surface_rate > 0.0
 
 
 def test_boundary_fidelity_eval_flags_leaks() -> None:

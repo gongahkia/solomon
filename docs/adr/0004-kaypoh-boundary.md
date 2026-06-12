@@ -14,18 +14,19 @@ is the currency layer, not another privacy gateway.
 
 ## Decision
 
-Solomon reuses Kaypoh as an external sibling dependency and does not fork or edit Kaypoh source.
+Solomon vendors the Kaypoh-derived local boundary surfaces it needs under `src/solomon/boundary/engine/`,
+with provenance and source commit recorded in the vendored `NOTICE`. This makes Solomon self-contained while
+keeping the origin explicit.
 
 | Concern | Solomon behavior |
 |---|---|
-| Ingestion safety gate | Call Kaypoh `/review` before storage. |
-| Outbound model context | Call Kaypoh `/pseudonymize`; retain mapping only in volatile memory. |
-| Inbound model response | Call Kaypoh `/reidentify`; flush the volatile mapping after use. |
-| Document file ingestion | Call Kaypoh `/documents/scrub` before extraction. |
-| Kaypoh unavailable | Fail closed. |
+| Ingestion safety gate | Call the vendored `/review` surface before storage. |
+| Outbound model context | Call the vendored `/pseudonymize`; retain mapping only in volatile memory. |
+| Inbound model response | Call the vendored `/reidentify`; flush the volatile mapping after use. |
+| Document file ingestion | Call the vendored `/documents/scrub` before extraction. |
+| Boundary unavailable | Fail closed. |
 
 ## Consequences
 
-Solomon's CI includes a Kaypoh-local smoke job. Unit tests may use fakes, but product code keeps Kaypoh as
-the boundary contract.
-
+Solomon's CI includes a vendored boundary smoke job. Unit tests may still use fakes for edge cases, but the
+default service path uses the in-process vendored boundary.

@@ -79,6 +79,22 @@ def test_recall_returns_live_items_by_default_and_stale_in_review_mode(tmp_path:
     assert {result.item.id for result in review} == {"live", "stale"}
 
 
+def test_recall_filters_on_computed_currency_and_output_matches_displayed_state(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    stale_by_policy = _item("computed-stale", "structure x needs verification").model_copy(
+        update={"last_verified_at": None}
+    )
+    orchestrator.store.write_item(stale_by_policy)
+    orchestrator.index_items([stale_by_policy])
+
+    default = orchestrator.recall("structure x")
+    review = orchestrator.recall("structure x", options=RecallOptions(review_mode=True))
+
+    assert default == []
+    assert review[0].currency_state is CurrencyState.STALE_PENDING_REVERIFICATION
+    assert review[0].item.currency_state is review[0].currency_state
+
+
 def test_recall_attaches_dependencies_provenance_currency_and_last_verified(tmp_path: Path) -> None:
     orchestrator = _orchestrator(tmp_path)
     item = _item("item-1", "house view depends on regulation r section 12")

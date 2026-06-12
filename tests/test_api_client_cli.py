@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 
 from solomon.api.app import create_app
 from solomon.api.service import (
@@ -18,11 +19,14 @@ from solomon.api.service import (
     SolomonService,
     VerificationRequest,
 )
+from solomon.boundary.engine.client import BoundaryClient
+from solomon.boundary.kaypoh import BoundaryUnavailableError, KaypohBoundary
 from solomon.client import SolomonClient
 from solomon.config import Settings
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.graph.models import EdgeType
+from solomon.orchestrator.models import EndpointKind, ModelRequest, ModelResponse
 
 
 def test_service_ingest_recall_why_and_timeline(tmp_path: Path) -> None:
@@ -45,6 +49,88 @@ def test_service_ingest_recall_why_and_timeline(tmp_path: Path) -> None:
     assert timeline[0]["item"]["id"] == item.id
 
 
+def test_service_ingest_calls_vendored_boundary_and_attaches_findings(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="Position prepared for Client A under Regulation R section 12.",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo",
+        )
+    )
+
+    assert item.provenance.kaypoh_review_classification == "SAFE"
+    assert any(finding["kind"] == "client_reference" for finding in item.provenance.kaypoh_findings)
+
+
+def test_service_fails_closed_when_vendored_boundary_fails_for_ingest_and_model_egress(tmp_path: Path) -> None:
+    service = SolomonService(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        boundary=KaypohBoundary(BoundaryClient(fail=True)),
+    )
+
+    with pytest.raises(BoundaryUnavailableError):
+        service.ingest(
+            IngestRequest(
+                kind=KnowledgeKind.POSITION,
+                content="Client A structure x",
+                source_kind=SourceKind.PARTNER,
+                source_ref="memo",
+            )
+        )
+
+    class CountingEndpoint:
+        kind = EndpointKind.REMOTE_ZDR
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            self.calls += 1
+            return ModelResponse(text=request.prompt, endpoint=self.kind)
+
+    remote = CountingEndpoint()
+    local = CountingEndpoint()
+    from solomon.orchestrator.models import ModelRouter
+
+    router = ModelRouter(remote=remote, local=local)
+    with pytest.raises(BoundaryUnavailableError):
+        service.complete_model_request(router, ModelRequest(prompt="Client A model context", matter_id="matter-a"))
+    assert remote.calls == 0
+    assert local.calls == 0
+
+
+def test_service_model_call_sanitizes_before_router_and_reidentifies_after(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+
+    class EchoEndpoint:
+        kind = EndpointKind.REMOTE_ZDR
+
+        def __init__(self) -> None:
+            self.seen_prompt = ""
+
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            self.seen_prompt = request.prompt
+            return ModelResponse(text=f"Answer for {request.prompt}", endpoint=self.kind)
+
+    remote = EchoEndpoint()
+    local = EchoEndpoint()
+    from solomon.orchestrator.models import ModelRouter
+
+    result = service.complete_model_request(
+        ModelRouter(remote=remote, local=local),
+        ModelRequest(prompt="Advice for Client A", matter_id="matter-a"),
+    )
+
+    assert "Client A" not in remote.seen_prompt
+    assert "[CLIENT_1]" in remote.seen_prompt
+    assert "Client A" in result.response.text
+    assert service.boundary.volatile_mapping_count() == 0
+
+
 def test_service_currency_cache_invalidates_after_dependency_change(tmp_path: Path) -> None:
     service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
     item = service.ingest(
@@ -64,7 +150,7 @@ def test_service_currency_cache_invalidates_after_dependency_change(tmp_path: Pa
         )
     )
 
-    assert service.evaluate_currency(item.id)["currency_state"] == "StalePendingReverification"
+    assert service.evaluate_currency(item.id)["currency_state"] == "Live"
     assert service.currency_cache.contains(item.id)
 
     service.register_authority_change(

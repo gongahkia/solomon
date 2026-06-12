@@ -3,22 +3,22 @@
 # Independent Boundary Audit Checklist
 
 This checklist is written for a reviewer who did not build Solomon. It focuses on the boundary between
-firm knowledge, Kaypoh, model endpoints, storage, tenants, and audit evidence.
+firm knowledge, the vendored Kaypoh-derived boundary, model endpoints, storage, tenants, and audit evidence.
 
 ## Scope
 
 - Solomon repository only.
-- Kaypoh is treated as an external sibling dependency and is not modified by this audit.
+- The vendored boundary source is treated as in-scope Solomon code and must retain its Kaypoh provenance notice.
 - Audit evidence should be metadata-only unless a test explicitly uses synthetic fixture content.
 
 ## Checklist
 
 | Area | Control | Evidence |
 |---|---|---|
-| Kaypoh import boundary | Solomon imports or calls Kaypoh; it does not fork Kaypoh source. | `docs/kaypoh-integration.md`; `scripts/kaypoh_smoke.py`; `tests/test_boundary.py` |
-| Ingestion review | New knowledge can be reviewed before storage and unsafe content can be refused/quarantined. | `src/solomon/boundary/kaypoh.py`; `tests/test_boundary.py` |
+| Boundary provenance | Solomon vendors the Kaypoh-derived local boundary and records the source commit. | `src/solomon/boundary/engine/NOTICE`; `docs/kaypoh-integration.md`; `scripts/kaypoh_smoke.py` |
+| Ingestion review | New knowledge is reviewed before storage and unsafe content can be refused/quarantined. | `src/solomon/api/service.py`; `src/solomon/boundary/kaypoh.py`; `tests/test_api_client_cli.py` |
 | Model egress | Model-bound context is pseudonymized before egress and mappings are volatile. | `tests/test_boundary.py`; `tests/test_security_governance.py` |
-| Fail-closed behavior | Kaypoh outage blocks egress paths that require the boundary. | `tests/test_boundary.py` |
+| Fail-closed behavior | Boundary engine failure blocks ingestion and model egress paths. | `tests/test_api_client_cli.py`; `tests/test_boundary.py` |
 | Raw text discipline | Structured-token mode is the default; raw text requires explicit opt-in. | `docs/trust-boundary.md`; `docs/assumption.md` |
 | Prompt injection | Retrieved instructions are separated from facts/positions before prompt assembly. | `tests/test_credence.py`; `tests/test_security_governance.py` |
 | Tenant isolation | Server SKU namespaces data and journals by `x-tenant-id`. | `src/solomon/api/app.py`; `tests/test_api_client_cli.py` |

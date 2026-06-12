@@ -189,6 +189,18 @@
             "title": "Content",
             "type": "string"
           },
+          "ingested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ingested At"
+          },
           "kind": {
             "$ref": "#/components/schemas/KnowledgeKind"
           },
@@ -210,6 +222,18 @@
             "minLength": 1,
             "title": "Source Ref",
             "type": "string"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
           }
         },
         "required": [

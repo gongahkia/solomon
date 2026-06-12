@@ -87,6 +87,21 @@ def evaluate_currency(
             stale_reasons=stale_reasons,
         )
 
+    if item.currency_state is CurrencyState.SUPERSEDED:
+        if item.valid_to is not None:
+            explanation.append(f"valid_to closed at {item.valid_to.isoformat()}")
+        else:
+            explanation.append("item is already marked superseded")
+        if item.successor_id:
+            explanation.append(f"successor item: {item.successor_id}")
+        return CurrencyEvaluation(
+            item_id=item.id,
+            currency_state=CurrencyState.SUPERSEDED,
+            explanation=explanation,
+            verification_due=False,
+            stale_reasons=stale_reasons,
+        )
+
     if item.valid_to is not None and item.valid_to <= timestamp:
         explanation.append(f"valid_to closed at {item.valid_to.isoformat()}")
         if item.successor_id:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -92,6 +92,25 @@ class DependencyRequest(SolomonModel):
     reason: str | None = None
 
 
+class AnswerRequest(SolomonModel):
+    query: str
+    matter_id: str | None = None
+    client_id: str | None = None
+    matter_sensitivity: Literal["standard", "confidential", "strict"] = "standard"
+    limit: int = Field(default=5, ge=1)
+    max_context_tokens: int | None = Field(default=1200, ge=1)
+    max_tokens: int = Field(default=1024, ge=1)
+    temperature: float = Field(default=0.0, ge=0.0)
+
+
+class AnswerResponse(SolomonModel):
+    query: str
+    text: str
+    model: dict[str, Any]
+    recalled: list[dict[str, Any]]
+    prompt: dict[str, Any]
+
+
 class WhyTrace(SolomonModel):
     item: KnowledgeItem
     currency: dict[str, Any]
@@ -163,6 +182,56 @@ class SolomonService:
         )
         self.audit.log_query(query_id=request.query, results=results)
         return [result.model_dump(mode="json") for result in results]
+
+    def answer(self, request: AnswerRequest, router: ModelRouter) -> AnswerResponse:
+        recalled = self.recall(
+            RecallRequest(
+                query=request.query,
+                matter_id=request.matter_id,
+                client_id=request.client_id,
+                limit=request.limit,
+                max_context_tokens=request.max_context_tokens,
+            )
+        )
+        prompt = _build_answer_prompt(request.query, recalled)
+        matter = Matter(
+            id=request.matter_id or "ad-hoc",
+            client_id=request.client_id or "unknown-client",
+            name=request.matter_id or "Ad hoc answer request",
+            sensitivity=request.matter_sensitivity,
+        )
+        routed = self.complete_model_request(
+            router,
+            ModelRequest(
+                prompt=prompt,
+                matter_id=request.matter_id,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+            ),
+            matter=matter,
+        )
+        return AnswerResponse(
+            query=request.query,
+            text=routed.response.text,
+            model={
+                "endpoint": routed.audit.endpoint.value,
+                "reason": routed.audit.reason,
+                "crossed_boundary": routed.audit.crossed_boundary,
+                "fallback_used": routed.audit.fallback_used,
+                "quality_caveat": routed.audit.quality_caveat,
+                "prompt_sha256": routed.audit.prompt_sha256,
+                "prompt_chars": routed.audit.prompt_chars,
+                "latency_ms": routed.audit.latency_ms,
+                "cost_usd": routed.audit.cost_usd,
+                "response_metadata": routed.response.metadata,
+            },
+            recalled=recalled,
+            prompt={
+                "context_item_ids": [entry["item"]["id"] for entry in recalled],
+                "context_count": len(recalled),
+                "boundary_applied": True,
+            },
+        )
 
     def complete_model_request(
         self,
@@ -329,3 +398,31 @@ class SolomonService:
                 "verified_by": item.provenance.author or f"source:{item.provenance.source_kind.value}",
             }
         )
+
+
+def _build_answer_prompt(query: str, recalled: list[dict[str, Any]]) -> str:
+    context_blocks: list[str] = []
+    for index, entry in enumerate(recalled, start=1):
+        item = entry["item"]
+        provenance = entry["provenance"]
+        context_blocks.append(
+            "\n".join(
+                [
+                    f"[{index}] item_id={item['id']}",
+                    f"currency={entry['currency_state']} credence={item['credence_tier']}",
+                    f"source={provenance['source_ref']} source_kind={provenance['source_kind']}",
+                    f"stale_reasons={entry['stale_reasons']}",
+                    item["content"],
+                ]
+            )
+        )
+    context = "\n\n".join(context_blocks) if context_blocks else "No live Solomon context was recalled."
+    return "\n".join(
+        [
+            "You are answering from Solomon's recalled firm knowledge.",
+            "Use only the recalled context. If context is missing or stale, say so.",
+            f"Question: {query}",
+            "Recalled context:",
+            context,
+        ]
+    )

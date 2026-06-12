@@ -26,7 +26,7 @@ from solomon.config import Settings
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.graph.models import EdgeType
-from solomon.orchestrator.models import EndpointKind, ModelRequest, ModelResponse
+from solomon.orchestrator.models import EndpointKind, ModelRequest, ModelResponse, ModelRouter
 
 
 def test_service_ingest_recall_why_and_timeline(tmp_path: Path) -> None:
@@ -191,6 +191,7 @@ def test_fastapi_app_exposes_public_verbs(tmp_path: Path) -> None:
     assert {
         "/ingest",
         "/recall",
+        "/answer",
         "/currency/{item_id}",
         "/verification/{item_id}",
         "/authorities/{authority_id}/changes",
@@ -201,6 +202,66 @@ def test_fastapi_app_exposes_public_verbs(tmp_path: Path) -> None:
         "/why/{item_id}",
         "/timeline",
     }.issubset(paths)
+
+
+def test_answer_endpoint_runs_recall_boundary_router_model_workflow(tmp_path: Path) -> None:
+    app = create_app(Settings(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal"))
+
+    class CapturingEndpoint:
+        kind = EndpointKind.REMOTE_ZDR
+
+        def __init__(self) -> None:
+            self.calls = 0
+            self.seen_prompt = ""
+
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            self.calls += 1
+            self.seen_prompt = request.prompt
+            return ModelResponse(text=f"Answer from {request.prompt}", endpoint=self.kind)
+
+    remote = CapturingEndpoint()
+    local = CapturingEndpoint()
+    app.state.router = ModelRouter(remote=remote, local=local)
+
+    async def exercise() -> tuple[httpx.Response, httpx.Response]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            created = await client.post(
+                "/ingest",
+                json={
+                    "kind": "position",
+                    "content": "Client A position under Regulation R section 12.",
+                    "source_kind": "partner",
+                    "source_ref": "memo-answer",
+                    "matter_id": "matter-a",
+                    "client_id": "client-a",
+                },
+            )
+            answer = await client.post(
+                "/answer",
+                json={
+                    "query": "Client A Regulation R",
+                    "matter_id": "matter-a",
+                    "client_id": "client-a",
+                    "limit": 3,
+                },
+            )
+            return created, answer
+
+    created, answer = asyncio.run(exercise())
+
+    assert created.status_code == 200
+    assert answer.status_code == 200
+    payload = answer.json()
+    assert payload["recalled"][0]["item"]["id"] == created.json()["id"]
+    assert payload["prompt"]["context_item_ids"] == [created.json()["id"]]
+    assert payload["prompt"]["boundary_applied"] is True
+    assert payload["model"]["endpoint"] == "remote_zdr"
+    assert remote.calls == 1
+    assert local.calls == 0
+    assert "Client A" not in remote.seen_prompt
+    assert "[CLIENT_1]" in remote.seen_prompt
+    assert "Client A" in payload["text"]
 
 
 def test_server_mode_requires_and_isolates_tenants(tmp_path: Path) -> None:

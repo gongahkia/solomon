@@ -59,7 +59,7 @@ checkout is required at runtime.
 - [x] Remote-ZDR and local endpoint abstractions exist with model-call metadata.
 - [x] Sensitivity router sends strict and zero-egress matters local-only, with tests proving the remote endpoint is not called.
 - [x] Remote failure can fall back to local when policy allows.
-- [ ] There is no public API endpoint that runs a full recall -> boundary -> router -> model answer workflow.
+- [x] Public `/answer` API endpoint runs recall -> boundary sanitization/reidentification -> router -> model answer and returns recall/model audit evidence.
 - [ ] Provider clients are minimal HTTP wrappers, not production provider integrations.
 
 ## Phase 6 — Credence ledger and verification

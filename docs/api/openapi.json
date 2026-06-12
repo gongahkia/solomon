@@ -1,6 +1,83 @@
 {
   "components": {
     "schemas": {
+      "AnswerRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "limit": {
+            "default": 5,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "matter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matter Id"
+          },
+          "matter_sensitivity": {
+            "default": "standard",
+            "enum": [
+              "standard",
+              "confidential",
+              "strict"
+            ],
+            "title": "Matter Sensitivity",
+            "type": "string"
+          },
+          "max_context_tokens": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 1200,
+            "title": "Max Context Tokens"
+          },
+          "max_tokens": {
+            "default": 1024,
+            "minimum": 1.0,
+            "title": "Max Tokens",
+            "type": "integer"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "temperature": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Temperature",
+            "type": "number"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "AnswerRequest",
+        "type": "object"
+      },
       "AuthorityChangeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -553,6 +630,46 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/answer": {
+      "post": {
+        "operationId": "answer_answer_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Answer Answer Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Answer"
+      }
+    },
     "/authorities/{authority_id}/changes": {
       "post": {
         "operationId": "authority_change_authorities__authority_id__changes_post",

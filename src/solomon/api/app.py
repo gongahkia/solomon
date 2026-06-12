@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from solomon import __version__
 from solomon.api.service import (
+    AnswerRequest,
     AuthorityChangeRequest,
     DependencyRequest,
     IngestRequest,
@@ -24,6 +25,7 @@ from solomon.boundary.kaypoh import KaypohImportStatus, probe_kaypoh_client
 from solomon.config import Settings, get_settings
 from solomon.errors import SolomonError
 from solomon.graph.visualization import GraphFormat
+from solomon.orchestrator.models import LocalModelEndpoint, ModelRouter, RemoteZDREndpoint, RoutingPolicy
 
 PUBLIC_PATHS = {"/health", "/ready", "/docs", "/redoc", "/openapi.json"}
 TENANT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
@@ -83,6 +85,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = resolved_settings
     app.state.service = service
+    app.state.router = _model_router_from_settings(resolved_settings)
+
+    def active_router() -> ModelRouter:
+        resolved = getattr(app.state, "router", None)
+        if isinstance(resolved, ModelRouter):
+            return resolved
+        return _model_router_from_settings(resolved_settings)
 
     @app.middleware("http")
     async def server_api_key_middleware(request: Request, call_next: Any) -> Any:
@@ -133,6 +142,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/recall")
     def recall(request: Request, payload: RecallRequest) -> list[dict[str, Any]]:
         return active_service(request).recall(payload)
+
+    @app.post("/answer")
+    def answer(request: Request, payload: AnswerRequest) -> dict[str, Any]:
+        return active_service(request).answer(payload, active_router()).model_dump(mode="json")
 
     @app.get("/currency/{item_id}")
     def currency(request: Request, item_id: str) -> dict[str, Any]:
@@ -186,6 +199,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return active_service(request).timeline(payload, as_of=as_of)
 
     return app
+
+
+def _model_router_from_settings(settings: Settings) -> ModelRouter:
+    local = LocalModelEndpoint(url=settings.local_model_url)
+    remote = RemoteZDREndpoint(url=settings.remote_model_url or settings.local_model_url)
+    return ModelRouter(
+        remote=remote,
+        local=local,
+        policy=RoutingPolicy(
+            remote_allowed=settings.allow_remote_egress and settings.remote_model_url is not None,
+            zero_egress_mode=settings.zero_egress_mode,
+        ),
+    )
 
 
 app = create_app()

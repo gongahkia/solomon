@@ -147,6 +147,24 @@ If a deployment needs encryption at rest today, use filesystem, volume, or
 platform encryption around the store path, and do not treat Shibahama snapshots
 as sanitized exports.
 
+## Public Surface Checklist
+
+The current public security-relevant surfaces are:
+
+- `shibahama_core::encryption::EncryptionAtRest`, exported through
+  `core/src/lib.rs`, for future encryption-at-rest providers;
+- `shibahama_core::encryption::NoopEncryption`, the explicit no-op provider;
+- server request logs from `shibahama serve`, emitted through
+  `log_server_request` as metadata and cost counters only;
+- recall candidate `read_safety_findings`, exposed by the Rust core and
+  bindings;
+- `why(memory_id)` traces, which expose provenance, credence, tier, currency,
+  significance, and audit information for a memory.
+
+This confirms the encryption hook and metadata-only logging behavior are visible
+from the repository's public surfaces. It does not mean encryption is active by
+default.
+
 ## Snapshots And Exports
 
 Snapshots and exports preserve memory content, provenance, event history,

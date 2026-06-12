@@ -16,6 +16,7 @@ from solomon.evaluation import (
     generate_synthetic_corpus,
     impact_query_recall,
     render_results_table,
+    run_boundary_fidelity_suite,
     run_currency_evaluation,
     stale_surface_rate,
     time_to_flag,
@@ -72,6 +73,14 @@ def test_boundary_fidelity_eval_flags_leaks() -> None:
 
     assert result.ok is False
     assert result.leaked_event_ids == ["leak"]
+
+
+def test_boundary_fidelity_suite_runs_vendored_boundary_roundtrip() -> None:
+    result = run_boundary_fidelity_suite()
+
+    assert result.ok is True
+    assert result.total_events >= 3
+    assert result.leaked_event_ids == []
 
 
 def test_recall_weight_calibration_selects_default_profile() -> None:

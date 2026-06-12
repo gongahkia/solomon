@@ -117,7 +117,7 @@ checkout is required at runtime.
 - [x] Evaluation harness now actually writes the corpus to store/graph/index, runs propagation, recall, warehouse baseline, decay baseline, and timing.
 - [x] Metrics include stale-surface rate, time-to-flag, and impact-query recall.
 - [ ] Evaluation remains synthetic and curated; it is not a jurisdictional coverage benchmark or external-law-monitoring benchmark.
-- [ ] Boundary-fidelity evaluation is a small forbidden-term scan, not a full Kaypoh recall evaluation.
+- [x] Boundary-fidelity evaluation runs an executable vendored-boundary suite covering sanitization, reidentification, leak checks, and volatile mapping flushes.
 
 ## Phase 13 — Testing and correctness
 

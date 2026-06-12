@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import Field
 
 from solomon.api.schemas import SolomonModel
+from solomon.boundary.kaypoh import KaypohBoundary
 from solomon.currency.models import (
     CredenceTier,
     CurrencyState,
@@ -70,6 +71,12 @@ class BoundaryFidelityResult(SolomonModel):
     leaked_event_ids: list[str] = Field(default_factory=list)
 
 
+class BoundaryFidelityCase(SolomonModel):
+    case_id: str
+    input_text: str
+    forbidden_terms: list[str]
+
+
 class RankingCalibrationItem(SolomonModel):
     candidate_id: str
     similarity: float = Field(ge=0.0, le=1.0)
@@ -125,6 +132,24 @@ DEFAULT_RECALL_WEIGHT_CANDIDATES = [
     RecallWeights(similarity=0.85, credence=0.10, centrality=0.05),
     RecallWeights(similarity=0.55, credence=0.35, centrality=0.10),
     RecallWeights(similarity=0.55, credence=0.15, centrality=0.30),
+]
+
+DEFAULT_BOUNDARY_FIDELITY_CASES = [
+    BoundaryFidelityCase(
+        case_id="client-and-person",
+        input_text="Client A asked Jane Doe about Regulation R.",
+        forbidden_terms=["Client A", "Jane"],
+    ),
+    BoundaryFidelityCase(
+        case_id="person-and-client",
+        input_text="Send Jane the memo for Client A.",
+        forbidden_terms=["Jane", "Client A"],
+    ),
+    BoundaryFidelityCase(
+        case_id="organisation",
+        input_text="Acme Pte Ltd instructed us.",
+        forbidden_terms=["Acme Pte Ltd"],
+    ),
 ]
 
 
@@ -237,6 +262,31 @@ def boundary_fidelity_eval(events: list[dict[str, str]], *, forbidden_terms: set
             leaked.append(event.get("event_id", "<unknown>"))
     return BoundaryFidelityResult(
         total_events=len(events),
+        leaked_events=len(leaked),
+        ok=not leaked,
+        leaked_event_ids=leaked,
+    )
+
+
+def run_boundary_fidelity_suite(
+    *,
+    boundary: KaypohBoundary | None = None,
+    cases: list[BoundaryFidelityCase] | None = None,
+) -> BoundaryFidelityResult:
+    resolved_boundary = boundary or KaypohBoundary()
+    resolved_cases = cases or DEFAULT_BOUNDARY_FIDELITY_CASES
+    leaked: list[str] = []
+    for case in resolved_cases:
+        sanitized = resolved_boundary.sanitize_context(case.input_text, matter_id=case.case_id)
+        if any(term in sanitized.sanitized_text for term in case.forbidden_terms):
+            leaked.append(f"{case.case_id}:sanitized")
+        reidentified = resolved_boundary.reidentify_response(sanitized.context_id, sanitized.sanitized_text)
+        if reidentified.text != case.input_text:
+            leaked.append(f"{case.case_id}:reidentified")
+        if resolved_boundary.volatile_mapping_count() != 0:
+            leaked.append(f"{case.case_id}:mapping")
+    return BoundaryFidelityResult(
+        total_events=len(resolved_cases),
         leaked_events=len(leaked),
         ok=not leaked,
         leaked_event_ids=leaked,

@@ -92,7 +92,7 @@ checkout is required at runtime.
 - [x] API exposes ingest, recall, currency, verification, authority change, dependency add, impact, graph, references, staleness prediction, why, and timeline.
 - [x] Python sync/async client exists for ingest/recall/why.
 - [x] Server-mode middleware enforces API key and tenant isolation.
-- [ ] CLI exists but has no direct test coverage.
+- [x] CLI direct test coverage exists for version/diagnostics plus ingest -> recall -> why on an isolated local store.
 - [x] OpenAPI export has been regenerated after boundary/ingest schema changes.
 
 ## Phase 10 — Local vs server SKU

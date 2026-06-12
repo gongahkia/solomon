@@ -9,12 +9,13 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 
 ## Stop point / next work
 
-Stopped on 2026-06-12 after the benchmark and coding-agent demo slices.
+Updated on 2026-06-12 after completing the local documentation and examples pass.
 
-Current uncommitted local state:
-- `TODO.md` has Phase 12 testing items checked off based on existing core tests plus a new correctness smoke.
-- `scripts/ci/correctness-smoke.py` is untracked; it passed once and covers invalidated recall, never-delete behavior, malformed/adversarial ingestion, poisoning quarantine, a 10k-session soak, and Python/Node parity.
-- Decide next whether to keep and commit that smoke script, or revert the Phase 12 checkbox changes.
+Current local state:
+- The working tree is expected to be clean after the latest task commit.
+- This branch is ahead of `origin/main` by the local task commits from this pass.
+- Phase 14 now has architecture, concepts, benchmarks, security, ADR index, naming/philosophy docs, and runnable Rust/Python/Node examples.
+- Phase 16 now confirms the encryption-at-rest trait and metadata-only logging hooks are documented and visible from public surfaces.
 
 Still not done / next up:
 - Publishing is blocked on registry credentials or trusted publishing setup:
@@ -27,22 +28,19 @@ Still not done / next up:
   - Implement real ablations for significance/reconstruction/graph toggles; do not mark done with placeholder labels.
   - Run Mem0 and Zep adapters with real credentials/config to complete the "all systems" CurrencyBench gap claim.
 - Performance:
-  - Add recall latency benchmark with p50/p95 budget.
-  - Audit hot paths for accidental global scans.
   - Profile significance recompute.
   - Add embedded memory-footprint budget.
   - Add tested multi-reader/single-writer or MVCC concurrency story.
 - Documentation:
   - Replace the stub README with the full thesis/quickstart/benchmark/debugger narrative.
-  - Write `docs/architecture.md`, `docs/concepts.md`, `docs/benchmarks.md`, and `docs/security.md`.
-  - Generate or collect API references for Rust, TypeScript/Node, and Python.
-  - Add runnable snippets per binding under `examples/`.
-  - Keep the ADR index current.
+  - Generate API references from Rust, TypeScript/Node, and Python doc comments/docstrings.
 - Launch assets:
   - Record the Tideline README demo GIF.
   - Draft Show HN post, FAQ, short launch writeup, and early-user outreach notes.
-- Final security/posture check:
-  - Confirm the encryption-at-rest trait and metadata-only logging hooks are documented and visible from the public surface.
+- Legal-tech bridge:
+  - Confirm forgetting can be globally disabled in favour of flag-for-reverification.
+  - Confirm credence taxonomy is swappable.
+  - Stub the sanitising-gateway integration point.
 
 ---
 

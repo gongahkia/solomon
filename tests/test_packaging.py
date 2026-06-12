@@ -5,11 +5,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
-    import tomli as tomllib
-
+import tomli
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,7 +22,7 @@ def test_pyinstaller_spec_targets_local_cli_binary() -> None:
 
 
 def test_packaging_docs_match_project_version_and_dependencies() -> None:
-    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    pyproject = tomli.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     version = pyproject["project"]["version"]
     packaging_deps = pyproject["project"]["optional-dependencies"]["packaging"]
     docs = (ROOT / "packaging" / "README.md").read_text(encoding="utf-8")

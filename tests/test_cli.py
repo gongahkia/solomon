@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from solomon import __version__
@@ -14,14 +15,14 @@ from solomon.config import get_settings
 runner = CliRunner()
 
 
-def _configure_cli_store(monkeypatch, tmp_path: Path) -> None:
+def _configure_cli_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("SOLOMON_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("SOLOMON_JOURNAL_DIR", str(tmp_path / "journal"))
     monkeypatch.setenv("SOLOMON_VERIFICATION_ATTESTATION_KEY", "test-secret")
     get_settings.cache_clear()
 
 
-def test_cli_version_and_diagnostics(monkeypatch, tmp_path: Path) -> None:
+def test_cli_version_and_diagnostics(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _configure_cli_store(monkeypatch, tmp_path)
 
     version = runner.invoke(app, ["--version"])
@@ -38,7 +39,7 @@ def test_cli_version_and_diagnostics(monkeypatch, tmp_path: Path) -> None:
     assert payload["kaypoh"]["importable"] is True
 
 
-def test_cli_ingest_recall_and_why_use_same_local_store(monkeypatch, tmp_path: Path) -> None:
+def test_cli_ingest_recall_and_why_use_same_local_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _configure_cli_store(monkeypatch, tmp_path)
 
     ingest = runner.invoke(

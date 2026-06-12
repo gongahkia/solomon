@@ -208,8 +208,8 @@ def test_staleness_forecast_uses_authority_change_history(tmp_path: Path) -> Non
         graph=graph,
         store=store,
         history=[
-            AuthorityChangeHistory(authority_id="reg-r-12", changed_at="2023-01-01T00:00:00+00:00"),
-            AuthorityChangeHistory(authority_id="reg-r-12", changed_at="2023-06-01T00:00:00+00:00"),
+            AuthorityChangeHistory(authority_id="reg-r-12", changed_at=_dt(2023)),
+            AuthorityChangeHistory(authority_id="reg-r-12", changed_at=datetime(2023, 6, 1, tzinfo=timezone.utc)),
         ],
         as_of=_dt(2024),
         lookahead_days=60,

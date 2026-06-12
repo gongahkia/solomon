@@ -8,6 +8,7 @@ Architecture notes, ADRs, API references, performance notes, and launch document
 - `concepts.md`: plain-language explanation of memories, significance, tiers, credence, reconstruction, and graph concepts.
 - `performance.md`: recall latency budget and hot-path scan boundaries.
 - `horizontal-scale.md`: namespace sharding story for scaling optional server deployments.
+- `launch/early-users.md`: early-user outreach notes and feedback triage plan.
 - `launch/faq.md`: launch FAQ for common objections and security questions.
 - `launch/show-hn.md`: draft Show HN launch post.
 - `launch/writeup.md`: short launch writeup for the project thesis and current status.

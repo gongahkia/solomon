@@ -29,7 +29,7 @@ from solomon.currency.models import (
     VerifiedState,
 )
 from solomon.currency.prediction import PendingAuthorityAmendment, StalenessRiskReport, predict_staleness_risk
-from solomon.errors import NotFoundError
+from solomon.errors import NotFoundError, PolicyRefusalError
 from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
 from solomon.graph.propagation import CurrencyPropagator
 from solomon.graph.store import GraphStore
@@ -195,6 +195,7 @@ class SolomonService:
                 max_context_tokens=request.max_context_tokens,
             )
         )
+        self._enforce_load_bearing_answer_policy(request, recalled)
         prompt = _build_answer_prompt(request.query, recalled)
         matter = Matter(
             id=request.matter_id or "ad-hoc",
@@ -405,6 +406,29 @@ class SolomonService:
     def _persist_credence_entries(self, *, start: int) -> None:
         for entry in self.credence.entries[start:]:
             self.audit.log_credence_change(entry)
+
+    def _enforce_load_bearing_answer_policy(self, request: AnswerRequest, recalled: list[dict[str, Any]]) -> None:
+        refusals: list[dict[str, Any]] = []
+        if not recalled:
+            refusals.append({"item_id": None, "reasons": ["no live context recalled for load-bearing answer"]})
+        for entry in recalled:
+            item = KnowledgeItem.model_validate(entry["item"])
+            decision = self.credence.load_bearing_decision(item)
+            if not decision.allowed:
+                refusals.append(decision.model_dump(mode="json"))
+        if not refusals:
+            return
+        self.audit.append(
+            "load_bearing_refusal",
+            {
+                "query_id": request.query,
+                "matter_id": request.matter_id,
+                "client_id": request.client_id,
+                "refusals": refusals,
+            },
+        )
+        reason_text = "; ".join(", ".join(refusal["reasons"]) for refusal in refusals)
+        raise PolicyRefusalError(f"load-bearing answer refused: {reason_text}")
 
     def _seed_verification_from_source(self, item: KnowledgeItem) -> KnowledgeItem:
         if item.credence_tier not in {CredenceTier.FIRM_AUTHORITATIVE, CredenceTier.VERIFIED}:

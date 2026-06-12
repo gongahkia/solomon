@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ from solomon.boundary.kaypoh import BoundaryUnavailableError, KaypohBoundary
 from solomon.client import SolomonClient
 from solomon.config import Settings
 from solomon.currency.engine import VerificationOutcome
-from solomon.currency.models import KnowledgeKind, SourceKind
+from solomon.currency.models import CredenceTier, KnowledgeItem, KnowledgeKind, Provenance, SourceKind
 from solomon.graph.models import EdgeType
 from solomon.orchestrator.models import EndpointKind, ModelRequest, ModelResponse, ModelRouter
 
@@ -288,6 +289,51 @@ def test_answer_endpoint_runs_recall_boundary_router_model_workflow(tmp_path: Pa
     assert "prompt_sha256" in raw_journal
     assert "Client A position under Regulation R section 12." not in raw_journal
     assert "Answer from" not in raw_journal
+
+
+def test_answer_endpoint_refuses_low_credence_context_before_model_call(tmp_path: Path) -> None:
+    app = create_app(Settings(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal"))
+    service = app.state.service
+    low = KnowledgeItem(
+        id="model-only",
+        kind=KnowledgeKind.POSITION,
+        content="model-only structure x",
+        provenance=Provenance(source_kind=SourceKind.MODEL, source_ref="llm"),
+        credence_tier=CredenceTier.MODEL_INFERRED,
+        last_verified_at=datetime.now(tz=timezone.utc),
+    )
+    indexed = service.index.upsert_item(low)
+    service.store.write_item(indexed)
+
+    class CountingEndpoint:
+        kind = EndpointKind.REMOTE_ZDR
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            self.calls += 1
+            return ModelResponse(text="should not be called", endpoint=self.kind)
+
+    remote = CountingEndpoint()
+    local = CountingEndpoint()
+    app.state.router = ModelRouter(remote=remote, local=local)
+
+    async def exercise() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.post("/answer", json={"query": "model-only structure"})
+
+    response = asyncio.run(exercise())
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "policy_refusal"
+    assert "ModelInferred" in response.json()["error"]["message"]
+    assert remote.calls == 0
+    assert local.calls == 0
+    raw_journal = (tmp_path / "journal" / "journal.jsonl").read_text(encoding="utf-8")
+    assert "load_bearing_refusal" in raw_journal
+    assert "model-only structure x" not in raw_journal
 
 
 def test_server_mode_requires_and_isolates_tenants(tmp_path: Path) -> None:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -180,88 +179,6 @@ class WarehouseAdapter:
         return "\n".join(content for overlap, _, content in scored[:top_k] if overlap > 0)
 
 
-class Mem0Adapter:
-    """Adapter for the Mem0 OSS Python SDK.
-
-    This follows the public SDK shape documented by Mem0: `Memory().add(...)`
-    and `Memory().search(..., filters={"user_id": ...})`.
-    """
-
-    name = "mem0"
-
-    def __init__(self) -> None:
-        try:
-            from mem0 import Memory
-        except ImportError as error:
-            raise RuntimeError("install mem0ai and configure its model/vector backend") from error
-
-        self._memory_cls = Memory
-        self._memory = None
-        self._user_id = "shibahama-bench"
-
-    def reset(self, case_name: str) -> None:
-        self._memory = self._memory_cls()
-        self._user_id = f"shibahama-bench-{case_name}"
-
-    def ingest(self, observation: Observation) -> None:
-        assert self._memory is not None
-        messages = [{"role": "user", "content": observation.content}]
-        self._memory.add(messages, user_id=self._user_id)
-
-    def query(self, prompt: str, top_k: int, now_unix: int) -> str:
-        assert self._memory is not None
-        result = self._memory.search(prompt, filters={"user_id": self._user_id}, limit=top_k)
-        rows = result.get("results", result if isinstance(result, list) else [])
-
-        return "\n".join(str(row.get("memory", row)) for row in rows[:top_k])
-
-
-class ZepAdapter:
-    """Adapter for Zep Cloud's current thread context API."""
-
-    name = "zep"
-
-    def __init__(self) -> None:
-        api_key = os.environ.get("ZEP_API_KEY")
-        if not api_key:
-            raise RuntimeError("set ZEP_API_KEY before running the Zep adapter")
-
-        try:
-            from zep_cloud.client import Zep
-            from zep_cloud.types import Message
-        except ImportError:
-            try:
-                from zep_cloud import Zep, Message
-            except ImportError as error:
-                raise RuntimeError("install zep-cloud before running the Zep adapter") from error
-
-        self._client = Zep(api_key=api_key)
-        self._message_cls = Message
-        self._user_id = "shibahama-bench"
-        self._thread_id = "shibahama-bench"
-
-    def reset(self, case_name: str) -> None:
-        self._user_id = f"shibahama-bench-{case_name}"
-        self._thread_id = f"shibahama-bench-{case_name}"
-        self._client.user.add(user_id=self._user_id)
-        self._client.thread.create(thread_id=self._thread_id, user_id=self._user_id)
-
-    def ingest(self, observation: Observation) -> None:
-        message = self._message_cls(
-            role="user",
-            content=observation.content,
-            name="benchmark",
-        )
-        self._client.thread.add_messages(thread_id=self._thread_id, messages=[message])
-
-    def query(self, prompt: str, top_k: int, now_unix: int) -> str:
-        message = self._message_cls(role="user", content=prompt, name="benchmark")
-        self._client.thread.add_messages(thread_id=self._thread_id, messages=[message])
-        context = self._client.thread.get_user_context(thread_id=self._thread_id)
-
-        return str(context.context)
-
-
 @dataclass(frozen=True)
 class AdapterFactory:
     """Named adapter constructor."""
@@ -276,6 +193,4 @@ ADAPTERS: dict[str, type[MemoryAdapter]] = {
     "shibahama-no-reconstruction": ShibahamaNoReconstructionAdapter,
     "shibahama-no-graph": ShibahamaNoGraphAdapter,
     "warehouse": WarehouseAdapter,
-    "mem0": Mem0Adapter,
-    "zep": ZepAdapter,
 }

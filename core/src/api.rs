@@ -4,7 +4,14 @@
 
 use crate::anomaly::AnomalyConfig;
 use crate::model::{AccessOutcome, CredenceTier, MemoryId, MemoryItem, Provenance, Tier};
-use crate::reconstruction::{BackgroundReconstructionConfig, ReconstructionBudgetConfig};
+use crate::reconstruction::{
+    BackgroundReconstructionConfig, CorroborationDecision, CorroborationPolicy,
+    CorroborationSignal, DefaultRevalidationHook, QuarantinedProposal, ReconstructionBudgetConfig,
+    ReconstructionBudgetDenial, ReconstructionMode, ReconstructionTrigger, RevalidationAction,
+    RevalidationHook, RevalidationSource, apply_reconstruction_budget,
+    evaluate_corroboration, evaluate_reconstruction_gate, promote_corroborated_proposal,
+    quarantine_proposal, triggers_from_recall,
+};
 use crate::retrieval::{
     RecallCandidate, RecallCandidateCurrency, RecallDiversificationConfig, RecallError,
     RecallRankingConfig, RecallRequest, RecallStalenessConfig, recall, timeline,
@@ -12,9 +19,10 @@ use crate::retrieval::{
 use crate::significance::{SignificanceBreakdown, SignificanceConfig};
 use crate::storage::{
     EventRecord, IngestCredencePolicy, MemoryAuditEntry, MemoryWriteEvent, RedbMemoryStore,
-    StorageError, TierCapacityConfig,
+    ReconstructionReplacementRecord, StorageError, TierCapacityConfig,
 };
 use crate::vector::{VectorIndex, VectorIndexError};
+use std::collections::BTreeMap;
 use std::iter::FusedIterator;
 use std::path::Path;
 #[cfg(feature = "tokio")]
@@ -199,6 +207,7 @@ impl ShibahamaConfig {
     ) -> RecallRequest<'_> {
         RecallRequest::new(query_vector, top_k, now)
             .with_ranking(self.recall_ranking)
+            .with_significance(self.significance)
             .with_staleness(self.recall_staleness)
             .with_diversification(self.recall_diversification)
     }
@@ -232,6 +241,40 @@ pub struct WriteEmbedding<'a> {
     pub model: &'a str,
     /// Embedding model version.
     pub model_version: &'a str,
+}
+
+/// Status for one explicit reconstruction trigger.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ExplicitReconstructionStatus {
+    /// Trigger was blocked by the reconstruction budget.
+    Deferred(ReconstructionBudgetDenial),
+    /// Gate allowed the trigger, but the referenced memory no longer exists.
+    MissingOriginal,
+    /// Revalidation source produced no replacement observation.
+    NoObservation,
+    /// Replacement observation exists but remains quarantined pending corroboration.
+    Quarantined,
+    /// Corroborated replacement invalidated the superseded memory and was written.
+    Applied,
+}
+
+/// Result for one trigger processed by explicit reconstruction.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExplicitReconstructionOutcome {
+    /// Trigger considered by the loop.
+    pub trigger: ReconstructionTrigger,
+    /// Action planned for external revalidation, when the trigger was processed.
+    pub action: Option<RevalidationAction>,
+    /// Quarantined proposal, when a revalidation source produced a replacement observation.
+    pub proposal: Option<QuarantinedProposal>,
+    /// Corroboration decision for the proposal.
+    pub corroboration: Option<CorroborationDecision>,
+    /// Promoted replacement written to storage, when applied.
+    pub replacement: Option<MemoryItem>,
+    /// Event records produced by invalidate-not-delete plus replacement write.
+    pub records: Option<ReconstructionReplacementRecord>,
+    /// Final status.
+    pub status: ExplicitReconstructionStatus,
 }
 
 /// Owned embedding metadata for async write calls.
@@ -306,6 +349,8 @@ pub struct AsyncRecallRequest {
     pub include_instructions: bool,
     /// Ranking weights applied to retrieved candidates.
     pub ranking: RecallRankingConfig,
+    /// Significance policy used for lazy pre-rank refresh and surfaced-access updates.
+    pub significance: SignificanceConfig,
     /// Policy for flagging load-bearing but possibly stale memories.
     pub staleness: RecallStalenessConfig,
     /// Policy for suppressing near-duplicate results.
@@ -329,6 +374,7 @@ impl AsyncRecallRequest {
             include_cold: request.include_cold,
             include_instructions: request.include_instructions,
             ranking: request.ranking,
+            significance: request.significance,
             staleness: request.staleness,
             diversification: request.diversification,
             max_context_tokens: request.max_context_tokens,
@@ -362,6 +408,7 @@ impl AsyncRecallRequest {
             include_cold: request.include_cold,
             include_instructions: request.include_instructions,
             ranking: request.ranking,
+            significance: request.significance,
             staleness: request.staleness,
             diversification: request.diversification,
             max_context_tokens: request.max_context_tokens,
@@ -396,6 +443,13 @@ impl AsyncRecallRequest {
         self
     }
 
+    /// Overrides the significance policy used by this request.
+    #[must_use]
+    pub const fn with_significance(mut self, significance: SignificanceConfig) -> Self {
+        self.significance = significance;
+        self
+    }
+
     /// Overrides stale-load-bearing detection policy for this request.
     #[must_use]
     pub const fn with_staleness(mut self, staleness: RecallStalenessConfig) -> Self {
@@ -426,6 +480,7 @@ impl AsyncRecallRequest {
         request.include_cold = self.include_cold;
         request.include_instructions = self.include_instructions;
         request.ranking = self.ranking;
+        request.significance = self.significance;
         request.staleness = self.staleness;
         request.diversification = self.diversification;
         request.max_context_tokens = self.max_context_tokens;
@@ -705,7 +760,12 @@ impl<V: VectorIndex> Shibahama<V> {
         &self,
         request: &RecallRequest<'_>,
     ) -> Result<Vec<RecallCandidate>, ShibahamaError> {
-        Ok(recall(&self.store, &self.vector_index, request)?)
+        let mut request = *request;
+        if request.significance == SignificanceConfig::default() {
+            request.significance = self.config.significance;
+        }
+
+        Ok(recall(&self.store, &self.vector_index, &request)?)
     }
 
     /// Recalls current fact memories and returns an owning iterator over ranked candidates.
@@ -720,6 +780,155 @@ impl<V: VectorIndex> Shibahama<V> {
         Ok(RecallStream::new(self.recall(request)?))
     }
 
+    /// Runs the gated reconstruction loop for stale load-bearing recall candidates.
+    ///
+    /// Plain `recall` never calls this method or mutates validity. Callers must explicitly provide
+    /// a revalidation source and corroboration signals before a replacement can leave quarantine.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage reads, budgeted replacement writes, or event replay fail.
+    pub fn reconstruct_from_recall<S>(
+        &self,
+        candidates: &[RecallCandidate],
+        source: &S,
+        corroboration_signals: &[(MemoryId, Vec<CorroborationSignal>)],
+        now: OffsetDateTime,
+    ) -> Result<Vec<ExplicitReconstructionOutcome>, ShibahamaError>
+    where
+        S: RevalidationSource,
+    {
+        let triggers = triggers_from_recall(candidates);
+        let gate = evaluate_reconstruction_gate(&triggers, ReconstructionMode::ExplicitRevalidation);
+
+        if !gate.may_run {
+            return Ok(Vec::new());
+        }
+
+        let budget = apply_reconstruction_budget(
+            &gate.triggers,
+            &[],
+            &[],
+            now,
+            self.config.reconstruction_budget,
+        );
+        let signals_by_memory = corroboration_signals
+            .iter()
+            .map(|(id, signals)| (*id, signals.as_slice()))
+            .collect::<BTreeMap<_, _>>();
+        let candidates_by_memory = candidates
+            .iter()
+            .map(|candidate| (candidate.id, candidate))
+            .collect::<BTreeMap<_, _>>();
+        let hook = DefaultRevalidationHook;
+        let policy = CorroborationPolicy::default();
+        let mut outcomes = Vec::new();
+
+        for deferred in budget.deferred {
+            outcomes.push(ExplicitReconstructionOutcome {
+                trigger: deferred.trigger,
+                action: None,
+                proposal: None,
+                corroboration: None,
+                replacement: None,
+                records: None,
+                status: ExplicitReconstructionStatus::Deferred(deferred.reason),
+            });
+        }
+
+        for trigger in budget.allowed {
+            let Some(candidate) = candidates_by_memory.get(&trigger.memory_id) else {
+                outcomes.push(ExplicitReconstructionOutcome {
+                    trigger,
+                    action: None,
+                    proposal: None,
+                    corroboration: None,
+                    replacement: None,
+                    records: None,
+                    status: ExplicitReconstructionStatus::MissingOriginal,
+                });
+                continue;
+            };
+
+            let Some(original) = self.store.get(trigger.memory_id)? else {
+                outcomes.push(ExplicitReconstructionOutcome {
+                    trigger,
+                    action: None,
+                    proposal: None,
+                    corroboration: None,
+                    replacement: None,
+                    records: None,
+                    status: ExplicitReconstructionStatus::MissingOriginal,
+                });
+                continue;
+            };
+
+            let action = hook.plan_revalidation(&trigger, &candidate.provenance);
+            let Some(event) = source.revalidate(&action, &original, now) else {
+                outcomes.push(ExplicitReconstructionOutcome {
+                    trigger,
+                    action: Some(action),
+                    proposal: None,
+                    corroboration: None,
+                    replacement: None,
+                    records: None,
+                    status: ExplicitReconstructionStatus::NoObservation,
+                });
+                continue;
+            };
+
+            let proposal = quarantine_proposal(
+                event.into_item_with_policy(self.config.ingest_credence),
+                trigger.memory_id,
+            );
+            let signals = signals_by_memory
+                .get(&trigger.memory_id)
+                .copied()
+                .unwrap_or(&[]);
+            let corroboration = evaluate_corroboration(signals, policy);
+            let Some(replacement) =
+                promote_corroborated_proposal(&proposal, signals, policy)
+            else {
+                outcomes.push(ExplicitReconstructionOutcome {
+                    trigger,
+                    action: Some(action),
+                    proposal: Some(proposal),
+                    corroboration: Some(corroboration),
+                    replacement: None,
+                    records: None,
+                    status: ExplicitReconstructionStatus::Quarantined,
+                });
+                continue;
+            };
+
+            let records = self
+                .store
+                .insert_reconstruction_replacement(
+                    trigger.memory_id,
+                    &replacement,
+                    replacement.timestamps.valid_from,
+                )?
+                .ok_or_else(|| {
+                    ShibahamaError::InvalidRequest(format!(
+                        "memory {} disappeared before reconstruction replacement",
+                        trigger.memory_id
+                    ))
+                })?;
+
+            outcomes.push(ExplicitReconstructionOutcome {
+                trigger,
+                action: Some(action),
+                proposal: Some(proposal),
+                corroboration: Some(corroboration),
+                replacement: Some(replacement),
+                records: Some(records),
+                status: ExplicitReconstructionStatus::Applied,
+            });
+        }
+
+        Ok(outcomes)
+    }
+
     /// Replays recalled memories as they were believed at `request.now`.
     ///
     /// # Errors
@@ -729,7 +938,12 @@ impl<V: VectorIndex> Shibahama<V> {
         &self,
         request: &RecallRequest<'_>,
     ) -> Result<Vec<RecallCandidate>, ShibahamaError> {
-        Ok(timeline(&self.store, &self.vector_index, request)?)
+        let mut request = *request;
+        if request.significance == SignificanceConfig::default() {
+            request.significance = self.config.significance;
+        }
+
+        Ok(timeline(&self.store, &self.vector_index, &request)?)
     }
 
     /// Replays timeline recall and returns an owning iterator over ranked candidates.
@@ -750,7 +964,14 @@ impl<V: VectorIndex> Shibahama<V> {
     ///
     /// Returns an error when the access event cannot be persisted.
     pub fn reinforce(&self, id: MemoryId, outcome: AccessOutcome) -> Result<bool, ShibahamaError> {
-        Ok(self.store.reinforce(id, outcome)?.is_some())
+        Ok(self
+            .store
+            .record_access_with_policy(
+                id,
+                crate::model::AccessEvent::new(OffsetDateTime::now_utc(), None, outcome),
+                &self.config.significance,
+            )?
+            .is_some())
     }
 
     /// Returns a full explanation for the current memory state.
@@ -876,6 +1097,7 @@ where
         let config = self.config().await;
         AsyncRecallRequest::new(query_vector, top_k, now)
             .with_ranking(config.recall_ranking)
+            .with_significance(config.significance)
             .with_staleness(config.recall_staleness)
             .with_diversification(config.recall_diversification)
     }
@@ -1059,12 +1281,13 @@ where
 mod tests {
     use super::*;
     use crate::model::{Provenance, SourceKind};
+    #[cfg(feature = "tokio")]
     use crate::read_safety::DefaultSanitizingGateway;
     use crate::retrieval::{RecallCandidateCurrency, RecallRequest};
     use crate::storage::MemoryEvent;
     use crate::vector::HnswVectorIndex;
     use tempfile::NamedTempFile;
-    use time::OffsetDateTime;
+    use time::{Duration, OffsetDateTime};
 
     #[test]
     fn facade_write_recall_reinforce_why_and_timeline_work() {
@@ -1111,9 +1334,130 @@ mod tests {
         assert_eq!(why.tier.credence, why.item.credence);
         assert_eq!(why.currency.state, RecallCandidateCurrency::Current);
         assert_eq!(why.currency.valid_from, item.timestamps.valid_from);
-        assert!((why.significance.base_score - why.item.significance).abs() < f64::EPSILON);
+        assert!((why.significance.base_score - why.item.base_significance).abs() < f64::EPSILON);
         assert_eq!(why.audit_trail.len(), why.tier.audit.len());
         assert!(why.audit_trail.len() >= 2);
+    }
+
+    #[test]
+    fn explicit_reconstruction_is_gated_quarantined_and_applied_after_corroboration() {
+        struct StaticRevalidator {
+            event: MemoryWriteEvent,
+        }
+
+        impl RevalidationSource for StaticRevalidator {
+            fn revalidate(
+                &self,
+                _action: &RevalidationAction,
+                _original: &MemoryItem,
+                _now: OffsetDateTime,
+            ) -> Option<MemoryWriteEvent> {
+                Some(self.event.clone())
+            }
+        }
+
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let mut shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let ingested_at = OffsetDateTime::UNIX_EPOCH;
+        let now = ingested_at + Duration::days(90);
+        let mut event = MemoryWriteEvent::new(
+            "old API endpoint is /v1",
+            Provenance::new(SourceKind::File, Some("docs://api".to_owned()), "api-test"),
+            ingested_at,
+            ingested_at,
+        );
+        event.significance = 16.0;
+        event.tier = Tier::Warm;
+        event.credence_floor = Tier::Warm;
+        let original = shibahama
+            .write_with_embedding(
+                event,
+                WriteEmbedding {
+                    vector: &[0.0, 0.0],
+                    index_name: "api-test",
+                    model: "embedding-model",
+                    model_version: "v1",
+                },
+            )
+            .expect("write should work");
+        let query = [0.0, 0.0];
+        let request = RecallRequest::new(&query, 1, now);
+        let recalled = shibahama.recall(&request).expect("recall should work");
+
+        assert_eq!(recalled.len(), 1);
+        assert!(recalled[0].load_bearing_possibly_stale);
+        assert!(
+            !shibahama
+                .event_records()
+                .expect("events should read")
+                .iter()
+                .any(|record| matches!(
+                    record.event,
+                    MemoryEvent::MemoryInvalidated { .. }
+                        | MemoryEvent::ReconstructionApplied { .. }
+                ))
+        );
+
+        let mut replacement_event = MemoryWriteEvent::new(
+            "current API endpoint is /v2",
+            Provenance::new(SourceKind::File, Some("docs://api".to_owned()), "api-test"),
+            now,
+            now,
+        );
+        replacement_event.significance = 16.0;
+        replacement_event.tier = Tier::Warm;
+        replacement_event.credence_floor = Tier::Warm;
+        let revalidator = StaticRevalidator {
+            event: replacement_event,
+        };
+        let outcomes = shibahama
+            .reconstruct_from_recall(
+                &recalled,
+                &revalidator,
+                &[(original.id, vec![CorroborationSignal::HumanConfirmed])],
+                now,
+            )
+            .expect("reconstruction should run");
+
+        assert_eq!(outcomes.len(), 1);
+        assert!(matches!(
+            outcomes[0].status,
+            ExplicitReconstructionStatus::Applied
+        ));
+        assert_eq!(
+            outcomes[0]
+                .proposal
+                .as_ref()
+                .expect("proposal should exist")
+                .item
+                .credence,
+            CredenceTier::Unverified
+        );
+        let replacement = outcomes[0]
+            .replacement
+            .as_ref()
+            .expect("replacement should be promoted");
+        assert_eq!(replacement.content, "current API endpoint is /v2");
+        assert_eq!(replacement.credence, CredenceTier::FirmAuthoritative);
+
+        let rows = shibahama.memory_items().expect("rows should read");
+        let superseded = rows
+            .iter()
+            .find(|item| item.id == original.id)
+            .expect("old row should remain");
+        assert_eq!(superseded.timestamps.valid_to, Some(now));
+        assert!(rows
+            .iter()
+            .any(|item| item.content == "current API endpoint is /v2"));
+        assert!(shibahama
+            .event_records()
+            .expect("events should read")
+            .iter()
+            .any(|record| matches!(
+                record.event,
+                MemoryEvent::ReconstructionApplied { .. }
+            )));
     }
 
     #[test]

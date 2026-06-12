@@ -86,6 +86,11 @@ class ShibahamaMemory:
         return {
             "schema_version": 1,
             "namespace": "coding-agent-demo",
+            "recording_kind": "illustrative",
+            "recording_note": (
+                "Tideline-shaped demo replay derived from final memory rows, "
+                "not a raw Shibahama event-log export."
+            ),
             "memory_count": len(memories),
             "memories": memories,
             "events": [

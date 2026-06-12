@@ -102,6 +102,7 @@ mod tests {
             tier: Tier::Warm,
             credence: CredenceTier::FirmAuthoritative,
             significance: 1.0,
+            base_significance: 1.0,
             credence_floor: Tier::Warm,
             access_events: Vec::new(),
         }

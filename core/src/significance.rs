@@ -180,7 +180,7 @@ impl SignificanceConfig {
         }
 
         let decay_multiplier = self.time_decay(last_used_at, now);
-        let decayed_base = item.significance * decay_multiplier;
+        let decayed_base = item.base_significance * decay_multiplier;
         let reinforcement = self.reinforcement(item.access_events.len());
         let contradiction_penalty = f64::from(contradiction_count) * self.contradicted_weight.abs();
         let graph_centrality = self.graph_centrality_weight * graph_centrality_score;
@@ -188,7 +188,7 @@ impl SignificanceConfig {
             decayed_base + reinforcement + outcome_bonus + graph_centrality - contradiction_penalty;
 
         SignificanceBreakdown {
-            base_score: item.significance,
+            base_score: item.base_significance,
             decay_multiplier,
             decayed_base,
             reinforcement,
@@ -360,6 +360,7 @@ mod tests {
             tier: crate::model::Tier::Warm,
             credence: crate::model::CredenceTier::VerifiedSource,
             significance: 1.0,
+            base_significance: 1.0,
             credence_floor: crate::model::Tier::Cold,
             access_events: Vec::new(),
         };
@@ -373,6 +374,45 @@ mod tests {
         assert!(breakdown.outcome_bonus > 0.0);
         assert!(breakdown.graph_centrality.abs() < f64::EPSILON);
         assert!((config.recompute(&item, now) - breakdown.final_score).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn recompute_is_idempotent_from_base_score_and_access_log() {
+        let config = SignificanceConfig::default();
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::seconds(10);
+        let mut item = MemoryItem {
+            schema_version: crate::model::CURRENT_MEMORY_SCHEMA_VERSION,
+            id: crate::model::MemoryId::new_v7(),
+            content: "stable recompute".to_owned(),
+            kind: crate::model::MemoryKind::Fact,
+            compaction: None,
+            consolidation: None,
+            embedding_ref: None,
+            provenance: crate::model::Provenance::new(
+                crate::model::SourceKind::User,
+                None,
+                "significance-test",
+            ),
+            timestamps: crate::model::TemporalBounds::open_from(
+                OffsetDateTime::UNIX_EPOCH,
+                OffsetDateTime::UNIX_EPOCH,
+            ),
+            tier: crate::model::Tier::Warm,
+            credence: crate::model::CredenceTier::VerifiedSource,
+            significance: 1.0,
+            base_significance: 1.0,
+            credence_floor: crate::model::Tier::Cold,
+            access_events: vec![
+                AccessEvent::new(now, None, AccessOutcome::Surfaced),
+                AccessEvent::new(now, None, AccessOutcome::Cited),
+            ],
+        };
+
+        let first = config.recompute(&item, now);
+        item.significance = first;
+        let second = config.recompute(&item, now);
+
+        assert!((second - first).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -398,6 +438,7 @@ mod tests {
             tier: crate::model::Tier::Warm,
             credence: crate::model::CredenceTier::VerifiedSource,
             significance: 2.0,
+            base_significance: 2.0,
             credence_floor: crate::model::Tier::Cold,
             access_events: vec![
                 AccessEvent::new(
@@ -424,7 +465,8 @@ mod tests {
             .map(|event| event.timestamp)
             .max()
             .expect("access history should be non-empty");
-        let expected_decayed_base = item.significance * config.time_decay(separate_last_used, now);
+        let expected_decayed_base =
+            item.base_significance * config.time_decay(separate_last_used, now);
         let expected_outcome_bonus = config.outcome_bonus(&item.access_events);
         let expected_contradiction_penalty = config.contradiction_penalty(&item.access_events);
         let explanation = config.explain(&item, now);
@@ -465,6 +507,7 @@ mod tests {
             tier: crate::model::Tier::Warm,
             credence: crate::model::CredenceTier::VerifiedSource,
             significance: 1.0,
+            base_significance: 1.0,
             credence_floor: crate::model::Tier::Cold,
             access_events: Vec::new(),
         };
@@ -498,6 +541,7 @@ mod tests {
             tier: crate::model::Tier::Hot,
             credence: crate::model::CredenceTier::FirmAuthoritative,
             significance: 0.0,
+            base_significance: 0.0,
             credence_floor: crate::model::Tier::Warm,
             access_events: Vec::new(),
         };
@@ -560,6 +604,7 @@ mod tests {
             tier: crate::model::Tier::Warm,
             credence: crate::model::CredenceTier::VerifiedSource,
             significance: 1.0,
+            base_significance: 1.0,
             credence_floor: crate::model::Tier::Cold,
             access_events: Vec::new(),
         };

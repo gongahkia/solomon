@@ -194,6 +194,7 @@ mod tests {
             tier: Tier::Warm,
             credence,
             significance: 1.0,
+            base_significance: 1.0,
             credence_floor: Tier::Cold,
             access_events: Vec::new(),
         }

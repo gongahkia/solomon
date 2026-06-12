@@ -427,7 +427,7 @@ impl MemoryWriteEvent {
             ingested_at,
             tier,
             credence: None,
-            significance: 0.0,
+            significance: 1.0,
             credence_floor: Tier::Cold,
         }
     }
@@ -487,6 +487,7 @@ impl MemoryWriteEvent {
             tier: self.tier,
             credence,
             significance: self.significance,
+            base_significance: self.significance,
             credence_floor: self.credence_floor,
             access_events: Vec::new(),
         }
@@ -932,6 +933,69 @@ impl RedbMemoryStore {
         }
 
         Ok(records)
+    }
+
+    /// Reconstructs memory rows believed at `as_of` from the event log.
+    ///
+    /// Writes become visible at their ingestion time. Backdated invalidations only affect an
+    /// `as_of` query once the invalidation event itself has been recorded, so timeline queries do
+    /// not retroactively erase what the system believed before the invalidation was known.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the event table cannot be read or a stored record cannot be decoded.
+    pub fn memory_items_believed_at(
+        &self,
+        as_of: OffsetDateTime,
+    ) -> Result<Vec<MemoryItem>, StorageError> {
+        let mut items = BTreeMap::<MemoryId, MemoryItem>::new();
+
+        for record in self.events()? {
+            match record.event {
+                MemoryEvent::MemoryWritten { item } => {
+                    let item = *item;
+                    if item.timestamps.ingested_at <= as_of {
+                        items.insert(item.id, item);
+                    }
+                }
+                MemoryEvent::MemoryInvalidated { id, valid_to } => {
+                    if record.recorded_at <= as_of {
+                        if let Some(item) = items.get_mut(&id) {
+                            item.timestamps = item.timestamps.closed_at(valid_to);
+                        }
+                    }
+                }
+                MemoryEvent::AccessRecorded { id, event } => {
+                    if record.recorded_at <= as_of && event.timestamp <= as_of {
+                        if let Some(item) = items.get_mut(&id) {
+                            item.access_events.push(event);
+                        }
+                    }
+                }
+                MemoryEvent::TierChanged { id, to, .. } => {
+                    if record.recorded_at <= as_of {
+                        if let Some(item) = items.get_mut(&id) {
+                            item.tier = to;
+                        }
+                    }
+                }
+                MemoryEvent::ContentCompacted { id, pointer } => {
+                    if record.recorded_at <= as_of {
+                        if let Some(item) = items.get_mut(&id) {
+                            item.compaction = Some(pointer);
+                            item.content.clear();
+                        }
+                    }
+                }
+                MemoryEvent::ReverificationFlagged { .. }
+                | MemoryEvent::ReconstructionApplied { .. } => {}
+            }
+        }
+
+        Ok(items
+            .into_values()
+            .filter(|item| item.timestamps.is_valid_at(as_of))
+            .collect())
     }
 
     /// Validates persisted tables after opening the store.
@@ -2035,6 +2099,22 @@ impl RedbMemoryStore {
         id: MemoryId,
         access_event: AccessEvent,
     ) -> Result<Option<EventRecord>, StorageError> {
+        self.record_access_with_policy(id, access_event, &SignificanceConfig::default())
+    }
+
+    /// Appends a caller-supplied access event and recomputes significance with `policy`.
+    ///
+    /// Returns `Ok(None)` when the memory id is unknown.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read or written, or stored state cannot be decoded.
+    pub fn record_access_with_policy(
+        &self,
+        id: MemoryId,
+        access_event: AccessEvent,
+        policy: &dyn SignificanceFunction,
+    ) -> Result<Option<EventRecord>, StorageError> {
         let mut write_txn = self.db.begin_write().map_err(embed)?;
         write_txn
             .set_durability(Durability::Immediate)
@@ -2054,10 +2134,8 @@ impl RedbMemoryStore {
             let previous_tier = item.tier;
 
             item.access_events.push(access_event.clone());
-            item.significance =
-                SignificanceConfig::default().recompute(&item, access_event.timestamp);
-            item.tier =
-                SignificanceConfig::default().promote_on_access(item.tier, item.significance);
+            item.significance = policy.recompute(&item, access_event.timestamp);
+            item.tier = policy.promote_on_access(item.tier, item.significance);
 
             let recorded_at = access_event.timestamp;
             let sequence = event_table.len().map_err(embed)?;
@@ -2607,13 +2685,16 @@ fn relation_matches_traversal(relation: &Relation, request: &GraphTraversalReque
 mod tests {
     use super::*;
     use crate::model::{
-        CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, Provenance, SourceKind, TemporalBounds,
+        AccessOutcome, CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, Provenance, SourceKind,
+        TemporalBounds,
     };
     use crate::vector::{HnswVectorIndex, VectorIndex};
+    use proptest::prelude::*;
     use std::sync::{Arc, Barrier};
     use std::thread;
     use tempfile::NamedTempFile;
     use tempfile::tempdir;
+    use time::Duration;
 
     fn test_item(content: &str) -> MemoryItem {
         MemoryItem {
@@ -2632,6 +2713,7 @@ mod tests {
             tier: Tier::Warm,
             credence: CredenceTier::FirmAuthoritative,
             significance: 1.0,
+            base_significance: 1.0,
             credence_floor: Tier::Warm,
             access_events: Vec::new(),
         }
@@ -2639,6 +2721,77 @@ mod tests {
 
     fn test_entity(label: &str, timestamps: TemporalBounds) -> Entity {
         Entity::new("Claim", label, format!("claim:{label}"), timestamps)
+    }
+
+    proptest! {
+        #[test]
+        fn never_delete_invariant_survives_generated_memory_operations(
+            operations in proptest::collection::vec(0_u8..=255, 1..32)
+        ) {
+            let file = NamedTempFile::new().expect("tempfile should be created");
+            let store = RedbMemoryStore::open(file.path()).expect("store should open");
+            let mut ids = Vec::<MemoryId>::new();
+            let policy = SignificanceConfig::default();
+
+            for (index, operation) in operations.into_iter().enumerate() {
+                match operation % 5 {
+                    op if ids.is_empty() || op == 0 => {
+                        let mut item = test_item(&format!("generated memory {index}"));
+                        item.tier = if operation % 2 == 0 { Tier::Cold } else { Tier::Warm };
+                        item.credence_floor = Tier::Cold;
+                        store.write(&item).expect("write should succeed");
+                        ids.push(item.id);
+                    }
+                    1 => {
+                        let id = ids[usize::from(operation) % ids.len()];
+                        store
+                            .record_access(
+                                id,
+                                AccessEvent::new(
+                                    OffsetDateTime::UNIX_EPOCH
+                                        + Duration::seconds(i64::try_from(index).unwrap_or(i64::MAX)),
+                                    None,
+                                    AccessOutcome::Surfaced,
+                                ),
+                            )
+                            .expect("access should record");
+                    }
+                    2 => {
+                        let id = ids[usize::from(operation) % ids.len()];
+                        store
+                            .refresh_significance(
+                                id,
+                                &policy,
+                                OffsetDateTime::UNIX_EPOCH
+                                    + Duration::seconds(i64::try_from(index).unwrap_or(i64::MAX)),
+                            )
+                            .expect("refresh should succeed");
+                    }
+                    3 => {
+                        let id = ids[usize::from(operation) % ids.len()];
+                        store
+                            .soft_invalidate(
+                                id,
+                                OffsetDateTime::UNIX_EPOCH
+                                    + Duration::seconds(i64::try_from(index + 1).unwrap_or(i64::MAX)),
+                            )
+                            .expect("invalidate should succeed");
+                    }
+                    _ => {
+                        let id = ids[usize::from(operation) % ids.len()];
+                        store.compact_cold_item(id).expect("compaction should not delete");
+                    }
+                }
+
+                let report = store
+                    .verify_never_delete_invariant()
+                    .expect("never-delete invariant should hold");
+                prop_assert_eq!(
+                    report.written_item_count,
+                    ids.iter().copied().collect::<BTreeSet<_>>().len()
+                );
+            }
+        }
     }
 
     fn graph_snapshot_ids(snapshot: &GraphSnapshot) -> (BTreeSet<EntityId>, BTreeSet<RelationId>) {

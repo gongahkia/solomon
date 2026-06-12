@@ -645,6 +645,13 @@ pub struct MemoryItem {
     pub credence: CredenceTier,
     /// Current materialized significance score.
     pub significance: f64,
+    /// Immutable base significance captured at write time.
+    ///
+    /// `significance` is a materialized score derived from this base plus access history. Keeping
+    /// the original base separate makes lazy recomputation idempotent instead of feeding each
+    /// refreshed score back into the next refresh.
+    #[serde(default)]
+    pub base_significance: f64,
     /// Coldest tier this memory may occupy after significance-based demotion.
     pub credence_floor: Tier,
     /// Captured usage events for this memory.
@@ -902,6 +909,7 @@ mod tests {
             tier: Tier::Warm,
             credence: CredenceTier::FirmAuthoritative,
             significance: 1.0,
+            base_significance: 1.0,
             credence_floor: Tier::Warm,
             access_events: Vec::new(),
         };
@@ -953,6 +961,7 @@ mod tests {
             tier: Tier::Hot,
             credence: CredenceTier::FirmAuthoritative,
             significance: 0.0,
+            base_significance: 0.0,
             credence_floor: Tier::Warm,
             access_events: Vec::new(),
         };

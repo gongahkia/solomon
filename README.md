@@ -224,12 +224,12 @@ system returns the current fact rather than the stale one:
 
 | Suite | System | Queries | Accuracy | Stale Answer Rate | Mean Token Cost | p95 ms | Status |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| currencybench | shibahama | 4 | 1.000 | 0.000 | 5.750 | 0.685 | ok |
-| currencybench | warehouse | 4 | 0.000 | 1.000 | 11.500 | 0.016 | ok |
+| currencybench | shibahama | 12 | 1.000 | 0.000 | 5.917 | 0.719 | ok |
+| currencybench | warehouse | 12 | 0.000 | 1.000 | 11.833 | 0.017 | ok |
 
-The coding-agent benchmark artifact is still an open gap: both Shibahama and the
-warehouse baseline currently score `0.000` accuracy in the checked-in result.
-Do not cite that artifact as a win until the harness result changes.
+The coding-agent benchmark harness remains experimental and no longer has a
+checked-in result artifact. The runnable `examples/coding-agent/` demo is kept
+separate from benchmark claims.
 
 The checked-in `ablation-local` artifact isolates significance,
 reconstruction/supersession, and graph expansion toggles. Full Shibahama scores
@@ -246,7 +246,7 @@ python benchmarks/run.py \
   --markdown benchmarks/results/currencybench-local.md
 ```
 
-Benchmark methodology and external-adapter caveats are documented in
+Benchmark methodology and current scope are documented in
 [`docs/benchmarks.md`](docs/benchmarks.md).
 
 ## Security Posture
@@ -315,6 +315,5 @@ Still pending:
 - TestPyPI/PyPI publish for `pip install shibahama`.
 - npm publish for `npm install shibahama`.
 - final `v0.1.0` tag and registry publication.
-- LoCoMo, LongMemEval, Mem0, and Zep all-systems benchmark runs with real
-  datasets and credentials.
+- LoCoMo and LongMemEval benchmark runs with real dataset exports.
 - public early-user outreach and issue collection.

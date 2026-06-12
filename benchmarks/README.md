@@ -30,10 +30,11 @@ Supported systems:
 - `shibahama-no-reconstruction`: Shibahama with supersession invalidation disabled.
 - `shibahama-no-graph`: Shibahama with related-memory graph expansion disabled.
 - `warehouse`: append-only keyword baseline with no currency model.
-- `mem0`: optional Mem0 OSS SDK adapter. Requires `mem0ai` plus its model/vector configuration.
-- `zep`: optional Zep Cloud adapter. Requires `zep-cloud` and `ZEP_API_KEY`.
 
-The harness reports recall accuracy, approximate retrieval token cost, p50/p95 query latency, and stale-answer rate. Missing external adapters can be recorded with `--allow-missing` so result tables clearly show which credentials or services were unavailable.
+The harness reports recall accuracy, approximate retrieval token cost, p50/p95
+query latency, and stale-answer rate. External-system adapters should only be
+added when they have reproducible successful runs, not missing-credential
+placeholders.
 
 ## Feature Ablations
 

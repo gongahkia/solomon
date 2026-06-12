@@ -9,9 +9,10 @@ use crate::read_safety::{
     DefaultSanitizingGateway, SanitizingGateway, StoredContentFinding,
     sanitize_memory_for_read_with_gateway,
 };
+use crate::significance::SignificanceConfig;
 use crate::storage::{RedbMemoryStore, StorageError};
 use crate::vector::{VectorIndex, VectorIndexError};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 use time::OffsetDateTime;
 
@@ -43,6 +44,8 @@ pub struct RecallRequest<'a> {
     pub include_instructions: bool,
     /// Ranking weights applied to retrieved candidates.
     pub ranking: RecallRankingConfig,
+    /// Significance policy used for lazy pre-rank refresh and surfaced-access updates.
+    pub significance: SignificanceConfig,
     /// Policy for flagging load-bearing but possibly stale memories.
     pub staleness: RecallStalenessConfig,
     /// Policy for suppressing near-duplicate results.
@@ -69,6 +72,7 @@ impl<'a> RecallRequest<'a> {
             include_cold: false,
             include_instructions: false,
             ranking: RecallRankingConfig::default(),
+            significance: SignificanceConfig::default(),
             staleness: RecallStalenessConfig::default(),
             diversification: RecallDiversificationConfig::default(),
             max_context_tokens: None,
@@ -103,6 +107,13 @@ impl<'a> RecallRequest<'a> {
     #[must_use]
     pub const fn with_ranking(mut self, ranking: RecallRankingConfig) -> Self {
         self.ranking = ranking;
+        self
+    }
+
+    /// Overrides the significance policy used by this request.
+    #[must_use]
+    pub const fn with_significance(mut self, significance: SignificanceConfig) -> Self {
+        self.significance = significance;
         self
     }
 
@@ -320,7 +331,117 @@ pub fn timeline(
     vector_index: &dyn VectorIndex,
     request: &RecallRequest<'_>,
 ) -> Result<Vec<RecallCandidate>, RecallError> {
-    recall_inner(store, vector_index, request, false)
+    timeline_inner(store, vector_index, request)
+}
+
+fn timeline_inner(
+    store: &RedbMemoryStore,
+    vector_index: &dyn VectorIndex,
+    request: &RecallRequest<'_>,
+) -> Result<Vec<RecallCandidate>, RecallError> {
+    let default_sanitizing_gateway = DefaultSanitizingGateway;
+    let sanitizing_gateway = request
+        .sanitizing_gateway
+        .unwrap_or(&default_sanitizing_gateway);
+    let candidate_context = CandidateBuildContext {
+        ranking: request.ranking,
+        staleness: request.staleness,
+        now: request.now,
+        sanitizing_gateway,
+    };
+    let vector_results = vector_index.search(request.query_vector, request.top_k)?;
+    let mut historical_items = store
+        .memory_items_believed_at(request.now)?
+        .into_iter()
+        .map(|item| (item.id, item))
+        .collect::<BTreeMap<_, _>>();
+    let mut seen_ids = BTreeSet::new();
+    let mut candidates = Vec::new();
+
+    for result in vector_results {
+        let Some(item) = historical_items.remove(&result.id) else {
+            continue;
+        };
+
+        if !is_recallable_item(&item, request) {
+            continue;
+        }
+
+        seen_ids.insert(result.id);
+        candidates.push(candidate_from_item(
+            result.id,
+            item,
+            result.distance,
+            RecallCandidateSource::Vector,
+            &candidate_context,
+        ));
+    }
+
+    if let Some(provider) = request.related_memory_provider {
+        let anchors = candidates
+            .iter()
+            .map(|candidate| candidate.id)
+            .collect::<Vec<_>>();
+        let mut expanded_candidates = Vec::new();
+
+        for anchor in anchors {
+            for related_id in provider.related_memory_ids(anchor)? {
+                if !seen_ids.insert(related_id) {
+                    continue;
+                }
+
+                let Some(item) = historical_items.remove(&related_id) else {
+                    continue;
+                };
+
+                if !is_recallable_item(&item, request) {
+                    continue;
+                }
+
+                expanded_candidates.push(candidate_from_item(
+                    related_id,
+                    item,
+                    f32::INFINITY,
+                    RecallCandidateSource::GraphExpansion { anchor },
+                    &candidate_context,
+                ));
+            }
+        }
+
+        candidates.extend(expanded_candidates);
+    }
+
+    for (id, item) in historical_items {
+        if candidates.len() >= request.top_k {
+            break;
+        }
+
+        if !seen_ids.insert(id) || !is_recallable_item(&item, request) {
+            continue;
+        }
+
+        candidates.push(candidate_from_item(
+            id,
+            item,
+            f32::INFINITY,
+            RecallCandidateSource::Vector,
+            &candidate_context,
+        ));
+    }
+
+    candidates.sort_by(|left, right| {
+        right
+            .item
+            .credence
+            .cmp(&left.item.credence)
+            .then_with(|| right.rank_score.total_cmp(&left.rank_score))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    candidates = diversify_candidates(candidates, request.diversification);
+    candidates = apply_context_token_budget(candidates, request.max_context_tokens);
+
+    Ok(candidates)
 }
 
 fn recall_inner(
@@ -349,21 +470,29 @@ fn recall_inner(
     let mut candidates = vector_results
         .into_iter()
         .zip(items)
-        .filter_map(|(result, item)| {
-            let item = item?;
+        .map(|(result, item)| -> Result<Option<RecallCandidate>, RecallError> {
+            let Some(item) = item else {
+                return Ok(None);
+            };
+
+            let item =
+                refresh_item_for_recall(store, item, request, record_surface_access)?;
 
             if !is_recallable_item(&item, request) {
-                return None;
+                return Ok(None);
             }
 
-            Some(candidate_from_item(
+            Ok(Some(candidate_from_item(
                 result.id,
                 item,
                 result.distance,
                 RecallCandidateSource::Vector,
                 &candidate_context,
-            ))
+            )))
         })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
         .collect::<Vec<_>>();
 
     for candidate in &candidates {
@@ -389,6 +518,9 @@ fn recall_inner(
                 let Some(item) = related_item else {
                     continue;
                 };
+
+                let item =
+                    refresh_item_for_recall(store, item, request, record_surface_access)?;
 
                 if !is_recallable_item(&item, request) {
                     continue;
@@ -432,11 +564,26 @@ fn recall_inner(
                 },
             );
 
-            store.record_access(candidate.id, access_event)?;
+            store.record_access_with_policy(candidate.id, access_event, &request.significance)?;
         }
     }
 
     Ok(candidates)
+}
+
+fn refresh_item_for_recall(
+    store: &RedbMemoryStore,
+    item: MemoryItem,
+    request: &RecallRequest<'_>,
+    record_surface_access: bool,
+) -> Result<MemoryItem, RecallError> {
+    if !record_surface_access {
+        return Ok(item);
+    }
+
+    Ok(store
+        .refresh_significance(item.id, &request.significance, request.now)?
+        .unwrap_or(item))
 }
 
 fn apply_context_token_budget(
@@ -674,6 +821,7 @@ mod tests {
     };
     use crate::storage::MemoryEvent;
     use crate::vector::HnswVectorIndex;
+    use proptest::prelude::*;
     use std::collections::BTreeMap;
     use tempfile::NamedTempFile;
     use time::Duration;
@@ -703,8 +851,117 @@ mod tests {
             tier: Tier::Warm,
             credence: CredenceTier::FirmAuthoritative,
             significance: 1.0,
+            base_significance: 1.0,
             credence_floor: Tier::Warm,
             access_events: Vec::new(),
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn invalidated_memories_are_excluded_from_default_recall(
+            valid_to_seconds in 1_i64..10_000,
+            query_after_seconds in 10_001_i64..20_000,
+        ) {
+            let file = NamedTempFile::new().expect("tempfile should be created");
+            let store = RedbMemoryStore::open(file.path()).expect("store should open");
+            let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+            let ingested_at = OffsetDateTime::UNIX_EPOCH;
+            let mut invalidated = test_item("invalidated", ingested_at);
+            let mut active = test_item("active", ingested_at);
+
+            invalidated.significance = 100.0;
+            invalidated.base_significance = 100.0;
+            active.significance = 1.0;
+            active.base_significance = 1.0;
+
+            store
+                .write_embedded(
+                    &mut invalidated,
+                    &mut vector_index,
+                    &[0.0, 0.0],
+                    "hnsw-test",
+                    "embedding-model",
+                    "v1",
+                )
+                .expect("invalidated item should write");
+            store
+                .write_embedded(
+                    &mut active,
+                    &mut vector_index,
+                    &[1.0, 1.0],
+                    "hnsw-test",
+                    "embedding-model",
+                    "v1",
+                )
+                .expect("active item should write");
+            store
+                .soft_invalidate(
+                    invalidated.id,
+                    ingested_at + Duration::seconds(valid_to_seconds),
+                )
+                .expect("invalidation should write");
+
+            let query = [0.0, 0.0];
+            let request = RecallRequest::new(
+                &query,
+                2,
+                ingested_at + Duration::seconds(query_after_seconds),
+            );
+            let candidates = recall(&store, &vector_index, &request).expect("recall should work");
+
+            prop_assert!(!candidates.iter().any(|candidate| candidate.id == invalidated.id));
+        }
+
+        #[test]
+        fn credence_ordering_holds_over_generated_significance_gaps(
+            unverified_score in 1_u8..=200,
+        ) {
+            let file = NamedTempFile::new().expect("tempfile should be created");
+            let store = RedbMemoryStore::open(file.path()).expect("store should open");
+            let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+            let now = OffsetDateTime::UNIX_EPOCH;
+            let mut authoritative = test_item("authoritative", now);
+            let mut unverified = test_item("unverified", now);
+
+            authoritative.credence = CredenceTier::FirmAuthoritative;
+            authoritative.significance = 0.0;
+            authoritative.base_significance = 0.0;
+            unverified.credence = CredenceTier::Unverified;
+            unverified.significance = f64::from(unverified_score);
+            unverified.base_significance = f64::from(unverified_score);
+
+            store
+                .write_embedded(
+                    &mut authoritative,
+                    &mut vector_index,
+                    &[1.0, 1.0],
+                    "hnsw-test",
+                    "embedding-model",
+                    "v1",
+                )
+                .expect("authoritative should write");
+            store
+                .write_embedded(
+                    &mut unverified,
+                    &mut vector_index,
+                    &[0.0, 0.0],
+                    "hnsw-test",
+                    "embedding-model",
+                    "v1",
+                )
+                .expect("unverified should write");
+
+            let query = [0.0, 0.0];
+            let candidates = recall(
+                &store,
+                &vector_index,
+                &RecallRequest::new(&query, 2, now),
+            )
+            .expect("recall should work");
+
+            prop_assert_eq!(candidates[0].id, authoritative.id);
+            prop_assert_eq!(candidates[1].id, unverified.id);
         }
     }
 
@@ -1110,8 +1367,11 @@ mod tests {
         let mut distinct = test_item("delta epsilon", OffsetDateTime::UNIX_EPOCH);
 
         first.significance = 0.0;
+        first.base_significance = 0.0;
         duplicate.significance = 0.0;
+        duplicate.base_significance = 0.0;
         distinct.significance = 0.0;
+        distinct.base_significance = 0.0;
 
         store
             .write_embedded(
@@ -1156,7 +1416,7 @@ mod tests {
     }
 
     #[test]
-    fn recall_rank_score_includes_materialized_significance() {
+    fn recall_rank_score_includes_refreshed_significance() {
         let file = NamedTempFile::new().expect("tempfile should be created");
         let store = RedbMemoryStore::open(file.path()).expect("store should open");
         let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
@@ -1165,7 +1425,9 @@ mod tests {
         let mut far = test_item("far but important", OffsetDateTime::UNIX_EPOCH);
 
         near.significance = 0.0;
+        near.base_significance = 0.0;
         far.significance = 10.0;
+        far.base_significance = 10.0;
 
         store
             .write_embedded(
@@ -1193,8 +1455,59 @@ mod tests {
         let candidates = recall(&store, &vector_index, &request).expect("recall should work");
 
         assert_eq!(candidates[0].id, far.id);
-        assert!((candidates[0].significance_score - 10.0).abs() < f64::EPSILON);
+        assert!(candidates[0].significance_score > 9.0);
         assert!(candidates[0].rank_score > candidates[1].rank_score);
+    }
+
+    #[test]
+    fn recall_refreshes_significance_before_ranking() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let old_ingested = OffsetDateTime::UNIX_EPOCH;
+        let now = old_ingested + Duration::days(100);
+        let mut old = test_item("old high base", old_ingested);
+        let mut recent = test_item("recent lower base", now);
+
+        old.significance = 10.0;
+        old.base_significance = 10.0;
+        recent.significance = 2.0;
+        recent.base_significance = 2.0;
+
+        store
+            .write_embedded(
+                &mut old,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("old item should write");
+        store
+            .write_embedded(
+                &mut recent,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("recent item should write");
+
+        let query = [0.0, 0.0];
+        let request =
+            RecallRequest::new(&query, 2, now).with_ranking(RecallRankingConfig {
+                similarity_weight: 0.0,
+                significance_weight: 1.0,
+                recency_weight: 0.0,
+                graph_weight: 0.0,
+            });
+        let candidates = recall(&store, &vector_index, &request).expect("recall should work");
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].id, recent.id);
+        assert!(candidates[0].significance_score > candidates[1].significance_score);
     }
 
     #[test]
@@ -1209,8 +1522,10 @@ mod tests {
 
         authoritative.credence = CredenceTier::FirmAuthoritative;
         authoritative.significance = 0.0;
+        authoritative.base_significance = 0.0;
         unverified.credence = CredenceTier::Unverified;
         unverified.significance = 100.0;
+        unverified.base_significance = 100.0;
 
         store
             .write_embedded(
@@ -1260,7 +1575,9 @@ mod tests {
         let mut recent = test_item("recent", now - Duration::days(1));
 
         old.significance = 0.0;
+        old.base_significance = 0.0;
         recent.significance = 0.0;
+        recent.base_significance = 0.0;
 
         store
             .write_embedded(
@@ -1354,6 +1671,7 @@ mod tests {
         let mut provider = StaticRelatedMemoryProvider::default();
 
         anchor.significance = 0.0;
+        anchor.base_significance = 0.0;
         provider.related.insert(anchor.id, vec![related.id]);
 
         store
@@ -1393,8 +1711,10 @@ mod tests {
         let mut stale = test_item("stale load bearing", ingested_at);
         let mut recently_validated = test_item("recently used", ingested_at);
 
-        stale.significance = 3.0;
-        recently_validated.significance = 3.0;
+        stale.significance = 12.0;
+        stale.base_significance = 12.0;
+        recently_validated.significance = 12.0;
+        recently_validated.base_significance = 12.0;
         recently_validated.access_events.push(AccessEvent::new(
             now - Duration::days(1),
             None,
@@ -1539,5 +1859,48 @@ mod tests {
             .expect("item should exist");
 
         assert!(stored.access_events.is_empty());
+    }
+
+    #[test]
+    fn timeline_reconstructs_backdated_invalidation_from_event_log() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let ingested_at = OffsetDateTime::now_utc() - Duration::days(10);
+        let valid_to = ingested_at + Duration::days(5);
+        let before_invalidation_was_known = ingested_at + Duration::days(9);
+        let mut item = test_item("backdated historical fact", ingested_at);
+
+        store
+            .write_embedded(
+                &mut item,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("item should write");
+        store
+            .soft_invalidate_with_vector(item.id, valid_to, &mut vector_index)
+            .expect("item should invalidate");
+
+        let query = [0.0, 0.0];
+        let before_request = RecallRequest::new(&query, 1, before_invalidation_was_known);
+        let historical =
+            timeline(&store, &vector_index, &before_request).expect("timeline should read");
+
+        assert_eq!(historical.len(), 1);
+        assert_eq!(historical[0].id, item.id);
+        assert_eq!(historical[0].currency, RecallCandidateCurrency::Current);
+
+        let after_request =
+            RecallRequest::new(&query, 1, OffsetDateTime::now_utc() + Duration::seconds(1));
+
+        assert!(
+            timeline(&store, &vector_index, &after_request)
+                .expect("timeline should read")
+                .is_empty()
+        );
     }
 }

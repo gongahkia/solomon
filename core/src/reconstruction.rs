@@ -4,6 +4,7 @@
 
 use crate::model::{CredenceTier, MemoryId, MemoryItem, Provenance, SourceKind, Tier};
 use crate::retrieval::RecallCandidate;
+use crate::storage::MemoryWriteEvent;
 use std::collections::{BTreeMap, BTreeSet};
 use time::{Duration, OffsetDateTime};
 
@@ -370,6 +371,22 @@ pub trait RevalidationHook {
     ) -> RevalidationAction;
 }
 
+/// Source/tool boundary used by explicit reconstruction.
+///
+/// Plain recall never calls this trait. It is only invoked by an explicit
+/// re-validation/reconstruction API after the gate and budget allow a trigger.
+pub trait RevalidationSource {
+    /// Revalidates `original` using a planned action and returns a proposed replacement write.
+    ///
+    /// Returning `None` leaves the proposal unwritten.
+    fn revalidate(
+        &self,
+        action: &RevalidationAction,
+        original: &MemoryItem,
+        now: OffsetDateTime,
+    ) -> Option<MemoryWriteEvent>;
+}
+
 /// Configurable provenance-driven re-validation planner.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ConfigurableRevalidationHook {
@@ -699,6 +716,7 @@ mod tests {
             tier: Tier::Warm,
             credence: CredenceTier::FirmAuthoritative,
             significance: 3.0,
+            base_significance: 3.0,
             credence_floor: Tier::Warm,
             access_events: Vec::new(),
         };

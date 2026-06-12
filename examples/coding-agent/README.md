@@ -22,4 +22,6 @@ It then runs the same two scenarios against Shibahama and an append-only warehou
 Outputs:
 
 - `out/results.json`: side-by-side scenario results.
-- `out/tideline-recording.json`: a Tideline-shaped recording for demo replay material.
+- `out/tideline-recording.json`: an illustrative Tideline-shaped recording for
+  demo replay material. It is derived from final memory rows, not a raw
+  Shibahama event-log export.

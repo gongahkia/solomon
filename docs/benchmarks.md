@@ -7,15 +7,10 @@ summary Markdown.
 
 ## Current Scope
 
-The repository currently has two kinds of benchmark paths:
-
-- deterministic local suites that can run without hosted services;
-- adapter slots for external systems that require package installs, API keys, or
-  model/vector configuration.
-
-The local suites are the only results that should be treated as reproducible
-from a fresh checkout today. LoCoMo, LongMemEval, Mem0, and Zep runs are wired
-as harness targets but still require external datasets or service credentials.
+The repository currently has deterministic local suites that can run without
+hosted services. The local suites are the only results that should be treated as
+reproducible from a fresh checkout today. LoCoMo and LongMemEval are JSONL
+loader paths only; they require caller-supplied dataset exports.
 
 ## Systems
 
@@ -28,13 +23,6 @@ Current adapters:
   local embeddings from `benchmarks/shibahama_bench/embeddings.py`.
 - `warehouse`: append-only keyword baseline with no currency or invalidation
   model.
-- `mem0`: optional Mem0 OSS SDK adapter; requires `mem0ai` and its configured
-  model/vector backend.
-- `zep`: optional Zep Cloud adapter; requires `zep-cloud` and `ZEP_API_KEY`.
-
-Use `--allow-missing` when running optional adapters in environments that may
-not have credentials. Missing adapters are recorded as missing instead of being
-silently omitted.
 
 ## Suites
 
@@ -62,25 +50,15 @@ The checked-in summary is:
 
 | Suite | System | Queries | Accuracy | Stale Answer Rate | Mean Token Cost |
 | --- | --- | ---: | ---: | ---: | ---: |
-| currencybench | shibahama | 4 | 1.000 | 0.000 | 5.750 |
-| currencybench | warehouse | 4 | 0.000 | 1.000 | 11.500 |
+| currencybench | shibahama | 12 | 1.000 | 0.000 | 5.917 |
+| currencybench | warehouse | 12 | 0.000 | 1.000 | 11.833 |
 
 ### Coding-Agent Memory Task
 
 `coding-agent` is a compact long-horizon coding-agent benchmark. It includes
-project decisions, rejected approaches, and file moves.
-
-The checked-in result files are:
-
-- `benchmarks/results/coding-agent-local.json`
-- `benchmarks/results/coding-agent-local.md`
-
-As of the current artifact, both Shibahama and the warehouse baseline score
-`0.000` accuracy with `1.000` stale-answer rate on this benchmark. Treat that as
-an open benchmark gap, not as a headline win. The separate
-`examples/coding-agent/` demo covers the intended scenario behavior, but the
-benchmark artifact should not be represented as passing until the harness result
-does.
+project decisions, rejected approaches, and file moves. It remains experimental
+and has no checked-in result artifact; do not cite it as a passing benchmark
+until a non-placeholder result is generated and committed.
 
 ### Feature Ablation Suite
 
@@ -137,7 +115,7 @@ python benchmarks/run.py \
   --markdown benchmarks/results/currencybench-local.md
 ```
 
-Run the coding-agent benchmark:
+Run the experimental coding-agent benchmark:
 
 ```sh
 python benchmarks/run.py \
@@ -170,30 +148,6 @@ python benchmarks/run.py \
 ```
 
 Swap `--suite longmemeval` for a LongMemEval-shaped JSONL export.
-
-## Optional External Adapters
-
-Mem0 requires the `mem0ai` package and whatever model/vector backend config the
-SDK needs in the local environment:
-
-```sh
-python benchmarks/run.py \
-  --suite currencybench \
-  --systems shibahama,warehouse,mem0 \
-  --allow-missing
-```
-
-Zep requires the `zep-cloud` package and `ZEP_API_KEY`:
-
-```sh
-ZEP_API_KEY=... python benchmarks/run.py \
-  --suite currencybench \
-  --systems shibahama,warehouse,zep \
-  --allow-missing
-```
-
-Do not claim "all systems" results unless the generated JSON shows each adapter
-with `"status": "ok"`.
 
 ## Metrics
 
@@ -242,8 +196,6 @@ When adding or updating benchmark results:
 - include the command, suite, systems, top-k, seed, and dataset path in the JSON
   config;
 - keep generated local smoke results separate from hosted-service results;
-- use `--allow-missing` only when a partial run is acceptable and the missing
-  adapter rows are part of the output;
 - do not reuse placeholder labels for ablations unless the harness actually
   toggles significance, reconstruction, or graph behavior.
 
@@ -251,8 +203,7 @@ When adding or updating benchmark results:
 
 The TODO list still tracks benchmark work that is not complete:
 
-- run LoCoMo through all systems after a dataset export and external service
-  config are available;
-- run LongMemEval through all systems after a dataset export and external
-  service config are available;
-- run Mem0 and Zep with real credentials/config for CurrencyBench.
+- run LoCoMo after a dataset export is available;
+- run LongMemEval after a dataset export is available;
+- add external-system adapters only when they are backed by reproducible,
+  checked-in successful runs rather than missing-credential placeholders.

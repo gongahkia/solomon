@@ -32,7 +32,7 @@ Still not done / next up:
   - Run LongMemEval through all systems once a dataset export and external service credentials/config are available.
   - Run Mem0 and Zep adapters with real credentials/config to complete the "all systems" CurrencyBench gap claim.
 - Performance:
-  - Optional mmap for cold-tier compressed store still needs a separate cold-content file/backend design; current cold content lives in the redb `cold_content` table.
+  - Optional mmap for cold-tier compressed store still needs a separate cold-content file/backend design; current cold content lives in the redb `cold_content` table, direct memmap2-style file mapping conflicts with the workspace unsafe-code policy, and the safe-wrapper crates checked so far are not a clean fit.
 - Launch assets:
   - Actually reach out to early users and collect first issues.
   - Submit CurrencyBench writeup somewhere citable.

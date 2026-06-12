@@ -44,6 +44,8 @@ def load_suite(name: str, dataset: Path | None = None, seed: int = 7) -> list[Be
     """Load a named suite."""
 
     if name == "currencybench":
+        if dataset is not None:
+            return load_jsonl_suite(dataset, suite_name=name)
         return currencybench(seed)
     if name == "coding-agent":
         return coding_agent_memory_task(seed)

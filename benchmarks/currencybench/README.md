@@ -55,6 +55,14 @@ The external dataset format uses one benchmark case per line:
 The harness loader also accepts this format for LoCoMo-shaped and
 LongMemEval-shaped exports.
 
+The checked-in v0 dataset is `benchmarks/currencybench/currencybench-v0.jsonl`.
+Regenerate it with:
+
+```sh
+python benchmarks/currencybench/generate.py \
+  --output benchmarks/currencybench/currencybench-v0.jsonl
+```
+
 ## Metrics
 
 CurrencyBench reports:
@@ -89,6 +97,17 @@ Run the local Shibahama-vs-warehouse comparison:
 ```sh
 python benchmarks/run.py \
   --suite currencybench \
+  --systems shibahama,warehouse \
+  --output benchmarks/results/currencybench-local.json \
+  --markdown benchmarks/results/currencybench-local.md
+```
+
+Run from the checked-in JSONL dataset instead of the built-in generator:
+
+```sh
+python benchmarks/run.py \
+  --suite currencybench \
+  --dataset benchmarks/currencybench/currencybench-v0.jsonl \
   --systems shibahama,warehouse \
   --output benchmarks/results/currencybench-local.json \
   --markdown benchmarks/results/currencybench-local.md
@@ -138,6 +157,7 @@ fact.
 When changing CurrencyBench:
 
 - keep generated cases deterministic for a given seed;
+- regenerate `currencybench-v0.jsonl` with `generate.py`;
 - update this README if cases, metrics, or interpretation change;
 - commit JSON and Markdown result artifacts together;
 - do not expand the benchmark with private or unreleasable data;

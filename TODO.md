@@ -282,7 +282,7 @@ Still not done / next up:
 - [x] (P2) Design `CurrencyBench`: long-horizon task that injects fact CHANGES mid-stream
 - [x] (P2) Metrics: stale-answer rate, time-to-correction after a fact changes
 - [ ] (P2) Run all systems; show the gap Shibahama is built to win
-- [ ] (P3) Write up CurrencyBench as its own `benchmarks/currencybench/README.md` for citability
+- [x] (P3) Write up CurrencyBench as its own `benchmarks/currencybench/README.md` for citability
 - [ ] (P3) Release the CurrencyBench dataset/generator so others can reproduce
 
 ---

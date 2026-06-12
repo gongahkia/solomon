@@ -9,3 +9,10 @@ coexist without corrupting the event log. Propagation is incremental: authority 
 The dependency graph has indexes on source, target, and current target validity for `impact_query`.
 `solomon.performance` provides small latency and memory budget helpers used by tests and benchmark scripts.
 
+## Characterized Local Concurrency
+
+The supported local write envelope is SQLite's WAL model: many readers can coexist with serialized writers,
+and writers wait on the configured 5s busy timeout instead of immediately failing on transient lock
+contention. CI covers this with a multi-connection write characterization test: 4 independent
+`SQLiteKnowledgeStore` connections each append 25 knowledge items to the same database, then the final
+materialized state and WAL/busy-timeout pragmas are verified.

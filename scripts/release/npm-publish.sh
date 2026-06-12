@@ -21,10 +21,10 @@ if [[ "${SHIBAHAMA_PUBLISH:-0}" != "1" ]]; then
   exit 0
 fi
 
-token="${NODE_AUTH_TOKEN:-${NPM_TOKEN:-}}"
-if [[ -n "$token" ]]; then
+auth_value="${NODE_AUTH_TOKEN:-${NPM_TOKEN:-}}"
+if [[ -n "$auth_value" ]]; then
   npmrc="$tmpdir/npmrc"
-  printf '//registry.npmjs.org/:_authToken=%s\n' "$token" > "$npmrc"
+  printf '//registry.npmjs.org/:_authToken=%s\n' "$auth_value" > "$npmrc"
   export NPM_CONFIG_USERCONFIG="$npmrc"
 fi
 

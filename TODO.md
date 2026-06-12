@@ -337,7 +337,7 @@ Still not done / next up:
 - [ ] (P1) API reference generated from doc-comments (rustdoc + typedoc + Python docstrings)
 - [x] (P1) `examples/` with runnable snippets per binding
 - [x] (P2) `docs/benchmarks.md`: methodology + how to reproduce
-- [ ] (P2) `docs/security.md`: the ASI06/poisoning posture and what is/ isn't guaranteed
+- [x] (P2) `docs/security.md`: the ASI06/poisoning posture and what is/ isn't guaranteed
 - [ ] (P2) ADR index kept current
 - [ ] (P3) A short `docs/why-shibahama.md` telling the rakugo story + the design philosophy
 

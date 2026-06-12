@@ -6,3 +6,4 @@ Architecture notes, ADRs, API references, performance notes, and launch document
 - `benchmarks.md`: benchmark methodology, reproduction commands, current local results, and open gaps.
 - `concepts.md`: plain-language explanation of memories, significance, tiers, credence, reconstruction, and graph concepts.
 - `performance.md`: recall latency budget and hot-path scan boundaries.
+- `security.md`: poisoning posture, logging behavior, encryption limits, and operational guidance.

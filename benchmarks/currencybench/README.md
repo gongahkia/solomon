@@ -113,26 +113,14 @@ python benchmarks/run.py \
   --markdown benchmarks/results/currencybench-local.md
 ```
 
-Optional external adapters:
-
-```sh
-python benchmarks/run.py \
-  --suite currencybench \
-  --systems shibahama,warehouse,mem0,zep \
-  --allow-missing
-```
-
-Do not claim all-systems results unless every adapter row in the generated JSON
-has `"status": "ok"`.
-
 ## Current Local Result
 
 The current checked-in local smoke result is:
 
 | Suite | System | Queries | Accuracy | Stale Answer Rate | Mean Token Cost |
 | --- | --- | ---: | ---: | ---: | ---: |
-| currencybench | shibahama | 4 | 1.000 | 0.000 | 5.750 |
-| currencybench | warehouse | 4 | 0.000 | 1.000 | 11.500 |
+| currencybench | shibahama | 12 | 1.000 | 0.000 | 5.917 |
+| currencybench | warehouse | 12 | 0.000 | 1.000 | 11.833 |
 
 Artifacts:
 

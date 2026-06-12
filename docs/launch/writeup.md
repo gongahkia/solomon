@@ -78,10 +78,10 @@ The repository includes:
 
 ## What Still Needs External Proof
 
-The local harness can run Shibahama and a warehouse baseline today. Full Mem0,
-Zep, LoCoMo, and LongMemEval comparisons still require external packages,
-datasets, credentials, and configuration. Those results should not be claimed
-until they are run under reproducible settings.
+The local harness can run Shibahama and a warehouse baseline today. LoCoMo and
+LongMemEval comparisons still require external dataset exports. External-system
+adapters should not be claimed until they are backed by reproducible successful
+runs.
 
 The current claim is narrower: Shibahama has the mechanics needed for
 currency-aware, provenance-aware, reconstructive memory, and the repo contains

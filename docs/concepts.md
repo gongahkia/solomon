@@ -53,9 +53,10 @@ This distinction matters when facts are learned late or corrected later. A file
 may have moved last month, while Shibahama only learned that today. Timeline
 queries need to preserve both truths.
 
-Default recall asks for facts believed now. `timeline(query, as_of)` asks what
-Shibahama had ingested and believed at a specific instant, without recording a
-new surfaced-access event.
+Default recall asks for facts believed now. `timeline(query, as_of)` replays the
+event log to ask what Shibahama had ingested and believed at a specific instant,
+without recording a new surfaced-access event. Backdated invalidations only
+affect timeline queries after the invalidation event itself was recorded.
 
 ## Currency
 
@@ -97,6 +98,10 @@ The default scorer combines:
 The function is deterministic and configurable. It is deliberately not learned
 in the current implementation, because users need to inspect why a memory is
 hot, stale, demoted, or still protected.
+
+Recall refreshes significance lazily before ranking candidates. The surfaced
+access event caused by that recall is recorded after the final result set is
+chosen, so it affects later recalls, not the rank order that produced it.
 
 `why(memory_id)` returns the significance breakdown used by the current engine.
 

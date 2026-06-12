@@ -26,8 +26,10 @@ significance =
 The exact coefficients live in configuration. The default function must return an explanation
 breakdown that can be surfaced by `why(memory_id)` and the Tideline.
 
-The scorer is recomputed lazily on access, recall, reinforcement, or explicit explanation. There is
-no global maintenance scan.
+The scorer is recomputed lazily on access, recall, reinforcement, or explicit explanation. Recall
+refreshes candidate significance before ranking. The `Surfaced` event from the current recall is
+recorded after the final candidates are chosen, so that access affects later recalls. There is no
+global maintenance scan.
 
 ## Rationale
 

@@ -121,8 +121,8 @@ Run the experimental coding-agent benchmark:
 python benchmarks/run.py \
   --suite coding-agent \
   --systems shibahama,warehouse \
-  --output benchmarks/results/coding-agent-local.json \
-  --markdown benchmarks/results/coding-agent-local.md
+  --output /tmp/coding-agent-experimental.json \
+  --markdown /tmp/coding-agent-experimental.md
 ```
 
 Run the local feature ablations:

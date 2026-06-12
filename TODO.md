@@ -9,14 +9,23 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 
 ## Stop point / next work
 
-Updated on 2026-06-12 after completing the local implementation, performance, Tideline, API-reference, launch-assets, README-demo-GIF, deep-README, and benchmark-ablation pass.
+Updated on 2026-06-12 after reconciling the current implementation against the
+GOAL.md audit: explicit reconstruction API, pure significance recompute,
+event-log timeline replay, property tests, 12-case CurrencyBench, and benchmark
+claim cleanup.
 
 Current local state:
-- The working tree is expected to be clean after the latest task commit.
-- This branch is ahead of `origin/main` by the local task commits from this pass.
+- Core Rust tests currently cover the explicit reconstruction loop, lazy
+  pre-rank significance refresh, event-log timeline replay, never-delete
+  property sequences, invalidated recall filtering, and credence ordering.
+- The checked-in benchmark claim is local only: CurrencyBench over Shibahama and
+  the warehouse baseline, plus local feature ablations.
 - Phase 5 now includes opt-in idle/background reconstruction planning for known-stale significant facts.
+- Phase 5 now also has a real explicit reconstruction API that gates recall
+  triggers, calls a caller-supplied revalidation source, quarantines proposals,
+  requires corroboration, and writes invalidate-not-delete replacements.
 - Phase 9 now has the Tideline diff view and browser-native shareable WebM clip export.
-- Phase 10 now has real local ablations for significance, reconstruction/supersession, and graph expansion toggles.
+- Phase 10 now has real local ablations for significance, reconstruction/supersession, and graph expansion toggles, and a 12-case CurrencyBench local result.
 - Phase 13 now has significance recompute profiling/optimisation, embedded memory-footprint budget, tested multi-reader/single-writer store concurrency, and batched vector search.
 - Phase 14 now has a deep README, architecture, concepts, benchmarks, security, ADR index, naming/philosophy docs, runnable Rust/Python/Node examples, and a generated API reference.
 - Phase 15 now has draft Show HN, FAQ, launch writeup, early-user outreach notes, and a recorded Tideline README demo GIF.
@@ -28,9 +37,9 @@ Still not done / next up:
   - npm publish for `npm install`.
   - final `v0.1.0` tag + crate/pip/npm publish.
 - Benchmarks:
-  - Run LoCoMo through all systems once a dataset export and external service credentials/config are available.
-  - Run LongMemEval through all systems once a dataset export and external service credentials/config are available.
-  - Run Mem0 and Zep adapters with real credentials/config to complete the "all systems" CurrencyBench gap claim.
+  - Run LoCoMo once a dataset export is available.
+  - Run LongMemEval once a dataset export is available.
+  - Add external-system adapters only when the repo can include reproducible successful runs; the previous Mem0/Zep placeholder adapters were removed rather than keeping missing-credential claims.
 - Performance:
   - Optional mmap for cold-tier compressed store still needs a separate cold-content file/backend design; current cold content lives in the redb `cold_content` table, direct memmap2-style file mapping conflicts with the workspace unsafe-code policy, and the safe-wrapper crates checked so far are not a clean fit.
 - Launch assets:
@@ -261,22 +270,23 @@ Still not done / next up:
 ## Phase 10 — Proof: benchmarks (P1/P2)
 
 ### Harness
-- [x] (P0) Build a benchmark harness (Python) that drives Shibahama, Mem0, and Zep through identical tasks
-- [x] (P0) Implement adapters for Mem0 and Zep so comparisons are apples-to-apples
+- [x] (P0) Build a benchmark harness (Python) that drives Shibahama variants and a warehouse baseline through identical local tasks
+- [ ] (P0) Add external-system adapters only with reproducible successful runs; Mem0/Zep placeholder adapters are intentionally not checked in
 - [x] (P1) Deterministic seeds + logged configs so results are reproducible
 - [x] (P1) Metrics: recall accuracy, retrieval token cost, latency, stale-answer rate
 
 ### Existing suites
-- [ ] (P1) Wire up LoCoMo and run all systems
-- [ ] (P1) Wire up LongMemEval and run all systems
+- [ ] (P1) Wire up LoCoMo from a real dataset export
+- [ ] (P1) Wire up LongMemEval from a real dataset export
 - [x] (P1) Build a long-horizon coding-agent memory task (the headline scenario)
-- [x] (P1) Produce a results table (accuracy vs token-cost frontier) for the README
+- [x] (P1) Produce a local results table (accuracy vs token-cost frontier) for the README
 - [x] (P2) Ablations: significance on/off, reconstruction on/off, graph on/off — isolate what each contributes
 
 ### CurrencyBench (P2/P3, the defensible new artifact)
 - [x] (P2) Design `CurrencyBench`: long-horizon task that injects fact CHANGES mid-stream
 - [x] (P2) Metrics: stale-answer rate, time-to-correction after a fact changes
-- [ ] (P2) Run all systems; show the gap Shibahama is built to win
+- [x] (P2) Run the reproducible local systems (`shibahama`, `warehouse`) and show the local currency gap
+- [ ] (P2) Run external systems under reproducible settings before making any all-systems claim
 - [x] (P3) Write up CurrencyBench as its own `benchmarks/currencybench/README.md` for citability
 - [x] (P3) Release the CurrencyBench dataset/generator so others can reproduce
 

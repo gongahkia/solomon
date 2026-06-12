@@ -27,7 +27,7 @@ recall.
 | Python binding | `bindings/python/` | PyO3/maturin package exposing the core API to Python. |
 | Node binding | `bindings/node/` | napi-rs package exposing the core API to ESM/CJS users. |
 | Tideline debugger | `tideline/` | React/Vite UI for replaying event/state streams. |
-| Benchmarks | `benchmarks/` | Harnesses and local result artifacts for Shibahama, Mem0, Zep, and baselines. |
+| Benchmarks | `benchmarks/` | Harnesses and local result artifacts for Shibahama, feature ablations, and baselines. |
 
 ## Durable State Model
 
@@ -197,7 +197,6 @@ production implementations:
   network client.
 - Multi-reader/single-writer or MVCC behavior is inherited from redb but has not
   yet been documented as a tested Shibahama concurrency contract.
-- LoCoMo, LongMemEval, and all-systems hosted benchmark runs still need external
-  datasets and service credentials.
+- LoCoMo and LongMemEval benchmark runs still need external dataset exports.
 - Publishing to crates.io, PyPI, and npm is intentionally outside the local
   architecture and requires registry credentials or trusted publishing setup.

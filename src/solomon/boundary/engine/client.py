@@ -6,18 +6,25 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from solomon.boundary.engine.jurisdictions import supported_jurisdiction_codes
 from solomon.boundary.engine.mapping_store import VolatileMappingStore
 from solomon.boundary.engine.review import (
+    DETECTOR_FAMILIES,
+    anonymize_text,
     document_hash,
     pseudonymize_text,
+    redact_text,
     reidentify_text,
     review_text,
     scrub_document_base64,
 )
 from solomon.boundary.engine.schemas import (
+    AnonymizeResponse,
+    BoundaryCapabilities,
     MappingEntry,
     PseudonymizeResponse,
     ReadyResponse,
+    RedactResponse,
     ReidentifyResponse,
     ReviewResponse,
 )
@@ -44,6 +51,15 @@ class BoundaryClient:
         self._raise_if_failed()
         return ReadyResponse()
 
+    def capabilities(self) -> BoundaryCapabilities:
+        self._raise_if_failed()
+        return BoundaryCapabilities(
+            surfaces=["review", "pseudonymize", "anonymize", "redact", "reidentify", "documents/scrub"],
+            privacy_operations=["pseudonymize", "anonymize", "redact", "reidentify"],
+            jurisdiction_codes=supported_jurisdiction_codes(),
+            detector_families=DETECTOR_FAMILIES,
+        )
+
     def review(
         self,
         text: str | None = None,
@@ -55,7 +71,7 @@ class BoundaryClient:
     ) -> ReviewResponse:
         self._raise_if_failed()
         payload = dict(request or {})
-        resolved_text = str(payload.get("text", text or ""))
+        resolved_text = _resolve_text(payload, text)
         source = str(payload.get("source_jurisdiction", source_jurisdiction))
         destination = str(payload.get("destination_jurisdiction", destination_jurisdiction))
         classification, findings = review_text(
@@ -79,15 +95,42 @@ class BoundaryClient:
     ) -> PseudonymizeResponse:
         self._raise_if_failed()
         payload = dict(request or {})
-        resolved_text = str(payload.get("text", text or ""))
+        resolved_text = _resolve_text(payload, text)
         sanitized, mapping = pseudonymize_text(resolved_text)
-        doc_hash = document_hash(sanitized)
+        doc_hash = document_hash(resolved_text)
         if bool(payload.get("persist_mapping", persist_mapping)):
             self.mapping_store.put(doc_hash, mapping)
-        return PseudonymizeResponse(pseudonymized_text=sanitized, mapping=mapping, document_hash=doc_hash)
+        return PseudonymizeResponse(
+            pseudonymized_text=sanitized,
+            anonymized_text=sanitized,
+            mapping=mapping,
+            document_hash=doc_hash,
+            mapping_persisted=bool(payload.get("persist_mapping", persist_mapping)),
+        )
 
-    def anonymize(self, *args: Any, **kwargs: Any) -> PseudonymizeResponse:
-        return self.pseudonymize(*args, **kwargs)
+    def anonymize(self, *args: Any, **kwargs: Any) -> AnonymizeResponse:
+        self._raise_if_failed()
+        text = args[0] if args else None
+        payload = dict(kwargs.get("request") or {})
+        resolved_text = _resolve_text(payload, text if isinstance(text, str) else kwargs.get("text"))
+        anonymized, replacements = anonymize_text(resolved_text)
+        return AnonymizeResponse(
+            anonymized_text=anonymized,
+            replacements=replacements,
+            document_hash=document_hash(resolved_text),
+        )
+
+    def redact(self, *args: Any, **kwargs: Any) -> RedactResponse:
+        self._raise_if_failed()
+        text = args[0] if args else None
+        payload = dict(kwargs.get("request") or {})
+        resolved_text = _resolve_text(payload, text if isinstance(text, str) else kwargs.get("text"))
+        redacted, redactions = redact_text(resolved_text)
+        return RedactResponse(
+            redacted_text=redacted,
+            redactions=redactions,
+            document_hash=document_hash(resolved_text),
+        )
 
     def reidentify(
         self,
@@ -130,3 +173,16 @@ class BoundaryClient:
 
 
 KaypohClient = BoundaryClient
+
+
+def _resolve_text(payload: Mapping[str, Any], text: str | None) -> str:
+    if payload.get("text") is not None:
+        return str(payload["text"])
+    if text is not None:
+        return text
+    if payload.get("document_base64") is not None:
+        import base64
+
+        decoded = base64.b64decode(str(payload["document_base64"]).encode("ascii"), validate=True)
+        return decoded.decode("utf-8", errors="replace")
+    return ""

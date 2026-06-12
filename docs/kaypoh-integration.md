@@ -14,12 +14,21 @@ src/solomon/boundary/engine/
 The vendored source is pinned in `src/solomon/boundary/engine/NOTICE` to Kaypoh commit
 `7415069e57d69398e2c44ef6ababafb0c04a988b`.
 
-Solomon uses:
+Solomon vendors the Kaypoh-compatible surfaces needed for local operation:
 
 - `/review` before storing sensitive knowledge.
 - `/pseudonymize` before model egress, with `persist_mapping=false`.
+- `/anonymize` for irreversible placeholder-only rewrites with no mapping.
+- `/redact` for opaque markers that do not expose entity type or original text.
 - `/reidentify` after model response, using volatile in-process mappings.
 - `/documents/scrub` before file extraction.
+- `capabilities()` for the local parity manifest.
+
+The vendored engine carries the same jurisdiction coverage list exposed by Kaypoh's schema docs:
+`AE`, `AU`, `CN`, `EU`, `HK`, `ID`, `IN`, `JP`, `KR`, `MY`, `PH`, `SA`, `SEA`, `SG`, `TH`, `UK`, `US`,
+and `VN`. It also includes deterministic universal PII, special-category PII, privacy-handling event,
+financial-scalar, and MNPI lexicon detectors. Solomon still treats the boundary as a gate and evidence source,
+not as legal advice or a complete DLP replacement.
 
 Run a local smoke test:
 

@@ -36,12 +36,56 @@ class MappingEntry(BaseModel):
     entity_type: str = "UNKNOWN"
 
 
+class PlaceholderReplacement(BaseModel):
+    placeholder: str
+    entity_type: str
+    start_char: int
+    end_char: int
+
+
+class OpaqueRedaction(BaseModel):
+    marker: str
+    start_char: int
+    end_char: int
+
+
 class PseudonymizeResponse(BaseModel):
     pseudonymized_text: str
     mapping: list[MappingEntry] = Field(default_factory=list)
     document_hash: str
+    privacy_operation: str = "pseudonymize"
+    anonymized_text: str | None = None
+    mapping_persisted: bool = False
+
+
+class AnonymizeResponse(BaseModel):
+    anonymized_text: str
+    document_hash: str
+    replacements: list[PlaceholderReplacement] = Field(default_factory=list)
+    privacy_operation: str = "anonymize"
+    anonymization_mode: str = "placeholder_only"
+    mapping_persisted: bool = False
+
+
+class RedactResponse(BaseModel):
+    redacted_text: str
+    document_hash: str
+    redactions: list[OpaqueRedaction] = Field(default_factory=list)
+    privacy_operation: str = "redact"
+    redaction_style: str = "opaque_text_marker"
+    mapping_persisted: bool = False
 
 
 class ReidentifyResponse(BaseModel):
     reidentified_text: str
     replacement_count: int
+
+
+class BoundaryCapabilities(BaseModel):
+    engine: str = "solomon.boundary.engine"
+    source_commit: str = "7415069e57d69398e2c44ef6ababafb0c04a988b"
+    surfaces: list[str]
+    privacy_operations: list[str]
+    jurisdiction_codes: list[str]
+    detector_families: list[str]
+    parity_reference: str = "../kaypoh/docs/schema.md"

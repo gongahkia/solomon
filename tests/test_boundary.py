@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from solomon.boundary.engine.client import BoundaryClient
 from solomon.boundary.kaypoh import (
     BoundaryPolicy,
     BoundaryRefusedError,
@@ -144,3 +145,90 @@ def test_placeholder_survival_flags_dropped_tokens() -> None:
     assert result.present_placeholders == ["[PERSON_1]"]
     assert result.missing_placeholders == ["[CLIENT_1]"]
 
+
+def test_vendored_boundary_exposes_kaypoh_required_surface_parity() -> None:
+    client = BoundaryClient()
+
+    capabilities = client.capabilities()
+
+    for method in ["review", "pseudonymize", "anonymize", "redact", "reidentify", "scrub_document"]:
+        assert hasattr(client, method)
+    assert capabilities.surfaces == [
+        "review",
+        "pseudonymize",
+        "anonymize",
+        "redact",
+        "reidentify",
+        "documents/scrub",
+    ]
+    assert capabilities.privacy_operations == ["pseudonymize", "anonymize", "redact", "reidentify"]
+    assert set(capabilities.jurisdiction_codes) == {
+        "AE",
+        "AU",
+        "CN",
+        "EU",
+        "HK",
+        "ID",
+        "IN",
+        "JP",
+        "KR",
+        "MY",
+        "PH",
+        "SA",
+        "SEA",
+        "SG",
+        "TH",
+        "UK",
+        "US",
+        "VN",
+    }
+    assert "mnpi_lexicon" in capabilities.detector_families
+    assert "placeholder_rewrite" in capabilities.detector_families
+
+
+def test_vendored_boundary_detects_expanded_pii_mnpi_and_jurisdiction_terms() -> None:
+    client = BoundaryClient()
+
+    response = client.review(
+        request={
+            "text": (
+                "Send Dr Jane Tan S1234567D, passport number E1234567, DOB 01/02/1980, "
+                "card 4111 1111 1111 1111, IP 192.168.1.10, and confidential Q1 guidance "
+                "before announcement under UK MAR."
+            ),
+            "source_jurisdiction": "SG",
+            "destination_jurisdiction": "UK",
+        }
+    )
+
+    kinds = {finding.kind for finding in response.findings}
+    assert response.classification == "HIGH_RISK"
+    assert {
+        "person",
+        "national_id",
+        "passport_number",
+        "date_of_birth",
+        "credit_card",
+        "ip_address",
+        "mnpi_or_high_risk_secret",
+        "jurisdiction_strict_term",
+    }.issubset(kinds)
+    assert any(finding.jurisdiction == "UK" for finding in response.findings)
+
+
+def test_anonymize_is_irreversible_and_redact_is_opaque() -> None:
+    client = BoundaryClient()
+    text = "Send Jane Tan at jane@example.com the $2.5 billion draft."
+
+    anonymized = client.anonymize(text)
+    redacted = client.redact(text)
+
+    assert "Jane" not in anonymized.anonymized_text
+    assert "jane@example.com" not in anonymized.anonymized_text
+    assert anonymized.mapping_persisted is False
+    assert anonymized.anonymization_mode == "placeholder_only"
+    assert all(not hasattr(replacement, "original_text") for replacement in anonymized.replacements)
+    assert "Jane" not in redacted.redacted_text
+    assert "EMAIL" not in redacted.redacted_text
+    assert redacted.redaction_style == "opaque_text_marker"
+    assert redacted.mapping_persisted is False

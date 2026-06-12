@@ -52,7 +52,7 @@ checkout is required at runtime.
 - [x] `SolomonService.ingest()` calls boundary review before store/index writes and captures findings on provenance.
 - [x] `SolomonService.complete_model_request()` sanitizes before router/model egress, reidentifies inbound text, and flushes mappings.
 - [x] Service-level fail-closed tests prove vendored boundary failure blocks ingestion and model egress before endpoint calls.
-- [ ] Vendored boundary is intentionally compact and deterministic; it is not full Kaypoh feature parity.
+- [x] Vendored boundary now covers the Kaypoh product surfaces Solomon depends on: review, pseudonymize, irreversible anonymize, opaque redact, reidentify, document scrub, capabilities, 18 jurisdiction packs, richer deterministic PII/MNPI detectors, and parity tests.
 
 ## Phase 5 — Dual model endpoint and routing
 

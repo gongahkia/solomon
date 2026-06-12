@@ -233,5 +233,5 @@ def test_vendored_kaypoh_client_contract() -> None:
     from solomon.boundary.kaypoh import load_kaypoh_client_class
 
     client_class = load_kaypoh_client_class()
-    for method in ["review", "pseudonymize", "reidentify", "scrub_document"]:
+    for method in ["review", "pseudonymize", "anonymize", "redact", "reidentify", "scrub_document", "capabilities"]:
         assert hasattr(client_class, method)

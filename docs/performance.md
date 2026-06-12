@@ -46,16 +46,17 @@ No portable SIMD implementation is claimed for the current HNSW dependency. The
 portable contract is batched vector operation support; SIMD can be added behind
 the same methods if a backend exposes it.
 
-## Cold-Tier Mmap Status
+## Cold-Tier Mmap Decision
 
 Cold-tier compaction currently stores compressed payloads in the embedded redb
 `cold_content` table. `RedbMemoryStore::compact_cold_item` moves cold item text
 out of the materialized memory row, writes an LZ4 size-prepended payload into
 that table, and leaves a `CompactionRef` pointing at the table key.
 
-That design is not mmap-ready yet. A real mmap path needs a separate
-cold-content file/backend layout with stable offsets, lengths, integrity
-metadata, and a migration path from existing redb `cold_content` records.
+The v0.1 decision is to keep that design and not add mmap. A real mmap path
+needs a separate cold-content file/backend layout with stable offsets, lengths,
+integrity metadata, and a migration path from existing redb `cold_content`
+records.
 
 The usual Rust mmap crate choice, `memmap2`, marks file-backed map constructors
 as `unsafe` because the compiler cannot prove the underlying file will not be
@@ -65,10 +66,9 @@ would require an explicit unsafe-code policy change and audit.
 
 I also checked safe-public-API mmap wrappers. `mmap-rs` still requires unsafe for
 file-backed `with_file`, while `tiverse-mmap` advertises a safe public API but
-its published 1.0.0 README describes the implementation as still in progress.
-The cold-tier mmap TODO should therefore stay open until the storage backend
-design is split from redb and the mmap safety/dependency choice is made
-deliberately.
+its published 1.0.0 documentation still shows examples as incomplete. The mmap
+item is therefore closed as rejected/deferred for v0.1 in
+[`ADR 0008`](adr/0008-cold-tier-mmap.md), not as an implemented feature.
 
 ## Hot-Path Scan Boundary
 

@@ -40,7 +40,7 @@ Still not done / next up:
   - LoCoMo and LongMemEval official export loaders are wired; result claims still require caller-supplied datasets and committed run artifacts.
   - External-system adapters are gated by adapter metadata and checked-in successful result artifacts; Mem0/Zep placeholders remain intentionally absent.
 - Performance:
-  - Optional mmap for cold-tier compressed store still needs a separate cold-content file/backend design; current cold content lives in the redb `cold_content` table, direct memmap2-style file mapping conflicts with the workspace unsafe-code policy, and the safe-wrapper crates checked so far are not a clean fit.
+  - Optional mmap for cold-tier compressed store is closed as a v0.1 non-goal in ADR 0008; current cold content stays in the compressed redb `cold_content` table.
 - Launch assets:
   - Actually reach out to early users and collect first issues.
   - Submit CurrencyBench writeup somewhere citable.
@@ -327,7 +327,7 @@ Still not done / next up:
 - [x] (P2) Memory-footprint budget for embedded mode (must stay modest to justify "embeddable")
 - [x] (P2) Concurrency: safe multi-reader / single-writer (or MVCC) story, tested
 - [x] (P3) SIMD / batched vector ops where the index backend allows
-- [ ] (P3) Optional mmap for cold-tier compressed store
+- [x] (P3) Evaluate optional mmap for cold-tier compressed store and close as a v0.1 non-goal (ADR 0008)
 
 ---
 

@@ -12,8 +12,8 @@ from solomon.api.schemas import SolomonModel
 from solomon.currency.models import CurrencyState, KnowledgeItem, KnowledgeKind, VerifiedState, now_utc
 from solomon.graph.models import ImpactResult
 from solomon.graph.propagation import CurrencyPropagator
-from solomon.graph.store import GraphStore
-from solomon.store.sqlite import SQLiteKnowledgeStore
+from solomon.graph.types import DependencyGraphProtocol
+from solomon.store.types import KnowledgeStoreProtocol
 
 
 class VerificationOutcome(str, Enum):
@@ -148,7 +148,7 @@ def evaluate_currency(
     )
 
 
-def live_items(store: SQLiteKnowledgeStore) -> list[KnowledgeItem]:
+def live_items(store: KnowledgeStoreProtocol) -> list[KnowledgeItem]:
     return store.get_many(include_states={CurrencyState.LIVE})
 
 
@@ -209,8 +209,8 @@ def register_authority_change(
     authority_id: str,
     new_version: str,
     changed_at: datetime,
-    graph: GraphStore,
-    store: SQLiteKnowledgeStore,
+    graph: DependencyGraphProtocol,
+    store: KnowledgeStoreProtocol,
 ) -> ImpactResult:
     reason = f"external authority {authority_id} changed to version {new_version}"
     return CurrencyPropagator(graph=graph, store=store).propagate_dependency_change(

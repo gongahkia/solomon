@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -36,6 +38,7 @@ from solomon.orchestrator.models import (
 
 PUBLIC_PATHS = {"/health", "/ready", "/docs", "/redoc", "/openapi.json"}
 TENANT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+DEFAULT_DATABASE_URL = str(Settings.model_fields["database_url"].default)
 
 
 class HealthResponse(BaseModel):
@@ -62,6 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         data_dir=resolved_settings.data_dir,
         journal_dir=resolved_settings.journal_dir,
         attestation_key=resolved_settings.verification_attestation_key,
+        database_url=_service_database_url(resolved_settings, resolved_settings.data_dir),
     )
     tenant_services: dict[str, SolomonService] = {}
 
@@ -73,6 +77,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             data_dir=resolved_settings.data_dir / "tenants" / tenant_id,
             journal_dir=resolved_settings.journal_dir / "tenants" / tenant_id,
             attestation_key=resolved_settings.verification_attestation_key,
+            database_url=_service_database_url(
+                resolved_settings,
+                resolved_settings.data_dir / "tenants" / tenant_id,
+            ),
+            postgres_schema=_postgres_schema_for_tenant(resolved_settings, tenant_id),
         )
         tenant_services[tenant_id] = tenant_service
         return tenant_service
@@ -227,6 +236,24 @@ def _model_router_from_settings(settings: Settings) -> ModelRouter:
             zero_egress_mode=settings.zero_egress_mode,
         ),
     )
+
+
+def _service_database_url(settings: Settings, data_dir: Path) -> str:
+    if _is_postgres_url(settings.database_url):
+        return settings.database_url
+    if settings.database_url != DEFAULT_DATABASE_URL:
+        return settings.database_url
+    return str(data_dir / "solomon.sqlite3")
+
+
+def _postgres_schema_for_tenant(settings: Settings, tenant_id: str) -> str | None:
+    if not _is_postgres_url(settings.database_url):
+        return None
+    return f"tenant_{tenant_id}"
+
+
+def _is_postgres_url(database_url: str) -> bool:
+    return urlparse(database_url).scheme in {"postgres", "postgresql"}
 
 
 app = create_app()

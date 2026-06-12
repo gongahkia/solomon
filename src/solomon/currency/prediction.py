@@ -14,8 +14,9 @@ from pydantic import Field, field_validator
 from solomon.api.schemas import SolomonModel
 from solomon.currency.models import _ensure_aware_utc, now_utc
 from solomon.graph.models import DependencyEdge, EdgeConfidence
-from solomon.graph.store import GraphStore
-from solomon.store.sqlite import ItemNotFoundError, SQLiteKnowledgeStore
+from solomon.graph.types import DependencyGraphProtocol
+from solomon.store.sqlite import ItemNotFoundError
+from solomon.store.types import KnowledgeStoreProtocol
 
 
 class PendingAuthorityAmendment(SolomonModel):
@@ -75,8 +76,8 @@ def load_pending_amendments(path: Path | str) -> list[PendingAuthorityAmendment]
 def predict_staleness_risk(
     amendments: list[PendingAuthorityAmendment],
     *,
-    graph: GraphStore,
-    store: SQLiteKnowledgeStore,
+    graph: DependencyGraphProtocol,
+    store: KnowledgeStoreProtocol,
     history: list[AuthorityChangeHistory] | None = None,
     as_of: datetime | None = None,
     lookahead_days: int = 180,
@@ -130,7 +131,10 @@ def predict_staleness_risk(
     )
 
 
-def _transitive_dependents(graph: GraphStore, authority_id: str) -> list[tuple[str, list[DependencyEdge]]]:
+def _transitive_dependents(
+    graph: DependencyGraphProtocol,
+    authority_id: str,
+) -> list[tuple[str, list[DependencyEdge]]]:
     queue: deque[tuple[str, list[DependencyEdge]]] = deque(
         (edge.source_id, [edge]) for edge in graph.get_dependents(authority_id)
     )

@@ -25,9 +25,16 @@ Solomon is a Python 3.10+ FastAPI service and CLI. It is organized around durabl
 
 ## Store
 
-SQLite is the local default. Knowledge is written through append-only events and projected into current
-state. Supersession closes `valid_to`, links the successor, and leaves the predecessor queryable in review
+SQLite is the local default. Server deployments can set `SOLOMON_DATABASE_URL` to a `postgres://` or
+`postgresql://` DSN and install the optional `solomon[server]` dependency for the psycopg driver. Both
+backends preserve the same event-log contract: knowledge is written through append-only events and projected
+into current state, dependency edges are bi-temporal, and the retrieval index stores deterministic hashed
+vectors. Supersession closes `valid_to`, links the successor, and leaves the predecessor queryable in review
 or historical modes.
+
+In server mode, tenant services keep the existing filesystem isolation for local SQLite deployments. When
+Postgres is configured, each tenant is mapped to a sanitized Postgres schema so tenant data does not share
+tables.
 
 ## Boundary
 

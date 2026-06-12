@@ -10,8 +10,8 @@ from pydantic import Field
 from solomon.api.schemas import SolomonModel
 from solomon.currency.models import KnowledgeItem
 from solomon.graph.models import DependencyEdge, EdgeType
-from solomon.graph.store import GraphStore
-from solomon.store.sqlite import SQLiteKnowledgeStore
+from solomon.graph.types import DependencyGraphProtocol
+from solomon.store.types import KnowledgeStoreProtocol
 
 GraphFormat = Literal["mermaid", "dot"]
 
@@ -29,8 +29,8 @@ class DependencyGraphView(SolomonModel):
 
 def dependency_graph_view(
     *,
-    graph: GraphStore,
-    store: SQLiteKnowledgeStore,
+    graph: DependencyGraphProtocol,
+    store: KnowledgeStoreProtocol,
     matter_id: str | None = None,
     client_id: str | None = None,
 ) -> DependencyGraphView:

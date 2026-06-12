@@ -10,7 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import Field
 
@@ -19,8 +19,8 @@ from solomon.credence.policy import CredenceLedger, RetrievalCandidate
 from solomon.currency.engine import evaluate_currency
 from solomon.currency.models import CurrencyState, KnowledgeItem
 from solomon.graph.models import DependencyEdge
-from solomon.graph.store import GraphStore
-from solomon.store.sqlite import SQLiteKnowledgeStore
+from solomon.graph.types import DependencyGraphProtocol
+from solomon.store.types import KnowledgeStoreProtocol
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_§.-]*")
 SEMANTIC_ALIASES = {
@@ -177,6 +177,18 @@ class ReembedReport(SolomonModel):
     reembedded_item_ids: list[str]
 
 
+class RetrievalIndexProtocol(Protocol):
+    strategy: EmbeddingStrategy
+
+    def upsert_item(self, item: KnowledgeItem, *, indexed_at: datetime | None = None) -> KnowledgeItem: ...
+
+    def batch_upsert(self, items: list[KnowledgeItem]) -> list[KnowledgeItem]: ...
+
+    def embedding_refs(self, item_ids: list[str]) -> dict[str, str]: ...
+
+    def search(self, query: str, *, limit: int = 20) -> list[IndexedHit]: ...
+
+
 @dataclass(frozen=True)
 class MatterContext:
     matter_id: str | None = None
@@ -187,9 +199,9 @@ class RetrievalOrchestrator:
     def __init__(
         self,
         *,
-        store: SQLiteKnowledgeStore,
-        graph: GraphStore,
-        index: SQLiteRetrievalIndex,
+        store: KnowledgeStoreProtocol,
+        graph: DependencyGraphProtocol,
+        index: RetrievalIndexProtocol,
         credence: CredenceLedger | None = None,
     ) -> None:
         self.store = store

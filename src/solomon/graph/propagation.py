@@ -7,12 +7,13 @@ from datetime import datetime
 
 from solomon.currency.models import CurrencyState, now_utc
 from solomon.graph.models import ImpactResult, StalenessReason
-from solomon.graph.store import GraphStore
-from solomon.store.sqlite import ItemNotFoundError, SQLiteKnowledgeStore
+from solomon.graph.types import DependencyGraphProtocol
+from solomon.store.sqlite import ItemNotFoundError
+from solomon.store.types import KnowledgeStoreProtocol
 
 
 class CurrencyPropagator:
-    def __init__(self, *, graph: GraphStore, store: SQLiteKnowledgeStore) -> None:
+    def __init__(self, *, graph: DependencyGraphProtocol, store: KnowledgeStoreProtocol) -> None:
         self.graph = graph
         self.store = store
 

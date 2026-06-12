@@ -33,13 +33,13 @@ from solomon.currency.prediction import PendingAuthorityAmendment, StalenessRisk
 from solomon.errors import NotFoundError, PolicyRefusalError
 from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
 from solomon.graph.propagation import CurrencyPropagator
-from solomon.graph.store import GraphStore
 from solomon.graph.suggestions import ReferenceExtraction, extract_defined_terms_and_citations
 from solomon.graph.visualization import GraphFormat, dependency_graph_view, render_dependency_graph
 from solomon.orchestrator.models import ModelRequest, ModelRouter, RoutedModelResult
-from solomon.orchestrator.retrieval import MatterContext, RecallOptions, RetrievalOrchestrator, SQLiteRetrievalIndex
+from solomon.orchestrator.retrieval import MatterContext, RecallOptions, RetrievalOrchestrator
+from solomon.store.factory import create_storage_bundle
 from solomon.store.hardening import harden_stored_content
-from solomon.store.sqlite import ItemNotFoundError, SQLiteKnowledgeStore
+from solomon.store.sqlite import ItemNotFoundError
 
 
 class IngestRequest(SolomonModel):
@@ -132,13 +132,18 @@ class SolomonService:
         journal_dir: Path,
         attestation_key: str | None = None,
         boundary: KaypohBoundary | None = None,
+        database_url: str | None = None,
+        postgres_schema: str | None = None,
     ) -> None:
         data_dir.mkdir(parents=True, exist_ok=True)
         journal_dir.mkdir(parents=True, exist_ok=True)
-        db = data_dir / "solomon.sqlite3"
-        self.store = SQLiteKnowledgeStore(db)
-        self.graph = GraphStore(db)
-        self.index = SQLiteRetrievalIndex(db)
+        storage = create_storage_bundle(
+            database_url or str(data_dir / "solomon.sqlite3"),
+            postgres_schema=postgres_schema,
+        )
+        self.store = storage.store
+        self.graph = storage.graph
+        self.index = storage.index
         self.credence = CredenceLedger()
         self.currency_cache = CurrencyEvaluationCache()
         self.retrieval = RetrievalOrchestrator(

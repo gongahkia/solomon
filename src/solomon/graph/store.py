@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from solomon.graph.models import DependencyEdge, EdgeType
-from solomon.store.sqlite import SQLiteKnowledgeStore
+from solomon.store.types import KnowledgeStoreProtocol
 
 
 class GraphStore:
@@ -149,7 +149,7 @@ class GraphStore:
     def subgraph_for_scope(
         self,
         *,
-        store: SQLiteKnowledgeStore,
+        store: KnowledgeStoreProtocol,
         matter_id: str | None = None,
         client_id: str | None = None,
     ) -> list[DependencyEdge]:

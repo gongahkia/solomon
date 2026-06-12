@@ -22,7 +22,7 @@ checkout is required at runtime.
 - [x] `KnowledgeItem`, provenance, credence, currency state, matter/client, and external-authority models exist.
 - [x] SQLite append-only event log, materialized current table, `write_item()`, `get_item()`, `get_many()`, supersede-not-delete, `as_of()`, snapshot/restore, and no-delete tests exist.
 - [x] Encryption helper for portable artifacts exists.
-- [ ] Postgres backend is not implemented; `create_knowledge_store()` rejects Postgres with `UnsupportedStoreBackend`.
+- [x] Postgres backend exists for the knowledge event store/current projection, dependency graph, and retrieval index; `create_knowledge_store()` and `create_storage_bundle()` accept Postgres URLs with optional `solomon[server]` driver support.
 - [x] Retrieval index is SQLite-backed vector search with stable hashed legal-domain token embeddings, vector persistence, cosine scoring, and schema migration.
 - [x] Embedding lifecycle includes stale/missing `embedding_ref` detection and a `reembed_stale_items()` pipeline that reindexes store items after strategy version changes.
 
@@ -100,7 +100,7 @@ checkout is required at runtime.
 - [x] Local SKU defaults to offline/zero-egress with SQLite and in-process boundary.
 - [x] Server settings require explicit remote model URL before remote egress.
 - [x] Docker compose and PyInstaller spec files exist.
-- [ ] Postgres server backend is not implemented.
+- [x] Postgres server backend is implemented through `SOLOMON_DATABASE_URL`, with tenant services mapped to separate Postgres schemas and SQLite remaining the local default.
 - [x] PyInstaller local binary and Docker Compose server config are built/verified in this worktree; evidence is recorded in `docs/release-artifacts.md`.
 - [ ] Server multi-tenancy is basic filesystem namespace isolation, not a full tenant-management system.
 

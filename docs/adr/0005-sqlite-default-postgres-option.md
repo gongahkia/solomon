@@ -15,11 +15,14 @@ same append-only, supersede-not-delete semantics.
 ## Decision
 
 SQLite is the default local store. It is embedded, durable, portable, and sufficient for a single-user
-offline SKU. The storage interface is event-log shaped so a later Postgres implementation can preserve the
-same events and current-state projection without changing product semantics.
+offline SKU. The storage interface is event-log shaped; the Postgres backend preserves the same events and
+current-state projection without changing product semantics. The server storage bundle includes Postgres
+implementations for the knowledge store, dependency graph, and deterministic retrieval index. The optional
+driver dependency lives behind `solomon[server]`.
 
 ## Consequences
 
-The first implementation uses SQLite WAL mode, transactional writes, and JSON event payloads. Server
-deployments can add Postgres without weakening the local SKU or changing the API contract.
-
+The local implementation uses SQLite WAL mode, transactional writes, and JSON event payloads. Server
+deployments can select Postgres through `SOLOMON_DATABASE_URL` without weakening the local SKU or changing
+the API contract. Tenant isolation is kept at the storage layer: SQLite uses per-tenant files and Postgres
+uses per-tenant schemas.

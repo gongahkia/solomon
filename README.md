@@ -100,7 +100,8 @@ uv run solomon recall "structure X regulation"
 
 ## Honest Limitations
 
-- External monitoring is intentionally narrow: manual and structured feeds, not Shepard's-scale coverage.
+- External monitoring is intentionally narrow: deterministic fixture replay and structured feeds, not
+  Shepard's-scale live source coverage.
 - The default local retrieval index is deterministic and lightweight; production semantic backends can be
   swapped in.
 - Solomon does not decide whether a legal position is wrong. It flags re-verification triggers.

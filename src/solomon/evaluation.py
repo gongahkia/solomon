@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import time
@@ -13,6 +14,8 @@ from typing import Any
 from pydantic import Field
 
 from solomon.api.schemas import SolomonModel
+from solomon.boundary.engine.jurisdictions import resolve_pack, supported_jurisdiction_codes
+from solomon.boundary.engine.review import review_text
 from solomon.boundary.kaypoh import KaypohBoundary
 from solomon.currency.models import (
     CredenceTier,
@@ -71,10 +74,57 @@ class BoundaryFidelityResult(SolomonModel):
     leaked_event_ids: list[str] = Field(default_factory=list)
 
 
+class JurisdictionCoverageCase(SolomonModel):
+    case_id: str
+    jurisdiction: str
+    text: str
+    expected_finding_kinds: list[str] = Field(default_factory=lambda: ["jurisdiction_strict_term"])
+
+
+class JurisdictionCoverageResult(SolomonModel):
+    schema_id: str = "solomon.jurisdiction_coverage.v1"
+    case_count: int
+    total_supported_jurisdictions: int
+    covered_jurisdictions: list[str]
+    missing_jurisdictions: list[str]
+    jurisdiction_coverage_rate: float
+    finding_recall: float
+    failed_case_ids: list[str] = Field(default_factory=list)
+
+
 class BoundaryFidelityCase(SolomonModel):
     case_id: str
     input_text: str
     forbidden_terms: list[str]
+
+
+class ExternalAuthoritySnapshot(SolomonModel):
+    authority_id: str
+    jurisdiction: str
+    source_ref: str
+    version: str
+    content_sha256: str
+    captured_at: datetime
+
+
+class ExternalLawMonitorCase(SolomonModel):
+    case_id: str
+    before: ExternalAuthoritySnapshot
+    after: ExternalAuthoritySnapshot
+    expected_changed: bool
+
+
+class ExternalLawMonitoringResult(SolomonModel):
+    schema_id: str = "solomon.external_law_monitoring.v1"
+    monitored_authorities: int
+    monitored_jurisdictions: list[str]
+    expected_changed_authorities: int
+    detected_changed_authority_ids: list[str]
+    missed_changed_authority_ids: list[str]
+    false_positive_authority_ids: list[str]
+    change_detection_recall: float
+    false_positive_rate: float
+    impact_query_recall: float
 
 
 class RankingCalibrationItem(SolomonModel):
@@ -153,6 +203,108 @@ DEFAULT_BOUNDARY_FIDELITY_CASES = [
 ]
 
 
+def generate_jurisdiction_coverage_cases() -> list[JurisdictionCoverageCase]:
+    cases: list[JurisdictionCoverageCase] = []
+    for code in supported_jurisdiction_codes():
+        pack = resolve_pack(code)
+        strict_term = pack.strict_terms[0] if pack.strict_terms else pack.name
+        cases.append(
+            JurisdictionCoverageCase(
+                case_id=f"{code.lower()}-strict-term",
+                jurisdiction=code,
+                text=f"{strict_term} appears in a {pack.name} matter.",
+            )
+        )
+    return cases
+
+
+def run_jurisdiction_coverage_benchmark(
+    cases: list[JurisdictionCoverageCase] | None = None,
+) -> JurisdictionCoverageResult:
+    resolved_cases = cases or generate_jurisdiction_coverage_cases()
+    supported = set(supported_jurisdiction_codes())
+    covered: set[str] = set()
+    failed_case_ids: list[str] = []
+    expected_findings = 0
+    matched_findings = 0
+
+    for case in resolved_cases:
+        _classification, findings = review_text(
+            case.text,
+            source_jurisdiction=case.jurisdiction,
+            destination_jurisdiction=case.jurisdiction,
+        )
+        found_kinds = {finding.kind for finding in findings}
+        expected_findings += len(case.expected_finding_kinds)
+        missing_kinds = [kind for kind in case.expected_finding_kinds if kind not in found_kinds]
+        matched_findings += len(case.expected_finding_kinds) - len(missing_kinds)
+        if missing_kinds:
+            failed_case_ids.append(case.case_id)
+        else:
+            covered.add(case.jurisdiction.upper())
+
+    covered_supported = supported & covered
+    missing_jurisdictions = sorted(supported - covered_supported)
+    return JurisdictionCoverageResult(
+        case_count=len(resolved_cases),
+        total_supported_jurisdictions=len(supported),
+        covered_jurisdictions=sorted(covered_supported),
+        missing_jurisdictions=missing_jurisdictions,
+        jurisdiction_coverage_rate=len(covered_supported) / len(supported) if supported else 1.0,
+        finding_recall=matched_findings / expected_findings if expected_findings else 1.0,
+        failed_case_ids=failed_case_ids,
+    )
+
+
+def default_external_law_monitor_cases() -> list[ExternalLawMonitorCase]:
+    return [
+        _monitor_case(
+            case_id="sg-reg-r-12",
+            authority_id="sg-reg-r-12",
+            jurisdiction="SG",
+            source_ref="fixture://sg/reg-r-12",
+            before_version="2024-01",
+            after_version="2025-01",
+            before_text="Regulation R section 12 permits structure X with filing A.",
+            after_text="Regulation R section 12 requires re-verification before structure X filing A.",
+            expected_changed=True,
+        ),
+        _monitor_case(
+            case_id="uk-mar-article-7",
+            authority_id="uk-mar-article-7",
+            jurisdiction="UK",
+            source_ref="fixture://uk/mar/article-7",
+            before_version="2024-03",
+            after_version="2025-02",
+            before_text="UK MAR Article 7 inside information guidance baseline.",
+            after_text="UK MAR Article 7 inside information guidance updated for selective disclosure.",
+            expected_changed=True,
+        ),
+        _monitor_case(
+            case_id="eu-mar-article-7",
+            authority_id="eu-mar-article-7",
+            jurisdiction="EU",
+            source_ref="fixture://eu/mar/article-7",
+            before_version="2024-02",
+            after_version="2025-04",
+            before_text="EU MAR Article 7 baseline text.",
+            after_text="EU MAR Article 7 amended guidance text.",
+            expected_changed=True,
+        ),
+        _monitor_case(
+            case_id="us-reg-fd",
+            authority_id="us-reg-fd",
+            jurisdiction="US",
+            source_ref="fixture://us/reg-fd",
+            before_version="2024-01",
+            after_version="2024-01",
+            before_text="Reg FD selective disclosure baseline.",
+            after_text="Reg FD selective disclosure baseline.",
+            expected_changed=False,
+        ),
+    ]
+
+
 def generate_synthetic_corpus(size: int = 10) -> SyntheticCorpus:
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     items: list[KnowledgeItem] = []
@@ -226,6 +378,44 @@ def impact_query_recall(expected_ids: set[str], actual_ids: set[str]) -> float:
     if not expected_ids:
         return 1.0
     return len(expected_ids & actual_ids) / len(expected_ids)
+
+
+def detect_external_authority_change(before: ExternalAuthoritySnapshot, after: ExternalAuthoritySnapshot) -> bool:
+    return before.version != after.version or before.content_sha256 != after.content_sha256
+
+
+def run_external_law_monitoring_benchmark(
+    cases: list[ExternalLawMonitorCase] | None = None,
+) -> ExternalLawMonitoringResult:
+    resolved_cases = cases or default_external_law_monitor_cases()
+    expected_changed_authority_ids = {
+        case.after.authority_id for case in resolved_cases if case.expected_changed
+    }
+    detected_authority_ids: set[str] = set()
+    false_positive_authority_ids: set[str] = set()
+    unchanged_expected = 0
+
+    for case in resolved_cases:
+        changed = detect_external_authority_change(case.before, case.after)
+        if changed:
+            detected_authority_ids.add(case.after.authority_id)
+        if not case.expected_changed:
+            unchanged_expected += 1
+        if changed and not case.expected_changed:
+            false_positive_authority_ids.add(case.after.authority_id)
+
+    missed_authority_ids = expected_changed_authority_ids - detected_authority_ids
+    return ExternalLawMonitoringResult(
+        monitored_authorities=len(resolved_cases),
+        monitored_jurisdictions=sorted({case.after.jurisdiction for case in resolved_cases}),
+        expected_changed_authorities=len(expected_changed_authority_ids),
+        detected_changed_authority_ids=sorted(detected_authority_ids),
+        missed_changed_authority_ids=sorted(missed_authority_ids),
+        false_positive_authority_ids=sorted(false_positive_authority_ids),
+        change_detection_recall=impact_query_recall(expected_changed_authority_ids, detected_authority_ids),
+        false_positive_rate=len(false_positive_authority_ids) / unchanged_expected if unchanged_expected else 0.0,
+        impact_query_recall=_monitoring_impact_query_recall(resolved_cases, detected_authority_ids),
+    )
 
 
 def warehouse_similarity_baseline(
@@ -422,8 +612,114 @@ def run_currency_evaluation(
 
 def main() -> int:
     metrics = run_currency_evaluation(size=10)
-    print(json.dumps({"table": render_results_table(metrics)}, indent=2))
+    coverage = run_jurisdiction_coverage_benchmark()
+    monitoring = run_external_law_monitoring_benchmark()
+    print(
+        json.dumps(
+            {
+                "table": render_results_table(metrics),
+                "jurisdiction_coverage": coverage.model_dump(mode="json"),
+                "external_law_monitoring": monitoring.model_dump(mode="json"),
+            },
+            indent=2,
+        )
+    )
     return 0
+
+
+def _monitor_case(
+    *,
+    case_id: str,
+    authority_id: str,
+    jurisdiction: str,
+    source_ref: str,
+    before_version: str,
+    after_version: str,
+    before_text: str,
+    after_text: str,
+    expected_changed: bool,
+) -> ExternalLawMonitorCase:
+    before_time = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    after_time = datetime(2025, 6, 1, tzinfo=timezone.utc)
+    return ExternalLawMonitorCase(
+        case_id=case_id,
+        before=ExternalAuthoritySnapshot(
+            authority_id=authority_id,
+            jurisdiction=jurisdiction,
+            source_ref=source_ref,
+            version=before_version,
+            content_sha256=_content_hash(before_text),
+            captured_at=before_time,
+        ),
+        after=ExternalAuthoritySnapshot(
+            authority_id=authority_id,
+            jurisdiction=jurisdiction,
+            source_ref=source_ref,
+            version=after_version,
+            content_sha256=_content_hash(after_text),
+            captured_at=after_time,
+        ),
+        expected_changed=expected_changed,
+    )
+
+
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _monitoring_impact_query_recall(
+    cases: list[ExternalLawMonitorCase],
+    detected_authority_ids: set[str],
+) -> float:
+    expected_item_ids = {f"monitor-item-{case.case_id}" for case in cases if case.expected_changed}
+    if not expected_item_ids:
+        return 1.0
+
+    with tempfile.TemporaryDirectory(prefix="solomon-monitor-eval-") as tmp:
+        db = Path(tmp) / "solomon.sqlite3"
+        store = SQLiteKnowledgeStore(db)
+        graph = GraphStore(db)
+        for case in cases:
+            item_id = f"monitor-item-{case.case_id}"
+            item = KnowledgeItem(
+                id=item_id,
+                kind=KnowledgeKind.POSITION,
+                content=f"{case.after.jurisdiction} position depending on {case.after.authority_id}",
+                provenance=Provenance(source_kind=SourceKind.PARTNER, source_ref=f"monitor-{case.case_id}"),
+                valid_from=case.before.captured_at - timedelta(days=30),
+                ingested_at=case.before.captured_at - timedelta(days=30),
+                last_verified_at=case.before.captured_at,
+                credence_tier=CredenceTier.FIRM_AUTHORITATIVE,
+                metadata={
+                    "authority_id": case.after.authority_id,
+                    "jurisdiction": case.after.jurisdiction,
+                    "source_ref": case.after.source_ref,
+                },
+            )
+            store.write_item(item)
+            graph.add_dependency(
+                DependencyEdge(
+                    id=f"monitor-edge-{case.case_id}",
+                    source_id=item_id,
+                    target_id=case.after.authority_id,
+                    edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+                    target_kind="external_authority",
+                    valid_from=case.before.captured_at - timedelta(days=30),
+                    created_at=case.before.captured_at - timedelta(days=30),
+                )
+            )
+
+        actual_item_ids: set[str] = set()
+        propagator = CurrencyPropagator(graph=graph, store=store)
+        for authority_id in detected_authority_ids:
+            impact = propagator.propagate_dependency_change(
+                authority_id,
+                changed_at=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                reason=f"{authority_id} changed in external-law monitor fixture",
+            )
+            actual_item_ids.update(impact.stale_item_ids)
+
+    return impact_query_recall(expected_item_ids, actual_item_ids)
 
 
 if __name__ == "__main__":

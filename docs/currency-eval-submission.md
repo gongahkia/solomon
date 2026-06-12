@@ -7,6 +7,8 @@ The currency-eval writeup is submitted as a repository-citable artifact for `v0.
 - Writeup: [currency-eval-writeup.md](currency-eval-writeup.md)
 - Corpus schema and reproduction notes: [evaluation-corpus.md](evaluation-corpus.md)
 - Committed sample corpus: [evaluation-corpus.synthetic.json](evaluation-corpus.synthetic.json)
+- Executable coverage and monitoring benchmarks: `run_jurisdiction_coverage_benchmark()` and
+  `run_external_law_monitoring_benchmark()` in `solomon.evaluation`
 - Citation metadata: [../CITATION.cff](../CITATION.cff)
 - Repository URL: `https://github.com/gongahkia/solomon`
 

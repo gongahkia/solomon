@@ -116,7 +116,7 @@ checkout is required at runtime.
 - [x] Synthetic corpus generator exists and exports reproducible items, dependencies, changed authority, and oracle stale ids.
 - [x] Evaluation harness now actually writes the corpus to store/graph/index, runs propagation, recall, warehouse baseline, decay baseline, and timing.
 - [x] Metrics include stale-surface rate, time-to-flag, and impact-query recall.
-- [ ] Evaluation remains synthetic and curated; it is not a jurisdictional coverage benchmark or external-law-monitoring benchmark.
+- [x] Evaluation now includes executable jurisdiction-pack coverage and external-law monitoring fixture-replay benchmarks, alongside the synthetic currency corpus and baselines.
 - [x] Boundary-fidelity evaluation runs an executable vendored-boundary suite covering sanitization, reidentification, leak checks, and volatile mapping flushes.
 
 ## Phase 13 — Testing and correctness

@@ -11,13 +11,17 @@ from solomon.evaluation import (
     EvaluationMetrics,
     boundary_fidelity_eval,
     decay_baseline,
+    default_external_law_monitor_cases,
     evaluate_ablation,
     export_synthetic_corpus,
+    generate_jurisdiction_coverage_cases,
     generate_synthetic_corpus,
     impact_query_recall,
     render_results_table,
     run_boundary_fidelity_suite,
     run_currency_evaluation,
+    run_external_law_monitoring_benchmark,
+    run_jurisdiction_coverage_benchmark,
     stale_surface_rate,
     time_to_flag,
     tune_recall_weights,
@@ -101,3 +105,27 @@ def test_synthetic_corpus_export_is_reproducible(tmp_path: Path) -> None:
     assert exported.schema_id == "solomon.synthetic_corpus.v1"
     assert exported.expected_stale_item_ids == ["item-0", "item-2"]
     assert '"expected_stale_item_ids": [' in target.read_text(encoding="utf-8")
+
+
+def test_jurisdiction_coverage_benchmark_covers_vendored_packs() -> None:
+    cases = generate_jurisdiction_coverage_cases()
+    result = run_jurisdiction_coverage_benchmark(cases)
+
+    assert len(cases) == result.total_supported_jurisdictions
+    assert result.jurisdiction_coverage_rate == 1.0
+    assert result.finding_recall == 1.0
+    assert result.missing_jurisdictions == []
+    assert result.failed_case_ids == []
+    assert "SG" in result.covered_jurisdictions
+
+
+def test_external_law_monitoring_benchmark_detects_and_propagates_changes() -> None:
+    result = run_external_law_monitoring_benchmark(default_external_law_monitor_cases())
+
+    assert result.monitored_authorities == 4
+    assert result.expected_changed_authorities == 3
+    assert result.change_detection_recall == 1.0
+    assert result.false_positive_rate == 0.0
+    assert result.impact_query_recall == 1.0
+    assert "sg-reg-r-12" in result.detected_changed_authority_ids
+    assert "us-reg-fd" not in result.detected_changed_authority_ids

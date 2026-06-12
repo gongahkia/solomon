@@ -2,8 +2,16 @@
 
 # Benchmarks
 
-Solomon's currency evaluation harness is intentionally small and reproducible. It generates synthetic
-firm positions with explicit dependency edges, injects authority changes, and reports:
+Solomon's benchmark suite is intentionally reproducible. It has three layers:
+
+- a currency harness that generates firm positions with explicit dependency edges and injected authority
+  changes;
+- a jurisdiction coverage benchmark that exercises every vendored jurisdiction pack against expected boundary
+  findings;
+- an external-law monitoring fixture replay that diffs before/after authority snapshots and feeds detected
+  changes into dependency propagation.
+
+The currency harness reports:
 
 | Metric | Meaning |
 |---|---|
@@ -13,6 +21,10 @@ firm positions with explicit dependency edges, injects authority changes, and re
 
 The harness includes a warehouse-style similarity baseline and a decay baseline to demonstrate why old is
 not the same as stale.
+
+The jurisdiction coverage benchmark reports supported jurisdiction coverage, detector finding recall, and
+failed case ids. The external-law monitoring benchmark reports change-detection recall, false-positive rate,
+monitored jurisdictions, and downstream impact-query recall after detected fixture changes are propagated.
 
 Retrieval ranking weights are calibrated by `tune_recall_weights()` against deterministic synthetic cases
 covering exact relevance, firm-authoritative-vs-model-inferred tie breaking, and centrality tie breaking.

@@ -10,5 +10,6 @@ Architecture notes, ADRs, API references, performance notes, and launch document
 - `horizontal-scale.md`: namespace sharding story for scaling optional server deployments.
 - `launch/faq.md`: launch FAQ for common objections and security questions.
 - `launch/show-hn.md`: draft Show HN launch post.
+- `launch/writeup.md`: short launch writeup for the project thesis and current status.
 - `security.md`: poisoning posture, logging behavior, encryption limits, and operational guidance.
 - `why-shibahama.md`: naming rationale and design philosophy.

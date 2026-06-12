@@ -45,6 +45,10 @@ Use early feedback to create issues in these buckets:
 - Benchmark credibility: missing baselines, unclear metrics, weak datasets.
 - Security posture: poisoning concerns, read-safety hooks, logging expectations.
 
+Track sends and response conversion in
+[`outreach-tracker.md`](outreach-tracker.md). Ask users to file feedback with
+the `Early-User Feedback` GitHub issue template when possible.
+
 ## Minimum Feedback Template
 
 ```text

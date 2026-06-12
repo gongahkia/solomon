@@ -355,7 +355,7 @@ Still not done / next up:
 - [x] (P1) Write the Show HN post (lead with the embeddable-core + the "remembers why you said no" hook)
 - [x] (P1) Prepare a FAQ for the predictable HN objections (null hypothesis, "isn't this just a cache", security)
 - [x] (P2) A short launch blog post / writeup (optional, README may suffice)
-- [ ] (P2) Reach out for early users / collect first issues
+- [!] (P2) Reach out for early users / collect first issues — blocked on recipient list and account approval; outreach tracker and feedback issue template added
 - [ ] (P3) Submit CurrencyBench writeup somewhere citable
 
 ---

@@ -277,6 +277,80 @@ pub struct ExplicitReconstructionOutcome {
     pub status: ExplicitReconstructionStatus,
 }
 
+impl ExplicitReconstructionOutcome {
+    fn deferred(trigger: ReconstructionTrigger, reason: ReconstructionBudgetDenial) -> Self {
+        Self {
+            trigger,
+            action: None,
+            proposal: None,
+            corroboration: None,
+            replacement: None,
+            records: None,
+            status: ExplicitReconstructionStatus::Deferred(reason),
+        }
+    }
+
+    fn missing_original(trigger: ReconstructionTrigger) -> Self {
+        Self {
+            trigger,
+            action: None,
+            proposal: None,
+            corroboration: None,
+            replacement: None,
+            records: None,
+            status: ExplicitReconstructionStatus::MissingOriginal,
+        }
+    }
+
+    fn no_observation(trigger: ReconstructionTrigger, action: RevalidationAction) -> Self {
+        Self {
+            trigger,
+            action: Some(action),
+            proposal: None,
+            corroboration: None,
+            replacement: None,
+            records: None,
+            status: ExplicitReconstructionStatus::NoObservation,
+        }
+    }
+
+    fn quarantined(
+        trigger: ReconstructionTrigger,
+        action: RevalidationAction,
+        proposal: QuarantinedProposal,
+        corroboration: CorroborationDecision,
+    ) -> Self {
+        Self {
+            trigger,
+            action: Some(action),
+            proposal: Some(proposal),
+            corroboration: Some(corroboration),
+            replacement: None,
+            records: None,
+            status: ExplicitReconstructionStatus::Quarantined,
+        }
+    }
+
+    fn applied(
+        trigger: ReconstructionTrigger,
+        action: RevalidationAction,
+        proposal: QuarantinedProposal,
+        corroboration: CorroborationDecision,
+        replacement: MemoryItem,
+        records: ReconstructionReplacementRecord,
+    ) -> Self {
+        Self {
+            trigger,
+            action: Some(action),
+            proposal: Some(proposal),
+            corroboration: Some(corroboration),
+            replacement: Some(replacement),
+            records: Some(records),
+            status: ExplicitReconstructionStatus::Applied,
+        }
+    }
+}
+
 /// Owned embedding metadata for async write calls.
 #[cfg(feature = "tokio")]
 #[derive(Clone, Debug, PartialEq)]
@@ -821,112 +895,96 @@ impl<V: VectorIndex> Shibahama<V> {
             .iter()
             .map(|candidate| (candidate.id, candidate))
             .collect::<BTreeMap<_, _>>();
-        let hook = DefaultRevalidationHook;
-        let policy = CorroborationPolicy::default();
         let mut outcomes = Vec::new();
 
         for deferred in budget.deferred {
-            outcomes.push(ExplicitReconstructionOutcome {
-                trigger: deferred.trigger,
-                action: None,
-                proposal: None,
-                corroboration: None,
-                replacement: None,
-                records: None,
-                status: ExplicitReconstructionStatus::Deferred(deferred.reason),
-            });
+            outcomes.push(ExplicitReconstructionOutcome::deferred(
+                deferred.trigger,
+                deferred.reason,
+            ));
         }
 
         for trigger in budget.allowed {
-            let Some(candidate) = candidates_by_memory.get(&trigger.memory_id) else {
-                outcomes.push(ExplicitReconstructionOutcome {
+            outcomes.push(
+                self.reconstruct_allowed_trigger(
                     trigger,
-                    action: None,
-                    proposal: None,
-                    corroboration: None,
-                    replacement: None,
-                    records: None,
-                    status: ExplicitReconstructionStatus::MissingOriginal,
-                });
-                continue;
-            };
-
-            let Some(original) = self.store.get(trigger.memory_id)? else {
-                outcomes.push(ExplicitReconstructionOutcome {
-                    trigger,
-                    action: None,
-                    proposal: None,
-                    corroboration: None,
-                    replacement: None,
-                    records: None,
-                    status: ExplicitReconstructionStatus::MissingOriginal,
-                });
-                continue;
-            };
-
-            let action = hook.plan_revalidation(&trigger, &candidate.provenance);
-            let Some(event) = source.revalidate(&action, &original, now) else {
-                outcomes.push(ExplicitReconstructionOutcome {
-                    trigger,
-                    action: Some(action),
-                    proposal: None,
-                    corroboration: None,
-                    replacement: None,
-                    records: None,
-                    status: ExplicitReconstructionStatus::NoObservation,
-                });
-                continue;
-            };
-
-            let proposal = quarantine_proposal(
-                event.into_item_with_policy(self.config.ingest_credence),
-                trigger.memory_id,
+                    candidates_by_memory.get(&trigger.memory_id).copied(),
+                    source,
+                    signals_by_memory
+                        .get(&trigger.memory_id)
+                        .copied()
+                        .unwrap_or(&[]),
+                    now,
+                )?,
             );
-            let signals = signals_by_memory
-                .get(&trigger.memory_id)
-                .copied()
-                .unwrap_or(&[]);
-            let corroboration = evaluate_corroboration(signals, policy);
-            let Some(replacement) = promote_corroborated_proposal(&proposal, signals, policy)
-            else {
-                outcomes.push(ExplicitReconstructionOutcome {
-                    trigger,
-                    action: Some(action),
-                    proposal: Some(proposal),
-                    corroboration: Some(corroboration),
-                    replacement: None,
-                    records: None,
-                    status: ExplicitReconstructionStatus::Quarantined,
-                });
-                continue;
-            };
-
-            let records = self
-                .store
-                .insert_reconstruction_replacement(
-                    trigger.memory_id,
-                    &replacement,
-                    replacement.timestamps.valid_from,
-                )?
-                .ok_or_else(|| {
-                    ShibahamaError::InvalidRequest(format!(
-                        "memory {} disappeared before reconstruction replacement",
-                        trigger.memory_id
-                    ))
-                })?;
-
-            outcomes.push(ExplicitReconstructionOutcome {
-                trigger,
-                action: Some(action),
-                proposal: Some(proposal),
-                corroboration: Some(corroboration),
-                replacement: Some(replacement),
-                records: Some(records),
-                status: ExplicitReconstructionStatus::Applied,
-            });
         }
 
         Ok(outcomes)
+    }
+
+    fn reconstruct_allowed_trigger<S>(
+        &self,
+        trigger: ReconstructionTrigger,
+        candidate: Option<&RecallCandidate>,
+        source: &S,
+        signals: &[CorroborationSignal],
+        now: OffsetDateTime,
+    ) -> Result<ExplicitReconstructionOutcome, ShibahamaError>
+    where
+        S: RevalidationSource,
+    {
+        let Some(candidate) = candidate else {
+            return Ok(ExplicitReconstructionOutcome::missing_original(trigger));
+        };
+        let Some(original) = self.store.get(trigger.memory_id)? else {
+            return Ok(ExplicitReconstructionOutcome::missing_original(trigger));
+        };
+
+        let hook = DefaultRevalidationHook;
+        let policy = CorroborationPolicy::default();
+        let action = hook.plan_revalidation(&trigger, &candidate.provenance);
+        let Some(event) = source.revalidate(&action, &original, now) else {
+            return Ok(ExplicitReconstructionOutcome::no_observation(
+                trigger, action,
+            ));
+        };
+
+        let proposal = quarantine_proposal(
+            event.into_item_with_policy(self.config.ingest_credence),
+            trigger.memory_id,
+        );
+        let corroboration = evaluate_corroboration(signals, policy);
+        let Some(replacement) = promote_corroborated_proposal(&proposal, signals, policy) else {
+            return Ok(ExplicitReconstructionOutcome::quarantined(
+                trigger,
+                action,
+                proposal,
+                corroboration,
+            ));
+        };
+
+        let records = self
+            .store
+            .insert_reconstruction_replacement(
+                trigger.memory_id,
+                &replacement,
+                replacement.timestamps.valid_from,
+            )?
+            .ok_or_else(|| {
+                ShibahamaError::InvalidRequest(format!(
+                    "memory {} disappeared before reconstruction replacement",
+                    trigger.memory_id,
+                ))
+            })?;
+
+        Ok(ExplicitReconstructionOutcome::applied(
+            trigger,
+            action,
+            proposal,
+            corroboration,
+            replacement,
+            records,
+        ))
     }
 
     /// Replays recalled memories as they were believed at `request.now`.
@@ -1289,6 +1347,59 @@ mod tests {
     use tempfile::NamedTempFile;
     use time::{Duration, OffsetDateTime};
 
+    struct StaticRevalidator {
+        event: MemoryWriteEvent,
+    }
+
+    impl RevalidationSource for StaticRevalidator {
+        fn revalidate(
+            &self,
+            _action: &RevalidationAction,
+            _original: &MemoryItem,
+            _now: OffsetDateTime,
+        ) -> Option<MemoryWriteEvent> {
+            Some(self.event.clone())
+        }
+    }
+
+    fn api_endpoint_event(content: &str, at: OffsetDateTime) -> MemoryWriteEvent {
+        let mut event = MemoryWriteEvent::new(
+            content,
+            Provenance::new(SourceKind::File, Some("docs://api".to_owned()), "api-test"),
+            at,
+            at,
+        );
+        event.significance = 16.0;
+        event.tier = Tier::Warm;
+        event.credence_floor = Tier::Warm;
+        event
+    }
+
+    fn write_api_endpoint_memory(
+        shibahama: &mut Shibahama<HnswVectorIndex>,
+        event: MemoryWriteEvent,
+    ) -> MemoryItem {
+        shibahama
+            .write_with_embedding(
+                event,
+                WriteEmbedding {
+                    vector: &[0.0, 0.0],
+                    index_name: "api-test",
+                    model: "embedding-model",
+                    model_version: "v1",
+                },
+            )
+            .expect("write should work")
+    }
+
+    fn has_reconstruction_event(shibahama: &Shibahama<HnswVectorIndex>) -> bool {
+        shibahama
+            .event_records()
+            .expect("events should read")
+            .iter()
+            .any(|record| matches!(record.event, MemoryEvent::ReconstructionApplied { .. }))
+    }
+
     #[test]
     fn facade_write_recall_reinforce_why_and_timeline_work() {
         let file = NamedTempFile::new().expect("tempfile should be created");
@@ -1341,46 +1452,15 @@ mod tests {
 
     #[test]
     fn explicit_reconstruction_is_gated_quarantined_and_applied_after_corroboration() {
-        struct StaticRevalidator {
-            event: MemoryWriteEvent,
-        }
-
-        impl RevalidationSource for StaticRevalidator {
-            fn revalidate(
-                &self,
-                _action: &RevalidationAction,
-                _original: &MemoryItem,
-                _now: OffsetDateTime,
-            ) -> Option<MemoryWriteEvent> {
-                Some(self.event.clone())
-            }
-        }
-
         let file = NamedTempFile::new().expect("tempfile should be created");
         let mut shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
             .expect("api should open");
         let ingested_at = OffsetDateTime::UNIX_EPOCH;
         let now = ingested_at + Duration::days(90);
-        let mut event = MemoryWriteEvent::new(
-            "old API endpoint is /v1",
-            Provenance::new(SourceKind::File, Some("docs://api".to_owned()), "api-test"),
-            ingested_at,
-            ingested_at,
+        let original = write_api_endpoint_memory(
+            &mut shibahama,
+            api_endpoint_event("old API endpoint is /v1", ingested_at),
         );
-        event.significance = 16.0;
-        event.tier = Tier::Warm;
-        event.credence_floor = Tier::Warm;
-        let original = shibahama
-            .write_with_embedding(
-                event,
-                WriteEmbedding {
-                    vector: &[0.0, 0.0],
-                    index_name: "api-test",
-                    model: "embedding-model",
-                    model_version: "v1",
-                },
-            )
-            .expect("write should work");
         let query = [0.0, 0.0];
         let request = RecallRequest::new(&query, 1, now);
         let recalled = shibahama.recall(&request).expect("recall should work");
@@ -1399,17 +1479,8 @@ mod tests {
                 ))
         );
 
-        let mut replacement_event = MemoryWriteEvent::new(
-            "current API endpoint is /v2",
-            Provenance::new(SourceKind::File, Some("docs://api".to_owned()), "api-test"),
-            now,
-            now,
-        );
-        replacement_event.significance = 16.0;
-        replacement_event.tier = Tier::Warm;
-        replacement_event.credence_floor = Tier::Warm;
         let revalidator = StaticRevalidator {
-            event: replacement_event,
+            event: api_endpoint_event("current API endpoint is /v2", now),
         };
         let outcomes = shibahama
             .reconstruct_from_recall(
@@ -1451,13 +1522,7 @@ mod tests {
             rows.iter()
                 .any(|item| item.content == "current API endpoint is /v2")
         );
-        assert!(
-            shibahama
-                .event_records()
-                .expect("events should read")
-                .iter()
-                .any(|record| matches!(record.event, MemoryEvent::ReconstructionApplied { .. }))
-        );
+        assert!(has_reconstruction_event(&shibahama));
     }
 
     #[test]

@@ -552,23 +552,33 @@ fn recall_inner(
     candidates = apply_context_token_budget(candidates, request.max_context_tokens);
 
     if record_surface_access {
-        for candidate in &candidates {
-            let access_event = request.raw_query_context.map_or_else(
-                || AccessEvent::new(request.now, None, AccessOutcome::Surfaced),
-                |raw_context| {
-                    AccessEvent::with_raw_query_context(
-                        request.now,
-                        raw_context,
-                        AccessOutcome::Surfaced,
-                    )
-                },
-            );
-
-            store.record_access_with_policy(candidate.id, access_event, &request.significance)?;
-        }
+        record_surface_accesses(store, &candidates, request)?;
     }
 
     Ok(candidates)
+}
+
+fn record_surface_accesses(
+    store: &RedbMemoryStore,
+    candidates: &[RecallCandidate],
+    request: &RecallRequest<'_>,
+) -> Result<(), RecallError> {
+    for candidate in candidates {
+        let access_event = request.raw_query_context.map_or_else(
+            || AccessEvent::new(request.now, None, AccessOutcome::Surfaced),
+            |raw_context| {
+                AccessEvent::with_raw_query_context(
+                    request.now,
+                    raw_context,
+                    AccessOutcome::Surfaced,
+                )
+            },
+        );
+
+        store.record_access_with_policy(candidate.id, access_event, &request.significance)?;
+    }
+
+    Ok(())
 }
 
 fn refresh_item_for_recall(

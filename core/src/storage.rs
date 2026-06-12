@@ -959,32 +959,33 @@ impl RedbMemoryStore {
                     }
                 }
                 MemoryEvent::MemoryInvalidated { id, valid_to } => {
-                    if record.recorded_at <= as_of {
-                        if let Some(item) = items.get_mut(&id) {
-                            item.timestamps = item.timestamps.closed_at(valid_to);
-                        }
+                    if record.recorded_at <= as_of
+                        && let Some(item) = items.get_mut(&id)
+                    {
+                        item.timestamps = item.timestamps.closed_at(valid_to);
                     }
                 }
                 MemoryEvent::AccessRecorded { id, event } => {
-                    if record.recorded_at <= as_of && event.timestamp <= as_of {
-                        if let Some(item) = items.get_mut(&id) {
-                            item.access_events.push(event);
-                        }
+                    if record.recorded_at <= as_of
+                        && event.timestamp <= as_of
+                        && let Some(item) = items.get_mut(&id)
+                    {
+                        item.access_events.push(event);
                     }
                 }
                 MemoryEvent::TierChanged { id, to, .. } => {
-                    if record.recorded_at <= as_of {
-                        if let Some(item) = items.get_mut(&id) {
-                            item.tier = to;
-                        }
+                    if record.recorded_at <= as_of
+                        && let Some(item) = items.get_mut(&id)
+                    {
+                        item.tier = to;
                     }
                 }
                 MemoryEvent::ContentCompacted { id, pointer } => {
-                    if record.recorded_at <= as_of {
-                        if let Some(item) = items.get_mut(&id) {
-                            item.compaction = Some(pointer);
-                            item.content.clear();
-                        }
+                    if record.recorded_at <= as_of
+                        && let Some(item) = items.get_mut(&id)
+                    {
+                        item.compaction = Some(pointer);
+                        item.content.clear();
                     }
                 }
                 MemoryEvent::ReverificationFlagged { .. }

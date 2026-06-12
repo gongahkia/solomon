@@ -24,7 +24,13 @@ from solomon.currency.models import (
 from solomon.graph.models import DependencyEdge, EdgeType
 from solomon.graph.propagation import CurrencyPropagator
 from solomon.graph.store import GraphStore
-from solomon.orchestrator.retrieval import RecallOptions, RetrievalOrchestrator, SQLiteRetrievalIndex, tokenize
+from solomon.orchestrator.retrieval import (
+    RecallOptions,
+    RecallWeights,
+    RetrievalOrchestrator,
+    SQLiteRetrievalIndex,
+    tokenize,
+)
 from solomon.store.sqlite import SQLiteKnowledgeStore
 
 
@@ -62,6 +68,64 @@ class BoundaryFidelityResult(SolomonModel):
     leaked_events: int
     ok: bool
     leaked_event_ids: list[str] = Field(default_factory=list)
+
+
+class RankingCalibrationItem(SolomonModel):
+    candidate_id: str
+    similarity: float = Field(ge=0.0, le=1.0)
+    credence_rank: float = Field(ge=0.0, le=1.0)
+    centrality_score: float = Field(ge=0.0, le=1.0)
+
+
+class RankingCalibrationCase(SolomonModel):
+    name: str
+    expected_id: str
+    candidates: list[RankingCalibrationItem]
+
+
+class RankingCalibrationScore(SolomonModel):
+    weights: RecallWeights
+    mean_reciprocal_rank: float
+
+
+class RankingCalibrationResult(SolomonModel):
+    selected_weights: RecallWeights
+    scores: list[RankingCalibrationScore]
+
+
+DEFAULT_RANKING_CALIBRATION_CASES = [
+    RankingCalibrationCase(
+        name="exact relevance should beat broadly authoritative background",
+        expected_id="exact",
+        candidates=[
+            RankingCalibrationItem(candidate_id="exact", similarity=1.0, credence_rank=0.75, centrality_score=0.0),
+            RankingCalibrationItem(candidate_id="background", similarity=0.78, credence_rank=1.0, centrality_score=0.8),
+        ],
+    ),
+    RankingCalibrationCase(
+        name="firm authoritative should beat model inferred at close relevance",
+        expected_id="firm",
+        candidates=[
+            RankingCalibrationItem(candidate_id="firm", similarity=0.86, credence_rank=1.0, centrality_score=0.0),
+            RankingCalibrationItem(candidate_id="model", similarity=0.92, credence_rank=0.5, centrality_score=0.0),
+        ],
+    ),
+    RankingCalibrationCase(
+        name="central support should break near-ties",
+        expected_id="central",
+        candidates=[
+            RankingCalibrationItem(candidate_id="central", similarity=0.82, credence_rank=0.75, centrality_score=1.0),
+            RankingCalibrationItem(candidate_id="isolated", similarity=0.85, credence_rank=0.75, centrality_score=0.0),
+        ],
+    ),
+]
+
+DEFAULT_RECALL_WEIGHT_CANDIDATES = [
+    RecallWeights(similarity=0.70, credence=0.20, centrality=0.10),
+    RecallWeights(similarity=0.85, credence=0.10, centrality=0.05),
+    RecallWeights(similarity=0.55, credence=0.35, centrality=0.10),
+    RecallWeights(similarity=0.55, credence=0.15, centrality=0.30),
+]
 
 
 def generate_synthetic_corpus(size: int = 10) -> SyntheticCorpus:
@@ -177,6 +241,46 @@ def boundary_fidelity_eval(events: list[dict[str, str]], *, forbidden_terms: set
         ok=not leaked,
         leaked_event_ids=leaked,
     )
+
+
+def tune_recall_weights(
+    *,
+    cases: list[RankingCalibrationCase] | None = None,
+    candidates: list[RecallWeights] | None = None,
+) -> RankingCalibrationResult:
+    resolved_cases = cases or DEFAULT_RANKING_CALIBRATION_CASES
+    resolved_candidates = candidates or DEFAULT_RECALL_WEIGHT_CANDIDATES
+    scores = [
+        RankingCalibrationScore(
+            weights=weights,
+            mean_reciprocal_rank=_mean_reciprocal_rank(weights, resolved_cases),
+        )
+        for weights in resolved_candidates
+    ]
+    return RankingCalibrationResult(
+        selected_weights=max(scores, key=lambda score: score.mean_reciprocal_rank).weights,
+        scores=scores,
+    )
+
+
+def _mean_reciprocal_rank(weights: RecallWeights, cases: list[RankingCalibrationCase]) -> float:
+    reciprocal_ranks: list[float] = []
+    for case in cases:
+        ranked = sorted(
+            case.candidates,
+            key=lambda item: (
+                item.similarity * weights.similarity
+                + item.credence_rank * weights.credence
+                + item.centrality_score * weights.centrality,
+                item.candidate_id,
+            ),
+            reverse=True,
+        )
+        for rank, item in enumerate(ranked, start=1):
+            if item.candidate_id == case.expected_id:
+                reciprocal_ranks.append(1.0 / rank)
+                break
+    return sum(reciprocal_ranks) / len(reciprocal_ranks)
 
 
 def render_results_table(metrics: dict[str, EvaluationMetrics]) -> str:

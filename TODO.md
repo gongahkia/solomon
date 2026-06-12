@@ -78,7 +78,7 @@ checkout is required at runtime.
 - [x] Review mode surfaces stale/superseded items; default mode filters computed non-Live items.
 - [x] Scope filters, basic dedupe, centrality weighting, credence weighting, and context budget controls exist.
 - [ ] Retrieval is lexical token-set search, not semantic vector search.
-- [ ] Ranking weights are simple local scoring, not empirically tuned.
+- [x] Ranking weights are calibrated by `tune_recall_weights()` over deterministic synthetic relevance/credence/centrality cases and documented in benchmarks.
 
 ## Phase 8 — Audit and privilege evidence chain
 

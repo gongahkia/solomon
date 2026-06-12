@@ -19,9 +19,11 @@ from solomon.evaluation import (
     run_currency_evaluation,
     stale_surface_rate,
     time_to_flag,
+    tune_recall_weights,
     warehouse_similarity_baseline,
     write_synthetic_corpus,
 )
+from solomon.orchestrator.retrieval import RecallWeights
 
 
 def test_synthetic_corpus_and_metrics() -> None:
@@ -70,6 +72,14 @@ def test_boundary_fidelity_eval_flags_leaks() -> None:
 
     assert result.ok is False
     assert result.leaked_event_ids == ["leak"]
+
+
+def test_recall_weight_calibration_selects_default_profile() -> None:
+    calibration = tune_recall_weights()
+
+    assert calibration.selected_weights == RecallWeights(similarity=0.70, credence=0.20, centrality=0.10)
+    assert calibration.scores[0].mean_reciprocal_rank == 1.0
+    assert any(score.mean_reciprocal_rank < 1.0 for score in calibration.scores[1:])
 
 
 def test_synthetic_corpus_export_is_reproducible(tmp_path: Path) -> None:

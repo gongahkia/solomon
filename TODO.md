@@ -9,13 +9,17 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 
 ## Stop point / next work
 
-Updated on 2026-06-12 after completing the local documentation and examples pass.
+Updated on 2026-06-12 after completing the local implementation, performance, Tideline, API-reference, and launch-assets pass.
 
 Current local state:
 - The working tree is expected to be clean after the latest task commit.
 - This branch is ahead of `origin/main` by the local task commits from this pass.
-- Phase 14 now has architecture, concepts, benchmarks, security, ADR index, naming/philosophy docs, and runnable Rust/Python/Node examples.
-- Phase 16 now confirms the encryption-at-rest trait and metadata-only logging hooks are documented and visible from public surfaces.
+- Phase 5 now includes opt-in idle/background reconstruction planning for known-stale significant facts.
+- Phase 9 now has the Tideline diff view and browser-native shareable WebM clip export.
+- Phase 13 now has significance recompute profiling/optimisation, embedded memory-footprint budget, tested multi-reader/single-writer store concurrency, and batched vector search.
+- Phase 14 now has architecture, concepts, benchmarks, security, ADR index, naming/philosophy docs, runnable Rust/Python/Node examples, and a generated API reference.
+- Phase 15 now has draft Show HN, FAQ, launch writeup, and early-user outreach notes.
+- Phase 16 legal-tech bridge confirmations are complete.
 
 Still not done / next up:
 - Publishing is blocked on registry credentials or trusted publishing setup:
@@ -28,19 +32,13 @@ Still not done / next up:
   - Implement real ablations for significance/reconstruction/graph toggles; do not mark done with placeholder labels.
   - Run Mem0 and Zep adapters with real credentials/config to complete the "all systems" CurrencyBench gap claim.
 - Performance:
-  - Profile significance recompute.
-  - Add embedded memory-footprint budget.
-  - Add tested multi-reader/single-writer or MVCC concurrency story.
+  - Optional mmap for cold-tier compressed store still needs a separate cold-content file/backend design; current cold content lives in the redb `cold_content` table.
 - Documentation:
   - Replace the stub README with the full thesis/quickstart/benchmark/debugger narrative.
-  - Generate API references from Rust, TypeScript/Node, and Python doc comments/docstrings.
 - Launch assets:
   - Record the Tideline README demo GIF.
-  - Draft Show HN post, FAQ, short launch writeup, and early-user outreach notes.
-- Legal-tech bridge:
-  - Confirm forgetting can be globally disabled in favour of flag-for-reverification.
-  - Confirm credence taxonomy is swappable.
-  - Stub the sanitising-gateway integration point.
+  - Actually reach out to early users and collect first issues.
+  - Submit CurrencyBench writeup somewhere citable.
 
 ---
 

@@ -16,22 +16,22 @@ destroying the original input data. The universal weakness: consolidation is an
 opaque black box. Shibahama's differentiator is a consolidation pass that is
 driven by the usage signal AND fully visible in the Tideline.
 
-1. Implement a `consolidate()` pass that runs offline / on idle, never on the hot
+1. [x] Implement a `consolidate()` pass that runs offline / on idle, never on the hot
    recall path. It may: merge duplicate/fragmented memories into a synthesized
    higher-level memory; promote/demote tiers based on accumulated usage; flag
    stale-but-significant items for reconstruction. It may NOT delete or overwrite
    originals — consolidated memories are NEW items that link back to their
    sources (provenance preserved), and originals remain queryable.
-2. Drive consolidation decisions from the existing significance/usage signal and
+2. [x] Drive consolidation decisions from the existing significance/usage signal and
    the credence floor — safety-critical / floored items must survive consolidation
    unchanged. Add a test asserting floored items are never merged away or demoted
    below floor by a consolidation pass.
-3. Emit a consolidation event for every decision (merge/promote/demote/flag) with
+3. [x] Emit a consolidation event for every decision (merge/promote/demote/flag) with
    a `why` trace: which inputs, what usage evidence, what was produced.
-4. Tideline: add a consolidation view that replays a pass — show memories merging,
+4. [x] Tideline: add a consolidation view that replays a pass — show memories merging,
    tiers shifting, items being flagged, each with its `why`. This is the headline
    DX moment; budget for it. Nobody has a legible consolidation pass.
-5. Make consolidation idempotent-safe: re-running on an unchanged store produces
+5. [x] Make consolidation idempotent-safe: re-running on an unchanged store produces
    no spurious new memories.
 
 ## Part 2 — Human-in-the-loop "challenge" / override (first-class, generalisable)

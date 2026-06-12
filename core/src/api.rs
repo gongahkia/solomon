@@ -3,6 +3,10 @@
 //! Small public API facade.
 
 use crate::anomaly::AnomalyConfig;
+use crate::consolidation::{
+    ConsolidationPolicy, OfflineConsolidationConfig, PlannedConsolidationDecision,
+    plan_offline_consolidation,
+};
 use crate::model::{AccessOutcome, CredenceTier, MemoryId, MemoryItem, Provenance, Tier};
 use crate::reconstruction::{
     BackgroundReconstructionConfig, CorroborationDecision, CorroborationPolicy,
@@ -18,8 +22,9 @@ use crate::retrieval::{
 };
 use crate::significance::{SignificanceBreakdown, SignificanceConfig};
 use crate::storage::{
-    EventRecord, IngestCredencePolicy, MemoryAuditEntry, MemoryWriteEvent,
-    ReconstructionReplacementRecord, RedbMemoryStore, StorageError, TierCapacityConfig,
+    ConsolidationDecisionRecord, EventRecord, IngestCredencePolicy, MemoryAuditEntry,
+    MemoryWriteEvent, ReconstructionReplacementRecord, RedbMemoryStore, StorageError,
+    TierCapacityConfig,
 };
 use crate::vector::{VectorIndex, VectorIndexError};
 use std::collections::BTreeMap;
@@ -188,6 +193,8 @@ pub struct ShibahamaConfig {
     pub reconstruction_budget: ReconstructionBudgetConfig,
     /// Optional idle/background reconstruction planning.
     pub background_reconstruction: BackgroundReconstructionConfig,
+    /// Offline/idle consolidation pass settings.
+    pub consolidation: OfflineConsolidationConfig,
     /// Default tier residency budgets.
     pub tier_capacity: TierCapacityConfig,
     /// Default source-kind to credence mapping used for writes without explicit credence.
@@ -275,6 +282,24 @@ pub struct ExplicitReconstructionOutcome {
     pub records: Option<ReconstructionReplacementRecord>,
     /// Final status.
     pub status: ExplicitReconstructionStatus,
+}
+
+/// Applied result for one offline consolidation decision.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConsolidationOutcome {
+    /// Planned decision that was applied.
+    pub decision: PlannedConsolidationDecision,
+    /// Durable event records written while applying the decision.
+    pub records: ConsolidationDecisionRecord,
+}
+
+/// Result of one offline consolidation pass.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ConsolidationPassReport {
+    /// Stable pass id shared by emitted consolidation decision events.
+    pub pass_id: String,
+    /// Applied decisions. Empty means the store was already consolidated for this state.
+    pub applied: Vec<ConsolidationOutcome>,
 }
 
 impl ExplicitReconstructionOutcome {
@@ -854,6 +879,113 @@ impl<V: VectorIndex> Shibahama<V> {
         Ok(RecallStream::new(self.recall(request)?))
     }
 
+    /// Runs the offline/idle consolidation pass.
+    ///
+    /// This method is never called by `recall`; callers opt in when they can afford background
+    /// work. It may write new consolidated memories, apply tier transitions, and flag stale
+    /// significant memories for explicit reconstruction. It never deletes source memories.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when event replay, materialized state reads, or decision writes fail.
+    pub fn consolidate(
+        &self,
+        now: OffsetDateTime,
+    ) -> Result<ConsolidationPassReport, ShibahamaError> {
+        let items = self.store.memory_items()?;
+        let events = self.store.events()?;
+        let plan = plan_offline_consolidation(
+            &items,
+            &events,
+            now,
+            self.config.consolidation,
+            ConsolidationPolicy::default(),
+        );
+        let mut applied = Vec::new();
+
+        for decision in plan.decisions {
+            if let Some(records) = self.apply_consolidation_decision(&decision)? {
+                applied.push(ConsolidationOutcome { decision, records });
+            }
+        }
+
+        Ok(ConsolidationPassReport {
+            pass_id: plan.pass_id,
+            applied,
+        })
+    }
+
+    fn apply_consolidation_decision(
+        &self,
+        decision: &PlannedConsolidationDecision,
+    ) -> Result<Option<ConsolidationDecisionRecord>, ShibahamaError> {
+        let records = match decision.action {
+            crate::model::ConsolidationAction::Merge => {
+                let output = decision.output.as_ref().ok_or_else(|| {
+                    ShibahamaError::InvalidRequest(
+                        "merge consolidation decision did not include an output memory".to_owned(),
+                    )
+                })?;
+
+                Some(self.store.insert_consolidated_memory(
+                    output,
+                    decision.pass_id.clone(),
+                    decision.input_ids.clone(),
+                    decision.why.clone(),
+                )?)
+            }
+            crate::model::ConsolidationAction::Promote
+            | crate::model::ConsolidationAction::Demote => {
+                let id = decision.input_ids.first().copied().ok_or_else(|| {
+                    ShibahamaError::InvalidRequest(
+                        "tier consolidation decision did not include an input memory".to_owned(),
+                    )
+                })?;
+                let tier_to = decision.tier_to.ok_or_else(|| {
+                    ShibahamaError::InvalidRequest(
+                        "tier consolidation decision did not include a target tier".to_owned(),
+                    )
+                })?;
+
+                self.store.apply_consolidation_tier_change(
+                    id,
+                    tier_to,
+                    decision.pass_id.clone(),
+                    decision.why.clone(),
+                )?
+            }
+            crate::model::ConsolidationAction::FlagStale => {
+                let id = decision.input_ids.first().copied().ok_or_else(|| {
+                    ShibahamaError::InvalidRequest(
+                        "stale-flag consolidation decision did not include an input memory"
+                            .to_owned(),
+                    )
+                })?;
+                let flag_at = decision.flag_at.ok_or_else(|| {
+                    ShibahamaError::InvalidRequest(
+                        "stale-flag consolidation decision did not include a flag timestamp"
+                            .to_owned(),
+                    )
+                })?;
+                let reason = decision.flag_reason.clone().ok_or_else(|| {
+                    ShibahamaError::InvalidRequest(
+                        "stale-flag consolidation decision did not include a reason".to_owned(),
+                    )
+                })?;
+
+                self.store.flag_for_consolidation_revalidation(
+                    id,
+                    flag_at,
+                    reason,
+                    decision.pass_id.clone(),
+                    decision.why.clone(),
+                )?
+            }
+        };
+
+        Ok(records)
+    }
+
     /// Runs the gated reconstruction loop for stale load-bearing recall candidates.
     ///
     /// Plain `recall` never calls this method or mutates validity. Callers must explicitly provide
@@ -1295,6 +1427,21 @@ where
         Ok(RecallStream::new(self.timeline(request).await?))
     }
 
+    /// Runs the offline/idle consolidation pass.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when event replay, materialized state reads, decision writes, or the
+    /// blocking task fails.
+    pub async fn consolidate(
+        &self,
+        now: OffsetDateTime,
+    ) -> Result<ConsolidationPassReport, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().consolidate(now)).await?
+    }
+
     /// Reinforces a memory with a usage outcome.
     ///
     /// # Errors
@@ -1338,7 +1485,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Provenance, SourceKind};
+    use crate::model::{ConsolidationAction, Provenance, SourceKind};
     #[cfg(feature = "tokio")]
     use crate::read_safety::DefaultSanitizingGateway;
     use crate::retrieval::{RecallCandidateCurrency, RecallRequest};
@@ -1455,8 +1602,8 @@ mod tests {
         let file = NamedTempFile::new().expect("tempfile should be created");
         let mut shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
             .expect("api should open");
-        let ingested_at = OffsetDateTime::UNIX_EPOCH;
-        let now = ingested_at + Duration::days(90);
+        let now = OffsetDateTime::now_utc();
+        let ingested_at = now - Duration::days(90);
         let original = write_api_endpoint_memory(
             &mut shibahama,
             api_endpoint_event("old API endpoint is /v1", ingested_at),
@@ -1523,6 +1670,186 @@ mod tests {
                 .any(|item| item.content == "current API endpoint is /v2")
         );
         assert!(has_reconstruction_event(&shibahama));
+    }
+
+    struct ConsolidationFixture {
+        first: MemoryItem,
+        second: MemoryItem,
+        floored: MemoryItem,
+        stale: MemoryItem,
+        now: OffsetDateTime,
+    }
+
+    fn seed_consolidation_fixture(shibahama: &Shibahama<HnswVectorIndex>) -> ConsolidationFixture {
+        let ingested_at = OffsetDateTime::UNIX_EPOCH;
+        let now = ingested_at + Duration::days(90);
+        let mut first_event = MemoryWriteEvent::new(
+            "API endpoint is /v1",
+            Provenance::new(SourceKind::User, None, "api-test"),
+            ingested_at,
+            ingested_at,
+        );
+        first_event.credence_floor = Tier::Cold;
+        first_event.significance = 2.2;
+        let mut second_event = MemoryWriteEvent::new(
+            "api endpoint is /v1",
+            Provenance::new(SourceKind::User, None, "api-test"),
+            ingested_at,
+            ingested_at,
+        );
+        second_event.credence_floor = Tier::Cold;
+        second_event.significance = 1.8;
+        let mut floored_event = MemoryWriteEvent::with_explicit_credence(
+            "pinned safety rule",
+            Provenance::new(SourceKind::User, None, "api-test"),
+            ingested_at,
+            ingested_at,
+            Tier::Hot,
+            CredenceTier::FirmAuthoritative,
+            Tier::Warm,
+        );
+        floored_event.significance = 0.1;
+        let mut stale_event = MemoryWriteEvent::new(
+            "old but load-bearing source pointer",
+            Provenance::new(SourceKind::File, Some("docs://old".to_owned()), "api-test"),
+            ingested_at,
+            ingested_at,
+        );
+        stale_event.credence_floor = Tier::Cold;
+        stale_event.significance = 3.2;
+        let first = shibahama.write(first_event).expect("first should write");
+        let second = shibahama.write(second_event).expect("second should write");
+        let floored = shibahama
+            .write(floored_event)
+            .expect("floored should write");
+        let stale = shibahama.write(stale_event).expect("stale should write");
+
+        shibahama
+            .reinforce(first.id, AccessOutcome::Cited)
+            .expect("first use should record");
+        shibahama
+            .reinforce(second.id, AccessOutcome::LedSomewhere)
+            .expect("second use should record");
+
+        ConsolidationFixture {
+            first,
+            second,
+            floored,
+            stale,
+            now,
+        }
+    }
+
+    fn assert_consolidation_report(
+        report: &ConsolidationPassReport,
+        fixture: &ConsolidationFixture,
+    ) {
+        assert!(report.applied.iter().any(|outcome| {
+            outcome.decision.action == ConsolidationAction::Merge
+                && outcome.decision.input_ids == vec![fixture.first.id, fixture.second.id]
+        }));
+        assert!(report.applied.iter().any(|outcome| {
+            outcome.decision.action == ConsolidationAction::FlagStale
+                && outcome.decision.input_ids == vec![fixture.stale.id]
+        }));
+        assert!(report.applied.iter().any(|outcome| {
+            outcome.decision.action == ConsolidationAction::Demote
+                && outcome.decision.input_ids == vec![fixture.floored.id]
+                && outcome.decision.tier_to == Some(Tier::Warm)
+        }));
+    }
+
+    fn assert_consolidated_rows<'a>(
+        rows: &'a [MemoryItem],
+        fixture: &ConsolidationFixture,
+    ) -> &'a MemoryItem {
+        let consolidated = rows
+            .iter()
+            .find(|item| {
+                item.consolidation.as_ref().is_some_and(|lineage| {
+                    lineage.source_memory_ids == vec![fixture.first.id, fixture.second.id]
+                })
+            })
+            .expect("consolidated memory should exist");
+
+        assert_eq!(consolidated.content, "API endpoint is /v1");
+        assert!(rows.iter().any(|item| item.id == fixture.first.id));
+        assert!(rows.iter().any(|item| item.id == fixture.second.id));
+        assert_eq!(
+            rows.iter()
+                .find(|item| item.id == fixture.floored.id)
+                .expect("floored row should remain")
+                .tier,
+            Tier::Warm
+        );
+
+        consolidated
+    }
+
+    fn assert_consolidation_events(
+        shibahama: &Shibahama<HnswVectorIndex>,
+        consolidated: &MemoryItem,
+    ) {
+        let events = shibahama.event_records().expect("events should read");
+        let consolidation_events = events
+            .iter()
+            .filter(|record| matches!(record.event, MemoryEvent::ConsolidationDecision { .. }))
+            .count();
+
+        assert!(consolidation_events >= 3);
+        assert!(events.iter().any(|record| {
+            matches!(
+                &record.event,
+                MemoryEvent::ConsolidationDecision {
+                    action: ConsolidationAction::Merge,
+                    output_id: Some(output_id),
+                    why,
+                    ..
+                } if *output_id == consolidated.id && !why.evidence.is_empty()
+            )
+        }));
+    }
+
+    fn assert_consolidation_rerun_is_idempotent(
+        shibahama: &Shibahama<HnswVectorIndex>,
+        now: OffsetDateTime,
+    ) {
+        let before_rerun = shibahama.memory_items().expect("rows should read").len();
+        let rerun = shibahama
+            .consolidate(now)
+            .expect("rerun should be idempotent");
+        let after_rerun = shibahama.memory_items().expect("rows should read").len();
+
+        assert_eq!(before_rerun, after_rerun);
+        assert!(
+            !rerun
+                .applied
+                .iter()
+                .any(|outcome| outcome.decision.action == ConsolidationAction::Merge)
+        );
+    }
+
+    #[test]
+    fn offline_consolidation_merges_flags_demotes_and_is_idempotent() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let fixture = seed_consolidation_fixture(&shibahama);
+        let report = shibahama
+            .consolidate(fixture.now)
+            .expect("consolidation should run");
+
+        assert_consolidation_report(&report, &fixture);
+
+        let rows = shibahama.memory_items().expect("rows should read");
+        let consolidated = assert_consolidated_rows(&rows, &fixture);
+
+        shibahama
+            .store()
+            .verify_never_delete_invariant()
+            .expect("consolidation should preserve never-delete");
+        assert_consolidation_events(&shibahama, consolidated);
+        assert_consolidation_rerun_is_idempotent(&shibahama, fixture.now);
     }
 
     #[test]
@@ -1741,6 +2068,7 @@ mod tests {
         assert_eq!(config.tier_capacity.hot_capacity, None);
         assert_eq!(config.reconstruction_budget.max_revalidations_per_window, 8);
         assert!(!config.background_reconstruction.validate_on_idle);
+        assert_eq!(config.consolidation.min_merge_sources, 2);
         assert_eq!(config.ingest_credence.web, CredenceTier::Unverified);
         assert_eq!(config.forgetting.mode, ForgettingMode::SoftInvalidate);
     }

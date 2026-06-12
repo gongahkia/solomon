@@ -616,6 +616,49 @@ pub struct ConsolidationRef {
     pub resummarization_depth: u16,
 }
 
+/// Durable action type emitted by an offline consolidation pass.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum ConsolidationAction {
+    /// Multiple source memories were synthesized into a new lineage-bearing memory item.
+    Merge,
+    /// A memory was promoted to a hotter accessibility tier.
+    Promote,
+    /// A memory was demoted to a colder accessibility tier while respecting its floor.
+    Demote,
+    /// A significant stale memory was flagged for explicit reconstruction/reverification.
+    FlagStale,
+}
+
+/// Usage and safety evidence behind one consolidation decision.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ConsolidationUsageEvidence {
+    /// Memory considered by the consolidation pass.
+    pub memory_id: MemoryId,
+    /// Materialized significance score used by the pass.
+    pub significance: f64,
+    /// Number of usage events captured for the memory.
+    pub access_count: usize,
+    /// Number of caller-confirmed useful events.
+    pub actual_use_count: usize,
+    /// Number of contradiction events captured for the memory.
+    pub contradiction_count: usize,
+    /// Tier before the consolidation decision.
+    pub tier: Tier,
+    /// Credence before the consolidation decision.
+    pub credence: CredenceTier,
+    /// Coldest tier this memory may occupy after demotion.
+    pub credence_floor: Tier,
+}
+
+/// Human-readable why trace attached to every consolidation decision event.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ConsolidationWhy {
+    /// Short explanation suitable for the Tideline and logs.
+    pub summary: String,
+    /// Usage/safety evidence for each input memory.
+    pub evidence: Vec<ConsolidationUsageEvidence>,
+}
+
 /// Persisted memory item materialized from the event log.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MemoryItem {

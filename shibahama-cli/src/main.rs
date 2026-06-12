@@ -16,7 +16,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use shibahama_core::api::{Shibahama, WhyTrace, WriteEmbedding};
 use shibahama_core::model::{
-    CredenceTier, MemoryId, MemoryItem, MemoryKind, Provenance, SourceKind, Tier,
+    ConsolidationAction, ConsolidationWhy, CredenceTier, MemoryId, MemoryItem, MemoryKind,
+    Provenance, SourceKind, Tier,
 };
 use shibahama_core::retrieval::{
     RecallCandidate, RecallCandidateCurrency, RecallCandidateSource, RecallRequest,
@@ -329,6 +330,30 @@ struct TidelineEventDto {
     tier_to: Option<String>,
     access_outcome: Option<String>,
     valid_to_unix: Option<i64>,
+    consolidation_action: Option<String>,
+    consolidation_why: Option<String>,
+    consolidation_evidence: Vec<TidelineConsolidationEvidenceDto>,
+}
+
+#[derive(Serialize)]
+struct TidelineConsolidationEvidenceDto {
+    memory_id: String,
+    significance: f64,
+    access_count: usize,
+    actual_use_count: usize,
+    contradiction_count: usize,
+    tier: String,
+    credence: String,
+    credence_floor: String,
+}
+
+struct ConsolidationEventParts {
+    action: ConsolidationAction,
+    input_ids: Vec<MemoryId>,
+    output_id: Option<MemoryId>,
+    tier_from: Option<Tier>,
+    tier_to: Option<Tier>,
+    why: ConsolidationWhy,
 }
 
 #[derive(Serialize)]
@@ -848,90 +873,176 @@ fn event_touches_namespace(
             replacement_id,
             ..
         } => namespace_ids.contains(superseded_id) || namespace_ids.contains(replacement_id),
+        MemoryEvent::ConsolidationDecision {
+            input_ids,
+            output_id,
+            ..
+        } => {
+            input_ids.iter().any(|id| namespace_ids.contains(id))
+                || output_id.is_some_and(|id| namespace_ids.contains(&id))
+        }
     }
 }
 
 fn tideline_event_from_record(record: EventRecord) -> TidelineEventDto {
+    let sequence = record.sequence;
+    let recorded_at = record.recorded_at;
+
     match record.event {
-        MemoryEvent::MemoryWritten { item } => TidelineEventDto {
-            sequence: record.sequence,
-            recorded_at_unix: record.recorded_at.unix_timestamp(),
-            kind: "memory_written".to_owned(),
-            memory_ids: vec![item.id.to_string()],
-            tier_from: None,
-            tier_to: Some(tier_str(item.tier).to_owned()),
-            access_outcome: None,
-            valid_to_unix: item.timestamps.valid_to.map(OffsetDateTime::unix_timestamp),
-        },
-        MemoryEvent::MemoryInvalidated { id, valid_to } => TidelineEventDto {
-            sequence: record.sequence,
-            recorded_at_unix: record.recorded_at.unix_timestamp(),
-            kind: "memory_invalidated".to_owned(),
-            memory_ids: vec![id.to_string()],
-            tier_from: None,
-            tier_to: None,
-            access_outcome: None,
-            valid_to_unix: Some(valid_to.unix_timestamp()),
-        },
-        MemoryEvent::ReverificationFlagged { id, flagged_at, .. } => TidelineEventDto {
-            sequence: record.sequence,
-            recorded_at_unix: record.recorded_at.unix_timestamp(),
-            kind: "reverification_flagged".to_owned(),
-            memory_ids: vec![id.to_string()],
-            tier_from: None,
-            tier_to: None,
-            access_outcome: None,
-            valid_to_unix: Some(flagged_at.unix_timestamp()),
-        },
-        MemoryEvent::AccessRecorded { id, event } => TidelineEventDto {
-            sequence: record.sequence,
-            recorded_at_unix: record.recorded_at.unix_timestamp(),
-            kind: "access_recorded".to_owned(),
-            memory_ids: vec![id.to_string()],
-            tier_from: None,
-            tier_to: None,
-            access_outcome: Some(format!("{:?}", event.outcome)),
-            valid_to_unix: None,
-        },
-        MemoryEvent::TierChanged { id, from, to, .. } => TidelineEventDto {
-            sequence: record.sequence,
-            recorded_at_unix: record.recorded_at.unix_timestamp(),
-            kind: "tier_changed".to_owned(),
-            memory_ids: vec![id.to_string()],
-            tier_from: Some(tier_str(from).to_owned()),
-            tier_to: Some(tier_str(to).to_owned()),
-            access_outcome: None,
-            valid_to_unix: None,
-        },
-        MemoryEvent::ContentCompacted { id, .. } => TidelineEventDto {
-            sequence: record.sequence,
-            recorded_at_unix: record.recorded_at.unix_timestamp(),
-            kind: "content_compacted".to_owned(),
-            memory_ids: vec![id.to_string()],
-            tier_from: None,
-            tier_to: Some("cold".to_owned()),
-            access_outcome: None,
-            valid_to_unix: None,
-        },
+        MemoryEvent::MemoryWritten { item } => {
+            let mut event =
+                base_tideline_event(sequence, recorded_at, "memory_written", vec![item.id]);
+            event.tier_to = Some(tier_str(item.tier).to_owned());
+            event.valid_to_unix = item.timestamps.valid_to.map(OffsetDateTime::unix_timestamp);
+            event
+        }
+        MemoryEvent::MemoryInvalidated { id, valid_to } => {
+            let mut event =
+                base_tideline_event(sequence, recorded_at, "memory_invalidated", vec![id]);
+            event.valid_to_unix = Some(valid_to.unix_timestamp());
+            event
+        }
+        MemoryEvent::ReverificationFlagged { id, flagged_at, .. } => {
+            let mut event =
+                base_tideline_event(sequence, recorded_at, "reverification_flagged", vec![id]);
+            event.valid_to_unix = Some(flagged_at.unix_timestamp());
+            event
+        }
+        MemoryEvent::AccessRecorded { id, event } => {
+            let mut dto = base_tideline_event(sequence, recorded_at, "access_recorded", vec![id]);
+            dto.access_outcome = Some(format!("{:?}", event.outcome));
+            dto
+        }
+        MemoryEvent::TierChanged { id, from, to, .. } => {
+            let mut event = base_tideline_event(sequence, recorded_at, "tier_changed", vec![id]);
+            event.tier_from = Some(tier_str(from).to_owned());
+            event.tier_to = Some(tier_str(to).to_owned());
+            event
+        }
+        MemoryEvent::ContentCompacted { id, .. } => {
+            let mut event =
+                base_tideline_event(sequence, recorded_at, "content_compacted", vec![id]);
+            event.tier_to = Some("cold".to_owned());
+            event
+        }
         MemoryEvent::ReconstructionApplied {
             superseded_id,
             replacement_id,
             valid_to,
-        } => TidelineEventDto {
-            sequence: record.sequence,
-            recorded_at_unix: record.recorded_at.unix_timestamp(),
-            kind: "reconstruction_applied".to_owned(),
-            memory_ids: vec![superseded_id.to_string(), replacement_id.to_string()],
-            tier_from: None,
-            tier_to: None,
-            access_outcome: None,
-            valid_to_unix: Some(valid_to.unix_timestamp()),
-        },
+        } => {
+            let mut event = base_tideline_event(
+                sequence,
+                recorded_at,
+                "reconstruction_applied",
+                vec![superseded_id, replacement_id],
+            );
+            event.valid_to_unix = Some(valid_to.unix_timestamp());
+            event
+        }
+        MemoryEvent::ConsolidationDecision {
+            action,
+            input_ids,
+            output_id,
+            tier_from,
+            tier_to,
+            why,
+            ..
+        } => consolidation_tideline_event(
+            sequence,
+            recorded_at,
+            ConsolidationEventParts {
+                action,
+                input_ids,
+                output_id,
+                tier_from,
+                tier_to,
+                why,
+            },
+        ),
+    }
+}
+
+fn base_tideline_event(
+    sequence: u64,
+    recorded_at: OffsetDateTime,
+    kind: &str,
+    memory_ids: Vec<MemoryId>,
+) -> TidelineEventDto {
+    TidelineEventDto {
+        sequence,
+        recorded_at_unix: recorded_at.unix_timestamp(),
+        kind: kind.to_owned(),
+        memory_ids: memory_ids.into_iter().map(|id| id.to_string()).collect(),
+        tier_from: None,
+        tier_to: None,
+        access_outcome: None,
+        valid_to_unix: None,
+        consolidation_action: None,
+        consolidation_why: None,
+        consolidation_evidence: Vec::new(),
+    }
+}
+
+fn consolidation_tideline_event(
+    sequence: u64,
+    recorded_at: OffsetDateTime,
+    parts: ConsolidationEventParts,
+) -> TidelineEventDto {
+    let mut memory_ids = parts.input_ids;
+
+    if let Some(output_id) = parts.output_id {
+        memory_ids.push(output_id);
+    }
+
+    let mut event =
+        base_tideline_event(sequence, recorded_at, "consolidation_decision", memory_ids);
+
+    event.tier_from = parts.tier_from.map(|tier| tier_str(tier).to_owned());
+    event.tier_to = parts.tier_to.map(|tier| tier_str(tier).to_owned());
+    event.consolidation_action = Some(consolidation_action_str(parts.action).to_owned());
+    event.consolidation_why = Some(parts.why.summary);
+    event.consolidation_evidence = parts
+        .why
+        .evidence
+        .into_iter()
+        .map(|evidence| TidelineConsolidationEvidenceDto {
+            memory_id: evidence.memory_id.to_string(),
+            significance: evidence.significance,
+            access_count: evidence.access_count,
+            actual_use_count: evidence.actual_use_count,
+            contradiction_count: evidence.contradiction_count,
+            tier: tier_str(evidence.tier).to_owned(),
+            credence: credence_str(evidence.credence).to_owned(),
+            credence_floor: tier_str(evidence.credence_floor).to_owned(),
+        })
+        .collect();
+
+    event
+}
+
+fn consolidation_action_str(action: ConsolidationAction) -> &'static str {
+    match action {
+        ConsolidationAction::Merge => "merge",
+        ConsolidationAction::Promote => "promote",
+        ConsolidationAction::Demote => "demote",
+        ConsolidationAction::FlagStale => "flag_stale",
     }
 }
 
 fn tideline_graph(memories: &[MemoryItem], event_records: &[EventRecord]) -> TidelineGraphDto {
-    let nodes = memories
+    let nodes = tideline_graph_nodes(memories);
+    let namespace_ids = memories.iter().map(|item| item.id).collect::<BTreeSet<_>>();
+    let mut edges = Vec::new();
+
+    for record in event_records {
+        append_tideline_graph_edges(record, &namespace_ids, &mut edges);
+    }
+
+    TidelineGraphDto { nodes, edges }
+}
+
+fn tideline_graph_nodes(memories: &[MemoryItem]) -> Vec<TidelineGraphNodeDto> {
+    memories
         .iter()
         .map(|item| TidelineGraphNodeDto {
             id: item.id.to_string(),
@@ -942,65 +1053,134 @@ fn tideline_graph(memories: &[MemoryItem], event_records: &[EventRecord]) -> Tid
             valid_from_unix: item.timestamps.valid_from.unix_timestamp(),
             valid_to_unix: item.timestamps.valid_to.map(OffsetDateTime::unix_timestamp),
         })
-        .collect::<Vec<_>>();
-    let namespace_ids = memories.iter().map(|item| item.id).collect::<BTreeSet<_>>();
-    let mut edges = Vec::new();
+        .collect()
+}
 
-    for record in event_records {
-        match &record.event {
-            MemoryEvent::MemoryInvalidated { id, valid_to } if namespace_ids.contains(id) => {
-                edges.push(TidelineGraphEdgeDto {
-                    id: format!("event-{}-invalidated", record.sequence),
-                    from: id.to_string(),
-                    to: id.to_string(),
-                    kind: "invalidated".to_owned(),
-                    valid_from_unix: None,
-                    valid_to_unix: Some(valid_to.unix_timestamp()),
-                });
-            }
-            MemoryEvent::ReverificationFlagged { id, flagged_at, .. }
-                if namespace_ids.contains(id) =>
-            {
-                edges.push(TidelineGraphEdgeDto {
-                    id: format!("event-{}-reverification", record.sequence),
-                    from: id.to_string(),
-                    to: id.to_string(),
-                    kind: "reverification_flagged".to_owned(),
-                    valid_from_unix: Some(flagged_at.unix_timestamp()),
-                    valid_to_unix: None,
-                });
-            }
-            MemoryEvent::ReconstructionApplied {
-                superseded_id,
-                replacement_id,
-                valid_to,
-            } if namespace_ids.contains(superseded_id)
-                || namespace_ids.contains(replacement_id) =>
-            {
-                edges.push(TidelineGraphEdgeDto {
-                    id: format!("event-{}-reconstruction", record.sequence),
-                    from: superseded_id.to_string(),
-                    to: replacement_id.to_string(),
-                    kind: "reconstruction".to_owned(),
-                    valid_from_unix: None,
-                    valid_to_unix: Some(valid_to.unix_timestamp()),
-                });
-            }
-            MemoryEvent::TierChanged { id, .. } if namespace_ids.contains(id) => {
-                edges.push(TidelineGraphEdgeDto {
-                    id: format!("event-{}-tier", record.sequence),
-                    from: id.to_string(),
-                    to: id.to_string(),
-                    kind: "tier_transition".to_owned(),
-                    valid_from_unix: Some(record.recorded_at.unix_timestamp()),
-                    valid_to_unix: None,
-                });
-            }
-            _ => {}
+fn append_tideline_graph_edges(
+    record: &EventRecord,
+    namespace_ids: &BTreeSet<MemoryId>,
+    edges: &mut Vec<TidelineGraphEdgeDto>,
+) {
+    match &record.event {
+        MemoryEvent::MemoryInvalidated { id, valid_to } if namespace_ids.contains(id) => {
+            edges.push(self_edge(record, *id, "invalidated", None, Some(*valid_to)));
         }
+        MemoryEvent::ReverificationFlagged { id, flagged_at, .. } if namespace_ids.contains(id) => {
+            edges.push(self_edge(
+                record,
+                *id,
+                "reverification_flagged",
+                Some(*flagged_at),
+                None,
+            ));
+        }
+        MemoryEvent::ReconstructionApplied {
+            superseded_id,
+            replacement_id,
+            valid_to,
+        } if namespace_ids.contains(superseded_id) || namespace_ids.contains(replacement_id) => {
+            edges.push(TidelineGraphEdgeDto {
+                id: format!("event-{}-reconstruction", record.sequence),
+                from: superseded_id.to_string(),
+                to: replacement_id.to_string(),
+                kind: "reconstruction".to_owned(),
+                valid_from_unix: None,
+                valid_to_unix: Some(valid_to.unix_timestamp()),
+            });
+        }
+        MemoryEvent::TierChanged { id, .. } if namespace_ids.contains(id) => {
+            edges.push(self_edge(
+                record,
+                *id,
+                "tier_transition",
+                Some(record.recorded_at),
+                None,
+            ));
+        }
+        MemoryEvent::ConsolidationDecision {
+            action,
+            input_ids,
+            output_id,
+            ..
+        } => append_consolidation_graph_edges(
+            record,
+            namespace_ids,
+            edges,
+            *action,
+            input_ids,
+            *output_id,
+        ),
+        _ => {}
+    }
+}
+
+fn self_edge(
+    record: &EventRecord,
+    id: MemoryId,
+    kind: &str,
+    valid_from: Option<OffsetDateTime>,
+    valid_to: Option<OffsetDateTime>,
+) -> TidelineGraphEdgeDto {
+    TidelineGraphEdgeDto {
+        id: format!("event-{}-{kind}", record.sequence),
+        from: id.to_string(),
+        to: id.to_string(),
+        kind: kind.to_owned(),
+        valid_from_unix: valid_from.map(OffsetDateTime::unix_timestamp),
+        valid_to_unix: valid_to.map(OffsetDateTime::unix_timestamp),
+    }
+}
+
+fn append_consolidation_graph_edges(
+    record: &EventRecord,
+    namespace_ids: &BTreeSet<MemoryId>,
+    edges: &mut Vec<TidelineGraphEdgeDto>,
+    action: ConsolidationAction,
+    input_ids: &[MemoryId],
+    output_id: Option<MemoryId>,
+) {
+    if action == ConsolidationAction::Merge
+        && let Some(output_id) = output_id
+        && (input_ids.iter().any(|id| namespace_ids.contains(id))
+            || namespace_ids.contains(&output_id))
+    {
+        for input_id in input_ids {
+            edges.push(consolidation_edge(
+                record,
+                *input_id,
+                output_id,
+                "consolidation_merge",
+            ));
+        }
+        return;
     }
 
-    TidelineGraphDto { nodes, edges }
+    for input_id in input_ids {
+        if namespace_ids.contains(input_id) {
+            edges.push(consolidation_edge(
+                record,
+                *input_id,
+                *input_id,
+                &format!("consolidation_{}", consolidation_action_str(action)),
+            ));
+        }
+    }
+}
+
+fn consolidation_edge(
+    record: &EventRecord,
+    from: MemoryId,
+    to: MemoryId,
+    kind: &str,
+) -> TidelineGraphEdgeDto {
+    TidelineGraphEdgeDto {
+        id: format!("event-{}-consolidation-{from}", record.sequence),
+        from: from.to_string(),
+        to: to.to_string(),
+        kind: kind.to_owned(),
+        valid_from_unix: Some(record.recorded_at.unix_timestamp()),
+        valid_to_unix: None,
+    }
 }
 
 fn memory_label(content: &str) -> String {

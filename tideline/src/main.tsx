@@ -41,6 +41,20 @@ type TidelineEvent = {
   tier_to: Tier | null;
   access_outcome: string | null;
   valid_to_unix: number | null;
+  consolidation_action: string | null;
+  consolidation_why: string | null;
+  consolidation_evidence: ConsolidationEvidence[];
+};
+
+type ConsolidationEvidence = {
+  memory_id: string;
+  significance: number;
+  access_count: number;
+  actual_use_count: number;
+  contradiction_count: number;
+  tier: Tier;
+  credence: string;
+  credence_floor: Tier;
 };
 
 type TidelineGraphNode = {
@@ -102,7 +116,7 @@ type WhyTrace = {
   audit_trail: string[];
 };
 
-type ViewName = "moment" | "poisoning" | "bitemporal" | "graph" | "diff";
+type ViewName = "moment" | "consolidation" | "poisoning" | "bitemporal" | "graph" | "diff";
 
 const API_BASE = "http://127.0.0.1:8765";
 const tierOrder: Record<string, number> = { hot: 0, warm: 1, cold: 2 };
@@ -227,6 +241,9 @@ function App() {
   );
   const momentEvents = visibleEvents.filter((event) =>
     ["memory_invalidated", "reconstruction_applied"].includes(event.kind),
+  );
+  const consolidationEvents = visibleEvents.filter(
+    (event) => event.kind === "consolidation_decision",
   );
 
   async function downloadRecording() {
@@ -371,6 +388,12 @@ function App() {
           <button className={activeView === "moment" ? "active" : ""} onClick={() => setActiveView("moment")}>
             <Activity size={16} /> Moment
           </button>
+          <button
+            className={activeView === "consolidation" ? "active" : ""}
+            onClick={() => setActiveView("consolidation")}
+          >
+            <GitCompareArrows size={16} /> Consolidation
+          </button>
           <button className={activeView === "poisoning" ? "active" : ""} onClick={() => setActiveView("poisoning")}>
             <ShieldAlert size={16} /> Poisoning
           </button>
@@ -385,6 +408,9 @@ function App() {
           </button>
         </nav>
         {activeView === "moment" && <MomentView events={momentEvents} memories={visibleMemories} />}
+        {activeView === "consolidation" && (
+          <ConsolidationView events={consolidationEvents} memories={visibleMemories} />
+        )}
         {activeView === "poisoning" && <PoisoningView memories={visibleMemories} lowCredence={lowCredence} />}
         {activeView === "bitemporal" && <BiTemporalView memories={visibleMemories} asOf={asOf} />}
         {activeView === "graph" && <GraphView snapshot={snapshot} selectedId={selectedId} onSelect={setSelectedId} />}
@@ -527,6 +553,71 @@ function MomentView({ events, memories }: { events: TidelineEvent[]; memories: M
             <p>{event.memory_ids.map((id) => byId.get(id)?.content ?? id).join(" -> ")}</p>
           </article>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function ConsolidationView({
+  events,
+  memories,
+}: {
+  events: TidelineEvent[];
+  memories: MemoryItem[];
+}) {
+  const byId = new Map(memories.map((memory) => [memory.id, memory]));
+
+  return (
+    <section className="panel wide-panel consolidation-panel">
+      <div className="panel-title">
+        <h2>Consolidation</h2>
+        <span>{events.length}</span>
+      </div>
+      {events.length === 0 ? <p className="empty">No consolidation decisions</p> : null}
+      <div className="consolidation-list">
+        {events.map((event) => {
+          const outputId =
+            event.consolidation_action === "merge" ? event.memory_ids.at(-1) ?? null : null;
+          const inputIds =
+            outputId === null ? event.memory_ids : event.memory_ids.filter((id) => id !== outputId);
+
+          return (
+            <article key={event.sequence} className={`consolidation-row ${event.consolidation_action ?? "unknown"}`}>
+              <div className="consolidation-main">
+                <strong>{event.consolidation_action ?? "decision"}</strong>
+                <span>#{event.sequence}</span>
+                <p>{event.consolidation_why ?? "No why trace recorded"}</p>
+              </div>
+              <div className="merge-flow">
+                <div>
+                  {inputIds.map((id) => (
+                    <span key={id}>{byId.get(id)?.content ? memoryLabel(byId.get(id)!.content) : shortId(id)}</span>
+                  ))}
+                </div>
+                <b>{"->"}</b>
+                <div>
+                  {outputId ? (
+                    <span>{byId.get(outputId)?.content ? memoryLabel(byId.get(outputId)!.content) : shortId(outputId)}</span>
+                  ) : (
+                    <span>{event.tier_to ?? event.consolidation_action}</span>
+                  )}
+                </div>
+              </div>
+              <div className="evidence-grid">
+                {event.consolidation_evidence.map((evidence) => (
+                  <div key={`${event.sequence}-${evidence.memory_id}`} className="evidence-cell">
+                    <span>{byId.get(evidence.memory_id)?.content ? memoryLabel(byId.get(evidence.memory_id)!.content) : shortId(evidence.memory_id)}</span>
+                    <b>{evidence.significance.toFixed(2)}</b>
+                    <i>
+                      {evidence.actual_use_count}/{evidence.access_count}
+                    </i>
+                    <em>{evidence.credence_floor}</em>
+                  </div>
+                ))}
+              </div>
+            </article>
+          );
+        })}
       </div>
     </section>
   );
@@ -1015,9 +1106,13 @@ function buildSessionDiff(snapshot: TidelineSnapshot | null, fromSequence: numbe
     .filter((id) => !knownAtStart.has(id))
     .map((id) => labels.get(id) ?? shortId(id));
   const stateChanges = eventsInRange.filter((event) =>
-    ["memory_invalidated", "reconstruction_applied", "reverification_flagged", "content_compacted"].includes(
-      event.kind,
-    ),
+    [
+      "memory_invalidated",
+      "reconstruction_applied",
+      "reverification_flagged",
+      "content_compacted",
+      "consolidation_decision",
+    ].includes(event.kind),
   );
   const tierChanges = eventsInRange.filter((event) => event.kind === "tier_changed");
   const accesses = eventsInRange.filter((event) => event.kind === "access_recorded");

@@ -6,9 +6,9 @@ use crate::anomaly::{
     AnomalyConfig, AnomalyFlag, detect_contradiction_bursts, inspect_suspicious_provenance,
 };
 use crate::model::{
-    AccessEvent, CURRENT_MEMORY_SCHEMA_VERSION, CompactionRef, CredenceTier, EmbeddingRef, Entity,
-    EntityId, MemoryId, MemoryItem, MemoryKind, Provenance, Relation, RelationId, SourceKind,
-    TemporalBounds, Tier,
+    AccessEvent, CURRENT_MEMORY_SCHEMA_VERSION, CompactionRef, ConsolidationAction,
+    ConsolidationWhy, CredenceTier, EmbeddingRef, Entity, EntityId, MemoryId, MemoryItem,
+    MemoryKind, Provenance, Relation, RelationId, SourceKind, TemporalBounds, Tier,
 };
 use crate::significance::{SignificanceBreakdown, SignificanceConfig, SignificanceFunction};
 use crate::vector::{VectorIndex, VectorIndexError};
@@ -113,6 +113,23 @@ pub enum MemoryEvent {
         /// Timestamp that closes the superseded memory's valid-time interval.
         valid_to: OffsetDateTime,
     },
+    /// An offline consolidation pass made a legible decision.
+    ConsolidationDecision {
+        /// Stable pass identifier.
+        pass_id: String,
+        /// Decision action.
+        action: ConsolidationAction,
+        /// Input memories considered by the decision.
+        input_ids: Vec<MemoryId>,
+        /// New memory produced by a merge decision, when applicable.
+        output_id: Option<MemoryId>,
+        /// Previous tier for tier-transition decisions.
+        tier_from: Option<Tier>,
+        /// New tier for tier-transition decisions.
+        tier_to: Option<Tier>,
+        /// Explainable usage/safety trace behind the decision.
+        why: ConsolidationWhy,
+    },
 }
 
 /// Cause attached to tier-transition events.
@@ -127,6 +144,8 @@ pub enum TierChangeCause {
     SignificanceRefresh,
     /// Tier changed because a tier capacity policy demoted the item.
     CapacityEnforcement,
+    /// Tier changed because an offline consolidation pass applied usage evidence.
+    ConsolidationPass,
 }
 
 /// Cause shown in an item's audit trail.
@@ -142,6 +161,8 @@ pub enum MemoryAuditCause {
     SignificanceRefresh,
     /// Tier changed because a tier capacity policy demoted the item.
     CapacityEnforcement,
+    /// Tier changed because an offline consolidation pass applied usage evidence.
+    ConsolidationPass,
     /// Cause was not recorded by an older event.
     Unknown,
 }
@@ -153,6 +174,7 @@ impl From<TierChangeCause> for MemoryAuditCause {
             TierChangeCause::AccessReinforcement => Self::AccessReinforcement,
             TierChangeCause::SignificanceRefresh => Self::SignificanceRefresh,
             TierChangeCause::CapacityEnforcement => Self::CapacityEnforcement,
+            TierChangeCause::ConsolidationPass => Self::ConsolidationPass,
         }
     }
 }
@@ -233,6 +255,19 @@ pub struct ReconstructionReplacementRecord {
     pub replacement_write: EventRecord,
     /// Reconstruction marker event for replay/debugger consumers.
     pub reconstruction: EventRecord,
+}
+
+/// Events produced by applying one consolidation decision.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConsolidationDecisionRecord {
+    /// Event writing a synthesized memory for merge decisions.
+    pub memory_write: Option<EventRecord>,
+    /// Event recording a tier transition for promote/demote decisions.
+    pub tier_change: Option<EventRecord>,
+    /// Event flagging a memory for explicit re-verification.
+    pub revalidation_flag: Option<EventRecord>,
+    /// Legible consolidation marker with the why trace.
+    pub decision: EventRecord,
 }
 
 /// Tier residency limits for materialized memory state.
@@ -989,7 +1024,8 @@ impl RedbMemoryStore {
                     }
                 }
                 MemoryEvent::ReverificationFlagged { .. }
-                | MemoryEvent::ReconstructionApplied { .. } => {}
+                | MemoryEvent::ReconstructionApplied { .. }
+                | MemoryEvent::ConsolidationDecision { .. } => {}
             }
         }
 
@@ -2063,6 +2099,296 @@ impl RedbMemoryStore {
             invalidation,
             replacement_write,
             reconstruction,
+        }))
+    }
+
+    /// Writes a synthesized consolidation memory and a legible decision marker atomically.
+    ///
+    /// The source memories are not modified; the new memory carries its own consolidation lineage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read or written, or the synthesized id already
+    /// exists.
+    pub fn insert_consolidated_memory(
+        &self,
+        item: &MemoryItem,
+        pass_id: impl Into<String>,
+        input_ids: Vec<MemoryId>,
+        why: ConsolidationWhy,
+    ) -> Result<ConsolidationDecisionRecord, StorageError> {
+        let pass_id = pass_id.into();
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let (write_sequence, decision_sequence) = {
+            let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+            let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let item_key = item.id.to_string();
+
+            if item_table.get(item_key.as_str()).map_err(embed)?.is_some() {
+                return Err(StorageError::InvariantViolation(format!(
+                    "consolidated memory {} already exists",
+                    item.id
+                )));
+            }
+
+            let write_sequence = event_table.len().map_err(embed)?;
+            let decision_sequence = write_sequence + 1;
+            let recorded_at = OffsetDateTime::now_utc();
+            let write_record = EventRecord {
+                sequence: write_sequence,
+                recorded_at,
+                event: MemoryEvent::MemoryWritten {
+                    item: Box::new(item.clone()),
+                },
+            };
+            let decision_record = EventRecord {
+                sequence: decision_sequence,
+                recorded_at,
+                event: MemoryEvent::ConsolidationDecision {
+                    pass_id,
+                    action: ConsolidationAction::Merge,
+                    input_ids,
+                    output_id: Some(item.id),
+                    tier_from: None,
+                    tier_to: Some(item.tier),
+                    why,
+                },
+            };
+            let write_bytes = serde_json::to_vec(&write_record)?;
+            let decision_bytes = serde_json::to_vec(&decision_record)?;
+            let item_bytes = serde_json::to_vec(item)?;
+
+            event_table
+                .insert(write_sequence, write_bytes.as_slice())
+                .map_err(embed)?;
+            event_table
+                .insert(decision_sequence, decision_bytes.as_slice())
+                .map_err(embed)?;
+            item_table
+                .insert(item_key.as_str(), item_bytes.as_slice())
+                .map_err(embed)?;
+
+            (write_sequence, decision_sequence)
+        };
+
+        write_txn.commit().map_err(embed)?;
+
+        Ok(ConsolidationDecisionRecord {
+            memory_write: Some(self.event(write_sequence)?.ok_or_else(|| {
+                StorageError::Embedded(
+                    "committed consolidated memory write was not readable".to_owned(),
+                )
+            })?),
+            tier_change: None,
+            revalidation_flag: None,
+            decision: self.event(decision_sequence)?.ok_or_else(|| {
+                StorageError::Embedded(
+                    "committed consolidation decision event was not readable".to_owned(),
+                )
+            })?,
+        })
+    }
+
+    /// Applies an offline consolidation tier transition with a legible decision marker.
+    ///
+    /// Returns `Ok(None)` when the memory is missing or already in `tier_to`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read or written.
+    pub fn apply_consolidation_tier_change(
+        &self,
+        id: MemoryId,
+        tier_to: Tier,
+        pass_id: impl Into<String>,
+        why: ConsolidationWhy,
+    ) -> Result<Option<ConsolidationDecisionRecord>, StorageError> {
+        let pass_id = pass_id.into();
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let Some((tier_sequence, decision_sequence)) =
+            (|| -> Result<Option<(u64, u64)>, StorageError> {
+                let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+                let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+                let key = id.to_string();
+                let mut item: MemoryItem = {
+                    let Some(value) = item_table.get(key.as_str()).map_err(embed)? else {
+                        return Ok(None);
+                    };
+
+                    serde_json::from_slice(value.value())?
+                };
+                let tier_from = item.tier;
+
+                if tier_from == tier_to {
+                    return Ok(None);
+                }
+
+                item.tier = tier_to;
+
+                let tier_sequence = event_table.len().map_err(embed)?;
+                let decision_sequence = tier_sequence + 1;
+                let recorded_at = OffsetDateTime::now_utc();
+                let action = if tier_to > tier_from {
+                    ConsolidationAction::Promote
+                } else {
+                    ConsolidationAction::Demote
+                };
+                let tier_record = EventRecord {
+                    sequence: tier_sequence,
+                    recorded_at,
+                    event: MemoryEvent::TierChanged {
+                        id,
+                        from: tier_from,
+                        to: tier_to,
+                        cause: TierChangeCause::ConsolidationPass,
+                    },
+                };
+                let decision_record = EventRecord {
+                    sequence: decision_sequence,
+                    recorded_at,
+                    event: MemoryEvent::ConsolidationDecision {
+                        pass_id,
+                        action,
+                        input_ids: vec![id],
+                        output_id: None,
+                        tier_from: Some(tier_from),
+                        tier_to: Some(tier_to),
+                        why,
+                    },
+                };
+                let tier_bytes = serde_json::to_vec(&tier_record)?;
+                let decision_bytes = serde_json::to_vec(&decision_record)?;
+                let item_bytes = serde_json::to_vec(&item)?;
+
+                event_table
+                    .insert(tier_sequence, tier_bytes.as_slice())
+                    .map_err(embed)?;
+                event_table
+                    .insert(decision_sequence, decision_bytes.as_slice())
+                    .map_err(embed)?;
+                item_table
+                    .insert(key.as_str(), item_bytes.as_slice())
+                    .map_err(embed)?;
+
+                Ok(Some((tier_sequence, decision_sequence)))
+            })()?
+        else {
+            write_txn.commit().map_err(embed)?;
+            return Ok(None);
+        };
+
+        write_txn.commit().map_err(embed)?;
+
+        Ok(Some(ConsolidationDecisionRecord {
+            memory_write: None,
+            tier_change: Some(self.event(tier_sequence)?.ok_or_else(|| {
+                StorageError::Embedded(
+                    "committed consolidation tier event was not readable".to_owned(),
+                )
+            })?),
+            revalidation_flag: None,
+            decision: self.event(decision_sequence)?.ok_or_else(|| {
+                StorageError::Embedded(
+                    "committed consolidation decision event was not readable".to_owned(),
+                )
+            })?,
+        }))
+    }
+
+    /// Flags a memory from an offline consolidation pass with a legible decision marker.
+    ///
+    /// Returns `Ok(None)` when the memory is missing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read or written.
+    pub fn flag_for_consolidation_revalidation(
+        &self,
+        id: MemoryId,
+        flagged_at: OffsetDateTime,
+        reason: impl Into<String>,
+        pass_id: impl Into<String>,
+        why: ConsolidationWhy,
+    ) -> Result<Option<ConsolidationDecisionRecord>, StorageError> {
+        let reason = reason.into();
+        let pass_id = pass_id.into();
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let Some((flag_sequence, decision_sequence)) =
+            (|| -> Result<Option<(u64, u64)>, StorageError> {
+                let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+                let item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+                let key = id.to_string();
+
+                if item_table.get(key.as_str()).map_err(embed)?.is_none() {
+                    return Ok(None);
+                }
+
+                let flag_sequence = event_table.len().map_err(embed)?;
+                let decision_sequence = flag_sequence + 1;
+                let recorded_at = OffsetDateTime::now_utc();
+                let flag_record = EventRecord {
+                    sequence: flag_sequence,
+                    recorded_at,
+                    event: MemoryEvent::ReverificationFlagged {
+                        id,
+                        flagged_at,
+                        reason,
+                    },
+                };
+                let decision_record = EventRecord {
+                    sequence: decision_sequence,
+                    recorded_at,
+                    event: MemoryEvent::ConsolidationDecision {
+                        pass_id,
+                        action: ConsolidationAction::FlagStale,
+                        input_ids: vec![id],
+                        output_id: None,
+                        tier_from: None,
+                        tier_to: None,
+                        why,
+                    },
+                };
+                let flag_bytes = serde_json::to_vec(&flag_record)?;
+                let decision_bytes = serde_json::to_vec(&decision_record)?;
+
+                event_table
+                    .insert(flag_sequence, flag_bytes.as_slice())
+                    .map_err(embed)?;
+                event_table
+                    .insert(decision_sequence, decision_bytes.as_slice())
+                    .map_err(embed)?;
+
+                Ok(Some((flag_sequence, decision_sequence)))
+            })()?
+        else {
+            write_txn.commit().map_err(embed)?;
+            return Ok(None);
+        };
+
+        write_txn.commit().map_err(embed)?;
+
+        Ok(Some(ConsolidationDecisionRecord {
+            memory_write: None,
+            tier_change: None,
+            revalidation_flag: Some(self.event(flag_sequence)?.ok_or_else(|| {
+                StorageError::Embedded(
+                    "committed consolidation flag event was not readable".to_owned(),
+                )
+            })?),
+            decision: self.event(decision_sequence)?.ok_or_else(|| {
+                StorageError::Embedded(
+                    "committed consolidation decision event was not readable".to_owned(),
+                )
+            })?,
         }))
     }
 

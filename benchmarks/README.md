@@ -54,3 +54,16 @@ python benchmarks/recall-latency.py --check-budget
 ```
 
 The default local budget is p50 <= 25 ms and p95 <= 75 ms for 1,000 memories, 200 measured queries, 16 dimensions, and top-k 5. The benchmark uses deterministic local embeddings, a temporary `redb` store, and the Python binding over the Rust core. Run without `--check-budget` to print a report without failing on timing.
+
+## Embedded Memory-Footprint Budget
+
+Measure resident memory growth for an embedded temporary store:
+
+```bash
+python benchmarks/memory-footprint.py --check-budget
+```
+
+The default local budget is RSS delta <= 128 MiB for 1,000 memories,
+16-dimensional deterministic embeddings, capacity 1,000, and top-k 5. The
+script reports resident-set delta and temporary database size as JSON. Run
+without `--check-budget` to print the report without failing on the budget.

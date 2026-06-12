@@ -9,6 +9,18 @@ default local budget is p50 <= 25 ms and p95 <= 75 ms for 1,000 memories, 200 me
 This budget covers the in-process Rust core through the Python binding. It does not include hosted
 embedding calls, external memory adapters, or network transport.
 
+## Embedded Memory-Footprint Budget
+
+Use `python benchmarks/memory-footprint.py --check-budget` after building the
+Python binding to measure resident memory growth for an embedded temporary
+store. The default local budget is RSS delta <= 128 MiB for 1,000 memories,
+16-dimensional deterministic embeddings, capacity 1,000, and top-k 5.
+
+The script reports RSS baseline, RSS after seeding and one recall, RSS delta,
+and temporary database size as JSON. The budget intentionally measures the
+in-process binding plus Rust core together because that is the embeddable shape
+most Python users exercise locally.
+
 ## Hot-Path Scan Boundary
 
 Shibahama's recall path is intended to be lazy and id-bounded. A normal recall should:

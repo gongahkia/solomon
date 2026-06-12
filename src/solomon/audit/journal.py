@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import Field, field_validator
 
 from solomon.api.schemas import SolomonModel
+from solomon.credence.policy import CredenceAuditEntry
 from solomon.currency.models import KnowledgeItem, now_utc
 from solomon.graph.models import ImpactResult
 from solomon.orchestrator.models import ModelCallAudit
@@ -165,6 +166,9 @@ class AuditJournal:
 
     def log_verification_attestation(self, attestation: VerificationAttestation) -> AuditEntry:
         return self.append("verification_attestation", attestation.model_dump(mode="json"))
+
+    def log_credence_change(self, entry: CredenceAuditEntry) -> AuditEntry:
+        return self.append("credence_change", entry.model_dump(mode="json"))
 
     def record_erasure_tombstone(self, *, subject_ref: str, lawful_basis: str, by: str) -> AuditEntry:
         return self.append(

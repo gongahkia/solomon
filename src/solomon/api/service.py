@@ -164,7 +164,9 @@ class SolomonService:
             client_id=request.client_id,
         )
         item, _review = self.boundary.review_for_ingest(item)
+        credence_entry_start = len(self.credence.entries)
         item = self.credence.assign_on_ingest(item)
+        self._persist_credence_entries(start=credence_entry_start)
         item = self._seed_verification_from_source(item)
         item = self.index.upsert_item(item)
         self.store.write_item(item)
@@ -387,6 +389,10 @@ class SolomonService:
             return self.store.get_item(item_id)
         except ItemNotFoundError as exc:
             raise NotFoundError(f"knowledge item not found: {item_id}") from exc
+
+    def _persist_credence_entries(self, *, start: int) -> None:
+        for entry in self.credence.entries[start:]:
+            self.audit.log_credence_change(entry)
 
     def _seed_verification_from_source(self, item: KnowledgeItem) -> KnowledgeItem:
         if item.credence_tier not in {CredenceTier.FIRM_AUTHORITATIVE, CredenceTier.VERIFIED}:

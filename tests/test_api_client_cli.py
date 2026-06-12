@@ -65,6 +65,26 @@ def test_service_ingest_calls_vendored_boundary_and_attaches_findings(tmp_path: 
     assert any(finding["kind"] == "client_reference" for finding in item.provenance.kaypoh_findings)
 
 
+def test_service_ingest_persists_credence_audit_without_content(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="privileged client strategy",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo",
+        )
+    )
+
+    raw = (tmp_path / "journal" / "journal.jsonl").read_text(encoding="utf-8")
+    assert "credence_change" in raw
+    assert item.id in raw
+    assert "FirmAuthoritative" in raw
+    assert "source kind partner" in raw
+    assert "privileged client strategy" not in raw
+
+
 def test_service_fails_closed_when_vendored_boundary_fails_for_ingest_and_model_egress(tmp_path: Path) -> None:
     service = SolomonService(
         data_dir=tmp_path / "data",

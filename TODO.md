@@ -69,7 +69,7 @@ checkout is required at runtime.
 - [x] Load-bearing decision helper refuses stale or low-credence items; instruction-role content is excluded from prompt context.
 - [x] Credence changes are audited in memory.
 - [ ] Load-bearing refusal is not enforced globally across every API path.
-- [ ] Credence audit is not persisted to the main audit journal by default.
+- [x] Credence audit entries are persisted to the main hash-chained audit journal by default on service ingest without storing item content.
 
 ## Phase 7 — Retrieval orchestrator
 

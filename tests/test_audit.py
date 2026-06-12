@@ -12,6 +12,7 @@ from solomon.audit.journal import (
     verify_verification_attestation,
     what_did_we_know_report,
 )
+from solomon.credence.policy import CredenceAction, CredenceAuditEntry
 from solomon.currency.models import CredenceTier, KnowledgeItem, KnowledgeKind, Provenance, SourceKind
 from solomon.orchestrator.models import EndpointKind, ModelCallAudit
 
@@ -62,6 +63,25 @@ def test_query_logging_is_metadata_only(tmp_path: Path) -> None:
     assert "privileged text" not in raw
     assert "prompt_sha256" in raw
     assert "item-1" in raw
+
+
+def test_credence_change_logging_is_hash_chained(tmp_path: Path) -> None:
+    journal = AuditJournal(tmp_path / "journal.jsonl")
+    entry = CredenceAuditEntry(
+        item_id="item-1",
+        action=CredenceAction.ASSIGN,
+        from_tier=CredenceTier.UNVERIFIED,
+        to_tier=CredenceTier.FIRM_AUTHORITATIVE,
+        by="system",
+        reason="source kind partner",
+    )
+
+    journal.log_credence_change(entry)
+
+    raw = (tmp_path / "journal.jsonl").read_text(encoding="utf-8")
+    assert "credence_change" in raw
+    assert "FirmAuthoritative" in raw
+    assert journal.verify().ok is True
 
 
 def test_audit_pack_export_and_verify(tmp_path: Path) -> None:

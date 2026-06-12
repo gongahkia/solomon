@@ -79,9 +79,9 @@ The repository includes:
 ## What Still Needs External Proof
 
 The local harness can run Shibahama and a warehouse baseline today. LoCoMo and
-LongMemEval comparisons still require external dataset exports. External-system
-adapters should not be claimed until they are backed by reproducible successful
-runs.
+LongMemEval loaders accept official dataset exports, but checked-in comparison
+claims still require committed run artifacts. External-system adapters should
+not be claimed until they are backed by reproducible successful runs.
 
 The current claim is narrower: Shibahama has the mechanics needed for
 currency-aware, provenance-aware, reconstructive memory, and the repo contains

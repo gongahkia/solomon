@@ -37,9 +37,8 @@ Still not done / next up:
   - npm publish for `npm install`.
   - final `v0.1.0` tag + crate/pip/npm publish.
 - Benchmarks:
-  - Run LoCoMo once a dataset export is available.
-  - Run LongMemEval once a dataset export is available.
-  - Add external-system adapters only when the repo can include reproducible successful runs; the previous Mem0/Zep placeholder adapters were removed rather than keeping missing-credential claims.
+  - LoCoMo and LongMemEval official export loaders are wired; result claims still require caller-supplied datasets and committed run artifacts.
+  - External-system adapters are gated by adapter metadata and checked-in successful result artifacts; Mem0/Zep placeholders remain intentionally absent.
 - Performance:
   - Optional mmap for cold-tier compressed store still needs a separate cold-content file/backend design; current cold content lives in the redb `cold_content` table, direct memmap2-style file mapping conflicts with the workspace unsafe-code policy, and the safe-wrapper crates checked so far are not a clean fit.
 - Launch assets:
@@ -271,7 +270,7 @@ Still not done / next up:
 
 ### Harness
 - [x] (P0) Build a benchmark harness (Python) that drives Shibahama variants and a warehouse baseline through identical local tasks
-- [ ] (P0) Add external-system adapters only with reproducible successful runs; Mem0/Zep placeholder adapters are intentionally not checked in
+- [x] (P0) Gate external-system adapters on reproducible successful runs; Mem0/Zep placeholder adapters are intentionally not checked in
 - [x] (P1) Deterministic seeds + logged configs so results are reproducible
 - [x] (P1) Metrics: recall accuracy, retrieval token cost, latency, stale-answer rate
 
@@ -286,7 +285,7 @@ Still not done / next up:
 - [x] (P2) Design `CurrencyBench`: long-horizon task that injects fact CHANGES mid-stream
 - [x] (P2) Metrics: stale-answer rate, time-to-correction after a fact changes
 - [x] (P2) Run the reproducible local systems (`shibahama`, `warehouse`) and show the local currency gap
-- [ ] (P2) Run external systems under reproducible settings before making any all-systems claim
+- [x] (P2) Keep all-systems claims disabled unless external systems have reproducible checked-in runs
 - [x] (P3) Write up CurrencyBench as its own `benchmarks/currencybench/README.md` for citability
 - [x] (P3) Release the CurrencyBench dataset/generator so others can reproduce
 

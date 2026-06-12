@@ -35,7 +35,9 @@ Supported systems:
 The harness reports recall accuracy, approximate retrieval token cost, p50/p95
 query latency, and stale-answer rate. External-system adapters should only be
 added when they have reproducible successful runs, not missing-credential
-placeholders.
+placeholders. The adapter registry validates this metadata at import time, so a
+future hosted adapter must declare checked-in result artifacts before it can be
+used by the harness.
 
 ## Feature Ablations
 

@@ -180,10 +180,19 @@ class WarehouseAdapter:
 
 
 @dataclass(frozen=True)
+class AdapterMetadata:
+    """Reproducibility metadata for a benchmark adapter."""
+
+    name: str
+    is_external: bool
+    result_artifacts: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class AdapterFactory:
     """Named adapter constructor."""
 
-    name: str
+    metadata: AdapterMetadata
     build: type[MemoryAdapter]
 
 
@@ -194,3 +203,47 @@ ADAPTERS: dict[str, type[MemoryAdapter]] = {
     "shibahama-no-graph": ShibahamaNoGraphAdapter,
     "warehouse": WarehouseAdapter,
 }
+
+ADAPTER_METADATA: dict[str, AdapterMetadata] = {
+    "shibahama": AdapterMetadata(name="shibahama", is_external=False),
+    "shibahama-no-significance": AdapterMetadata(
+        name="shibahama-no-significance",
+        is_external=False,
+    ),
+    "shibahama-no-reconstruction": AdapterMetadata(
+        name="shibahama-no-reconstruction",
+        is_external=False,
+    ),
+    "shibahama-no-graph": AdapterMetadata(name="shibahama-no-graph", is_external=False),
+    "warehouse": AdapterMetadata(name="warehouse", is_external=False),
+}
+
+
+def validate_adapter_registry(results_root: Path | None = None) -> None:
+    """Validate that every adapter is registered and external adapters have artifacts."""
+
+    missing_metadata = sorted(set(ADAPTERS) - set(ADAPTER_METADATA))
+    if missing_metadata:
+        names = ", ".join(missing_metadata)
+        raise RuntimeError(f"benchmark adapters missing reproducibility metadata: {names}")
+
+    root = results_root or Path(__file__).resolve().parents[1] / "results"
+    missing_artifacts = []
+    for metadata in ADAPTER_METADATA.values():
+        if not metadata.is_external:
+            continue
+        if not metadata.result_artifacts:
+            missing_artifacts.append(metadata.name)
+            continue
+        if any(not (root / artifact).exists() for artifact in metadata.result_artifacts):
+            missing_artifacts.append(metadata.name)
+
+    if missing_artifacts:
+        names = ", ".join(sorted(missing_artifacts))
+        raise RuntimeError(
+            "external benchmark adapters require checked-in reproducible result artifacts: "
+            f"{names}"
+        )
+
+
+validate_adapter_registry()

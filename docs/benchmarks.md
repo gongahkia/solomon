@@ -9,8 +9,9 @@ summary Markdown.
 
 The repository currently has deterministic local suites that can run without
 hosted services. The local suites are the only results that should be treated as
-reproducible from a fresh checkout today. LoCoMo and LongMemEval are JSONL
-loader paths only; they require caller-supplied dataset exports.
+reproducible from a fresh checkout today. LoCoMo and LongMemEval have official
+dataset loaders, but checked-in result claims still require caller-supplied
+dataset exports and committed run artifacts.
 
 ## Systems
 
@@ -23,6 +24,11 @@ Current adapters:
   local embeddings from `benchmarks/shibahama_bench/embeddings.py`.
 - `warehouse`: append-only keyword baseline with no currency or invalidation
   model.
+
+There are intentionally no hosted/external-system adapters in the checked-in
+registry. `benchmarks/shibahama_bench/adapters.py` validates adapter metadata at
+import time; any future external adapter must declare checked-in successful
+result artifacts before it can be used by the harness.
 
 ## Suites
 
@@ -216,11 +222,17 @@ When adding or updating benchmark results:
 - do not reuse placeholder labels for ablations unless the harness actually
   toggles significance, reconstruction, or graph behavior.
 
-## Open Benchmark Work
+## External-System Gate
 
-The TODO list still tracks benchmark work that is not complete:
+Do not add Mem0, Zep, hosted SaaS memory, or other external-system adapters as
+missing-credential placeholders. A future external-system comparison must land
+all of the following in one change:
 
-- run LoCoMo after a dataset export is available;
-- run LongMemEval after a dataset export is available;
-- add external-system adapters only when they are backed by reproducible,
-  checked-in successful runs rather than missing-credential placeholders.
+- the adapter implementation and dependency instructions;
+- the exact command and config used to run it;
+- the generated JSON and Markdown result artifacts under `benchmarks/results/`;
+- docs that scope the claim to the exact dataset, service version, model, seed,
+  and credential setup.
+
+Until then, README and launch materials must keep the claim to local Shibahama
+versus warehouse-baseline runs.

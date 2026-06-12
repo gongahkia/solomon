@@ -224,7 +224,7 @@ Still not done / next up:
 ### TypeScript / Node bindings (`npm install shibahama`)
 - [x] (P0) Set up napi-rs build
 - [x] (P0) Expose the full API with TS types
-- [ ] (P0) Publish a working `npm install`
+- [!] (P0) Publish a working `npm install` — blocked on npm auth/trusted publisher setup; local build/test/pack helper added at `scripts/release/npm-publish.sh`
 - [x] (P1) ESM + CJS dual package
 - [x] (P2) Integration shim for a JS agent framework
 

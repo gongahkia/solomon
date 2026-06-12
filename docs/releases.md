@@ -40,3 +40,25 @@ Only after TestPyPI installation works, upload to PyPI:
 PYPI_TOKEN=... SHIBAHAMA_PUBLISH=1 scripts/release/python-publish.sh pypi
 python -m pip install shibahama==0.1.0
 ```
+
+## Node Package
+
+The Node package uses napi-rs. This machine is not logged into npm (`npm whoami`
+returns `ENEEDAUTH`), so upload is blocked until npm auth or trusted publishing
+is configured.
+
+Build, test, and dry-pack locally without uploading:
+
+```sh
+scripts/release/npm-publish.sh
+```
+
+Publish after npm auth is configured:
+
+```sh
+NODE_AUTH_TOKEN=... SHIBAHAMA_PUBLISH=1 scripts/release/npm-publish.sh
+npm install shibahama@0.1.0
+```
+
+For public packages published from a public GitHub repository, prefer npm
+trusted publishing so npm can generate provenance automatically.

@@ -276,8 +276,8 @@ Still not done / next up:
 - [x] (P1) Metrics: recall accuracy, retrieval token cost, latency, stale-answer rate
 
 ### Existing suites
-- [ ] (P1) Wire up LoCoMo from a real dataset export
-- [ ] (P1) Wire up LongMemEval from a real dataset export
+- [x] (P1) Wire up LoCoMo from a real dataset export (`locomo10.json` loader)
+- [x] (P1) Wire up LongMemEval from a real dataset export (official cleaned JSON loader)
 - [x] (P1) Build a long-horizon coding-agent memory task (the headline scenario)
 - [x] (P1) Produce a local results table (accuracy vs token-cost frontier) for the README
 - [x] (P2) Ablations: significance on/off, reconstruction on/off, graph on/off — isolate what each contributes

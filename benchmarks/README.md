@@ -20,8 +20,9 @@ Supported suite names:
 - `coding-agent`: generated long-horizon coding-agent memory task.
 - `ablation`: generated feature-isolation tasks for significance,
   reconstruction/supersession, and graph expansion.
-- `locomo`: JSONL loader for LoCoMo-shaped task exports.
-- `longmemeval`: JSONL loader for LongMemEval-shaped task exports.
+- `locomo`: official `locomo10.json` loader, plus the neutral JSONL format.
+- `longmemeval`: official cleaned LongMemEval JSON loader, plus the neutral
+  JSONL format.
 
 Supported systems:
 

@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
+
+
+LOCOMO_SESSION_RE = re.compile(r"^session_(\d+)$")
+LOCOMO_OBSERVATION_RE = re.compile(r"^session_(\d+)_observation$")
 
 
 @dataclass(frozen=True)
@@ -53,10 +59,14 @@ def load_suite(name: str, dataset: Path | None = None, seed: int = 7) -> list[Be
         return coding_agent_memory_task(seed)
     if name == "ablation":
         return ablation_suite(seed)
-    if name in {"locomo", "longmemeval"}:
+    if name == "locomo":
         if dataset is None:
-            raise ValueError(f"{name} requires --dataset JSONL")
-        return load_jsonl_suite(dataset, suite_name=name)
+            raise ValueError(f"{name} requires --dataset JSON or JSONL")
+        return load_dataset_suite(dataset, suite_name=name)
+    if name == "longmemeval":
+        if dataset is None:
+            raise ValueError(f"{name} requires --dataset JSON or JSONL")
+        return load_dataset_suite(dataset, suite_name=name)
 
     raise ValueError(f"unknown suite: {name}")
 
@@ -357,6 +367,105 @@ def load_jsonl_suite(path: Path, suite_name: str) -> list[BenchmarkCase]:
     return cases
 
 
+def load_dataset_suite(path: Path, suite_name: str) -> list[BenchmarkCase]:
+    """Load a benchmark suite from either Shibahama JSONL or an official JSON export."""
+
+    if path.suffix == ".jsonl":
+        return load_jsonl_suite(path, suite_name=suite_name)
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if suite_name == "locomo":
+        return load_locomo_export(data, path)
+    if suite_name == "longmemeval":
+        return load_longmemeval_export(data, path)
+
+    raise ValueError(f"unsupported dataset suite: {suite_name}")
+
+
+def load_locomo_export(data: object, path: Path) -> list[BenchmarkCase]:
+    """Load the official LoCoMo ``locomo10.json`` export."""
+
+    if not isinstance(data, list):
+        raise ValueError("LoCoMo export must be a JSON array of conversation samples")
+
+    cases = []
+    for sample_index, sample in enumerate(data, start=1):
+        if not isinstance(sample, dict):
+            raise ValueError(f"LoCoMo sample {sample_index} must be an object")
+
+        sample_id = str(sample.get("sample_id", f"locomo-{sample_index}"))
+        observations = tuple(_locomo_observations(sample, sample_id))
+        if not observations:
+            raise ValueError(f"LoCoMo sample {sample_id} has no loadable observations")
+
+        now_unix = max(observation.valid_from_unix for observation in observations)
+        queries = tuple(_locomo_queries(sample, now_unix))
+        if not queries:
+            continue
+
+        cases.append(
+            BenchmarkCase(
+                name=sample_id,
+                observations=observations,
+                queries=queries,
+                metadata={"suite": "locomo", "source": str(path), "sample_id": sample_id},
+            )
+        )
+
+    return cases
+
+
+def load_longmemeval_export(data: object, path: Path) -> list[BenchmarkCase]:
+    """Load an official LongMemEval JSON export from Hugging Face."""
+
+    if isinstance(data, dict) and isinstance(data.get("data"), list):
+        records = data["data"]
+    elif isinstance(data, list):
+        records = data
+    else:
+        raise ValueError("LongMemEval export must be a JSON array of evaluation records")
+
+    cases = []
+    for record_index, record in enumerate(records, start=1):
+        if not isinstance(record, dict):
+            raise ValueError(f"LongMemEval record {record_index} must be an object")
+
+        question_id = str(record.get("question_id", f"longmemeval-{record_index}"))
+        observations = tuple(_longmemeval_observations(record, question_id))
+        if not observations:
+            raise ValueError(f"LongMemEval record {question_id} has no haystack sessions")
+
+        now_unix = _parse_timestamp(
+            record.get("question_date"),
+            fallback=max(observation.valid_from_unix for observation in observations),
+        )
+        answer = _normalise_answer(record.get("answer", ""))
+        if not answer:
+            continue
+
+        cases.append(
+            BenchmarkCase(
+                name=question_id,
+                observations=observations,
+                queries=(
+                    BenchmarkQuery(
+                        prompt=str(record.get("question", "")),
+                        expected=answer,
+                        now_unix=now_unix,
+                    ),
+                ),
+                metadata={
+                    "suite": "longmemeval",
+                    "source": str(path),
+                    "question_id": question_id,
+                    "question_type": str(record.get("question_type", "")),
+                },
+            )
+        )
+
+    return cases
+
+
 def _observations(values: Iterable[dict[str, object]], line_number: int) -> Iterable[Observation]:
     for index, value in enumerate(values):
         yield Observation(
@@ -387,3 +496,202 @@ def _queries(values: Iterable[dict[str, object]], line_number: int) -> Iterable[
                 None if value.get("changed_at_unix") is None else int(value["changed_at_unix"])
             ),
         )
+
+
+def _locomo_observations(sample: dict[str, object], sample_id: str) -> Iterator[Observation]:
+    conversation = _dict_value(sample.get("conversation"))
+    generated = _dict_value(sample.get("observation"))
+
+    for key, value in sorted(generated.items(), key=lambda item: _locomo_observation_sort(item[0])):
+        match = LOCOMO_OBSERVATION_RE.match(str(key))
+        if match is None:
+            continue
+
+        session_number = int(match.group(1))
+        valid_from_unix = _locomo_session_timestamp(conversation, session_number)
+        speakers = _dict_value(value)
+        for speaker, entries in speakers.items():
+            for index, entry in enumerate(_list_value(entries)):
+                statement, evidence_ref = _locomo_observation_entry(entry, session_number, index)
+                if not statement:
+                    continue
+
+                source_ref = (
+                    f"{sample_id}:{evidence_ref}"
+                    if evidence_ref
+                    else f"{sample_id}:session_{session_number}:obs_{index}"
+                )
+                yield Observation(
+                    content=f"{speaker}: {statement}",
+                    valid_from_unix=valid_from_unix,
+                    source_ref=source_ref,
+                )
+
+    if generated:
+        return
+
+    for session_number, turns in _locomo_conversation_sessions(conversation):
+        valid_from_unix = _locomo_session_timestamp(conversation, session_number)
+        for index, turn in enumerate(_list_value(turns)):
+            turn_object = _dict_value(turn)
+            text = str(turn_object.get("text", "")).strip()
+            if not text:
+                continue
+
+            speaker = str(turn_object.get("speaker", "speaker"))
+            dia_id = str(turn_object.get("dia_id", f"D{session_number}:{index + 1}"))
+            yield Observation(
+                content=f"{speaker}: {text}",
+                valid_from_unix=valid_from_unix,
+                source_ref=f"{sample_id}:{dia_id}",
+            )
+
+
+def _locomo_queries(sample: dict[str, object], now_unix: int) -> Iterator[BenchmarkQuery]:
+    for qa in _list_value(sample.get("qa")):
+        qa_object = _dict_value(qa)
+        answer = _normalise_answer(qa_object.get("answer", ""))
+        question = str(qa_object.get("question", "")).strip()
+        if not question or not answer:
+            continue
+
+        yield BenchmarkQuery(
+            prompt=question,
+            expected=answer,
+            now_unix=now_unix,
+        )
+
+
+def _longmemeval_observations(
+    record: dict[str, object], question_id: str
+) -> Iterator[Observation]:
+    sessions = _list_value(record.get("haystack_sessions"))
+    dates = _list_value(record.get("haystack_dates"))
+    session_ids = _list_value(record.get("haystack_session_ids"))
+
+    for index, session in enumerate(sessions):
+        session_id = str(_at_or_default(session_ids, index, f"session-{index + 1}"))
+        valid_from_unix = _parse_timestamp(_at_or_default(dates, index, index), fallback=index)
+        content = _longmemeval_session_text(session)
+        if not content:
+            continue
+
+        yield Observation(
+            content=content,
+            valid_from_unix=valid_from_unix,
+            source_ref=f"{question_id}:{session_id}",
+        )
+
+
+def _longmemeval_session_text(session: object) -> str:
+    turns = []
+    for turn in _list_value(session):
+        turn_object = _dict_value(turn)
+        role = str(turn_object.get("role", "message"))
+        content = str(turn_object.get("content", "")).strip()
+        if content:
+            turns.append(f"{role}: {content}")
+
+    return "\n".join(turns)
+
+
+def _locomo_conversation_sessions(
+    conversation: dict[str, object]
+) -> Iterator[tuple[int, object]]:
+    for key, value in sorted(conversation.items(), key=lambda item: _locomo_session_sort(item[0])):
+        match = LOCOMO_SESSION_RE.match(str(key))
+        if match is not None:
+            yield int(match.group(1)), value
+
+
+def _locomo_session_timestamp(conversation: dict[str, object], session_number: int) -> int:
+    key = f"session_{session_number}_date_time"
+    return _parse_timestamp(conversation.get(key), fallback=session_number)
+
+
+def _locomo_observation_entry(
+    entry: object, session_number: int, index: int
+) -> tuple[str, str | None]:
+    if isinstance(entry, list) and entry:
+        evidence_ref = None if len(entry) < 2 else str(entry[1])
+        return str(entry[0]).strip(), evidence_ref
+    if isinstance(entry, dict):
+        evidence_ref = entry.get("dia_id") or entry.get("evidence")
+        return str(entry.get("text", entry.get("content", ""))).strip(), (
+            None if evidence_ref is None else str(evidence_ref)
+        )
+
+    return str(entry).strip(), f"D{session_number}:{index + 1}"
+
+
+def _parse_timestamp(value: object, fallback: int = 0) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if value is None:
+        return fallback
+
+    text = str(value).strip()
+    if not text:
+        return fallback
+    if text.isdigit():
+        return int(text)
+
+    normalised = re.sub(
+        r"\b(am|pm)\b",
+        lambda match: match.group(1).upper(),
+        text,
+        flags=re.IGNORECASE,
+    )
+    for pattern in (
+        "%Y/%m/%d (%a) %H:%M",
+        "%I:%M %p on %d %B, %Y",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+    ):
+        try:
+            parsed = datetime.strptime(normalised, pattern)
+        except ValueError:
+            continue
+
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp())
+
+    return fallback
+
+
+def _normalise_answer(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        parts = [_normalise_answer(item) for item in value]
+        return "; ".join(part for part in parts if part)
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=True)
+    return str(value).strip()
+
+
+def _dict_value(value: object) -> dict[str, object]:
+    return value if isinstance(value, dict) else {}
+
+
+def _list_value(value: object) -> list[object]:
+    return value if isinstance(value, list) else []
+
+
+def _at_or_default(values: list[object], index: int, default: object) -> object:
+    return values[index] if index < len(values) else default
+
+
+def _locomo_session_sort(key: object) -> tuple[int, str]:
+    match = LOCOMO_SESSION_RE.match(str(key))
+    return (int(match.group(1)), str(key)) if match else (10**9, str(key))
+
+
+def _locomo_observation_sort(key: object) -> tuple[int, str]:
+    match = LOCOMO_OBSERVATION_RE.match(str(key))
+    return (int(match.group(1)), str(key)) if match else (10**9, str(key))

@@ -81,8 +81,16 @@ disabled behavior.
 
 ### LoCoMo And LongMemEval
 
-`locomo` and `longmemeval` are JSONL loaders for exported datasets with this
-shape:
+`locomo` and `longmemeval` load the official JSON exports directly:
+
+- LoCoMo: `locomo10.json` from `snap-research/locomo`, where generated
+  session observations are used as memory observations and QA annotations become
+  benchmark queries.
+- LongMemEval: `longmemeval_s_cleaned.json`, `longmemeval_m_cleaned.json`, or
+  `longmemeval_oracle.json` from `xiaowu0162/longmemeval-cleaned`, where each
+  haystack session is stored as one timestamped memory observation.
+
+They also retain support for the repo's neutral JSONL shape:
 
 ```json
 {"name":"case-name","observations":[{"content":"...","valid_from_unix":0}],"queries":[{"prompt":"...","expected":"...","forbidden":null,"now_unix":0}]}
@@ -136,18 +144,27 @@ python benchmarks/run.py \
   --markdown benchmarks/results/ablation-local.md
 ```
 
-Run a JSONL dataset export:
+Run LoCoMo from the official export:
 
 ```sh
 python benchmarks/run.py \
   --suite locomo \
-  --dataset path/to/locomo-export.jsonl \
+  --dataset path/to/locomo10.json \
   --systems shibahama,warehouse \
   --output benchmarks/results/locomo-local.json \
   --markdown benchmarks/results/locomo-local.md
 ```
 
-Swap `--suite longmemeval` for a LongMemEval-shaped JSONL export.
+Run LongMemEval from the official cleaned export:
+
+```sh
+python benchmarks/run.py \
+  --suite longmemeval \
+  --dataset path/to/longmemeval_s_cleaned.json \
+  --systems shibahama,warehouse \
+  --output benchmarks/results/longmemeval-local.json \
+  --markdown benchmarks/results/longmemeval-local.md
+```
 
 ## Metrics
 

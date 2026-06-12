@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from enum import Enum
 from typing import Literal
@@ -9,6 +10,7 @@ from typing import Literal
 from solomon.api.schemas import SolomonModel
 from solomon.boundary.kaypoh import KaypohBoundary
 from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
+from solomon.orchestrator.models import ModelRequest, ModelRouter
 
 AUTHORITY_RE = re.compile(r"\b(Regulation\s+[A-Z]\s+(?:section|§)\s*\d+[A-Za-z0-9-]*)\b", re.IGNORECASE)
 DEFINED_TERM_QUOTED_RE = re.compile(
@@ -158,6 +160,48 @@ def suggest_authority_dependencies(
     return suggestions
 
 
+def suggest_authority_dependencies_with_llm(
+    *,
+    item_id: str,
+    content: str,
+    boundary: KaypohBoundary,
+    router: ModelRouter,
+    matter_id: str | None = None,
+) -> list[DependencySuggestion]:
+    sanitized = boundary.sanitize_context(content, matter_id=matter_id)
+    prompt = "\n".join(
+        [
+            "Extract load-bearing external legal authorities from this sanitized text.",
+            "Return strict JSON only in this shape:",
+            '{"dependencies":[{"authority_ref":"...","authority_id":"...","reason":"..."}]}',
+            "Do not include client names or confidential facts.",
+            sanitized.sanitized_text,
+        ]
+    )
+    routed = router.complete(ModelRequest(prompt=prompt, matter_id=matter_id))
+    payload = _parse_llm_dependency_payload(routed.response.text)
+    suggestions: list[DependencySuggestion] = []
+    for dependency in payload:
+        authority_ref = _clean(str(dependency["authority_ref"]))
+        authority_id = _citation_id(str(dependency["authority_id"]))
+        reason = _clean(str(dependency.get("reason") or "LLM-assisted authority extraction"))
+        suggestions.append(
+            DependencySuggestion(
+                item_id=item_id,
+                authority_ref=authority_ref,
+                suggested_edge=DependencyEdge(
+                    source_id=item_id,
+                    target_id=authority_id,
+                    edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+                    target_kind="external_authority",
+                    confidence=EdgeConfidence.LLM_SUGGESTED,
+                    reason=f"LLM-assisted candidate from Kaypoh-sanitized text: {reason}",
+                ),
+            )
+        )
+    return suggestions
+
+
 def confirm_suggestion(suggestion: DependencySuggestion, *, by: str) -> DependencyEdge:
     return suggestion.suggested_edge.model_copy(
         update={
@@ -190,3 +234,20 @@ def _authority_id(value: str) -> str:
 def _citation_id(value: str) -> str:
     normalized = value.lower().replace("§", " section ")
     return re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+
+
+def _parse_llm_dependency_payload(text: str) -> list[dict[str, object]]:
+    parsed = json.loads(text)
+    if not isinstance(parsed, dict):
+        raise ValueError("LLM dependency response must be a JSON object")
+    raw_dependencies = parsed.get("dependencies")
+    if not isinstance(raw_dependencies, list):
+        raise ValueError("LLM dependency response must contain a dependencies list")
+    dependencies: list[dict[str, object]] = []
+    for raw in raw_dependencies:
+        if not isinstance(raw, dict):
+            raise ValueError("LLM dependency entries must be JSON objects")
+        if not isinstance(raw.get("authority_ref"), str) or not isinstance(raw.get("authority_id"), str):
+            raise ValueError("LLM dependency entries require authority_ref and authority_id strings")
+        dependencies.append(raw)
+    return dependencies

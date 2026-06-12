@@ -13,7 +13,9 @@ from solomon.graph.suggestions import (
     extract_defined_terms_and_citations,
     reject_suggestion,
     suggest_authority_dependencies,
+    suggest_authority_dependencies_with_llm,
 )
+from solomon.orchestrator.models import EndpointKind, ModelRequest, ModelResponse, ModelRouter
 
 
 class SuggestionKaypohClient:
@@ -65,6 +67,41 @@ def test_suggest_confirm_and_reject_dependencies() -> None:
     assert suggestions[0].suggested_edge.confidence is EdgeConfidence.LLM_SUGGESTED
     assert confirmed.confidence is EdgeConfidence.HUMAN_CONFIRMED
     assert rejected.decision.value == "rejected"
+
+
+def test_llm_dependency_capture_uses_boundary_sanitized_prompt() -> None:
+    class CapturingEndpoint:
+        kind = EndpointKind.REMOTE_ZDR
+
+        def __init__(self) -> None:
+            self.seen_prompt = ""
+
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            self.seen_prompt = request.prompt
+            return ModelResponse(
+                text=(
+                    '{"dependencies":[{"authority_ref":"Regulation R section 12",'
+                    '"authority_id":"regulation-r-section-12","reason":"explicit citation"}]}'
+                ),
+                endpoint=self.kind,
+            )
+
+    remote = CapturingEndpoint()
+    local = CapturingEndpoint()
+    suggestions = suggest_authority_dependencies_with_llm(
+        item_id="item-1",
+        content="Client A relies on Regulation R section 12 for structure X.",
+        boundary=KaypohBoundary(),
+        router=ModelRouter(remote=remote, local=local),
+        matter_id="matter-a",
+    )
+
+    assert "Client A" not in remote.seen_prompt
+    assert "[CLIENT_1]" in remote.seen_prompt
+    assert suggestions[0].authority_ref == "Regulation R section 12"
+    assert suggestions[0].suggested_edge.target_id == "regulation-r-section-12"
+    assert suggestions[0].suggested_edge.confidence is EdgeConfidence.LLM_SUGGESTED
+    assert "LLM-assisted candidate" in str(suggestions[0].suggested_edge.reason)
 
 
 def test_extract_defined_terms_and_citations_after_boundary_sanitization() -> None:

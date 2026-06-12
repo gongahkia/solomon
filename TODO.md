@@ -33,7 +33,7 @@ checkout is required at runtime.
 - [x] Propagation is real: external changes flag transitive dependents and cycle protection is tested.
 - [x] `impact_query()` now returns the transitive dependent set without mutating store state.
 - [x] Manual dependency tagging, confidence levels, centrality, scoped subgraphs, and basic Mermaid/DOT visualization exist.
-- [ ] LLM-assisted dependency capture is deterministic regex extraction over boundary-sanitized text, not an actual LLM workflow.
+- [x] LLM-assisted dependency capture exists as an optional boundary-sanitized model workflow with strict JSON validation and human-confirmation semantics.
 - [ ] Defined-term/citation extraction is conservative regex extraction, not a full legal parser.
 
 ## Phase 3 — Currency engine

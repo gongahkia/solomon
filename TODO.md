@@ -9,7 +9,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 
 ## Stop point / next work
 
-Updated on 2026-06-12 after completing the local implementation, performance, Tideline, API-reference, and launch-assets pass.
+Updated on 2026-06-12 after completing the local implementation, performance, Tideline, API-reference, launch-assets, and README-demo-GIF pass.
 
 Current local state:
 - The working tree is expected to be clean after the latest task commit.
@@ -18,7 +18,7 @@ Current local state:
 - Phase 9 now has the Tideline diff view and browser-native shareable WebM clip export.
 - Phase 13 now has significance recompute profiling/optimisation, embedded memory-footprint budget, tested multi-reader/single-writer store concurrency, and batched vector search.
 - Phase 14 now has architecture, concepts, benchmarks, security, ADR index, naming/philosophy docs, runnable Rust/Python/Node examples, and a generated API reference.
-- Phase 15 now has draft Show HN, FAQ, launch writeup, and early-user outreach notes.
+- Phase 15 now has draft Show HN, FAQ, launch writeup, early-user outreach notes, and a recorded Tideline README demo GIF.
 - Phase 16 legal-tech bridge confirmations are complete.
 
 Still not done / next up:
@@ -36,7 +36,6 @@ Still not done / next up:
 - Documentation:
   - Replace the stub README with the full thesis/quickstart/benchmark/debugger narrative.
 - Launch assets:
-  - Record the Tideline README demo GIF.
   - Actually reach out to early users and collect first issues.
   - Submit CurrencyBench writeup somewhere citable.
 
@@ -342,7 +341,7 @@ Still not done / next up:
 ## Phase 15 — Launch (P1/P2)
 
 - [ ] (P0) Tag a real `v0.1.0`, publish crate + pip + npm
-- [ ] (P1) Record the README demo GIF from the Tideline
+- [x] (P1) Record the README demo GIF from the Tideline
 - [x] (P1) Write the Show HN post (lead with the embeddable-core + the "remembers why you said no" hook)
 - [x] (P1) Prepare a FAQ for the predictable HN objections (null hypothesis, "isn't this just a cache", security)
 - [x] (P2) A short launch blog post / writeup (optional, README may suffice)

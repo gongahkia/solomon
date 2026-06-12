@@ -60,7 +60,7 @@ checkout is required at runtime.
 - [x] Sensitivity router sends strict and zero-egress matters local-only, with tests proving the remote endpoint is not called.
 - [x] Remote failure can fall back to local when policy allows.
 - [x] Public `/answer` API endpoint runs recall -> boundary sanitization/reidentification -> router -> model answer and returns recall/model audit evidence.
-- [ ] Provider clients are minimal HTTP wrappers, not production provider integrations.
+- [x] Provider clients include an OpenAI Responses integration with provider-specific payloads, output parsing, auth, retry/backoff, and tests, plus generic retrying remote ZDR support.
 
 ## Phase 6 — Credence ledger and verification
 

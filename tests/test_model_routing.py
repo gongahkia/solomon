@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
+import httpx
 import pytest
 
 from solomon.currency.models import Matter
@@ -12,6 +14,7 @@ from solomon.orchestrator.models import (
     ModelRequest,
     ModelResponse,
     ModelRouter,
+    OpenAIResponsesEndpoint,
     RoutingPolicy,
 )
 
@@ -90,3 +93,71 @@ def test_remote_failure_can_fail_closed_without_fallback() -> None:
     with pytest.raises(RuntimeError, match="endpoint down"):
         router.complete(ModelRequest(prompt="sanitized prompt"), matter=_matter("standard"))
 
+
+def test_openai_responses_endpoint_posts_provider_payload_and_extracts_output_text() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        assert request.url.path == "/v1/responses"
+        assert request.headers["Authorization"] == "Bearer test-key"
+        assert payload == {
+            "model": "gpt-test",
+            "input": "sanitized prompt",
+            "max_output_tokens": 128,
+            "temperature": 0.0,
+        }
+        return httpx.Response(
+            200,
+            json={
+                "id": "resp-1",
+                "model": "gpt-test",
+                "output_text": "provider answer",
+                "usage": {"input_tokens": 4, "output_tokens": 2},
+            },
+        )
+
+    endpoint = OpenAIResponsesEndpoint(
+        model="gpt-test",
+        api_key="test-key",
+        transport=httpx.MockTransport(handler),
+    )
+
+    response = endpoint.complete(ModelRequest(prompt="sanitized prompt", max_tokens=128))
+
+    assert response.text == "provider answer"
+    assert response.metadata["provider"] == "openai-responses"
+    assert response.metadata["response_id"] == "resp-1"
+
+
+def test_openai_responses_endpoint_retries_transient_errors_and_parses_nested_output() -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(500, json={"error": "transient"})
+        return httpx.Response(
+            200,
+            json={
+                "id": "resp-2",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "retried answer"}],
+                    }
+                ],
+            },
+        )
+
+    endpoint = OpenAIResponsesEndpoint(
+        model="gpt-test",
+        api_key="test-key",
+        retries=1,
+        retry_backoff_seconds=0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    response = endpoint.complete(ModelRequest(prompt="sanitized prompt"))
+
+    assert calls == 2
+    assert response.text == "retried answer"

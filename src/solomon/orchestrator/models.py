@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import time
 from enum import Enum
+from http import HTTPStatus
 from typing import Any, Literal, Protocol
 
 import httpx
@@ -53,27 +54,92 @@ class ModelEndpoint(Protocol):
 class RemoteZDREndpoint:
     kind = EndpointKind.REMOTE_ZDR
 
-    def __init__(self, *, url: str, api_key: str | None = None, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        *,
+        url: str,
+        api_key: str | None = None,
+        timeout: float = 30.0,
+        retries: int = 2,
+        retry_backoff_seconds: float = 0.25,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
         self.url = url
         self.api_key = api_key
         self.timeout = timeout
+        self.retries = retries
+        self.retry_backoff_seconds = retry_backoff_seconds
+        self.transport = transport
 
     def complete(self, request: ModelRequest) -> ModelResponse:
         headers = {"Accept": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        response = httpx.post(
+        response = _post_json_with_retries(
             self.url,
-            json=request.model_dump(mode="json"),
+            payload=request.model_dump(mode="json"),
             headers=headers,
             timeout=self.timeout,
+            retries=self.retries,
+            retry_backoff_seconds=self.retry_backoff_seconds,
+            transport=self.transport,
         )
-        response.raise_for_status()
         payload = response.json()
         return ModelResponse(
             text=str(payload.get("text", payload.get("response", ""))),
             endpoint=self.kind,
             metadata={k: v for k, v in payload.items() if k not in {"text", "response"}},
+        )
+
+
+class OpenAIResponsesEndpoint:
+    kind = EndpointKind.REMOTE_ZDR
+
+    def __init__(
+        self,
+        *,
+        model: str,
+        api_key: str,
+        url: str = "https://api.openai.com/v1/responses",
+        timeout: float = 30.0,
+        retries: int = 2,
+        retry_backoff_seconds: float = 0.25,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self.model = model
+        self.api_key = api_key
+        self.url = url
+        self.timeout = timeout
+        self.retries = retries
+        self.retry_backoff_seconds = retry_backoff_seconds
+        self.transport = transport
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        response = _post_json_with_retries(
+            self.url,
+            payload={
+                "model": self.model,
+                "input": request.prompt,
+                "max_output_tokens": request.max_tokens,
+                "temperature": request.temperature,
+            },
+            headers={"Accept": "application/json", "Authorization": f"Bearer {self.api_key}"},
+            timeout=self.timeout,
+            retries=self.retries,
+            retry_backoff_seconds=self.retry_backoff_seconds,
+            transport=self.transport,
+        )
+        payload = response.json()
+        text = _extract_openai_response_text(payload)
+        return ModelResponse(
+            text=text,
+            endpoint=self.kind,
+            metadata={
+                "provider": "openai-responses",
+                "model": payload.get("model", self.model),
+                "response_id": payload.get("id"),
+                "usage": payload.get("usage"),
+            },
         )
 
 
@@ -200,3 +266,49 @@ class ModelRouter:
         )
         return RoutedModelResult(response=response, audit=audit)
 
+
+def _post_json_with_retries(
+    url: str,
+    *,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    timeout: float,
+    retries: int,
+    retry_backoff_seconds: float,
+    transport: httpx.BaseTransport | None,
+) -> httpx.Response:
+    attempts = retries + 1
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            with httpx.Client(transport=transport, timeout=timeout) as client:
+                response = client.post(url, json=payload, headers=headers)
+            if response.status_code in {HTTPStatus.TOO_MANY_REQUESTS, *range(500, 600)} and attempt < attempts - 1:
+                time.sleep(retry_backoff_seconds * (2**attempt))
+                continue
+            response.raise_for_status()
+            return response
+        except httpx.HTTPError as exc:
+            last_exc = exc
+            if attempt >= attempts - 1:
+                raise
+            time.sleep(retry_backoff_seconds * (2**attempt))
+    raise RuntimeError("unreachable retry state") from last_exc
+
+
+def _extract_openai_response_text(payload: dict[str, Any]) -> str:
+    direct = payload.get("output_text")
+    if isinstance(direct, str):
+        return direct
+    parts: list[str] = []
+    for output in payload.get("output", []):
+        if not isinstance(output, dict):
+            continue
+        for content in output.get("content", []):
+            if not isinstance(content, dict):
+                continue
+            if content.get("type") == "output_text" and isinstance(content.get("text"), str):
+                parts.append(str(content["text"]))
+            elif content.get("type") == "refusal" and isinstance(content.get("refusal"), str):
+                parts.append(str(content["refusal"]))
+    return "\n".join(parts)

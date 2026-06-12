@@ -25,7 +25,14 @@ from solomon.boundary.kaypoh import KaypohImportStatus, probe_kaypoh_client
 from solomon.config import Settings, get_settings
 from solomon.errors import SolomonError
 from solomon.graph.visualization import GraphFormat
-from solomon.orchestrator.models import LocalModelEndpoint, ModelRouter, RemoteZDREndpoint, RoutingPolicy
+from solomon.orchestrator.models import (
+    LocalModelEndpoint,
+    ModelEndpoint,
+    ModelRouter,
+    OpenAIResponsesEndpoint,
+    RemoteZDREndpoint,
+    RoutingPolicy,
+)
 
 PUBLIC_PATHS = {"/health", "/ready", "/docs", "/redoc", "/openapi.json"}
 TENANT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
@@ -203,7 +210,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 def _model_router_from_settings(settings: Settings) -> ModelRouter:
     local = LocalModelEndpoint(url=settings.local_model_url)
-    remote = RemoteZDREndpoint(url=settings.remote_model_url or settings.local_model_url)
+    remote: ModelEndpoint
+    if settings.remote_model_provider == "openai-responses" and settings.remote_model_api_key:
+        remote = OpenAIResponsesEndpoint(
+            url=settings.remote_model_url or "https://api.openai.com/v1/responses",
+            api_key=settings.remote_model_api_key,
+            model=settings.remote_model_name,
+        )
+    else:
+        remote = RemoteZDREndpoint(url=settings.remote_model_url or settings.local_model_url)
     return ModelRouter(
         remote=remote,
         local=local,

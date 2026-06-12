@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./solomon-data/solomon.sqlite3"
     local_model_url: str = "http://127.0.0.1:11434/api/generate"
     remote_model_url: str | None = None
+    remote_model_provider: str = Field(default="generic", pattern="^(generic|openai-responses)$")
+    remote_model_name: str = "gpt-5.5"
+    remote_model_api_key: str | None = None
     allow_remote_egress: bool = False
     zero_egress_mode: bool = True
     verification_attestation_key: str | None = None
@@ -51,6 +54,9 @@ class Settings(BaseSettings):
             "database_url": self.database_url,
             "local_model_url": self.local_model_url,
             "remote_model_configured": self.remote_model_url is not None,
+            "remote_model_provider": self.remote_model_provider,
+            "remote_model_name": self.remote_model_name,
+            "remote_model_api_key_configured": self.remote_model_api_key is not None,
             "allow_remote_egress": self.allow_remote_egress,
             "zero_egress_mode": self.zero_egress_mode,
             "verification_attestation_key_configured": self.verification_attestation_key is not None,

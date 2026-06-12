@@ -102,7 +102,7 @@ checkout is required at runtime.
 - [x] Docker compose and PyInstaller spec files exist.
 - [x] Postgres server backend is implemented through `SOLOMON_DATABASE_URL`, with tenant services mapped to separate Postgres schemas and SQLite remaining the local default.
 - [x] PyInstaller local binary and Docker Compose server config are built/verified in this worktree; evidence is recorded in `docs/release-artifacts.md`.
-- [ ] Server multi-tenancy is basic filesystem namespace isolation, not a full tenant-management system.
+- [x] Server multi-tenancy now has a durable tenant registry, admin lifecycle endpoints, active/suspended state, tenant-specific API-key hashes, optional explicit provisioning, and isolated storage namespaces.
 
 ## Phase 11 — Headline demo: stale house-view
 

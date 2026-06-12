@@ -32,9 +32,15 @@ into current state, dependency edges are bi-temporal, and the retrieval index st
 vectors. Supersession closes `valid_to`, links the successor, and leaves the predecessor queryable in review
 or historical modes.
 
-In server mode, tenant services keep the existing filesystem isolation for local SQLite deployments. When
-Postgres is configured, each tenant is mapped to a sanitized Postgres schema so tenant data does not share
-tables.
+In server mode, tenants are tracked in a durable registry at `data_dir/tenants/registry.json`. Admin requests
+can create, list, suspend, and reactivate tenants through `/tenants`, `/tenants/{tenant_id}/suspend`, and
+`/tenants/{tenant_id}/reactivate`. Tenant records include lifecycle state and optional tenant-specific API
+key hashes; raw tenant keys are not stored. `SOLOMON_SERVER_AUTO_PROVISION_TENANTS=false` disables implicit
+first-request tenant creation and requires pre-registration.
+
+Tenant storage stays isolated after registry admission. SQLite deployments use per-tenant data and journal
+directories. When Postgres is configured, each tenant is mapped to a sanitized Postgres schema so tenant data
+does not share tables.
 
 ## Reference Extraction
 

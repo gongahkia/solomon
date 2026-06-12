@@ -14,8 +14,9 @@ Keep the flow two-step:
 
 1. The add-in sends text to Solomon.
 2. Solomon calls the vendored boundary before storage or model egress.
-3. For server SKU deployments, the add-in must send `x-api-key` and `x-tenant-id` to Solomon; every tenant gets a
-   separate Solomon data and journal namespace.
+3. For server SKU deployments, the add-in must send `x-api-key` and `x-tenant-id` to Solomon. Tenants are
+   registered in Solomon's tenant registry and can be suspended/reactivated by an admin before their isolated
+   data and journal namespace is used.
 
 ## Word Taskpane
 
@@ -51,6 +52,7 @@ Content-Type: application/json
 ## Deployment Notes
 
 - Production deployment should still use Microsoft 365 admin-managed deployment for the add-in manifests.
-- Solomon-specific tenant headers belong in the add-in configuration store.
+- Solomon-specific tenant headers belong in the add-in configuration store. Prefer tenant-specific API keys
+  created through `/tenants`; the server admin key should remain in deployment automation.
 - Do not persist pseudonymization mappings in the add-in or in Solomon.
 - Keep the default local flow loopback-only: Solomon on `127.0.0.1:8140`.

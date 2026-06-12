@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
@@ -23,6 +24,13 @@ from solomon.api.service import (
     StalenessPredictionRequest,
     VerificationRequest,
 )
+from solomon.api.tenancy import (
+    TenantAlreadyExistsError,
+    TenantNotFoundError,
+    TenantRecord,
+    TenantRegistry,
+    is_valid_tenant_id,
+)
 from solomon.boundary.kaypoh import KaypohImportStatus, probe_kaypoh_client
 from solomon.config import Settings, get_settings
 from solomon.errors import SolomonError
@@ -37,7 +45,7 @@ from solomon.orchestrator.models import (
 )
 
 PUBLIC_PATHS = {"/health", "/ready", "/docs", "/redoc", "/openapi.json"}
-TENANT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+TENANT_MANAGEMENT_PREFIX = "/tenants"
 DEFAULT_DATABASE_URL = str(Settings.model_fields["database_url"].default)
 
 
@@ -59,8 +67,24 @@ class DiagnosticsResponse(BaseModel):
     settings: dict[str, Any]
 
 
+class TenantCreateRequest(BaseModel):
+    tenant_id: str = Field(..., examples=["tenant-a"])
+    display_name: str | None = Field(default=None, max_length=120)
+    api_key: str | None = Field(default=None, min_length=8)
+
+
+class TenantResponse(BaseModel):
+    tenant_id: str
+    display_name: str | None
+    status: str
+    created_at: str
+    updated_at: str
+    api_key_configured: bool
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
+    tenant_registry = TenantRegistry(resolved_settings.data_dir / "tenants" / "registry.json")
     service = SolomonService(
         data_dir=resolved_settings.data_dir,
         journal_dir=resolved_settings.journal_dir,
@@ -102,6 +126,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = resolved_settings
     app.state.service = service
     app.state.router = _model_router_from_settings(resolved_settings)
+    app.state.tenant_registry = tenant_registry
 
     def active_router() -> ModelRouter:
         resolved = getattr(app.state, "router", None)
@@ -113,20 +138,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def server_api_key_middleware(request: Request, call_next: Any) -> Any:
         request.state.tenant_id = "local"
         request.state.service = service
-        if resolved_settings.sku == "server" and request.url.path not in PUBLIC_PATHS:
-            if resolved_settings.server_api_key:
-                supplied = request.headers.get("x-api-key")
-                if supplied != resolved_settings.server_api_key:
-                    return JSONResponse(
-                        status_code=401,
-                        content={"error": {"code": "unauthorized", "message": "invalid or missing API key"}},
-                    )
+        path = request.url.path
+        if resolved_settings.sku == "server" and path not in PUBLIC_PATHS:
+            supplied_api_key = request.headers.get("x-api-key")
+            if _is_tenant_management_path(path):
+                if not _has_admin_api_key(resolved_settings, supplied_api_key):
+                    return _auth_error()
+                return await call_next(request)
+
             tenant_id = request.headers.get("x-tenant-id")
-            if tenant_id is None or not TENANT_ID_RE.fullmatch(tenant_id):
+            if tenant_id is None or not is_valid_tenant_id(tenant_id):
                 return JSONResponse(
                     status_code=400,
                     content={"error": {"code": "invalid_tenant", "message": "valid x-tenant-id header required"}},
                 )
+            record = tenant_registry.get(tenant_id)
+            if record is None:
+                if not resolved_settings.server_auto_provision_tenants:
+                    return JSONResponse(
+                        status_code=404,
+                        content={"error": {"code": "tenant_not_found", "message": "tenant is not registered"}},
+                    )
+                if not _has_admin_api_key(resolved_settings, supplied_api_key):
+                    return _auth_error()
+                record = tenant_registry.ensure_tenant(tenant_id)
+            if record.status != "active":
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": {"code": "tenant_suspended", "message": "tenant is suspended"}},
+                )
+            if not _is_tenant_request_authorized(resolved_settings, tenant_registry, record, supplied_api_key):
+                return _auth_error()
             request.state.tenant_id = tenant_id
             request.state.service = service_for_tenant(tenant_id)
         return await call_next(request)
@@ -150,6 +192,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             kaypoh=probe_kaypoh_client(resolved_settings.kaypoh_repo_path),
             settings=resolved_settings.public_diagnostics(),
         )
+
+    @app.get("/tenants", response_model=list[TenantResponse])
+    def tenants() -> list[TenantResponse]:
+        return [_tenant_response(record) for record in tenant_registry.list_tenants()]
+
+    @app.post("/tenants", response_model=TenantResponse, status_code=201)
+    def create_tenant(payload: TenantCreateRequest) -> TenantResponse:
+        if not is_valid_tenant_id(payload.tenant_id):
+            raise HTTPException(status_code=400, detail="invalid tenant_id")
+        try:
+            record = tenant_registry.create_tenant(
+                payload.tenant_id,
+                display_name=payload.display_name,
+                api_key=payload.api_key,
+            )
+        except TenantAlreadyExistsError as exc:
+            raise HTTPException(status_code=409, detail="tenant already exists") from exc
+        return _tenant_response(record)
+
+    @app.post("/tenants/{tenant_id}/suspend", response_model=TenantResponse)
+    def suspend_tenant(tenant_id: str) -> TenantResponse:
+        if not is_valid_tenant_id(tenant_id):
+            raise HTTPException(status_code=400, detail="invalid tenant_id")
+        try:
+            return _tenant_response(tenant_registry.suspend_tenant(tenant_id))
+        except TenantNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="tenant not found") from exc
+
+    @app.post("/tenants/{tenant_id}/reactivate", response_model=TenantResponse)
+    def reactivate_tenant(tenant_id: str) -> TenantResponse:
+        if not is_valid_tenant_id(tenant_id):
+            raise HTTPException(status_code=400, detail="invalid tenant_id")
+        try:
+            return _tenant_response(tenant_registry.reactivate_tenant(tenant_id))
+        except TenantNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="tenant not found") from exc
 
     @app.post("/ingest")
     def ingest(request: Request, payload: IngestRequest) -> dict[str, Any]:
@@ -249,11 +327,56 @@ def _service_database_url(settings: Settings, data_dir: Path) -> str:
 def _postgres_schema_for_tenant(settings: Settings, tenant_id: str) -> str | None:
     if not _is_postgres_url(settings.database_url):
         return None
-    return f"tenant_{tenant_id}"
+    safe_tenant_id = re.sub(r"[^A-Za-z0-9_]", "_", tenant_id).lower()
+    if len(safe_tenant_id) > 57:
+        suffix = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:8]
+        safe_tenant_id = f"{safe_tenant_id[:48]}_{suffix}"
+    return f"tenant_{safe_tenant_id}"
 
 
 def _is_postgres_url(database_url: str) -> bool:
     return urlparse(database_url).scheme in {"postgres", "postgresql"}
+
+
+def _is_tenant_management_path(path: str) -> bool:
+    return path == TENANT_MANAGEMENT_PREFIX or path.startswith(f"{TENANT_MANAGEMENT_PREFIX}/")
+
+
+def _has_admin_api_key(settings: Settings, supplied_api_key: str | None) -> bool:
+    if settings.server_api_key is None:
+        return True
+    return supplied_api_key == settings.server_api_key
+
+
+def _is_tenant_request_authorized(
+    settings: Settings,
+    tenant_registry: TenantRegistry,
+    record: TenantRecord,
+    supplied_api_key: str | None,
+) -> bool:
+    if _has_admin_api_key(settings, supplied_api_key):
+        return True
+    if tenant_registry.verify_tenant_api_key(record, supplied_api_key):
+        return True
+    return settings.server_api_key is None and not record.api_key_configured
+
+
+def _auth_error() -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content={"error": {"code": "unauthorized", "message": "invalid or missing API key"}},
+    )
+
+
+def _tenant_response(record: TenantRecord) -> TenantResponse:
+    return TenantResponse(
+        tenant_id=record.tenant_id,
+        display_name=record.display_name,
+        status=record.status,
+        created_at=record.created_at.isoformat(),
+        updated_at=record.updated_at.isoformat(),
+        api_key_configured=record.api_key_configured,
+    )
 
 
 app = create_app()

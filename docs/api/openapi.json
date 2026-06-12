@@ -266,6 +266,16 @@
             "title": "Content",
             "type": "string"
           },
+          "content_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KnowledgeContentRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "ingested_at": {
             "anyOf": [
               {
@@ -349,6 +359,15 @@
         ],
         "title": "KaypohImportStatus",
         "type": "object"
+      },
+      "KnowledgeContentRole": {
+        "enum": [
+          "fact",
+          "position",
+          "instruction"
+        ],
+        "title": "KnowledgeContentRole",
+        "type": "string"
       },
       "KnowledgeKind": {
         "enum": [
@@ -541,6 +560,91 @@
           "pending_amendments"
         ],
         "title": "StalenessPredictionRequest",
+        "type": "object"
+      },
+      "TenantCreateRequest": {
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "minLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "tenant_id": {
+            "examples": [
+              "tenant-a"
+            ],
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id"
+        ],
+        "title": "TenantCreateRequest",
+        "type": "object"
+      },
+      "TenantResponse": {
+        "properties": {
+          "api_key_configured": {
+            "title": "Api Key Configured",
+            "type": "boolean"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "display_name",
+          "status",
+          "created_at",
+          "updated_at",
+          "api_key_configured"
+        ],
+        "title": "TenantResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -1130,6 +1234,142 @@
           }
         },
         "summary": "Predict Staleness"
+      }
+    },
+    "/tenants": {
+      "get": {
+        "operationId": "tenants_tenants_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TenantResponse"
+                  },
+                  "title": "Response Tenants Tenants Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Tenants"
+      },
+      "post": {
+        "operationId": "create_tenant_tenants_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Tenant"
+      }
+    },
+    "/tenants/{tenant_id}/reactivate": {
+      "post": {
+        "operationId": "reactivate_tenant_tenants__tenant_id__reactivate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reactivate Tenant"
+      }
+    },
+    "/tenants/{tenant_id}/suspend": {
+      "post": {
+        "operationId": "suspend_tenant_tenants__tenant_id__suspend_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Suspend Tenant"
       }
     },
     "/timeline": {

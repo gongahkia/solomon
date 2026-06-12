@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     kaypoh_api_key: str | None = None
     kaypoh_timeout_seconds: float = 30.0
     server_api_key: str | None = None
+    server_auto_provision_tenants: bool = True
     database_url: str = "sqlite:///./solomon-data/solomon.sqlite3"
     local_model_url: str = "http://127.0.0.1:11434/api/generate"
     remote_model_url: str | None = None
@@ -52,6 +53,7 @@ class Settings(BaseSettings):
             "server_api_key_configured": self.server_api_key is not None,
             "kaypoh_timeout_seconds": self.kaypoh_timeout_seconds,
             "database_url": self.database_url,
+            "server_auto_provision_tenants": self.server_auto_provision_tenants,
             "local_model_url": self.local_model_url,
             "remote_model_configured": self.remote_model_url is not None,
             "remote_model_provider": self.remote_model_provider,

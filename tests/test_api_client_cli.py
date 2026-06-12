@@ -382,6 +382,111 @@ def test_server_mode_requires_and_isolates_tenants(tmp_path: Path) -> None:
     assert (tmp_path / "data" / "tenants" / "tenant-b" / "solomon.sqlite3").exists()
 
 
+def test_server_tenant_registry_lifecycle_and_keys(tmp_path: Path) -> None:
+    app = create_app(
+        Settings(
+            sku="server",
+            zero_egress_mode=False,
+            data_dir=tmp_path / "data",
+            journal_dir=tmp_path / "journal",
+            server_api_key="admin-secret",
+            server_auto_provision_tenants=False,
+        )
+    )
+    admin_headers = {"x-api-key": "admin-secret"}
+    tenant_headers = {"x-api-key": "tenant-secret", "x-tenant-id": "managed-tenant"}
+    wrong_headers = {"x-api-key": "wrong-secret", "x-tenant-id": "managed-tenant"}
+    payload = {
+        "kind": "position",
+        "content": "managed tenant position",
+        "source_kind": "partner",
+        "source_ref": "managed-memo",
+    }
+
+    async def exercise() -> tuple[
+        httpx.Response,
+        httpx.Response,
+        httpx.Response,
+        httpx.Response,
+        httpx.Response,
+        httpx.Response,
+        httpx.Response,
+        httpx.Response,
+        httpx.Response,
+    ]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            unknown_tenant = await client.post(
+                "/recall",
+                headers={"x-api-key": "admin-secret", "x-tenant-id": "managed-tenant"},
+                json={"query": "managed tenant"},
+            )
+            created_tenant = await client.post(
+                "/tenants",
+                headers=admin_headers,
+                json={
+                    "tenant_id": "managed-tenant",
+                    "display_name": "Managed Tenant",
+                    "api_key": "tenant-secret",
+                },
+            )
+            listed_tenants = await client.get("/tenants", headers=admin_headers)
+            rejected = await client.post("/ingest", headers=wrong_headers, json=payload)
+            created_item = await client.post("/ingest", headers=tenant_headers, json=payload)
+            suspended = await client.post("/tenants/managed-tenant/suspend", headers=admin_headers)
+            suspended_recall = await client.post(
+                "/recall",
+                headers=tenant_headers,
+                json={"query": "managed tenant", "review_mode": True},
+            )
+            reactivated = await client.post("/tenants/managed-tenant/reactivate", headers=admin_headers)
+            tenant_recall = await client.post(
+                "/recall",
+                headers=tenant_headers,
+                json={"query": "managed tenant", "review_mode": True},
+            )
+            return (
+                unknown_tenant,
+                created_tenant,
+                listed_tenants,
+                rejected,
+                created_item,
+                suspended,
+                suspended_recall,
+                reactivated,
+                tenant_recall,
+            )
+
+    (
+        unknown_tenant,
+        created_tenant,
+        listed_tenants,
+        rejected,
+        created_item,
+        suspended,
+        suspended_recall,
+        reactivated,
+        tenant_recall,
+    ) = asyncio.run(exercise())
+
+    assert unknown_tenant.status_code == 404
+    assert created_tenant.status_code == 201
+    assert created_tenant.json()["api_key_configured"] is True
+    assert created_tenant.json()["status"] == "active"
+    assert listed_tenants.json()[0]["tenant_id"] == "managed-tenant"
+    assert rejected.status_code == 401
+    assert created_item.status_code == 200
+    assert suspended.status_code == 200
+    assert suspended.json()["status"] == "suspended"
+    assert suspended_recall.status_code == 403
+    assert reactivated.status_code == 200
+    assert reactivated.json()["status"] == "active"
+    assert len(tenant_recall.json()) == 1
+    raw_registry = (tmp_path / "data" / "tenants" / "registry.json").read_text(encoding="utf-8")
+    assert "tenant-secret" not in raw_registry
+    assert "pbkdf2_sha256" in raw_registry
+
+
 def test_sync_client_uses_httpx_transport() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/ingest":

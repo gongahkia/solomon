@@ -24,5 +24,6 @@ driver dependency lives behind `solomon[server]`.
 
 The local implementation uses SQLite WAL mode, transactional writes, and JSON event payloads. Server
 deployments can select Postgres through `SOLOMON_DATABASE_URL` without weakening the local SKU or changing
-the API contract. Tenant isolation is kept at the storage layer: SQLite uses per-tenant files and Postgres
-uses per-tenant schemas.
+the API contract. Server tenant admission is tracked in the tenant registry, including lifecycle state and
+optional tenant-specific API-key hashes. Tenant storage remains isolated at the storage layer: SQLite uses
+per-tenant files and Postgres uses per-tenant schemas.

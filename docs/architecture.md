@@ -17,7 +17,7 @@ Solomon is a Python 3.10+ FastAPI service and CLI. It is organized around durabl
 
 1. Ingest creates a `KnowledgeItem` with provenance and source-derived credence.
 2. The vendored Kaypoh-derived review engine gates storage before the item is written.
-3. Dependency edges are manually tagged or suggested from boundary-sanitized text.
+3. Dependency edges are manually tagged or suggested from boundary-sanitized text and parsed legal references.
 4. Authority changes propagate staleness through graph dependents.
 5. Recall searches the local index, filters Live items by default, expands dependencies, and applies credence.
 6. Model context is pseudonymized by the vendored boundary before any remote endpoint.
@@ -35,6 +35,14 @@ or historical modes.
 In server mode, tenant services keep the existing filesystem isolation for local SQLite deployments. When
 Postgres is configured, each tenant is mapped to a sanitized Postgres schema so tenant data does not share
 tables.
+
+## Reference Extraction
+
+`/references/extract` runs after optional Kaypoh sanitization. Citation parsing uses `eyecite` for full,
+short, statutory, `supra`, and `id.` citation forms, then Solomon's deterministic grammar fills gaps for
+firm-style authority references such as "Regulation R section 12", non-US case strings, and defined terms.
+Each returned citation includes its parser source and source-text span so reviewers can inspect the exact
+evidence before confirming a dependency edge.
 
 ## Boundary
 

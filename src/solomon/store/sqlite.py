@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -31,7 +32,7 @@ class SQLiteKnowledgeStore:
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA busy_timeout=5000")
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._execute_locked_retry("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self.initialize()
 
@@ -310,6 +311,16 @@ class SQLiteKnowledgeStore:
         if row is None:
             return None
         return row[0]
+
+    def _execute_locked_retry(self, sql: str) -> sqlite3.Cursor:
+        for attempt in range(6):
+            try:
+                return self._conn.execute(sql)
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or attempt == 5:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+        raise StoreError("unreachable SQLite retry state")
 
     def _append_event(
         self,

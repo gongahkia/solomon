@@ -34,7 +34,7 @@ checkout is required at runtime.
 - [x] `impact_query()` now returns the transitive dependent set without mutating store state.
 - [x] Manual dependency tagging, confidence levels, centrality, scoped subgraphs, and basic Mermaid/DOT visualization exist.
 - [x] LLM-assisted dependency capture exists as an optional boundary-sanitized model workflow with strict JSON validation and human-confirmation semantics.
-- [ ] Defined-term/citation extraction is conservative regex extraction, not a full legal parser.
+- [x] Defined-term/citation extraction uses `eyecite` for legal citations plus Solomon's deterministic grammar for firm-style authorities, non-US case strings, and defined terms, with parser/span metadata in API output.
 
 ## Phase 3 — Currency engine
 

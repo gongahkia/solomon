@@ -65,6 +65,7 @@ def test_suggest_confirm_and_reject_dependencies() -> None:
     rejected = reject_suggestion(suggestions[0], by="Partner A")
 
     assert suggestions[0].suggested_edge.confidence is EdgeConfidence.LLM_SUGGESTED
+    assert suggestions[0].suggested_edge.target_id == "regulation-r-section-12"
     assert confirmed.confidence is EdgeConfidence.HUMAN_CONFIRMED
     assert rejected.decision.value == "rejected"
 
@@ -119,3 +120,39 @@ def test_extract_defined_terms_and_citations_after_boundary_sanitization() -> No
     assert extraction.defined_terms[0].term == "Restricted Person"
     assert {citation.kind for citation in extraction.citations} == {"authority", "case"}
     assert "regulation-r-section-12" in {citation.normalized_id for citation in extraction.citations}
+
+
+def test_reference_parser_uses_eyecite_for_full_case_and_law_citations() -> None:
+    extraction = extract_defined_terms_and_citations(
+        content=(
+            "The brief cites Bush v. Gore, 531 U.S. 98, 99-100 (2000), "
+            "then Mass. Gen. Laws ch. 1, § 2."
+        )
+    )
+
+    citations = {citation.normalized_id: citation for citation in extraction.citations}
+
+    case = citations["bush-v-gore-531-u-s-98-99-100-scotus-2000"]
+    law = citations["mass-gen-laws-ch-1-section-2"]
+    assert case.kind == "case"
+    assert case.parser == "eyecite"
+    assert case.metadata["metadata"]["pin_cite"] == "99-100"
+    assert law.kind == "section"
+    assert law.parser == "eyecite"
+    assert law.metadata["groups"]["section"] == "2"
+
+
+def test_reference_parser_handles_defined_terms_and_non_us_case_grammar() -> None:
+    extraction = extract_defined_terms_and_citations(
+        content=(
+            "A regulated payment institution (\"Payment Institution\") must keep records. "
+            "The analysis distinguishes Alpha Pte Ltd v. Beta LLC [2024] SGHC 12."
+        )
+    )
+
+    assert extraction.defined_terms[0].term == "Payment Institution"
+    assert extraction.defined_terms[0].definition == "A regulated payment institution"
+    assert extraction.defined_terms[0].source == "parenthetical-definition"
+    case = next(citation for citation in extraction.citations if citation.kind == "case")
+    assert case.parser == "solomon-grammar"
+    assert case.text == "Alpha Pte Ltd v. Beta LLC [2024] SGHC 12"

@@ -123,7 +123,7 @@ Still not done / next up:
 - [x] (P1) Implement the credence-floor clamp (significance may fall, tier cannot drop below floor)
 - [x] (P2) Make the significance function pluggable/parameterised via config
 - [x] (P2) Expose a deterministic "explain significance" breakdown (powers `why()` + the debugger)
-- [ ] (P3) Experiment harness to compare significance-function variants offline
+- [x] (P3) Experiment harness to compare significance-function variants offline
 
 ### Tier transitions
 - [x] (P0) Implement threshold-based promotion (warm→hot, cold→warm) on access

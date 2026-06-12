@@ -30,6 +30,21 @@ Supported systems:
 
 The harness reports recall accuracy, approximate retrieval token cost, p50/p95 query latency, and stale-answer rate. Missing external adapters can be recorded with `--allow-missing` so result tables clearly show which credentials or services were unavailable.
 
+## Significance Variant Experiments
+
+Compare transparent significance-function parameter variants offline:
+
+```bash
+python benchmarks/significance-variants.py \
+  --output benchmarks/results/significance-variants.json \
+  --markdown benchmarks/results/significance-variants.md
+```
+
+This script does not call any memory-system adapter. It mirrors the Rust
+significance formula over deterministic synthetic histories, then ranks variants
+by scenario so parameter changes can be reviewed before they are promoted into
+benchmarked runtime behavior.
+
 ## Recall Latency Budget
 
 The embedded hot-path budget is measured separately from adapter comparisons:

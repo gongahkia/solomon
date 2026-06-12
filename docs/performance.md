@@ -33,6 +33,19 @@ last-used time, outcome contribution, and contradiction penalty. The benchmark
 keeps this optimisation measurable through the same binding path users call for
 debugging significance.
 
+## Batched Vector Operations
+
+The `VectorIndex` trait includes both `batch_upsert` and `search_batch`.
+Backends can override either method when their native API can execute a true
+batch. The in-process HNSW adapter validates all query dimensions up front and
+then runs the backend search for each query. The Qdrant adapter forwards batch
+search through the transport boundary, whose default implementation falls back
+to repeated searches when a concrete transport has no native batch endpoint.
+
+No portable SIMD implementation is claimed for the current HNSW dependency. The
+portable contract is batched vector operation support; SIMD can be added behind
+the same methods if a backend exposes it.
+
 ## Hot-Path Scan Boundary
 
 Shibahama's recall path is intended to be lazy and id-bounded. A normal recall should:

@@ -53,6 +53,22 @@ pub trait VectorIndex {
         top_k: usize,
     ) -> Result<Vec<VectorSearchResult>, VectorIndexError>;
 
+    /// Searches the index for many query vectors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any query dimensions are invalid or the backend cannot search.
+    fn search_batch(
+        &self,
+        queries: &[Vec<f32>],
+        top_k: usize,
+    ) -> Result<Vec<Vec<VectorSearchResult>>, VectorIndexError> {
+        queries
+            .iter()
+            .map(|query| self.search(query, top_k))
+            .collect()
+    }
+
     /// Removes the vector associated with `id`, if present.
     ///
     /// # Errors
@@ -167,6 +183,21 @@ impl VectorIndex for HnswVectorIndex {
             .collect())
     }
 
+    fn search_batch(
+        &self,
+        queries: &[Vec<f32>],
+        top_k: usize,
+    ) -> Result<Vec<Vec<VectorSearchResult>>, VectorIndexError> {
+        for query in queries {
+            self.ensure_dimensions(query)?;
+        }
+
+        queries
+            .iter()
+            .map(|query| self.search(query, top_k))
+            .collect()
+    }
+
     fn delete_by_id(&mut self, id: MemoryId) -> Result<(), VectorIndexError> {
         if let Some(slot) = self.slots_by_id.remove(&id) {
             self.deleted_slots.insert(slot);
@@ -205,6 +236,23 @@ pub trait QdrantTransport {
         query: &[f32],
         top_k: usize,
     ) -> Result<Vec<VectorSearchResult>, VectorIndexError>;
+
+    /// Searches `collection` for nearest vectors for many queries.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the remote backend rejects the batch search.
+    fn search_batch(
+        &self,
+        collection: &str,
+        queries: &[Vec<f32>],
+        top_k: usize,
+    ) -> Result<Vec<Vec<VectorSearchResult>>, VectorIndexError> {
+        queries
+            .iter()
+            .map(|query| self.search(collection, query, top_k))
+            .collect()
+    }
 
     /// Deletes a vector from `collection`.
     ///
@@ -261,6 +309,19 @@ impl<T: QdrantTransport> VectorIndex for QdrantVectorIndex<T> {
     ) -> Result<Vec<VectorSearchResult>, VectorIndexError> {
         self.ensure_dimensions(query)?;
         self.transport.search(&self.collection, query, top_k)
+    }
+
+    fn search_batch(
+        &self,
+        queries: &[Vec<f32>],
+        top_k: usize,
+    ) -> Result<Vec<Vec<VectorSearchResult>>, VectorIndexError> {
+        for query in queries {
+            self.ensure_dimensions(query)?;
+        }
+
+        self.transport
+            .search_batch(&self.collection, queries, top_k)
     }
 
     fn delete_by_id(&mut self, id: MemoryId) -> Result<(), VectorIndexError> {
@@ -447,6 +508,44 @@ mod tests {
         let transport = index.into_transport();
 
         assert_eq!(results[0].id, far);
+        assert!(transport.collections.iter().all(|name| name == "memories"));
+    }
+
+    #[test]
+    fn hnsw_index_batch_searches_multiple_queries() {
+        let mut index = HnswVectorIndex::with_capacity(2, 8);
+        let first = MemoryId::new_v7();
+        let second = MemoryId::new_v7();
+
+        index.add(first, &[0.0, 0.0]).expect("first should add");
+        index.add(second, &[5.0, 5.0]).expect("second should add");
+
+        let results = index
+            .search_batch(&[vec![0.1, 0.1], vec![4.9, 4.9]], 1)
+            .expect("batch search should work");
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0][0].id, first);
+        assert_eq!(results[1][0].id, second);
+    }
+
+    #[test]
+    fn qdrant_adapter_batch_search_uses_transport_collection() {
+        let transport = FakeQdrantTransport::default();
+        let mut index = QdrantVectorIndex::new("memories", 2, transport);
+        let first = MemoryId::new_v7();
+        let second = MemoryId::new_v7();
+
+        index.add(first, &[0.0, 0.0]).expect("first should add");
+        index.add(second, &[5.0, 5.0]).expect("second should add");
+
+        let results = index
+            .search_batch(&[vec![0.1, 0.1], vec![4.9, 4.9]], 1)
+            .expect("batch search should work");
+        let transport = index.into_transport();
+
+        assert_eq!(results[0][0].id, first);
+        assert_eq!(results[1][0].id, second);
         assert!(transport.collections.iter().all(|name| name == "memories"));
     }
 

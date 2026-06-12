@@ -322,7 +322,7 @@ Still not done / next up:
 - [x] (P2) Profile and optimise the significance recompute path
 - [x] (P2) Memory-footprint budget for embedded mode (must stay modest to justify "embeddable")
 - [x] (P2) Concurrency: safe multi-reader / single-writer (or MVCC) story, tested
-- [ ] (P3) SIMD / batched vector ops where the index backend allows
+- [x] (P3) SIMD / batched vector ops where the index backend allows
 - [ ] (P3) Optional mmap for cold-tier compressed store
 
 ---

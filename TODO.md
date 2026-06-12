@@ -237,7 +237,7 @@ Still not done / next up:
 - [x] (P2) Per-namespace config + quotas
 - [x] (P2) Metadata-only request logging (who/when/cost, never content — matters for legal reuse)
 - [x] (P2) Health/readiness endpoints + graceful shutdown
-- [ ] (P3) Horizontal-scale story (sharding by namespace)
+- [x] (P3) Horizontal-scale story (sharding by namespace)
 
 ---
 

@@ -17,6 +17,7 @@ from solomon.currency.models import (
 from solomon.graph.models import DependencyEdge, EdgeType
 from solomon.graph.store import GraphStore
 from solomon.orchestrator.retrieval import (
+    EmbeddingStrategy,
     MatterContext,
     RecallOptions,
     RetrievalOrchestrator,
@@ -158,6 +159,36 @@ def test_batch_index_stores_embedding_ref_and_scope_filtering(tmp_path: Path) ->
 
     assert all(item.embedding_ref == "lexical-token-set:1" for item in indexed)
     assert [result.item.id for result in scoped] == ["a"]
+
+
+def test_reembed_pipeline_updates_items_when_strategy_version_changes(tmp_path: Path) -> None:
+    db = tmp_path / "solomon.sqlite3"
+    item = _item("item-1", "structure x regulation r")
+    first = RetrievalOrchestrator(
+        store=SQLiteKnowledgeStore(db),
+        graph=GraphStore(db),
+        index=SQLiteRetrievalIndex(db, strategy=EmbeddingStrategy(version="1")),
+        credence=CredenceLedger(),
+    )
+    first.store.write_item(item)
+    first.index_items([item])
+
+    second = RetrievalOrchestrator(
+        store=SQLiteKnowledgeStore(db),
+        graph=GraphStore(db),
+        index=SQLiteRetrievalIndex(db, strategy=EmbeddingStrategy(version="2")),
+        credence=CredenceLedger(),
+    )
+
+    report = second.reembed_stale_items()
+    noop = second.reembed_stale_items()
+
+    assert report.embedding_ref == "lexical-token-set:2"
+    assert report.considered_item_ids == ["item-1"]
+    assert report.reembedded_item_ids == ["item-1"]
+    assert second.store.get_item("item-1").embedding_ref == "lexical-token-set:2"
+    assert second.index.search("structure x")[0].embedding_ref == "lexical-token-set:2"
+    assert noop.reembedded_item_ids == []
 
 
 def test_recall_context_budget_caps_results_before_sanitisation(tmp_path: Path) -> None:

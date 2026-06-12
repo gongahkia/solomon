@@ -24,7 +24,7 @@ checkout is required at runtime.
 - [x] Encryption helper for portable artifacts exists.
 - [ ] Postgres backend is not implemented; `create_knowledge_store()` rejects Postgres with `UnsupportedStoreBackend`.
 - [ ] Retrieval index is lexical token-set, not sqlite-vss/LanceDB/pgvector/Qdrant.
-- [ ] Embedding lifecycle is minimal: model/version is stored as an `embedding_ref`, but there is no real re-embed pipeline.
+- [x] Embedding lifecycle includes stale/missing `embedding_ref` detection and a `reembed_stale_items()` pipeline that reindexes store items after strategy version changes.
 
 ## Phase 2 — Dependency graph
 

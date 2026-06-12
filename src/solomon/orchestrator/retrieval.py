@@ -89,6 +89,16 @@ class SQLiteRetrievalIndex:
     def batch_upsert(self, items: list[KnowledgeItem]) -> list[KnowledgeItem]:
         return [self.upsert_item(item) for item in items]
 
+    def embedding_refs(self, item_ids: list[str]) -> dict[str, str]:
+        if not item_ids:
+            return {}
+        placeholders = ",".join("?" for _ in item_ids)
+        rows = self._conn.execute(
+            f"SELECT item_id, embedding_ref FROM retrieval_index WHERE item_id IN ({placeholders})",  # noqa: S608
+            item_ids,
+        ).fetchall()
+        return {str(row["item_id"]): str(row["embedding_ref"]) for row in rows}
+
     def search(self, query: str, *, limit: int = 20) -> list[IndexedHit]:
         query_tokens = tokenize(query)
         if not query_tokens:
@@ -137,6 +147,12 @@ class RecallResult(SolomonModel):
     estimated_context_tokens: int
 
 
+class ReembedReport(SolomonModel):
+    embedding_ref: str
+    considered_item_ids: list[str]
+    reembedded_item_ids: list[str]
+
+
 @dataclass(frozen=True)
 class MatterContext:
     matter_id: str | None = None
@@ -162,6 +178,23 @@ class RetrievalOrchestrator:
         for item in indexed:
             self.store.update_item(item, event_type="knowledge_item_indexed")
         return indexed
+
+    def reembed_stale_items(self, *, item_ids: list[str] | None = None) -> ReembedReport:
+        items = self.store.get_many(item_ids)
+        considered_ids = [item.id for item in items]
+        indexed_refs = self.index.embedding_refs(considered_ids)
+        target_ref = self.index.strategy.ref
+        stale = [
+            item
+            for item in items
+            if item.embedding_ref != target_ref or indexed_refs.get(item.id) != target_ref
+        ]
+        self.index_items(stale)
+        return ReembedReport(
+            embedding_ref=target_ref,
+            considered_item_ids=considered_ids,
+            reembedded_item_ids=[item.id for item in stale],
+        )
 
     def recall(
         self,

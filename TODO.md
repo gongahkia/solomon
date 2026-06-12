@@ -148,7 +148,7 @@ Still not done / next up:
 - [x] (P2) Tunable ranking weights (similarity ⊕ significance ⊕ recency ⊕ graph) via config
 - [x] (P2) Cold-tier retrieval requires explicit opt-in / costs a flag (so callers know they paid for it)
 - [x] (P2) Result diversification so near-duplicate memories don't dominate
-- [ ] (P3) Query-time budget controls (max tokens of context to assemble)
+- [x] (P3) Query-time budget controls (max tokens of context to assemble)
 
 ---
 

@@ -72,6 +72,7 @@ class Shibahama:
         raw_query_context: str | None = None,
         include_cold: bool = False,
         include_instructions: bool = False,
+        max_context_tokens: int | None = None,
     ) -> list[RecallCandidate]:
         return self._inner.recall(
             query_vector,
@@ -80,6 +81,7 @@ class Shibahama:
             raw_query_context,
             include_cold,
             include_instructions,
+            max_context_tokens,
         )
 
     async def async_recall(self, *args, **kwargs) -> list[RecallCandidate]:
@@ -126,6 +128,7 @@ class Shibahama:
         raw_query_context: str | None = None,
         include_cold: bool = False,
         include_instructions: bool = False,
+        max_context_tokens: int | None = None,
     ) -> RecallStream:
         return self._inner.stream_recall(
             query_vector,
@@ -134,6 +137,7 @@ class Shibahama:
             raw_query_context,
             include_cold,
             include_instructions,
+            max_context_tokens,
         )
 
     async def async_stream_recall(self, *args, **kwargs) -> AsyncIterator[RecallCandidate]:
@@ -149,6 +153,7 @@ class Shibahama:
         as_of_unix: int,
         include_cold: bool = False,
         include_instructions: bool = False,
+        max_context_tokens: int | None = None,
     ) -> list[RecallCandidate]:
         return self._inner.timeline(
             query_vector,
@@ -156,6 +161,7 @@ class Shibahama:
             as_of_unix,
             include_cold,
             include_instructions,
+            max_context_tokens,
         )
 
     async def async_timeline(self, *args, **kwargs) -> list[RecallCandidate]:
@@ -168,6 +174,7 @@ class Shibahama:
         as_of_unix: int,
         include_cold: bool = False,
         include_instructions: bool = False,
+        max_context_tokens: int | None = None,
     ) -> RecallStream:
         return self._inner.stream_timeline(
             query_vector,
@@ -175,6 +182,7 @@ class Shibahama:
             as_of_unix,
             include_cold,
             include_instructions,
+            max_context_tokens,
         )
 
     async def async_stream_timeline(self, *args, **kwargs) -> AsyncIterator[RecallCandidate]:

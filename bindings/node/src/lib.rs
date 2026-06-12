@@ -122,6 +122,7 @@ pub struct RecallOptions {
     pub raw_query_context: Option<String>,
     pub include_cold: Option<bool>,
     pub include_instructions: Option<bool>,
+    pub max_context_tokens: Option<u32>,
 }
 
 /// Iterator over recall candidates.
@@ -498,6 +499,9 @@ fn recall_request<'a>(
     if options.include_instructions.unwrap_or(false) {
         request = request.include_instructions();
     }
+    if let Some(max_context_tokens) = options.max_context_tokens {
+        request = request.with_max_context_tokens(max_context_tokens as usize);
+    }
 
     Ok(request)
 }
@@ -507,6 +511,7 @@ static DEFAULT_RECALL_OPTIONS: RecallOptions = RecallOptions {
     raw_query_context: None,
     include_cold: None,
     include_instructions: None,
+    max_context_tokens: None,
 };
 
 fn time_from_optional_unix(value: Option<f64>) -> Result<OffsetDateTime> {

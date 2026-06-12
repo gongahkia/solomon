@@ -287,6 +287,8 @@ pub struct AsyncRecallRequest {
     pub staleness: RecallStalenessConfig,
     /// Policy for suppressing near-duplicate results.
     pub diversification: RecallDiversificationConfig,
+    /// Optional maximum approximate context tokens to return.
+    pub max_context_tokens: Option<usize>,
 }
 
 #[cfg(feature = "tokio")]
@@ -306,6 +308,7 @@ impl AsyncRecallRequest {
             ranking: request.ranking,
             staleness: request.staleness,
             diversification: request.diversification,
+            max_context_tokens: request.max_context_tokens,
         }
     }
 
@@ -332,6 +335,7 @@ impl AsyncRecallRequest {
             ranking: request.ranking,
             staleness: request.staleness,
             diversification: request.diversification,
+            max_context_tokens: request.max_context_tokens,
         })
     }
 
@@ -380,6 +384,13 @@ impl AsyncRecallRequest {
         self
     }
 
+    /// Limits the approximate number of whitespace tokens returned as recall context.
+    #[must_use]
+    pub const fn with_max_context_tokens(mut self, max_context_tokens: usize) -> Self {
+        self.max_context_tokens = Some(max_context_tokens);
+        self
+    }
+
     fn as_recall_request(&self) -> RecallRequest<'_> {
         let mut request = RecallRequest::new(&self.query_vector, self.top_k, self.now);
         request.raw_query_context = self.raw_query_context.as_deref();
@@ -388,6 +399,7 @@ impl AsyncRecallRequest {
         request.ranking = self.ranking;
         request.staleness = self.staleness;
         request.diversification = self.diversification;
+        request.max_context_tokens = self.max_context_tokens;
 
         request
     }
@@ -1338,7 +1350,8 @@ mod tests {
         let sync_request = RecallRequest::new(&query, 4, OffsetDateTime::UNIX_EPOCH)
             .include_cold()
             .include_instructions()
-            .with_raw_query_context("hello");
+            .with_raw_query_context("hello")
+            .with_max_context_tokens(8);
         let async_request = AsyncRecallRequest::try_from_recall_request(&sync_request)
             .expect("request should copy");
 
@@ -1347,5 +1360,6 @@ mod tests {
         assert_eq!(async_request.raw_query_context.as_deref(), Some("hello"));
         assert!(async_request.include_cold);
         assert!(async_request.include_instructions);
+        assert_eq!(async_request.max_context_tokens, Some(8));
     }
 }

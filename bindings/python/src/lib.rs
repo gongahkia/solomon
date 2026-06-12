@@ -323,7 +323,8 @@ impl PyShibahama {
         now_unix = None,
         raw_query_context = None,
         include_cold = false,
-        include_instructions = false
+        include_instructions = false,
+        max_context_tokens = None
     ))]
     fn recall(
         &self,
@@ -333,6 +334,7 @@ impl PyShibahama {
         raw_query_context: Option<&str>,
         include_cold: bool,
         include_instructions: bool,
+        max_context_tokens: Option<usize>,
     ) -> PyResult<Vec<PyRecallCandidate>> {
         let inner = self.inner.lock().map_err(lock_error)?;
         let request = recall_request(
@@ -342,6 +344,7 @@ impl PyShibahama {
             raw_query_context,
             include_cold,
             include_instructions,
+            max_context_tokens,
         )?;
         let candidates = inner.recall(&request).map_err(py_error)?;
 
@@ -366,7 +369,8 @@ impl PyShibahama {
         now_unix = None,
         raw_query_context = None,
         include_cold = false,
-        include_instructions = false
+        include_instructions = false,
+        max_context_tokens = None
     ))]
     fn stream_recall(
         &self,
@@ -376,6 +380,7 @@ impl PyShibahama {
         raw_query_context: Option<&str>,
         include_cold: bool,
         include_instructions: bool,
+        max_context_tokens: Option<usize>,
     ) -> PyResult<PyRecallStream> {
         let candidates = self.recall(
             query_vector,
@@ -384,6 +389,7 @@ impl PyShibahama {
             raw_query_context,
             include_cold,
             include_instructions,
+            max_context_tokens,
         )?;
 
         Ok(PyRecallStream {
@@ -397,7 +403,8 @@ impl PyShibahama {
         top_k,
         as_of_unix,
         include_cold = false,
-        include_instructions = false
+        include_instructions = false,
+        max_context_tokens = None
     ))]
     fn timeline(
         &self,
@@ -406,6 +413,7 @@ impl PyShibahama {
         as_of_unix: i64,
         include_cold: bool,
         include_instructions: bool,
+        max_context_tokens: Option<usize>,
     ) -> PyResult<Vec<PyRecallCandidate>> {
         let inner = self.inner.lock().map_err(lock_error)?;
         let request = recall_request(
@@ -415,6 +423,7 @@ impl PyShibahama {
             None,
             include_cold,
             include_instructions,
+            max_context_tokens,
         )?;
         let candidates = inner.timeline(&request).map_err(py_error)?;
 
@@ -430,7 +439,8 @@ impl PyShibahama {
         top_k,
         as_of_unix,
         include_cold = false,
-        include_instructions = false
+        include_instructions = false,
+        max_context_tokens = None
     ))]
     fn stream_timeline(
         &self,
@@ -439,6 +449,7 @@ impl PyShibahama {
         as_of_unix: i64,
         include_cold: bool,
         include_instructions: bool,
+        max_context_tokens: Option<usize>,
     ) -> PyResult<PyRecallStream> {
         let candidates = self.timeline(
             query_vector,
@@ -446,6 +457,7 @@ impl PyShibahama {
             as_of_unix,
             include_cold,
             include_instructions,
+            max_context_tokens,
         )?;
 
         Ok(PyRecallStream {
@@ -620,6 +632,7 @@ fn recall_request<'a>(
     raw_query_context: Option<&'a str>,
     include_cold: bool,
     include_instructions: bool,
+    max_context_tokens: Option<usize>,
 ) -> PyResult<RecallRequest<'a>> {
     let mut request = RecallRequest::new(query_vector, top_k, time_from_optional_unix(now_unix)?);
 
@@ -631,6 +644,9 @@ fn recall_request<'a>(
     }
     if include_instructions {
         request = request.include_instructions();
+    }
+    if let Some(max_context_tokens) = max_context_tokens {
+        request = request.with_max_context_tokens(max_context_tokens);
     }
 
     Ok(request)

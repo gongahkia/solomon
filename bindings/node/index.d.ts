@@ -130,6 +130,7 @@ export interface RecallOptions {
   rawQueryContext?: string
   includeCold?: boolean
   includeInstructions?: boolean
+  maxContextTokens?: number
 }
 
 export interface SignificanceBreakdown {

@@ -44,6 +44,8 @@ pub struct RecallRequest<'a> {
     pub staleness: RecallStalenessConfig,
     /// Policy for suppressing near-duplicate results.
     pub diversification: RecallDiversificationConfig,
+    /// Optional maximum approximate context tokens to return.
+    pub max_context_tokens: Option<usize>,
     /// Optional related-memory provider used for graph expansion.
     pub related_memory_provider: Option<&'a dyn RelatedMemoryProvider>,
     /// Optional provenance source-ref prefix that candidate items must match.
@@ -64,6 +66,7 @@ impl<'a> RecallRequest<'a> {
             ranking: RecallRankingConfig::default(),
             staleness: RecallStalenessConfig::default(),
             diversification: RecallDiversificationConfig::default(),
+            max_context_tokens: None,
             related_memory_provider: None,
             source_ref_prefix: None,
         }
@@ -111,6 +114,13 @@ impl<'a> RecallRequest<'a> {
         diversification: RecallDiversificationConfig,
     ) -> Self {
         self.diversification = diversification;
+        self
+    }
+
+    /// Limits the approximate number of whitespace tokens returned as recall context.
+    #[must_use]
+    pub const fn with_max_context_tokens(mut self, max_context_tokens: usize) -> Self {
+        self.max_context_tokens = Some(max_context_tokens);
         self
     }
 
@@ -385,6 +395,7 @@ fn recall_inner(
     });
 
     candidates = diversify_candidates(candidates, request.diversification);
+    candidates = apply_context_token_budget(candidates, request.max_context_tokens);
 
     if record_surface_access {
         for candidate in &candidates {
@@ -404,6 +415,34 @@ fn recall_inner(
     }
 
     Ok(candidates)
+}
+
+fn apply_context_token_budget(
+    candidates: Vec<RecallCandidate>,
+    max_context_tokens: Option<usize>,
+) -> Vec<RecallCandidate> {
+    let Some(max_context_tokens) = max_context_tokens else {
+        return candidates;
+    };
+
+    let mut selected = Vec::with_capacity(candidates.len());
+    let mut used_tokens = 0usize;
+
+    for candidate in candidates {
+        let candidate_tokens = context_token_count(&candidate.item.content);
+        let Some(next_used_tokens) = used_tokens.checked_add(candidate_tokens) else {
+            break;
+        };
+
+        if next_used_tokens > max_context_tokens {
+            break;
+        }
+
+        used_tokens = next_used_tokens;
+        selected.push(candidate);
+    }
+
+    selected
 }
 
 fn diversify_candidates(
@@ -457,6 +496,10 @@ fn normalized_terms(content: &str) -> BTreeSet<String> {
         .split_whitespace()
         .map(str::to_ascii_lowercase)
         .collect()
+}
+
+fn context_token_count(content: &str) -> usize {
+    content.split_whitespace().count()
 }
 
 fn candidate_from_item(
@@ -1311,6 +1354,56 @@ mod tests {
 
         assert!(stale_candidate.load_bearing_possibly_stale);
         assert!(!recently_validated_candidate.load_bearing_possibly_stale);
+    }
+
+    #[test]
+    fn recall_respects_context_token_budget_before_recording_access() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(1);
+        let mut first = test_item("alpha beta", OffsetDateTime::UNIX_EPOCH);
+        let mut second = test_item("gamma delta epsilon", OffsetDateTime::UNIX_EPOCH);
+
+        store
+            .write_embedded(
+                &mut first,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("first should write");
+        store
+            .write_embedded(
+                &mut second,
+                &mut vector_index,
+                &[0.1, 0.1],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("second should write");
+
+        let query = [0.0, 0.0];
+        let request = RecallRequest::new(&query, 2, now)
+            .with_raw_query_context("budgeted recall")
+            .with_max_context_tokens(2);
+        let candidates = recall(&store, &vector_index, &request).expect("recall should work");
+        let stored_first = store
+            .get(first.id)
+            .expect("first should read")
+            .expect("first should exist");
+        let stored_second = store
+            .get(second.id)
+            .expect("second should read")
+            .expect("second should exist");
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].id, first.id);
+        assert_eq!(stored_first.access_events.len(), 1);
+        assert!(stored_second.access_events.is_empty());
     }
 
     #[test]

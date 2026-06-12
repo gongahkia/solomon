@@ -28,7 +28,15 @@ try {
     validFromUnix: 0,
     ingestedAtUnix: 0,
   });
+  engine.write("Node binding overflow memory", {
+    vector: [10, 10],
+    sourceKind: "user",
+    sourceRef: "smoke-overflow",
+    validFromUnix: 0,
+    ingestedAtUnix: 0,
+  });
   const recalled = engine.recall([0, 0], 1, { nowUnix: 0 });
+  const budgeted = engine.recall([0, 0], 2, { nowUnix: 0, maxContextTokens: 3 });
   const streamed = engine.streamRecall([0, 0], 1, { nowUnix: 0 });
   const timeline = engine.timeline([0, 0], 1, 0);
   const timelineStream = engine.streamTimeline([0, 0], 1, 0);
@@ -38,6 +46,10 @@ try {
   assert.equal(item.content, "Node binding memory");
   assert.equal(item.provenance.sourceKind, "user");
   assert.equal(recalled[0].id, item.id);
+  assert.deepEqual(
+    budgeted.map((candidate) => candidate.id),
+    [item.id],
+  );
   assert.equal(streamed.next().id, item.id);
   assert.equal(streamed.next(), null);
   assert.equal(streamed.remaining(), 0);

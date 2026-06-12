@@ -42,13 +42,23 @@ with tempfile.NamedTemporaryFile() as db:
         valid_from_unix=0,
         ingested_at_unix=0,
     )
+    engine.write(
+        "Python binding overflow memory",
+        vector=[10.0, 10.0],
+        source_kind="user",
+        source_ref="smoke-overflow",
+        valid_from_unix=0,
+        ingested_at_unix=0,
+    )
     recalled = engine.recall([0.0, 0.0], 1, now_unix=0)
+    budgeted = engine.recall([0.0, 0.0], 2, now_unix=0, max_context_tokens=3)
     streamed = engine.stream_recall([0.0, 0.0], 1, now_unix=0)
     timeline = engine.timeline([0.0, 0.0], 1, as_of_unix=0)
     why = engine.why(item.id, now_unix=0)
 
     assert item.content == "Python binding memory"
     assert recalled[0].id == item.id
+    assert [candidate.id for candidate in budgeted] == [item.id]
     assert next(streamed).id == item.id
     assert timeline[0].id == item.id
     assert engine.reinforce(item.id, "cited")

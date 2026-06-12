@@ -149,6 +149,9 @@ struct RecallCommand {
     /// Include instruction memories.
     #[arg(long)]
     include_instructions: bool,
+    /// Maximum approximate whitespace tokens of recalled context to return.
+    #[arg(long)]
+    max_context_tokens: Option<usize>,
 }
 
 #[derive(Args)]
@@ -392,6 +395,7 @@ struct ServerRecallRequest {
     raw_query_context: Option<String>,
     include_cold: Option<bool>,
     include_instructions: Option<bool>,
+    max_context_tokens: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -538,6 +542,9 @@ fn recall(command: RecallCommand) -> CliResult<()> {
     }
     if command.include_instructions {
         request = request.include_instructions();
+    }
+    if let Some(max_context_tokens) = command.max_context_tokens {
+        request = request.with_max_context_tokens(max_context_tokens);
     }
 
     let candidates = engine
@@ -1256,6 +1263,9 @@ async fn server_recall(
         if body.include_instructions.unwrap_or(false) {
             request = request.include_instructions();
         }
+        if let Some(max_context_tokens) = body.max_context_tokens {
+            request = request.with_max_context_tokens(max_context_tokens);
+        }
 
         let mut candidates = engine.recall(&request).map_err(ServerError::internal)?;
         candidates.truncate(requested_top_k);
@@ -1272,6 +1282,7 @@ async fn server_recall(
                 "query_dimensions": body.query_vector.len(),
                 "requested_top_k": requested_top_k,
                 "searched_top_k": search_top_k,
+                "max_context_tokens": body.max_context_tokens,
                 "namespace_memory_count": namespace_memory_count,
                 "returned": returned,
             }),

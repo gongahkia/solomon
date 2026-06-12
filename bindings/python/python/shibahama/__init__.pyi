@@ -124,6 +124,7 @@ class Shibahama:
         raw_query_context: str | None = None,
         include_cold: bool = False,
         include_instructions: bool = False,
+        max_context_tokens: int | None = None,
     ) -> list[RecallCandidate]: ...
     async def async_recall(
         self,
@@ -133,6 +134,7 @@ class Shibahama:
         raw_query_context: str | None = None,
         include_cold: bool = False,
         include_instructions: bool = False,
+        max_context_tokens: int | None = None,
     ) -> list[RecallCandidate]: ...
     def memory_items(self) -> list[MemoryItem]: ...
     def export_records(self) -> list[dict[str, object]]: ...
@@ -146,6 +148,7 @@ class Shibahama:
         raw_query_context: str | None = None,
         include_cold: bool = False,
         include_instructions: bool = False,
+        max_context_tokens: int | None = None,
     ) -> RecallStream: ...
     async def async_stream_recall(
         self,
@@ -155,6 +158,7 @@ class Shibahama:
         raw_query_context: str | None = None,
         include_cold: bool = False,
         include_instructions: bool = False,
+        max_context_tokens: int | None = None,
     ) -> AsyncIterator[RecallCandidate]: ...
     def timeline(
         self,
@@ -163,6 +167,7 @@ class Shibahama:
         as_of_unix: int,
         include_cold: bool = False,
         include_instructions: bool = False,
+        max_context_tokens: int | None = None,
     ) -> list[RecallCandidate]: ...
     async def async_timeline(
         self,
@@ -171,6 +176,7 @@ class Shibahama:
         as_of_unix: int,
         include_cold: bool = False,
         include_instructions: bool = False,
+        max_context_tokens: int | None = None,
     ) -> list[RecallCandidate]: ...
     def stream_timeline(
         self,
@@ -179,6 +185,7 @@ class Shibahama:
         as_of_unix: int,
         include_cold: bool = False,
         include_instructions: bool = False,
+        max_context_tokens: int | None = None,
     ) -> RecallStream: ...
     async def async_stream_timeline(
         self,
@@ -187,6 +194,7 @@ class Shibahama:
         as_of_unix: int,
         include_cold: bool = False,
         include_instructions: bool = False,
+        max_context_tokens: int | None = None,
     ) -> AsyncIterator[RecallCandidate]: ...
     def reinforce(self, memory_id: str, outcome: AccessOutcome = "cited") -> bool: ...
     async def async_reinforce(

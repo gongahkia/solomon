@@ -193,7 +193,7 @@ Still not done / next up:
 - [x] (P2) Separate "facts" from "instructions" so retrieved memory can't inject directives
 - [x] (P2) Anomaly flags: sudden burst of contradictory writes, suspicious provenance
 - [x] (P2) Per-item audit trail of all credence/tier changes with cause
-- [ ] (P3) Optional signed provenance (write attribution that can't be forged)
+- [x] (P3) Optional signed provenance (write attribution that can't be forged)
 
 ---
 

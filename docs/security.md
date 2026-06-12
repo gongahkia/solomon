@@ -43,6 +43,13 @@ Suspicious provenance inspection currently flags:
 - web source refs that are not HTTP(S) URLs;
 - non-user sources claiming `FirmAuthoritative` credence.
 
+Provenance can also carry an optional keyed attribution signature. The core
+model exposes `ProvenanceSigningKey`, `Provenance::with_signature`, and
+`Provenance::verify_signature`, using BLAKE3 keyed hashing over source kind,
+source ref, and ingester. This protects attribution fields when the signing key
+is kept secret. It is not a content-integrity signature and it is not a public
+key infrastructure.
+
 ## Poisoning Resistance
 
 Shibahama separates trust from usefulness. Significance is based on use, but
@@ -178,6 +185,8 @@ The current public security-relevant surfaces are:
   durable re-verification flags instead of closing valid-time intervals;
 - `SanitizingGateway`, the sync recall hook where deployment-specific
   tokenization or redaction can sit before memory text is returned;
+- `ProvenanceSigningKey` and signed `Provenance`, which provide optional keyed
+  attribution checks for source metadata;
 - recall candidate `read_safety_findings`, exposed by the Rust core and
   bindings;
 - `why(memory_id)` traces, which expose provenance, credence, tier, currency,
@@ -202,7 +211,6 @@ reviewed separately.
 The current repository does not yet guarantee:
 
 - built-in encryption at rest for the default redb backend;
-- signed provenance or non-forgeable write attribution;
 - hard multi-tenant isolation inside one store;
 - a complete prompt-injection defense for all host-agent usage patterns;
 - deletion or right-to-erasure semantics, because the core invariant is

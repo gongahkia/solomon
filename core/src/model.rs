@@ -189,6 +189,20 @@ pub enum SourceKind {
     Tool,
 }
 
+impl SourceKind {
+    /// Stable string used in signed provenance payloads.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Agent => "agent",
+            Self::File => "file",
+            Self::Web => "web",
+            Self::Tool => "tool",
+        }
+    }
+}
+
 /// Semantic class for stored memory content.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum MemoryKind {
@@ -197,6 +211,51 @@ pub enum MemoryKind {
     Fact,
     /// Instruction or directive that must not be mixed into fact recall by default.
     Instruction,
+}
+
+/// Optional keyed signature over provenance attribution fields.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProvenanceSignature {
+    /// Signature algorithm identifier.
+    pub algorithm: String,
+    /// Caller-managed key identifier.
+    pub key_id: String,
+    /// Hex-encoded keyed digest.
+    pub digest: String,
+}
+
+/// Key material used to sign and verify provenance attribution.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProvenanceSigningKey {
+    key_id: String,
+    key: [u8; 32],
+}
+
+impl ProvenanceSigningKey {
+    /// Builds a signing key from caller-managed secret material.
+    #[must_use]
+    pub fn new(key_id: impl Into<String>, secret: impl AsRef<[u8]>) -> Self {
+        Self {
+            key_id: key_id.into(),
+            key: blake3::derive_key("shibahama provenance signing v1", secret.as_ref()),
+        }
+    }
+
+    /// Returns the caller-managed key id.
+    #[must_use]
+    pub fn key_id(&self) -> &str {
+        &self.key_id
+    }
+
+    fn sign(&self, provenance: &Provenance) -> ProvenanceSignature {
+        let digest = blake3::keyed_hash(&self.key, &provenance_signature_payload(provenance));
+
+        ProvenanceSignature {
+            algorithm: PROVENANCE_SIGNATURE_ALGORITHM.to_owned(),
+            key_id: self.key_id.clone(),
+            digest: digest.to_hex().to_string(),
+        }
+    }
 }
 
 /// Provenance attached to every persisted memory.
@@ -208,6 +267,9 @@ pub struct Provenance {
     pub source_ref: Option<String>,
     /// Actor, process, or integration that ingested the memory.
     pub ingested_by: String,
+    /// Optional keyed signature for source attribution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<ProvenanceSignature>,
 }
 
 impl Provenance {
@@ -222,8 +284,73 @@ impl Provenance {
             source_kind,
             source_ref: source_ref.into(),
             ingested_by: ingested_by.into(),
+            signature: None,
         }
     }
+
+    /// Returns a copy with a keyed provenance-attribution signature attached.
+    #[must_use]
+    pub fn with_signature(mut self, key: &ProvenanceSigningKey) -> Self {
+        self.sign(key);
+        self
+    }
+
+    /// Attaches a keyed provenance-attribution signature in place.
+    pub fn sign(&mut self, key: &ProvenanceSigningKey) {
+        self.signature = Some(key.sign(self));
+    }
+
+    /// Verifies the attached provenance signature with `key`.
+    #[must_use]
+    pub fn verify_signature(&self, key: &ProvenanceSigningKey) -> bool {
+        self.signature.as_ref().is_some_and(|signature| {
+            signature.algorithm == PROVENANCE_SIGNATURE_ALGORITHM
+                && signature.key_id == key.key_id
+                && constant_time_eq(&signature.digest, &key.sign(self).digest)
+        })
+    }
+}
+
+const PROVENANCE_SIGNATURE_ALGORITHM: &str = "blake3-keyed-v1";
+
+fn provenance_signature_payload(provenance: &Provenance) -> Vec<u8> {
+    let mut payload = Vec::new();
+
+    append_signature_field(&mut payload, "source_kind", provenance.source_kind.as_str());
+    append_signature_field(
+        &mut payload,
+        "source_ref",
+        provenance.source_ref.as_deref().unwrap_or(""),
+    );
+    append_signature_field(&mut payload, "ingested_by", &provenance.ingested_by);
+
+    payload
+}
+
+fn append_signature_field(payload: &mut Vec<u8>, name: &str, value: &str) {
+    payload.extend_from_slice(name.as_bytes());
+    payload.push(0);
+    payload.extend_from_slice(value.len().to_string().as_bytes());
+    payload.push(0);
+    payload.extend_from_slice(value.as_bytes());
+    payload.push(0xff);
+}
+
+fn constant_time_eq(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+
+    if left.len() != right.len() {
+        return false;
+    }
+
+    let mut diff = 0_u8;
+
+    for (left, right) in left.iter().zip(right) {
+        diff |= left ^ right;
+    }
+
+    diff == 0
 }
 
 /// Bi-temporal timestamps for a memory item or graph edge.
@@ -590,6 +717,43 @@ mod tests {
         assert_eq!(provenance.source_kind, SourceKind::File);
         assert_eq!(provenance.source_ref.as_deref(), Some("core/src/model.rs"));
         assert_eq!(provenance.ingested_by, "unit-test");
+    }
+
+    #[test]
+    fn provenance_signature_verifies_source_attribution() {
+        let key = ProvenanceSigningKey::new("unit-key", b"shared secret");
+        let provenance = Provenance::new(
+            SourceKind::Tool,
+            Some("tool:calendar".to_owned()),
+            "unit-test",
+        )
+        .with_signature(&key);
+
+        assert!(provenance.verify_signature(&key));
+        assert_eq!(
+            provenance
+                .signature
+                .as_ref()
+                .map(|signature| signature.key_id.as_str()),
+            Some("unit-key")
+        );
+    }
+
+    #[test]
+    fn provenance_signature_rejects_tampering_and_wrong_keys() {
+        let key = ProvenanceSigningKey::new("unit-key", b"shared secret");
+        let wrong_key = ProvenanceSigningKey::new("other-key", b"shared secret");
+        let mut provenance = Provenance::new(
+            SourceKind::File,
+            Some("repo:Cargo.toml".to_owned()),
+            "unit-test",
+        )
+        .with_signature(&key);
+
+        assert!(!provenance.verify_signature(&wrong_key));
+
+        provenance.ingested_by = "attacker".to_owned();
+        assert!(!provenance.verify_signature(&key));
     }
 
     #[test]

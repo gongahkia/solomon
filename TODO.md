@@ -125,7 +125,7 @@ checkout is required at runtime.
 - [x] Service-level boundary tests now cover ingestion and model egress fail-closed behavior with the vendored engine forced to fail.
 - [x] Soak test covers 300 direct dependents.
 - [x] Fuzz/property coverage now includes non-empty service ingest round trips with metadata-only audit checks and generated-text retrieval invariants in addition to empty-content rejection.
-- [ ] No browser/UI/desktop packaging tests exist.
+- [x] Desktop packaging tests validate the PyInstaller local binary spec, CLI entrypoint, packaging dependency, and documented artifact names.
 
 ## Phase 14 — Performance and hardening
 

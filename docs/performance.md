@@ -25,3 +25,21 @@ orchestration.
 Whole-store scans are still allowed in administrative paths where the caller asks for aggregate
 state, including server readiness, server inspection, export, snapshot, and tier-capacity
 enforcement. Those paths must stay outside default recall.
+
+## Embedded Concurrency Boundary
+
+The embedded `RedbMemoryStore` is intended to be shared as one database handle
+across threads with many short read transactions and one writer transaction at a
+time. `redb` supplies MVCC-style read transactions for committed state, while
+write transactions serialize through the backend.
+
+The regression test `redb_store_allows_concurrent_readers_with_a_single_writer`
+asserts that the store is `Send + Sync`, keeps an existing memory readable from
+several reader threads, and commits a single writer's appended memories without
+corrupting the event log or materialized item table.
+
+This does not make one `Shibahama` engine instance multi-writer at the API
+level. The engine also owns a mutable vector index, so server and async wrappers
+continue to serialize full-engine mutations around their existing lock. Systems
+that need multi-writer fan-in should queue writes or shard by namespace rather
+than sharing one mutable vector index without coordination.

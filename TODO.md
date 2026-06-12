@@ -321,7 +321,7 @@ Still not done / next up:
 - [x] (P1) Ensure no global scan exists anywhere on the hot path (lazy everything)
 - [ ] (P2) Profile and optimise the significance recompute path
 - [ ] (P2) Memory-footprint budget for embedded mode (must stay modest to justify "embeddable")
-- [ ] (P2) Concurrency: safe multi-reader / single-writer (or MVCC) story, tested
+- [x] (P2) Concurrency: safe multi-reader / single-writer (or MVCC) story, tested
 - [ ] (P3) SIMD / batched vector ops where the index backend allows
 - [ ] (P3) Optional mmap for cold-tier compressed store
 

@@ -2610,6 +2610,8 @@ mod tests {
         CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, Provenance, SourceKind, TemporalBounds,
     };
     use crate::vector::{HnswVectorIndex, VectorIndex};
+    use std::sync::{Arc, Barrier};
+    use std::thread;
     use tempfile::NamedTempFile;
     use tempfile::tempdir;
 
@@ -2818,6 +2820,66 @@ mod tests {
             }
         );
         assert_eq!(stored, item);
+    }
+
+    #[test]
+    fn redb_store_allows_concurrent_readers_with_a_single_writer() {
+        fn assert_send_sync<T: Send + Sync>() {}
+
+        assert_send_sync::<RedbMemoryStore>();
+
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = Arc::new(RedbMemoryStore::open(file.path()).expect("store should open"));
+        let seed = test_item("seed");
+        let seed_id = seed.id;
+
+        store.write(&seed).expect("seed should write");
+
+        let participants = 5;
+        let barrier = Arc::new(Barrier::new(participants));
+        let readers = (0..4)
+            .map(|_| {
+                let store = Arc::clone(&store);
+                let barrier = Arc::clone(&barrier);
+
+                thread::spawn(move || {
+                    barrier.wait();
+
+                    for _ in 0..64 {
+                        let item = store
+                            .get(seed_id)
+                            .expect("reader should not fail")
+                            .expect("seed should remain readable");
+                        let events = store.events().expect("events should remain readable");
+
+                        assert_eq!(item.content, "seed");
+                        assert!(!events.is_empty());
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        let writer = {
+            let store = Arc::clone(&store);
+            let barrier = Arc::clone(&barrier);
+
+            thread::spawn(move || {
+                barrier.wait();
+
+                for index in 0..16 {
+                    let item = test_item(&format!("writer-{index}"));
+
+                    store.write(&item).expect("single writer should commit");
+                }
+            })
+        };
+
+        for reader in readers {
+            reader.join().expect("reader should finish");
+        }
+        writer.join().expect("writer should finish");
+
+        assert_eq!(store.events().expect("events should read").len(), 17);
+        assert_eq!(store.memory_items().expect("items should read").len(), 17);
     }
 
     #[test]

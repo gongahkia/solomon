@@ -153,10 +153,13 @@ When changing CurrencyBench:
 
 ## Citation
 
-Until a formal paper or dataset DOI exists, cite this repository path and commit:
+Repository citation metadata now lives in `CITATION.cff`, and Zenodo metadata
+lives in `.zenodo.json`. Until a DOI is minted from a formal archived release,
+cite this repository path and commit:
 
 ```text
 CurrencyBench v0, Shibahama repository, benchmarks/currencybench, commit <commit>.
 ```
 
-Include the exact result JSON used for any claim.
+Include the exact result JSON used for any claim. See
+`docs/launch/citable-submission.md` for the DOI submission checklist.

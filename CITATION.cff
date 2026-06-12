@@ -1,16 +1,23 @@
 cff-version: 1.2.0
-message: "If you use Solomon, cite this repository and version."
-title: "Solomon"
+message: "If you use Shibahama or CurrencyBench, cite this repository release."
+title: "Shibahama: Usage-Aware Reconstructive Memory for Long-Lived Agents"
 version: "0.1.0"
-date-released: "2026-06-11"
-url: "https://github.com/gongahkia/solomon"
+date-released: "2026-06-12"
+repository-code: "https://github.com/gongahkia/shibahama"
+license: MIT
 authors:
-  - name: "Solomon contributors"
+  - name: "Shibahama contributors"
+keywords:
+  - agent memory
+  - retrieval
+  - benchmark
+  - temporal knowledge
+  - stale answer detection
 preferred-citation:
   type: software
-  title: "Solomon"
+  title: "CurrencyBench v0: Fact-Change Benchmark for Agent Memory Currency"
   version: "0.1.0"
-  date-released: "2026-06-11"
-  url: "https://github.com/gongahkia/solomon"
+  date-released: "2026-06-12"
+  repository-code: "https://github.com/gongahkia/shibahama/tree/main/benchmarks/currencybench"
   authors:
-    - name: "Solomon contributors"
+    - name: "Shibahama contributors"

@@ -46,7 +46,7 @@ Still not done / next up:
   - Optional mmap for cold-tier compressed store is closed as a v0.1 non-goal in ADR 0008; current cold content stays in the compressed redb `cold_content` table.
 - Launch assets:
   - Actually reach out to early users and collect first issues.
-  - Submit CurrencyBench writeup somewhere citable.
+  - CurrencyBench citation metadata and Zenodo checklist are prepared; actual DOI submission is externally blocked on archive account/release-owner action.
 
 ---
 
@@ -356,7 +356,7 @@ Still not done / next up:
 - [x] (P1) Prepare a FAQ for the predictable HN objections (null hypothesis, "isn't this just a cache", security)
 - [x] (P2) A short launch blog post / writeup (optional, README may suffice)
 - [!] (P2) Reach out for early users / collect first issues — blocked on recipient list and account approval; outreach tracker and feedback issue template added
-- [ ] (P3) Submit CurrencyBench writeup somewhere citable
+- [!] (P3) Submit CurrencyBench writeup somewhere citable — blocked on archive account/release-owner action; `CITATION.cff`, `.zenodo.json`, and submission checklist added
 
 ---
 

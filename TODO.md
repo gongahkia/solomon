@@ -142,7 +142,7 @@ checkout is required at runtime.
 - [x] Fail-closed boundary behavior is enforced in service-level tests.
 - [x] Volatile mapping hygiene is tested.
 - [ ] Auth/tenancy is basic API-key/header middleware, not a full auth system.
-- [ ] Stored-knowledge sanitization is limited to instruction-role separation and boundary-on-ingest, not deep content hardening.
+- [x] Stored-knowledge hardening normalizes control characters, detects instruction-like content on ingest, records findings, marks unsafe content as instruction-role, and blocks it from load-bearing answers.
 
 ## Phase 16 — Repo docs
 

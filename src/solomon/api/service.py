@@ -21,6 +21,7 @@ from solomon.currency.engine import (
 )
 from solomon.currency.models import (
     CredenceTier,
+    KnowledgeContentRole,
     KnowledgeItem,
     KnowledgeKind,
     Matter,
@@ -37,6 +38,7 @@ from solomon.graph.suggestions import ReferenceExtraction, extract_defined_terms
 from solomon.graph.visualization import GraphFormat, dependency_graph_view, render_dependency_graph
 from solomon.orchestrator.models import ModelRequest, ModelRouter, RoutedModelResult
 from solomon.orchestrator.retrieval import MatterContext, RecallOptions, RetrievalOrchestrator, SQLiteRetrievalIndex
+from solomon.store.hardening import harden_stored_content
 from solomon.store.sqlite import ItemNotFoundError, SQLiteKnowledgeStore
 
 
@@ -46,6 +48,7 @@ class IngestRequest(SolomonModel):
     source_kind: SourceKind
     source_ref: str = Field(min_length=1)
     author: str | None = None
+    content_role: KnowledgeContentRole | None = None
     matter_id: str | None = None
     client_id: str | None = None
     valid_from: datetime | None = None
@@ -149,9 +152,15 @@ class SolomonService:
         self.boundary = boundary or KaypohBoundary()
 
     def ingest(self, request: IngestRequest) -> KnowledgeItem:
+        hardened = harden_stored_content(request.content)
         item = KnowledgeItem(
             kind=request.kind,
-            content=request.content,
+            content=hardened.content,
+            content_role=(
+                KnowledgeContentRole.INSTRUCTION
+                if hardened.content_role is KnowledgeContentRole.INSTRUCTION
+                else request.content_role or hardened.content_role
+            ),
             provenance=Provenance(
                 source_kind=request.source_kind,
                 source_ref=request.source_ref,
@@ -162,6 +171,7 @@ class SolomonService:
             ingested_at=request.ingested_at or datetime.now().astimezone(),
             matter_id=request.matter_id,
             client_id=request.client_id,
+            metadata={"stored_content_hardening": hardened.findings} if hardened.findings else {},
         )
         item, _review = self.boundary.review_for_ingest(item)
         credence_entry_start = len(self.credence.entries)

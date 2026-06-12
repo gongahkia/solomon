@@ -140,6 +140,8 @@ class CredenceLedger:
     def load_bearing_decision(self, item: KnowledgeItem) -> LoadBearingDecision:
         reasons: list[str] = []
         evaluation = evaluate_currency(item)
+        if item.content_role is KnowledgeContentRole.INSTRUCTION:
+            reasons.append("stored content is instruction-role and cannot support load-bearing output")
         if evaluation.currency_state is not CurrencyState.LIVE:
             reasons.append(f"currency state is {evaluation.currency_state.value}")
         if self.policy.tier_rank[item.credence_tier] < self.policy.tier_rank[self.policy.load_bearing_minimum]:

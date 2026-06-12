@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from solomon.api.service import IngestRequest, SolomonService, VerificationRequest
+from solomon.currency.cache import CurrencyEvaluationCache
 from solomon.currency.engine import (
     VerificationOutcome,
     VerificationPolicy,
@@ -102,6 +104,71 @@ def test_live_items_default_query_path_filters_stale_and_superseded(tmp_path: Pa
     store.write_item(stale)
 
     assert live_items(store) == [live]
+
+
+def test_currency_cache_recomputes_for_item_state_metadata_and_as_of_day() -> None:
+    cache = CurrencyEvaluationCache()
+    item = _item("cached", verified_at=_dt(2025, 12, 1))
+
+    live = cache.get_or_evaluate(item, as_of=_dt(2026, 1, 1))
+    cached_live = cache.get_or_evaluate(item, as_of=_dt(2026, 1, 1))
+    assert cached_live is live
+    assert live.currency_state is CurrencyState.LIVE
+
+    stale = item.model_copy(
+        update={
+            "metadata": {
+                "staleness_reasons": [
+                    {"dependency_id": "reg-r-12", "reason": "external authority changed"},
+                ]
+            }
+        }
+    )
+    stale_result = cache.get_or_evaluate(stale, as_of=_dt(2026, 1, 1))
+    assert stale_result is not live
+    assert stale_result.currency_state is CurrencyState.STALE_PENDING_REVERIFICATION
+    assert stale_result.stale_reasons[0]["dependency_id"] == "reg-r-12"
+
+    time_limited = item.model_copy(update={"valid_to": _dt(2026, 1, 2), "successor_id": "successor"})
+    before_close = cache.get_or_evaluate(time_limited, as_of=_dt(2026, 1, 1))
+    after_close = cache.get_or_evaluate(time_limited, as_of=_dt(2026, 1, 3))
+    assert before_close.currency_state is CurrencyState.LIVE
+    assert after_close.currency_state is CurrencyState.SUPERSEDED
+
+
+def test_service_record_verification_invalidates_cached_currency(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="reg r structure x",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo",
+        )
+    )
+    stale = item.model_copy(
+        update={
+            "currency_state": CurrencyState.STALE_PENDING_REVERIFICATION,
+            "metadata": {
+                "staleness_reasons": [
+                    {"dependency_id": "reg-r-12", "reason": "external authority changed"},
+                ]
+            },
+        }
+    )
+    service.store.update_item(stale, event_type="knowledge_item_stale")
+
+    assert service.evaluate_currency(item.id)["currency_state"] == "StalePendingReverification"
+    assert service.currency_cache.contains(item.id)
+
+    service.record_verification(
+        item.id,
+        VerificationRequest(by="Partner B", outcome=VerificationOutcome.REAFFIRM),
+    )
+
+    assert not service.currency_cache.contains(item.id)
+    assert service.evaluate_currency(item.id)["currency_state"] == "Live"
+    assert service.evaluate_currency(item.id)["stale_reasons"] == []
 
 
 def test_register_authority_change_triggers_graph_propagation(tmp_path: Path) -> None:

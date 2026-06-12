@@ -134,7 +134,7 @@ checkout is required at runtime.
 - [x] Graph target indexes support fast direct dependent lookup.
 - [ ] No serious p50/p95 benchmark gate is enforced in CI.
 - [ ] Concurrency is SQLite WAL plus busy timeout, not a fully characterized multi-writer design.
-- [ ] Currency cache invalidation exists for authority changes, but cache correctness is narrowly tested.
+- [x] Currency cache correctness is directly tested for item-state fingerprints, metadata staleness reasons, as-of-day changes, authority-change invalidation, and verification invalidation.
 
 ## Phase 15 — Security and governance
 

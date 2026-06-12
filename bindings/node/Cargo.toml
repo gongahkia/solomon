@@ -13,6 +13,7 @@ documentation.workspace = true
 readme = "README.md"
 keywords.workspace = true
 categories.workspace = true
+publish = false
 
 [lib]
 name = "shibahama"

@@ -62,3 +62,49 @@ npm install shibahama@0.1.0
 
 For public packages published from a public GitHub repository, prefer npm
 trusted publishing so npm can generate provenance automatically.
+
+## Rust Crates
+
+The publishable Rust crates are:
+
+- `shibahama-core`
+- `shibahama-cli`
+
+The Rust crates used only for Python and Node native bindings are marked
+`publish = false` to avoid accidental crates.io uploads.
+
+Build the core crate package and dry-run the core crate publish:
+
+```sh
+scripts/release/rust-publish.sh
+```
+
+Publish after crates.io auth is configured:
+
+```sh
+CARGO_REGISTRY_TOKEN=... SHIBAHAMA_PUBLISH=1 scripts/release/rust-publish.sh
+cargo install shibahama-cli --version 0.1.0
+```
+
+`shibahama-cli` depends on `shibahama-core = 0.1.0`, so it cannot be fully
+packaged or dry-run against crates.io until the core crate exists in the
+crates.io index. Publish the core crate first, wait for the index, then publish
+the CLI.
+
+## v0.1.0 Release Sequence
+
+Actual `v0.1.0` release remains blocked until crates.io, TestPyPI/PyPI, and npm
+auth or trusted publishing are configured. The local preflight sequence is:
+
+```sh
+scripts/release/rust-publish.sh
+scripts/release/python-publish.sh testpypi
+scripts/release/npm-publish.sh
+```
+
+After all registry installs are verified, tag and push:
+
+```sh
+git tag -a v0.1.0 -m "v0.1.0"
+git push origin v0.1.0
+```

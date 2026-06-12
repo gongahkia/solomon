@@ -350,7 +350,7 @@ Still not done / next up:
 
 ## Phase 15 — Launch (P1/P2)
 
-- [ ] (P0) Tag a real `v0.1.0`, publish crate + pip + npm
+- [!] (P0) Tag a real `v0.1.0`, publish crate + pip + npm — blocked on crates.io/PyPI/npm auth and final release owner action; local preflight helpers added under `scripts/release/`
 - [x] (P1) Record the README demo GIF from the Tideline
 - [x] (P1) Write the Show HN post (lead with the embeddable-core + the "remembers why you said no" hook)
 - [x] (P1) Prepare a FAQ for the predictable HN objections (null hypothesis, "isn't this just a cache", security)

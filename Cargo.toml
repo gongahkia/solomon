@@ -5,6 +5,7 @@ members = [
     "bindings/node",
     "bindings/python",
     "core",
+    "examples/rust/quickstart",
     "shibahama-cli",
 ]
 resolver = "3"

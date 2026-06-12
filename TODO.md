@@ -5,6 +5,9 @@ A usage-aware, reconstructive memory engine for LLM agents.
 Priority scale: **P0** = must exist for the thing to work at all · **P1** = core thesis / required for a credible launch · **P2** = strong differentiator · **P3** = polish / stretch / nice-to-have.
 Phases run roughly in order but P-tags cut across them — do all P0s in a phase before P2s in the same phase.
 
+Status markers: **[x]** complete or consciously closed in-repo · **[!]**
+externally blocked and no longer open as repo implementation work.
+
 ---
 
 ## Stop point / next work
@@ -213,7 +216,7 @@ Still not done / next up:
 ### Python bindings (`pip install shibahama`)
 - [x] (P0) Set up PyO3 + maturin build
 - [x] (P0) Expose the full API with Pythonic types and type stubs (.pyi)
-- [ ] (P0) Publish a working `pip install` from TestPyPI, then PyPI
+- [!] (P0) Publish a working `pip install` from TestPyPI, then PyPI — blocked on TestPyPI/PyPI token or trusted publishing setup; local build/check helper added at `scripts/release/python-publish.sh`
 - [x] (P1) Async support that plays well with asyncio
 - [x] (P1) Integration shim for a popular agent framework (LangChain/LlamaIndex memory interface)
 - [x] (P2) Pandas/Arrow export of memory state for analysis

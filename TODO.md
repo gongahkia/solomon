@@ -339,7 +339,7 @@ Still not done / next up:
 - [x] (P2) `docs/benchmarks.md`: methodology + how to reproduce
 - [x] (P2) `docs/security.md`: the ASI06/poisoning posture and what is/ isn't guaranteed
 - [x] (P2) ADR index kept current
-- [ ] (P3) A short `docs/why-shibahama.md` telling the rakugo story + the design philosophy
+- [x] (P3) A short `docs/why-shibahama.md` telling the rakugo story + the design philosophy
 
 ---
 

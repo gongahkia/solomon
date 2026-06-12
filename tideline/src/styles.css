@@ -429,6 +429,78 @@ input[type="range"] {
   stroke-dasharray: 5 7;
 }
 
+.diff-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.diff-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.diff-controls label {
+  grid-template-columns: 52px minmax(0, 1fr) 48px;
+  align-items: center;
+  text-transform: uppercase;
+}
+
+.diff-controls input {
+  min-height: 34px;
+  padding: 0;
+}
+
+.diff-controls span,
+.diff-summary span {
+  border: 1px solid #d8d0c1;
+  background: #fff9ee;
+  color: #4a4943;
+  padding: 6px 8px;
+  font-size: 0.78rem;
+  font-weight: 750;
+  text-align: center;
+}
+
+.diff-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.diff-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.diff-column {
+  min-height: 190px;
+  border-top: 1px solid #ddd3c4;
+  padding-top: 10px;
+}
+
+.diff-column h2 {
+  margin-bottom: 10px;
+}
+
+.diff-column p {
+  border: 1px solid #d8d0c1;
+  background: #fff9ee;
+  margin-bottom: 8px;
+  padding: 9px;
+  color: #3d3a34;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.diff-column .empty {
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0;
+  color: #777066;
+}
+
 @media (max-width: 960px) {
   .topbar,
   .workspace {
@@ -456,6 +528,11 @@ input[type="range"] {
   .workspace {
     display: grid;
   }
+
+  .diff-summary,
+  .diff-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
@@ -466,7 +543,14 @@ input[type="range"] {
   .control-band,
   .moment-row,
   .poisoning-grid,
+  .diff-controls,
+  .diff-summary,
+  .diff-grid,
   .time-row {
+    grid-template-columns: 1fr;
+  }
+
+  .diff-controls label {
     grid-template-columns: 1fr;
   }
 

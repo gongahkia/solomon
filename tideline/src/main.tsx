@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import {
   Activity,
   Download,
+  GitCompareArrows,
   Pause,
   Play,
   RefreshCcw,
@@ -101,7 +102,7 @@ type WhyTrace = {
   audit_trail: string[];
 };
 
-type ViewName = "moment" | "poisoning" | "bitemporal" | "graph";
+type ViewName = "moment" | "poisoning" | "bitemporal" | "graph" | "diff";
 
 const API_BASE = "http://127.0.0.1:8765";
 const tierOrder: Record<string, number> = { hot: 0, warm: 1, cold: 2 };
@@ -118,6 +119,8 @@ function App() {
   const [live, setLive] = useState(false);
   const [activeView, setActiveView] = useState<ViewName>("moment");
   const [sequence, setSequence] = useState<number>(0);
+  const [diffFrom, setDiffFrom] = useState<number>(0);
+  const [diffTo, setDiffTo] = useState<number>(0);
   const [asOf, setAsOf] = useState("");
 
   const requestHeaders = useMemo(() => {
@@ -144,8 +147,11 @@ function App() {
     }
 
     const data = (await response.json()) as TidelineSnapshot;
+    const lastSequence = data.last_sequence ?? 0;
     setSnapshot(data);
-    setSequence(data.last_sequence ?? 0);
+    setSequence(lastSequence);
+    setDiffFrom((current) => Math.min(current, lastSequence));
+    setDiffTo((current) => (current === 0 ? lastSequence : Math.min(current, lastSequence)));
     setSelectedId((current) => current ?? data.memories[0]?.id ?? null);
     setStatus("synced");
   }, [asOf, baseUrl, requestHeaders]);
@@ -192,6 +198,7 @@ function App() {
   }, [loadWhy, selectedId]);
 
   const events = snapshot?.events ?? [];
+  const maxSequence = snapshot?.last_sequence ?? 0;
   const visibleEvents = events.filter((event) => event.sequence <= sequence);
   const activeEvent = visibleEvents.at(-1) ?? null;
   const firstSeen = useMemo(() => {
@@ -338,11 +345,24 @@ function App() {
           <button className={activeView === "graph" ? "active" : ""} onClick={() => setActiveView("graph")}>
             <Waypoints size={16} /> Graph
           </button>
+          <button className={activeView === "diff" ? "active" : ""} onClick={() => setActiveView("diff")}>
+            <GitCompareArrows size={16} /> Diff
+          </button>
         </nav>
         {activeView === "moment" && <MomentView events={momentEvents} memories={visibleMemories} />}
         {activeView === "poisoning" && <PoisoningView memories={visibleMemories} lowCredence={lowCredence} />}
         {activeView === "bitemporal" && <BiTemporalView memories={visibleMemories} asOf={asOf} />}
         {activeView === "graph" && <GraphView snapshot={snapshot} selectedId={selectedId} onSelect={setSelectedId} />}
+        {activeView === "diff" && (
+          <DiffView
+            snapshot={snapshot}
+            fromSequence={diffFrom}
+            toSequence={diffTo}
+            maxSequence={maxSequence}
+            onFromChange={setDiffFrom}
+            onToChange={setDiffTo}
+          />
+        )}
       </section>
     </main>
   );
@@ -596,9 +616,221 @@ function GraphView({
   );
 }
 
+function DiffView({
+  snapshot,
+  fromSequence,
+  toSequence,
+  maxSequence,
+  onFromChange,
+  onToChange,
+}: {
+  snapshot: TidelineSnapshot | null;
+  fromSequence: number;
+  toSequence: number;
+  maxSequence: number;
+  onFromChange: (sequence: number) => void;
+  onToChange: (sequence: number) => void;
+}) {
+  const diff = useMemo(
+    () => buildSessionDiff(snapshot, fromSequence, toSequence),
+    [fromSequence, snapshot, toSequence],
+  );
+
+  return (
+    <section className="panel wide-panel diff-panel">
+      <div className="panel-title">
+        <h2>Session Diff</h2>
+        <span>
+          {diff.start} {"->"} {diff.end}
+        </span>
+      </div>
+      <div className="diff-controls">
+        <label>
+          From
+          <input
+            type="range"
+            min={0}
+            max={maxSequence}
+            value={fromSequence}
+            onChange={(event) => onFromChange(Number(event.target.value))}
+          />
+          <span>{fromSequence}</span>
+        </label>
+        <label>
+          To
+          <input
+            type="range"
+            min={0}
+            max={maxSequence}
+            value={toSequence}
+            onChange={(event) => onToChange(Number(event.target.value))}
+          />
+          <span>{toSequence}</span>
+        </label>
+      </div>
+      <div className="diff-summary">
+        <span>
+          Known {diff.knownAtStart} {"->"} {diff.knownAtEnd}
+        </span>
+        <span>
+          Active {diff.activeAtStart} {"->"} {diff.activeAtEnd}
+        </span>
+        <span>{diff.events.length} events</span>
+        <span>{diff.graphChanges.length} graph changes</span>
+      </div>
+      <div className="diff-grid">
+        <DiffColumn title="New Memories" empty="No new memories">
+          {diff.addedMemories.map((memory) => (
+            <p key={memory}>{memory}</p>
+          ))}
+        </DiffColumn>
+        <DiffColumn title="State Changes" empty="No invalidations or reconstructions">
+          {diff.stateChanges.map((event) => (
+            <p key={event.sequence}>
+              <strong>#{event.sequence}</strong> {event.kind} {event.memoryLabels.join(" -> ")}
+            </p>
+          ))}
+        </DiffColumn>
+        <DiffColumn title="Tier Moves" empty="No tier changes">
+          {diff.tierChanges.map((event) => (
+            <p key={event.sequence}>
+              <strong>#{event.sequence}</strong> {event.memoryLabels[0]} {event.tier_from ?? "?"} {"->"}{" "}
+              {event.tier_to ?? "?"}
+            </p>
+          ))}
+        </DiffColumn>
+        <DiffColumn title="Accesses" empty="No access events">
+          {diff.accesses.map((event) => (
+            <p key={event.sequence}>
+              <strong>#{event.sequence}</strong> {event.memoryLabels[0]} {event.access_outcome ?? "surfaced"}
+            </p>
+          ))}
+        </DiffColumn>
+      </div>
+    </section>
+  );
+}
+
+function DiffColumn({
+  title,
+  empty,
+  children,
+}: {
+  title: string;
+  empty: string;
+  children: React.ReactNode;
+}) {
+  const hasChildren = React.Children.count(children) > 0;
+
+  return (
+    <div className="diff-column">
+      <h2>{title}</h2>
+      {hasChildren ? children : <p className="empty">{empty}</p>}
+    </div>
+  );
+}
+
 function memoryLabel(content: string) {
   const normalized = content.replace(/\s+/g, " ").trim();
   return normalized.length > 28 ? `${normalized.slice(0, 25)}...` : normalized;
+}
+
+function buildSessionDiff(snapshot: TidelineSnapshot | null, fromSequence: number, toSequence: number) {
+  const events = snapshot?.events ?? [];
+  const memories = snapshot?.memories ?? [];
+  const graphEdges = snapshot?.graph.edges ?? [];
+  const labels = new Map(memories.map((memory) => [memory.id, memoryLabel(memory.content)]));
+  const start = Math.min(fromSequence, toSequence);
+  const end = Math.max(fromSequence, toSequence);
+  const eventsInRange = events
+    .filter((event) => event.sequence > start && event.sequence <= end)
+    .map((event) => ({
+      ...event,
+      memoryLabels: event.memory_ids.map((id) => labels.get(id) ?? shortId(id)),
+    }));
+  const knownAtStart = knownMemoryIdsAt(events, start);
+  const knownAtEnd = knownMemoryIdsAt(events, end);
+  const activeAtStart = activeMemoryIdsAt(events, start);
+  const activeAtEnd = activeMemoryIdsAt(events, end);
+  const addedMemories = [...knownAtEnd]
+    .filter((id) => !knownAtStart.has(id))
+    .map((id) => labels.get(id) ?? shortId(id));
+  const stateChanges = eventsInRange.filter((event) =>
+    ["memory_invalidated", "reconstruction_applied", "reverification_flagged", "content_compacted"].includes(
+      event.kind,
+    ),
+  );
+  const tierChanges = eventsInRange.filter((event) => event.kind === "tier_changed");
+  const accesses = eventsInRange.filter((event) => event.kind === "access_recorded");
+  const graphChanges = graphEdges.filter((edge) => {
+    const sequence = sequenceFromGraphEdge(edge.id);
+    return sequence !== null && sequence > start && sequence <= end;
+  });
+
+  return {
+    start,
+    end,
+    events: eventsInRange,
+    knownAtStart: knownAtStart.size,
+    knownAtEnd: knownAtEnd.size,
+    activeAtStart: activeAtStart.size,
+    activeAtEnd: activeAtEnd.size,
+    addedMemories,
+    stateChanges,
+    tierChanges,
+    accesses,
+    graphChanges,
+  };
+}
+
+function knownMemoryIdsAt(events: TidelineEvent[], sequence: number) {
+  const ids = new Set<string>();
+
+  for (const event of events) {
+    if (event.sequence > sequence) {
+      continue;
+    }
+
+    if (event.kind === "memory_written" || event.kind === "demo_step") {
+      for (const id of event.memory_ids) {
+        ids.add(id);
+      }
+    }
+  }
+
+  return ids;
+}
+
+function activeMemoryIdsAt(events: TidelineEvent[], sequence: number) {
+  const ids = knownMemoryIdsAt(events, sequence);
+
+  for (const event of events) {
+    if (event.sequence > sequence) {
+      continue;
+    }
+
+    if (event.kind === "memory_invalidated") {
+      ids.delete(event.memory_ids[0]);
+    }
+
+    if (event.kind === "reconstruction_applied") {
+      ids.delete(event.memory_ids[0]);
+      if (event.memory_ids[1]) {
+        ids.add(event.memory_ids[1]);
+      }
+    }
+  }
+
+  return ids;
+}
+
+function sequenceFromGraphEdge(id: string) {
+  const match = /^event-(\d+)-/.exec(id);
+  return match ? Number(match[1]) : null;
+}
+
+function shortId(id: string) {
+  return id.length > 12 ? `${id.slice(0, 8)}...` : id;
 }
 
 function timeOffset(unix: number) {

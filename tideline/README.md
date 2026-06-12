@@ -28,3 +28,7 @@ Tideline consumes the read-only server routes:
 - `GET /tideline/live?as_of_unix=...` returns an SSE stream of periodic snapshot events.
 
 The UI also calls `GET /why/{memory_id}` for the selected memory's trace.
+
+The Diff tab compares two sequence numbers from the loaded session recording and
+summarizes memory additions, invalidations, reconstructions, tier moves, access
+events, and graph-edge changes between those points.

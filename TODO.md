@@ -333,7 +333,7 @@ Still not done / next up:
 
 - [ ] (P0) Deep `README.md`: thesis, the closed-loop diagram, quickstart, benchmark table, debugger GIF (README IS the paper)
 - [x] (P1) `docs/architecture.md`: components, data model, request lifecycle
-- [ ] (P1) `docs/concepts.md`: significance, tiers, credence, reconstruction explained plainly
+- [x] (P1) `docs/concepts.md`: significance, tiers, credence, reconstruction explained plainly
 - [ ] (P1) API reference generated from doc-comments (rustdoc + typedoc + Python docstrings)
 - [ ] (P1) `examples/` with runnable snippets per binding
 - [ ] (P2) `docs/benchmarks.md`: methodology + how to reproduce

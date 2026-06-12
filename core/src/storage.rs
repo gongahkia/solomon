@@ -291,6 +291,17 @@ pub struct GraphTraversalResult {
     pub relations: Vec<Relation>,
 }
 
+/// Entities and relations believed at a point in bi-temporal graph time.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraphSnapshot {
+    /// Instant used for valid-time and ingestion-time reconstruction.
+    pub as_of: OffsetDateTime,
+    /// Entities believed at `as_of`.
+    pub entities: Vec<Entity>,
+    /// Relations believed at `as_of`, with both endpoints present in `entities`.
+    pub relations: Vec<Relation>,
+}
+
 /// Request for extracting a scoped subgraph.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SubgraphRequest {
@@ -1463,6 +1474,45 @@ impl RedbMemoryStore {
         Ok(relations)
     }
 
+    /// Reconstructs the full graph believed at `as_of`.
+    ///
+    /// Both entities and relations must have been ingested by `as_of` and valid at `as_of`.
+    /// Relations are returned only when both endpoints are also present in the snapshot, so callers
+    /// never receive dangling historical edges.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph entity or relation rows cannot be read or decoded.
+    pub fn graph_snapshot(&self, as_of: OffsetDateTime) -> Result<GraphSnapshot, StorageError> {
+        let mut entities = self
+            .graph_entities()?
+            .into_iter()
+            .filter(|entity| entity_believed_at(entity, as_of))
+            .collect::<Vec<_>>();
+        let entity_ids = entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect::<BTreeSet<_>>();
+        let mut relations = self
+            .graph_relations()?
+            .into_iter()
+            .filter(|relation| {
+                relation_believed_at(relation, as_of)
+                    && entity_ids.contains(&relation.from_entity)
+                    && entity_ids.contains(&relation.to_entity)
+            })
+            .collect::<Vec<_>>();
+
+        entities.sort_by_key(|entity| entity.id);
+        relations.sort_by_key(|relation| relation.id);
+
+        Ok(GraphSnapshot {
+            as_of,
+            entities,
+            relations,
+        })
+    }
+
     /// Detects whether `proposed` contradicts an active relation at `as_of`.
     ///
     /// A relation contradiction is defined as the same source entity and relation type pointing to
@@ -2406,6 +2456,10 @@ fn compression(error: impl std::fmt::Display) -> StorageError {
     StorageError::Compression(error.to_string())
 }
 
+fn entity_believed_at(entity: &Entity, as_of: OffsetDateTime) -> bool {
+    entity.timestamps.ingested_at <= as_of && entity.timestamps.is_valid_at(as_of)
+}
+
 fn relation_believed_at(relation: &Relation, as_of: OffsetDateTime) -> bool {
     relation.timestamps.ingested_at <= as_of && relation.timestamps.is_valid_at(as_of)
 }
@@ -2859,6 +2913,142 @@ mod tests {
                 .relations_for_entity(source.id, Some(now + time::Duration::days(1)))
                 .expect("relations should read")
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn graph_snapshot_reconstructs_graph_at_as_of() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let later = now + time::Duration::days(1);
+        let source = Entity::new(
+            "Claim",
+            "source",
+            "claim:source",
+            TemporalBounds::open_from(now, now),
+        );
+        let target = Entity::new(
+            "Claim",
+            "target",
+            "claim:target",
+            TemporalBounds::open_from(now, now),
+        );
+        let expired = Entity::new(
+            "Claim",
+            "expired",
+            "claim:expired",
+            TemporalBounds::open_from(now, now).closed_at(later),
+        );
+        let future = Entity::new(
+            "Claim",
+            "future",
+            "claim:future",
+            TemporalBounds::open_from(later, later),
+        );
+        let late_ingest = Entity::new(
+            "Claim",
+            "late-ingest",
+            "claim:late-ingest",
+            TemporalBounds::open_from(now, later),
+        );
+        let active = Relation::new(
+            "supports",
+            source.id,
+            target.id,
+            None,
+            TemporalBounds::open_from(now, now),
+        );
+        let expired_relation = Relation::new(
+            "supports",
+            source.id,
+            expired.id,
+            None,
+            TemporalBounds::open_from(now, now).closed_at(later),
+        );
+        let dangling_until_later = Relation::new(
+            "supports",
+            source.id,
+            future.id,
+            None,
+            TemporalBounds::open_from(now, now),
+        );
+        let future_relation = Relation::new(
+            "supports",
+            source.id,
+            future.id,
+            None,
+            TemporalBounds::open_from(later, later),
+        );
+        let late_relation = Relation::new(
+            "supports",
+            source.id,
+            late_ingest.id,
+            None,
+            TemporalBounds::open_from(now, later),
+        );
+
+        for entity in [&source, &target, &expired, &future, &late_ingest] {
+            store.put_entity(entity).expect("entity should write");
+        }
+
+        for relation in [
+            &active,
+            &expired_relation,
+            &dangling_until_later,
+            &future_relation,
+            &late_relation,
+        ] {
+            store.put_relation(relation).expect("relation should write");
+        }
+
+        let now_snapshot = store.graph_snapshot(now).expect("snapshot should read");
+        let now_entity_ids = now_snapshot
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect::<BTreeSet<_>>();
+        let now_relation_ids = now_snapshot
+            .relations
+            .iter()
+            .map(|relation| relation.id)
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(now_snapshot.as_of, now);
+        assert_eq!(
+            now_entity_ids,
+            BTreeSet::from([source.id, target.id, expired.id])
+        );
+        assert_eq!(
+            now_relation_ids,
+            BTreeSet::from([active.id, expired_relation.id])
+        );
+
+        let later_snapshot = store.graph_snapshot(later).expect("snapshot should read");
+        let later_entity_ids = later_snapshot
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect::<BTreeSet<_>>();
+        let later_relation_ids = later_snapshot
+            .relations
+            .iter()
+            .map(|relation| relation.id)
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(later_snapshot.as_of, later);
+        assert_eq!(
+            later_entity_ids,
+            BTreeSet::from([source.id, target.id, future.id, late_ingest.id])
+        );
+        assert_eq!(
+            later_relation_ids,
+            BTreeSet::from([
+                active.id,
+                dangling_until_later.id,
+                future_relation.id,
+                late_relation.id,
+            ])
         );
     }
 

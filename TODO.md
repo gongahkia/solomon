@@ -163,7 +163,7 @@ Still not done / next up:
 - [x] (P1) Implement graph centrality as a significance input (well-connected facts matter more)
 - [x] (P2) Entity resolution / dedup (same entity referred to differently)
 - [x] (P2) Subgraph extraction for a given matter/namespace/scope
-- [ ] (P3) Graph snapshot at an arbitrary `as_of` time (full historical graph reconstruction)
+- [x] (P3) Graph snapshot at an arbitrary `as_of` time (full historical graph reconstruction)
 
 ---
 

@@ -357,5 +357,5 @@ Still not done / next up:
 
 - [x] (P2) Confirm the encryption-at-rest trait and metadata-only logging hooks are in place
 - [x] (P3) Confirm forgetting can be globally disabled in favour of flag-for-reverification (config switch)
-- [ ] (P3) Confirm credence taxonomy is swappable (generic OSS names → firm-authoritative/etc.)
+- [x] (P3) Confirm credence taxonomy is swappable (generic OSS names → firm-authoritative/etc.)
 - [ ] (P3) Stub the sanitising-gateway integration point (where tokenisation will sit) without building it here

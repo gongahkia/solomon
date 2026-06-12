@@ -29,6 +29,10 @@ credence:
 - `Agent` and `Tool` start as `ModelInferred`;
 - `Web` starts as `Unverified`.
 
+This mapping is configurable through `ShibahamaConfig::ingest_credence`, which
+uses `IngestCredencePolicy` to map source kinds to default credence tiers.
+Per-write explicit credence still overrides the configured default.
+
 Recall candidates include provenance and credence. Ranking sorts by credence
 before score, so a low-credence memory cannot outrank a higher-credence memory
 solely because it is semantically closer or recently reinforced.
@@ -163,6 +167,8 @@ The current public security-relevant surfaces are:
 - `shibahama_core::encryption::NoopEncryption`, the explicit no-op provider;
 - server request logs from `shibahama serve`, emitted through
   `log_server_request` as metadata and cost counters only;
+- `ShibahamaConfig::ingest_credence`, which swaps source-kind default credence
+  assignments without changing the stored `CredenceTier` ordering invariant;
 - `ShibahamaConfig::forgetting`, which can route invalidation requests to
   durable re-verification flags instead of closing valid-time intervals;
 - recall candidate `read_safety_findings`, exposed by the Rust core and

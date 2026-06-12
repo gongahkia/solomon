@@ -22,6 +22,13 @@ Use four generic open-source credence tiers:
   trusted source.
 - `Unverified`: web, imported, reconstructed, or otherwise unconfirmed content.
 
+These names are the default open-source taxonomy, not a hard-coded deployment
+ontology. `IngestCredencePolicy` maps each `SourceKind` to a default
+`CredenceTier`, and `ShibahamaConfig::ingest_credence` lets callers swap that
+mapping for domain-specific trust language or source assumptions. An individual
+write can still use `MemoryWriteEvent::with_explicit_credence` when the caller
+knows a specific observation should override the source-kind default.
+
 Each memory item also has a `credence_floor`: the coldest tier/accessibility class below which decay
 and low significance cannot push it. The floor protects load-bearing negative memories and explicit
 decisions from fading into practical invisibility.
@@ -38,6 +45,8 @@ the simplest way to prevent usage reinforcement from laundering weak provenance 
 ## Consequences
 
 - Ingestion must assign credence from provenance by default.
+- The default provenance-to-credence policy must be configurable by engine
+  config, while explicit per-write credence overrides remain available.
 - APIs must expose credence and provenance on every recall candidate.
 - Reconstructed updates enter at lower credence until corroborated.
 - Contradiction handling must compare credence before deciding which item is current.

@@ -11,8 +11,8 @@ use crate::retrieval::{
 };
 use crate::significance::{SignificanceBreakdown, SignificanceConfig};
 use crate::storage::{
-    EventRecord, MemoryAuditEntry, MemoryWriteEvent, RedbMemoryStore, StorageError,
-    TierCapacityConfig,
+    EventRecord, IngestCredencePolicy, MemoryAuditEntry, MemoryWriteEvent, RedbMemoryStore,
+    StorageError, TierCapacityConfig,
 };
 use crate::vector::{VectorIndex, VectorIndexError};
 use std::iter::FusedIterator;
@@ -180,6 +180,8 @@ pub struct ShibahamaConfig {
     pub reconstruction_budget: ReconstructionBudgetConfig,
     /// Default tier residency budgets.
     pub tier_capacity: TierCapacityConfig,
+    /// Default source-kind to credence mapping used for writes without explicit credence.
+    pub ingest_credence: IngestCredencePolicy,
     /// Policy for caller-requested forgetting/invalidation.
     pub forgetting: ForgettingConfig,
 }
@@ -614,7 +616,9 @@ impl<V: VectorIndex> Shibahama<V> {
     ///
     /// Returns an error when the write cannot be persisted.
     pub fn write(&self, event: MemoryWriteEvent) -> Result<MemoryItem, ShibahamaError> {
-        let (_, item) = self.store.write_event(event)?;
+        let (_, item) = self
+            .store
+            .write_event_with_policy(event, self.config.ingest_credence)?;
 
         Ok(item)
     }
@@ -629,8 +633,10 @@ impl<V: VectorIndex> Shibahama<V> {
         event: MemoryWriteEvent,
         embedding: WriteEmbedding<'_>,
     ) -> Result<MemoryItem, ShibahamaError> {
-        let (_, item) = self.store.write_event_embedded(
-            event,
+        let mut item = event.into_item_with_policy(self.config.ingest_credence);
+
+        self.store.write_embedded(
+            &mut item,
             &mut self.vector_index,
             embedding.vector,
             embedding.index_name,
@@ -1227,6 +1233,47 @@ mod tests {
     }
 
     #[test]
+    fn engine_config_swaps_ingest_credence_policy() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let mut config = ShibahamaConfig::default();
+        config.ingest_credence.web = CredenceTier::VerifiedSource;
+        config.ingest_credence.user = CredenceTier::ModelInferred;
+        let shibahama =
+            Shibahama::open_with_config(file.path(), HnswVectorIndex::with_capacity(2, 8), config)
+                .expect("api should open");
+        let web_item = shibahama
+            .write(MemoryWriteEvent::new(
+                "domain-vetted web source",
+                Provenance::new(
+                    SourceKind::Web,
+                    Some("https://example.test".to_owned()),
+                    "api-test",
+                ),
+                OffsetDateTime::UNIX_EPOCH,
+                OffsetDateTime::UNIX_EPOCH,
+            ))
+            .expect("write should use configured credence policy");
+        let explicit_item = shibahama
+            .write(MemoryWriteEvent::with_explicit_credence(
+                "explicit caller override",
+                Provenance::new(SourceKind::User, None, "api-test"),
+                OffsetDateTime::UNIX_EPOCH,
+                OffsetDateTime::UNIX_EPOCH,
+                Tier::Cold,
+                CredenceTier::Unverified,
+                Tier::Cold,
+            ))
+            .expect("explicit credence write should work");
+
+        assert_eq!(web_item.credence, CredenceTier::VerifiedSource);
+        assert_eq!(explicit_item.credence, CredenceTier::Unverified);
+        assert_eq!(
+            shibahama.config().ingest_credence.user,
+            CredenceTier::ModelInferred
+        );
+    }
+
+    #[test]
     fn facade_errors_expose_stable_kind_code_and_action() {
         let file = NamedTempFile::new().expect("tempfile should be created");
         let mut shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
@@ -1275,6 +1322,7 @@ mod tests {
         );
         assert_eq!(config.tier_capacity.hot_capacity, None);
         assert_eq!(config.reconstruction_budget.max_revalidations_per_window, 8);
+        assert_eq!(config.ingest_credence.web, CredenceTier::Unverified);
         assert_eq!(config.forgetting.mode, ForgettingMode::SoftInvalidate);
     }
 
@@ -1287,6 +1335,7 @@ mod tests {
         config.recall_staleness.load_bearing_significance_threshold = 3.0;
         config.recall_diversification.enabled = false;
         config.tier_capacity.hot_capacity = Some(64);
+        config.ingest_credence.web = CredenceTier::VerifiedSource;
         config.forgetting.mode = ForgettingMode::FlagForReverification;
         let mut shibahama =
             Shibahama::open_with_config(file.path(), HnswVectorIndex::with_capacity(2, 8), config)
@@ -1300,12 +1349,20 @@ mod tests {
         assert!(!request.diversification.enabled);
         assert_eq!(shibahama.config().tier_capacity.hot_capacity, Some(64));
         assert_eq!(
+            shibahama.config().ingest_credence.web,
+            CredenceTier::VerifiedSource
+        );
+        assert_eq!(
             shibahama.config().forgetting.mode,
             ForgettingMode::FlagForReverification
         );
 
         shibahama.set_config(ShibahamaConfig::default());
         assert_eq!(shibahama.config().tier_capacity.hot_capacity, None);
+        assert_eq!(
+            shibahama.config().ingest_credence.web,
+            CredenceTier::Unverified
+        );
         assert_eq!(
             shibahama.config().forgetting.mode,
             ForgettingMode::SoftInvalidate

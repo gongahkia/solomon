@@ -463,6 +463,12 @@ impl MemoryWriteEvent {
         }
     }
 
+    /// Materializes this write event into a memory item using an explicit credence policy.
+    #[must_use]
+    pub fn into_item_with_policy(self, policy: IngestCredencePolicy) -> MemoryItem {
+        self.into_item(policy)
+    }
+
     fn into_item(self, policy: IngestCredencePolicy) -> MemoryItem {
         let credence = self
             .credence
@@ -559,6 +565,17 @@ pub trait MemoryStore {
     fn write_event(
         &self,
         event: MemoryWriteEvent,
+    ) -> Result<(EventRecord, MemoryItem), StorageError>;
+
+    /// Ingests a caller-supplied write event with an explicit source-kind credence policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot durably materialize and write the event.
+    fn write_event_with_policy(
+        &self,
+        event: MemoryWriteEvent,
+        policy: IngestCredencePolicy,
     ) -> Result<(EventRecord, MemoryItem), StorageError>;
 
     /// Reads current materialized state for one memory id.
@@ -723,7 +740,20 @@ impl RedbMemoryStore {
         &self,
         event: MemoryWriteEvent,
     ) -> Result<(EventRecord, MemoryItem), StorageError> {
-        let item = event.into_item(IngestCredencePolicy::default());
+        self.write_event_with_policy(event, IngestCredencePolicy::default())
+    }
+
+    /// Ingests a caller-supplied write event with an explicit source-kind credence policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the event cannot be materialized, written, committed, or read back.
+    pub fn write_event_with_policy(
+        &self,
+        event: MemoryWriteEvent,
+        policy: IngestCredencePolicy,
+    ) -> Result<(EventRecord, MemoryItem), StorageError> {
+        let item = event.into_item(policy);
         let record = self.write(&item)?;
 
         Ok((record, item))
@@ -2454,6 +2484,14 @@ impl MemoryStore for RedbMemoryStore {
         event: MemoryWriteEvent,
     ) -> Result<(EventRecord, MemoryItem), StorageError> {
         RedbMemoryStore::write_event(self, event)
+    }
+
+    fn write_event_with_policy(
+        &self,
+        event: MemoryWriteEvent,
+        policy: IngestCredencePolicy,
+    ) -> Result<(EventRecord, MemoryItem), StorageError> {
+        RedbMemoryStore::write_event_with_policy(self, event, policy)
     }
 
     fn get(&self, id: MemoryId) -> Result<Option<MemoryItem>, StorageError> {

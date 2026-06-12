@@ -319,7 +319,7 @@ Still not done / next up:
 
 ## Phase 13 — Performance & hardening (P2)
 
-- [ ] (P1) Benchmark recall latency (p50/p95) and set a budget
+- [x] (P1) Benchmark recall latency (p50/p95) and set a budget
 - [ ] (P1) Ensure no global scan exists anywhere on the hot path (lazy everything)
 - [ ] (P2) Profile and optimise the significance recompute path
 - [ ] (P2) Memory-footprint budget for embedded mode (must stay modest to justify "embeddable")

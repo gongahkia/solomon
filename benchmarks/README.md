@@ -45,6 +45,18 @@ significance formula over deterministic synthetic histories, then ranks variants
 by scenario so parameter changes can be reviewed before they are promoted into
 benchmarked runtime behavior.
 
+## Significance Recompute Profile
+
+Profile the end-to-end `why()` path over one memory with a long access history:
+
+```bash
+python benchmarks/significance-recompute.py --check-budget
+```
+
+The default local guardrail is p95 <= 20 ms for 1,000 access events and 200
+measured `why()` calls. This profiles the public binding path while exercising
+the Rust significance explanation over the stored access history.
+
 ## Recall Latency Budget
 
 The embedded hot-path budget is measured separately from adapter comparisons:

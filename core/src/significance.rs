@@ -167,17 +167,22 @@ impl SignificanceConfig {
         now: OffsetDateTime,
         graph_centrality_score: f64,
     ) -> SignificanceBreakdown {
-        let last_used_at = item
-            .access_events
-            .iter()
-            .map(|event| event.timestamp)
-            .max()
-            .unwrap_or(item.timestamps.ingested_at);
+        let mut last_used_at = item.timestamps.ingested_at;
+        let mut outcome_bonus = 0.0;
+        let mut contradiction_count = 0_u32;
+
+        for event in &item.access_events {
+            last_used_at = last_used_at.max(event.timestamp);
+            outcome_bonus += self.outcome_weight(event.outcome);
+            if event.outcome == AccessOutcome::Contradicted {
+                contradiction_count = contradiction_count.saturating_add(1);
+            }
+        }
+
         let decay_multiplier = self.time_decay(last_used_at, now);
         let decayed_base = item.significance * decay_multiplier;
         let reinforcement = self.reinforcement(item.access_events.len());
-        let outcome_bonus = self.outcome_bonus(&item.access_events);
-        let contradiction_penalty = self.contradiction_penalty(&item.access_events);
+        let contradiction_penalty = f64::from(contradiction_count) * self.contradicted_weight.abs();
         let graph_centrality = self.graph_centrality_weight * graph_centrality_score;
         let final_score =
             decayed_base + reinforcement + outcome_bonus + graph_centrality - contradiction_penalty;
@@ -368,6 +373,72 @@ mod tests {
         assert!(breakdown.outcome_bonus > 0.0);
         assert!(breakdown.graph_centrality.abs() < f64::EPSILON);
         assert!((config.recompute(&item, now) - breakdown.final_score).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn explain_access_summary_matches_separate_pass_helpers() {
+        let config = SignificanceConfig::default();
+        let mut item = MemoryItem {
+            schema_version: crate::model::CURRENT_MEMORY_SCHEMA_VERSION,
+            id: crate::model::MemoryId::new_v7(),
+            content: "single pass".to_owned(),
+            kind: crate::model::MemoryKind::Fact,
+            compaction: None,
+            consolidation: None,
+            embedding_ref: None,
+            provenance: crate::model::Provenance::new(
+                crate::model::SourceKind::User,
+                None,
+                "significance-test",
+            ),
+            timestamps: crate::model::TemporalBounds::open_from(
+                OffsetDateTime::UNIX_EPOCH,
+                OffsetDateTime::UNIX_EPOCH,
+            ),
+            tier: crate::model::Tier::Warm,
+            credence: crate::model::CredenceTier::VerifiedSource,
+            significance: 2.0,
+            credence_floor: crate::model::Tier::Cold,
+            access_events: vec![
+                AccessEvent::new(
+                    OffsetDateTime::UNIX_EPOCH + Duration::seconds(5),
+                    None,
+                    AccessOutcome::Surfaced,
+                ),
+                AccessEvent::new(
+                    OffsetDateTime::UNIX_EPOCH + Duration::seconds(10),
+                    None,
+                    AccessOutcome::Cited,
+                ),
+                AccessEvent::new(
+                    OffsetDateTime::UNIX_EPOCH + Duration::seconds(7),
+                    None,
+                    AccessOutcome::Contradicted,
+                ),
+            ],
+        };
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::seconds(20);
+        let separate_last_used = item
+            .access_events
+            .iter()
+            .map(|event| event.timestamp)
+            .max()
+            .expect("access history should be non-empty");
+        let expected_decayed_base = item.significance * config.time_decay(separate_last_used, now);
+        let expected_outcome_bonus = config.outcome_bonus(&item.access_events);
+        let expected_contradiction_penalty = config.contradiction_penalty(&item.access_events);
+        let explanation = config.explain(&item, now);
+
+        item.access_events.reverse();
+        let reversed = config.explain(&item, now);
+
+        assert!((explanation.decayed_base - expected_decayed_base).abs() < f64::EPSILON);
+        assert!((explanation.outcome_bonus - expected_outcome_bonus).abs() < f64::EPSILON);
+        assert!(
+            (explanation.contradiction_penalty - expected_contradiction_penalty).abs()
+                < f64::EPSILON
+        );
+        assert!((reversed.final_score - explanation.final_score).abs() < f64::EPSILON);
     }
 
     #[test]

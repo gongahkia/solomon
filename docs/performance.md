@@ -21,6 +21,18 @@ and temporary database size as JSON. The budget intentionally measures the
 in-process binding plus Rust core together because that is the embeddable shape
 most Python users exercise locally.
 
+## Significance Recompute Profile
+
+Use `python benchmarks/significance-recompute.py --check-budget` after building
+the Python binding to profile the public `why()` path over one memory with a
+long access history. The default local guardrail is p95 <= 20 ms for 1,000
+access events and 200 measured explanations.
+
+The core scorer summarizes access history in one pass when computing
+last-used time, outcome contribution, and contradiction penalty. The benchmark
+keeps this optimisation measurable through the same binding path users call for
+debugging significance.
+
 ## Hot-Path Scan Boundary
 
 Shibahama's recall path is intended to be lazy and id-bounded. A normal recall should:

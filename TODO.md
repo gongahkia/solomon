@@ -84,7 +84,7 @@ checkout is required at runtime.
 
 - [x] Append-only hash-chained audit journal, tamper verification, audit-pack export/verify, metadata-only query logging, erasure tombstones, and HMAC verification attestations exist.
 - [x] Stale-house-view demo now renders the dependency-change -> stale-flag -> verification-prompt chain.
-- [ ] Model-call audit is present for `complete_model_request()`, but recall/query/model workflows are not yet a single end-to-end audited transaction.
+- [x] `/answer` records a single metadata-only `answer_workflow` audit transaction tying recall context ids, boundary metadata, and model-call audit together.
 - [ ] Signed attestations are HMAC-based local attestations, not public-key or external timestamp signatures.
 
 ## Phase 9 — Public API and CLI

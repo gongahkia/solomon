@@ -212,6 +212,18 @@ class SolomonService:
             ),
             matter=matter,
         )
+        self.audit.append(
+            "answer_workflow",
+            {
+                "query_id": request.query,
+                "matter_id": request.matter_id,
+                "client_id": request.client_id,
+                "context_item_ids": [entry["item"]["id"] for entry in recalled],
+                "context_count": len(recalled),
+                "model": routed.audit.model_dump(mode="json"),
+                "boundary": routed.response.metadata.get("boundary", {}),
+            },
+        )
         return AnswerResponse(
             query=request.query,
             text=routed.response.text,

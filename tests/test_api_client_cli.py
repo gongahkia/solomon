@@ -282,6 +282,12 @@ def test_answer_endpoint_runs_recall_boundary_router_model_workflow(tmp_path: Pa
     assert "Client A" not in remote.seen_prompt
     assert "[CLIENT_1]" in remote.seen_prompt
     assert "Client A" in payload["text"]
+    raw_journal = (tmp_path / "journal" / "journal.jsonl").read_text(encoding="utf-8")
+    assert "answer_workflow" in raw_journal
+    assert "context_item_ids" in raw_journal
+    assert "prompt_sha256" in raw_journal
+    assert "Client A position under Regulation R section 12." not in raw_journal
+    assert "Answer from" not in raw_journal
 
 
 def test_server_mode_requires_and_isolates_tenants(tmp_path: Path) -> None:

@@ -101,7 +101,7 @@ checkout is required at runtime.
 - [x] Server settings require explicit remote model URL before remote egress.
 - [x] Docker compose and PyInstaller spec files exist.
 - [ ] Postgres server backend is not implemented.
-- [ ] PyInstaller and Docker artifacts are not built or verified in this worktree.
+- [x] PyInstaller local binary and Docker Compose server config are built/verified in this worktree; evidence is recorded in `docs/release-artifacts.md`.
 - [ ] Server multi-tenancy is basic filesystem namespace isolation, not a full tenant-management system.
 
 ## Phase 11 — Headline demo: stale house-view
@@ -155,5 +155,5 @@ checkout is required at runtime.
 
 - [x] Launch post, FAQ, outreach docs, packaging README, and citation metadata exist.
 - [x] Annotated git tag `v0.1.0` is present in this worktree for the current release state.
-- [ ] No built pip or desktop artifacts are present in `dist/`.
+- [x] Built pip artifacts and desktop binary are present in `dist/`: sdist, wheel, and `solomon-local`.
 - [ ] Early-user outreach and eval submission are docs, not externally verifiable release activity.

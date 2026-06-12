@@ -470,26 +470,27 @@ fn recall_inner(
     let mut candidates = vector_results
         .into_iter()
         .zip(items)
-        .map(|(result, item)| -> Result<Option<RecallCandidate>, RecallError> {
-            let Some(item) = item else {
-                return Ok(None);
-            };
+        .map(
+            |(result, item)| -> Result<Option<RecallCandidate>, RecallError> {
+                let Some(item) = item else {
+                    return Ok(None);
+                };
 
-            let item =
-                refresh_item_for_recall(store, item, request, record_surface_access)?;
+                let item = refresh_item_for_recall(store, item, request, record_surface_access)?;
 
-            if !is_recallable_item(&item, request) {
-                return Ok(None);
-            }
+                if !is_recallable_item(&item, request) {
+                    return Ok(None);
+                }
 
-            Ok(Some(candidate_from_item(
-                result.id,
-                item,
-                result.distance,
-                RecallCandidateSource::Vector,
-                &candidate_context,
-            )))
-        })
+                Ok(Some(candidate_from_item(
+                    result.id,
+                    item,
+                    result.distance,
+                    RecallCandidateSource::Vector,
+                    &candidate_context,
+                )))
+            },
+        )
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .flatten()
@@ -519,8 +520,7 @@ fn recall_inner(
                     continue;
                 };
 
-                let item =
-                    refresh_item_for_recall(store, item, request, record_surface_access)?;
+                let item = refresh_item_for_recall(store, item, request, record_surface_access)?;
 
                 if !is_recallable_item(&item, request) {
                     continue;
@@ -1496,13 +1496,12 @@ mod tests {
             .expect("recent item should write");
 
         let query = [0.0, 0.0];
-        let request =
-            RecallRequest::new(&query, 2, now).with_ranking(RecallRankingConfig {
-                similarity_weight: 0.0,
-                significance_weight: 1.0,
-                recency_weight: 0.0,
-                graph_weight: 0.0,
-            });
+        let request = RecallRequest::new(&query, 2, now).with_ranking(RecallRankingConfig {
+            similarity_weight: 0.0,
+            significance_weight: 1.0,
+            recency_weight: 0.0,
+            graph_weight: 0.0,
+        });
         let candidates = recall(&store, &vector_index, &request).expect("recall should work");
 
         assert_eq!(candidates.len(), 2);

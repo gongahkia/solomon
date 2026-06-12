@@ -8,9 +8,9 @@ use crate::reconstruction::{
     BackgroundReconstructionConfig, CorroborationDecision, CorroborationPolicy,
     CorroborationSignal, DefaultRevalidationHook, QuarantinedProposal, ReconstructionBudgetConfig,
     ReconstructionBudgetDenial, ReconstructionMode, ReconstructionTrigger, RevalidationAction,
-    RevalidationHook, RevalidationSource, apply_reconstruction_budget,
-    evaluate_corroboration, evaluate_reconstruction_gate, promote_corroborated_proposal,
-    quarantine_proposal, triggers_from_recall,
+    RevalidationHook, RevalidationSource, apply_reconstruction_budget, evaluate_corroboration,
+    evaluate_reconstruction_gate, promote_corroborated_proposal, quarantine_proposal,
+    triggers_from_recall,
 };
 use crate::retrieval::{
     RecallCandidate, RecallCandidateCurrency, RecallDiversificationConfig, RecallError,
@@ -18,8 +18,8 @@ use crate::retrieval::{
 };
 use crate::significance::{SignificanceBreakdown, SignificanceConfig};
 use crate::storage::{
-    EventRecord, IngestCredencePolicy, MemoryAuditEntry, MemoryWriteEvent, RedbMemoryStore,
-    ReconstructionReplacementRecord, StorageError, TierCapacityConfig,
+    EventRecord, IngestCredencePolicy, MemoryAuditEntry, MemoryWriteEvent,
+    ReconstructionReplacementRecord, RedbMemoryStore, StorageError, TierCapacityConfig,
 };
 use crate::vector::{VectorIndex, VectorIndexError};
 use std::collections::BTreeMap;
@@ -799,7 +799,8 @@ impl<V: VectorIndex> Shibahama<V> {
         S: RevalidationSource,
     {
         let triggers = triggers_from_recall(candidates);
-        let gate = evaluate_reconstruction_gate(&triggers, ReconstructionMode::ExplicitRevalidation);
+        let gate =
+            evaluate_reconstruction_gate(&triggers, ReconstructionMode::ExplicitRevalidation);
 
         if !gate.may_run {
             return Ok(Vec::new());
@@ -886,8 +887,7 @@ impl<V: VectorIndex> Shibahama<V> {
                 .copied()
                 .unwrap_or(&[]);
             let corroboration = evaluate_corroboration(signals, policy);
-            let Some(replacement) =
-                promote_corroborated_proposal(&proposal, signals, policy)
+            let Some(replacement) = promote_corroborated_proposal(&proposal, signals, policy)
             else {
                 outcomes.push(ExplicitReconstructionOutcome {
                     trigger,
@@ -1447,17 +1447,17 @@ mod tests {
             .find(|item| item.id == original.id)
             .expect("old row should remain");
         assert_eq!(superseded.timestamps.valid_to, Some(now));
-        assert!(rows
-            .iter()
-            .any(|item| item.content == "current API endpoint is /v2"));
-        assert!(shibahama
-            .event_records()
-            .expect("events should read")
-            .iter()
-            .any(|record| matches!(
-                record.event,
-                MemoryEvent::ReconstructionApplied { .. }
-            )));
+        assert!(
+            rows.iter()
+                .any(|item| item.content == "current API endpoint is /v2")
+        );
+        assert!(
+            shibahama
+                .event_records()
+                .expect("events should read")
+                .iter()
+                .any(|record| matches!(record.event, MemoryEvent::ReconstructionApplied { .. }))
+        );
     }
 
     #[test]

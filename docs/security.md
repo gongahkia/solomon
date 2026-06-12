@@ -71,6 +71,11 @@ should still treat recalled memory as untrusted data, preserve provenance, and
 avoid executing stored instructions unless they intentionally requested
 instruction memories.
 
+`core/src/read_safety.rs` also exposes a `SanitizingGateway` trait. Sync recall
+requests can provide a custom gateway when a deployment needs a tokenization or
+redaction boundary before memory text leaves the store. The repository only
+ships the default gateway; it does not implement domain-specific tokenization.
+
 ## Reconstruction Gate
 
 Reconstruction is explicitly gated. A normal read or recall may flag a
@@ -171,6 +176,8 @@ The current public security-relevant surfaces are:
   assignments without changing the stored `CredenceTier` ordering invariant;
 - `ShibahamaConfig::forgetting`, which can route invalidation requests to
   durable re-verification flags instead of closing valid-time intervals;
+- `SanitizingGateway`, the sync recall hook where deployment-specific
+  tokenization or redaction can sit before memory text is returned;
 - recall candidate `read_safety_findings`, exposed by the Rust core and
   bindings;
 - `why(memory_id)` traces, which expose provenance, credence, tier, currency,

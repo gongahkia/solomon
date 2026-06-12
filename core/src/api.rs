@@ -337,12 +337,18 @@ impl AsyncRecallRequest {
     ///
     /// # Errors
     ///
-    /// Returns an error when the borrowed request uses a related-memory provider, which cannot
+    /// Returns an error when the borrowed request uses callback-style sync hooks, which cannot
     /// safely cross the async blocking-task boundary.
     pub fn try_from_recall_request(request: &RecallRequest<'_>) -> Result<Self, ShibahamaError> {
         if request.related_memory_provider.is_some() {
             return Err(ShibahamaError::InvalidRequest(
                 "async recall requests must own their data; related-memory providers are only supported by the sync API".to_owned(),
+            ));
+        }
+
+        if request.sanitizing_gateway.is_some() {
+            return Err(ShibahamaError::InvalidRequest(
+                "async recall requests must own their data; sanitizing gateways are only supported by the sync API".to_owned(),
             ));
         }
 
@@ -1051,6 +1057,7 @@ where
 mod tests {
     use super::*;
     use crate::model::{Provenance, SourceKind};
+    use crate::read_safety::DefaultSanitizingGateway;
     use crate::retrieval::{RecallCandidateCurrency, RecallRequest};
     use crate::storage::MemoryEvent;
     use crate::vector::HnswVectorIndex;
@@ -1516,5 +1523,17 @@ mod tests {
         assert!(async_request.include_cold);
         assert!(async_request.include_instructions);
         assert_eq!(async_request.max_context_tokens, Some(8));
+
+        let gateway = DefaultSanitizingGateway;
+        let unsupported = RecallRequest::new(&query, 4, OffsetDateTime::UNIX_EPOCH)
+            .with_sanitizing_gateway(&gateway);
+        let error = AsyncRecallRequest::try_from_recall_request(&unsupported)
+            .expect_err("sync sanitizing gateway should be rejected");
+
+        assert!(matches!(
+            error,
+            ShibahamaError::InvalidRequest(message)
+                if message.contains("sanitizing gateways")
+        ));
     }
 }

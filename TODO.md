@@ -9,7 +9,7 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 
 ## Stop point / next work
 
-Updated on 2026-06-12 after completing the local implementation, performance, Tideline, API-reference, launch-assets, and README-demo-GIF pass.
+Updated on 2026-06-12 after completing the local implementation, performance, Tideline, API-reference, launch-assets, README-demo-GIF, and deep-README pass.
 
 Current local state:
 - The working tree is expected to be clean after the latest task commit.
@@ -17,7 +17,7 @@ Current local state:
 - Phase 5 now includes opt-in idle/background reconstruction planning for known-stale significant facts.
 - Phase 9 now has the Tideline diff view and browser-native shareable WebM clip export.
 - Phase 13 now has significance recompute profiling/optimisation, embedded memory-footprint budget, tested multi-reader/single-writer store concurrency, and batched vector search.
-- Phase 14 now has architecture, concepts, benchmarks, security, ADR index, naming/philosophy docs, runnable Rust/Python/Node examples, and a generated API reference.
+- Phase 14 now has a deep README, architecture, concepts, benchmarks, security, ADR index, naming/philosophy docs, runnable Rust/Python/Node examples, and a generated API reference.
 - Phase 15 now has draft Show HN, FAQ, launch writeup, early-user outreach notes, and a recorded Tideline README demo GIF.
 - Phase 16 legal-tech bridge confirmations are complete.
 
@@ -33,8 +33,6 @@ Still not done / next up:
   - Run Mem0 and Zep adapters with real credentials/config to complete the "all systems" CurrencyBench gap claim.
 - Performance:
   - Optional mmap for cold-tier compressed store still needs a separate cold-content file/backend design; current cold content lives in the redb `cold_content` table.
-- Documentation:
-  - Replace the stub README with the full thesis/quickstart/benchmark/debugger narrative.
 - Launch assets:
   - Actually reach out to early users and collect first issues.
   - Submit CurrencyBench writeup somewhere citable.
@@ -326,7 +324,7 @@ Still not done / next up:
 
 ## Phase 14 — Docs inside the repo (P1, minimal but essential)
 
-- [ ] (P0) Deep `README.md`: thesis, the closed-loop diagram, quickstart, benchmark table, debugger GIF (README IS the paper)
+- [x] (P0) Deep `README.md`: thesis, the closed-loop diagram, quickstart, benchmark table, debugger GIF (README IS the paper)
 - [x] (P1) `docs/architecture.md`: components, data model, request lifecycle
 - [x] (P1) `docs/concepts.md`: significance, tiers, credence, reconstruction explained plainly
 - [x] (P1) API reference generated from doc-comments (rustdoc + typedoc + Python docstrings)

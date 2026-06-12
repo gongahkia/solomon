@@ -32,3 +32,6 @@ The UI also calls `GET /why/{memory_id}` for the selected memory's trace.
 The Diff tab compares two sequence numbers from the loaded session recording and
 summarizes memory additions, invalidations, reconstructions, tier moves, access
 events, and graph-edge changes between those points.
+
+The clip export button records the loaded session's tier-map replay to a
+standalone WebM file that can be shared directly or converted to a README GIF.

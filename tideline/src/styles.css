@@ -103,7 +103,7 @@ h2 {
 
 .control-band {
   display: grid;
-  grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(120px, 0.8fr)) 42px 42px 42px;
+  grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(120px, 0.8fr)) 42px 42px 42px 42px;
   gap: 10px;
   align-items: end;
   padding: 12px;
@@ -149,6 +149,11 @@ input:focus {
 .tabs button.active {
   border-color: #226d68;
   background: #d8f0e5;
+}
+
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .timeline-band {

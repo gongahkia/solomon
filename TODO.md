@@ -259,7 +259,7 @@ Still not done / next up:
 - [x] (P2) Bi-temporal scrubber: "show me the memory state as of date X"
 - [x] (P2) Graph view: entities + relationships with valid-time edges
 - [x] (P3) Diff view between two points in a session
-- [ ] (P3) Export a view as the README GIF / shareable clip
+- [x] (P3) Export a view as the README GIF / shareable clip
 
 ---
 

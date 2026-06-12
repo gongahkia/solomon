@@ -121,6 +121,7 @@ function App() {
   const [sequence, setSequence] = useState<number>(0);
   const [diffFrom, setDiffFrom] = useState<number>(0);
   const [diffTo, setDiffTo] = useState<number>(0);
+  const [exportingClip, setExportingClip] = useState(false);
   const [asOf, setAsOf] = useState("");
 
   const requestHeaders = useMemo(() => {
@@ -245,6 +246,31 @@ function App() {
     URL.revokeObjectURL(url);
   }
 
+  async function downloadShareableClip() {
+    if (!snapshot || exportingClip) {
+      return;
+    }
+
+    setExportingClip(true);
+    setStatus("exporting clip");
+
+    try {
+      const blob = await renderShareableClip(snapshot);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+
+      anchor.href = url;
+      anchor.download = `tideline-${snapshot.namespace}.webm`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setStatus("clip exported");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "clip export failed");
+    } finally {
+      setExportingClip(false);
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -292,6 +318,15 @@ function App() {
           {live ? <Pause size={18} /> : <Play size={18} />}
         </button>
         <button type="button" className="icon-button" title="Download recording" onClick={downloadRecording}>
+          <Download size={18} />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          title="Export shareable clip"
+          disabled={!snapshot || exportingClip}
+          onClick={downloadShareableClip}
+        >
           <Download size={18} />
         </button>
       </section>
@@ -728,6 +763,230 @@ function DiffColumn({
       {hasChildren ? children : <p className="empty">{empty}</p>}
     </div>
   );
+}
+
+async function renderShareableClip(snapshot: TidelineSnapshot) {
+  if (typeof MediaRecorder === "undefined") {
+    throw new Error("clip export unavailable");
+  }
+
+  const width = 960;
+  const height = 540;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+
+  if (!context || !canvas.captureStream) {
+    throw new Error("canvas export unavailable");
+  }
+
+  const stream = canvas.captureStream(12);
+  const recorder = new MediaRecorder(stream, recorderOptions());
+  const chunks: BlobPart[] = [];
+  const done = new Promise<Blob>((resolve, reject) => {
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        chunks.push(event.data);
+      }
+    };
+    recorder.onerror = () => reject(new Error("clip recording failed"));
+    recorder.onstop = () => {
+      resolve(
+        new Blob(chunks, {
+          type: recorder.mimeType || "video/webm",
+        }),
+      );
+    };
+  });
+  const sequences = sampledClipSequences(snapshot);
+  let stopped = false;
+
+  try {
+    recorder.start();
+
+    for (const sequence of sequences) {
+      drawClipFrame(context, snapshot, sequence, width, height);
+      await wait(220);
+    }
+
+    if (sequences.length <= 1) {
+      await wait(300);
+    }
+
+    recorder.stop();
+    stopped = true;
+
+    return await done;
+  } finally {
+    if (!stopped && recorder.state !== "inactive") {
+      recorder.stop();
+    }
+
+    for (const track of stream.getTracks()) {
+      track.stop();
+    }
+  }
+}
+
+function recorderOptions(): MediaRecorderOptions | undefined {
+  for (const mimeType of ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"]) {
+    if (MediaRecorder.isTypeSupported(mimeType)) {
+      return { mimeType };
+    }
+  }
+
+  return undefined;
+}
+
+function sampledClipSequences(snapshot: TidelineSnapshot) {
+  const sequences = [
+    0,
+    ...snapshot.events.map((event) => event.sequence),
+    snapshot.last_sequence ?? 0,
+  ]
+    .filter((sequence, index, all) => all.indexOf(sequence) === index)
+    .sort((left, right) => left - right);
+  const maxFrames = 48;
+
+  if (sequences.length <= maxFrames) {
+    return sequences;
+  }
+
+  return Array.from({ length: maxFrames }, (_, index) => {
+    const sourceIndex = Math.round((index / (maxFrames - 1)) * (sequences.length - 1));
+    return sequences[sourceIndex];
+  }).filter((sequence, index, all) => all.indexOf(sequence) === index);
+}
+
+function drawClipFrame(
+  context: CanvasRenderingContext2D,
+  snapshot: TidelineSnapshot,
+  sequence: number,
+  width: number,
+  height: number,
+) {
+  const events = snapshot.events;
+  const activeEvent =
+    [...events].reverse().find((event) => event.sequence <= sequence) ?? null;
+  const memories = snapshot.memories.filter(
+    (memory) => firstMemorySequence(events, memory.id) <= sequence,
+  );
+
+  context.fillStyle = "#f4f0e8";
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = "rgba(34, 109, 104, 0.08)";
+  for (let x = 0; x < width; x += 42) {
+    context.fillRect(x, 0, 1, height);
+  }
+  for (let y = 0; y < height; y += 42) {
+    context.fillRect(0, y, width, 1);
+  }
+
+  context.fillStyle = "#20211f";
+  context.font = "700 34px Inter, sans-serif";
+  context.fillText("Tideline", 32, 52);
+  context.font = "700 15px Inter, sans-serif";
+  context.fillStyle = "#226d68";
+  context.fillText(snapshot.namespace, 34, 82);
+  context.fillStyle = "#5a564f";
+  context.fillText(`Sequence ${sequence}`, width - 180, 52);
+  context.fillText(activeEvent ? activeEvent.kind : "start", width - 180, 78);
+
+  for (const [index, tier] of tierLabels.entries()) {
+    const x = 170 + index * 310;
+    context.strokeStyle = "#d8d0c1";
+    context.lineWidth = 2;
+    context.setLineDash([6, 10]);
+    context.beginPath();
+    context.moveTo(x, 112);
+    context.lineTo(x, 470);
+    context.stroke();
+    context.setLineDash([]);
+    context.fillStyle = "#4c4942";
+    context.font = "800 16px Inter, sans-serif";
+    context.textAlign = "center";
+    context.fillText(tier, x, 104);
+  }
+
+  for (const [index, memory] of memories.entries()) {
+    const state = memoryStateAtSequence(memory, events, sequence);
+    const tierIndex = tierOrder[state.tier] ?? 1;
+    const x = 170 + tierIndex * 310 + ((index % 5) - 2) * 22;
+    const y = 450 - Math.max(0.04, Math.min(1, memory.significance)) * 300;
+    const active = activeEvent?.memory_ids.includes(memory.id) ?? false;
+
+    context.globalAlpha = state.invalidated ? 0.38 : 1;
+    context.fillStyle = tierColor(state.tier);
+    context.strokeStyle = active ? "#20211f" : "#fffdf8";
+    context.lineWidth = active ? 5 : 3;
+    context.beginPath();
+    context.arc(x, y, active ? 18 : 14, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+    context.fillStyle = "#3d3a34";
+    context.font = "700 12px Inter, sans-serif";
+    context.textAlign = "center";
+    context.fillText(memoryLabel(memory.content), x, y + 34, 148);
+    context.globalAlpha = 1;
+  }
+
+  context.textAlign = "left";
+}
+
+function firstMemorySequence(events: TidelineEvent[], id: string) {
+  const first = events.find(
+    (event) =>
+      (event.kind === "memory_written" || event.kind === "demo_step") &&
+      event.memory_ids.includes(id),
+  );
+
+  return first?.sequence ?? 0;
+}
+
+function memoryStateAtSequence(memory: MemoryItem, events: TidelineEvent[], sequence: number) {
+  let tier = memory.tier;
+  let invalidated = false;
+
+  for (const event of events) {
+    if (event.sequence > sequence || !event.memory_ids.includes(memory.id)) {
+      continue;
+    }
+
+    if ((event.kind === "memory_written" || event.kind === "tier_changed") && event.tier_to) {
+      tier = event.tier_to;
+    }
+
+    if (event.kind === "content_compacted") {
+      tier = "cold";
+    }
+
+    if (event.kind === "memory_invalidated") {
+      invalidated = true;
+    }
+
+    if (event.kind === "reconstruction_applied") {
+      invalidated = event.memory_ids[0] === memory.id;
+    }
+  }
+
+  return { tier, invalidated };
+}
+
+function tierColor(tier: Tier) {
+  if (tier === "hot") {
+    return "#cf4f3f";
+  }
+
+  if (tier === "cold") {
+    return "#3a8d95";
+  }
+
+  return "#d9a441";
+}
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 function memoryLabel(content: string) {

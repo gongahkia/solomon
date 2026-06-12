@@ -124,7 +124,7 @@ checkout is required at runtime.
 - [x] Unit/property tests cover store invariants, supersede-not-delete, `as_of()`, recall filtering, credence ranking, propagation cycles, boundary fail-closed, routing, audit, demo, and evaluation helpers.
 - [x] Service-level boundary tests now cover ingestion and model egress fail-closed behavior with the vendored engine forced to fail.
 - [x] Soak test covers 300 direct dependents.
-- [ ] Fuzzing is minimal and focused on empty ingest content.
+- [x] Fuzz/property coverage now includes non-empty service ingest round trips with metadata-only audit checks and generated-text retrieval invariants in addition to empty-content rejection.
 - [ ] No browser/UI/desktop packaging tests exist.
 
 ## Phase 14 — Performance and hardening

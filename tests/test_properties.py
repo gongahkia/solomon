@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import string
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -25,6 +26,8 @@ from solomon.graph.propagation import CurrencyPropagator
 from solomon.graph.store import GraphStore
 from solomon.orchestrator.retrieval import RetrievalOrchestrator, SQLiteRetrievalIndex
 from solomon.store.sqlite import SQLiteKnowledgeStore
+
+SAFE_TEXT = st.text(alphabet=string.ascii_letters + string.digits + " _.,;:-", min_size=1, max_size=60)
 
 
 def _dt() -> datetime:
@@ -124,6 +127,55 @@ def test_fuzz_malformed_ingest_rejects_empty_content(tmp_path: Path) -> None:
         service.ingest(
             IngestRequest(kind=KnowledgeKind.NOTE, content="", source_kind=SourceKind.ASSOCIATE, source_ref="x")
         )
+
+
+@given(payload=SAFE_TEXT)
+@settings(max_examples=25)
+def test_fuzz_service_ingest_round_trips_nonempty_content_and_audits_metadata(payload: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="solomon-ingest-fuzz-") as tmp:
+        root = Path(tmp)
+        service = SolomonService(data_dir=root / "data", journal_dir=root / "journal")
+        content = f"FuzzContent::{payload}"
+
+        item = service.ingest(
+            IngestRequest(
+                kind=KnowledgeKind.NOTE,
+                content=content,
+                source_kind=SourceKind.ASSOCIATE,
+                source_ref="fuzz-source",
+            )
+        )
+
+        stored = service.store.get_item(item.id)
+        journal = (root / "journal" / "journal.jsonl").read_text(encoding="utf-8")
+        assert stored.content == content
+        assert stored.credence_tier is CredenceTier.VERIFIED
+        assert "credence_change" in journal
+        assert "FuzzContent::" not in journal
+
+
+@given(content_suffix=SAFE_TEXT, query_suffix=SAFE_TEXT)
+@settings(max_examples=25)
+def test_fuzz_retrieval_handles_generated_text_without_returning_nonlive_items(
+    content_suffix: str,
+    query_suffix: str,
+) -> None:
+    with tempfile.TemporaryDirectory(prefix="solomon-retrieval-fuzz-") as tmp:
+        db = Path(tmp) / "solomon.sqlite3"
+        store = SQLiteKnowledgeStore(db)
+        graph = GraphStore(db)
+        index = SQLiteRetrievalIndex(db)
+        orchestrator = RetrievalOrchestrator(store=store, graph=graph, index=index)
+        live = _item("live", f"alpha beta {content_suffix}")
+        stale = _item("stale", f"alpha beta {content_suffix}", state=CurrencyState.STALE_PENDING_REVERIFICATION)
+        store.write_item(live)
+        store.write_item(stale)
+        orchestrator.index_items([live, stale])
+
+        results = orchestrator.recall(f"alpha {query_suffix}")
+
+        assert [result.item.id for result in results] in ([], ["live"])
+        assert all(result.currency_state is CurrencyState.LIVE for result in results)
 
 
 def test_poisoning_red_team_model_fact_cannot_outrank_authoritative(tmp_path: Path) -> None:

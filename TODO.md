@@ -42,7 +42,7 @@ checkout is required at runtime.
 - [x] Default recall now filters on computed currency and avoids returning items whose displayed currency contradicts the filter.
 - [x] `record_verification()` supports reaffirm, retire, and supersede; `register_authority_change()` triggers propagation.
 - [x] JSON authority-change feed and matter/client currency report exist.
-- [ ] External monitoring is manual/JSON only, not comprehensive regulatory monitoring.
+- [x] External monitoring includes an HTTP authority-change feed poller with ETag/Last-Modified conditional requests and 304 handling, in addition to local JSON/CSV feeds.
 - [ ] Predictive staleness is a simple pending-amendment heuristic, not a legal-change forecasting system.
 
 ## Phase 4 — Boundary integration

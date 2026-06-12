@@ -6,7 +6,9 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from solomon.currency.feeds import apply_authority_changes, load_authority_changes
+import httpx
+
+from solomon.currency.feeds import apply_authority_changes, load_authority_changes, poll_authority_change_feed
 from solomon.currency.models import KnowledgeItem, KnowledgeKind, Provenance, SourceKind
 from solomon.currency.prediction import load_pending_amendments, predict_staleness_risk
 from solomon.currency.report import currency_report
@@ -86,6 +88,45 @@ def test_authority_json_feed_and_currency_report(tmp_path: Path) -> None:
     assert impacts[0].stale_item_ids == ["item-1"]
     assert report.items[0]["item_id"] == "item-1"
     assert report.items[0]["dependencies"][0]["target_id"] == "reg-r-12"
+
+
+def test_http_authority_feed_monitor_uses_conditional_requests() -> None:
+    seen_headers: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.append(dict(request.headers))
+        if len(seen_headers) == 1:
+            return httpx.Response(
+                200,
+                headers={"ETag": '"feed-v1"', "Last-Modified": "Fri, 12 Jun 2026 00:00:00 GMT"},
+                json={
+                    "changes": [
+                        {
+                            "authority_id": "reg-r-12",
+                            "new_version": "2026",
+                            "changed_at": "2026-06-12T00:00:00+00:00",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(304)
+
+    transport = httpx.MockTransport(handler)
+
+    first = poll_authority_change_feed("https://regulator.example/feed.json", transport=transport)
+    second = poll_authority_change_feed(
+        "https://regulator.example/feed.json",
+        state=first.state,
+        transport=transport,
+    )
+
+    assert first.changed is True
+    assert first.changes[0].authority_id == "reg-r-12"
+    assert first.state.etag == '"feed-v1"'
+    assert second.changed is False
+    assert second.changes == []
+    assert seen_headers[1]["if-none-match"] == '"feed-v1"'
+    assert seen_headers[1]["if-modified-since"] == "Fri, 12 Jun 2026 00:00:00 GMT"
 
 
 def test_pending_amendment_predicts_transitive_staleness_risk(tmp_path: Path) -> None:

@@ -8,5 +8,6 @@ Architecture notes, ADRs, API references, performance notes, and launch document
 - `concepts.md`: plain-language explanation of memories, significance, tiers, credence, reconstruction, and graph concepts.
 - `performance.md`: recall latency budget and hot-path scan boundaries.
 - `horizontal-scale.md`: namespace sharding story for scaling optional server deployments.
+- `launch/show-hn.md`: draft Show HN launch post.
 - `security.md`: poisoning posture, logging behavior, encryption limits, and operational guidance.
 - `why-shibahama.md`: naming rationale and design philosophy.

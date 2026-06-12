@@ -109,7 +109,7 @@ checkout is required at runtime.
 - [x] `examples/stale-house-view/run.py` creates the 2023 memo, 2025 authority change, 2026 query, Solomon flag, warehouse-baseline miss, boundary masking proof, and audit chain.
 - [x] Demo uses the real vendored boundary, not a fake client.
 - [x] Internal supersession example exists.
-- [ ] README GIF may need rerecording after the demo output changes.
+- [x] README GIF has been re-rendered with `scripts/render_stale_house_view_gif.py` and matches the committed asset.
 
 ## Phase 12 — Evaluation
 
@@ -149,7 +149,7 @@ checkout is required at runtime.
 - [x] README, architecture, concepts, Kaypoh integration, trust boundary, benchmark/evaluation, and ADR docs exist.
 - [x] Docs now describe the vendored boundary design and pinned source commit.
 - [x] Generated OpenAPI has been refreshed after schema/API changes.
-- [ ] Launch/readme media should be rerecorded if the changed stale-house-view output matters.
+- [x] Launch/readme media is current: `docs/assets/stale-house-view-demo.gif` was re-rendered from the checked-in script.
 
 ## Phase 17 — Launch
 

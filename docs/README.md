@@ -2,6 +2,7 @@
 
 Architecture notes, ADRs, API references, performance notes, and launch documentation.
 
+- `api/README.md`: generated API reference from Rust, TypeScript/Node, and Python source docs.
 - `adr/README.md`: index of accepted architecture decision records.
 - `architecture.md`: implemented component map, data model, request lifecycle, and deployment surfaces.
 - `benchmarks.md`: benchmark methodology, reproduction commands, current local results, and open gaps.

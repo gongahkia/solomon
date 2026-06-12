@@ -25,6 +25,7 @@ class Shibahama:
     __slots__ = ("_inner",)
 
     def __init__(self, path: str, dimensions: int, capacity: int = 1024) -> None:
+        """Open an embedded Shibahama store with the built-in HNSW vector index."""
         self._inner = _NativeShibahama(path, dimensions, capacity)
 
     def write(
@@ -41,6 +42,7 @@ class Shibahama:
         model: str = "unknown",
         model_version: str = "unknown",
     ) -> MemoryItem:
+        """Write a memory and optionally index an embedding vector."""
         return self._inner.write(
             content,
             vector,
@@ -56,12 +58,15 @@ class Shibahama:
         )
 
     async def async_write(self, *args, **kwargs) -> MemoryItem:
+        """Async wrapper for `write` using a worker thread."""
         return await asyncio.to_thread(self.write, *args, **kwargs)
 
     def invalidate(self, memory_id: str, valid_to_unix: int) -> bool:
+        """Invalidate a memory at a Unix timestamp without deleting its history."""
         return self._inner.invalidate(memory_id, valid_to_unix)
 
     async def async_invalidate(self, *args, **kwargs) -> bool:
+        """Async wrapper for `invalidate` using a worker thread."""
         return await asyncio.to_thread(self.invalidate, *args, **kwargs)
 
     def recall(
@@ -74,6 +79,7 @@ class Shibahama:
         include_instructions: bool = False,
         max_context_tokens: int | None = None,
     ) -> list[RecallCandidate]:
+        """Recall current memories for a query embedding."""
         return self._inner.recall(
             query_vector,
             top_k,
@@ -85,12 +91,15 @@ class Shibahama:
         )
 
     async def async_recall(self, *args, **kwargs) -> list[RecallCandidate]:
+        """Async wrapper for `recall` using a worker thread."""
         return await asyncio.to_thread(self.recall, *args, **kwargs)
 
     def memory_items(self) -> list[MemoryItem]:
+        """Return all current materialized memory rows."""
         return self._inner.memory_items()
 
     def export_records(self) -> list[dict[str, object]]:
+        """Return current memory rows as plain Python dictionaries."""
         return [
             {
                 "id": item.id,
@@ -111,11 +120,13 @@ class Shibahama:
         ]
 
     def to_pandas(self):
+        """Return current memory rows as a pandas DataFrame."""
         import pandas as pd
 
         return pd.DataFrame.from_records(self.export_records())
 
     def to_arrow(self):
+        """Return current memory rows as a PyArrow table."""
         import pyarrow as pa
 
         return pa.Table.from_pylist(self.export_records())
@@ -130,6 +141,7 @@ class Shibahama:
         include_instructions: bool = False,
         max_context_tokens: int | None = None,
     ) -> RecallStream:
+        """Return an iterator over current recall candidates."""
         return self._inner.stream_recall(
             query_vector,
             top_k,
@@ -141,6 +153,7 @@ class Shibahama:
         )
 
     async def async_stream_recall(self, *args, **kwargs) -> AsyncIterator[RecallCandidate]:
+        """Async iterator wrapper for current recall candidates."""
         candidates = await self.async_recall(*args, **kwargs)
 
         for candidate in candidates:
@@ -155,6 +168,7 @@ class Shibahama:
         include_instructions: bool = False,
         max_context_tokens: int | None = None,
     ) -> list[RecallCandidate]:
+        """Recall memories as they were believed at `as_of_unix`."""
         return self._inner.timeline(
             query_vector,
             top_k,
@@ -165,6 +179,7 @@ class Shibahama:
         )
 
     async def async_timeline(self, *args, **kwargs) -> list[RecallCandidate]:
+        """Async wrapper for `timeline` using a worker thread."""
         return await asyncio.to_thread(self.timeline, *args, **kwargs)
 
     def stream_timeline(
@@ -176,6 +191,7 @@ class Shibahama:
         include_instructions: bool = False,
         max_context_tokens: int | None = None,
     ) -> RecallStream:
+        """Return an iterator over historical recall candidates."""
         return self._inner.stream_timeline(
             query_vector,
             top_k,
@@ -186,21 +202,26 @@ class Shibahama:
         )
 
     async def async_stream_timeline(self, *args, **kwargs) -> AsyncIterator[RecallCandidate]:
+        """Async iterator wrapper for historical recall candidates."""
         candidates = await self.async_timeline(*args, **kwargs)
 
         for candidate in candidates:
             yield candidate
 
     def reinforce(self, memory_id: str, outcome: str = "cited") -> bool:
+        """Record a usage outcome for a memory."""
         return self._inner.reinforce(memory_id, outcome)
 
     async def async_reinforce(self, *args, **kwargs) -> bool:
+        """Async wrapper for `reinforce` using a worker thread."""
         return await asyncio.to_thread(self.reinforce, *args, **kwargs)
 
     def why(self, memory_id: str, now_unix: int | None = None) -> WhyTrace | None:
+        """Explain the current significance, provenance, tier, and currency state."""
         return self._inner.why(memory_id, now_unix)
 
     async def async_why(self, *args, **kwargs) -> WhyTrace | None:
+        """Async wrapper for `why` using a worker thread."""
         return await asyncio.to_thread(self.why, *args, **kwargs)
 
 
@@ -225,6 +246,7 @@ class LangChainMemory:
         output_key: str = "output",
         top_k: int = 5,
     ) -> None:
+        """Create a dependency-free LangChain-style memory adapter."""
         self.engine = engine
         self.embed = embed
         self.memory_key = memory_key
@@ -234,9 +256,11 @@ class LangChainMemory:
 
     @property
     def memory_variables(self) -> list[str]:
+        """Return the memory variable names exposed to LangChain-style callers."""
         return [self.memory_key]
 
     def load_memory_variables(self, inputs: Mapping[str, Any]) -> dict[str, str]:
+        """Load relevant memory context for a LangChain-style input mapping."""
         query = _mapping_text(inputs, self.input_key)
         candidates = self.engine.recall(self.embed(query), self.top_k)
         history = "\n".join(candidate.item.content for candidate in candidates)
@@ -244,9 +268,11 @@ class LangChainMemory:
         return {self.memory_key: history}
 
     async def aload_memory_variables(self, inputs: Mapping[str, Any]) -> dict[str, str]:
+        """Async wrapper for `load_memory_variables` using a worker thread."""
         return await asyncio.to_thread(self.load_memory_variables, inputs)
 
     def save_context(self, inputs: Mapping[str, Any], outputs: Mapping[str, Any]) -> None:
+        """Save a LangChain-style input/output turn into Shibahama."""
         user_text = _mapping_text(inputs, self.input_key)
         assistant_text = _mapping_text(outputs, self.output_key)
         content = f"Human: {user_text}\nAI: {assistant_text}"
@@ -262,12 +288,15 @@ class LangChainMemory:
     async def asave_context(
         self, inputs: Mapping[str, Any], outputs: Mapping[str, Any]
     ) -> None:
+        """Async wrapper for `save_context` using a worker thread."""
         await asyncio.to_thread(self.save_context, inputs, outputs)
 
     def clear(self) -> None:
+        """No-op clear method for LangChain compatibility."""
         return None
 
     async def aclear(self) -> None:
+        """Async no-op clear method for LangChain compatibility."""
         return None
 
 

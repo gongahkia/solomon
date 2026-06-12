@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""Generate API reference Markdown from source comments and docstrings."""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@dataclass(frozen=True)
+class ApiEntry:
+    surface: str
+    signature: str
+    summary: str
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, default=ROOT / "docs" / "api" / "README.md")
+    args = parser.parse_args()
+
+    entries = [
+        *rust_entries(ROOT / "core" / "src" / "api.rs"),
+        *typescript_entries(ROOT / "bindings" / "node" / "index.d.ts"),
+        *python_entries(ROOT / "bindings" / "python" / "python" / "shibahama" / "__init__.py"),
+    ]
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(render(entries), encoding="utf-8")
+    return 0
+
+
+def rust_entries(path: Path) -> list[ApiEntry]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    entries = []
+    docs: list[str] = []
+    item_pattern = re.compile(r"pub\s+(?:async\s+)?(?:const\s+)?(?:fn|struct|enum|trait)\s+\w+")
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("///"):
+            docs.append(stripped.removeprefix("///").strip())
+            continue
+        if stripped.startswith("#[") or not stripped:
+            continue
+        if docs and item_pattern.search(stripped):
+            signature = collect_rust_signature(lines, index)
+            entries.append(ApiEntry("Rust core", signature, summary_from_docs(docs)))
+        docs = []
+
+    return entries
+
+
+def collect_rust_signature(lines: list[str], start: int) -> str:
+    parts = []
+
+    for line in lines[start : start + 12]:
+        stripped = line.strip()
+        parts.append(stripped)
+        if stripped.endswith("{") or stripped.endswith(";"):
+            break
+
+    return " ".join(parts).removesuffix("{").strip()
+
+
+def typescript_entries(path: Path) -> list[ApiEntry]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    entries = []
+    docs: list[str] = []
+    in_comment = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("/**"):
+            docs = [stripped.removeprefix("/**").removesuffix("*/").strip()]
+            in_comment = not stripped.endswith("*/")
+            continue
+        if in_comment:
+            if stripped.endswith("*/"):
+                tail = stripped.removesuffix("*/").strip().removeprefix("*").strip()
+                if tail:
+                    docs.append(tail)
+                in_comment = False
+                continue
+            docs.append(stripped.removeprefix("*").strip())
+            continue
+        if docs and is_typescript_signature(stripped):
+            entries.append(ApiEntry("TypeScript/Node", stripped, summary_from_docs(docs)))
+        if stripped:
+            docs = []
+
+    return entries
+
+
+def is_typescript_signature(value: str) -> bool:
+    return (
+        value.startswith("export declare class ")
+        or value.startswith("export declare function ")
+        or bool(re.match(r"^[A-Za-z_]\w*\(.*\)", value))
+    )
+
+
+def python_entries(path: Path) -> list[ApiEntry]:
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    entries = []
+
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            entries.append(
+                ApiEntry("Python", f"class {node.name}", ast.get_docstring(node) or "")
+            )
+            for child in node.body:
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    entries.append(
+                        ApiEntry(
+                            "Python",
+                            function_header(source, child),
+                            ast.get_docstring(child) or "",
+                        )
+                    )
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            entries.append(ApiEntry("Python", function_header(source, node), ast.get_docstring(node) or ""))
+
+    return [entry for entry in entries if entry.summary]
+
+
+def function_header(source: str, node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+    lines = source.splitlines()
+    end_line = node.body[0].lineno - 1 if node.body else node.lineno
+    return " ".join(line.strip() for line in lines[node.lineno - 1 : end_line])
+
+
+def summary_from_docs(docs: list[str]) -> str:
+    for doc in docs:
+        if doc and not doc.startswith("#"):
+            return doc
+
+    return ""
+
+
+def render(entries: list[ApiEntry]) -> str:
+    grouped: dict[str, list[ApiEntry]] = {}
+
+    for entry in entries:
+        grouped.setdefault(entry.surface, []).append(entry)
+
+    lines = [
+        "# API Reference",
+        "",
+        "Generated by `scripts/generate-api-reference.py` from Rust doc comments, TypeScript declaration comments, and Python docstrings.",
+        "",
+    ]
+
+    for surface in ("Rust core", "TypeScript/Node", "Python"):
+        lines.extend([f"## {surface}", ""])
+        for entry in grouped.get(surface, []):
+            lines.extend([f"### `{entry.signature}`", "", entry.summary, ""])
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

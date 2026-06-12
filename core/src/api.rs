@@ -4,7 +4,7 @@
 
 use crate::anomaly::AnomalyConfig;
 use crate::model::{AccessOutcome, CredenceTier, MemoryId, MemoryItem, Provenance, Tier};
-use crate::reconstruction::ReconstructionBudgetConfig;
+use crate::reconstruction::{BackgroundReconstructionConfig, ReconstructionBudgetConfig};
 use crate::retrieval::{
     RecallCandidate, RecallCandidateCurrency, RecallDiversificationConfig, RecallError,
     RecallRankingConfig, RecallRequest, RecallStalenessConfig, recall, timeline,
@@ -178,6 +178,8 @@ pub struct ShibahamaConfig {
     pub anomaly: AnomalyConfig,
     /// Default reconstruction rate/cost budget.
     pub reconstruction_budget: ReconstructionBudgetConfig,
+    /// Optional idle/background reconstruction planning.
+    pub background_reconstruction: BackgroundReconstructionConfig,
     /// Default tier residency budgets.
     pub tier_capacity: TierCapacityConfig,
     /// Default source-kind to credence mapping used for writes without explicit credence.
@@ -1329,6 +1331,7 @@ mod tests {
         );
         assert_eq!(config.tier_capacity.hot_capacity, None);
         assert_eq!(config.reconstruction_budget.max_revalidations_per_window, 8);
+        assert!(!config.background_reconstruction.validate_on_idle);
         assert_eq!(config.ingest_credence.web, CredenceTier::Unverified);
         assert_eq!(config.forgetting.mode, ForgettingMode::SoftInvalidate);
     }
@@ -1342,6 +1345,7 @@ mod tests {
         config.recall_staleness.load_bearing_significance_threshold = 3.0;
         config.recall_diversification.enabled = false;
         config.tier_capacity.hot_capacity = Some(64);
+        config.background_reconstruction.validate_on_idle = true;
         config.ingest_credence.web = CredenceTier::VerifiedSource;
         config.forgetting.mode = ForgettingMode::FlagForReverification;
         let mut shibahama =
@@ -1355,6 +1359,12 @@ mod tests {
         assert!((request.staleness.load_bearing_significance_threshold - 3.0).abs() < f64::EPSILON);
         assert!(!request.diversification.enabled);
         assert_eq!(shibahama.config().tier_capacity.hot_capacity, Some(64));
+        assert!(
+            shibahama
+                .config()
+                .background_reconstruction
+                .validate_on_idle
+        );
         assert_eq!(
             shibahama.config().ingest_credence.web,
             CredenceTier::VerifiedSource
@@ -1366,6 +1376,12 @@ mod tests {
 
         shibahama.set_config(ShibahamaConfig::default());
         assert_eq!(shibahama.config().tier_capacity.hot_capacity, None);
+        assert!(
+            !shibahama
+                .config()
+                .background_reconstruction
+                .validate_on_idle
+        );
         assert_eq!(
             shibahama.config().ingest_credence.web,
             CredenceTier::Unverified

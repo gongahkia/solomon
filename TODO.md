@@ -178,7 +178,7 @@ Still not done / next up:
 - [x] (P1) Emit reconstruction events to the log (so the Tideline can show the moment)
 - [x] (P2) Configurable re-validation strategies per provenance type
 - [x] (P2) Rate-limit / cost-cap reconstructions so a query storm can't trigger mass re-validation
-- [ ] (P3) Async/background reconstruction option (validate-on-idle for known-stale significant facts)
+- [x] (P3) Async/background reconstruction option (validate-on-idle for known-stale significant facts)
 
 ---
 

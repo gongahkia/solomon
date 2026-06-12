@@ -89,8 +89,13 @@ Reconstruction is explicitly gated. A normal read or recall may flag a
 load-bearing, possibly stale memory, but it does not revalidate or mutate memory
 state automatically.
 
-Reconstruction work requires explicit re-validation mode. Proposed updates enter
-quarantine at lower credence and cold tier. Promotion requires one of:
+Reconstruction work requires explicit re-validation mode or an opt-in idle
+planning pass through `BackgroundReconstructionConfig::validate_on_idle`. The
+idle path only plans budgeted re-validation actions; it does not write proposed
+updates or invalidate memories on its own.
+
+Proposed updates enter quarantine at lower credence and cold tier. Promotion
+requires one of:
 
 - human confirmation;
 - a high-credence source;

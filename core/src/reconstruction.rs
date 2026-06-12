@@ -137,6 +137,35 @@ pub struct ReconstructionBudgetDecision {
     pub used_cost_after: u64,
 }
 
+/// Optional idle/background reconstruction planning config.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BackgroundReconstructionConfig {
+    /// Whether idle-time re-validation planning is enabled.
+    pub validate_on_idle: bool,
+    /// Maximum stale load-bearing triggers to reserve in one idle pass.
+    pub max_idle_triggers: usize,
+}
+
+impl Default for BackgroundReconstructionConfig {
+    fn default() -> Self {
+        Self {
+            validate_on_idle: false,
+            max_idle_triggers: 4,
+        }
+    }
+}
+
+/// Idle/background re-validation plan.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BackgroundReconstructionPlan {
+    /// Re-validation actions allowed by the idle config and budget.
+    pub actions: Vec<RevalidationAction>,
+    /// Budget decision for considered triggers.
+    pub budget: ReconstructionBudgetDecision,
+    /// True when planning was skipped because idle validation is disabled.
+    pub skipped_disabled: bool,
+}
+
 /// Quarantined reconstruction proposal.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuarantinedProposal {
@@ -495,6 +524,58 @@ pub fn apply_reconstruction_budget(
     }
 }
 
+/// Plans idle-time re-validations from known stale recall candidates without mutating memory.
+#[must_use]
+pub fn plan_background_revalidations(
+    candidates: &[RecallCandidate],
+    hook: &dyn RevalidationHook,
+    cost_estimates: &[ReconstructionCostEstimate],
+    recent_attempts: &[ReconstructionAttempt],
+    now: OffsetDateTime,
+    budget_config: ReconstructionBudgetConfig,
+    background_config: BackgroundReconstructionConfig,
+) -> BackgroundReconstructionPlan {
+    if !background_config.validate_on_idle {
+        return BackgroundReconstructionPlan {
+            actions: Vec::new(),
+            budget: apply_reconstruction_budget(
+                &[],
+                cost_estimates,
+                recent_attempts,
+                now,
+                budget_config,
+            ),
+            skipped_disabled: true,
+        };
+    }
+
+    let mut triggers = triggers_from_recall(candidates);
+    triggers.truncate(background_config.max_idle_triggers);
+    let budget = apply_reconstruction_budget(
+        &triggers,
+        cost_estimates,
+        recent_attempts,
+        now,
+        budget_config,
+    );
+    let actions = budget
+        .allowed
+        .iter()
+        .filter_map(|trigger| {
+            candidates
+                .iter()
+                .find(|candidate| candidate.id == trigger.memory_id)
+                .map(|candidate| hook.plan_revalidation(trigger, &candidate.provenance))
+        })
+        .collect();
+
+    BackgroundReconstructionPlan {
+        actions,
+        budget,
+        skipped_disabled: false,
+    }
+}
+
 fn attempt_in_budget_window(
     attempt: ReconstructionAttempt,
     now: OffsetDateTime,
@@ -785,6 +866,87 @@ mod tests {
                 requested_cost: 5,
             }
         );
+    }
+
+    #[test]
+    fn background_revalidation_planning_is_disabled_by_default() {
+        let stale = candidate(true);
+        let plan = plan_background_revalidations(
+            &[stale],
+            &DefaultRevalidationHook,
+            &[],
+            &[],
+            OffsetDateTime::UNIX_EPOCH,
+            ReconstructionBudgetConfig::default(),
+            BackgroundReconstructionConfig::default(),
+        );
+
+        assert!(plan.skipped_disabled);
+        assert!(plan.actions.is_empty());
+        assert!(plan.budget.allowed.is_empty());
+    }
+
+    #[test]
+    fn background_revalidation_plans_idle_actions_with_budget() {
+        let stale = candidate(true);
+        let second = candidate(true);
+        let plan = plan_background_revalidations(
+            &[stale.clone(), second],
+            &DefaultRevalidationHook,
+            &[ReconstructionCostEstimate {
+                memory_id: stale.id,
+                estimated_cost: 2,
+            }],
+            &[],
+            OffsetDateTime::UNIX_EPOCH,
+            ReconstructionBudgetConfig {
+                max_revalidations_per_window: 1,
+                max_cost_per_window: 10,
+                default_cost_per_revalidation: 1,
+                window: time::Duration::minutes(1),
+            },
+            BackgroundReconstructionConfig {
+                validate_on_idle: true,
+                max_idle_triggers: 2,
+            },
+        );
+
+        assert!(!plan.skipped_disabled);
+        assert_eq!(plan.budget.allowed.len(), 1);
+        assert_eq!(
+            plan.actions,
+            vec![RevalidationAction::SurfaceToCaller {
+                memory_id: stale.id,
+            }]
+        );
+        assert_eq!(plan.budget.deferred.len(), 1);
+    }
+
+    #[test]
+    fn background_revalidation_respects_idle_batch_limit() {
+        let first = candidate(true);
+        let second = candidate(true);
+        let plan = plan_background_revalidations(
+            &[first.clone(), second],
+            &DefaultRevalidationHook,
+            &[],
+            &[],
+            OffsetDateTime::UNIX_EPOCH,
+            ReconstructionBudgetConfig::default(),
+            BackgroundReconstructionConfig {
+                validate_on_idle: true,
+                max_idle_triggers: 1,
+            },
+        );
+
+        assert_eq!(plan.actions.len(), 1);
+        assert_eq!(
+            plan.actions[0],
+            RevalidationAction::SurfaceToCaller {
+                memory_id: first.id,
+            }
+        );
+        assert!(plan.budget.deferred.is_empty());
     }
 
     #[test]

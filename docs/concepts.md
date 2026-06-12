@@ -181,6 +181,12 @@ The gate decides whether reconstruction may run:
 This matters because a normal `recall` should not unexpectedly mutate memory
 state.
 
+Idle/background reconstruction is still opt-in. When
+`BackgroundReconstructionConfig::validate_on_idle` is enabled, known stale
+load-bearing recall candidates can be converted into budgeted re-validation
+actions during idle time. The planner does not mutate memory by itself; it only
+decides which source, graph, or caller checks may run.
+
 ## Quarantine And Corroboration
 
 Reconstructed proposals enter cautiously. A proposed update is stored at lower

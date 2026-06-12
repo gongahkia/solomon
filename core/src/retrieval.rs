@@ -637,6 +637,31 @@ mod tests {
     }
 
     #[test]
+    fn recall_hot_path_does_not_call_whole_store_read_apis() {
+        let source = include_str!("retrieval.rs");
+        let hot_path = source
+            .split("fn recall_inner(")
+            .nth(1)
+            .expect("recall_inner should stay in retrieval.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("test module should remain after production recall helpers");
+        let forbidden_calls = [
+            "materialized_items(",
+            ".memory_items(",
+            ".events(",
+            "events()",
+        ];
+
+        for forbidden_call in forbidden_calls {
+            assert!(
+                !hot_path.contains(forbidden_call),
+                "recall hot path must stay bounded to vector result ids; found {forbidden_call}"
+            );
+        }
+    }
+
+    #[test]
     fn recall_returns_vector_ranked_valid_candidates_and_records_surface_access() {
         let file = NamedTempFile::new().expect("tempfile should be created");
         let store = RedbMemoryStore::open(file.path()).expect("store should open");

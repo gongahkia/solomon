@@ -1,18 +1,27 @@
-<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Performance Notes
 
-# Performance And Hardening
+## Recall Latency Budget
 
-Solomon-local uses SQLite WAL mode with a busy timeout so separate readers and the single writer can
-coexist without corrupting the event log. Propagation is incremental: authority changes call
-`get_dependents()` and walk only reachable dependency edges instead of rescanning every item.
+Use `python benchmarks/recall-latency.py --check-budget` to measure embedded recall latency. The
+default local budget is p50 <= 25 ms and p95 <= 75 ms for 1,000 memories, 200 measured queries,
+16-dimensional deterministic embeddings, and top-k 5.
 
-The dependency graph has indexes on source, target, and current target validity for `impact_query`.
-`solomon.performance` provides small latency and memory budget helpers used by tests and benchmark scripts.
+This budget covers the in-process Rust core through the Python binding. It does not include hosted
+embedding calls, external memory adapters, or network transport.
 
-## Characterized Local Concurrency
+## Hot-Path Scan Boundary
 
-The supported local write envelope is SQLite's WAL model: many readers can coexist with serialized writers,
-and writers wait on the configured 5s busy timeout instead of immediately failing on transient lock
-contention. CI covers this with a multi-connection write characterization test: 4 independent
-`SQLiteKnowledgeStore` connections each append 25 knowledge items to the same database, then the final
-materialized state and WAL/busy-timeout pragmas are verified.
+Shibahama's recall path is intended to be lazy and id-bounded. A normal recall should:
+
+1. Search the vector index for `top_k` candidate ids.
+2. Read only those ids from storage with `get_many`.
+3. Optionally expand through a related-memory provider by explicit related ids.
+4. Record surfaced access events for returned candidates.
+
+The recall hot path must not scan the full materialized store or event log. The regression test in
+`core/src/retrieval.rs` guards against calls to known whole-store APIs from production recall
+orchestration.
+
+Whole-store scans are still allowed in administrative paths where the caller asks for aggregate
+state, including server readiness, server inspection, export, snapshot, and tier-capacity
+enforcement. Those paths must stay outside default recall.

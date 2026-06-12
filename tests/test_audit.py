@@ -7,8 +7,11 @@ from pathlib import Path
 
 from solomon.audit.journal import (
     AuditJournal,
+    generate_verification_keypair,
     knowledge_metadata_snapshot,
+    sign_public_key_verification_attestation,
     sign_verification_attestation,
+    verify_public_key_verification_attestation,
     verify_verification_attestation,
     what_did_we_know_report,
 )
@@ -126,3 +129,24 @@ def test_signed_verification_attestation_verifies_and_detects_tamper() -> None:
 
     assert verify_verification_attestation(attestation, signing_key="test-secret") is True
     assert verify_verification_attestation(tampered, signing_key="test-secret") is False
+
+
+def test_public_key_verification_attestation_verifies_and_detects_tamper() -> None:
+    item = _item().model_copy(update={"verified_by": "Partner A", "last_verified_at": _item().ingested_at})
+    private_pem, public_pem = generate_verification_keypair()
+
+    attestation = sign_public_key_verification_attestation(
+        item,
+        verified_by="Partner A",
+        outcome="reaffirm",
+        private_key_pem=private_pem,
+        key_id="firm-ed25519-2026",
+    )
+    tampered = attestation.model_copy(update={"outcome": "retire"})
+
+    assert attestation.signature_alg == "ed25519"
+    assert "BEGIN PRIVATE KEY" in private_pem
+    assert "BEGIN PUBLIC KEY" in public_pem
+    assert verify_public_key_verification_attestation(attestation, public_key_pem=public_pem) is True
+    assert verify_public_key_verification_attestation(tampered, public_key_pem=public_pem) is False
+    assert verify_verification_attestation(attestation, signing_key="test-secret") is False

@@ -6,11 +6,15 @@ import hashlib
 import hmac
 import json
 import shutil
+from base64 import b64decode, b64encode
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from pydantic import Field, field_validator
 
 from solomon.api.schemas import SolomonModel
@@ -69,6 +73,7 @@ class VerificationAttestation(SolomonModel):
     recorded_at: datetime
     item_sha256: str
     key_id: str
+    signature_alg: Literal["hmac-sha256", "ed25519"] = "hmac-sha256"
     signature: str
 
     @field_validator("recorded_at")
@@ -306,6 +311,7 @@ def sign_verification_attestation(
         recorded_at=recorded_at,
         item_sha256=item_hash,
         key_id=key_id,
+        signature_alg="hmac-sha256",
     )
     signature = hmac.new(signing_key.encode("utf-8"), payload, hashlib.sha256).hexdigest()
     return VerificationAttestation(
@@ -315,11 +321,14 @@ def sign_verification_attestation(
         recorded_at=recorded_at,
         item_sha256=item_hash,
         key_id=key_id,
+        signature_alg="hmac-sha256",
         signature=signature,
     )
 
 
 def verify_verification_attestation(attestation: VerificationAttestation, *, signing_key: str) -> bool:
+    if attestation.signature_alg != "hmac-sha256":
+        return False
     payload = _attestation_payload(
         item_id=attestation.item_id,
         verified_by=attestation.verified_by,
@@ -327,9 +336,80 @@ def verify_verification_attestation(attestation: VerificationAttestation, *, sig
         recorded_at=attestation.recorded_at,
         item_sha256=attestation.item_sha256,
         key_id=attestation.key_id,
+        signature_alg="hmac-sha256",
     )
     expected = hmac.new(signing_key.encode("utf-8"), payload, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, attestation.signature)
+
+
+def generate_verification_keypair() -> tuple[str, str]:
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key()
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+    public_pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    return private_pem, public_pem
+
+
+def sign_public_key_verification_attestation(
+    item: KnowledgeItem,
+    *,
+    verified_by: str,
+    outcome: str,
+    private_key_pem: str,
+    key_id: str,
+) -> VerificationAttestation:
+    recorded_at = item.last_verified_at or now_utc()
+    item_hash = _item_attestation_hash(item)
+    payload = _attestation_payload(
+        item_id=item.id,
+        verified_by=verified_by,
+        outcome=outcome,
+        recorded_at=recorded_at,
+        item_sha256=item_hash,
+        key_id=key_id,
+        signature_alg="ed25519",
+    )
+    signature = _load_ed25519_private_key(private_key_pem).sign(payload)
+    return VerificationAttestation(
+        item_id=item.id,
+        verified_by=verified_by,
+        outcome=outcome,
+        recorded_at=recorded_at,
+        item_sha256=item_hash,
+        key_id=key_id,
+        signature_alg="ed25519",
+        signature=b64encode(signature).decode("ascii"),
+    )
+
+
+def verify_public_key_verification_attestation(
+    attestation: VerificationAttestation,
+    *,
+    public_key_pem: str,
+) -> bool:
+    if attestation.signature_alg != "ed25519":
+        return False
+    payload = _attestation_payload(
+        item_id=attestation.item_id,
+        verified_by=attestation.verified_by,
+        outcome=attestation.outcome,
+        recorded_at=attestation.recorded_at,
+        item_sha256=attestation.item_sha256,
+        key_id=attestation.key_id,
+        signature_alg="ed25519",
+    )
+    try:
+        _load_ed25519_public_key(public_key_pem).verify(b64decode(attestation.signature.encode("ascii")), payload)
+    except (InvalidSignature, ValueError):
+        return False
+    return True
 
 
 def _item_attestation_hash(item: KnowledgeItem) -> str:
@@ -354,6 +434,7 @@ def _attestation_payload(
     recorded_at: datetime,
     item_sha256: str,
     key_id: str,
+    signature_alg: Literal["hmac-sha256", "ed25519"],
 ) -> bytes:
     return json.dumps(
         {
@@ -364,7 +445,22 @@ def _attestation_payload(
             "recorded_at": recorded_at.isoformat(),
             "item_sha256": item_sha256,
             "key_id": key_id,
+            "signature_alg": signature_alg,
         },
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
+
+
+def _load_ed25519_private_key(private_key_pem: str) -> Ed25519PrivateKey:
+    key = serialization.load_pem_private_key(private_key_pem.encode("utf-8"), password=None)
+    if not isinstance(key, Ed25519PrivateKey):
+        raise ValueError("private key must be Ed25519")
+    return key
+
+
+def _load_ed25519_public_key(public_key_pem: str) -> Ed25519PublicKey:
+    key = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
+    if not isinstance(key, Ed25519PublicKey):
+        raise ValueError("public key must be Ed25519")
+    return key

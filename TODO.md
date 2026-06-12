@@ -85,7 +85,7 @@ checkout is required at runtime.
 - [x] Append-only hash-chained audit journal, tamper verification, audit-pack export/verify, metadata-only query logging, erasure tombstones, and HMAC verification attestations exist.
 - [x] Stale-house-view demo now renders the dependency-change -> stale-flag -> verification-prompt chain.
 - [x] `/answer` records a single metadata-only `answer_workflow` audit transaction tying recall context ids, boundary metadata, and model-call audit together.
-- [ ] Signed attestations are HMAC-based local attestations, not public-key or external timestamp signatures.
+- [x] Signed attestations support Ed25519 public-key signing and verification with tamper tests, alongside the existing local HMAC mode.
 
 ## Phase 9 — Public API and CLI
 

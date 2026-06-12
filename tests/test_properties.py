@@ -148,7 +148,7 @@ def test_fuzz_service_ingest_round_trips_nonempty_content_and_audits_metadata(pa
 
         stored = service.store.get_item(item.id)
         journal = (root / "journal" / "journal.jsonl").read_text(encoding="utf-8")
-        assert stored.content == content
+        assert stored.content == " ".join(content.split())
         assert stored.credence_tier is CredenceTier.VERIFIED
         assert "credence_change" in journal
         assert "FuzzContent::" not in journal

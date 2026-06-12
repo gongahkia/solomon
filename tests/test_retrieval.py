@@ -157,8 +157,20 @@ def test_batch_index_stores_embedding_ref_and_scope_filtering(tmp_path: Path) ->
 
     scoped = orchestrator.recall("structure x", matter_context=MatterContext(matter_id="matter-a"))
 
-    assert all(item.embedding_ref == "lexical-token-set:1" for item in indexed)
+    assert all(item.embedding_ref == "hashed-token-vector:1" for item in indexed)
     assert [result.item.id for result in scoped] == ["a"]
+
+
+def test_vector_retrieval_matches_legal_domain_synonyms(tmp_path: Path) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    item = _item("item-1", "regulation r structure x section 12")
+    orchestrator.store.write_item(item)
+    orchestrator.index_items([item])
+
+    results = orchestrator.recall("law arrangement clause 12")
+
+    assert [result.item.id for result in results] == ["item-1"]
+    assert results[0].similarity > 0
 
 
 def test_reembed_pipeline_updates_items_when_strategy_version_changes(tmp_path: Path) -> None:
@@ -183,11 +195,11 @@ def test_reembed_pipeline_updates_items_when_strategy_version_changes(tmp_path: 
     report = second.reembed_stale_items()
     noop = second.reembed_stale_items()
 
-    assert report.embedding_ref == "lexical-token-set:2"
+    assert report.embedding_ref == "hashed-token-vector:2"
     assert report.considered_item_ids == ["item-1"]
     assert report.reembedded_item_ids == ["item-1"]
-    assert second.store.get_item("item-1").embedding_ref == "lexical-token-set:2"
-    assert second.index.search("structure x")[0].embedding_ref == "lexical-token-set:2"
+    assert second.store.get_item("item-1").embedding_ref == "hashed-token-vector:2"
+    assert second.index.search("structure x")[0].embedding_ref == "hashed-token-vector:2"
     assert noop.reembedded_item_ids == []
 
 

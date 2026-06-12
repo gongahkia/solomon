@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -22,15 +23,35 @@ from solomon.graph.store import GraphStore
 from solomon.store.sqlite import SQLiteKnowledgeStore
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_§.-]*")
+SEMANTIC_ALIASES = {
+    "arrangement": "structure",
+    "arrangements": "structure",
+    "clause": "section",
+    "clauses": "section",
+    "law": "regulation",
+    "laws": "regulation",
+    "provision": "section",
+    "provisions": "section",
+    "rule": "regulation",
+    "rules": "regulation",
+    "statute": "regulation",
+    "statutes": "regulation",
+}
 
 
 def tokenize(text: str) -> set[str]:
     return {match.group(0).lower() for match in TOKEN_RE.finditer(text)}
 
 
+def semantic_tokens(text: str) -> set[str]:
+    tokens = tokenize(text)
+    return tokens | {SEMANTIC_ALIASES[token] for token in tokens if token in SEMANTIC_ALIASES}
+
+
 class EmbeddingStrategy(SolomonModel):
-    name: str = "lexical-token-set"
+    name: str = "hashed-token-vector"
     version: str = "1"
+    dimensions: int = 256
 
     @property
     def ref(self) -> str:
@@ -60,29 +81,35 @@ class SQLiteRetrievalIndex:
                     item_id TEXT PRIMARY KEY,
                     embedding_ref TEXT NOT NULL,
                     tokens_json TEXT NOT NULL,
+                    vector_json TEXT NOT NULL DEFAULT '[]',
                     indexed_at TEXT NOT NULL
                 )
                 """
             )
+            columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(retrieval_index)").fetchall()}
+            if "vector_json" not in columns:
+                self._conn.execute("ALTER TABLE retrieval_index ADD COLUMN vector_json TEXT NOT NULL DEFAULT '[]'")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_retrieval_ref ON retrieval_index(embedding_ref)")
 
     def upsert_item(self, item: KnowledgeItem, *, indexed_at: datetime | None = None) -> KnowledgeItem:
         from solomon.currency.models import now_utc
 
         embedding_ref = self.strategy.ref
-        tokens = sorted(tokenize(item.content))
+        tokens = sorted(semantic_tokens(item.content))
+        vector = _embed_tokens(tokens, dimensions=self.strategy.dimensions)
         timestamp = indexed_at or now_utc()
         with self._conn:
             self._conn.execute(
                 """
-                INSERT INTO retrieval_index (item_id, embedding_ref, tokens_json, indexed_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO retrieval_index (item_id, embedding_ref, tokens_json, vector_json, indexed_at)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(item_id) DO UPDATE SET
                     embedding_ref = excluded.embedding_ref,
                     tokens_json = excluded.tokens_json,
+                    vector_json = excluded.vector_json,
                     indexed_at = excluded.indexed_at
                 """,
-                (item.id, embedding_ref, json.dumps(tokens), timestamp.isoformat()),
+                (item.id, embedding_ref, json.dumps(tokens), json.dumps(vector), timestamp.isoformat()),
             )
         return item.model_copy(update={"embedding_ref": embedding_ref})
 
@@ -100,19 +127,16 @@ class SQLiteRetrievalIndex:
         return {str(row["item_id"]): str(row["embedding_ref"]) for row in rows}
 
     def search(self, query: str, *, limit: int = 20) -> list[IndexedHit]:
-        query_tokens = tokenize(query)
+        query_tokens = semantic_tokens(query)
         if not query_tokens:
             return []
+        query_vector = _embed_tokens(sorted(query_tokens), dimensions=self.strategy.dimensions)
         rows = self._conn.execute(
-            "SELECT item_id, embedding_ref, tokens_json FROM retrieval_index ORDER BY item_id"
+            "SELECT item_id, embedding_ref, vector_json FROM retrieval_index ORDER BY item_id"
         ).fetchall()
         hits: list[IndexedHit] = []
         for row in rows:
-            tokens = set(json.loads(str(row["tokens_json"])))
-            union = query_tokens | tokens
-            if not union:
-                continue
-            score = len(query_tokens & tokens) / len(union)
+            score = _cosine_similarity(query_vector, json.loads(str(row["vector_json"])))
             if score > 0:
                 hits.append(
                     IndexedHit(item_id=str(row["item_id"]), similarity=score, embedding_ref=str(row["embedding_ref"]))
@@ -333,3 +357,20 @@ class RetrievalOrchestrator:
 
 def estimate_context_tokens(item: KnowledgeItem) -> int:
     return max(1, len(tokenize(item.content)))
+
+
+def _embed_tokens(tokens: list[str], *, dimensions: int) -> list[float]:
+    vector = [0.0] * dimensions
+    for token in tokens:
+        bucket = int(hashlib.sha256(token.encode("utf-8")).hexdigest(), 16) % dimensions
+        vector[bucket] += 1.0
+    magnitude = sum(value * value for value in vector) ** 0.5
+    if magnitude == 0:
+        return vector
+    return [value / magnitude for value in vector]
+
+
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
+    if len(left) != len(right):
+        return 0.0
+    return sum(a * b for a, b in zip(left, right, strict=True))

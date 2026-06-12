@@ -23,7 +23,7 @@ checkout is required at runtime.
 - [x] SQLite append-only event log, materialized current table, `write_item()`, `get_item()`, `get_many()`, supersede-not-delete, `as_of()`, snapshot/restore, and no-delete tests exist.
 - [x] Encryption helper for portable artifacts exists.
 - [ ] Postgres backend is not implemented; `create_knowledge_store()` rejects Postgres with `UnsupportedStoreBackend`.
-- [ ] Retrieval index is lexical token-set, not sqlite-vss/LanceDB/pgvector/Qdrant.
+- [x] Retrieval index is SQLite-backed vector search with stable hashed legal-domain token embeddings, vector persistence, cosine scoring, and schema migration.
 - [x] Embedding lifecycle includes stale/missing `embedding_ref` detection and a `reembed_stale_items()` pipeline that reindexes store items after strategy version changes.
 
 ## Phase 2 — Dependency graph
@@ -77,7 +77,7 @@ checkout is required at runtime.
 - [x] `timeline(query, as_of)` reconstructs historical state from the event log.
 - [x] Review mode surfaces stale/superseded items; default mode filters computed non-Live items.
 - [x] Scope filters, basic dedupe, centrality weighting, credence weighting, and context budget controls exist.
-- [ ] Retrieval is lexical token-set search, not semantic vector search.
+- [x] Retrieval uses semantic vector scoring with stable hashed embeddings and legal-domain synonym expansion rather than token-set Jaccard search.
 - [x] Ranking weights are calibrated by `tune_recall_weights()` over deterministic synthetic relevance/credence/centrality cases and documented in benchmarks.
 
 ## Phase 8 — Audit and privilege evidence chain

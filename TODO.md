@@ -9,13 +9,14 @@ Phases run roughly in order but P-tags cut across them — do all P0s in a phase
 
 ## Stop point / next work
 
-Updated on 2026-06-12 after completing the local implementation, performance, Tideline, API-reference, launch-assets, README-demo-GIF, and deep-README pass.
+Updated on 2026-06-12 after completing the local implementation, performance, Tideline, API-reference, launch-assets, README-demo-GIF, deep-README, and benchmark-ablation pass.
 
 Current local state:
 - The working tree is expected to be clean after the latest task commit.
 - This branch is ahead of `origin/main` by the local task commits from this pass.
 - Phase 5 now includes opt-in idle/background reconstruction planning for known-stale significant facts.
 - Phase 9 now has the Tideline diff view and browser-native shareable WebM clip export.
+- Phase 10 now has real local ablations for significance, reconstruction/supersession, and graph expansion toggles.
 - Phase 13 now has significance recompute profiling/optimisation, embedded memory-footprint budget, tested multi-reader/single-writer store concurrency, and batched vector search.
 - Phase 14 now has a deep README, architecture, concepts, benchmarks, security, ADR index, naming/philosophy docs, runnable Rust/Python/Node examples, and a generated API reference.
 - Phase 15 now has draft Show HN, FAQ, launch writeup, early-user outreach notes, and a recorded Tideline README demo GIF.
@@ -29,7 +30,6 @@ Still not done / next up:
 - Benchmarks:
   - Run LoCoMo through all systems once a dataset export and external service credentials/config are available.
   - Run LongMemEval through all systems once a dataset export and external service credentials/config are available.
-  - Implement real ablations for significance/reconstruction/graph toggles; do not mark done with placeholder labels.
   - Run Mem0 and Zep adapters with real credentials/config to complete the "all systems" CurrencyBench gap claim.
 - Performance:
   - Optional mmap for cold-tier compressed store still needs a separate cold-content file/backend design; current cold content lives in the redb `cold_content` table.
@@ -271,7 +271,7 @@ Still not done / next up:
 - [ ] (P1) Wire up LongMemEval and run all systems
 - [x] (P1) Build a long-horizon coding-agent memory task (the headline scenario)
 - [x] (P1) Produce a results table (accuracy vs token-cost frontier) for the README
-- [ ] (P2) Ablations: significance on/off, reconstruction on/off, graph on/off — isolate what each contributes
+- [x] (P2) Ablations: significance on/off, reconstruction on/off, graph on/off — isolate what each contributes
 
 ### CurrencyBench (P2/P3, the defensible new artifact)
 - [x] (P2) Design `CurrencyBench`: long-horizon task that injects fact CHANGES mid-stream

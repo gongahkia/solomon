@@ -125,6 +125,11 @@ class Shibahama:
         include_cold: bool = False,
         include_instructions: bool = False,
         max_context_tokens: int | None = None,
+        similarity_weight: float = 1.0,
+        significance_weight: float = 1.0,
+        recency_weight: float = 0.0,
+        graph_weight: float = 0.0,
+        related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None,
     ) -> list[RecallCandidate]: ...
     async def async_recall(
         self,
@@ -135,6 +140,11 @@ class Shibahama:
         include_cold: bool = False,
         include_instructions: bool = False,
         max_context_tokens: int | None = None,
+        similarity_weight: float = 1.0,
+        significance_weight: float = 1.0,
+        recency_weight: float = 0.0,
+        graph_weight: float = 0.0,
+        related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None,
     ) -> list[RecallCandidate]: ...
     def memory_items(self) -> list[MemoryItem]: ...
     def export_records(self) -> list[dict[str, object]]: ...
@@ -149,6 +159,11 @@ class Shibahama:
         include_cold: bool = False,
         include_instructions: bool = False,
         max_context_tokens: int | None = None,
+        similarity_weight: float = 1.0,
+        significance_weight: float = 1.0,
+        recency_weight: float = 0.0,
+        graph_weight: float = 0.0,
+        related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None,
     ) -> RecallStream: ...
     async def async_stream_recall(
         self,
@@ -159,6 +174,11 @@ class Shibahama:
         include_cold: bool = False,
         include_instructions: bool = False,
         max_context_tokens: int | None = None,
+        similarity_weight: float = 1.0,
+        significance_weight: float = 1.0,
+        recency_weight: float = 0.0,
+        graph_weight: float = 0.0,
+        related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None,
     ) -> AsyncIterator[RecallCandidate]: ...
     def timeline(
         self,

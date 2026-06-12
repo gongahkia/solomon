@@ -17,6 +17,8 @@ class Observation:
     valid_from_unix: int
     source_ref: str
     supersedes_source_ref: str | None = None
+    reinforce_count: int = 0
+    related_source_refs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,8 @@ def load_suite(name: str, dataset: Path | None = None, seed: int = 7) -> list[Be
         return currencybench(seed)
     if name == "coding-agent":
         return coding_agent_memory_task(seed)
+    if name == "ablation":
+        return ablation_suite(seed)
     if name in {"locomo", "longmemeval"}:
         if dataset is None:
             raise ValueError(f"{name} requires --dataset JSONL")
@@ -169,6 +173,92 @@ def coding_agent_memory_task(seed: int = 7) -> list[BenchmarkCase]:
     ]
 
 
+def ablation_suite(seed: int = 7) -> list[BenchmarkCase]:
+    """Return deterministic cases that isolate core Shibahama feature toggles."""
+
+    rng = random.Random(seed)
+    cases = [
+        BenchmarkCase(
+            name="significance-ranking",
+            observations=(
+                Observation(
+                    "The API client lives in src/client/http.py.",
+                    0,
+                    "ablation:significance:distractor",
+                ),
+                Observation(
+                    "Decision: put API client changes in src/integrations/api_client.py after the module split.",
+                    0,
+                    "ablation:significance:decision",
+                    reinforce_count=8,
+                ),
+            ),
+            queries=(
+                BenchmarkQuery(
+                    prompt="Where should API client changes go?",
+                    expected="src/integrations/api_client.py",
+                    forbidden="src/client/http.py",
+                    now_unix=120,
+                ),
+            ),
+            metadata={"suite": "ablation", "toggle": "significance"},
+        ),
+        BenchmarkCase(
+            name="reconstruction-supersession",
+            observations=(
+                Observation(
+                    "The support escalation owner is Priya.",
+                    0,
+                    "ablation:reconstruction:old-owner",
+                ),
+                Observation(
+                    "The support escalation owner is Mateo.",
+                    60,
+                    "ablation:reconstruction:new-owner",
+                    supersedes_source_ref="ablation:reconstruction:old-owner",
+                ),
+            ),
+            queries=(
+                BenchmarkQuery(
+                    prompt="Who owns support escalation?",
+                    expected="Mateo",
+                    forbidden="Priya",
+                    now_unix=120,
+                    changed_at_unix=60,
+                ),
+            ),
+            metadata={"suite": "ablation", "toggle": "reconstruction"},
+        ),
+        BenchmarkCase(
+            name="graph-expansion",
+            observations=(
+                Observation(
+                    "Runbook RB-42 links the payments incident to its current owner record.",
+                    0,
+                    "ablation:graph:anchor",
+                    related_source_refs=("ablation:graph:owner",),
+                ),
+                Observation(
+                    "The current payments escalation owner is Nina.",
+                    0,
+                    "ablation:graph:owner",
+                ),
+            ),
+            queries=(
+                BenchmarkQuery(
+                    prompt="Which runbook links the payments incident?",
+                    expected="Nina",
+                    now_unix=120,
+                ),
+            ),
+            metadata={"suite": "ablation", "toggle": "graph"},
+        ),
+    ]
+    rng.shuffle(cases)
+
+    return cases
+
+
 def load_jsonl_suite(path: Path, suite_name: str) -> list[BenchmarkCase]:
     """Load a neutral JSONL benchmark format for LoCoMo and LongMemEval adapters.
 
@@ -205,6 +295,10 @@ def _observations(values: Iterable[dict[str, object]], line_number: int) -> Iter
                 None
                 if value.get("supersedes_source_ref") is None
                 else str(value.get("supersedes_source_ref"))
+            ),
+            reinforce_count=int(value.get("reinforce_count", 0)),
+            related_source_refs=tuple(
+                str(source_ref) for source_ref in value.get("related_source_refs", [])
             ),
         )
 

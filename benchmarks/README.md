@@ -18,17 +18,44 @@ Supported suite names:
 
 - `currencybench`: generated fact-change tasks.
 - `coding-agent`: generated long-horizon coding-agent memory task.
+- `ablation`: generated feature-isolation tasks for significance,
+  reconstruction/supersession, and graph expansion.
 - `locomo`: JSONL loader for LoCoMo-shaped task exports.
 - `longmemeval`: JSONL loader for LongMemEval-shaped task exports.
 
 Supported systems:
 
 - `shibahama`: in-process Python binding with deterministic local embeddings.
+- `shibahama-no-significance`: Shibahama with significance removed from recall ranking.
+- `shibahama-no-reconstruction`: Shibahama with supersession invalidation disabled.
+- `shibahama-no-graph`: Shibahama with related-memory graph expansion disabled.
 - `warehouse`: append-only keyword baseline with no currency model.
 - `mem0`: optional Mem0 OSS SDK adapter. Requires `mem0ai` plus its model/vector configuration.
 - `zep`: optional Zep Cloud adapter. Requires `zep-cloud` and `ZEP_API_KEY`.
 
 The harness reports recall accuracy, approximate retrieval token cost, p50/p95 query latency, and stale-answer rate. Missing external adapters can be recorded with `--allow-missing` so result tables clearly show which credentials or services were unavailable.
+
+## Feature Ablations
+
+Run the local feature-isolation suite:
+
+```bash
+python benchmarks/run.py \
+  --suite ablation \
+  --systems shibahama,shibahama-no-significance,shibahama-no-reconstruction,shibahama-no-graph \
+  --top-k 1 \
+  --output benchmarks/results/ablation-local.json \
+  --markdown benchmarks/results/ablation-local.md
+```
+
+The ablation suite has one targeted case per feature:
+
+- significance ranking: a reinforced decision must outrank a closer vector-only distractor;
+- reconstruction/supersession: a newer fact must invalidate the stale owner fact;
+- graph expansion: a vector anchor must pull in a related owner memory.
+
+The checked-in `ablation-local` result records full Shibahama at 3/3 accuracy,
+while each disabled variant drops on the case tied to the removed behavior.
 
 ## Significance Variant Experiments
 

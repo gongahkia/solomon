@@ -82,6 +82,25 @@ an open benchmark gap, not as a headline win. The separate
 benchmark artifact should not be represented as passing until the harness result
 does.
 
+### Feature Ablation Suite
+
+`ablation` is a deterministic local suite that isolates three Shibahama feature
+families without placeholder labels:
+
+- significance ranking: a reinforced project decision must beat a closer
+  vector-only distractor;
+- reconstruction/supersession: a newer fact must invalidate a stale owner fact;
+- graph expansion: a vector anchor must pull in a related owner memory.
+
+The checked-in result files are:
+
+- `benchmarks/results/ablation-local.json`
+- `benchmarks/results/ablation-local.md`
+
+As of the current artifact, full Shibahama scores `1.000` accuracy and each
+single-feature ablation scores `0.667`, failing only the case tied to its
+disabled behavior.
+
 ### LoCoMo And LongMemEval
 
 `locomo` and `longmemeval` are JSONL loaders for exported datasets with this
@@ -126,6 +145,17 @@ python benchmarks/run.py \
   --systems shibahama,warehouse \
   --output benchmarks/results/coding-agent-local.json \
   --markdown benchmarks/results/coding-agent-local.md
+```
+
+Run the local feature ablations:
+
+```sh
+python benchmarks/run.py \
+  --suite ablation \
+  --systems shibahama,shibahama-no-significance,shibahama-no-reconstruction,shibahama-no-graph \
+  --top-k 1 \
+  --output benchmarks/results/ablation-local.json \
+  --markdown benchmarks/results/ablation-local.md
 ```
 
 Run a JSONL dataset export:
@@ -225,6 +255,4 @@ The TODO list still tracks benchmark work that is not complete:
   config are available;
 - run LongMemEval through all systems after a dataset export and external
   service config are available;
-- implement real significance, reconstruction, and graph ablations;
-- run Mem0 and Zep with real credentials/config for CurrencyBench;
-- release a reproducible CurrencyBench dataset or generator.
+- run Mem0 and Zep with real credentials/config for CurrencyBench.

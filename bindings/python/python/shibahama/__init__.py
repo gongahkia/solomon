@@ -78,6 +78,11 @@ class Shibahama:
         include_cold: bool = False,
         include_instructions: bool = False,
         max_context_tokens: int | None = None,
+        similarity_weight: float = 1.0,
+        significance_weight: float = 1.0,
+        recency_weight: float = 0.0,
+        graph_weight: float = 0.0,
+        related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None,
     ) -> list[RecallCandidate]:
         """Recall current memories for a query embedding."""
         return self._inner.recall(
@@ -88,6 +93,11 @@ class Shibahama:
             include_cold,
             include_instructions,
             max_context_tokens,
+            similarity_weight,
+            significance_weight,
+            recency_weight,
+            graph_weight,
+            related_memory_ids_by_anchor,
         )
 
     async def async_recall(self, *args, **kwargs) -> list[RecallCandidate]:
@@ -140,6 +150,11 @@ class Shibahama:
         include_cold: bool = False,
         include_instructions: bool = False,
         max_context_tokens: int | None = None,
+        similarity_weight: float = 1.0,
+        significance_weight: float = 1.0,
+        recency_weight: float = 0.0,
+        graph_weight: float = 0.0,
+        related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None,
     ) -> RecallStream:
         """Return an iterator over current recall candidates."""
         return self._inner.stream_recall(
@@ -150,6 +165,11 @@ class Shibahama:
             include_cold,
             include_instructions,
             max_context_tokens,
+            similarity_weight,
+            significance_weight,
+            recency_weight,
+            graph_weight,
+            related_memory_ids_by_anchor,
         )
 
     async def async_stream_recall(self, *args, **kwargs) -> AsyncIterator[RecallCandidate]:

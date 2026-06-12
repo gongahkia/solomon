@@ -231,6 +231,11 @@ The coding-agent benchmark artifact is still an open gap: both Shibahama and the
 warehouse baseline currently score `0.000` accuracy in the checked-in result.
 Do not cite that artifact as a win until the harness result changes.
 
+The checked-in `ablation-local` artifact isolates significance,
+reconstruction/supersession, and graph expansion toggles. Full Shibahama scores
+`1.000` accuracy; each single-feature ablation scores `0.667` and fails the case
+tied to the removed behavior.
+
 Run the local CurrencyBench comparison after building the Python binding:
 
 ```sh

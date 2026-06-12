@@ -44,6 +44,8 @@ def case_to_record(case: BenchmarkCase) -> dict[str, object]:
                 "valid_from_unix": observation.valid_from_unix,
                 "source_ref": observation.source_ref,
                 "supersedes_source_ref": observation.supersedes_source_ref,
+                "reinforce_count": observation.reinforce_count,
+                "related_source_refs": list(observation.related_source_refs),
             }
             for observation in case.observations
         ],

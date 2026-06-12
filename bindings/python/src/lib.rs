@@ -11,11 +11,13 @@ use shibahama_core::model::{
     AccessOutcome, CredenceTier, MemoryId, MemoryItem, MemoryKind, Provenance, SourceKind, Tier,
 };
 use shibahama_core::retrieval::{
-    RecallCandidate, RecallCandidateCurrency, RecallCandidateSource, RecallRequest,
+    RecallCandidate, RecallCandidateCurrency, RecallCandidateSource, RecallRankingConfig,
+    RecallRequest, RelatedMemoryProvider,
 };
 use shibahama_core::significance::SignificanceBreakdown;
-use shibahama_core::storage::MemoryWriteEvent;
+use shibahama_core::storage::{MemoryWriteEvent, StorageError};
 use shibahama_core::vector::HnswVectorIndex;
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -206,6 +208,16 @@ pub struct PyRecallStream {
     candidates: std::vec::IntoIter<PyRecallCandidate>,
 }
 
+struct PyRelatedMemoryProvider {
+    related: BTreeMap<MemoryId, Vec<MemoryId>>,
+}
+
+impl RelatedMemoryProvider for PyRelatedMemoryProvider {
+    fn related_memory_ids(&self, id: MemoryId) -> Result<Vec<MemoryId>, StorageError> {
+        Ok(self.related.get(&id).cloned().unwrap_or_default())
+    }
+}
+
 #[pymethods]
 impl PyRecallStream {
     /// Returns the number of remaining candidates.
@@ -324,7 +336,12 @@ impl PyShibahama {
         raw_query_context = None,
         include_cold = false,
         include_instructions = false,
-        max_context_tokens = None
+        max_context_tokens = None,
+        similarity_weight = 1.0,
+        significance_weight = 1.0,
+        recency_weight = 0.0,
+        graph_weight = 0.0,
+        related_memory_ids_by_anchor = None
     ))]
     fn recall(
         &self,
@@ -335,9 +352,14 @@ impl PyShibahama {
         include_cold: bool,
         include_instructions: bool,
         max_context_tokens: Option<usize>,
+        similarity_weight: f64,
+        significance_weight: f64,
+        recency_weight: f64,
+        graph_weight: f64,
+        related_memory_ids_by_anchor: Option<BTreeMap<String, Vec<String>>>,
     ) -> PyResult<Vec<PyRecallCandidate>> {
         let inner = self.inner.lock().map_err(lock_error)?;
-        let request = recall_request(
+        let mut request = recall_request(
             &query_vector,
             top_k,
             now_unix,
@@ -345,7 +367,19 @@ impl PyShibahama {
             include_cold,
             include_instructions,
             max_context_tokens,
-        )?;
+        )?
+        .with_ranking(RecallRankingConfig {
+            similarity_weight,
+            significance_weight,
+            recency_weight,
+            graph_weight,
+        });
+        let related_provider = related_memory_ids_by_anchor
+            .map(parse_related_memory_provider)
+            .transpose()?;
+        if let Some(provider) = &related_provider {
+            request = request.with_related_memory_provider(provider);
+        }
         let candidates = inner.recall(&request).map_err(py_error)?;
 
         Ok(candidates
@@ -370,7 +404,12 @@ impl PyShibahama {
         raw_query_context = None,
         include_cold = false,
         include_instructions = false,
-        max_context_tokens = None
+        max_context_tokens = None,
+        similarity_weight = 1.0,
+        significance_weight = 1.0,
+        recency_weight = 0.0,
+        graph_weight = 0.0,
+        related_memory_ids_by_anchor = None
     ))]
     fn stream_recall(
         &self,
@@ -381,6 +420,11 @@ impl PyShibahama {
         include_cold: bool,
         include_instructions: bool,
         max_context_tokens: Option<usize>,
+        similarity_weight: f64,
+        significance_weight: f64,
+        recency_weight: f64,
+        graph_weight: f64,
+        related_memory_ids_by_anchor: Option<BTreeMap<String, Vec<String>>>,
     ) -> PyResult<PyRecallStream> {
         let candidates = self.recall(
             query_vector,
@@ -390,6 +434,11 @@ impl PyShibahama {
             include_cold,
             include_instructions,
             max_context_tokens,
+            similarity_weight,
+            significance_weight,
+            recency_weight,
+            graph_weight,
+            related_memory_ids_by_anchor,
         )?;
 
         Ok(PyRecallStream {
@@ -664,6 +713,24 @@ fn parse_memory_id(value: &str) -> PyResult<MemoryId> {
     Uuid::parse_str(value)
         .map(MemoryId::from)
         .map_err(|error| PyValueError::new_err(format!("invalid memory id: {error}")))
+}
+
+fn parse_related_memory_provider(
+    value: BTreeMap<String, Vec<String>>,
+) -> PyResult<PyRelatedMemoryProvider> {
+    let mut related = BTreeMap::new();
+
+    for (anchor, related_values) in value {
+        related.insert(
+            parse_memory_id(&anchor)?,
+            related_values
+                .into_iter()
+                .map(|related_id| parse_memory_id(&related_id))
+                .collect::<PyResult<Vec<_>>>()?,
+        );
+    }
+
+    Ok(PyRelatedMemoryProvider { related })
 }
 
 fn parse_source_kind(value: &str) -> PyResult<SourceKind> {

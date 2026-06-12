@@ -69,6 +69,15 @@ pub enum MemoryEvent {
         /// Timestamp that closes the valid-time interval.
         valid_to: OffsetDateTime,
     },
+    /// A memory was kept current but flagged for explicit re-verification.
+    ReverificationFlagged {
+        /// Memory id requiring re-verification.
+        id: MemoryId,
+        /// Timestamp or domain instant that caused the flag.
+        flagged_at: OffsetDateTime,
+        /// Short machine-readable reason for the flag.
+        reason: String,
+    },
     /// A usage event was recorded for a memory.
     AccessRecorded {
         /// Accessed memory id.
@@ -575,6 +584,18 @@ pub trait MemoryStore {
         &self,
         id: MemoryId,
         valid_to: OffsetDateTime,
+    ) -> Result<Option<EventRecord>, StorageError>;
+
+    /// Flags a memory for explicit re-verification without changing its valid-time interval.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot durably write the flag event.
+    fn flag_for_reverification(
+        &self,
+        id: MemoryId,
+        flagged_at: OffsetDateTime,
+        reason: String,
     ) -> Result<Option<EventRecord>, StorageError>;
 
     /// Atomically closes a superseded memory and writes its reconstructed replacement.
@@ -1773,6 +1794,63 @@ impl RedbMemoryStore {
             .map(Some)
     }
 
+    /// Flags a memory for explicit re-verification without changing valid-time or vector state.
+    ///
+    /// Returns `Ok(None)` when the item does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read or written.
+    pub fn flag_for_reverification(
+        &self,
+        id: MemoryId,
+        flagged_at: OffsetDateTime,
+        reason: impl Into<String>,
+    ) -> Result<Option<EventRecord>, StorageError> {
+        let reason = reason.into();
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let sequence = {
+            let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+            let item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let key = id.to_string();
+
+            if item_table.get(key.as_str()).map_err(embed)?.is_none() {
+                return Ok(None);
+            }
+
+            let sequence = event_table.len().map_err(embed)?;
+            let record = EventRecord {
+                sequence,
+                recorded_at: OffsetDateTime::now_utc(),
+                event: MemoryEvent::ReverificationFlagged {
+                    id,
+                    flagged_at,
+                    reason,
+                },
+            };
+            let event_bytes = serde_json::to_vec(&record)?;
+
+            event_table
+                .insert(sequence, event_bytes.as_slice())
+                .map_err(embed)?;
+
+            sequence
+        };
+
+        write_txn.commit().map_err(embed)?;
+
+        self.event(sequence)?
+            .ok_or_else(|| {
+                StorageError::Embedded(
+                    "committed re-verification flag event was not readable".to_owned(),
+                )
+            })
+            .map(Some)
+    }
+
     /// Atomically invalidates a superseded memory and writes a reconstructed replacement.
     ///
     /// The replacement must use a distinct id so the superseded row remains readable for
@@ -2394,6 +2472,15 @@ impl MemoryStore for RedbMemoryStore {
         RedbMemoryStore::soft_invalidate(self, id, valid_to)
     }
 
+    fn flag_for_reverification(
+        &self,
+        id: MemoryId,
+        flagged_at: OffsetDateTime,
+        reason: String,
+    ) -> Result<Option<EventRecord>, StorageError> {
+        RedbMemoryStore::flag_for_reverification(self, id, flagged_at, reason)
+    }
+
     fn insert_reconstruction_replacement(
         &self,
         superseded_id: MemoryId,
@@ -2508,6 +2595,25 @@ mod tests {
             credence_floor: Tier::Warm,
             access_events: Vec::new(),
         }
+    }
+
+    fn test_entity(label: &str, timestamps: TemporalBounds) -> Entity {
+        Entity::new("Claim", label, format!("claim:{label}"), timestamps)
+    }
+
+    fn graph_snapshot_ids(snapshot: &GraphSnapshot) -> (BTreeSet<EntityId>, BTreeSet<RelationId>) {
+        let entity_ids = snapshot
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect::<BTreeSet<_>>();
+        let relation_ids = snapshot
+            .relations
+            .iter()
+            .map(|relation| relation.id)
+            .collect::<BTreeSet<_>>();
+
+        (entity_ids, relation_ids)
     }
 
     fn assert_memory_ids_survive(
@@ -2922,36 +3028,14 @@ mod tests {
         let store = RedbMemoryStore::open(file.path()).expect("store should open");
         let now = OffsetDateTime::UNIX_EPOCH;
         let later = now + time::Duration::days(1);
-        let source = Entity::new(
-            "Claim",
-            "source",
-            "claim:source",
-            TemporalBounds::open_from(now, now),
-        );
-        let target = Entity::new(
-            "Claim",
-            "target",
-            "claim:target",
-            TemporalBounds::open_from(now, now),
-        );
-        let expired = Entity::new(
-            "Claim",
+        let source = test_entity("source", TemporalBounds::open_from(now, now));
+        let target = test_entity("target", TemporalBounds::open_from(now, now));
+        let expired = test_entity(
             "expired",
-            "claim:expired",
             TemporalBounds::open_from(now, now).closed_at(later),
         );
-        let future = Entity::new(
-            "Claim",
-            "future",
-            "claim:future",
-            TemporalBounds::open_from(later, later),
-        );
-        let late_ingest = Entity::new(
-            "Claim",
-            "late-ingest",
-            "claim:late-ingest",
-            TemporalBounds::open_from(now, later),
-        );
+        let future = test_entity("future", TemporalBounds::open_from(later, later));
+        let late_ingest = test_entity("late-ingest", TemporalBounds::open_from(now, later));
         let active = Relation::new(
             "supports",
             source.id,
@@ -3003,16 +3087,7 @@ mod tests {
         }
 
         let now_snapshot = store.graph_snapshot(now).expect("snapshot should read");
-        let now_entity_ids = now_snapshot
-            .entities
-            .iter()
-            .map(|entity| entity.id)
-            .collect::<BTreeSet<_>>();
-        let now_relation_ids = now_snapshot
-            .relations
-            .iter()
-            .map(|relation| relation.id)
-            .collect::<BTreeSet<_>>();
+        let (now_entity_ids, now_relation_ids) = graph_snapshot_ids(&now_snapshot);
 
         assert_eq!(now_snapshot.as_of, now);
         assert_eq!(
@@ -3025,16 +3100,7 @@ mod tests {
         );
 
         let later_snapshot = store.graph_snapshot(later).expect("snapshot should read");
-        let later_entity_ids = later_snapshot
-            .entities
-            .iter()
-            .map(|entity| entity.id)
-            .collect::<BTreeSet<_>>();
-        let later_relation_ids = later_snapshot
-            .relations
-            .iter()
-            .map(|relation| relation.id)
-            .collect::<BTreeSet<_>>();
+        let (later_entity_ids, later_relation_ids) = graph_snapshot_ids(&later_snapshot);
 
         assert_eq!(later_snapshot.as_of, later);
         assert_eq!(

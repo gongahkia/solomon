@@ -180,6 +180,8 @@ pub struct ShibahamaConfig {
     pub reconstruction_budget: ReconstructionBudgetConfig,
     /// Default tier residency budgets.
     pub tier_capacity: TierCapacityConfig,
+    /// Policy for caller-requested forgetting/invalidation.
+    pub forgetting: ForgettingConfig,
 }
 
 impl ShibahamaConfig {
@@ -196,6 +198,23 @@ impl ShibahamaConfig {
             .with_staleness(self.recall_staleness)
             .with_diversification(self.recall_diversification)
     }
+}
+
+/// How the engine handles caller-requested forgetting.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ForgettingConfig {
+    /// Forgetting behavior used by `Shibahama::invalidate`.
+    pub mode: ForgettingMode,
+}
+
+/// Engine behavior for `invalidate` requests.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ForgettingMode {
+    /// Close `valid_to` and remove the memory's vector from default current recall.
+    #[default]
+    SoftInvalidate,
+    /// Keep the memory valid and append a durable flag for explicit re-verification.
+    FlagForReverification,
 }
 
 /// Embedding metadata supplied to `write_with_embedding`.
@@ -633,10 +652,16 @@ impl<V: VectorIndex> Shibahama<V> {
         id: MemoryId,
         valid_to: OffsetDateTime,
     ) -> Result<bool, ShibahamaError> {
-        Ok(self
-            .store
-            .soft_invalidate_with_vector(id, valid_to, &mut self.vector_index)?
-            .is_some())
+        match self.config.forgetting.mode {
+            ForgettingMode::SoftInvalidate => Ok(self
+                .store
+                .soft_invalidate_with_vector(id, valid_to, &mut self.vector_index)?
+                .is_some()),
+            ForgettingMode::FlagForReverification => Ok(self
+                .store
+                .flag_for_reverification(id, valid_to, "forgetting-disabled".to_owned())?
+                .is_some()),
+        }
     }
 
     /// Returns all current materialized memory rows.
@@ -1021,6 +1046,7 @@ mod tests {
     use super::*;
     use crate::model::{Provenance, SourceKind};
     use crate::retrieval::{RecallCandidateCurrency, RecallRequest};
+    use crate::storage::MemoryEvent;
     use crate::vector::HnswVectorIndex;
     use tempfile::NamedTempFile;
     use time::OffsetDateTime;
@@ -1139,6 +1165,68 @@ mod tests {
     }
 
     #[test]
+    fn forgetting_config_flags_for_reverification_without_invalidating() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let mut config = ShibahamaConfig::default();
+        config.forgetting.mode = ForgettingMode::FlagForReverification;
+        let mut shibahama =
+            Shibahama::open_with_config(file.path(), HnswVectorIndex::with_capacity(2, 8), config)
+                .expect("api should open");
+        let valid_from = OffsetDateTime::UNIX_EPOCH;
+        let flag_at = valid_from + time::Duration::days(1);
+        let item = shibahama
+            .write_with_embedding(
+                MemoryWriteEvent::new(
+                    "keep current but reverify",
+                    Provenance::new(SourceKind::User, None, "api-test"),
+                    valid_from,
+                    valid_from,
+                ),
+                WriteEmbedding {
+                    vector: &[0.0, 0.0],
+                    index_name: "api-test",
+                    model: "embedding-model",
+                    model_version: "v1",
+                },
+            )
+            .expect("write should work");
+
+        assert!(
+            shibahama
+                .invalidate(item.id, flag_at)
+                .expect("flag should work")
+        );
+
+        let why = shibahama
+            .why_at(item.id, flag_at)
+            .expect("why should read")
+            .expect("item should exist");
+        let query = [0.0, 0.0];
+        let recalled = shibahama
+            .recall(&RecallRequest::new(&query, 1, flag_at))
+            .expect("recall should keep flagged memory current");
+        let event_records = shibahama
+            .event_records()
+            .expect("events should read after flag");
+
+        assert_eq!(why.currency.state, RecallCandidateCurrency::Current);
+        assert_eq!(why.currency.valid_to, None);
+        assert_eq!(recalled[0].id, item.id);
+        assert!(event_records.iter().any(|record| {
+            matches!(
+                &record.event,
+                MemoryEvent::ReverificationFlagged {
+                    id,
+                    flagged_at,
+                    reason
+                } if *id == item.id
+                    && *flagged_at == flag_at
+                    && reason == "forgetting-disabled"
+            )
+        }));
+    }
+
+    #[test]
     fn facade_errors_expose_stable_kind_code_and_action() {
         let file = NamedTempFile::new().expect("tempfile should be created");
         let mut shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
@@ -1187,6 +1275,7 @@ mod tests {
         );
         assert_eq!(config.tier_capacity.hot_capacity, None);
         assert_eq!(config.reconstruction_budget.max_revalidations_per_window, 8);
+        assert_eq!(config.forgetting.mode, ForgettingMode::SoftInvalidate);
     }
 
     #[test]
@@ -1198,6 +1287,7 @@ mod tests {
         config.recall_staleness.load_bearing_significance_threshold = 3.0;
         config.recall_diversification.enabled = false;
         config.tier_capacity.hot_capacity = Some(64);
+        config.forgetting.mode = ForgettingMode::FlagForReverification;
         let mut shibahama =
             Shibahama::open_with_config(file.path(), HnswVectorIndex::with_capacity(2, 8), config)
                 .expect("api should open");
@@ -1209,9 +1299,17 @@ mod tests {
         assert!((request.staleness.load_bearing_significance_threshold - 3.0).abs() < f64::EPSILON);
         assert!(!request.diversification.enabled);
         assert_eq!(shibahama.config().tier_capacity.hot_capacity, Some(64));
+        assert_eq!(
+            shibahama.config().forgetting.mode,
+            ForgettingMode::FlagForReverification
+        );
 
         shibahama.set_config(ShibahamaConfig::default());
         assert_eq!(shibahama.config().tier_capacity.hot_capacity, None);
+        assert_eq!(
+            shibahama.config().forgetting.mode,
+            ForgettingMode::SoftInvalidate
+        );
     }
 
     #[test]

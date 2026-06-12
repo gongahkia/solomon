@@ -92,6 +92,13 @@ Timeline queries can inspect what Shibahama believed at a previous instant.
 This is useful for audit and debugging, but callers should avoid treating
 historical timeline output as current advice.
 
+Deployments that must avoid even soft invalidation can set
+`ShibahamaConfig::forgetting.mode` to `ForgettingMode::FlagForReverification`.
+In that mode, `Shibahama::invalidate` keeps the memory's valid-time interval and
+vector entry intact, then appends a durable `ReverificationFlagged` event for
+explicit review. Low-level storage APIs still expose soft invalidation for
+deployments that choose the default behavior.
+
 ## Server Auth And Namespace Isolation
 
 The optional HTTP server is a thin wrapper over the core API. It supports:
@@ -156,6 +163,8 @@ The current public security-relevant surfaces are:
 - `shibahama_core::encryption::NoopEncryption`, the explicit no-op provider;
 - server request logs from `shibahama serve`, emitted through
   `log_server_request` as metadata and cost counters only;
+- `ShibahamaConfig::forgetting`, which can route invalidation requests to
+  durable re-verification flags instead of closing valid-time intervals;
 - recall candidate `read_safety_findings`, exposed by the Rust core and
   bindings;
 - `why(memory_id)` traces, which expose provenance, credence, tier, currency,

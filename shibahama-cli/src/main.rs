@@ -839,6 +839,7 @@ fn event_touches_namespace(
     match &record.event {
         MemoryEvent::MemoryWritten { item } => memory_in_namespace(item, namespace),
         MemoryEvent::MemoryInvalidated { id, .. }
+        | MemoryEvent::ReverificationFlagged { id, .. }
         | MemoryEvent::AccessRecorded { id, .. }
         | MemoryEvent::TierChanged { id, .. }
         | MemoryEvent::ContentCompacted { id, .. } => namespace_ids.contains(id),
@@ -871,6 +872,16 @@ fn tideline_event_from_record(record: EventRecord) -> TidelineEventDto {
             tier_to: None,
             access_outcome: None,
             valid_to_unix: Some(valid_to.unix_timestamp()),
+        },
+        MemoryEvent::ReverificationFlagged { id, flagged_at, .. } => TidelineEventDto {
+            sequence: record.sequence,
+            recorded_at_unix: record.recorded_at.unix_timestamp(),
+            kind: "reverification_flagged".to_owned(),
+            memory_ids: vec![id.to_string()],
+            tier_from: None,
+            tier_to: None,
+            access_outcome: None,
+            valid_to_unix: Some(flagged_at.unix_timestamp()),
         },
         MemoryEvent::AccessRecorded { id, event } => TidelineEventDto {
             sequence: record.sequence,
@@ -945,6 +956,18 @@ fn tideline_graph(memories: &[MemoryItem], event_records: &[EventRecord]) -> Tid
                     kind: "invalidated".to_owned(),
                     valid_from_unix: None,
                     valid_to_unix: Some(valid_to.unix_timestamp()),
+                });
+            }
+            MemoryEvent::ReverificationFlagged { id, flagged_at, .. }
+                if namespace_ids.contains(id) =>
+            {
+                edges.push(TidelineGraphEdgeDto {
+                    id: format!("event-{}-reverification", record.sequence),
+                    from: id.to_string(),
+                    to: id.to_string(),
+                    kind: "reverification_flagged".to_owned(),
+                    valid_from_unix: Some(flagged_at.unix_timestamp()),
+                    valid_to_unix: None,
                 });
             }
             MemoryEvent::ReconstructionApplied {

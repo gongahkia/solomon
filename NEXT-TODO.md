@@ -1,12 +1,28 @@
-# Shibahama — consolidation pass, human-in-the-loop "challenge", null-hypothesis honesty, and an RL stretch (TODO-only)
+# Shibahama — remaining release blockers and learned memory-policy work
 
-These are ADDITIVE features on top of the current fix-list. Implement Part 1 and
-Part 2 for real. Document Part 3 thoroughly. Add Part 4 as TODO-only — do NOT
-start building it; it depends on Parts 1–2 existing first.
+This file is now the single follow-up list after the old implementation
+`TODO.md` was reconciled. Parts 1-3 are done. Part 4 has moved from TODO-only to
+a gated Stage 1 implementation: offline evaluation only, with no runtime learned
+policy and no training loop.
 
 Keep the core ethos intact throughout: never-delete invariant, credence floor,
 usage-driven significance, and DX/legibility as priority #1. Nothing here may
 violate never-delete.
+
+## External release blockers moved from TODO.md
+
+- [!] Publish a working `pip install shibahama` from TestPyPI, then PyPI —
+      blocked on TestPyPI/PyPI token or trusted publishing setup; local
+      build/check helper exists at `scripts/release/python-publish.sh`.
+- [!] Publish a working `npm install shibahama` — blocked on npm auth/trusted
+      publisher setup; local build/test/pack helper exists at
+      `scripts/release/npm-publish.sh`.
+- [!] Tag a real `v0.1.0` and publish crate + pip + npm — blocked on
+      crates.io/PyPI/npm auth and final release-owner action; local preflight
+      helpers exist under `scripts/release/`.
+- [!] Submit the CurrencyBench writeup somewhere citable — blocked on archive
+      account/release-owner action; `CITATION.cff`, `.zenodo.json`, and the
+      submission checklist exist in-repo.
 
 ## Part 1 — Offline consolidation pass ("the dream"), but LEGIBLE (first-class)
 Context: the 2026 field has converged on offline memory consolidation (Karpathy's
@@ -79,22 +95,16 @@ dodging it.
 13. [x] Put a short, honest "When NOT to use Shibahama" section in the README (flat
     RAG is fine for stateless one-shot QA). This honesty is a feature.
 
-## Part 4 — RL for memory operations (TODO-ONLY — do not build yet)
-Add this as a clearly-marked future phase in TODO.md. It depends on Parts 1–2
-shipping first (it needs the consolidation actions and the logged human
-challenges). Write it rigorously and anti-sycophantically — flag the tension, do
-not hand-wave it.
+## Part 4 — Learned policy for memory operations (stretch, gated)
 
-Add these as unchecked TODO items under a new "Phase: Learned memory policy
-(stretch, gated)":
-- [ ] Document the core tension explicitly: the dominant RL-for-memory paradigm
-      (Memory-R1, DeltaMem, SEARL) learns an action space that INCLUDES DELETE and
-      rewards on naked answer-correctness (Exact Match / QA). Both fight
-      Shibahama's invariants: never-delete and credence floor. A rigorous version
-      must (a) restrict the action space to non-destructive ops (NOOP / promote /
-      demote / merge-with-provenance / flag — NO delete, NO overwrite), and
-      (b) use a reward that cannot be gamed by discarding inconvenient memories.
-- [ ] Stage 1 (laptop-feasible, gating): OFFLINE policy evaluation on the logged
+- [x] Document the core tension explicitly: the dominant RL-for-memory paradigm
+      (Memory-R1, DeltaMem, SEARL) often optimizes memory behavior with destructive
+      or answer-correctness-first incentives. Both can fight Shibahama's
+      invariants: never-delete and credence floor. A rigorous version must (a)
+      restrict the action space to non-destructive ops (NOOP / promote / demote /
+      merge-with-provenance / flag — NO delete, NO overwrite), and (b) use a
+      reward that cannot be gamed by discarding inconvenient memories.
+- [x] Stage 1 (laptop-feasible, gating): OFFLINE policy evaluation on the logged
       human challenges from Part 2. Question: would a learned demote/merge/flag
       policy have made better decisions than the hand-tuned significance function,
       judged against subsequent human affirms/challenges? No training loop. If the
@@ -117,11 +127,11 @@ Add these as unchecked TODO items under a new "Phase: Learned memory policy
       RL not justified" — and that null result gets written up, not buried.
 
 ## Reconcile the TODO
-14. [x] Add the new shipped work (Parts 1–2) and the documentation work (Part 3) as
-    honest, accurately-checked phases. Add Part 4 as the unchecked gated stretch
-    phase. Do not over-check.
+14. [x] Add the shipped work (Parts 1-2), documentation work (Part 3), release
+    blockers, and gated learned-policy work here. `TODO.md` has no remaining
+    unique implementation work and has been removed.
 
 ## Report back
-What consolidation decisions the pass makes and how they appear in the Tideline;
-the four human-signal verbs and their tests; the null-hypothesis doc; and the
-RL stretch phase as TODO-only (confirm nothing in Part 4 was built).
+Report the external blockers carried forward, confirm that `TODO.md` was removed
+because everything else was done or consciously closed, and summarize the offline
+learned-policy evaluator plus the remaining Stage 2/3 gates.

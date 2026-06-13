@@ -331,4 +331,4 @@ Still pending:
 - npm publish for `npm install shibahama`.
 - final `v0.1.0` tag and registry publication.
 - LoCoMo and LongMemEval benchmark runs with real dataset exports.
-- public early-user outreach and issue collection.
+- citable CurrencyBench archive/DOI submission.

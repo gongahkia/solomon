@@ -188,6 +188,14 @@ Replays timeline recall and returns an owning iterator over ranked candidates.
 
 Reinforces a memory with a usage outcome.
 
+### Human signal verbs
+
+`challenge`, `affirm`, `correct`, `pin`, and `unpin` record append-only human
+signals with actor, timestamp, and reason metadata. Challenges lower credence and
+flag review, affirmations raise credence, corrections reuse reconstruction
+quarantine/corroboration, and pins change the credence floor. These events are
+RL-ready audit records but are not connected to an automatic learned policy.
+
 ### `pub fn why(&self, id: MemoryId) -> Result<Option<WhyTrace>, ShibahamaError>`
 
 Returns a full explanation for the current memory state.

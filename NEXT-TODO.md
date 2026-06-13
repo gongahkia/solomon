@@ -39,7 +39,7 @@ Context: a real gap is that significance can't be fully objective — a human mu
 be able to weigh in. Build this with GENERAL agent-memory semantics (not legal
 vocabulary): "challenge", "correct", "affirm", "pin".
 
-6. Add API verbs: `challenge(memory_id, reason)`, `affirm(memory_id)`,
+6. [x] Add API verbs: `challenge(memory_id, reason)`, `affirm(memory_id)`,
    `correct(memory_id, proposed_content)`, `pin(memory_id)` / `unpin`.
    - challenge → lowers credence and flags the item for review; recorded as an
      access/usage event with negative outcome.
@@ -48,15 +48,15 @@ vocabulary): "challenge", "correct", "affirm", "pin".
      invalidate-not-delete the prior version on corroboration (reuse the Part-of-
      fix-list reconstruction pipeline).
    - pin → sets/raises the credence floor so the item cannot decay below it.
-7. Every challenge/affirm/correct/pin is an append-only audit event with actor +
+7. [x] Every challenge/affirm/correct/pin is an append-only audit event with actor +
    timestamp + reason. These are the legible human signals.
-8. Surface challenges in the Tideline (contested items visually marked; show the
+8. [x] Surface challenges in the Tideline (contested items visually marked; show the
    human reason alongside the machine significance).
-9. CRITICAL design note to encode in code comments + docs: these human signals
+9. [x] CRITICAL design note to encode in code comments + docs: these human signals
    are logged in an RL-ready shape (see Part 4) but are NOT wired into any reward
    or automatic policy in this shipped version. They affect credence/supersession
    directly and deterministically. Keep them decoupled from any learned policy.
-10. Tests: challenge lowers credence and never deletes; pin enforces floor;
+10. [x] Tests: challenge lowers credence and never deletes; pin enforces floor;
     correct routes through quarantine+corroboration; all four emit audit events.
 
 ## Part 3 — Confront the null hypothesis HONESTLY (document heavily, in-repo)

@@ -6,9 +6,10 @@ use crate::anomaly::{
     AnomalyConfig, AnomalyFlag, detect_contradiction_bursts, inspect_suspicious_provenance,
 };
 use crate::model::{
-    AccessEvent, CURRENT_MEMORY_SCHEMA_VERSION, CompactionRef, ConsolidationAction,
-    ConsolidationWhy, CredenceTier, EmbeddingRef, Entity, EntityId, MemoryId, MemoryItem,
-    MemoryKind, Provenance, Relation, RelationId, SourceKind, TemporalBounds, Tier,
+    AccessEvent, AccessOutcome, CURRENT_MEMORY_SCHEMA_VERSION, CompactionRef, ConsolidationAction,
+    ConsolidationWhy, CredenceTier, EmbeddingRef, Entity, EntityId, HumanSignal, HumanSignalAction,
+    MemoryId, MemoryItem, MemoryKind, Provenance, Relation, RelationId, SourceKind, TemporalBounds,
+    Tier,
 };
 use crate::significance::{SignificanceBreakdown, SignificanceConfig, SignificanceFunction};
 use crate::vector::{VectorIndex, VectorIndexError};
@@ -130,6 +131,11 @@ pub enum MemoryEvent {
         /// Explainable usage/safety trace behind the decision.
         why: ConsolidationWhy,
     },
+    /// A human supplied a direct deterministic signal for a memory.
+    HumanSignalRecorded {
+        /// Append-only human signal payload.
+        signal: HumanSignal,
+    },
 }
 
 /// Cause attached to tier-transition events.
@@ -163,6 +169,8 @@ pub enum MemoryAuditCause {
     CapacityEnforcement,
     /// Tier changed because an offline consolidation pass applied usage evidence.
     ConsolidationPass,
+    /// A human challenge, affirmation, correction, pin, or unpin changed state.
+    HumanSignal,
     /// Cause was not recorded by an older event.
     Unknown,
 }
@@ -194,6 +202,13 @@ pub enum MemoryAuditChange {
         /// Previous tier, or `None` for initial assignment.
         from: Option<Tier>,
         /// New tier.
+        to: Tier,
+    },
+    /// Credence floor changed.
+    CredenceFloor {
+        /// Previous floor, or `None` for initial assignment.
+        from: Option<Tier>,
+        /// New floor.
         to: Tier,
     },
 }
@@ -268,6 +283,33 @@ pub struct ConsolidationDecisionRecord {
     pub revalidation_flag: Option<EventRecord>,
     /// Legible consolidation marker with the why trace.
     pub decision: EventRecord,
+}
+
+/// Events produced by one human signal API call.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HumanSignalRecord {
+    /// Optional usage event emitted by challenge/affirm signals.
+    pub access: Option<EventRecord>,
+    /// Optional re-verification flag emitted by challenge signals.
+    pub revalidation_flag: Option<EventRecord>,
+    /// Append-only human signal audit event.
+    pub signal: EventRecord,
+}
+
+struct HumanCredenceSignalInput {
+    id: MemoryId,
+    action: HumanSignalAction,
+    actor: String,
+    reason: String,
+    timestamp: OffsetDateTime,
+    outcome: AccessOutcome,
+}
+
+struct HumanCredenceEventSet {
+    item: MemoryItem,
+    access: EventRecord,
+    revalidation_flag: Option<EventRecord>,
+    signal: EventRecord,
 }
 
 /// Tier residency limits for materialized memory state.
@@ -1023,6 +1065,19 @@ impl RedbMemoryStore {
                         item.content.clear();
                     }
                 }
+                MemoryEvent::HumanSignalRecorded { signal } => {
+                    if record.recorded_at <= as_of
+                        && signal.timestamp <= as_of
+                        && let Some(item) = items.get_mut(&signal.memory_id)
+                    {
+                        if let Some(credence) = signal.new_credence {
+                            item.credence = credence;
+                        }
+                        if let Some(floor) = signal.new_credence_floor {
+                            item.credence_floor = floor;
+                        }
+                    }
+                }
                 MemoryEvent::ReverificationFlagged { .. }
                 | MemoryEvent::ReconstructionApplied { .. }
                 | MemoryEvent::ConsolidationDecision { .. } => {}
@@ -1142,42 +1197,54 @@ impl RedbMemoryStore {
         let mut entries = Vec::new();
         let mut previous_credence = None;
         let mut previous_tier = None;
+        let mut previous_credence_floor = None;
 
         for record in self.events()? {
             match record.event {
-                MemoryEvent::MemoryWritten { item } if item.id == id => {
-                    let cause = if previous_credence.is_none() && previous_tier.is_none() {
+                MemoryEvent::MemoryWritten { ref item } if item.id == id => {
+                    let cause = if previous_credence.is_none()
+                        && previous_tier.is_none()
+                        && previous_credence_floor.is_none()
+                    {
                         MemoryAuditCause::InitialWrite
                     } else {
                         MemoryAuditCause::DirectWrite
                     };
 
                     if previous_credence != Some(item.credence) {
-                        entries.push(MemoryAuditEntry {
-                            sequence: record.sequence,
-                            recorded_at: record.recorded_at,
-                            memory_id: id,
-                            change: MemoryAuditChange::Credence {
-                                from: previous_credence,
-                                to: item.credence,
-                            },
+                        push_credence_audit_entry(
+                            &mut entries,
+                            &record,
+                            id,
+                            previous_credence,
+                            item.credence,
                             cause,
-                        });
+                        );
                         previous_credence = Some(item.credence);
                     }
 
                     if previous_tier != Some(item.tier) {
-                        entries.push(MemoryAuditEntry {
-                            sequence: record.sequence,
-                            recorded_at: record.recorded_at,
-                            memory_id: id,
-                            change: MemoryAuditChange::Tier {
-                                from: previous_tier,
-                                to: item.tier,
-                            },
+                        push_tier_audit_entry(
+                            &mut entries,
+                            &record,
+                            id,
+                            previous_tier,
+                            item.tier,
                             cause,
-                        });
+                        );
                         previous_tier = Some(item.tier);
+                    }
+
+                    if previous_credence_floor != Some(item.credence_floor) {
+                        push_floor_audit_entry(
+                            &mut entries,
+                            &record,
+                            id,
+                            previous_credence_floor,
+                            item.credence_floor,
+                            cause,
+                        );
+                        previous_credence_floor = Some(item.credence_floor);
                     }
                 }
                 MemoryEvent::TierChanged {
@@ -1186,17 +1253,40 @@ impl RedbMemoryStore {
                     to,
                     cause,
                 } if changed_id == id => {
-                    entries.push(MemoryAuditEntry {
-                        sequence: record.sequence,
-                        recorded_at: record.recorded_at,
-                        memory_id: id,
-                        change: MemoryAuditChange::Tier {
-                            from: Some(from),
-                            to,
-                        },
-                        cause: MemoryAuditCause::from(cause),
-                    });
+                    push_tier_audit_entry(
+                        &mut entries,
+                        &record,
+                        id,
+                        Some(from),
+                        to,
+                        MemoryAuditCause::from(cause),
+                    );
                     previous_tier = Some(to);
+                }
+                MemoryEvent::HumanSignalRecorded { ref signal } if signal.memory_id == id => {
+                    if let Some(to) = signal.new_credence {
+                        push_credence_audit_entry(
+                            &mut entries,
+                            &record,
+                            id,
+                            signal.previous_credence.or(previous_credence),
+                            to,
+                            MemoryAuditCause::HumanSignal,
+                        );
+                        previous_credence = Some(to);
+                    }
+
+                    if let Some(to) = signal.new_credence_floor {
+                        push_floor_audit_entry(
+                            &mut entries,
+                            &record,
+                            id,
+                            signal.previous_credence_floor.or(previous_credence_floor),
+                            to,
+                            MemoryAuditCause::HumanSignal,
+                        );
+                        previous_credence_floor = Some(to);
+                    }
                 }
                 _ => {}
             }
@@ -2392,6 +2482,245 @@ impl RedbMemoryStore {
         }))
     }
 
+    /// Records a human challenge by lowering credence, appending a negative usage signal, and
+    /// flagging the item for review.
+    ///
+    /// Returns `Ok(None)` when the memory is missing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read or written.
+    pub fn challenge_memory(
+        &self,
+        id: MemoryId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+        timestamp: OffsetDateTime,
+        policy: &dyn SignificanceFunction,
+    ) -> Result<Option<HumanSignalRecord>, StorageError> {
+        self.apply_human_credence_signal(
+            HumanCredenceSignalInput {
+                id,
+                action: HumanSignalAction::Challenge,
+                actor: actor.into(),
+                reason: reason.into(),
+                timestamp,
+                outcome: AccessOutcome::Contradicted,
+            },
+            policy,
+        )
+    }
+
+    /// Records a human affirmation by raising credence and appending a positive usage signal.
+    ///
+    /// Returns `Ok(None)` when the memory is missing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read or written.
+    pub fn affirm_memory(
+        &self,
+        id: MemoryId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+        timestamp: OffsetDateTime,
+        policy: &dyn SignificanceFunction,
+    ) -> Result<Option<HumanSignalRecord>, StorageError> {
+        self.apply_human_credence_signal(
+            HumanCredenceSignalInput {
+                id,
+                action: HumanSignalAction::Affirm,
+                actor: actor.into(),
+                reason: reason.into(),
+                timestamp,
+                outcome: AccessOutcome::Cited,
+            },
+            policy,
+        )
+    }
+
+    fn apply_human_credence_signal(
+        &self,
+        input: HumanCredenceSignalInput,
+        policy: &dyn SignificanceFunction,
+    ) -> Result<Option<HumanSignalRecord>, StorageError> {
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let Some((access_sequence, flag_sequence, signal_sequence)) =
+            (|| -> Result<Option<(u64, Option<u64>, u64)>, StorageError> {
+                let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+                let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+                let key = input.id.to_string();
+                let item: MemoryItem = {
+                    let Some(value) = item_table.get(key.as_str()).map_err(embed)? else {
+                        return Ok(None);
+                    };
+
+                    serde_json::from_slice(value.value())?
+                };
+                let access_sequence = event_table.len().map_err(embed)?;
+                let event_set =
+                    build_human_credence_event_set(access_sequence, item, input, policy);
+                let signal_sequence = event_set.signal.sequence;
+                let access_bytes = serde_json::to_vec(&event_set.access)?;
+                let signal_bytes = serde_json::to_vec(&event_set.signal)?;
+                let item_bytes = serde_json::to_vec(&event_set.item)?;
+
+                event_table
+                    .insert(access_sequence, access_bytes.as_slice())
+                    .map_err(embed)?;
+                if let Some(flag_record) = &event_set.revalidation_flag {
+                    let flag_bytes = serde_json::to_vec(flag_record)?;
+
+                    event_table
+                        .insert(flag_record.sequence, flag_bytes.as_slice())
+                        .map_err(embed)?;
+                }
+                event_table
+                    .insert(signal_sequence, signal_bytes.as_slice())
+                    .map_err(embed)?;
+                item_table
+                    .insert(key.as_str(), item_bytes.as_slice())
+                    .map_err(embed)?;
+
+                Ok(Some((
+                    access_sequence,
+                    event_set.revalidation_flag.map(|record| record.sequence),
+                    signal_sequence,
+                )))
+            })()?
+        else {
+            write_txn.commit().map_err(embed)?;
+            return Ok(None);
+        };
+
+        write_txn.commit().map_err(embed)?;
+
+        Ok(Some(HumanSignalRecord {
+            access: Some(self.event(access_sequence)?.ok_or_else(|| {
+                StorageError::Embedded("committed human access event was not readable".to_owned())
+            })?),
+            revalidation_flag: flag_sequence
+                .map(|sequence| {
+                    self.event(sequence)?.ok_or_else(|| {
+                        StorageError::Embedded(
+                            "committed human review flag was not readable".to_owned(),
+                        )
+                    })
+                })
+                .transpose()?,
+            signal: self.event(signal_sequence)?.ok_or_else(|| {
+                StorageError::Embedded("committed human signal was not readable".to_owned())
+            })?,
+        }))
+    }
+
+    /// Raises or clears the credence floor from a human pin/unpin signal.
+    ///
+    /// Returns `Ok(None)` when the memory is missing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read or written.
+    pub fn set_human_credence_floor(
+        &self,
+        id: MemoryId,
+        action: HumanSignalAction,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+        timestamp: OffsetDateTime,
+    ) -> Result<Option<HumanSignalRecord>, StorageError> {
+        debug_assert!(matches!(
+            action,
+            HumanSignalAction::Pin | HumanSignalAction::Unpin
+        ));
+
+        let actor = actor.into();
+        let reason = reason.into();
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let Some(signal_sequence) = (|| -> Result<Option<u64>, StorageError> {
+            let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+            let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let key = id.to_string();
+            let mut item: MemoryItem = {
+                let Some(value) = item_table.get(key.as_str()).map_err(embed)? else {
+                    return Ok(None);
+                };
+
+                serde_json::from_slice(value.value())?
+            };
+            let previous_floor = item.credence_floor;
+            let new_floor = match action {
+                HumanSignalAction::Pin => item.credence_floor.max(item.tier).max(Tier::Warm),
+                HumanSignalAction::Unpin => Tier::Cold,
+                HumanSignalAction::Challenge
+                | HumanSignalAction::Affirm
+                | HumanSignalAction::Correct => item.credence_floor,
+            };
+
+            item.credence_floor = new_floor;
+
+            let signal = HumanSignal {
+                action,
+                memory_id: id,
+                actor,
+                timestamp,
+                reason,
+                proposed_content: None,
+                proposal_id: None,
+                previous_credence: None,
+                new_credence: None,
+                previous_credence_floor: Some(previous_floor),
+                new_credence_floor: Some(new_floor),
+            };
+            let signal_sequence = event_table.len().map_err(embed)?;
+            let signal_record = EventRecord {
+                sequence: signal_sequence,
+                recorded_at: timestamp,
+                event: MemoryEvent::HumanSignalRecorded { signal },
+            };
+            let signal_bytes = serde_json::to_vec(&signal_record)?;
+            let item_bytes = serde_json::to_vec(&item)?;
+
+            event_table
+                .insert(signal_sequence, signal_bytes.as_slice())
+                .map_err(embed)?;
+            item_table
+                .insert(key.as_str(), item_bytes.as_slice())
+                .map_err(embed)?;
+
+            Ok(Some(signal_sequence))
+        })()?
+        else {
+            write_txn.commit().map_err(embed)?;
+            return Ok(None);
+        };
+
+        write_txn.commit().map_err(embed)?;
+
+        Ok(Some(HumanSignalRecord {
+            access: None,
+            revalidation_flag: None,
+            signal: self.event(signal_sequence)?.ok_or_else(|| {
+                StorageError::Embedded("committed human floor signal was not readable".to_owned())
+            })?,
+        }))
+    }
+
+    /// Appends a human signal audit event that does not directly mutate a row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the event cannot be appended.
+    pub fn append_human_signal(&self, signal: HumanSignal) -> Result<EventRecord, StorageError> {
+        self.append_event(MemoryEvent::HumanSignalRecorded { signal })
+    }
+
     /// Soft-invalidates an item and removes its vector from the index.
     ///
     /// # Errors
@@ -2941,6 +3270,147 @@ impl MemoryStore for RedbMemoryStore {
     fn events(&self) -> Result<Vec<EventRecord>, StorageError> {
         RedbMemoryStore::events(self)
     }
+}
+
+const fn lower_credence(credence: CredenceTier) -> CredenceTier {
+    match credence {
+        CredenceTier::FirmAuthoritative => CredenceTier::VerifiedSource,
+        CredenceTier::VerifiedSource => CredenceTier::ModelInferred,
+        CredenceTier::ModelInferred | CredenceTier::Unverified => CredenceTier::Unverified,
+    }
+}
+
+const fn raise_credence(credence: CredenceTier) -> CredenceTier {
+    match credence {
+        CredenceTier::Unverified => CredenceTier::ModelInferred,
+        CredenceTier::ModelInferred => CredenceTier::VerifiedSource,
+        CredenceTier::VerifiedSource | CredenceTier::FirmAuthoritative => {
+            CredenceTier::FirmAuthoritative
+        }
+    }
+}
+
+fn build_human_credence_event_set(
+    access_sequence: u64,
+    mut item: MemoryItem,
+    input: HumanCredenceSignalInput,
+    policy: &dyn SignificanceFunction,
+) -> HumanCredenceEventSet {
+    let previous_credence = item.credence;
+    let new_credence = match input.action {
+        HumanSignalAction::Challenge => lower_credence(item.credence),
+        HumanSignalAction::Affirm => raise_credence(item.credence),
+        HumanSignalAction::Correct | HumanSignalAction::Pin | HumanSignalAction::Unpin => {
+            item.credence
+        }
+    };
+    let access_event = AccessEvent::new(input.timestamp, None, input.outcome);
+
+    item.credence = new_credence;
+    item.access_events.push(access_event.clone());
+    item.significance = policy.recompute(&item, input.timestamp);
+
+    let access = EventRecord {
+        sequence: access_sequence,
+        recorded_at: input.timestamp,
+        event: MemoryEvent::AccessRecorded {
+            id: input.id,
+            event: access_event,
+        },
+    };
+    let revalidation_flag = human_challenge_flag(access_sequence, &input);
+    let signal_sequence = access_sequence + 1 + u64::from(revalidation_flag.is_some());
+    let signal = HumanSignal {
+        action: input.action,
+        memory_id: input.id,
+        actor: input.actor,
+        timestamp: input.timestamp,
+        reason: input.reason,
+        proposed_content: None,
+        proposal_id: None,
+        previous_credence: Some(previous_credence),
+        new_credence: Some(new_credence),
+        previous_credence_floor: None,
+        new_credence_floor: None,
+    };
+    let signal = EventRecord {
+        sequence: signal_sequence,
+        recorded_at: signal.timestamp,
+        event: MemoryEvent::HumanSignalRecorded { signal },
+    };
+
+    HumanCredenceEventSet {
+        item,
+        access,
+        revalidation_flag,
+        signal,
+    }
+}
+
+fn human_challenge_flag(
+    access_sequence: u64,
+    input: &HumanCredenceSignalInput,
+) -> Option<EventRecord> {
+    (input.action == HumanSignalAction::Challenge).then(|| EventRecord {
+        sequence: access_sequence + 1,
+        recorded_at: input.timestamp,
+        event: MemoryEvent::ReverificationFlagged {
+            id: input.id,
+            flagged_at: input.timestamp,
+            reason: format!("human-challenge: {}", input.reason),
+        },
+    })
+}
+
+fn push_credence_audit_entry(
+    entries: &mut Vec<MemoryAuditEntry>,
+    record: &EventRecord,
+    memory_id: MemoryId,
+    from: Option<CredenceTier>,
+    to: CredenceTier,
+    cause: MemoryAuditCause,
+) {
+    entries.push(MemoryAuditEntry {
+        sequence: record.sequence,
+        recorded_at: record.recorded_at,
+        memory_id,
+        change: MemoryAuditChange::Credence { from, to },
+        cause,
+    });
+}
+
+fn push_tier_audit_entry(
+    entries: &mut Vec<MemoryAuditEntry>,
+    record: &EventRecord,
+    memory_id: MemoryId,
+    from: Option<Tier>,
+    to: Tier,
+    cause: MemoryAuditCause,
+) {
+    entries.push(MemoryAuditEntry {
+        sequence: record.sequence,
+        recorded_at: record.recorded_at,
+        memory_id,
+        change: MemoryAuditChange::Tier { from, to },
+        cause,
+    });
+}
+
+fn push_floor_audit_entry(
+    entries: &mut Vec<MemoryAuditEntry>,
+    record: &EventRecord,
+    memory_id: MemoryId,
+    from: Option<Tier>,
+    to: Tier,
+    cause: MemoryAuditCause,
+) {
+    entries.push(MemoryAuditEntry {
+        sequence: record.sequence,
+        recorded_at: record.recorded_at,
+        memory_id,
+        change: MemoryAuditChange::CredenceFloor { from, to },
+        cause,
+    });
 }
 
 fn reconstruction_replacement_events(
@@ -4491,7 +4961,7 @@ mod tests {
 
         let audit = store.audit_trail(item_id).expect("audit trail should read");
 
-        assert_eq!(audit.len(), 3);
+        assert_eq!(audit.len(), 4);
         assert_eq!(
             audit[0].change,
             MemoryAuditChange::Credence {
@@ -4510,12 +4980,20 @@ mod tests {
         assert_eq!(audit[1].cause, MemoryAuditCause::InitialWrite);
         assert_eq!(
             audit[2].change,
+            MemoryAuditChange::CredenceFloor {
+                from: None,
+                to: Tier::Warm,
+            }
+        );
+        assert_eq!(audit[2].cause, MemoryAuditCause::InitialWrite);
+        assert_eq!(
+            audit[3].change,
             MemoryAuditChange::Tier {
                 from: Some(Tier::Warm),
                 to: Tier::Hot,
             }
         );
-        assert_eq!(audit[2].cause, MemoryAuditCause::AccessReinforcement);
+        assert_eq!(audit[3].cause, MemoryAuditCause::AccessReinforcement);
     }
 
     #[test]

@@ -629,6 +629,52 @@ pub enum ConsolidationAction {
     FlagStale,
 }
 
+/// Human-in-the-loop signal recorded against a memory.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum HumanSignalAction {
+    /// A human contested a memory and requested review.
+    Challenge,
+    /// A human affirmed that a memory is still useful/correct.
+    Affirm,
+    /// A human supplied replacement content.
+    Correct,
+    /// A human raised the credence floor.
+    Pin,
+    /// A human removed a prior floor pin.
+    Unpin,
+}
+
+/// Append-only human signal audit event.
+///
+/// These events are deliberately RL-ready in shape: actor, action, timestamp, reason, and direct
+/// state deltas are explicit. They are not connected to any reward model or automatic learned
+/// policy in this version; Shibahama applies only the deterministic state changes recorded here.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct HumanSignal {
+    /// Human action.
+    pub action: HumanSignalAction,
+    /// Memory that received the signal.
+    pub memory_id: MemoryId,
+    /// Caller-supplied human or process actor.
+    pub actor: String,
+    /// Time the signal was supplied.
+    pub timestamp: OffsetDateTime,
+    /// Human-readable reason.
+    pub reason: String,
+    /// Proposed replacement content for corrections.
+    pub proposed_content: Option<String>,
+    /// Quarantined/promoted proposal id for corrections.
+    pub proposal_id: Option<MemoryId>,
+    /// Previous credence when changed.
+    pub previous_credence: Option<CredenceTier>,
+    /// New credence when changed.
+    pub new_credence: Option<CredenceTier>,
+    /// Previous credence floor when changed.
+    pub previous_credence_floor: Option<Tier>,
+    /// New credence floor when changed.
+    pub new_credence_floor: Option<Tier>,
+}
+
 /// Usage and safety evidence behind one consolidation decision.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ConsolidationUsageEvidence {

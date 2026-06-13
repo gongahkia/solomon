@@ -7,7 +7,10 @@ use crate::consolidation::{
     ConsolidationPolicy, OfflineConsolidationConfig, PlannedConsolidationDecision,
     plan_offline_consolidation,
 };
-use crate::model::{AccessOutcome, CredenceTier, MemoryId, MemoryItem, Provenance, Tier};
+use crate::model::{
+    AccessOutcome, CredenceTier, HumanSignal, HumanSignalAction, MemoryId, MemoryItem, Provenance,
+    SourceKind, Tier,
+};
 use crate::reconstruction::{
     BackgroundReconstructionConfig, CorroborationDecision, CorroborationPolicy,
     CorroborationSignal, DefaultRevalidationHook, QuarantinedProposal, ReconstructionBudgetConfig,
@@ -22,9 +25,9 @@ use crate::retrieval::{
 };
 use crate::significance::{SignificanceBreakdown, SignificanceConfig};
 use crate::storage::{
-    ConsolidationDecisionRecord, EventRecord, IngestCredencePolicy, MemoryAuditEntry,
-    MemoryWriteEvent, ReconstructionReplacementRecord, RedbMemoryStore, StorageError,
-    TierCapacityConfig,
+    ConsolidationDecisionRecord, EventRecord, HumanSignalRecord, IngestCredencePolicy,
+    MemoryAuditEntry, MemoryEvent, MemoryWriteEvent, ReconstructionReplacementRecord,
+    RedbMemoryStore, StorageError, TierCapacityConfig,
 };
 use crate::vector::{VectorIndex, VectorIndexError};
 use std::collections::BTreeMap;
@@ -300,6 +303,63 @@ pub struct ConsolidationPassReport {
     pub pass_id: String,
     /// Applied decisions. Empty means the store was already consolidated for this state.
     pub applied: Vec<ConsolidationOutcome>,
+}
+
+/// Caller metadata attached to a human-in-the-loop signal.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HumanSignalRequest {
+    /// Human or process actor supplying the signal.
+    pub actor: String,
+    /// Human-readable reason stored in the append-only audit event.
+    pub reason: String,
+    /// Time the caller supplied the signal.
+    pub timestamp: OffsetDateTime,
+}
+
+impl HumanSignalRequest {
+    /// Creates an explicit human signal request.
+    #[must_use]
+    pub fn new(
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+        timestamp: OffsetDateTime,
+    ) -> Self {
+        Self {
+            actor: actor.into(),
+            reason: reason.into(),
+            timestamp,
+        }
+    }
+
+    fn api_default(reason: impl Into<String>) -> Self {
+        Self::new("api", reason, OffsetDateTime::now_utc())
+    }
+}
+
+/// Result for a direct human signal that mutates credence or floor state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HumanSignalOutcome {
+    /// Signal payload stored in the append-only log.
+    pub signal: HumanSignal,
+    /// Durable event records emitted by the call.
+    pub records: HumanSignalRecord,
+}
+
+/// Result for a human correction routed through quarantine and corroboration.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HumanCorrectionOutcome {
+    /// Low-credence quarantined proposal before corroboration.
+    pub proposal: QuarantinedProposal,
+    /// Corroboration decision that allowed the proposal to replace the prior version.
+    pub corroboration: CorroborationDecision,
+    /// Promoted replacement that was durably written.
+    pub replacement: MemoryItem,
+    /// Invalidate-not-delete reconstruction records.
+    pub records: ReconstructionReplacementRecord,
+    /// Signal payload stored in the append-only log.
+    pub signal: HumanSignal,
+    /// Durable human signal event.
+    pub signal_record: EventRecord,
 }
 
 impl ExplicitReconstructionOutcome {
@@ -1119,6 +1179,241 @@ impl<V: VectorIndex> Shibahama<V> {
         ))
     }
 
+    /// Challenges a memory with a human-readable reason.
+    ///
+    /// This lowers credence deterministically, records a contradicted access outcome, and flags the
+    /// memory for review. The signal is logged in an RL-ready shape but is not connected to a
+    /// learned reward or policy update.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted.
+    pub fn challenge(
+        &self,
+        id: MemoryId,
+        reason: impl Into<String>,
+    ) -> Result<bool, ShibahamaError> {
+        Ok(self
+            .challenge_with_request(id, HumanSignalRequest::api_default(reason))?
+            .is_some())
+    }
+
+    /// Challenges a memory with explicit actor, reason, and timestamp metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted.
+    pub fn challenge_with_request(
+        &self,
+        id: MemoryId,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        self.store
+            .challenge_memory(
+                id,
+                request.actor,
+                request.reason,
+                request.timestamp,
+                &self.config.significance,
+            )?
+            .map(human_signal_outcome_from_records)
+            .transpose()
+    }
+
+    /// Affirms a memory using default API actor metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted.
+    pub fn affirm(&self, id: MemoryId) -> Result<bool, ShibahamaError> {
+        Ok(self
+            .affirm_with_request(id, HumanSignalRequest::api_default("affirmed"))?
+            .is_some())
+    }
+
+    /// Affirms a memory with explicit actor, reason, and timestamp metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted.
+    pub fn affirm_with_request(
+        &self,
+        id: MemoryId,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        self.store
+            .affirm_memory(
+                id,
+                request.actor,
+                request.reason,
+                request.timestamp,
+                &self.config.significance,
+            )?
+            .map(human_signal_outcome_from_records)
+            .transpose()
+    }
+
+    /// Corrects a memory with proposed replacement content.
+    ///
+    /// The proposed replacement first enters the reconstruction quarantine at low credence. Human
+    /// confirmation then corroborates it through the existing reconstruction pipeline, which
+    /// invalidate-not-deletes the prior version and writes the promoted replacement as a new row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the correction cannot be persisted.
+    pub fn correct(
+        &self,
+        id: MemoryId,
+        proposed_content: impl Into<String>,
+    ) -> Result<Option<HumanCorrectionOutcome>, ShibahamaError> {
+        self.correct_with_request(
+            id,
+            proposed_content,
+            HumanSignalRequest::api_default("corrected"),
+        )
+    }
+
+    /// Corrects a memory with explicit actor, reason, and timestamp metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the correction cannot be persisted.
+    pub fn correct_with_request(
+        &self,
+        id: MemoryId,
+        proposed_content: impl Into<String>,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanCorrectionOutcome>, ShibahamaError> {
+        let Some(original) = self.store.get(id)? else {
+            return Ok(None);
+        };
+        let proposed_content = proposed_content.into();
+        let mut event = MemoryWriteEvent::new(
+            proposed_content.clone(),
+            Provenance::new(
+                SourceKind::User,
+                Some(format!("human-correction:{id}")),
+                request.actor.clone(),
+            ),
+            request.timestamp,
+            request.timestamp,
+        );
+        event.tier = Tier::Cold;
+        event.credence = Some(CredenceTier::Unverified);
+        event.credence_floor = Tier::Cold;
+        event.significance = original.base_significance.max(1.0);
+
+        let proposal =
+            quarantine_proposal(event.into_item_with_policy(self.config.ingest_credence), id);
+        let corroboration_signals = [CorroborationSignal::HumanConfirmed];
+        let policy = CorroborationPolicy::default();
+        let corroboration = evaluate_corroboration(&corroboration_signals, policy);
+        let replacement = promote_corroborated_proposal(&proposal, &corroboration_signals, policy)
+            .ok_or_else(|| {
+                ShibahamaError::InvalidRequest(
+                    "human correction failed to corroborate its proposal".to_owned(),
+                )
+            })?;
+        let Some(records) = self.store.insert_reconstruction_replacement(
+            id,
+            &replacement,
+            replacement.timestamps.valid_from,
+        )?
+        else {
+            return Ok(None);
+        };
+        let signal = HumanSignal {
+            action: HumanSignalAction::Correct,
+            memory_id: id,
+            actor: request.actor,
+            timestamp: request.timestamp,
+            reason: request.reason,
+            proposed_content: Some(proposed_content),
+            proposal_id: Some(replacement.id),
+            previous_credence: Some(original.credence),
+            new_credence: Some(replacement.credence),
+            previous_credence_floor: Some(original.credence_floor),
+            new_credence_floor: Some(replacement.credence_floor),
+        };
+        let signal_record = self.store.append_human_signal(signal.clone())?;
+
+        Ok(Some(HumanCorrectionOutcome {
+            proposal,
+            corroboration,
+            replacement,
+            records,
+            signal,
+            signal_record,
+        }))
+    }
+
+    /// Pins a memory using default API actor metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted.
+    pub fn pin(&self, id: MemoryId) -> Result<bool, ShibahamaError> {
+        Ok(self
+            .pin_with_request(id, HumanSignalRequest::api_default("pinned"))?
+            .is_some())
+    }
+
+    /// Pins a memory by raising its credence floor with explicit metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted.
+    pub fn pin_with_request(
+        &self,
+        id: MemoryId,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        self.store
+            .set_human_credence_floor(
+                id,
+                HumanSignalAction::Pin,
+                request.actor,
+                request.reason,
+                request.timestamp,
+            )?
+            .map(human_signal_outcome_from_records)
+            .transpose()
+    }
+
+    /// Removes a human floor pin using default API actor metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted.
+    pub fn unpin(&self, id: MemoryId) -> Result<bool, ShibahamaError> {
+        Ok(self
+            .unpin_with_request(id, HumanSignalRequest::api_default("unpinned"))?
+            .is_some())
+    }
+
+    /// Removes a human floor pin with explicit metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted.
+    pub fn unpin_with_request(
+        &self,
+        id: MemoryId,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        self.store
+            .set_human_credence_floor(
+                id,
+                HumanSignalAction::Unpin,
+                request.actor,
+                request.reason,
+                request.timestamp,
+            )?
+            .map(human_signal_outcome_from_records)
+            .transpose()
+    }
+
     /// Replays recalled memories as they were believed at `request.now`.
     ///
     /// # Errors
@@ -1218,6 +1513,21 @@ impl<V: VectorIndex> Shibahama<V> {
             audit_trail,
         }))
     }
+}
+
+fn human_signal_outcome_from_records(
+    records: HumanSignalRecord,
+) -> Result<HumanSignalOutcome, ShibahamaError> {
+    let MemoryEvent::HumanSignalRecorded { signal } = &records.signal.event else {
+        return Err(ShibahamaError::InvalidRequest(
+            "human signal record did not contain a human signal event".to_owned(),
+        ));
+    };
+
+    Ok(HumanSignalOutcome {
+        signal: signal.clone(),
+        records,
+    })
 }
 
 /// Tokio-compatible async API facade around the sync engine.
@@ -1442,6 +1752,160 @@ where
         tokio::task::spawn_blocking(move || inner.blocking_lock().consolidate(now)).await?
     }
 
+    /// Challenges a memory with a human-readable reason.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted or the blocking task fails.
+    pub async fn challenge(
+        &self,
+        id: MemoryId,
+        reason: impl Into<String>,
+    ) -> Result<bool, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+        let reason = reason.into();
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().challenge(id, reason)).await?
+    }
+
+    /// Challenges a memory with explicit metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted or the blocking task fails.
+    pub async fn challenge_with_request(
+        &self,
+        id: MemoryId,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || {
+            inner.blocking_lock().challenge_with_request(id, request)
+        })
+        .await?
+    }
+
+    /// Affirms a memory using default API actor metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted or the blocking task fails.
+    pub async fn affirm(&self, id: MemoryId) -> Result<bool, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().affirm(id)).await?
+    }
+
+    /// Affirms a memory with explicit metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted or the blocking task fails.
+    pub async fn affirm_with_request(
+        &self,
+        id: MemoryId,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().affirm_with_request(id, request))
+            .await?
+    }
+
+    /// Corrects a memory with proposed replacement content.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the correction cannot be persisted or the blocking task fails.
+    pub async fn correct(
+        &self,
+        id: MemoryId,
+        proposed_content: impl Into<String>,
+    ) -> Result<Option<HumanCorrectionOutcome>, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+        let proposed_content = proposed_content.into();
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().correct(id, proposed_content))
+            .await?
+    }
+
+    /// Corrects a memory with explicit metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the correction cannot be persisted or the blocking task fails.
+    pub async fn correct_with_request(
+        &self,
+        id: MemoryId,
+        proposed_content: impl Into<String>,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanCorrectionOutcome>, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+        let proposed_content = proposed_content.into();
+
+        tokio::task::spawn_blocking(move || {
+            inner
+                .blocking_lock()
+                .correct_with_request(id, proposed_content, request)
+        })
+        .await?
+    }
+
+    /// Pins a memory using default API actor metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted or the blocking task fails.
+    pub async fn pin(&self, id: MemoryId) -> Result<bool, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().pin(id)).await?
+    }
+
+    /// Pins a memory with explicit metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted or the blocking task fails.
+    pub async fn pin_with_request(
+        &self,
+        id: MemoryId,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().pin_with_request(id, request))
+            .await?
+    }
+
+    /// Removes a human floor pin using default API actor metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted or the blocking task fails.
+    pub async fn unpin(&self, id: MemoryId) -> Result<bool, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().unpin(id)).await?
+    }
+
+    /// Removes a human floor pin with explicit metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the signal cannot be persisted or the blocking task fails.
+    pub async fn unpin_with_request(
+        &self,
+        id: MemoryId,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().unpin_with_request(id, request))
+            .await?
+    }
+
     /// Reinforces a memory with a usage outcome.
     ///
     /// # Errors
@@ -1485,7 +1949,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ConsolidationAction, Provenance, SourceKind};
+    use crate::model::{ConsolidationAction, HumanSignalAction, Provenance, SourceKind};
     #[cfg(feature = "tokio")]
     use crate::read_safety::DefaultSanitizingGateway;
     use crate::retrieval::{RecallCandidateCurrency, RecallRequest};
@@ -1850,6 +2314,251 @@ mod tests {
             .expect("consolidation should preserve never-delete");
         assert_consolidation_events(&shibahama, consolidated);
         assert_consolidation_rerun_is_idempotent(&shibahama, fixture.now);
+    }
+
+    #[test]
+    fn human_challenge_and_affirm_update_credence_and_emit_audit_events() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(1);
+        let item = shibahama
+            .write(MemoryWriteEvent::new(
+                "deploys go through the old host",
+                Provenance::new(SourceKind::User, None, "api-test"),
+                OffsetDateTime::UNIX_EPOCH,
+                OffsetDateTime::UNIX_EPOCH,
+            ))
+            .expect("write should work");
+
+        let challenge = shibahama
+            .challenge_with_request(
+                item.id,
+                HumanSignalRequest::new("cody", "host was retired", now),
+            )
+            .expect("challenge should persist")
+            .expect("item should exist");
+        let challenged = shibahama
+            .store()
+            .get(item.id)
+            .expect("item should read")
+            .expect("item should exist");
+
+        assert_eq!(challenge.signal.action, HumanSignalAction::Challenge);
+        assert_eq!(challenge.signal.actor, "cody");
+        assert_eq!(challenged.credence, CredenceTier::VerifiedSource);
+        assert!(challenge.records.access.is_some());
+        assert!(challenge.records.revalidation_flag.is_some());
+        assert!(
+            challenged
+                .access_events
+                .iter()
+                .any(|event| event.outcome == AccessOutcome::Contradicted)
+        );
+
+        let affirm = shibahama
+            .affirm_with_request(
+                item.id,
+                HumanSignalRequest::new(
+                    "cody",
+                    "verified after migration",
+                    now + Duration::hours(1),
+                ),
+            )
+            .expect("affirm should persist")
+            .expect("item should exist");
+        let affirmed = shibahama
+            .store()
+            .get(item.id)
+            .expect("item should read")
+            .expect("item should exist");
+        let events = shibahama.event_records().expect("events should read");
+
+        assert_eq!(affirm.signal.action, HumanSignalAction::Affirm);
+        assert_eq!(affirmed.credence, CredenceTier::FirmAuthoritative);
+        assert!(events.iter().any(|record| {
+            matches!(
+                &record.event,
+                MemoryEvent::HumanSignalRecorded {
+                    signal
+                } if signal.action == HumanSignalAction::Challenge
+                    && signal.memory_id == item.id
+                    && signal.reason == "host was retired"
+            )
+        }));
+        assert!(events.iter().any(|record| {
+            matches!(
+                &record.event,
+                MemoryEvent::HumanSignalRecorded {
+                    signal
+                } if signal.action == HumanSignalAction::Affirm
+                    && signal.memory_id == item.id
+                    && signal.reason == "verified after migration"
+            )
+        }));
+        assert!(events.iter().any(|record| {
+            matches!(
+                &record.event,
+                MemoryEvent::ReverificationFlagged {
+                    id,
+                    reason,
+                    ..
+                } if *id == item.id && reason.contains("host was retired")
+            )
+        }));
+        shibahama
+            .store()
+            .verify_never_delete_invariant()
+            .expect("human signals should preserve never-delete");
+    }
+
+    #[test]
+    fn human_pin_enforces_floor_and_unpin_emits_audit_event() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(2);
+        let mut event = MemoryWriteEvent::with_explicit_credence(
+            "do not auto-run destructive deploys",
+            Provenance::new(SourceKind::User, None, "api-test"),
+            OffsetDateTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
+            Tier::Cold,
+            CredenceTier::VerifiedSource,
+            Tier::Cold,
+        );
+        event.significance = 0.0;
+        let item = shibahama.write(event).expect("write should work");
+
+        let pin = shibahama
+            .pin_with_request(
+                item.id,
+                HumanSignalRequest::new("cody", "safety-critical", now),
+            )
+            .expect("pin should persist")
+            .expect("item should exist");
+        let pinned = shibahama
+            .store()
+            .refresh_significance(item.id, &shibahama.config().significance, now)
+            .expect("refresh should work")
+            .expect("item should exist");
+
+        assert_eq!(pin.signal.action, HumanSignalAction::Pin);
+        assert_eq!(pinned.credence_floor, Tier::Warm);
+        assert!(pinned.tier >= pinned.credence_floor);
+
+        let unpin = shibahama
+            .unpin_with_request(
+                item.id,
+                HumanSignalRequest::new("cody", "explicitly replaced", now + Duration::hours(1)),
+            )
+            .expect("unpin should persist")
+            .expect("item should exist");
+        let unpinned = shibahama
+            .store()
+            .get(item.id)
+            .expect("item should read")
+            .expect("item should exist");
+        let events = shibahama.event_records().expect("events should read");
+
+        assert_eq!(unpin.signal.action, HumanSignalAction::Unpin);
+        assert_eq!(unpinned.credence_floor, Tier::Cold);
+        assert!(events.iter().any(|record| {
+            matches!(
+                &record.event,
+                MemoryEvent::HumanSignalRecorded {
+                    signal
+                } if signal.action == HumanSignalAction::Pin
+                    && signal.memory_id == item.id
+                    && signal.reason == "safety-critical"
+            )
+        }));
+        assert!(events.iter().any(|record| {
+            matches!(
+                &record.event,
+                MemoryEvent::HumanSignalRecorded {
+                    signal
+                } if signal.action == HumanSignalAction::Unpin
+                    && signal.memory_id == item.id
+                    && signal.reason == "explicitly replaced"
+            )
+        }));
+    }
+
+    #[test]
+    fn human_correct_routes_through_quarantine_corroboration_and_reconstruction() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(3);
+        let original = shibahama
+            .write(MemoryWriteEvent::new(
+                "current deploy target is old-host",
+                Provenance::new(SourceKind::User, None, "api-test"),
+                OffsetDateTime::UNIX_EPOCH,
+                OffsetDateTime::UNIX_EPOCH,
+            ))
+            .expect("write should work");
+
+        let correction = shibahama
+            .correct_with_request(
+                original.id,
+                "current deploy target is new-host",
+                HumanSignalRequest::new("cody", "runbook updated", now),
+            )
+            .expect("correction should persist")
+            .expect("item should exist");
+        let rows = shibahama.memory_items().expect("rows should read");
+        let superseded = rows
+            .iter()
+            .find(|item| item.id == original.id)
+            .expect("original should remain");
+        let events = shibahama.event_records().expect("events should read");
+
+        assert_eq!(correction.proposal.item.credence, CredenceTier::Unverified);
+        assert_eq!(correction.proposal.item.tier, Tier::Cold);
+        assert_eq!(
+            correction.corroboration.promoted_credence,
+            Some(CredenceTier::FirmAuthoritative)
+        );
+        assert_eq!(
+            correction.replacement.content,
+            "current deploy target is new-host"
+        );
+        assert_eq!(
+            correction.replacement.credence,
+            CredenceTier::FirmAuthoritative
+        );
+        assert_eq!(superseded.timestamps.valid_to, Some(now));
+        assert!(rows.iter().any(|item| item.id == correction.replacement.id));
+        assert!(events.iter().any(|record| {
+            matches!(
+                &record.event,
+                MemoryEvent::ReconstructionApplied {
+                    superseded_id,
+                    replacement_id,
+                    ..
+                } if *superseded_id == original.id
+                    && *replacement_id == correction.replacement.id
+            )
+        }));
+        assert!(events.iter().any(|record| {
+            matches!(
+                &record.event,
+                MemoryEvent::HumanSignalRecorded {
+                    signal
+                } if signal.action == HumanSignalAction::Correct
+                    && signal.memory_id == original.id
+                    && signal.proposal_id == Some(correction.replacement.id)
+                    && signal.proposed_content.as_deref()
+                        == Some("current deploy target is new-host")
+                    && signal.reason == "runbook updated"
+            )
+        }));
+        shibahama
+            .store()
+            .verify_never_delete_invariant()
+            .expect("correction should preserve never-delete");
     }
 
     #[test]

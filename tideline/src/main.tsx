@@ -44,6 +44,9 @@ type TidelineEvent = {
   consolidation_action: string | null;
   consolidation_why: string | null;
   consolidation_evidence: ConsolidationEvidence[];
+  human_signal_action: string | null;
+  human_signal_actor: string | null;
+  human_signal_reason: string | null;
 };
 
 type ConsolidationEvidence = {
@@ -117,6 +120,7 @@ type WhyTrace = {
 };
 
 type ViewName = "moment" | "consolidation" | "poisoning" | "bitemporal" | "graph" | "diff";
+type ChallengeNote = { actor: string; reason: string };
 
 const API_BASE = "http://127.0.0.1:8765";
 const tierOrder: Record<string, number> = { hot: 0, warm: 1, cold: 2 };
@@ -240,11 +244,31 @@ function App() {
     ["unverified", "model_inferred"].includes(memory.credence),
   );
   const momentEvents = visibleEvents.filter((event) =>
-    ["memory_invalidated", "reconstruction_applied"].includes(event.kind),
+    ["memory_invalidated", "reconstruction_applied", "human_signal"].includes(event.kind),
   );
   const consolidationEvents = visibleEvents.filter(
     (event) => event.kind === "consolidation_decision",
   );
+  const challengeReasons = useMemo(() => {
+    const reasons = new Map<string, ChallengeNote>();
+
+    for (const event of visibleEvents) {
+      if (event.kind !== "human_signal" || event.human_signal_action !== "challenge") {
+        continue;
+      }
+
+      for (const id of event.memory_ids) {
+        reasons.set(id, {
+          actor: event.human_signal_actor ?? "unknown",
+          reason: event.human_signal_reason ?? "challenged",
+        });
+      }
+    }
+
+    return reasons;
+  }, [visibleEvents]);
+  const contestedIds = useMemo(() => new Set(challengeReasons.keys()), [challengeReasons]);
+  const selectedChallenge = selectedId ? challengeReasons.get(selectedId) ?? null : null;
 
   async function downloadRecording() {
     const asOfParam = asOf ? `?as_of_unix=${Math.floor(new Date(asOf).getTime() / 1000)}` : "";
@@ -378,9 +402,10 @@ function App() {
           memories={visibleMemories}
           activeEvent={activeEvent}
           selectedId={selectedId}
+          contestedIds={contestedIds}
           onSelect={setSelectedId}
         />
-        <WhyPanel memory={selectedMemory} trace={whyTrace} />
+        <WhyPanel memory={selectedMemory} trace={whyTrace} challenge={selectedChallenge} />
       </section>
 
       <section className="lower-grid">
@@ -433,11 +458,13 @@ function TierMap({
   memories,
   activeEvent,
   selectedId,
+  contestedIds,
   onSelect,
 }: {
   memories: MemoryItem[];
   activeEvent: TidelineEvent | null;
   selectedId: string | null;
+  contestedIds: Set<string>;
   onSelect: (id: string) => void;
 }) {
   const width = 760;
@@ -463,6 +490,7 @@ function TierMap({
           const x = 140 + tierIndex * 240 + ((index % 5) - 2) * 16;
           const y = 374 - Math.max(0.04, Math.min(1, memory.significance)) * 292;
           const active = activeEvent?.memory_ids.includes(memory.id) ?? false;
+          const contested = contestedIds.has(memory.id);
 
           return (
             <g key={memory.id} className="node-hit" onClick={() => onSelect(memory.id)}>
@@ -470,7 +498,7 @@ function TierMap({
                 cx={x}
                 cy={y}
                 r={selectedId === memory.id ? 18 : 14}
-                className={`memory-node ${memory.tier} ${active ? "pulse" : ""}`}
+                className={`memory-node ${memory.tier} ${active ? "pulse" : ""} ${contested ? "contested" : ""}`}
               />
               <text x={x} y={y + 34} textAnchor="middle" className="node-label">
                 {memoryLabel(memory.content)}
@@ -483,7 +511,15 @@ function TierMap({
   );
 }
 
-function WhyPanel({ memory, trace }: { memory: MemoryItem | null; trace: WhyTrace | null }) {
+function WhyPanel({
+  memory,
+  trace,
+  challenge,
+}: {
+  memory: MemoryItem | null;
+  trace: WhyTrace | null;
+  challenge: ChallengeNote | null;
+}) {
   const bars = trace
     ? [
         ["base", trace.significance.base_score],
@@ -511,6 +547,13 @@ function WhyPanel({ memory, trace }: { memory: MemoryItem | null; trace: WhyTrac
             <span>{memory.credence}</span>
             <span>{memory.significance.toFixed(3)}</span>
           </div>
+          {challenge ? (
+            <div className="human-signal-note">
+              <strong>Challenge</strong>
+              <span>{challenge.reason}</span>
+              <em>{challenge.actor}</em>
+            </div>
+          ) : null}
           <div className="bar-stack">
             {bars.map(([label, value]) => (
               <div className="bar-row" key={label}>
@@ -548,9 +591,12 @@ function MomentView({ events, memories }: { events: TidelineEvent[]; memories: M
         {events.length === 0 ? <p className="empty">No invalidation or reconstruction events</p> : null}
         {events.map((event) => (
           <article key={event.sequence} className="moment-row">
-            <strong>{event.kind}</strong>
+            <strong>{event.human_signal_action ?? event.kind}</strong>
             <span>#{event.sequence}</span>
-            <p>{event.memory_ids.map((id) => byId.get(id)?.content ?? id).join(" -> ")}</p>
+            <p>
+              {event.memory_ids.map((id) => byId.get(id)?.content ?? id).join(" -> ")}
+              {event.human_signal_reason ? `: ${event.human_signal_reason}` : ""}
+            </p>
           </article>
         ))}
       </div>

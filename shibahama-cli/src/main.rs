@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use shibahama_core::api::{Shibahama, WhyTrace, WriteEmbedding};
 use shibahama_core::model::{
-    ConsolidationAction, ConsolidationWhy, CredenceTier, MemoryId, MemoryItem, MemoryKind,
-    Provenance, SourceKind, Tier,
+    ConsolidationAction, ConsolidationWhy, CredenceTier, HumanSignalAction, MemoryId, MemoryItem,
+    MemoryKind, Provenance, SourceKind, Tier,
 };
 use shibahama_core::retrieval::{
     RecallCandidate, RecallCandidateCurrency, RecallCandidateSource, RecallRequest,
@@ -333,6 +333,9 @@ struct TidelineEventDto {
     consolidation_action: Option<String>,
     consolidation_why: Option<String>,
     consolidation_evidence: Vec<TidelineConsolidationEvidenceDto>,
+    human_signal_action: Option<String>,
+    human_signal_actor: Option<String>,
+    human_signal_reason: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -881,6 +884,12 @@ fn event_touches_namespace(
             input_ids.iter().any(|id| namespace_ids.contains(id))
                 || output_id.is_some_and(|id| namespace_ids.contains(&id))
         }
+        MemoryEvent::HumanSignalRecorded { signal } => {
+            namespace_ids.contains(&signal.memory_id)
+                || signal
+                    .proposal_id
+                    .is_some_and(|id| namespace_ids.contains(&id))
+        }
     }
 }
 
@@ -959,6 +968,19 @@ fn tideline_event_from_record(record: EventRecord) -> TidelineEventDto {
                 why,
             },
         ),
+        MemoryEvent::HumanSignalRecorded { signal } => {
+            let mut memory_ids = vec![signal.memory_id];
+
+            if let Some(proposal_id) = signal.proposal_id {
+                memory_ids.push(proposal_id);
+            }
+
+            let mut event = base_tideline_event(sequence, recorded_at, "human_signal", memory_ids);
+            event.human_signal_action = Some(human_signal_action_str(signal.action).to_owned());
+            event.human_signal_actor = Some(signal.actor);
+            event.human_signal_reason = Some(signal.reason);
+            event
+        }
     }
 }
 
@@ -980,6 +1002,9 @@ fn base_tideline_event(
         consolidation_action: None,
         consolidation_why: None,
         consolidation_evidence: Vec::new(),
+        human_signal_action: None,
+        human_signal_actor: None,
+        human_signal_reason: None,
     }
 }
 
@@ -1026,6 +1051,16 @@ fn consolidation_action_str(action: ConsolidationAction) -> &'static str {
         ConsolidationAction::Promote => "promote",
         ConsolidationAction::Demote => "demote",
         ConsolidationAction::FlagStale => "flag_stale",
+    }
+}
+
+fn human_signal_action_str(action: HumanSignalAction) -> &'static str {
+    match action {
+        HumanSignalAction::Challenge => "challenge",
+        HumanSignalAction::Affirm => "affirm",
+        HumanSignalAction::Correct => "correct",
+        HumanSignalAction::Pin => "pin",
+        HumanSignalAction::Unpin => "unpin",
     }
 }
 
@@ -1110,6 +1145,17 @@ fn append_tideline_graph_edges(
             input_ids,
             *output_id,
         ),
+        MemoryEvent::HumanSignalRecorded { signal }
+            if namespace_ids.contains(&signal.memory_id) =>
+        {
+            edges.push(self_edge(
+                record,
+                signal.memory_id,
+                &format!("human_{}", human_signal_action_str(signal.action)),
+                Some(signal.timestamp),
+                None,
+            ));
+        }
         _ => {}
     }
 }

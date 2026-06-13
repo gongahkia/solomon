@@ -207,6 +207,23 @@ A quarantined proposal can be promoted when there is enough corroboration:
 When a proposal is accepted, Shibahama invalidates the superseded memory and
 writes the replacement as a separate memory. It does not overwrite the original.
 
+## Human Signals
+
+Humans can challenge, affirm, correct, pin, or unpin a memory. These signals are
+append-only audit events with actor, timestamp, reason, action, and the direct
+state deltas they caused.
+
+The signal shape is deliberately ready for future learning experiments, but this
+version does not feed those events into a reward model or automatic learned
+policy. They affect memory state directly and deterministically:
+
+- challenge lowers credence, records a contradicted access outcome, and flags the
+  item for review;
+- affirm raises credence and records a positive usage outcome;
+- correct routes proposed replacement content through reconstruction quarantine
+  and corroboration before invalidating the prior version without deleting it;
+- pin and unpin change the credence floor used by tier decay.
+
 ## Graph
 
 The graph substrate stores typed entities and directed relations using the same

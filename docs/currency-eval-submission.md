@@ -4,6 +4,8 @@
 
 The currency-eval writeup is submitted as a repository-citable artifact for `v0.1.0`:
 
+- GitHub release: [Solomon v0.1.0](https://github.com/gongahkia/solomon/releases/tag/v0.1.0)
+- External tracking issue: [#4 Currency evaluation submission evidence for v0.1.0](https://github.com/gongahkia/solomon/issues/4)
 - Writeup: [currency-eval-writeup.md](currency-eval-writeup.md)
 - Corpus schema and reproduction notes: [evaluation-corpus.md](evaluation-corpus.md)
 - Committed sample corpus: [evaluation-corpus.synthetic.json](evaluation-corpus.synthetic.json)
@@ -13,4 +15,5 @@ The currency-eval writeup is submitted as a repository-citable artifact for `v0.
 - Repository URL: `https://github.com/gongahkia/solomon`
 
 External DOI publication can be layered on later by connecting the repository to an archival service, but the
-current artifact is already versioned, reproducible from source, and citation-addressable from the repository.
+current artifact is already versioned, reproducible from source, release-addressable on GitHub, and tracked in
+a public issue.

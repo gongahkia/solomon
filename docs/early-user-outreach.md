@@ -11,3 +11,11 @@ Initial issue themes to collect from reviewers:
 
 Use GitHub issues with labels `early-user`, `demo-feedback`, and `currency-report`.
 
+## Externally Tracked Feedback Issues
+
+Created against the public GitHub repository for `v0.1.0`:
+
+- [#1 Early user feedback: staleness explanations](https://github.com/gongahkia/solomon/issues/1)
+- [#2 Early user feedback: dependency tagging ergonomics](https://github.com/gongahkia/solomon/issues/2)
+- [#3 Early user feedback: matter and client currency reports](https://github.com/gongahkia/solomon/issues/3)
+- [#5 Early user feedback: boundary confidence evidence](https://github.com/gongahkia/solomon/issues/5)

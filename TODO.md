@@ -156,4 +156,4 @@ checkout is required at runtime.
 - [x] Launch post, FAQ, outreach docs, packaging README, and citation metadata exist.
 - [x] Annotated git tag `v0.1.0` is present in this worktree for the current release state.
 - [x] Built pip artifacts and desktop binary are present in `dist/`: sdist, wheel, and `solomon-local`.
-- [ ] Early-user outreach and eval submission are docs, not externally verifiable release activity.
+- [x] Early-user outreach and eval submission are externally tracked through the public GitHub `v0.1.0` release, attached release artifacts, and live GitHub issues #1-#5.

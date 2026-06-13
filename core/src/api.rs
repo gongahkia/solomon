@@ -7,6 +7,10 @@ use crate::consolidation::{
     ConsolidationPolicy, OfflineConsolidationConfig, PlannedConsolidationDecision,
     plan_offline_consolidation,
 };
+use crate::learned_policy::{
+    OfflinePolicyDecision, OfflinePolicyEvaluationConfig, OfflinePolicyEvaluationReport,
+    evaluate_offline_policy,
+};
 use crate::model::{
     AccessOutcome, CredenceTier, HumanSignal, HumanSignalAction, MemoryId, MemoryItem, Provenance,
     SourceKind, Tier,
@@ -910,6 +914,27 @@ impl<V: VectorIndex> Shibahama<V> {
         Ok(self.store.events()?)
     }
 
+    /// Evaluates offline learned-policy candidates against current memory state and event logs.
+    ///
+    /// The evaluator is read-only: it does not train a model, mutate memory state, or apply any
+    /// candidate action.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when current item state or event-log records cannot be read.
+    pub fn evaluate_offline_policy(
+        &self,
+        decisions: &[OfflinePolicyDecision],
+        config: OfflinePolicyEvaluationConfig,
+    ) -> Result<OfflinePolicyEvaluationReport, ShibahamaError> {
+        let memories = self.store.memory_items()?;
+        let events = self.store.events()?;
+
+        Ok(evaluate_offline_policy(
+            decisions, &memories, &events, config,
+        ))
+    }
+
     /// Recalls current fact memories for a query embedding.
     ///
     /// # Errors
@@ -1671,6 +1696,29 @@ where
         let inner = Arc::clone(&self.inner);
 
         tokio::task::spawn_blocking(move || inner.blocking_lock().event_records()).await?
+    }
+
+    /// Evaluates offline learned-policy candidates against current memory state and event logs.
+    ///
+    /// The evaluator is read-only: it does not train a model, mutate memory state, or apply any
+    /// candidate action.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when current item state, event-log records, or the blocking task fails.
+    pub async fn evaluate_offline_policy(
+        &self,
+        decisions: Vec<OfflinePolicyDecision>,
+        config: OfflinePolicyEvaluationConfig,
+    ) -> Result<OfflinePolicyEvaluationReport, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || {
+            inner
+                .blocking_lock()
+                .evaluate_offline_policy(&decisions, config)
+        })
+        .await?
     }
 
     /// Recalls current fact memories for an owned query embedding.

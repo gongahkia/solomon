@@ -194,7 +194,13 @@ Reinforces a memory with a usage outcome.
 signals with actor, timestamp, and reason metadata. Challenges lower credence and
 flag review, affirmations raise credence, corrections reuse reconstruction
 quarantine/corroboration, and pins change the credence floor. These events are
-RL-ready audit records but are not connected to an automatic learned policy.
+RL-ready audit records but are not connected to an automatic runtime policy.
+
+### `pub fn evaluate_offline_policy(&self, decisions: &[OfflinePolicyDecision], config: OfflinePolicyEvaluationConfig) -> Result<OfflinePolicyEvaluationReport, ShibahamaError>`
+
+Evaluates caller-supplied learned-policy candidates against current memory rows,
+event-log human signals, and the deterministic significance baseline. This is
+read-only: it does not train, mutate memory, delete, overwrite, or apply actions.
 
 ### `pub fn why(&self, id: MemoryId) -> Result<Option<WhyTrace>, ShibahamaError>`
 

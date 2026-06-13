@@ -13,6 +13,7 @@ Architecture notes, ADRs, API references, performance notes, and launch document
 - `launch/faq.md`: launch FAQ for common objections and security questions.
 - `launch/show-hn.md`: draft Show HN launch post.
 - `launch/writeup.md`: short launch writeup for the project thesis and current status.
+- `learned-memory-policy.md`: gated offline evaluation plan for future learned memory policies.
 - `null-hypothesis.md`: honest benchmark threat model and when flat retrieval may win.
 - `security.md`: poisoning posture, logging behavior, encryption limits, and operational guidance.
 - `why-shibahama.md`: naming rationale and design philosophy.

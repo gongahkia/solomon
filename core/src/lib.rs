@@ -6,6 +6,7 @@ pub mod anomaly;
 pub mod api;
 pub mod consolidation;
 pub mod encryption;
+pub mod learned_policy;
 pub mod model;
 pub mod read_safety;
 pub mod reconstruction;

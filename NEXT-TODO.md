@@ -13,22 +13,24 @@ itself becomes a human-readable audit trail, for regulated domains needing
 precision, auditability, and historical correctness. Make this Solomon's explicit
 architecture.
 
-1. Treat the existing verbs (`recall`, `evaluate_currency`, `impact_query`,
+1. [x] Treat the existing verbs (`recall`, `evaluate_currency`, `impact_query`,
    `timeline`, `record_verification`, `why`) as a CANONICAL DETERMINISTIC PRIMITIVE
-   API. Each primitive: deterministic given store state, no hidden LLM call,
-   fully logged (inputs, outputs, store version/timestamp).
-2. The LLM NEVER decides currency or supersession directly. It may only emit a
+   API. `/plans/execute` now validates and executes only these sanctioned primitives, with deterministic
+   store-state/result hashes and metadata-only `primitive_plan` audit events.
+2. [x] The LLM NEVER decides currency or supersession directly. It may only emit a
    PLAN — an ordered sequence of primitive calls — which Solomon executes
-   deterministically. The model proposes; the primitives dispose.
-3. Implement a plan executor: takes an LLM-proposed plan, validates each step is a
+   deterministically. The answer path now uses a primitive recall plan before model assembly.
+3. [x] Implement a plan executor: takes an LLM-proposed plan, validates each step is a
    known primitive with valid args, executes deterministically, and records the
-   full plan + each result as the audit trail for that query.
-4. `why(answer)` must reconstruct the exact primitive call-plan that produced an
+   validated plan, store-state hash, argument hashes, result hashes, summaries, and audit entry hash.
+4. [x] `why(answer)` must reconstruct the exact primitive call-plan that produced an
    answer — this IS the explainability artifact. A reviewer/regulator can read the
-   plan and re-execute it to the same result (determinism = reproducibility).
-5. Tests: same plan + same store state → identical results (determinism); the
+   plan and re-execute it to the same result (determinism = reproducibility). Answer responses now carry the
+   validated primitive plan summary used to gather context.
+5. [x] Tests: same plan + same store state → identical results (determinism); the
    executor rejects any step that isn't a sanctioned primitive (no arbitrary LLM
-   side-effects); the recorded plan re-executes to the same answer.
+   side-effects); the recorded plan re-executes to the same answer. Covered by `tests/test_primitives.py` and
+   the answer workflow API test.
 
 ## Part 2 — Contestability as a first-class verb (first-class)
 Context: 2026 XAI/governance guidance repeatedly names CONTESTABILITY — humans

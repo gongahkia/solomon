@@ -426,6 +426,54 @@
         "title": "PendingAuthorityAmendment",
         "type": "object"
       },
+      "PrimitivePlanRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Id"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/PrimitivePlanStep"
+            },
+            "minItems": 1,
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "steps"
+        ],
+        "title": "PrimitivePlanRequest",
+        "type": "object"
+      },
+      "PrimitivePlanStep": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "additionalProperties": true,
+            "title": "Args",
+            "type": "object"
+          },
+          "primitive": {
+            "title": "Primitive",
+            "type": "string"
+          }
+        },
+        "required": [
+          "primitive"
+        ],
+        "title": "PrimitivePlanStep",
+        "type": "object"
+      },
       "ReadyResponse": {
         "properties": {
           "kaypoh_client_importable": {
@@ -733,6 +781,18 @@
           },
           "outcome": {
             "$ref": "#/components/schemas/VerificationOutcome"
+          },
+          "recorded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded At"
           },
           "successor_id": {
             "anyOf": [
@@ -1121,6 +1181,46 @@
           }
         },
         "summary": "Ingest"
+      }
+    },
+    "/plans/execute": {
+      "post": {
+        "operationId": "execute_plan_plans_execute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrimitivePlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Execute Plan Plans Execute Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Execute Plan"
       }
     },
     "/ready": {

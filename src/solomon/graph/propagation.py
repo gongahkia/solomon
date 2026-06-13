@@ -68,10 +68,10 @@ class CurrencyPropagator:
             reasons=reasons,
         )
 
-    def impact_query(self, authority_or_item_id: str) -> ImpactResult:
+    def impact_query(self, authority_or_item_id: str, *, as_of: datetime | None = None) -> ImpactResult:
         reasons: dict[str, list[StalenessReason]] = {}
         stale_item_ids: list[str] = []
-        timestamp = now_utc()
+        timestamp = as_of or now_utc()
         queue: deque[str] = deque([authority_or_item_id])
         visited_dependencies: set[str] = set()
         while queue:

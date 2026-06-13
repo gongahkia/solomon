@@ -26,6 +26,7 @@ from solomon.api.service import (
     AuthorityChangeRequest,
     DependencyRequest,
     IngestRequest,
+    PrimitivePlanRequest,
     RecallRequest,
     ReferenceExtractionRequest,
     SolomonService,
@@ -288,6 +289,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/dependencies")
     def add_dependency(request: Request, payload: DependencyRequest) -> dict[str, Any]:
         return active_service(request).add_dependency(payload).model_dump(mode="json")
+
+    @app.post("/plans/execute")
+    def execute_plan(request: Request, payload: PrimitivePlanRequest) -> dict[str, Any]:
+        return active_service(request).execute_plan(payload).model_dump(mode="json")
 
     @app.get("/impact/{authority_id}")
     def impact(request: Request, authority_id: str) -> dict[str, Any]:

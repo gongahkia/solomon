@@ -55,6 +55,20 @@ Middleware classifies routes before invoking handlers. Tenant management and dia
 tenant read routes such as recall/answer require `tenant:read`; mutating tenant routes such as ingest,
 verification, dependency add, and authority changes require `tenant:write`.
 
+## Deterministic Primitive Plans
+
+The core service verbs are also exposed as deterministic primitives through `/plans/execute`. A plan is an
+ordered list of sanctioned calls: `recall`, `evaluate_currency`, `impact_query`, `timeline`,
+`record_verification`, and `why`. The executor rejects unknown primitive names and validates every step's
+arguments with Solomon's typed request models before any side effect occurs.
+
+Plan execution returns the exact validated plan, store-state hash, per-step result hashes, and result summaries.
+The audit journal records a metadata-only `primitive_plan` event containing the plan hash, store-state hash,
+argument hashes, result hashes, and identifiers surfaced by each step. Answer responses carry the primitive
+plan summary used to gather their context, so reviewers can re-run the same plan against the same store state.
+LLM output may propose a plan, but currency, impact, timeline, verification, and explanation are resolved by
+these deterministic primitives.
+
 ## Reference Extraction
 
 `/references/extract` runs after optional Kaypoh sanitization. Citation parsing uses `eyecite` for full,

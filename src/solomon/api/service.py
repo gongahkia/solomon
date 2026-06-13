@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import hashlib
+import json
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import Field
 
@@ -30,7 +32,7 @@ from solomon.currency.models import (
     VerifiedState,
 )
 from solomon.currency.prediction import PendingAuthorityAmendment, StalenessRiskReport, predict_staleness_risk
-from solomon.errors import NotFoundError, PolicyRefusalError
+from solomon.errors import BadRequestError, NotFoundError, PolicyRefusalError
 from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
 from solomon.graph.propagation import CurrencyPropagator
 from solomon.graph.suggestions import ReferenceExtraction, extract_defined_terms_and_citations
@@ -68,6 +70,7 @@ class VerificationRequest(SolomonModel):
     by: str
     outcome: VerificationOutcome
     successor_id: str | None = None
+    recorded_at: datetime | None = None
 
 
 class AuthorityChangeRequest(SolomonModel):
@@ -112,6 +115,7 @@ class AnswerResponse(SolomonModel):
     model: dict[str, Any]
     recalled: list[dict[str, Any]]
     prompt: dict[str, Any]
+    primitive_plan: dict[str, Any]
 
 
 class WhyTrace(SolomonModel):
@@ -122,6 +126,34 @@ class WhyTrace(SolomonModel):
     provenance: dict[str, Any]
     credence_tier: str
     verification: dict[str, Any]
+
+
+class PrimitivePlanStep(SolomonModel):
+    primitive: str
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+class PrimitivePlanRequest(SolomonModel):
+    plan_id: str | None = None
+    steps: list[PrimitivePlanStep] = Field(min_length=1)
+
+
+class PrimitiveStepResult(SolomonModel):
+    index: int
+    primitive: str
+    args_sha256: str
+    result_sha256: str
+    result_summary: dict[str, Any]
+    result: Any
+
+
+class PrimitivePlanExecution(SolomonModel):
+    schema_id: str = "solomon.primitive_plan_execution.v1"
+    plan_id: str
+    plan: PrimitivePlanRequest
+    store_state_sha256: str
+    steps: list[PrimitiveStepResult]
+    audit_event_hash: str
 
 
 class SolomonService:
@@ -201,15 +233,25 @@ class SolomonService:
         return [result.model_dump(mode="json") for result in results]
 
     def answer(self, request: AnswerRequest, router: ModelRouter) -> AnswerResponse:
-        recalled = self.recall(
-            RecallRequest(
-                query=request.query,
-                matter_id=request.matter_id,
-                client_id=request.client_id,
-                limit=request.limit,
-                max_context_tokens=request.max_context_tokens,
+        primitive_plan = self.execute_plan(
+            PrimitivePlanRequest(
+                plan_id=f"answer:{_digest({'query': request.query, 'matter_id': request.matter_id})[:16]}",
+                steps=[
+                    PrimitivePlanStep(
+                        primitive="recall",
+                        args={
+                            "query": request.query,
+                            "matter_id": request.matter_id,
+                            "client_id": request.client_id,
+                            "review_mode": False,
+                            "limit": request.limit,
+                            "max_context_tokens": request.max_context_tokens,
+                        },
+                    )
+                ],
             )
         )
+        recalled = cast(list[dict[str, Any]], primitive_plan.steps[0].result)
         self._enforce_load_bearing_answer_policy(request, recalled)
         prompt = _build_answer_prompt(request.query, recalled)
         matter = Matter(
@@ -261,6 +303,7 @@ class SolomonService:
                 "context_count": len(recalled),
                 "boundary_applied": True,
             },
+            primitive_plan=_plan_explainability_summary(primitive_plan),
         )
 
     def complete_model_request(
@@ -303,8 +346,8 @@ class SolomonService:
         )
         return RoutedModelResult(response=response, audit=routed.audit)
 
-    def evaluate_currency(self, item_id: str) -> dict[str, Any]:
-        return self.currency_cache.get_or_evaluate(self._get_item(item_id)).model_dump(mode="json")
+    def evaluate_currency(self, item_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
+        return self.currency_cache.get_or_evaluate(self._get_item(item_id), as_of=as_of).model_dump(mode="json")
 
     def record_verification(self, item_id: str, request: VerificationRequest) -> KnowledgeItem:
         item = self._get_item(item_id)
@@ -313,6 +356,7 @@ class SolomonService:
             by=request.by,
             outcome=request.outcome,
             successor_id=request.successor_id,
+            recorded_at=request.recorded_at,
         )
         self.store.update_item(recorded.item, event_type="knowledge_item_verified")
         self.currency_cache.invalidate({item_id})
@@ -352,8 +396,12 @@ class SolomonService:
         )
         return self.graph.add_dependency(edge)
 
-    def impact_query(self, authority_id: str) -> dict[str, Any]:
-        return CurrencyPropagator(graph=self.graph, store=self.store).impact_query(authority_id).model_dump(mode="json")
+    def impact_query(self, authority_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
+        timestamp = as_of or self._deterministic_store_timestamp()
+        return CurrencyPropagator(graph=self.graph, store=self.store).impact_query(
+            authority_id,
+            as_of=timestamp,
+        ).model_dump(mode="json")
 
     def dependency_graph(
         self,
@@ -379,11 +427,11 @@ class SolomonService:
             lookahead_days=request.lookahead_days,
         )
 
-    def why(self, item_id: str) -> WhyTrace:
+    def why(self, item_id: str, *, as_of: datetime | None = None) -> WhyTrace:
         item = self._get_item(item_id)
         return WhyTrace(
             item=item,
-            currency=evaluate_currency(item).model_dump(mode="json"),
+            currency=evaluate_currency(item, as_of=as_of).model_dump(mode="json"),
             dependencies=[edge.model_dump(mode="json") for edge in self.graph.get_dependencies(item.id)],
             dependents=[edge.model_dump(mode="json") for edge in self.graph.get_dependents(item.id)],
             provenance=item.provenance.model_dump(mode="json"),
@@ -409,8 +457,124 @@ class SolomonService:
         )
         return [result.model_dump(mode="json") for result in results]
 
+    def execute_plan(self, request: PrimitivePlanRequest) -> PrimitivePlanExecution:
+        plan_id = request.plan_id or f"plan:{_digest(request.model_dump(mode='json'))[:16]}"
+        store_state_sha256 = self._store_state_sha256()
+        step_results: list[PrimitiveStepResult] = []
+        for index, step in enumerate(request.steps, start=1):
+            result = _jsonable(self._execute_primitive(step))
+            step_results.append(
+                PrimitiveStepResult(
+                    index=index,
+                    primitive=step.primitive,
+                    args_sha256=_digest(step.args),
+                    result_sha256=_digest(result),
+                    result_summary=_result_summary(result),
+                    result=result,
+                )
+            )
+        audit_entry = self.audit.append(
+            "primitive_plan",
+            {
+                "schema_id": "solomon.primitive_plan_execution.v1",
+                "plan_id": plan_id,
+                "plan_sha256": _digest(request.model_dump(mode="json")),
+                "store_state_sha256": store_state_sha256,
+                "steps": [
+                    {
+                        "index": result.index,
+                        "primitive": result.primitive,
+                        "args_sha256": result.args_sha256,
+                        "result_sha256": result.result_sha256,
+                        "result_summary": result.result_summary,
+                    }
+                    for result in step_results
+                ],
+            },
+        )
+        return PrimitivePlanExecution(
+            plan_id=plan_id,
+            plan=request.model_copy(update={"plan_id": plan_id}),
+            store_state_sha256=store_state_sha256,
+            steps=step_results,
+            audit_event_hash=audit_entry.entry_hash,
+        )
+
     def export_audit_pack(self, destination: Path) -> Path:
         return self.audit.export_pack(destination).directory
+
+    def _execute_primitive(self, step: PrimitivePlanStep) -> Any:
+        if step.primitive == "recall":
+            return self.recall(RecallRequest.model_validate(step.args))
+        if step.primitive == "evaluate_currency":
+            _ensure_subset_args(step, {"item_id", "as_of"})
+            _ensure_arg(step, "item_id")
+            return self.evaluate_currency(
+                _required_arg(step, "item_id"),
+                as_of=_optional_datetime_arg(step, "as_of") or self._deterministic_store_timestamp(),
+            )
+        if step.primitive == "impact_query":
+            _ensure_subset_args(step, {"authority_id", "as_of"})
+            _ensure_arg(step, "authority_id")
+            return self.impact_query(
+                _required_arg(step, "authority_id"),
+                as_of=_optional_datetime_arg(step, "as_of") or self._deterministic_store_timestamp(),
+            )
+        if step.primitive == "timeline":
+            _ensure_arg(step, "as_of")
+            timeline_args = dict(step.args)
+            as_of = str(timeline_args.pop("as_of"))
+            return self.timeline(RecallRequest.model_validate(timeline_args), as_of=as_of)
+        if step.primitive == "record_verification":
+            _ensure_arg(step, "item_id")
+            _ensure_arg(step, "recorded_at")
+            verification_args = dict(step.args)
+            item_id = str(verification_args.pop("item_id"))
+            return self.record_verification(item_id, VerificationRequest.model_validate(verification_args))
+        if step.primitive == "why":
+            _ensure_subset_args(step, {"item_id", "as_of"})
+            _ensure_arg(step, "item_id")
+            return self.why(
+                _required_arg(step, "item_id"),
+                as_of=_optional_datetime_arg(step, "as_of") or self._deterministic_store_timestamp(),
+            )
+        raise BadRequestError(f"unsupported primitive: {step.primitive}")
+
+    def _store_state_sha256(self) -> str:
+        items = []
+        for item in sorted(self.store.get_many(), key=lambda current: current.id):
+            items.append(
+                {
+                    "id": item.id,
+                    "content_sha256": hashlib.sha256(item.content.encode("utf-8")).hexdigest(),
+                    "currency_state": item.currency_state.value,
+                    "credence_tier": item.credence_tier.value,
+                    "verified_state": item.verified_state.value,
+                    "last_verified_at": item.last_verified_at.isoformat() if item.last_verified_at else None,
+                    "valid_from": item.valid_from.isoformat(),
+                    "valid_to": item.valid_to.isoformat() if item.valid_to else None,
+                    "successor_id": item.successor_id,
+                    "metadata": item.metadata,
+                }
+            )
+        edges = [
+            edge.model_dump(mode="json")
+            for edge in sorted(
+                self.graph.subgraph_for_scope(store=self.store),
+                key=lambda current: current.id,
+            )
+        ]
+        return _digest({"items": items, "edges": edges})
+
+    def _deterministic_store_timestamp(self) -> datetime:
+        timestamps: list[datetime] = []
+        for item in self.store.get_many():
+            timestamps.extend([item.valid_from, item.ingested_at])
+            if item.last_verified_at is not None:
+                timestamps.append(item.last_verified_at)
+            if item.valid_to is not None:
+                timestamps.append(item.valid_to)
+        return max(timestamps) if timestamps else datetime(1970, 1, 1, tzinfo=timezone.utc)
 
     def _get_item(self, item_id: str) -> KnowledgeItem:
         try:
@@ -483,3 +647,88 @@ def _build_answer_prompt(query: str, recalled: list[dict[str, Any]]) -> str:
             context,
         ]
     )
+
+
+def _ensure_subset_args(step: PrimitivePlanStep, allowed: set[str]) -> None:
+    extra = sorted(set(step.args) - allowed)
+    if extra:
+        raise BadRequestError(f"{step.primitive} got unsupported args: {', '.join(extra)}")
+
+
+def _ensure_arg(step: PrimitivePlanStep, name: str) -> None:
+    if name not in step.args or step.args[name] is None:
+        raise BadRequestError(f"{step.primitive} requires arg: {name}")
+
+
+def _required_arg(step: PrimitivePlanStep, name: str) -> str:
+    _ensure_arg(step, name)
+    return str(step.args[name])
+
+
+def _optional_datetime_arg(step: PrimitivePlanStep, name: str) -> datetime | None:
+    raw = step.args.get(name)
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw
+    return datetime.fromisoformat(str(raw))
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, SolomonModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, list):
+        return [_jsonable(entry) for entry in value]
+    if isinstance(value, dict):
+        return {str(key): _jsonable(entry) for key, entry in value.items()}
+    return value
+
+
+def _digest(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(_jsonable(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _result_summary(value: Any) -> dict[str, Any]:
+    identifiers: set[str] = set()
+
+    def walk(current: Any) -> None:
+        if isinstance(current, dict):
+            for key in ("id", "item_id", "authority_id", "changed_dependency_id"):
+                raw = current.get(key)
+                if isinstance(raw, str):
+                    identifiers.add(f"{key}:{raw}")
+            for nested in current.values():
+                walk(nested)
+        elif isinstance(current, list):
+            for nested in current:
+                walk(nested)
+
+    walk(value)
+    summary: dict[str, Any] = {"result_type": type(value).__name__, "identifiers": sorted(identifiers)}
+    if isinstance(value, list):
+        summary["count"] = len(value)
+    elif isinstance(value, dict):
+        summary["keys"] = sorted(value)
+    return summary
+
+
+def _plan_explainability_summary(execution: PrimitivePlanExecution) -> dict[str, Any]:
+    return {
+        "plan_id": execution.plan_id,
+        "schema_id": execution.schema_id,
+        "plan": execution.plan.model_dump(mode="json"),
+        "store_state_sha256": execution.store_state_sha256,
+        "audit_event_hash": execution.audit_event_hash,
+        "steps": [
+            {
+                "index": step.index,
+                "primitive": step.primitive,
+                "args_sha256": step.args_sha256,
+                "result_sha256": step.result_sha256,
+                "result_summary": step.result_summary,
+            }
+            for step in execution.steps
+        ],
+    }

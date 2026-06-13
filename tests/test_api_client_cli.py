@@ -216,6 +216,7 @@ def test_fastapi_app_exposes_public_verbs(tmp_path: Path) -> None:
         "/currency/{item_id}",
         "/verification/{item_id}",
         "/authorities/{authority_id}/changes",
+        "/plans/execute",
         "/impact/{authority_id}",
         "/graph",
         "/references/extract",
@@ -283,7 +284,10 @@ def test_answer_endpoint_runs_recall_boundary_router_model_workflow(tmp_path: Pa
     assert "Client A" not in remote.seen_prompt
     assert "[CLIENT_1]" in remote.seen_prompt
     assert "Client A" in payload["text"]
+    assert payload["primitive_plan"]["steps"][0]["primitive"] == "recall"
+    assert payload["primitive_plan"]["plan"]["steps"][0]["args"]["query"] == "Client A Regulation R"
     raw_journal = (tmp_path / "journal" / "journal.jsonl").read_text(encoding="utf-8")
+    assert "primitive_plan" in raw_journal
     assert "answer_workflow" in raw_journal
     assert "context_item_ids" in raw_journal
     assert "prompt_sha256" in raw_journal

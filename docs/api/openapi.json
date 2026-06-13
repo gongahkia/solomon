@@ -1,6 +1,48 @@
 {
   "components": {
     "schemas": {
+      "AffirmRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_tier": {
+            "$ref": "#/components/schemas/CredenceTier",
+            "default": "FirmAuthoritative"
+          },
+          "affirmed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Affirmed At"
+          },
+          "correction_item_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correction Item Id"
+          },
+          "lawyer_id": {
+            "minLength": 1,
+            "title": "Lawyer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lawyer_id"
+        ],
+        "title": "AffirmRequest",
+        "type": "object"
+      },
       "AnswerRequest": {
         "additionalProperties": false,
         "properties": {
@@ -96,6 +138,64 @@
         ],
         "title": "AuthorityChangeRequest",
         "type": "object"
+      },
+      "ContestRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_tier": {
+            "$ref": "#/components/schemas/CredenceTier",
+            "default": "Verified"
+          },
+          "contested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contested At"
+          },
+          "lawyer_id": {
+            "minLength": 1,
+            "title": "Lawyer Id",
+            "type": "string"
+          },
+          "proposed_correction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Correction"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lawyer_id",
+          "reason"
+        ],
+        "title": "ContestRequest",
+        "type": "object"
+      },
+      "CredenceTier": {
+        "enum": [
+          "FirmAuthoritative",
+          "Verified",
+          "ModelInferred",
+          "Unverified"
+        ],
+        "title": "CredenceTier",
+        "type": "string"
       },
       "DependencyRequest": {
         "additionalProperties": false,
@@ -424,6 +524,43 @@
           "description"
         ],
         "title": "PendingAuthorityAmendment",
+        "type": "object"
+      },
+      "PinRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_tier": {
+            "$ref": "#/components/schemas/CredenceTier",
+            "default": "FirmAuthoritative"
+          },
+          "lawyer_id": {
+            "minLength": 1,
+            "title": "Lawyer Id",
+            "type": "string"
+          },
+          "pinned_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned At"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lawyer_id",
+          "reason"
+        ],
+        "title": "PinRequest",
         "type": "object"
       },
       "PrimitivePlanRequest": {
@@ -822,6 +959,57 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/affirm/{item_id}": {
+      "post": {
+        "operationId": "affirm_affirm__item_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AffirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Affirm Affirm  Item Id  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Affirm"
+      }
+    },
     "/answer": {
       "post": {
         "operationId": "answer_answer_post",
@@ -911,6 +1099,57 @@
           }
         },
         "summary": "Authority Change"
+      }
+    },
+    "/contest/{item_id}": {
+      "post": {
+        "operationId": "contest_contest__item_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Contest Contest  Item Id  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Contest"
       }
     },
     "/currency/{item_id}": {
@@ -1181,6 +1420,57 @@
           }
         },
         "summary": "Ingest"
+      }
+    },
+    "/pin/{item_id}": {
+      "post": {
+        "operationId": "pin_pin__item_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Pin Pin  Item Id  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pin"
       }
     },
     "/plans/execute": {

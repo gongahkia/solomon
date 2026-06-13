@@ -207,6 +207,10 @@ class SQLiteKnowledgeStore:
                 "knowledge_item_updated",
                 "knowledge_item_stale_flagged",
                 "knowledge_item_indexed",
+                "knowledge_item_contested",
+                "knowledge_item_affirmed",
+                "knowledge_item_correction_affirmed",
+                "knowledge_item_pinned",
             }:
                 item = KnowledgeItem.model_validate(payload["item"])
                 state[item.id] = item
@@ -272,6 +276,10 @@ class SQLiteKnowledgeStore:
                 "knowledge_item_updated",
                 "knowledge_item_stale_flagged",
                 "knowledge_item_indexed",
+                "knowledge_item_contested",
+                "knowledge_item_affirmed",
+                "knowledge_item_correction_affirmed",
+                "knowledge_item_pinned",
             }:
                 item = KnowledgeItem.model_validate(payload["item"])
                 state[item.id] = item

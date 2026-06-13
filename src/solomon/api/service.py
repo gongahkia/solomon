@@ -23,6 +23,7 @@ from solomon.currency.engine import (
 )
 from solomon.currency.models import (
     CredenceTier,
+    CurrencyState,
     KnowledgeContentRole,
     KnowledgeItem,
     KnowledgeKind,
@@ -30,6 +31,7 @@ from solomon.currency.models import (
     Provenance,
     SourceKind,
     VerifiedState,
+    new_uuid7,
 )
 from solomon.currency.prediction import PendingAuthorityAmendment, StalenessRiskReport, predict_staleness_risk
 from solomon.errors import BadRequestError, NotFoundError, PolicyRefusalError
@@ -76,6 +78,40 @@ class VerificationRequest(SolomonModel):
 class AuthorityChangeRequest(SolomonModel):
     new_version: str
     changed_at: str
+
+
+class ContestRequest(SolomonModel):
+    lawyer_id: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    proposed_correction: str | None = None
+    actor_tier: CredenceTier = CredenceTier.VERIFIED
+    contested_at: datetime | None = None
+
+
+class ContestResponse(SolomonModel):
+    item: KnowledgeItem
+    correction_item: KnowledgeItem | None = None
+    impact: dict[str, Any]
+
+
+class AffirmRequest(SolomonModel):
+    lawyer_id: str = Field(min_length=1)
+    actor_tier: CredenceTier = CredenceTier.FIRM_AUTHORITATIVE
+    correction_item_id: str | None = None
+    affirmed_at: datetime | None = None
+
+
+class AffirmResponse(SolomonModel):
+    item: KnowledgeItem
+    correction_item: KnowledgeItem | None = None
+    superseded: bool = False
+
+
+class PinRequest(SolomonModel):
+    lawyer_id: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    actor_tier: CredenceTier = CredenceTier.FIRM_AUTHORITATIVE
+    pinned_at: datetime | None = None
 
 
 class ReferenceExtractionRequest(SolomonModel):
@@ -384,6 +420,171 @@ class SolomonService:
         self.audit.log_impact(impact)
         return impact.model_dump(mode="json")
 
+    def contest(self, item_id: str, request: ContestRequest) -> ContestResponse:
+        timestamp = request.contested_at or datetime.now(timezone.utc)
+        item = self._get_item(item_id)
+        contest_id = new_uuid7()
+        correction = self._create_contest_correction(item, request, contest_id=contest_id, timestamp=timestamp)
+        contests = list(item.metadata.get("contests", []))
+        contests.append(
+            {
+                "contest_id": contest_id,
+                "lawyer_id": request.lawyer_id,
+                "reason": request.reason,
+                "actor_tier": request.actor_tier.value,
+                "contested_at": timestamp.isoformat(),
+                "proposed_correction_item_id": correction.id if correction is not None else None,
+                "status": "pending_review",
+            }
+        )
+        staleness_reasons = list(item.metadata.get("staleness_reasons", []))
+        staleness_reasons.append(
+            {
+                "dependency_id": item.id,
+                "changed_at": timestamp.isoformat(),
+                "reason": f"contest by {request.lawyer_id}: {request.reason}",
+                "edge_id": None,
+            }
+        )
+        contested = item.model_copy(
+            update={
+                "currency_state": CurrencyState.STALE_PENDING_REVERIFICATION,
+                "verified_state": VerifiedState.NEEDS_REVIEW,
+                "credence_tier": CredenceTier.UNVERIFIED,
+                "metadata": {
+                    **item.metadata,
+                    "contests": contests,
+                    "staleness_reasons": staleness_reasons,
+                    "contested": True,
+                },
+            }
+        )
+        self.store.update_item(contested, event_type="knowledge_item_contested", occurred_at=timestamp)
+        self.index.upsert_item(contested)
+        self.currency_cache.invalidate({item_id})
+        impact = CurrencyPropagator(graph=self.graph, store=self.store).propagate_dependency_change(
+            item_id,
+            changed_at=timestamp,
+            reason=f"contest on {item_id} requires dependent re-verification",
+        )
+        self.currency_cache.invalidate(set(impact.stale_item_ids))
+        self.audit.log_impact(impact)
+        self.audit.append(
+            "contest",
+            {
+                "contest_id": contest_id,
+                "item_id": item_id,
+                "lawyer_id": request.lawyer_id,
+                "actor_tier": request.actor_tier.value,
+                "reason_sha256": _digest(request.reason),
+                "proposed_correction_item_id": correction.id if correction is not None else None,
+                "proposed_correction_sha256": (
+                    _digest(request.proposed_correction) if request.proposed_correction else None
+                ),
+            },
+            occurred_at=timestamp,
+        )
+        return ContestResponse(item=contested, correction_item=correction, impact=impact.model_dump(mode="json"))
+
+    def affirm(self, item_id: str, request: AffirmRequest) -> AffirmResponse:
+        if request.actor_tier is not CredenceTier.FIRM_AUTHORITATIVE:
+            raise PolicyRefusalError("only FirmAuthoritative actors can affirm contested knowledge")
+        timestamp = request.affirmed_at or datetime.now(timezone.utc)
+        item = self._get_item(item_id)
+        if request.correction_item_id is not None:
+            correction = self._get_item(request.correction_item_id)
+            if correction.metadata.get("proposed_correction_for") != item_id:
+                raise BadRequestError("correction item is not proposed for this item")
+            successor_metadata = {
+                **correction.metadata,
+                "quarantined": False,
+                "affirmed_by": request.lawyer_id,
+                "affirmed_at": timestamp.isoformat(),
+                "contest_status": "affirmed",
+            }
+            successor = correction.model_copy(
+                update={
+                    "currency_state": CurrencyState.LIVE,
+                    "verified_state": VerifiedState.VERIFIED,
+                    "last_verified_at": timestamp,
+                    "verified_by": request.lawyer_id,
+                    "credence_tier": CredenceTier.FIRM_AUTHORITATIVE,
+                    "metadata": successor_metadata,
+                }
+            )
+            closed, written_successor = self.store.supersede(item_id, successor, superseded_at=timestamp)
+            self.index.upsert_item(closed)
+            self.index.upsert_item(written_successor)
+            self.currency_cache.invalidate({item_id, written_successor.id})
+            self.audit.append(
+                "affirm",
+                {
+                    "item_id": item_id,
+                    "lawyer_id": request.lawyer_id,
+                    "correction_item_id": written_successor.id,
+                    "superseded": True,
+                },
+                occurred_at=timestamp,
+            )
+            return AffirmResponse(item=closed, correction_item=written_successor, superseded=True)
+
+        metadata = dict(item.metadata)
+        metadata["affirmed_by"] = request.lawyer_id
+        metadata["affirmed_at"] = timestamp.isoformat()
+        metadata["contest_status"] = "affirmed"
+        metadata.pop("staleness_reasons", None)
+        affirmed = item.model_copy(
+            update={
+                "currency_state": CurrencyState.LIVE,
+                "verified_state": VerifiedState.VERIFIED,
+                "last_verified_at": timestamp,
+                "verified_by": request.lawyer_id,
+                "credence_tier": CredenceTier.FIRM_AUTHORITATIVE,
+                "metadata": metadata,
+            }
+        )
+        self.store.update_item(affirmed, event_type="knowledge_item_affirmed", occurred_at=timestamp)
+        self.index.upsert_item(affirmed)
+        self.currency_cache.invalidate({item_id})
+        self.audit.append(
+            "affirm",
+            {"item_id": item_id, "lawyer_id": request.lawyer_id, "superseded": False},
+            occurred_at=timestamp,
+        )
+        return AffirmResponse(item=affirmed)
+
+    def pin(self, item_id: str, request: PinRequest) -> KnowledgeItem:
+        if request.actor_tier is not CredenceTier.FIRM_AUTHORITATIVE:
+            raise PolicyRefusalError("only FirmAuthoritative actors can pin knowledge")
+        timestamp = request.pinned_at or datetime.now(timezone.utc)
+        item = self._get_item(item_id)
+        pinned = item.model_copy(
+            update={
+                "credence_tier": CredenceTier.FIRM_AUTHORITATIVE,
+                "metadata": {
+                    **item.metadata,
+                    "credence_floor": CredenceTier.FIRM_AUTHORITATIVE.value,
+                    "pinned_by": request.lawyer_id,
+                    "pinned_at": timestamp.isoformat(),
+                    "pin_reason": request.reason,
+                },
+            }
+        )
+        self.store.update_item(pinned, event_type="knowledge_item_pinned", occurred_at=timestamp)
+        self.index.upsert_item(pinned)
+        self.currency_cache.invalidate({item_id})
+        self.audit.append(
+            "pin",
+            {
+                "item_id": item_id,
+                "lawyer_id": request.lawyer_id,
+                "reason_sha256": _digest(request.reason),
+                "credence_floor": CredenceTier.FIRM_AUTHORITATIVE.value,
+            },
+            occurred_at=timestamp,
+        )
+        return pinned
+
     def add_dependency(self, request: DependencyRequest) -> DependencyEdge:
         edge = DependencyEdge(
             source_id=request.source_id,
@@ -502,6 +703,47 @@ class SolomonService:
 
     def export_audit_pack(self, destination: Path) -> Path:
         return self.audit.export_pack(destination).directory
+
+    def _create_contest_correction(
+        self,
+        item: KnowledgeItem,
+        request: ContestRequest,
+        *,
+        contest_id: str,
+        timestamp: datetime,
+    ) -> KnowledgeItem | None:
+        if request.proposed_correction is None:
+            return None
+        correction = KnowledgeItem(
+            kind=item.kind,
+            content=request.proposed_correction,
+            content_role=item.content_role,
+            provenance=Provenance(
+                source_kind=(
+                    SourceKind.MODEL if request.actor_tier is CredenceTier.MODEL_INFERRED else SourceKind.ASSOCIATE
+                ),
+                source_ref=f"contest:{contest_id}",
+                author=request.lawyer_id,
+                matter_id=item.matter_id,
+            ),
+            valid_from=timestamp,
+            ingested_at=timestamp,
+            matter_id=item.matter_id,
+            client_id=item.client_id,
+            currency_state=CurrencyState.STALE_PENDING_REVERIFICATION,
+            verified_state=VerifiedState.NEEDS_REVIEW,
+            credence_tier=CredenceTier.UNVERIFIED,
+            metadata={
+                "proposed_correction_for": item.id,
+                "contest_id": contest_id,
+                "quarantined": True,
+                "contest_status": "pending_review",
+            },
+        )
+        correction, _review = self.boundary.review_for_ingest(correction)
+        correction = self.index.upsert_item(correction)
+        self.store.write_item(correction)
+        return correction
 
     def _execute_primitive(self, step: PrimitivePlanStep) -> Any:
         if step.primitive == "recall":

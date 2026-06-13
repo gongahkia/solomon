@@ -10,3 +10,7 @@ a per-matter opt-in.
 Stored knowledge is also untrusted input. Retrieval code treats knowledge as data, not instructions:
 instruction-role items are excluded from prompt context, stale items are not returned by default, and
 low-credence items cannot be presented as settled.
+
+Contested knowledge is treated as unsafe for load-bearing reuse until a FirmAuthoritative actor affirms it.
+The contest path preserves history, demotes effective credence, marks the item stale-pending-reverification,
+and propagates that review signal to dependents without deleting the original item.

@@ -22,10 +22,13 @@ from solomon.api.auth import (
     validate_auth_scopes,
 )
 from solomon.api.service import (
+    AffirmRequest,
     AnswerRequest,
     AuthorityChangeRequest,
+    ContestRequest,
     DependencyRequest,
     IngestRequest,
+    PinRequest,
     PrimitivePlanRequest,
     RecallRequest,
     ReferenceExtractionRequest,
@@ -285,6 +288,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/authorities/{authority_id}/changes")
     def authority_change(request: Request, authority_id: str, payload: AuthorityChangeRequest) -> dict[str, Any]:
         return active_service(request).register_authority_change(authority_id, payload)
+
+    @app.post("/contest/{item_id}")
+    def contest(request: Request, item_id: str, payload: ContestRequest) -> dict[str, Any]:
+        return active_service(request).contest(item_id, payload).model_dump(mode="json")
+
+    @app.post("/affirm/{item_id}")
+    def affirm(request: Request, item_id: str, payload: AffirmRequest) -> dict[str, Any]:
+        return active_service(request).affirm(item_id, payload).model_dump(mode="json")
+
+    @app.post("/pin/{item_id}")
+    def pin(request: Request, item_id: str, payload: PinRequest) -> dict[str, Any]:
+        return active_service(request).pin(item_id, payload).model_dump(mode="json")
 
     @app.post("/dependencies")
     def add_dependency(request: Request, payload: DependencyRequest) -> dict[str, Any]:

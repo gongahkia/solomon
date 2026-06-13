@@ -69,6 +69,18 @@ plan summary used to gather their context, so reviewers can re-run the same plan
 LLM output may propose a plan, but currency, impact, timeline, verification, and explanation are resolved by
 these deterministic primitives.
 
+## Contestability
+
+Contestability is a first-class service path, not a side note on verification. `contest(item_id, ...)` records
+a challenge, demotes the item to `Unverified`, marks it `StalePendingReverification`, preserves contest history
+in item metadata, and propagates re-verification to dependents. Proposed corrections are stored as quarantined
+low-credence items until a `FirmAuthoritative` actor affirms them.
+
+`affirm(item_id, ...)` lets a FirmAuthoritative actor either reaffirm the contested item or affirm a proposed
+correction. Affirming a correction supersedes the contested predecessor without deleting it. `pin(item_id, ...)`
+sets a FirmAuthoritative credence floor for positions the firm has deliberately stabilized. Model-inferred or
+lower-tier actors can flag contests but cannot override human-affirmed knowledge.
+
 ## Reference Extraction
 
 `/references/extract` runs after optional Kaypoh sanitization. Citation parsing uses `eyecite` for full,

@@ -38,26 +38,26 @@ must be able to challenge an output, trace it to sources, and correct the system
 Solomon half-has this via the verification step; make it explicit and make the
 contest improve the store.
 
-6. Add `contest(item_id, lawyer_id, reason, proposed_correction?)`:
+6. [x] Add `contest(item_id, lawyer_id, reason, proposed_correction?)`:
    - Records an append-only audit event (who, when, why).
    - Lowers the item's effective credence / flags it for partner review.
    - If a correction is proposed, it enters at LOWER credence, quarantined; on
      confirmation by a FirmAuthoritative actor, it supersedes (invalidate-not-
      delete) the prior version.
    - A contest is itself a currency signal — it can trigger StalePending
-     Reverification on the contested item and (via the dependency graph) its
-     dependents.
-7. Add `affirm(item_id, lawyer_id)` (partner re-affirms → refresh verification,
+     Reverification on the contested item and (via the dependency graph) its dependents. Implemented through
+     `SolomonService.contest()` and `POST /contest/{item_id}`.
+7. [x] Add `affirm(item_id, lawyer_id)` (partner re-affirms → refresh verification,
    raise credence) and `pin(item_id)` (set credence floor — firm-authoritative
-   positions that must not decay).
-8. Contestability must respect roles: only a FirmAuthoritative actor's affirm can
+   positions that must not decay). Implemented through `POST /affirm/{item_id}` and `POST /pin/{item_id}`.
+8. [x] Contestability must respect roles: only a FirmAuthoritative actor's affirm can
    promote a contested correction to authoritative. ModelInferred contests can
    flag but never override a human-affirmed position.
-9. Surface contests in the audit chain and in recall output (a contested item is
+9. [x] Surface contests in the audit chain and in recall output (a contested item is
    returned with its contest history visible — never silently).
-10. Tests: contest lowers credence + emits audit event + never deletes; proposed
+10. [x] Tests: contest lowers credence + emits audit event + never deletes; proposed
     correction routes through quarantine→authoritative-confirm→supersede; a
-    contest propagates staleness to dependents; role rules enforced.
+    contest propagates staleness to dependents; role rules enforced. Covered by `tests/test_contestability.py`.
 
 ## Part 3 — EU AI Act / multi-jurisdiction regulator-ready evidence (document heavily)
 Context: EU AI Act full enforcement opens 2 Aug 2026; Art. 13 requires high-risk

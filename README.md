@@ -1,128 +1,59 @@
 # Shibahama
 
-Shibahama is a usage-aware, reconstructive memory engine for long-running LLM
-agents.
+<p align="center">
+  <img src="./docs/assets/tideline-demo.gif" width="80%" alt="Shibahama Tideline debugger">
+</p>
 
-It is built for the failure mode where an agent can retrieve old context but
-cannot tell whether that context is still current, trusted, load-bearing, or
-safe to use. Shibahama keeps memory as state with history: every item carries
+<p align="center">
+  <a href="https://github.com/gongahkia/shibahama/actions/workflows/ci.yml"><img alt="ci" src="https://img.shields.io/github/actions/workflow/status/gongahkia/shibahama/ci.yml?branch=main&style=flat-square"></a>
+  <img alt="rust" src="https://img.shields.io/badge/rust-1.89%2B-orange?style=flat-square">
+  <img alt="python" src="https://img.shields.io/badge/python-3.14%2B-blue?style=flat-square">
+  <img alt="node" src="https://img.shields.io/badge/node-22%2B-339933?style=flat-square">
+  <img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
+</p>
+
+Usage-aware, reconstructive memory for long-running LLM agents.
+
+Shibahama is built for the failure mode where an agent can retrieve old context
+but cannot tell whether that context is still current, trusted, load-bearing, or
+safe to use. It keeps memory as durable state with history: every item carries
 provenance, valid time, ingestion time, credence, tier, significance, and an
 audit trail. Recall returns contextual candidates, not bare text.
 
 The repository is pre-release. The Rust core, CLI, Python binding, Node binding,
-benchmark harness, examples, and Tideline debugger are implemented locally. PyPI
-and npm publication are still pending registry credentials or trusted
-publishing setup.
+benchmark harness, examples, Tideline debugger, consolidation pass, human signal
+verbs, and offline learned-policy evaluation gate are implemented locally. PyPI,
+npm, and final registry publication are still pending release credentials.
 
-![Tideline debugger demo](docs/assets/tideline-demo.gif)
+## Table of Contents
 
-## Why This Exists
+- [Quick Start](#quick-start)
+- [What Shibahama Does](#what-shibahama-does)
+- [API Surface](#api-surface)
+- [Examples](#examples)
+- [How It Works](#how-it-works)
+- [Runtime Modes](#runtime-modes)
+- [Benchmark Snapshot](#benchmark-snapshot)
+- [Security Posture](#security-posture)
+- [Documentation](#documentation)
+- [Development & Evaluation](#development--evaluation)
+- [Repository Layout](#repository-layout)
+- [Release State](#release-state)
+- [License](#license)
 
-Most agent memory systems behave like warehouses: write a chunk, embed it, and
-retrieve nearest neighbors later. That is useful, but it blurs separate
-questions:
-
-- Is this fact still true?
-- Where did it come from?
-- Has it helped before?
-- Is it authoritative or just model-inferred?
-- Should it be cheap to retrieve by default?
-- If it looks stale, should the agent re-check it before relying on it?
-
-Shibahama keeps those axes separate.
-
-- **Currency** comes from bi-temporal validity: `valid_from`, `valid_to`, and
-  `ingested_at`.
-- **Credence** comes from provenance and corroboration.
-- **Significance** comes from usage, outcomes, decay, contradiction, and graph
-  centrality.
-- **Tier** controls retrieval cost: hot, warm, or cold.
-- **Reconstruction** is explicit: stale important memories can be revalidated
-  and replaced without overwriting history.
-
-The name comes from the rakugo story about a memory that is hidden, preserved,
-and later reintroduced at the moment it can be understood correctly. See
-[`docs/why-shibahama.md`](docs/why-shibahama.md).
-
-## Closed Loop
-
-```mermaid
-flowchart LR
-    A[Write memory with provenance] --> B[Append-only event log]
-    B --> C[Materialized memory state]
-    C --> D[Vector and graph recall]
-    D --> E[Rank by credence, score, recency, graph]
-    E --> F[Caller uses or ignores result]
-    F --> G[Reinforce outcome]
-    G --> H[Recompute significance lazily]
-    H --> I[Promote or demote tier]
-    I --> C
-    E --> J{Load-bearing and stale?}
-    J -->|plain recall| K[Flag only]
-    J -->|explicit revalidation| L[Re-read source, graph, or caller]
-    L --> M[Quarantine proposed update]
-    M --> N[Corroborate]
-    N --> O[Invalidate old version, keep history]
-    O --> B
-```
-
-The important rule is that ordinary recall is read-only except for surfaced
-access recording. Reconstruction does not run as an invisible side effect of a
-plain read.
-
-## What Is Implemented
-
-The current repository includes:
-
-- Rust core crate with `write`, `recall`, `reinforce`, `why`, `timeline`, and
-  async facade APIs.
-- Append-only event log plus redb-backed materialized state.
-- UUIDv7 ids, provenance, bi-temporal memory items, credence tiers, hot/warm/cold
-  tiers, and schema versioning.
-- In-process HNSW vector index plus a Qdrant transport adapter boundary.
-- Lazy significance scoring with deterministic `why()` explanations.
-- Graph entities and bi-temporal relations for expansion, contradiction, and
-  supersession.
-- Reconstruction gate, quarantine, corroboration, and invalidate-not-overwrite
-  replacement flow.
-- Human signal APIs for challenge, affirm, correct, pin, and unpin, with
-  append-only actor/timestamp/reason audit events.
-- Read-safety filters for stored role/directive-looking content.
-- CLI and optional HTTP server mode with namespace filtering, API-key auth, and
-  metadata-only request logs.
-- Python and Node bindings, including LangChain-style memory adapters.
-- Tideline, a React/Vite visual debugger for replaying memory/event sessions.
-- Local benchmark harnesses for CurrencyBench and a coding-agent memory task.
-
-Architecture details live in [`docs/architecture.md`](docs/architecture.md), and
-plain-language concepts live in [`docs/concepts.md`](docs/concepts.md).
-
-## When Not To Use Shibahama
-
-Use plain RAG, keyword search, or long context when the job is stateless one-shot
-QA over mostly static content. If the whole useful corpus fits cheaply in
-context, if answers do not depend on supersession or current validity, or if you
-only need nearest-neighbor snippets, Shibahama's event log, credence, tiering,
-and reconstruction machinery may be unnecessary.
-
-Shibahama is aimed at continuity tasks where facts recur and change, stale
-answers are costly, and it matters to inspect why a memory is trusted,
-challenged, cold, or superseded. The benchmark boundary is documented in
-[`docs/null-hypothesis.md`](docs/null-hypothesis.md).
-
-## Quickstart From This Checkout
+## Quick Start
 
 Published packages are not available yet, so use the repository directly.
 
 Run the Rust example:
 
-```sh
+```bash
 cargo run --manifest-path examples/rust/quickstart/Cargo.toml
 ```
 
 Build the Python binding and run the Python example:
 
-```sh
+```bash
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip maturin
@@ -135,7 +66,7 @@ python examples/python/basic_memory.py
 
 Build the Node binding and run the Node example:
 
-```sh
+```bash
 (
   cd bindings/node
   npm install
@@ -146,7 +77,7 @@ node examples/node/basic-memory.mjs
 
 Try the CLI:
 
-```sh
+```bash
 cargo run -p shibahama-cli -- init --path shibahama.redb --dimensions 2
 cargo run -p shibahama-cli -- write \
   --path shibahama.redb \
@@ -159,11 +90,87 @@ cargo run -p shibahama-cli -- recall \
   --top-k 1
 ```
 
-## Core API Shape
+## What Shibahama Does
 
-Rust callers open an embedded engine with a vector index, write memories with
-provenance, and recall by supplying query embeddings from their own embedding
-model.
+- Stores memories with mandatory provenance and bi-temporal validity:
+  `valid_from`, `valid_to`, and `ingested_at`.
+- Separates credence from retrieval score so authoritative memories cannot be
+  buried by low-trust but similar snippets.
+- Computes usage-driven significance from access history, outcomes, decay,
+  contradictions, and optional graph centrality.
+- Moves memories through hot, warm, and cold tiers to control default retrieval
+  cost without deleting history.
+- Recalls by vector similarity, valid-time filtering, credence ordering,
+  significance weighting, recency, and graph expansion.
+- Flags stale but load-bearing memories for explicit revalidation.
+- Reconstructs memory through a gated flow: re-read source, quarantine proposal,
+  require corroboration, then invalidate old versions without overwriting them.
+- Consolidates offline by merging duplicate memories with provenance, promoting
+  or demoting tiers, and flagging stale important memories.
+- Records human signals through `challenge`, `affirm`, `correct`, `pin`, and
+  `unpin`, all as append-only audit events.
+- Exposes an offline learned-policy evaluator that can test candidate memory
+  decisions against logged human signals without training or mutating runtime
+  state.
+
+Shibahama is not a replacement for plain RAG on stateless one-shot QA. If the
+whole useful corpus fits cheaply in context, if answers do not depend on
+supersession or current validity, or if nearest-neighbor snippets are enough,
+Shibahama's event log, credence, tiering, and reconstruction machinery may be
+unnecessary. The benchmark boundary is documented in
+[`docs/null-hypothesis.md`](./docs/null-hypothesis.md).
+
+## API Surface
+
+Core memory operations:
+
+- `write`
+- `write_with_embedding`
+- `recall`
+- `stream_recall`
+- `timeline`
+- `stream_timeline`
+- `reinforce`
+- `why`
+- `why_at`
+- `invalidate`
+
+Offline and human-in-the-loop operations:
+
+- `consolidate`
+- `challenge`
+- `affirm`
+- `correct`
+- `pin`
+- `unpin`
+- `evaluate_offline_policy`
+
+Inspection and maintenance:
+
+- `memory_items`
+- `event_records`
+- `audit_trail`
+- `snapshot`
+- `restore`
+- `verify_never_delete_invariant`
+
+Optional server mode:
+
+- `GET /health`
+- `GET /ready`
+- `POST /write`
+- `POST /recall`
+- `POST /reinforce`
+- `GET /why/{id}`
+- `GET /tideline/snapshot`
+- `GET /tideline/recording`
+- `GET /tideline/live`
+
+Generated API notes live in [`docs/api/`](./docs/api/).
+
+## Examples
+
+Use the Rust core directly:
 
 ```rust
 use shibahama_core::api::{Shibahama, WriteEmbedding};
@@ -199,24 +206,20 @@ engine.reinforce(item.id, AccessOutcome::Cited)?;
 let why = engine.why(item.id)?;
 ```
 
-For complete runnable snippets, see [`examples/`](examples/). For generated API
-notes, see [`docs/api/README.md`](docs/api/README.md).
+Run a local CurrencyBench comparison after building the Python binding:
 
-## Tideline Debugger
-
-Tideline is the visual debugger for the memory loop. It can replay a recorded
-session, scrub event sequence time, inspect tier movement, show why a memory was
-returned, compare two points in a session, and export a shareable clip.
-
-Start the server:
-
-```sh
-cargo run -p shibahama-cli -- serve --path shibahama.redb --dimensions 2 --api-key dev
+```bash
+python benchmarks/run.py \
+  --suite currencybench \
+  --systems shibahama,warehouse \
+  --output benchmarks/results/currencybench-local.json \
+  --markdown benchmarks/results/currencybench-local.md
 ```
 
-Start Tideline:
+Start the optional server and Tideline debugger:
 
-```sh
+```bash
+cargo run -p shibahama-cli -- serve --path shibahama.redb --dimensions 2 --api-key dev
 (
   cd tideline
   npm install
@@ -225,44 +228,115 @@ Start Tideline:
 ```
 
 Open the Vite URL and point it at `http://127.0.0.1:8765` with API key `dev`.
-The UI consumes read-only `/tideline/snapshot`, `/tideline/recording`, and
-`/tideline/live` endpoints, plus `why` traces for selected memories.
+
+For complete runnable snippets, see [`examples/`](./examples/).
+
+## How It Works
+
+Shibahama has six main runtime pieces:
+
+1. The Rust core in [`core/`](./core/) owns memory semantics, significance,
+   reconstruction, consolidation, human signals, storage, graph, and vector
+   integration.
+2. The redb-backed storage layer keeps an append-only event log plus current
+   materialized memory state.
+3. The retrieval orchestrator combines vector search, temporal filtering,
+   credence ordering, significance, recency, graph expansion, diversification,
+   and token budgets.
+4. The reconstruction layer gates stale-memory revalidation, quarantines
+   proposals, requires corroboration, and preserves superseded history.
+5. The bindings and CLI expose the same core through Rust, Python, Node, and an
+   optional HTTP server.
+6. Tideline in [`tideline/`](./tideline/) replays events visually so users can
+   inspect why memory changed.
+
+Core flow:
+
+```mermaid
+flowchart TD
+    Client[Agent or app] --> Write[Write memory with provenance]
+    Write --> Log[Append-only event log]
+    Log --> State[Materialized memory state]
+    State --> Recall[Vector, temporal, graph recall]
+    Recall --> Rank[Credence, significance, recency ranking]
+    Rank --> Use[Caller uses or ignores result]
+    Use --> Signal[Reinforce outcome]
+    Signal --> Score[Lazy significance recompute]
+    Score --> Tier[Promote or demote tier]
+    Tier --> State
+    Rank --> Stale{Load-bearing and stale?}
+    Stale -->|plain recall| Flag[Flag only]
+    Stale -->|explicit revalidation| Recheck[Re-read source or ask caller]
+    Recheck --> Quarantine[Quarantine proposal]
+    Quarantine --> Corroborate[Require corroboration]
+    Corroborate --> Replace[Invalidate old version, keep history]
+    Replace --> Log
+```
+
+Ordinary recall is read-only except for surfaced access recording.
+Reconstruction does not run as an invisible side effect of a plain read.
+
+## Runtime Modes
+
+### Embedded Core
+
+Use the Rust crate directly with an in-process vector index:
+
+```bash
+cargo test -p shibahama-core
+```
+
+The embedded mode is the source of truth for memory semantics. It is suitable
+for local agents, test harnesses, and applications that want direct control of
+their embedding model and storage path.
+
+### Bindings
+
+Python and Node bindings expose the core API from local builds:
+
+```bash
+scripts/ci/python-binding-smoke.sh
+scripts/ci/node-binding-smoke.sh
+```
+
+Registry publication is not complete yet, so `pip install shibahama` and
+`npm install shibahama` are release blockers rather than current install paths.
+
+### Server
+
+The optional server wraps the same core API for process boundaries, namespaces,
+API-key auth, metadata-only logs, and Tideline streams:
+
+```bash
+cargo run -p shibahama-cli -- serve --path shibahama.redb --dimensions 2 --api-key dev
+curl -H "x-api-key: dev" http://127.0.0.1:8765/ready
+```
 
 ## Benchmark Snapshot
 
 Checked-in local benchmark artifacts are under
-[`benchmarks/results/`](benchmarks/results/). These are deterministic local smoke
-results, not hosted all-systems claims.
+[`benchmarks/results/`](./benchmarks/results/). These are deterministic local
+smoke results, not hosted all-systems claims.
 
 CurrencyBench injects fact changes mid-stream and measures whether the memory
 system returns the current fact rather than the stale one:
 
 | Suite | System | Queries | Accuracy | Stale Answer Rate | Mean Token Cost | p95 ms | Status |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+|---|---|---:|---:|---:|---:|---:|---|
 | currencybench | shibahama | 12 | 1.000 | 0.000 | 5.917 | 0.719 | ok |
 | currencybench | warehouse | 12 | 0.000 | 1.000 | 11.833 | 0.017 | ok |
 
 The coding-agent benchmark harness remains experimental and no longer has a
-checked-in result artifact. The runnable `examples/coding-agent/` demo is kept
-separate from benchmark claims.
+checked-in result artifact. The runnable [`examples/coding-agent/`](./examples/coding-agent/)
+demo is kept separate from benchmark claims.
 
 The checked-in `ablation-local` artifact isolates significance,
 reconstruction/supersession, and graph expansion toggles. Full Shibahama scores
 `1.000` accuracy; each single-feature ablation scores `0.667` and fails the case
 tied to the removed behavior.
 
-Run the local CurrencyBench comparison after building the Python binding:
-
-```sh
-python benchmarks/run.py \
-  --suite currencybench \
-  --systems shibahama,warehouse \
-  --output benchmarks/results/currencybench-local.json \
-  --markdown benchmarks/results/currencybench-local.md
-```
-
 Benchmark methodology and current scope are documented in
-[`docs/benchmarks.md`](docs/benchmarks.md).
+[`docs/benchmarks.md`](./docs/benchmarks.md).
 
 ## Security Posture
 
@@ -278,48 +352,81 @@ Shibahama treats memory as untrusted input.
 - The default redb store is plaintext at rest. The encryption trait is an
   extension point, not active encryption.
 
-Read [`docs/security.md`](docs/security.md) before using Shibahama with
+Read [`docs/security.md`](./docs/security.md) before using Shibahama with
 sensitive stores.
 
-## Repository Layout
+## Documentation
 
-| Path | Purpose |
-| --- | --- |
-| `core/` | Rust core library and memory semantics. |
-| `shibahama-cli/` | CLI and optional HTTP server mode. |
-| `bindings/python/` | PyO3/maturin Python package. |
-| `bindings/node/` | napi-rs ESM/CJS Node package. |
-| `tideline/` | React/Vite visual debugger. |
-| `benchmarks/` | Benchmark harnesses, adapters, datasets, and checked-in local results. |
-| `examples/` | Runnable Rust, Python, Node, and coding-agent examples. |
-| `docs/` | Architecture, concepts, security, performance, ADRs, API reference, and launch notes. |
+- [`docs/architecture.md`](./docs/architecture.md): component map, data model,
+  request lifecycle, and deployment surfaces.
+- [`docs/concepts.md`](./docs/concepts.md): plain-language explanation of
+  memories, significance, tiers, credence, reconstruction, and graph concepts.
+- [`docs/benchmarks.md`](./docs/benchmarks.md): benchmark methodology,
+  reproduction commands, local results, and open gaps.
+- [`docs/security.md`](./docs/security.md): poisoning posture, logging behavior,
+  encryption limits, and operational guidance.
+- [`docs/null-hypothesis.md`](./docs/null-hypothesis.md): when flat retrieval or
+  long context may beat Shibahama.
+- [`docs/learned-memory-policy.md`](./docs/learned-memory-policy.md): gated
+  offline evaluation plan for future learned memory policies.
+- [`docs/performance.md`](./docs/performance.md): recall latency budget and
+  hot-path scan boundaries.
+- [`docs/releases.md`](./docs/releases.md): release sequence and registry
+  blockers.
+- [`docs/adr/`](./docs/adr/): accepted architecture decision records.
+- [`docs/api/`](./docs/api/): generated API notes.
+- [`docs/why-shibahama.md`](./docs/why-shibahama.md): naming rationale and
+  design philosophy.
 
-## Development Gates
+## Development & Evaluation
 
 Run the Rust gate:
 
-```sh
+```bash
 scripts/ci/rust.sh
 ```
 
 Run binding smoke checks:
 
-```sh
+```bash
 scripts/ci/python-binding-smoke.sh
 scripts/ci/node-binding-smoke.sh
 ```
 
 Run the local correctness smoke:
 
-```sh
+```bash
 python scripts/ci/correctness-smoke.py
+```
+
+Run frontend build checks:
+
+```bash
+(
+  cd tideline
+  npm install
+  npm run build
+)
 ```
 
 Or enter the pinned Nix shell:
 
-```sh
+```bash
 nix develop
 ```
+
+## Repository Layout
+
+| Path | Purpose |
+|---|---|
+| [`core/`](./core/) | Rust core library and memory semantics. |
+| [`shibahama-cli/`](./shibahama-cli/) | CLI and optional HTTP server mode. |
+| [`bindings/python/`](./bindings/python/) | PyO3/maturin Python package. |
+| [`bindings/node/`](./bindings/node/) | napi-rs ESM/CJS Node package. |
+| [`tideline/`](./tideline/) | React/Vite visual debugger. |
+| [`benchmarks/`](./benchmarks/) | Benchmark harnesses, adapters, datasets, and checked-in local results. |
+| [`examples/`](./examples/) | Runnable Rust, Python, Node, and coding-agent examples. |
+| [`docs/`](./docs/) | Architecture, concepts, security, performance, ADRs, API reference, and launch notes. |
 
 ## Release State
 
@@ -332,3 +439,10 @@ Still pending:
 - final `v0.1.0` tag and registry publication.
 - LoCoMo and LongMemEval benchmark runs with real dataset exports.
 - citable CurrencyBench archive/DOI submission.
+
+Remaining tracked work lives in [`NEXT-TODO.md`](./NEXT-TODO.md). `TODO.md` has
+already been removed because it had no remaining unique implementation work.
+
+## License
+
+Shibahama is licensed under the [MIT License](./LICENSE).

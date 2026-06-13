@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from solomon.api.app import create_app
@@ -52,6 +54,59 @@ def test_server_api_key_middleware_is_configured(tmp_path: Path) -> None:
     middleware_names = [str(middleware.cls) for middleware in app.user_middleware]
 
     assert any("BaseHTTPMiddleware" in name for name in middleware_names)
+
+
+def test_server_auth_enforces_admin_and_tenant_scopes(tmp_path: Path) -> None:
+    app = create_app(
+        Settings(
+            sku="server",
+            zero_egress_mode=False,
+            data_dir=tmp_path / "data",
+            journal_dir=tmp_path / "journal",
+            server_api_key="admin-secret",
+            server_auto_provision_tenants=False,
+        )
+    )
+    admin_headers = {"Authorization": "Bearer admin-secret"}
+    read_only_headers = {"Authorization": "Bearer read-secret", "x-tenant-id": "read-only"}
+    payload = {
+        "kind": "position",
+        "content": "read only tenant position",
+        "source_kind": "partner",
+        "source_ref": "read-only-memo",
+    }
+
+    async def exercise() -> tuple[httpx.Response, httpx.Response, httpx.Response, httpx.Response, httpx.Response]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            created_tenant = await client.post(
+                "/tenants",
+                headers=admin_headers,
+                json={
+                    "tenant_id": "read-only",
+                    "api_key": "read-secret",
+                    "api_key_scopes": ["tenant:read"],
+                },
+            )
+            admin_diagnostics = await client.get("/diagnostics", headers=admin_headers)
+            tenant_diagnostics = await client.get("/diagnostics", headers=read_only_headers)
+            rejected_ingest = await client.post("/ingest", headers=read_only_headers, json=payload)
+            allowed_recall = await client.post(
+                "/recall",
+                headers=read_only_headers,
+                json={"query": "read only tenant", "review_mode": True},
+            )
+            return created_tenant, admin_diagnostics, tenant_diagnostics, rejected_ingest, allowed_recall
+
+    created_tenant, admin_diagnostics, tenant_diagnostics, rejected_ingest, allowed_recall = asyncio.run(exercise())
+
+    assert created_tenant.status_code == 201
+    assert created_tenant.json()["api_key_scopes"] == ["tenant:read"]
+    assert admin_diagnostics.status_code == 200
+    assert tenant_diagnostics.status_code == 401
+    assert rejected_ingest.status_code == 403
+    assert rejected_ingest.json()["error"]["code"] == "forbidden"
+    assert allowed_recall.status_code == 200
 
 
 def test_boundary_mapping_hygiene_never_persists_after_demasking() -> None:

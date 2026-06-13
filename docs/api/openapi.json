@@ -576,6 +576,26 @@
             ],
             "title": "Api Key"
           },
+          "api_key_scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              [
+                "tenant:read",
+                "tenant:write"
+              ]
+            ],
+            "title": "Api Key Scopes"
+          },
           "display_name": {
             "anyOf": [
               {
@@ -607,6 +627,13 @@
           "api_key_configured": {
             "title": "Api Key Configured",
             "type": "boolean"
+          },
+          "api_key_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Api Key Scopes",
+            "type": "array"
           },
           "created_at": {
             "title": "Created At",
@@ -642,7 +669,8 @@
           "status",
           "created_at",
           "updated_at",
-          "api_key_configured"
+          "api_key_configured",
+          "api_key_scopes"
         ],
         "title": "TenantResponse",
         "type": "object"

@@ -28,3 +28,8 @@ def test_server_sku_requires_explicit_remote_model_for_egress() -> None:
     settings = server_settings(allow_remote_egress=True, remote_model_url="https://zdr.example.test/v1")
     assert settings.sku == "server"
     assert settings.allow_remote_egress is True
+
+
+def test_server_sku_requires_admin_api_key() -> None:
+    with pytest.raises(ValueError, match="requires SOLOMON_SERVER_API_KEY"):
+        Settings(sku="server", zero_egress_mode=False)

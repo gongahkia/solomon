@@ -13,7 +13,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from solomon.api.auth import DEFAULT_TENANT_SCOPES, validate_auth_scopes
 
 TenantStatus = Literal["active", "suspended"]
 
@@ -45,10 +47,16 @@ class TenantRecord(BaseModel):
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
     api_key_hash: str | None = None
+    api_key_scopes: list[str] = Field(default_factory=lambda: list(DEFAULT_TENANT_SCOPES))
 
     @property
     def api_key_configured(self) -> bool:
         return self.api_key_hash is not None
+
+    @field_validator("api_key_scopes")
+    @classmethod
+    def validate_api_key_scopes(cls, value: list[str]) -> list[str]:
+        return validate_auth_scopes(value)
 
 
 class TenantRegistry:
@@ -73,6 +81,7 @@ class TenantRegistry:
         *,
         display_name: str | None = None,
         api_key: str | None = None,
+        api_key_scopes: list[str] | None = None,
     ) -> TenantRecord:
         self._validate_tenant_id(tenant_id)
         with self._lock:
@@ -88,6 +97,7 @@ class TenantRegistry:
                 created_at=now,
                 updated_at=now,
                 api_key_hash=hash_api_key(api_key) if api_key else None,
+                api_key_scopes=validate_auth_scopes(api_key_scopes or list(DEFAULT_TENANT_SCOPES)),
             )
             records[tenant_id] = record
             self._write_records_unlocked(records)
@@ -99,6 +109,7 @@ class TenantRegistry:
         *,
         display_name: str | None = None,
         api_key: str | None = None,
+        api_key_scopes: list[str] | None = None,
     ) -> TenantRecord:
         self._validate_tenant_id(tenant_id)
         with self._lock:
@@ -113,6 +124,7 @@ class TenantRegistry:
                 created_at=now,
                 updated_at=now,
                 api_key_hash=hash_api_key(api_key) if api_key else None,
+                api_key_scopes=validate_auth_scopes(api_key_scopes or list(DEFAULT_TENANT_SCOPES)),
             )
             records[tenant_id] = record
             self._write_records_unlocked(records)

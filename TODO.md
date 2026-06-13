@@ -141,7 +141,7 @@ checkout is required at runtime.
 - [x] Threat model, trust-boundary docs, known limitations, assumptions, erasure docs, and boundary audit checklist exist.
 - [x] Fail-closed boundary behavior is enforced in service-level tests.
 - [x] Volatile mapping hygiene is tested.
-- [ ] Auth/tenancy is basic API-key/header middleware, not a full auth system.
+- [x] Server auth now requires an admin key, accepts bearer/API-key credentials, maps requests to scoped admin or tenant principals, stores tenant key hashes, and enforces route-level read/write/manage/diagnostics scopes.
 - [x] Stored-knowledge hardening normalizes control characters, detects instruction-like content on ingest, records findings, marks unsafe content as instruction-role, and blocks it from load-bearing answers.
 
 ## Phase 16 — Repo docs

@@ -13,6 +13,14 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from solomon import __version__
+from solomon.api.auth import (
+    ADMIN_AUTH_SCOPES,
+    AuthPrincipal,
+    extract_api_key,
+    required_scope_for_request,
+    static_secret_matches,
+    validate_auth_scopes,
+)
 from solomon.api.service import (
     AnswerRequest,
     AuthorityChangeRequest,
@@ -71,6 +79,7 @@ class TenantCreateRequest(BaseModel):
     tenant_id: str = Field(..., examples=["tenant-a"])
     display_name: str | None = Field(default=None, max_length=120)
     api_key: str | None = Field(default=None, min_length=8)
+    api_key_scopes: list[str] | None = Field(default=None, examples=[["tenant:read", "tenant:write"]])
 
 
 class TenantResponse(BaseModel):
@@ -80,6 +89,7 @@ class TenantResponse(BaseModel):
     created_at: str
     updated_at: str
     api_key_configured: bool
+    api_key_scopes: list[str]
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -138,12 +148,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def server_api_key_middleware(request: Request, call_next: Any) -> Any:
         request.state.tenant_id = "local"
         request.state.service = service
+        request.state.principal = AuthPrincipal(
+            subject="local",
+            role="admin",
+            tenant_id=None,
+            scopes=ADMIN_AUTH_SCOPES,
+        )
         path = request.url.path
         if resolved_settings.sku == "server" and path not in PUBLIC_PATHS:
-            supplied_api_key = request.headers.get("x-api-key")
-            if _is_tenant_management_path(path):
-                if not _has_admin_api_key(resolved_settings, supplied_api_key):
+            supplied_api_key = extract_api_key(request.headers)
+            required_scope = required_scope_for_request(request.method, path)
+            if _is_admin_path(path):
+                principal = _admin_principal(resolved_settings, supplied_api_key)
+                if principal is None:
                     return _auth_error()
+                if not principal.has_scope(required_scope):
+                    return _forbidden_error(required_scope)
+                request.state.principal = principal
                 return await call_next(request)
 
             tenant_id = request.headers.get("x-tenant-id")
@@ -159,7 +180,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         status_code=404,
                         content={"error": {"code": "tenant_not_found", "message": "tenant is not registered"}},
                     )
-                if not _has_admin_api_key(resolved_settings, supplied_api_key):
+                if _admin_principal(resolved_settings, supplied_api_key) is None:
                     return _auth_error()
                 record = tenant_registry.ensure_tenant(tenant_id)
             if record.status != "active":
@@ -167,10 +188,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     status_code=403,
                     content={"error": {"code": "tenant_suspended", "message": "tenant is suspended"}},
                 )
-            if not _is_tenant_request_authorized(resolved_settings, tenant_registry, record, supplied_api_key):
+            principal = _tenant_principal(resolved_settings, tenant_registry, record, tenant_id, supplied_api_key)
+            if principal is None:
                 return _auth_error()
+            if not principal.has_scope(required_scope):
+                return _forbidden_error(required_scope)
             request.state.tenant_id = tenant_id
             request.state.service = service_for_tenant(tenant_id)
+            request.state.principal = principal
         return await call_next(request)
 
     @app.exception_handler(SolomonError)
@@ -202,10 +227,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not is_valid_tenant_id(payload.tenant_id):
             raise HTTPException(status_code=400, detail="invalid tenant_id")
         try:
+            api_key_scopes = (
+                validate_auth_scopes(payload.api_key_scopes) if payload.api_key_scopes is not None else None
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
             record = tenant_registry.create_tenant(
                 payload.tenant_id,
                 display_name=payload.display_name,
                 api_key=payload.api_key,
+                api_key_scopes=api_key_scopes,
             )
         except TenantAlreadyExistsError as exc:
             raise HTTPException(status_code=409, detail="tenant already exists") from exc
@@ -338,33 +370,52 @@ def _is_postgres_url(database_url: str) -> bool:
     return urlparse(database_url).scheme in {"postgres", "postgresql"}
 
 
-def _is_tenant_management_path(path: str) -> bool:
-    return path == TENANT_MANAGEMENT_PREFIX or path.startswith(f"{TENANT_MANAGEMENT_PREFIX}/")
+def _is_admin_path(path: str) -> bool:
+    return path == "/diagnostics" or path == TENANT_MANAGEMENT_PREFIX or path.startswith(f"{TENANT_MANAGEMENT_PREFIX}/")
 
 
-def _has_admin_api_key(settings: Settings, supplied_api_key: str | None) -> bool:
-    if settings.server_api_key is None:
-        return True
-    return supplied_api_key == settings.server_api_key
+def _admin_principal(settings: Settings, supplied_api_key: str | None) -> AuthPrincipal | None:
+    if not static_secret_matches(settings.server_api_key, supplied_api_key):
+        return None
+    return AuthPrincipal(
+        subject="server-admin",
+        role="admin",
+        tenant_id=None,
+        scopes=ADMIN_AUTH_SCOPES,
+    )
 
 
-def _is_tenant_request_authorized(
+def _tenant_principal(
     settings: Settings,
     tenant_registry: TenantRegistry,
     record: TenantRecord,
+    tenant_id: str,
     supplied_api_key: str | None,
-) -> bool:
-    if _has_admin_api_key(settings, supplied_api_key):
-        return True
+) -> AuthPrincipal | None:
+    admin = _admin_principal(settings, supplied_api_key)
+    if admin is not None:
+        return admin
     if tenant_registry.verify_tenant_api_key(record, supplied_api_key):
-        return True
-    return settings.server_api_key is None and not record.api_key_configured
+        return AuthPrincipal(
+            subject=f"tenant:{tenant_id}",
+            role="tenant",
+            tenant_id=tenant_id,
+            scopes=frozenset(record.api_key_scopes),
+        )
+    return None
 
 
 def _auth_error() -> JSONResponse:
     return JSONResponse(
         status_code=401,
         content={"error": {"code": "unauthorized", "message": "invalid or missing API key"}},
+    )
+
+
+def _forbidden_error(required_scope: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=403,
+        content={"error": {"code": "forbidden", "message": f"required scope: {required_scope}"}},
     )
 
 
@@ -376,6 +427,7 @@ def _tenant_response(record: TenantRecord) -> TenantResponse:
         created_at=record.created_at.isoformat(),
         updated_at=record.updated_at.isoformat(),
         api_key_configured=record.api_key_configured,
+        api_key_scopes=list(record.api_key_scopes),
     )
 
 

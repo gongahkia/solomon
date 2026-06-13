@@ -42,6 +42,19 @@ Tenant storage stays isolated after registry admission. SQLite deployments use p
 directories. When Postgres is configured, each tenant is mapped to a sanitized Postgres schema so tenant data
 does not share tables.
 
+## Server Auth
+
+`solomon-server` requires `SOLOMON_SERVER_API_KEY`. Requests may present credentials through `Authorization:
+Bearer <token>` or `x-api-key`. The server maps credentials to an authenticated principal:
+
+- the server admin key gets `admin:*`, `tenant:manage`, `tenant:read`, `tenant:write`, and `diagnostics:read`;
+- tenant keys are stored only as PBKDF2-SHA256 hashes and default to `tenant:read` plus `tenant:write`;
+- tenant creation can restrict a key to narrower scopes such as `tenant:read`.
+
+Middleware classifies routes before invoking handlers. Tenant management and diagnostics require admin scopes;
+tenant read routes such as recall/answer require `tenant:read`; mutating tenant routes such as ingest,
+verification, dependency add, and authority changes require `tenant:write`.
+
 ## Reference Extraction
 
 `/references/extract` runs after optional Kaypoh sanitization. Citation parsing uses `eyecite` for full,

@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     def validate_egress_policy(self) -> Settings:
         if self.sku == "local" and self.allow_remote_egress:
             raise ValueError("solomon-local cannot enable remote egress")
+        if self.sku == "server" and not self.server_api_key:
+            raise ValueError("server SKU requires SOLOMON_SERVER_API_KEY")
         if self.zero_egress_mode and self.allow_remote_egress:
             raise ValueError("zero-egress mode conflicts with remote egress")
         if self.sku == "server" and self.allow_remote_egress and not self.remote_model_url:
@@ -70,7 +72,7 @@ def local_settings(**overrides: Any) -> Settings:
 
 
 def server_settings(**overrides: Any) -> Settings:
-    defaults: dict[str, Any] = {"sku": "server", "zero_egress_mode": False}
+    defaults: dict[str, Any] = {"sku": "server", "zero_egress_mode": False, "server_api_key": "test-server-key"}
     defaults.update(overrides)
     return Settings(**defaults)
 

@@ -366,3 +366,62 @@ Still not done / next up:
 - [x] (P3) Confirm forgetting can be globally disabled in favour of flag-for-reverification (config switch)
 - [x] (P3) Confirm credence taxonomy is swappable (generic OSS names → firm-authoritative/etc.)
 - [x] (P3) Stub the sanitising-gateway integration point (where tokenisation will sit) without building it here
+
+---
+
+## Phase 17 — Consolidation, human challenge, and benchmark honesty (P1/P2 shipped)
+
+- [x] (P1) Offline/idle consolidation pass that can merge duplicate memories,
+  promote/demote tiers, and flag stale significant memories without deleting or
+  overwriting source rows.
+- [x] (P1) Consolidation decision events include action, inputs, outputs,
+  usage/safety evidence, and a legible `why` trace for Tideline replay.
+- [x] (P1) Consolidation is idempotent-safe on an unchanged store and respects
+  credence floors / protected items.
+- [x] (P1) Human signal APIs: `challenge`, `affirm`, `correct`, `pin`, and
+  `unpin`, with append-only actor/timestamp/reason audit events.
+- [x] (P1) Human challenge lowers credence, records a contradicted access
+  outcome, and flags the memory for review without deleting it.
+- [x] (P1) Human correction reuses reconstruction quarantine/corroboration and
+  invalidate-not-delete replacement flow.
+- [x] (P1) Pin/unpin modifies the credence floor so significance decay cannot
+  demote protected memories below the floor.
+- [x] (P2) Tideline surfaces consolidation passes and human challenges; contested
+  memories are visually marked and the human reason is shown alongside
+  significance.
+- [x] (P2) `docs/null-hypothesis.md` states where flat retrieval or long context
+  may beat reconstructive memory, and benchmark docs position CurrencyBench /
+  continuity tasks as the home turf.
+- [x] (P2) README includes an honest "When Not To Use Shibahama" section for
+  stateless one-shot QA and small static corpora.
+
+---
+
+## Phase 18 — Learned memory policy (stretch, gated)
+
+- [ ] (P3) Document the core tension explicitly: the dominant RL-for-memory
+  paradigm learns an action space that includes destructive operations and often
+  rewards naked answer correctness. A Shibahama-compatible policy must restrict
+  actions to non-destructive operations only: NOOP, promote, demote,
+  merge-with-provenance, and flag. No delete. No overwrite.
+- [ ] (P3) Define a reward that cannot be gamed by discarding inconvenient
+  memories. Reward design must preserve the never-delete invariant and the
+  credence-floor invariant before accuracy is considered.
+- [ ] (P3) Stage 1: run offline policy evaluation over logged human challenges
+  and affirms. Ask whether a learned demote/merge/flag policy would have beaten
+  the hand-tuned significance function under subsequent human signals. No
+  training loop. If the signal is weak or ambiguous, stop.
+- [ ] (P3) Stage 2: test a contextual-bandit update over existing significance
+  weights, not a new model. Reward is contest-derived (affirm positive,
+  challenge negative), task outcome is secondary, and every attempted floor
+  violation or pinned-item demotion is a hard failure.
+- [ ] (P3) Stage 3: only if Stages 1-2 prove out, consider a small GRPO/PPO policy
+  over the constrained non-destructive action space. Document GPU needs,
+  training-data volume, reward design, and ablations before implementation.
+- [ ] (P3) Eval gate for every learned-policy stage: beat the deterministic
+  significance baseline on a held-out continuity task and prove no never-delete
+  or floor violations across the action trace with property tests.
+- [ ] (P3) Anti-sycophancy clause: if learned policy does not beat the
+  deterministic baseline without violating invariants, write up the null result
+  as "deterministic significance is sufficient; RL not justified" and do not
+  ship learned policy.

@@ -117,7 +117,7 @@ Add these as unchecked TODO items under a new "Phase: Learned memory policy
       RL not justified" — and that null result gets written up, not buried.
 
 ## Reconcile the TODO
-14. Add the new shipped work (Parts 1–2) and the documentation work (Part 3) as
+14. [x] Add the new shipped work (Parts 1–2) and the documentation work (Part 3) as
     honest, accurately-checked phases. Add Part 4 as the unchecked gated stretch
     phase. Do not over-check.
 

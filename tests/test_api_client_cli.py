@@ -22,7 +22,7 @@ from solomon.api.service import (
 )
 from solomon.boundary.engine.client import BoundaryClient
 from solomon.boundary.kaypoh import BoundaryUnavailableError, KaypohBoundary
-from solomon.client import SolomonClient
+from solomon.client import AsyncSolomonClient, SolomonAPIError, SolomonClient
 from solomon.config import Settings
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import CredenceTier, KnowledgeItem, KnowledgeKind, Provenance, SourceKind
@@ -343,6 +343,131 @@ def test_answer_endpoint_refuses_low_credence_context_before_model_call(tmp_path
     assert "model-only structure x" not in raw_journal
 
 
+def test_public_route_wrappers_apply_service_state_and_return_stable_shapes(tmp_path: Path) -> None:
+    app = create_app(Settings(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal"))
+
+    async def exercise() -> dict[str, httpx.Response]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            created = await client.post(
+                "/ingest",
+                json={
+                    "kind": "position",
+                    "content": "Original structure x under Regulation R section 12.",
+                    "source_kind": "partner",
+                    "source_ref": "memo-routes",
+                    "valid_from": "2026-01-01T00:00:00+00:00",
+                    "ingested_at": "2026-01-01T00:00:00+00:00",
+                },
+            )
+            item_id = created.json()["id"]
+            dependency = await client.post(
+                "/dependencies",
+                json={
+                    "source_id": item_id,
+                    "target_id": "reg-r-12",
+                    "edge_type": "internal_depends_on_external",
+                    "target_kind": "external_authority",
+                    "reason": "manual route-wrapper test edge",
+                },
+            )
+            currency = await client.get(f"/currency/{item_id}")
+            plan = await client.post(
+                "/plans/execute",
+                json={
+                    "steps": [
+                        {"primitive": "recall", "args": {"query": "structure x", "review_mode": True}},
+                        {"primitive": "evaluate_currency", "args": {"item_id": item_id}},
+                    ]
+                },
+            )
+            impact = await client.get("/impact/reg-r-12")
+            graph = await client.get("/graph")
+            references = await client.post(
+                "/references/extract",
+                json={"content": 'The "Covered Structure" means Regulation R section 12 treatment.'},
+            )
+            prediction = await client.post(
+                "/staleness/predict",
+                json={
+                    "pending_amendments": [
+                        {
+                            "authority_id": "reg-r-12",
+                            "expected_change_at": "2026-01-01T00:00:00+00:00",
+                            "description": "Regulation R section 12 consultation",
+                        }
+                    ],
+                    "as_of": "2025-01-01T00:00:00+00:00",
+                    "lookahead_days": 400,
+                },
+            )
+            timeline = await client.post(
+                "/timeline",
+                params={"as_of": created.json()["ingested_at"]},
+                json={"query": "structure x", "review_mode": True},
+            )
+            contest = await client.post(
+                f"/contest/{item_id}",
+                json={
+                    "lawyer_id": "Associate A",
+                    "actor_tier": "Verified",
+                    "reason": "Route-wrapper challenge",
+                    "proposed_correction": "Corrected structure x under Regulation R section 12.",
+                    "contested_at": "2026-02-01T00:00:00+00:00",
+                },
+            )
+            correction_id = contest.json()["correction_item"]["id"]
+            affirm = await client.post(
+                f"/affirm/{item_id}",
+                json={
+                    "lawyer_id": "Partner A",
+                    "actor_tier": "FirmAuthoritative",
+                    "correction_item_id": correction_id,
+                    "affirmed_at": "2026-02-02T00:00:00+00:00",
+                },
+            )
+            pin = await client.post(
+                f"/pin/{correction_id}",
+                json={
+                    "lawyer_id": "Partner A",
+                    "actor_tier": "FirmAuthoritative",
+                    "reason": "Firm position confirmed through route wrapper",
+                    "pinned_at": "2026-02-03T00:00:00+00:00",
+                },
+            )
+            return {
+                "created": created,
+                "dependency": dependency,
+                "currency": currency,
+                "plan": plan,
+                "impact": impact,
+                "graph": graph,
+                "references": references,
+                "prediction": prediction,
+                "timeline": timeline,
+                "contest": contest,
+                "affirm": affirm,
+                "pin": pin,
+            }
+
+    responses = asyncio.run(exercise())
+
+    for name, response in responses.items():
+        assert response.status_code == 200, name
+    item_id = responses["created"].json()["id"]
+    assert responses["dependency"].json()["source_id"] == item_id
+    assert responses["currency"].json()["currency_state"] == "Live"
+    assert responses["plan"].json()["steps"][0]["primitive"] == "recall"
+    assert responses["impact"].json()["stale_item_ids"] == [item_id]
+    assert "reg-r-12" in responses["graph"].text
+    assert responses["references"].json()["defined_terms"][0]["term"] == "Covered Structure"
+    assert responses["prediction"].json()["risks"][0]["item_id"] == item_id
+    assert responses["timeline"].json()[0]["item"]["id"] == item_id
+    assert responses["contest"].json()["item"]["metadata"]["contested"] is True
+    assert responses["affirm"].json()["superseded"] is True
+    assert responses["pin"].json()["metadata"]["credence_floor"] == "FirmAuthoritative"
+
+
 def test_server_mode_requires_and_isolates_tenants(tmp_path: Path) -> None:
     app = create_app(
         Settings(
@@ -509,3 +634,39 @@ def test_sync_client_uses_httpx_transport() -> None:
         assert client.ingest({"content": "x"})["id"] == "item-1"
         assert client.recall({"query": "x"})[0]["item"]["id"] == "item-1"
         assert client.why("item-1")["item"]["id"] == "item-1"
+
+
+def test_sync_client_preserves_error_status_code() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="forbidden")
+
+    with SolomonClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(SolomonAPIError) as exc_info:
+            client.recall({"query": "x"})
+
+    assert exc_info.value.status_code == 403
+    assert str(exc_info.value) == "forbidden"
+
+
+def test_async_client_uses_httpx_transport_and_preserves_errors() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/ingest":
+            payload: dict[str, Any] = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(200, json={"id": "item-1", **payload})
+        if request.url.path == "/recall":
+            return httpx.Response(200, json=[{"item": {"id": "item-1"}}])
+        if request.url.path == "/why/item-1":
+            return httpx.Response(200, json={"item": {"id": "item-1"}})
+        return httpx.Response(409, text="conflict")
+
+    async def exercise() -> None:
+        async with AsyncSolomonClient(transport=httpx.MockTransport(handler)) as client:
+            assert (await client.ingest({"content": "x"}))["id"] == "item-1"
+            assert (await client.recall({"query": "x"}))[0]["item"]["id"] == "item-1"
+            assert (await client.why("item-1"))["item"]["id"] == "item-1"
+            with pytest.raises(SolomonAPIError) as exc_info:
+                await client.why("missing")
+            assert exc_info.value.status_code == 409
+            assert str(exc_info.value) == "conflict"
+
+    asyncio.run(exercise())

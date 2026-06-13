@@ -115,11 +115,11 @@ Knowledge, recall, and answers:
 
 Currency, dependency, and references:
 
-- `POST /currency/evaluate`
-- `POST /verification`
-- `POST /authority-change`
-- `POST /dependency`
-- `POST /impact`
+- `GET /currency/{item_id}`
+- `POST /verification/{item_id}`
+- `POST /authorities/{authority_id}/changes`
+- `POST /dependencies`
+- `GET /impact/{authority_id}`
 - `GET /graph`
 - `POST /references/extract`
 - `POST /staleness/predict`
@@ -388,6 +388,14 @@ Run the full test suite:
 
 ```bash
 uv run pytest
+```
+
+Run production-confidence checks:
+
+```bash
+uv run pytest tests/test_boundary_accuracy.py
+SOLOMON_TEST_POSTGRES_DSN=postgresql://solomon:solomon@localhost:5432/solomon \
+  uv run pytest -m integration tests/test_postgres_live_integration.py
 ```
 
 Run the performance gate:

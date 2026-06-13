@@ -1,0 +1,32 @@
+[
+  {
+    "name": "sg_to_uk_pii_mnpi",
+    "text": "Send Dr Jane Tan S1234567D, passport number E1234567, DOB 01/02/1980, card 4111 1111 1111 1111, IP 192.168.1.10, and confidential Q1 guidance before announcement under UK MAR.",
+    "source_jurisdiction": "SG",
+    "destination_jurisdiction": "UK",
+    "expected_classification": "HIGH_RISK",
+    "expected_kinds": [
+      "person",
+      "national_id",
+      "passport_number",
+      "date_of_birth",
+      "credit_card",
+      "ip_address",
+      "mnpi_or_high_risk_secret",
+      "jurisdiction_strict_term"
+    ]
+  },
+  {
+    "name": "eu_to_us_privacy_markers",
+    "text": "Client Alpha will transfer passport number E1234567 cross-border under SCCs and DSAR right to erasure.",
+    "source_jurisdiction": "EU",
+    "destination_jurisdiction": "US",
+    "expected_classification": "HIGH_RISK",
+    "expected_kinds": [
+      "client_reference",
+      "passport_number",
+      "cross_border_transfer_marker",
+      "consent_or_erasure_marker"
+    ]
+  }
+]

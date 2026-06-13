@@ -618,13 +618,11 @@ class SolomonService:
         return extract_defined_terms_and_citations(content=request.content)
 
     def predict_staleness(self, request: StalenessPredictionRequest) -> StalenessRiskReport:
-        from datetime import datetime
-
         return predict_staleness_risk(
             request.pending_amendments,
             graph=self.graph,
             store=self.store,
-            as_of=datetime.fromisoformat(request.as_of) if request.as_of else None,
+            as_of=_parse_iso_datetime(request.as_of) if request.as_of else None,
             lookahead_days=request.lookahead_days,
         )
 
@@ -645,11 +643,9 @@ class SolomonService:
         )
 
     def timeline(self, request: RecallRequest, *, as_of: str) -> list[dict[str, Any]]:
-        from datetime import datetime
-
         results = self.retrieval.timeline(
             request.query,
-            as_of=datetime.fromisoformat(as_of),
+            as_of=_parse_iso_datetime(as_of),
             options=RecallOptions(
                 limit=request.limit,
                 review_mode=True,
@@ -913,7 +909,12 @@ def _optional_datetime_arg(step: PrimitivePlanStep, name: str) -> datetime | Non
         return None
     if isinstance(raw, datetime):
         return raw
-    return datetime.fromisoformat(str(raw))
+    return _parse_iso_datetime(str(raw))
+
+
+def _parse_iso_datetime(value: str) -> datetime:
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    return datetime.fromisoformat(normalized)
 
 
 def _jsonable(value: Any) -> Any:

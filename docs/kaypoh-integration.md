@@ -36,6 +36,16 @@ Run a local smoke test:
 uv run python scripts/kaypoh_smoke.py
 ```
 
+Run the committed boundary-confidence fixture suite:
+
+```bash
+uv run pytest tests/test_boundary_accuracy.py
+```
+
+The fixture suite exercises representative PII, client-reference, MNPI, privacy-marker, pseudonymization,
+anonymization, redaction, and reidentification behavior. It is regression evidence for Solomon's vendored
+boundary, not a claim of complete DLP or legal coverage.
+
 If the vendored boundary engine is unavailable or errors, Solomon refuses ingestion or egress paths that require
 the boundary.
 

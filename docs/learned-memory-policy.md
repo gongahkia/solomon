@@ -1,9 +1,9 @@
 # Learned Memory Policy
 
 This is the gated plan for any learned policy that touches Shibahama memory
-operations. The current implementation is Stage 1 only: offline evaluation of
-candidate decisions against logged human signals. It does not train a model,
-does not run online learning, and does not apply candidate actions to storage.
+operations. The current implementation provides read-only gates for Stage 1,
+Stage 2 planning, and Stage 3 readiness. It does not train a model, does not run
+online learning, and does not apply candidate actions to storage.
 
 ## Why This Is Gated
 
@@ -81,17 +81,25 @@ graduate to online experiments.
 
 ## Stage Gates
 
-Stage 1 is now implemented as read-only evaluation in
+Stage 1 is implemented as read-only evaluation in
 `shibahama_core::learned_policy` and exposed through
-`Shibahama::evaluate_offline_policy`.
+`Shibahama::evaluate_offline_policy`. Reports include per-decision traces,
+per-action summaries, aggregate candidate/baseline scores, invariant
+violations, and a structured null result when the candidate cannot proceed.
 
-Stage 2 remains unbuilt. It may only be a contextual-bandit experiment over the
-existing significance weights, not a new model, and it must use contest-derived
-reward with invariant violations as hard failures.
+Stage 2 is implemented only as a disabled-by-default shadow-experiment planner
+through `plan_contextual_bandit_experiment` and
+`Shibahama::plan_contextual_bandit_experiment`. It may propose bounded deltas to
+existing `SignificanceConfig` weights after Stage 1 clears stricter evidence
+gates. It does not update runtime configuration, does not learn online, and does
+not ship a new model.
 
-Stage 3 remains unbuilt. It requires Stage 1 and Stage 2 evidence, plus a written
-GPU/data-volume plan, reward ablations, and property tests proving no invariant
-violations across the action trace.
+Stage 3 is implemented only as a readiness gate through
+`assess_stage3_training_readiness` and
+`Shibahama::assess_stage3_training_readiness`. It requires Stage 2 evidence plus
+a written GPU/cost plan, dataset card, reward ablations, invariant property
+tests, and held-out continuity evaluation. Passing this gate only allows offline
+training research; runtime learned-policy deployment remains blocked.
 
 ## Null Result Rule
 
@@ -102,3 +110,11 @@ violating invariants, the correct conclusion is:
 
 That result should be written up rather than hidden. For a real user-facing
 product, not shipping a fragile learned policy is an acceptable outcome.
+
+## Current Non-Claims
+
+- There is no online contextual-bandit loop in the product.
+- There is no GRPO/PPO policy model in the product.
+- There is no delete or overwrite action in the learned-policy action space.
+- There is no learned-policy path that can bypass the deterministic never-delete,
+  credence-floor, or provenance-lineage gates.

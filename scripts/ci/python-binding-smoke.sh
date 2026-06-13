@@ -134,13 +134,18 @@ with tempfile.NamedTemporaryFile() as db:
     loaded = memory.load_memory_variables({"input": "adapters"})
     assert memory.memory_variables == ["history"]
     assert "Human: remember adapters" in loaded["history"]
+    memory.clear()
+    loaded_after_clear = memory.load_memory_variables({"input": "adapters"})
+    assert "Human: remember adapters" in loaded_after_clear["history"]
 
     async def check_langchain_async() -> None:
         await memory.asave_context({"input": "async adapters"}, {"output": "stored"})
         async_loaded = await memory.aload_memory_variables({"input": "async"})
         await memory.aclear()
+        async_loaded_after_clear = await memory.aload_memory_variables({"input": "async"})
 
         assert "async adapters" in async_loaded["history"]
+        assert "async adapters" in async_loaded_after_clear["history"]
 
     asyncio.run(check_langchain_async())
 

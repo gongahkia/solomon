@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import shlex
 import sys
 import time
 from pathlib import Path
@@ -22,6 +24,26 @@ from shibahama_bench.metrics import (
     write_markdown,
 )
 from shibahama_bench.tasks import load_suite
+
+
+def dataset_metadata(path: Path | None) -> dict[str, object]:
+    """Return reproducibility metadata for the benchmark dataset input."""
+
+    if path is None:
+        return {
+            "dataset": None,
+            "dataset_source": "built-in",
+            "dataset_bytes": None,
+            "dataset_sha256": None,
+        }
+
+    data = path.read_bytes()
+    return {
+        "dataset": str(path),
+        "dataset_source": "external-file",
+        "dataset_bytes": len(data),
+        "dataset_sha256": hashlib.sha256(data).hexdigest(),
+    }
 
 
 def main() -> int:
@@ -104,8 +126,9 @@ def main() -> int:
         args.output,
         results,
         config={
+            "command": shlex.join(sys.argv),
             "suite": args.suite,
-            "dataset": str(args.dataset) if args.dataset else None,
+            **dataset_metadata(args.dataset),
             "systems": args.systems,
             "top_k": args.top_k,
             "seed": args.seed,

@@ -360,7 +360,11 @@ def load_jsonl_suite(path: Path, suite_name: str) -> list[BenchmarkCase]:
                     name=record.get("name", f"{suite_name}-{line_number}"),
                     observations=tuple(_observations(record.get("observations", []), line_number)),
                     queries=tuple(_queries(record.get("queries", []), line_number)),
-                    metadata={"suite": suite_name, "source": str(path)},
+                    metadata={
+                        "suite": suite_name,
+                        "source": str(path),
+                        "source_format": "shibahama-jsonl",
+                    },
                 )
             )
 
@@ -408,7 +412,12 @@ def load_locomo_export(data: object, path: Path) -> list[BenchmarkCase]:
                 name=sample_id,
                 observations=observations,
                 queries=queries,
-                metadata={"suite": "locomo", "source": str(path), "sample_id": sample_id},
+                metadata={
+                    "suite": "locomo",
+                    "source": str(path),
+                    "source_format": "official-locomo-json",
+                    "sample_id": sample_id,
+                },
             )
         )
 
@@ -457,6 +466,7 @@ def load_longmemeval_export(data: object, path: Path) -> list[BenchmarkCase]:
                 metadata={
                     "suite": "longmemeval",
                     "source": str(path),
+                    "source_format": "official-longmemeval-json",
                     "question_id": question_id,
                     "question_type": str(record.get("question_type", "")),
                 },

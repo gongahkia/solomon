@@ -5,6 +5,7 @@
 use crate::anomaly::{
     AnomalyConfig, AnomalyFlag, detect_contradiction_bursts, inspect_suspicious_provenance,
 };
+use crate::encryption::{EncryptionAtRest, EncryptionError, NoopEncryption};
 use crate::model::{
     AccessEvent, AccessOutcome, CURRENT_MEMORY_SCHEMA_VERSION, CompactionRef, ConsolidationAction,
     ConsolidationWhy, CredenceTier, EmbeddingRef, Entity, EntityId, HumanSignal, HumanSignalAction,
@@ -17,10 +18,12 @@ use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use redb::{
     Database, Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition,
 };
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use thiserror::Error;
 use time::OffsetDateTime;
 
@@ -31,6 +34,29 @@ const COLD_CONTENT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("c
 const GRAPH_ENTITIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("graph_entities");
 const GRAPH_RELATIONS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("graph_relations");
 const LZ4_SIZE_PREPENDED: &str = "lz4-size-prepended";
+
+#[derive(Clone, Copy)]
+enum StorageTableName {
+    EventLog,
+    MemoryItems,
+    Embeddings,
+    ColdContent,
+    GraphEntities,
+    GraphRelations,
+}
+
+impl StorageTableName {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::EventLog => "event_log",
+            Self::MemoryItems => "memory_items",
+            Self::Embeddings => "embeddings",
+            Self::ColdContent => "cold_content",
+            Self::GraphEntities => "graph_entities",
+            Self::GraphRelations => "graph_relations",
+        }
+    }
+}
 
 /// Error returned by storage backends.
 #[derive(Debug, Error)]
@@ -44,6 +70,9 @@ pub enum StorageError {
     /// Compression or decompression failed.
     #[error("compression failed: {0}")]
     Compression(String),
+    /// Encryption or decryption failed.
+    #[error(transparent)]
+    Encryption(#[from] EncryptionError),
     /// File I/O failed.
     #[error("file I/O failed: {0}")]
     Io(#[from] std::io::Error),
@@ -53,6 +82,9 @@ pub enum StorageError {
     /// Durable store invariants were violated.
     #[error("storage invariant violated: {0}")]
     InvariantViolation(String),
+    /// Snapshot export would write decrypted data from an encrypted store.
+    #[error("plaintext snapshot export is disabled for encrypted stores")]
+    EncryptedSnapshotExportDisabled,
 }
 
 /// Append-only event describing a durable memory-state change.
@@ -717,6 +749,7 @@ pub trait MemoryStore {
 /// `redb`-backed store for event log and materialized memory state.
 pub struct RedbMemoryStore {
     db: Database,
+    encryption: Arc<dyn EncryptionAtRest>,
 }
 
 impl RedbMemoryStore {
@@ -726,12 +759,90 @@ impl RedbMemoryStore {
     ///
     /// Returns an error when the embedded database cannot be created or opened.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
+        Self::open_with_encryption(path, NoopEncryption)
+    }
+
+    /// Opens or creates a `redb` store at `path` with an encryption provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the embedded database cannot be created, opened, or decoded with the
+    /// configured provider.
+    pub fn open_with_encryption<E>(
+        path: impl AsRef<Path>,
+        encryption: E,
+    ) -> Result<Self, StorageError>
+    where
+        E: EncryptionAtRest + 'static,
+    {
         let db = Database::create(path).map_err(embed)?;
-        let store = Self { db };
+        let store = Self {
+            db,
+            encryption: Arc::new(encryption),
+        };
 
         store.recover()?;
 
         Ok(store)
+    }
+
+    fn storage_context(table: StorageTableName, key: &[u8]) -> Vec<u8> {
+        let mut context =
+            Vec::with_capacity(b"shibahama:redb:".len() + table.as_str().len() + 1 + key.len());
+
+        context.extend_from_slice(b"shibahama:redb:");
+        context.extend_from_slice(table.as_str().as_bytes());
+        context.push(b':');
+        context.extend_from_slice(key);
+
+        context
+    }
+
+    fn event_key(sequence: u64) -> [u8; 8] {
+        sequence.to_be_bytes()
+    }
+
+    fn encode_json<T: Serialize>(
+        &self,
+        table: StorageTableName,
+        key: &[u8],
+        value: &T,
+    ) -> Result<Vec<u8>, StorageError> {
+        let plaintext = serde_json::to_vec(value)?;
+        self.encode_bytes(table, key, &plaintext)
+    }
+
+    fn decode_json<T: DeserializeOwned>(
+        &self,
+        table: StorageTableName,
+        key: &[u8],
+        value: &[u8],
+    ) -> Result<T, StorageError> {
+        let plaintext = self.decode_bytes(table, key, value)?;
+
+        Ok(serde_json::from_slice(&plaintext)?)
+    }
+
+    fn encode_bytes(
+        &self,
+        table: StorageTableName,
+        key: &[u8],
+        value: &[u8],
+    ) -> Result<Vec<u8>, StorageError> {
+        let context = Self::storage_context(table, key);
+
+        Ok(self.encryption.encrypt(&context, value)?)
+    }
+
+    fn decode_bytes(
+        &self,
+        table: StorageTableName,
+        key: &[u8],
+        value: &[u8],
+    ) -> Result<Vec<u8>, StorageError> {
+        let context = Self::storage_context(table, key);
+
+        Ok(self.encryption.decrypt(&context, value)?)
     }
 
     /// Appends an event and returns its durable record.
@@ -752,7 +863,8 @@ impl RedbMemoryStore {
                 recorded_at: OffsetDateTime::now_utc(),
                 event,
             };
-            let bytes = serde_json::to_vec(&record)?;
+            let event_key = Self::event_key(sequence);
+            let bytes = self.encode_json(StorageTableName::EventLog, &event_key, &record)?;
 
             table.insert(sequence, bytes.as_slice()).map_err(embed)?;
 
@@ -788,9 +900,11 @@ impl RedbMemoryStore {
                 recorded_at: OffsetDateTime::now_utc(),
                 event,
             };
-            let event_bytes = serde_json::to_vec(&record)?;
-            let item_bytes = serde_json::to_vec(&item)?;
             let item_key = item.id.to_string();
+            let event_key = Self::event_key(sequence);
+            let event_bytes = self.encode_json(StorageTableName::EventLog, &event_key, &record)?;
+            let item_bytes =
+                self.encode_json(StorageTableName::MemoryItems, item_key.as_bytes(), item)?;
 
             event_table
                 .insert(sequence, event_bytes.as_slice())
@@ -921,10 +1035,17 @@ impl RedbMemoryStore {
                     model,
                     model_version,
                 };
-                let event_bytes = serde_json::to_vec(&record)?;
-                let item_bytes = serde_json::to_vec(&item)?;
-                let embedding_bytes = serde_json::to_vec(&embedding)?;
                 let item_key = item.id.to_string();
+                let event_key = Self::event_key(sequence);
+                let event_bytes =
+                    self.encode_json(StorageTableName::EventLog, &event_key, &record)?;
+                let item_bytes =
+                    self.encode_json(StorageTableName::MemoryItems, item_key.as_bytes(), item)?;
+                let embedding_bytes = self.encode_json(
+                    StorageTableName::Embeddings,
+                    item_key.as_bytes(),
+                    &embedding,
+                )?;
 
                 event_table
                     .insert(sequence, event_bytes.as_slice())
@@ -968,8 +1089,14 @@ impl RedbMemoryStore {
         let mut embeddings = Vec::new();
 
         for row in table.iter().map_err(embed)? {
-            let (_, value) = row.map_err(embed)?;
-            embeddings.push(serde_json::from_slice(value.value())?);
+            let (key, value) = row.map_err(embed)?;
+            let key = key.value();
+
+            embeddings.push(self.decode_json(
+                StorageTableName::Embeddings,
+                key.as_bytes(),
+                value.value(),
+            )?);
         }
 
         Ok(embeddings)
@@ -1005,8 +1132,14 @@ impl RedbMemoryStore {
         let mut records = Vec::new();
 
         for row in table.iter().map_err(embed)? {
-            let (_, value) = row.map_err(embed)?;
-            records.push(serde_json::from_slice(value.value())?);
+            let (sequence, value) = row.map_err(embed)?;
+            let event_key = Self::event_key(sequence.value());
+
+            records.push(self.decode_json(
+                StorageTableName::EventLog,
+                &event_key,
+                value.value(),
+            )?);
         }
 
         Ok(records)
@@ -1302,6 +1435,10 @@ impl RedbMemoryStore {
     /// Returns an error when store tables cannot be read, the snapshot cannot be encoded, or the
     /// destination file cannot be written.
     pub fn snapshot(&self, path: impl AsRef<Path>) -> Result<(), StorageError> {
+        if self.encryption.is_enabled() {
+            return Err(StorageError::EncryptedSnapshotExportDisabled);
+        }
+
         let snapshot = StoreSnapshot {
             schema_version: 1,
             events: self.events()?,
@@ -1348,7 +1485,11 @@ impl RedbMemoryStore {
         table
             .get(sequence)
             .map_err(embed)?
-            .map(|value| serde_json::from_slice(value.value()).map_err(StorageError::from))
+            .map(|value| {
+                let key = Self::event_key(sequence);
+
+                self.decode_json(StorageTableName::EventLog, &key, value.value())
+            })
             .transpose()
     }
 
@@ -1365,7 +1506,7 @@ impl RedbMemoryStore {
         {
             let mut table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
             let key = item.id.to_string();
-            let bytes = serde_json::to_vec(item)?;
+            let bytes = self.encode_json(StorageTableName::MemoryItems, key.as_bytes(), item)?;
 
             table
                 .insert(key.as_str(), bytes.as_slice())
@@ -1392,7 +1533,9 @@ impl RedbMemoryStore {
         table
             .get(key.as_str())
             .map_err(embed)?
-            .map(|value| serde_json::from_slice(value.value()).map_err(StorageError::from))
+            .map(|value| {
+                self.decode_json(StorageTableName::MemoryItems, key.as_bytes(), value.value())
+            })
             .transpose()
     }
 
@@ -1415,8 +1558,14 @@ impl RedbMemoryStore {
         let mut items = Vec::new();
 
         for row in table.iter().map_err(embed)? {
-            let (_, value) = row.map_err(embed)?;
-            items.push(serde_json::from_slice(value.value())?);
+            let (key, value) = row.map_err(embed)?;
+            let key = key.value();
+
+            items.push(self.decode_json(
+                StorageTableName::MemoryItems,
+                key.as_bytes(),
+                value.value(),
+            )?);
         }
 
         Ok(items)
@@ -1433,9 +1582,13 @@ impl RedbMemoryStore {
 
         for row in table.iter().map_err(embed)? {
             let (key, value) = row.map_err(embed)?;
+            let key = key.value();
+            let bytes =
+                self.decode_bytes(StorageTableName::ColdContent, key.as_bytes(), value.value())?;
+
             records.push(ColdContentRecord {
-                storage_key: key.value().to_owned(),
-                bytes: value.value().to_vec(),
+                storage_key: key.to_owned(),
+                bytes,
             });
         }
 
@@ -1452,8 +1605,14 @@ impl RedbMemoryStore {
         let mut entities = Vec::new();
 
         for row in table.iter().map_err(embed)? {
-            let (_, value) = row.map_err(embed)?;
-            entities.push(serde_json::from_slice(value.value())?);
+            let (key, value) = row.map_err(embed)?;
+            let key = key.value();
+
+            entities.push(self.decode_json(
+                StorageTableName::GraphEntities,
+                key.as_bytes(),
+                value.value(),
+            )?);
         }
 
         Ok(entities)
@@ -1469,8 +1628,14 @@ impl RedbMemoryStore {
         let mut relations = Vec::new();
 
         for row in table.iter().map_err(embed)? {
-            let (_, value) = row.map_err(embed)?;
-            relations.push(serde_json::from_slice(value.value())?);
+            let (key, value) = row.map_err(embed)?;
+            let key = key.value();
+
+            relations.push(self.decode_json(
+                StorageTableName::GraphRelations,
+                key.as_bytes(),
+                value.value(),
+            )?);
         }
 
         Ok(relations)
@@ -1490,7 +1655,8 @@ impl RedbMemoryStore {
             let mut relation_table = write_txn.open_table(GRAPH_RELATIONS_TABLE).map_err(embed)?;
 
             for event in snapshot.events {
-                let bytes = serde_json::to_vec(&event)?;
+                let event_key = Self::event_key(event.sequence);
+                let bytes = self.encode_json(StorageTableName::EventLog, &event_key, &event)?;
 
                 event_table
                     .insert(event.sequence, bytes.as_slice())
@@ -1499,7 +1665,8 @@ impl RedbMemoryStore {
 
             for item in snapshot.materialized_items {
                 let key = item.id.to_string();
-                let bytes = serde_json::to_vec(&item)?;
+                let bytes =
+                    self.encode_json(StorageTableName::MemoryItems, key.as_bytes(), &item)?;
 
                 item_table
                     .insert(key.as_str(), bytes.as_slice())
@@ -1508,7 +1675,8 @@ impl RedbMemoryStore {
 
             for embedding in snapshot.embeddings {
                 let key = embedding.memory_id.to_string();
-                let bytes = serde_json::to_vec(&embedding)?;
+                let bytes =
+                    self.encode_json(StorageTableName::Embeddings, key.as_bytes(), &embedding)?;
 
                 embedding_table
                     .insert(key.as_str(), bytes.as_slice())
@@ -1516,17 +1684,21 @@ impl RedbMemoryStore {
             }
 
             for cold_content in snapshot.cold_contents {
+                let bytes = self.encode_bytes(
+                    StorageTableName::ColdContent,
+                    cold_content.storage_key.as_bytes(),
+                    &cold_content.bytes,
+                )?;
+
                 cold_table
-                    .insert(
-                        cold_content.storage_key.as_str(),
-                        cold_content.bytes.as_slice(),
-                    )
+                    .insert(cold_content.storage_key.as_str(), bytes.as_slice())
                     .map_err(embed)?;
             }
 
             for entity in snapshot.graph_entities {
                 let key = entity.id.to_string();
-                let bytes = serde_json::to_vec(&entity)?;
+                let bytes =
+                    self.encode_json(StorageTableName::GraphEntities, key.as_bytes(), &entity)?;
 
                 entity_table
                     .insert(key.as_str(), bytes.as_slice())
@@ -1535,7 +1707,8 @@ impl RedbMemoryStore {
 
             for relation in snapshot.graph_relations {
                 let key = relation.id.to_string();
-                let bytes = serde_json::to_vec(&relation)?;
+                let bytes =
+                    self.encode_json(StorageTableName::GraphRelations, key.as_bytes(), &relation)?;
 
                 relation_table
                     .insert(key.as_str(), bytes.as_slice())
@@ -1579,7 +1752,8 @@ impl RedbMemoryStore {
         {
             let mut table = write_txn.open_table(GRAPH_ENTITIES_TABLE).map_err(embed)?;
             let key = entity.id.to_string();
-            let bytes = serde_json::to_vec(entity)?;
+            let bytes =
+                self.encode_json(StorageTableName::GraphEntities, key.as_bytes(), entity)?;
 
             table
                 .insert(key.as_str(), bytes.as_slice())
@@ -1606,7 +1780,13 @@ impl RedbMemoryStore {
         table
             .get(key.as_str())
             .map_err(embed)?
-            .map(|value| serde_json::from_slice(value.value()).map_err(StorageError::from))
+            .map(|value| {
+                self.decode_json(
+                    StorageTableName::GraphEntities,
+                    key.as_bytes(),
+                    value.value(),
+                )
+            })
             .transpose()
     }
 
@@ -1659,7 +1839,8 @@ impl RedbMemoryStore {
         {
             let mut table = write_txn.open_table(GRAPH_RELATIONS_TABLE).map_err(embed)?;
             let key = relation.id.to_string();
-            let bytes = serde_json::to_vec(relation)?;
+            let bytes =
+                self.encode_json(StorageTableName::GraphRelations, key.as_bytes(), relation)?;
 
             table
                 .insert(key.as_str(), bytes.as_slice())
@@ -1686,7 +1867,13 @@ impl RedbMemoryStore {
         table
             .get(key.as_str())
             .map_err(embed)?
-            .map(|value| serde_json::from_slice(value.value()).map_err(StorageError::from))
+            .map(|value| {
+                self.decode_json(
+                    StorageTableName::GraphRelations,
+                    key.as_bytes(),
+                    value.value(),
+                )
+            })
             .transpose()
     }
 
@@ -1820,14 +2007,22 @@ impl RedbMemoryStore {
                     .timestamps
                     .closed_at(proposed.timestamps.valid_from);
 
-                let existing_bytes = serde_json::to_vec(&existing)?;
+                let existing_bytes = self.encode_json(
+                    StorageTableName::GraphRelations,
+                    existing_key.as_bytes(),
+                    &existing,
+                )?;
                 relation_table
                     .insert(existing_key.as_str(), existing_bytes.as_slice())
                     .map_err(embed)?;
             }
 
             let proposed_key = proposed.id.to_string();
-            let proposed_bytes = serde_json::to_vec(proposed)?;
+            let proposed_bytes = self.encode_json(
+                StorageTableName::GraphRelations,
+                proposed_key.as_bytes(),
+                proposed,
+            )?;
 
             relation_table
                 .insert(proposed_key.as_str(), proposed_bytes.as_slice())
@@ -1982,7 +2177,7 @@ impl RedbMemoryStore {
                     return Ok(None);
                 };
 
-                serde_json::from_slice(value.value())?
+                self.decode_json(StorageTableName::MemoryItems, key.as_bytes(), value.value())?
             };
 
             item.timestamps = item.timestamps.closed_at(valid_to);
@@ -1993,8 +2188,10 @@ impl RedbMemoryStore {
                 recorded_at: OffsetDateTime::now_utc(),
                 event: MemoryEvent::MemoryInvalidated { id, valid_to },
             };
-            let event_bytes = serde_json::to_vec(&record)?;
-            let item_bytes = serde_json::to_vec(&item)?;
+            let event_key = Self::event_key(sequence);
+            let event_bytes = self.encode_json(StorageTableName::EventLog, &event_key, &record)?;
+            let item_bytes =
+                self.encode_json(StorageTableName::MemoryItems, key.as_bytes(), &item)?;
 
             event_table
                 .insert(sequence, event_bytes.as_slice())
@@ -2052,7 +2249,8 @@ impl RedbMemoryStore {
                     reason,
                 },
             };
-            let event_bytes = serde_json::to_vec(&record)?;
+            let event_key = Self::event_key(sequence);
+            let event_bytes = self.encode_json(StorageTableName::EventLog, &event_key, &record)?;
 
             event_table
                 .insert(sequence, event_bytes.as_slice())
@@ -2083,6 +2281,7 @@ impl RedbMemoryStore {
     ///
     /// Returns an error when storage cannot be read or written, stored state cannot be decoded, or
     /// the replacement would overwrite an existing memory row.
+    #[allow(clippy::too_many_lines)]
     pub fn insert_reconstruction_replacement(
         &self,
         superseded_id: MemoryId,
@@ -2109,7 +2308,11 @@ impl RedbMemoryStore {
                     return Ok(None);
                 };
 
-                serde_json::from_slice(value.value())?
+                self.decode_json(
+                    StorageTableName::MemoryItems,
+                    superseded_key.as_bytes(),
+                    value.value(),
+                )?
             };
 
             if item_table
@@ -2135,11 +2338,31 @@ impl RedbMemoryStore {
             let invalidation_sequence = invalidation_record.sequence;
             let write_sequence = write_record.sequence;
             let reconstruction_sequence = reconstruction_record.sequence;
-            let invalidation_event_bytes = serde_json::to_vec(&invalidation_record)?;
-            let write_event_bytes = serde_json::to_vec(&write_record)?;
-            let reconstruction_event_bytes = serde_json::to_vec(&reconstruction_record)?;
-            let superseded_bytes = serde_json::to_vec(&superseded)?;
-            let replacement_bytes = serde_json::to_vec(replacement)?;
+            let invalidation_key = Self::event_key(invalidation_sequence);
+            let write_key = Self::event_key(write_sequence);
+            let reconstruction_key = Self::event_key(reconstruction_sequence);
+            let invalidation_event_bytes = self.encode_json(
+                StorageTableName::EventLog,
+                &invalidation_key,
+                &invalidation_record,
+            )?;
+            let write_event_bytes =
+                self.encode_json(StorageTableName::EventLog, &write_key, &write_record)?;
+            let reconstruction_event_bytes = self.encode_json(
+                StorageTableName::EventLog,
+                &reconstruction_key,
+                &reconstruction_record,
+            )?;
+            let superseded_bytes = self.encode_json(
+                StorageTableName::MemoryItems,
+                superseded_key.as_bytes(),
+                &superseded,
+            )?;
+            let replacement_bytes = self.encode_json(
+                StorageTableName::MemoryItems,
+                replacement_key.as_bytes(),
+                replacement,
+            )?;
 
             event_table
                 .insert(invalidation_sequence, invalidation_event_bytes.as_slice())
@@ -2247,9 +2470,14 @@ impl RedbMemoryStore {
                     why,
                 },
             };
-            let write_bytes = serde_json::to_vec(&write_record)?;
-            let decision_bytes = serde_json::to_vec(&decision_record)?;
-            let item_bytes = serde_json::to_vec(item)?;
+            let write_key = Self::event_key(write_sequence);
+            let decision_key = Self::event_key(decision_sequence);
+            let write_bytes =
+                self.encode_json(StorageTableName::EventLog, &write_key, &write_record)?;
+            let decision_bytes =
+                self.encode_json(StorageTableName::EventLog, &decision_key, &decision_record)?;
+            let item_bytes =
+                self.encode_json(StorageTableName::MemoryItems, item_key.as_bytes(), item)?;
 
             event_table
                 .insert(write_sequence, write_bytes.as_slice())
@@ -2311,7 +2539,7 @@ impl RedbMemoryStore {
                         return Ok(None);
                     };
 
-                    serde_json::from_slice(value.value())?
+                    self.decode_json(StorageTableName::MemoryItems, key.as_bytes(), value.value())?
                 };
                 let tier_from = item.tier;
 
@@ -2352,9 +2580,14 @@ impl RedbMemoryStore {
                         why,
                     },
                 };
-                let tier_bytes = serde_json::to_vec(&tier_record)?;
-                let decision_bytes = serde_json::to_vec(&decision_record)?;
-                let item_bytes = serde_json::to_vec(&item)?;
+                let tier_key = Self::event_key(tier_sequence);
+                let decision_key = Self::event_key(decision_sequence);
+                let tier_bytes =
+                    self.encode_json(StorageTableName::EventLog, &tier_key, &tier_record)?;
+                let decision_bytes =
+                    self.encode_json(StorageTableName::EventLog, &decision_key, &decision_record)?;
+                let item_bytes =
+                    self.encode_json(StorageTableName::MemoryItems, key.as_bytes(), &item)?;
 
                 event_table
                     .insert(tier_sequence, tier_bytes.as_slice())
@@ -2447,8 +2680,12 @@ impl RedbMemoryStore {
                         why,
                     },
                 };
-                let flag_bytes = serde_json::to_vec(&flag_record)?;
-                let decision_bytes = serde_json::to_vec(&decision_record)?;
+                let flag_key = Self::event_key(flag_sequence);
+                let decision_key = Self::event_key(decision_sequence);
+                let flag_bytes =
+                    self.encode_json(StorageTableName::EventLog, &flag_key, &flag_record)?;
+                let decision_bytes =
+                    self.encode_json(StorageTableName::EventLog, &decision_key, &decision_record)?;
 
                 event_table
                     .insert(flag_sequence, flag_bytes.as_slice())
@@ -2558,21 +2795,31 @@ impl RedbMemoryStore {
                         return Ok(None);
                     };
 
-                    serde_json::from_slice(value.value())?
+                    self.decode_json(StorageTableName::MemoryItems, key.as_bytes(), value.value())?
                 };
                 let access_sequence = event_table.len().map_err(embed)?;
                 let event_set =
                     build_human_credence_event_set(access_sequence, item, input, policy);
                 let signal_sequence = event_set.signal.sequence;
-                let access_bytes = serde_json::to_vec(&event_set.access)?;
-                let signal_bytes = serde_json::to_vec(&event_set.signal)?;
-                let item_bytes = serde_json::to_vec(&event_set.item)?;
+                let access_key = Self::event_key(access_sequence);
+                let signal_key = Self::event_key(signal_sequence);
+                let access_bytes =
+                    self.encode_json(StorageTableName::EventLog, &access_key, &event_set.access)?;
+                let signal_bytes =
+                    self.encode_json(StorageTableName::EventLog, &signal_key, &event_set.signal)?;
+                let item_bytes = self.encode_json(
+                    StorageTableName::MemoryItems,
+                    key.as_bytes(),
+                    &event_set.item,
+                )?;
 
                 event_table
                     .insert(access_sequence, access_bytes.as_slice())
                     .map_err(embed)?;
                 if let Some(flag_record) = &event_set.revalidation_flag {
-                    let flag_bytes = serde_json::to_vec(flag_record)?;
+                    let flag_key = Self::event_key(flag_record.sequence);
+                    let flag_bytes =
+                        self.encode_json(StorageTableName::EventLog, &flag_key, flag_record)?;
 
                     event_table
                         .insert(flag_record.sequence, flag_bytes.as_slice())
@@ -2652,7 +2899,7 @@ impl RedbMemoryStore {
                     return Ok(None);
                 };
 
-                serde_json::from_slice(value.value())?
+                self.decode_json(StorageTableName::MemoryItems, key.as_bytes(), value.value())?
             };
             let previous_floor = item.credence_floor;
             let new_floor = match action {
@@ -2684,8 +2931,11 @@ impl RedbMemoryStore {
                 recorded_at: timestamp,
                 event: MemoryEvent::HumanSignalRecorded { signal },
             };
-            let signal_bytes = serde_json::to_vec(&signal_record)?;
-            let item_bytes = serde_json::to_vec(&item)?;
+            let signal_key = Self::event_key(signal_sequence);
+            let signal_bytes =
+                self.encode_json(StorageTableName::EventLog, &signal_key, &signal_record)?;
+            let item_bytes =
+                self.encode_json(StorageTableName::MemoryItems, key.as_bytes(), &item)?;
 
             event_table
                 .insert(signal_sequence, signal_bytes.as_slice())
@@ -2784,7 +3034,7 @@ impl RedbMemoryStore {
                     return Ok(None);
                 };
 
-                serde_json::from_slice(value.value())?
+                self.decode_json(StorageTableName::MemoryItems, key.as_bytes(), value.value())?
             };
 
             let previous_tier = item.tier;
@@ -2803,8 +3053,10 @@ impl RedbMemoryStore {
                     event: access_event,
                 },
             };
-            let event_bytes = serde_json::to_vec(&record)?;
-            let item_bytes = serde_json::to_vec(&item)?;
+            let event_key = Self::event_key(sequence);
+            let event_bytes = self.encode_json(StorageTableName::EventLog, &event_key, &record)?;
+            let item_bytes =
+                self.encode_json(StorageTableName::MemoryItems, key.as_bytes(), &item)?;
 
             event_table
                 .insert(sequence, event_bytes.as_slice())
@@ -2822,7 +3074,9 @@ impl RedbMemoryStore {
                         cause: TierChangeCause::AccessReinforcement,
                     },
                 };
-                let tier_event_bytes = serde_json::to_vec(&tier_record)?;
+                let tier_key = Self::event_key(tier_sequence);
+                let tier_event_bytes =
+                    self.encode_json(StorageTableName::EventLog, &tier_key, &tier_record)?;
 
                 event_table
                     .insert(tier_sequence, tier_event_bytes.as_slice())
@@ -2899,7 +3153,7 @@ impl RedbMemoryStore {
                     return Ok(None);
                 };
 
-                serde_json::from_slice(value.value())?
+                self.decode_json(StorageTableName::MemoryItems, key.as_bytes(), value.value())?
             };
             let previous_tier = item.tier;
 
@@ -2907,7 +3161,7 @@ impl RedbMemoryStore {
             let demoted = policy.demote_for_score(item.tier, item.significance);
             item.tier = policy.clamp_tier_to_credence_floor(&item, demoted);
 
-            let bytes = serde_json::to_vec(&item)?;
+            let bytes = self.encode_json(StorageTableName::MemoryItems, key.as_bytes(), &item)?;
 
             if item.tier != previous_tier {
                 let sequence = event_table.len().map_err(embed)?;
@@ -2921,7 +3175,9 @@ impl RedbMemoryStore {
                         cause: TierChangeCause::SignificanceRefresh,
                     },
                 };
-                let event_bytes = serde_json::to_vec(&record)?;
+                let event_key = Self::event_key(sequence);
+                let event_bytes =
+                    self.encode_json(StorageTableName::EventLog, &event_key, &record)?;
 
                 event_table
                     .insert(sequence, event_bytes.as_slice())
@@ -3062,7 +3318,7 @@ impl RedbMemoryStore {
                         continue;
                     };
 
-                    serde_json::from_slice(value.value())?
+                    self.decode_json(StorageTableName::MemoryItems, key.as_bytes(), value.value())?
                 };
 
                 if item.tier != Tier::Hot {
@@ -3081,8 +3337,11 @@ impl RedbMemoryStore {
                         cause: TierChangeCause::CapacityEnforcement,
                     },
                 };
-                let event_bytes = serde_json::to_vec(&event_record)?;
-                let item_bytes = serde_json::to_vec(&item)?;
+                let event_key = Self::event_key(next_sequence);
+                let event_bytes =
+                    self.encode_json(StorageTableName::EventLog, &event_key, &event_record)?;
+                let item_bytes =
+                    self.encode_json(StorageTableName::MemoryItems, key.as_bytes(), &item)?;
 
                 event_table
                     .insert(next_sequence, event_bytes.as_slice())
@@ -3124,7 +3383,7 @@ impl RedbMemoryStore {
                     return Ok(false);
                 };
 
-                serde_json::from_slice(value.value())?
+                self.decode_json(StorageTableName::MemoryItems, key.as_bytes(), value.value())?
             };
 
             if item.tier != Tier::Cold || item.compaction.is_some() {
@@ -3152,11 +3411,15 @@ impl RedbMemoryStore {
             item.content.clear();
             item.compaction = Some(pointer);
 
-            let event_bytes = serde_json::to_vec(&record)?;
-            let item_bytes = serde_json::to_vec(&item)?;
+            let event_key = Self::event_key(sequence);
+            let event_bytes = self.encode_json(StorageTableName::EventLog, &event_key, &record)?;
+            let item_bytes =
+                self.encode_json(StorageTableName::MemoryItems, key.as_bytes(), &item)?;
+            let cold_bytes =
+                self.encode_bytes(StorageTableName::ColdContent, key.as_bytes(), &compressed)?;
 
             cold_table
-                .insert(key.as_str(), compressed.as_slice())
+                .insert(key.as_str(), cold_bytes.as_slice())
                 .map_err(embed)?;
             event_table
                 .insert(sequence, event_bytes.as_slice())
@@ -3197,7 +3460,12 @@ impl RedbMemoryStore {
         let Some(value) = table.get(pointer.storage_key.as_str()).map_err(embed)? else {
             return Ok(None);
         };
-        let decompressed = decompress_size_prepended(value.value()).map_err(compression)?;
+        let compressed = self.decode_bytes(
+            StorageTableName::ColdContent,
+            pointer.storage_key.as_bytes(),
+            value.value(),
+        )?;
+        let decompressed = decompress_size_prepended(&compressed).map_err(compression)?;
         let content = String::from_utf8(decompressed).map_err(compression)?;
 
         Ok(Some(content))
@@ -3481,6 +3749,7 @@ fn relation_matches_traversal(relation: &Relation, request: &GraphTraversalReque
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::encryption::Aes256GcmEncryption;
     use crate::model::{
         AccessOutcome, CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, Provenance, SourceKind,
         TemporalBounds,
@@ -4779,6 +5048,180 @@ mod tests {
                 materialized_item_count: 2
             }
         );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn encrypted_store_round_trips_without_plaintext_payloads_on_disk() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let path = file.path().to_path_buf();
+        let key = [7_u8; 32];
+        let hot_secret = "encrypted hot payload alpha 47291";
+        let embedded_secret = "encrypted embedded payload beta 47291";
+        let cold_secret = "encrypted cold payload gamma 47291";
+        let graph_secret = "encrypted graph entity delta 47291";
+        let mut embedded_item = test_item(embedded_secret);
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let mut cold_item = test_item(cold_secret);
+        let hot_item = test_item(hot_secret);
+        let timestamps =
+            TemporalBounds::open_from(OffsetDateTime::UNIX_EPOCH, OffsetDateTime::UNIX_EPOCH);
+        let source = test_entity(graph_secret, timestamps);
+        let target = test_entity("encrypted graph entity epsilon 47291", timestamps);
+        let relation = Relation::new(
+            "supports",
+            source.id,
+            target.id,
+            Some(hot_item.id),
+            timestamps,
+        );
+        let cold_pointer = {
+            let store = RedbMemoryStore::open_with_encryption(&path, Aes256GcmEncryption::new(key))
+                .expect("encrypted store should open");
+
+            cold_item.tier = Tier::Cold;
+            store.write(&hot_item).expect("hot item should write");
+            store
+                .write_embedded(
+                    &mut embedded_item,
+                    &mut vector_index,
+                    &[0.25, 0.75],
+                    "encrypted-local",
+                    "test-embedding",
+                    "v1",
+                )
+                .expect("embedded item should write");
+            store.write(&cold_item).expect("cold item should write");
+            store
+                .compact_cold_item(cold_item.id)
+                .expect("cold item should compact");
+            store
+                .put_entity(&source)
+                .expect("source entity should write");
+            store
+                .put_entity(&target)
+                .expect("target entity should write");
+            store
+                .put_relation(&relation)
+                .expect("relation should write");
+
+            let stored_cold = store
+                .get(cold_item.id)
+                .expect("cold item should read")
+                .expect("cold item should exist");
+            let pointer = stored_cold
+                .compaction
+                .expect("cold item should have compaction pointer");
+            assert_eq!(
+                store
+                    .read_compacted_content(&pointer)
+                    .expect("cold content should decrypt")
+                    .as_deref(),
+                Some(cold_secret)
+            );
+            assert_eq!(
+                store
+                    .stored_embeddings()
+                    .expect("embeddings should read")
+                    .len(),
+                1
+            );
+            assert_eq!(
+                store
+                    .get_entity(source.id)
+                    .expect("entity should read")
+                    .expect("entity should exist"),
+                source
+            );
+            assert_eq!(
+                store
+                    .get_relation(relation.id)
+                    .expect("relation should read")
+                    .expect("relation should exist"),
+                relation
+            );
+
+            pointer
+        };
+
+        let bytes = std::fs::read(&path).expect("database should be readable");
+        for secret in [hot_secret, embedded_secret, cold_secret, graph_secret] {
+            assert!(
+                !bytes
+                    .windows(secret.len())
+                    .any(|window| window == secret.as_bytes()),
+                "encrypted database contained plaintext payload: {secret}"
+            );
+        }
+
+        let reopened = RedbMemoryStore::open_with_encryption(&path, Aes256GcmEncryption::new(key))
+            .expect("encrypted store should reopen with the same key");
+        assert_eq!(
+            reopened
+                .get(hot_item.id)
+                .expect("hot item should read")
+                .expect("hot item should exist")
+                .content,
+            hot_secret
+        );
+        assert_eq!(
+            reopened
+                .read_compacted_content(&cold_pointer)
+                .expect("cold content should decrypt after reopen")
+                .as_deref(),
+            Some(cold_secret)
+        );
+        assert_eq!(
+            reopened
+                .stored_embeddings()
+                .expect("embedding rows should decrypt after reopen")[0]
+                .vector,
+            vec![0.25, 0.75]
+        );
+    }
+
+    #[test]
+    fn encrypted_store_rejects_wrong_key_and_plaintext_provider() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let path = file.path().to_path_buf();
+
+        {
+            let store =
+                RedbMemoryStore::open_with_encryption(&path, Aes256GcmEncryption::new([11_u8; 32]))
+                    .expect("encrypted store should open");
+            store
+                .write(&test_item("wrong key protected payload"))
+                .expect("item should write");
+        }
+
+        assert!(matches!(
+            RedbMemoryStore::open_with_encryption(&path, Aes256GcmEncryption::new([12_u8; 32])),
+            Err(StorageError::Encryption(_))
+        ));
+        assert!(matches!(
+            RedbMemoryStore::open(&path),
+            Err(StorageError::Encryption(_))
+        ));
+    }
+
+    #[test]
+    fn encrypted_store_refuses_plaintext_snapshot_export() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let snapshot_file = NamedTempFile::new().expect("snapshot tempfile should be created");
+        let store = RedbMemoryStore::open_with_encryption(
+            file.path(),
+            Aes256GcmEncryption::new([21_u8; 32]),
+        )
+        .expect("encrypted store should open");
+
+        store
+            .write(&test_item("snapshot protected payload"))
+            .expect("item should write");
+
+        assert!(matches!(
+            store.snapshot(snapshot_file.path()),
+            Err(StorageError::EncryptedSnapshotExportDisabled)
+        ));
     }
 
     #[test]

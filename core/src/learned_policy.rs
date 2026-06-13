@@ -9,6 +9,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use crate::model::{CredenceTier, HumanSignal, HumanSignalAction, MemoryId, MemoryItem, Tier};
+use crate::significance::SignificanceConfig;
 use crate::storage::{EventRecord, MemoryEvent};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -273,6 +274,48 @@ pub struct DecisionEvaluation {
     pub invariant_violations: Vec<InvariantViolation>,
 }
 
+/// Aggregate trace for one candidate action type.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PolicyActionSummary {
+    /// Stable action name, matching `PolicyAction::name`.
+    pub action_name: String,
+    /// Number of candidate decisions using this action.
+    pub decision_count: usize,
+    /// Number of decisions with at least one non-neutral human label.
+    pub labeled_decision_count: usize,
+    /// Number of positive human signals attached to this action.
+    pub positive_signal_count: u32,
+    /// Number of negative human signals attached to this action.
+    pub negative_signal_count: u32,
+    /// Number of decisions with both positive and negative labels.
+    pub mixed_decision_count: usize,
+    /// Number of decisions with no non-neutral labels.
+    pub neutral_decision_count: usize,
+    /// Candidate score contribution from labeled decisions for this action.
+    pub candidate_score: f64,
+    /// Baseline score contribution from the same labeled decisions.
+    pub baseline_score: f64,
+    /// Number of invariant violations emitted by this action.
+    pub invariant_violation_count: usize,
+}
+
+impl PolicyActionSummary {
+    fn empty(action_name: &str) -> Self {
+        Self {
+            action_name: action_name.to_owned(),
+            decision_count: 0,
+            labeled_decision_count: 0,
+            positive_signal_count: 0,
+            negative_signal_count: 0,
+            mixed_decision_count: 0,
+            neutral_decision_count: 0,
+            candidate_score: 0.0,
+            baseline_score: 0.0,
+            invariant_violation_count: 0,
+        }
+    }
+}
+
 /// Gate recommendation returned by Stage 1 evaluation.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum PolicyEvaluationRecommendation {
@@ -284,6 +327,23 @@ pub enum PolicyEvaluationRecommendation {
     StopBaselineNotBeaten,
     /// Candidate cleared Stage 1 and may be considered for a bandit experiment.
     ProceedToBanditExperiment,
+}
+
+/// Structured explanation for a Stage 1 stop recommendation.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PolicyNullResult {
+    /// Stop reason returned by the Stage 1 gate.
+    pub recommendation: PolicyEvaluationRecommendation,
+    /// Minimum labeled decisions required by the evaluation config.
+    pub required_labeled_decisions: usize,
+    /// Observed labeled decisions.
+    pub observed_labeled_decisions: usize,
+    /// Required score margin over the deterministic baseline.
+    pub required_score_margin: f64,
+    /// Observed score margin over the deterministic baseline.
+    pub observed_score_margin: f64,
+    /// Number of invariant violations in the evaluated candidate trace.
+    pub invariant_violation_count: usize,
 }
 
 /// Aggregate result for an offline learned-policy evaluation.
@@ -301,8 +361,12 @@ pub struct OfflinePolicyEvaluationReport {
     pub baseline_score: f64,
     /// Candidate score minus baseline score.
     pub score_margin: f64,
+    /// Per-action summary used to identify where signal exists or disappears.
+    pub action_summaries: Vec<PolicyActionSummary>,
     /// All blocking invariant violations.
     pub invariant_violations: Vec<InvariantViolation>,
+    /// Structured null result when the candidate cannot proceed.
+    pub null_result: Option<PolicyNullResult>,
     /// Stage 1 gate recommendation.
     pub recommendation: PolicyEvaluationRecommendation,
 }
@@ -379,6 +443,14 @@ pub fn evaluate_offline_policy(
         score_margin,
         config,
     );
+    let action_summaries = summarize_decisions_by_action(&evaluations);
+    let null_result = null_result(
+        recommendation,
+        labeled_decision_count,
+        score_margin,
+        all_violations.len(),
+        config,
+    );
 
     OfflinePolicyEvaluationReport {
         decisions: evaluations,
@@ -387,8 +459,404 @@ pub fn evaluate_offline_policy(
         candidate_score,
         baseline_score,
         score_margin,
+        action_summaries,
         invariant_violations: all_violations,
+        null_result,
         recommendation,
+    }
+}
+
+#[must_use]
+fn summarize_decisions_by_action(evaluations: &[DecisionEvaluation]) -> Vec<PolicyActionSummary> {
+    let mut summaries = ALLOWED_POLICY_ACTION_NAMES
+        .iter()
+        .map(|name| PolicyActionSummary::empty(name))
+        .collect::<Vec<_>>();
+
+    for evaluation in evaluations {
+        let action_name = evaluation.candidate_action.name();
+        let summary = summaries
+            .iter_mut()
+            .find(|summary| summary.action_name == action_name)
+            .expect("all candidate actions must be represented in summaries");
+        let positive = evaluation
+            .human_signals
+            .affirmations
+            .saturating_add(evaluation.human_signals.pins);
+        let negative = evaluation
+            .human_signals
+            .challenges
+            .saturating_add(evaluation.human_signals.corrections);
+
+        summary.decision_count = summary.decision_count.saturating_add(1);
+        summary.positive_signal_count = summary.positive_signal_count.saturating_add(positive);
+        summary.negative_signal_count = summary.negative_signal_count.saturating_add(negative);
+        summary.invariant_violation_count = summary
+            .invariant_violation_count
+            .saturating_add(evaluation.invariant_violations.len());
+
+        if evaluation.human_signals.labeled_count() > 0 {
+            summary.labeled_decision_count = summary.labeled_decision_count.saturating_add(1);
+            summary.candidate_score += evaluation.candidate_score;
+            summary.baseline_score += evaluation.baseline_score;
+        }
+
+        match evaluation.human_signals.direction() {
+            HumanSignalDirection::Mixed => {
+                summary.mixed_decision_count = summary.mixed_decision_count.saturating_add(1);
+            }
+            HumanSignalDirection::Neutral => {
+                summary.neutral_decision_count = summary.neutral_decision_count.saturating_add(1);
+            }
+            HumanSignalDirection::Positive | HumanSignalDirection::Negative => {}
+        }
+    }
+
+    summaries
+}
+
+#[must_use]
+fn null_result(
+    recommendation: PolicyEvaluationRecommendation,
+    observed_labeled_decisions: usize,
+    observed_score_margin: f64,
+    invariant_violation_count: usize,
+    config: OfflinePolicyEvaluationConfig,
+) -> Option<PolicyNullResult> {
+    if recommendation == PolicyEvaluationRecommendation::ProceedToBanditExperiment {
+        return None;
+    }
+
+    Some(PolicyNullResult {
+        recommendation,
+        required_labeled_decisions: config.min_labeled_decisions,
+        observed_labeled_decisions,
+        required_score_margin: config.required_score_margin,
+        observed_score_margin,
+        invariant_violation_count,
+    })
+}
+
+/// Configuration for the Stage 2 contextual-bandit shadow experiment.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ContextualBanditExperimentConfig {
+    /// Stage 2 is disabled unless a caller explicitly opts in.
+    pub enabled: bool,
+    /// Minimum Stage 1 labeled decisions required before planning any experiment.
+    pub min_stage1_labeled_decisions: usize,
+    /// Minimum Stage 1 score margin required before planning any experiment.
+    pub min_stage1_score_margin: f64,
+    /// Conservative learning-rate cap for proposed significance-weight deltas.
+    pub learning_rate: f64,
+    /// Maximum absolute delta allowed for any single proposed weight.
+    pub max_weight_delta: f64,
+}
+
+impl Default for ContextualBanditExperimentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_stage1_labeled_decisions: 100,
+            min_stage1_score_margin: 0.05,
+            learning_rate: 0.05,
+            max_weight_delta: 0.25,
+        }
+    }
+}
+
+/// Stage 2 gate recommendation.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum ContextualBanditRecommendation {
+    /// Stage 2 was not explicitly enabled.
+    Disabled,
+    /// Stage 1 evidence did not clear the stricter Stage 2 gate.
+    StopStage1Gate,
+    /// Stage 2 config is invalid or too risky.
+    StopUnsafeExperimentConfig,
+    /// A shadow experiment may be run; runtime memory policy is still unchanged.
+    ProceedToShadowExperiment,
+}
+
+/// Proposed delta to one existing `SignificanceConfig` weight.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SignificanceWeightDelta {
+    /// Existing significance config field.
+    pub weight_name: String,
+    /// Current value supplied by the caller.
+    pub current_value: f64,
+    /// Bounded proposed delta for a shadow arm.
+    pub delta: f64,
+    /// Current value plus delta.
+    pub proposed_value: f64,
+}
+
+/// Stage 2 contextual-bandit planning report.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ContextualBanditExperimentReport {
+    /// Stage 2 gate recommendation.
+    pub recommendation: ContextualBanditRecommendation,
+    /// Stage 1 recommendation this report was based on.
+    pub stage1_recommendation: PolicyEvaluationRecommendation,
+    /// True only for a shadow experiment; Shibahama never mutates runtime policy here.
+    pub shadow_experiment_allowed: bool,
+    /// Runtime policy mutation remains disabled by this API.
+    pub runtime_policy_update_allowed: bool,
+    /// Proposed bounded deltas to existing significance weights.
+    pub proposed_weight_deltas: Vec<SignificanceWeightDelta>,
+    /// Human-readable gate rationale.
+    pub rationale: String,
+}
+
+/// Plans a disabled-by-default Stage 2 shadow experiment over existing significance weights.
+///
+/// This does not learn online, mutate runtime config, or apply candidate actions. It only returns
+/// a conservative shadow-arm plan when Stage 1 already produced enough signal and beat the
+/// deterministic baseline without invariant violations.
+#[must_use]
+pub fn plan_contextual_bandit_experiment(
+    stage1_report: &OfflinePolicyEvaluationReport,
+    current_significance: SignificanceConfig,
+    config: ContextualBanditExperimentConfig,
+) -> ContextualBanditExperimentReport {
+    if !config.enabled {
+        return ContextualBanditExperimentReport {
+            recommendation: ContextualBanditRecommendation::Disabled,
+            stage1_recommendation: stage1_report.recommendation,
+            shadow_experiment_allowed: false,
+            runtime_policy_update_allowed: false,
+            proposed_weight_deltas: Vec::new(),
+            rationale: "Stage 2 is disabled by default".to_owned(),
+        };
+    }
+
+    if let Some(reason) = unsafe_bandit_config_reason(config) {
+        return ContextualBanditExperimentReport {
+            recommendation: ContextualBanditRecommendation::StopUnsafeExperimentConfig,
+            stage1_recommendation: stage1_report.recommendation,
+            shadow_experiment_allowed: false,
+            runtime_policy_update_allowed: false,
+            proposed_weight_deltas: Vec::new(),
+            rationale: reason.to_owned(),
+        };
+    }
+
+    if stage1_report.recommendation != PolicyEvaluationRecommendation::ProceedToBanditExperiment
+        || stage1_report.labeled_decision_count < config.min_stage1_labeled_decisions
+        || stage1_report.score_margin < config.min_stage1_score_margin
+    {
+        return ContextualBanditExperimentReport {
+            recommendation: ContextualBanditRecommendation::StopStage1Gate,
+            stage1_recommendation: stage1_report.recommendation,
+            shadow_experiment_allowed: false,
+            runtime_policy_update_allowed: false,
+            proposed_weight_deltas: Vec::new(),
+            rationale: "Stage 1 did not clear the stricter Stage 2 evidence gate".to_owned(),
+        };
+    }
+
+    let positive_signals = stage1_report
+        .action_summaries
+        .iter()
+        .map(|summary| summary.positive_signal_count)
+        .sum::<u32>();
+    let negative_signals = stage1_report
+        .action_summaries
+        .iter()
+        .map(|summary| summary.negative_signal_count)
+        .sum::<u32>();
+    let total_directional_signals = positive_signals.saturating_add(negative_signals);
+
+    if total_directional_signals == 0 {
+        return ContextualBanditExperimentReport {
+            recommendation: ContextualBanditRecommendation::StopStage1Gate,
+            stage1_recommendation: stage1_report.recommendation,
+            shadow_experiment_allowed: false,
+            runtime_policy_update_allowed: false,
+            proposed_weight_deltas: Vec::new(),
+            rationale: "Stage 1 had no directional human labels for weight planning".to_owned(),
+        };
+    }
+
+    let delta_scale = (stage1_report.score_margin * config.learning_rate)
+        .abs()
+        .min(config.max_weight_delta);
+    let total = f64::from(total_directional_signals);
+    let mut proposed_weight_deltas = Vec::new();
+
+    if positive_signals > 0 {
+        let delta = delta_scale * (f64::from(positive_signals) / total);
+        proposed_weight_deltas.push(SignificanceWeightDelta {
+            weight_name: "cited_weight".to_owned(),
+            current_value: current_significance.cited_weight,
+            delta,
+            proposed_value: current_significance.cited_weight + delta,
+        });
+    }
+
+    if negative_signals > 0 {
+        let delta = -delta_scale * (f64::from(negative_signals) / total);
+        proposed_weight_deltas.push(SignificanceWeightDelta {
+            weight_name: "contradicted_weight".to_owned(),
+            current_value: current_significance.contradicted_weight,
+            delta,
+            proposed_value: current_significance.contradicted_weight + delta,
+        });
+    }
+
+    ContextualBanditExperimentReport {
+        recommendation: ContextualBanditRecommendation::ProceedToShadowExperiment,
+        stage1_recommendation: stage1_report.recommendation,
+        shadow_experiment_allowed: true,
+        runtime_policy_update_allowed: false,
+        proposed_weight_deltas,
+        rationale: "Stage 2 may run as a shadow experiment over existing significance weights"
+            .to_owned(),
+    }
+}
+
+#[must_use]
+fn unsafe_bandit_config_reason(config: ContextualBanditExperimentConfig) -> Option<&'static str> {
+    if !config.min_stage1_score_margin.is_finite() || config.min_stage1_score_margin < 0.0 {
+        return Some("Stage 2 minimum score margin must be finite and non-negative");
+    }
+    if !config.learning_rate.is_finite()
+        || config.learning_rate <= 0.0
+        || config.learning_rate > 1.0
+    {
+        return Some("Stage 2 learning rate must be finite and in the range (0, 1]");
+    }
+    if !config.max_weight_delta.is_finite() || config.max_weight_delta <= 0.0 {
+        return Some("Stage 2 maximum weight delta must be finite and positive");
+    }
+
+    None
+}
+
+/// Required artifact for Stage 3 policy-model training readiness.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub enum Stage3TrainingPrerequisite {
+    /// A written GPU/cost/runtime budget exists.
+    GpuAndCostPlan,
+    /// A training data card exists with volume, source, privacy, and split details.
+    TrainingDatasetCard,
+    /// Reward ablations exist for human labels, task outcome, and invariant penalties.
+    RewardAblations,
+    /// Property tests or model-checking cover the full non-destructive action trace.
+    InvariantPropertyTests,
+    /// A held-out continuity eval exists against the deterministic significance baseline.
+    HeldoutContinuityEval,
+}
+
+impl Stage3TrainingPrerequisite {
+    const ALL: [Self; 5] = [
+        Self::GpuAndCostPlan,
+        Self::TrainingDatasetCard,
+        Self::RewardAblations,
+        Self::InvariantPropertyTests,
+        Self::HeldoutContinuityEval,
+    ];
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::GpuAndCostPlan => "gpu_and_cost_plan",
+            Self::TrainingDatasetCard => "training_dataset_card",
+            Self::RewardAblations => "reward_ablations",
+            Self::InvariantPropertyTests => "invariant_property_tests",
+            Self::HeldoutContinuityEval => "heldout_continuity_eval",
+        }
+    }
+}
+
+/// Configuration for Stage 3 policy-model training readiness.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct Stage3TrainingReadinessConfig {
+    /// Stage 3 readiness checks are disabled unless a caller explicitly opts in.
+    pub enabled: bool,
+    /// Completed prerequisite artifacts.
+    pub completed_prerequisites: BTreeSet<Stage3TrainingPrerequisite>,
+}
+
+/// Stage 3 readiness recommendation.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum Stage3TrainingRecommendation {
+    /// Stage 3 readiness checking was not explicitly enabled.
+    Disabled,
+    /// Stage 2 did not clear its gate.
+    StopStage2Gate,
+    /// Required research artifacts are missing.
+    StopMissingPrerequisites,
+    /// Offline model-training research may start; runtime deployment is still blocked.
+    ProceedToOfflineTrainingResearch,
+}
+
+/// Stage 3 readiness report.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct Stage3TrainingReadinessReport {
+    /// Stage 3 readiness recommendation.
+    pub recommendation: Stage3TrainingRecommendation,
+    /// Missing prerequisite artifact names.
+    pub missing_prerequisites: Vec<String>,
+    /// Offline training research is allowed only after Stage 2 and all prerequisites pass.
+    pub offline_training_research_allowed: bool,
+    /// Runtime deployment remains blocked by this readiness API.
+    pub runtime_deployment_allowed: bool,
+    /// Human-readable gate rationale.
+    pub rationale: String,
+}
+
+/// Assesses whether Stage 3 GRPO/PPO-style research is ready to begin.
+///
+/// This is a readiness gate only. It does not train a model and never authorizes runtime
+/// deployment of a learned policy.
+#[must_use]
+pub fn assess_stage3_training_readiness(
+    stage2_report: &ContextualBanditExperimentReport,
+    config: &Stage3TrainingReadinessConfig,
+) -> Stage3TrainingReadinessReport {
+    if !config.enabled {
+        return Stage3TrainingReadinessReport {
+            recommendation: Stage3TrainingRecommendation::Disabled,
+            missing_prerequisites: Vec::new(),
+            offline_training_research_allowed: false,
+            runtime_deployment_allowed: false,
+            rationale: "Stage 3 readiness checking is disabled by default".to_owned(),
+        };
+    }
+
+    if stage2_report.recommendation != ContextualBanditRecommendation::ProceedToShadowExperiment {
+        return Stage3TrainingReadinessReport {
+            recommendation: Stage3TrainingRecommendation::StopStage2Gate,
+            missing_prerequisites: Vec::new(),
+            offline_training_research_allowed: false,
+            runtime_deployment_allowed: false,
+            rationale: "Stage 2 did not clear the shadow-experiment gate".to_owned(),
+        };
+    }
+
+    let mut missing_prerequisites = Vec::new();
+    for prerequisite in Stage3TrainingPrerequisite::ALL {
+        if !config.completed_prerequisites.contains(&prerequisite) {
+            missing_prerequisites.push(prerequisite.name().to_owned());
+        }
+    }
+
+    if !missing_prerequisites.is_empty() {
+        return Stage3TrainingReadinessReport {
+            recommendation: Stage3TrainingRecommendation::StopMissingPrerequisites,
+            missing_prerequisites,
+            offline_training_research_allowed: false,
+            runtime_deployment_allowed: false,
+            rationale: "Stage 3 is missing required research and safety artifacts".to_owned(),
+        };
+    }
+
+    Stage3TrainingReadinessReport {
+        recommendation: Stage3TrainingRecommendation::ProceedToOfflineTrainingResearch,
+        missing_prerequisites,
+        offline_training_research_allowed: true,
+        runtime_deployment_allowed: false,
+        rationale: "Offline Stage 3 training research may begin; deployment remains gated"
+            .to_owned(),
     }
 }
 
@@ -679,6 +1147,44 @@ mod tests {
         }
     }
 
+    fn proceeding_stage1_report() -> OfflinePolicyEvaluationReport {
+        let positive = memory("stable useful preference", Tier::Warm, Tier::Cold, 1.0);
+        let negative = memory("contested endpoint", Tier::Warm, Tier::Cold, 1.0);
+        let decisions = vec![
+            OfflinePolicyDecision::new(
+                positive.id,
+                PolicyAction::Promote { to: Tier::Hot },
+                "positive labels favored promotion",
+            ),
+            OfflinePolicyDecision::new(
+                negative.id,
+                PolicyAction::FlagForReview,
+                "negative labels favored review",
+            ),
+        ];
+        let events = vec![
+            human_signal_event(
+                0,
+                positive.id,
+                HumanSignalAction::Affirm,
+                OffsetDateTime::UNIX_EPOCH + Duration::hours(1),
+            ),
+            human_signal_event(
+                1,
+                negative.id,
+                HumanSignalAction::Challenge,
+                OffsetDateTime::UNIX_EPOCH + Duration::hours(1),
+            ),
+        ];
+
+        evaluate_offline_policy(
+            &decisions,
+            &[positive, negative],
+            &events,
+            single_label_config(),
+        )
+    }
+
     #[test]
     fn action_space_has_no_destructive_operations() {
         assert_eq!(
@@ -747,6 +1253,13 @@ mod tests {
         );
         assert_eq!(report.labeled_decision_count, 0);
         assert!(report.candidate_score.abs() <= f64::EPSILON);
+        assert_eq!(
+            report
+                .null_result
+                .as_ref()
+                .map(|result| result.recommendation),
+            Some(PolicyEvaluationRecommendation::StopInsufficientSignal)
+        );
     }
 
     #[test]
@@ -868,5 +1381,180 @@ mod tests {
             PolicyEvaluationRecommendation::StopBaselineNotBeaten
         );
         assert!(report.score_margin < 0.0);
+        assert_eq!(
+            report
+                .null_result
+                .as_ref()
+                .map(|result| result.recommendation),
+            Some(PolicyEvaluationRecommendation::StopBaselineNotBeaten)
+        );
+        let promote_summary = report
+            .action_summaries
+            .iter()
+            .find(|summary| summary.action_name == "promote")
+            .expect("promote summary should exist");
+        assert_eq!(promote_summary.decision_count, 1);
+        assert_eq!(promote_summary.negative_signal_count, 1);
+    }
+
+    #[test]
+    fn stage2_bandit_planning_is_disabled_by_default() {
+        let report = proceeding_stage1_report();
+        let stage2 = plan_contextual_bandit_experiment(
+            &report,
+            SignificanceConfig::default(),
+            ContextualBanditExperimentConfig::default(),
+        );
+
+        assert_eq!(
+            stage2.recommendation,
+            ContextualBanditRecommendation::Disabled
+        );
+        assert!(!stage2.shadow_experiment_allowed);
+        assert!(!stage2.runtime_policy_update_allowed);
+        assert!(stage2.proposed_weight_deltas.is_empty());
+    }
+
+    #[test]
+    fn stage2_bandit_planning_stops_when_stage1_does_not_clear_gate() {
+        let item = memory("weak signal", Tier::Warm, Tier::Cold, 1.0);
+        let decision =
+            OfflinePolicyDecision::new(item.id, PolicyAction::FlagForReview, "no labels");
+        let report = evaluate_offline_policy(
+            &[decision],
+            &[item],
+            &[],
+            OfflinePolicyEvaluationConfig::default(),
+        );
+        let stage2 = plan_contextual_bandit_experiment(
+            &report,
+            SignificanceConfig::default(),
+            ContextualBanditExperimentConfig {
+                enabled: true,
+                min_stage1_labeled_decisions: 1,
+                min_stage1_score_margin: 0.0,
+                ..ContextualBanditExperimentConfig::default()
+            },
+        );
+
+        assert_eq!(
+            stage2.recommendation,
+            ContextualBanditRecommendation::StopStage1Gate
+        );
+        assert!(!stage2.shadow_experiment_allowed);
+    }
+
+    #[test]
+    fn stage2_bandit_planning_returns_bounded_shadow_weight_deltas() {
+        let report = proceeding_stage1_report();
+        let significance = SignificanceConfig::default();
+        let stage2 = plan_contextual_bandit_experiment(
+            &report,
+            significance,
+            ContextualBanditExperimentConfig {
+                enabled: true,
+                min_stage1_labeled_decisions: 1,
+                min_stage1_score_margin: 0.0,
+                learning_rate: 0.25,
+                max_weight_delta: 0.10,
+            },
+        );
+
+        assert_eq!(
+            stage2.recommendation,
+            ContextualBanditRecommendation::ProceedToShadowExperiment
+        );
+        assert!(stage2.shadow_experiment_allowed);
+        assert!(!stage2.runtime_policy_update_allowed);
+        assert_eq!(stage2.proposed_weight_deltas.len(), 2);
+        assert!(stage2.proposed_weight_deltas.iter().all(|delta| {
+            delta.delta.abs() <= 0.10
+                && (delta.current_value + delta.delta - delta.proposed_value).abs() <= f64::EPSILON
+        }));
+        assert!(stage2.proposed_weight_deltas.iter().any(|delta| {
+            delta.weight_name == "cited_weight" && delta.proposed_value > significance.cited_weight
+        }));
+        assert!(stage2.proposed_weight_deltas.iter().any(|delta| {
+            delta.weight_name == "contradicted_weight"
+                && delta.proposed_value < significance.contradicted_weight
+        }));
+    }
+
+    #[test]
+    fn stage3_readiness_is_disabled_and_fail_closed_until_prerequisites_exist() {
+        let report = proceeding_stage1_report();
+        let stage2 = plan_contextual_bandit_experiment(
+            &report,
+            SignificanceConfig::default(),
+            ContextualBanditExperimentConfig {
+                enabled: true,
+                min_stage1_labeled_decisions: 1,
+                min_stage1_score_margin: 0.0,
+                ..ContextualBanditExperimentConfig::default()
+            },
+        );
+
+        let disabled =
+            assess_stage3_training_readiness(&stage2, &Stage3TrainingReadinessConfig::default());
+        assert_eq!(
+            disabled.recommendation,
+            Stage3TrainingRecommendation::Disabled
+        );
+
+        let missing = assess_stage3_training_readiness(
+            &stage2,
+            &Stage3TrainingReadinessConfig {
+                enabled: true,
+                ..Stage3TrainingReadinessConfig::default()
+            },
+        );
+        assert_eq!(
+            missing.recommendation,
+            Stage3TrainingRecommendation::StopMissingPrerequisites
+        );
+        assert!(
+            missing
+                .missing_prerequisites
+                .contains(&"gpu_and_cost_plan".to_owned())
+        );
+        assert!(!missing.offline_training_research_allowed);
+        assert!(!missing.runtime_deployment_allowed);
+    }
+
+    #[test]
+    fn stage3_readiness_allows_only_offline_research_after_all_gates() {
+        let report = proceeding_stage1_report();
+        let stage2 = plan_contextual_bandit_experiment(
+            &report,
+            SignificanceConfig::default(),
+            ContextualBanditExperimentConfig {
+                enabled: true,
+                min_stage1_labeled_decisions: 1,
+                min_stage1_score_margin: 0.0,
+                ..ContextualBanditExperimentConfig::default()
+            },
+        );
+        let ready = assess_stage3_training_readiness(
+            &stage2,
+            &Stage3TrainingReadinessConfig {
+                enabled: true,
+                completed_prerequisites: [
+                    Stage3TrainingPrerequisite::GpuAndCostPlan,
+                    Stage3TrainingPrerequisite::TrainingDatasetCard,
+                    Stage3TrainingPrerequisite::RewardAblations,
+                    Stage3TrainingPrerequisite::InvariantPropertyTests,
+                    Stage3TrainingPrerequisite::HeldoutContinuityEval,
+                ]
+                .into_iter()
+                .collect(),
+            },
+        );
+
+        assert_eq!(
+            ready.recommendation,
+            Stage3TrainingRecommendation::ProceedToOfflineTrainingResearch
+        );
+        assert!(ready.offline_training_research_allowed);
+        assert!(!ready.runtime_deployment_allowed);
     }
 }

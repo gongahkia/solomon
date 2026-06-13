@@ -312,11 +312,11 @@ class LangChainMemory:
         await asyncio.to_thread(self.save_context, inputs, outputs)
 
     def clear(self) -> None:
-        """No-op clear method for LangChain compatibility."""
+        """Compatibility-only no-op; does not delete or invalidate Shibahama memories."""
         return None
 
     async def aclear(self) -> None:
-        """Async no-op clear method for LangChain compatibility."""
+        """Async compatibility-only no-op; does not delete or invalidate memories."""
         return None
 
 

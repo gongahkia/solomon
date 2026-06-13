@@ -18,3 +18,8 @@ import shibahama
 
 assert shibahama.version() == shibahama.__version__
 ```
+
+`LangChainMemory.clear()` and `LangChainMemory.aclear()` are
+compatibility-only no-ops. They do not delete or invalidate durable Shibahama
+memories; use separate stores or namespaces when a caller needs isolated
+context.

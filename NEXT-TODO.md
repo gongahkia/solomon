@@ -2,8 +2,9 @@
 
 This file is now the single follow-up list after the old implementation
 `TODO.md` was reconciled. Parts 1-3 are done. Part 4 has moved from TODO-only to
-a gated Stage 1 implementation: offline evaluation only, with no runtime learned
-policy and no training loop.
+read-only learned-policy gates: offline evaluation, disabled Stage 2 shadow
+planning, and Stage 3 readiness checks, with no runtime learned policy and no
+training loop.
 
 Keep the core ethos intact throughout: never-delete invariant, credence floor,
 usage-driven significance, and DX/legibility as priority #1. Nothing here may
@@ -109,20 +110,27 @@ dodging it.
       policy have made better decisions than the hand-tuned significance function,
       judged against subsequent human affirms/challenges? No training loop. If the
       signal isn't there offline, STOP — do not proceed to training.
-- [ ] Stage 2: contextual-bandit / online learning over the EXISTING significance
-      weights (not a new model). Reward = contest-derived (affirm=+, challenge=−)
-      with task-outcome as a secondary check, penalised for any floor violation or
-      any attempt to demote a pinned/floored item. Compare against the hand-tuned
-      baseline; ship only if it wins without violating invariants.
-- [ ] Stage 3 (only if 1–2 prove out): small policy model trained with GRPO/PPO
-      over the constrained non-destructive action space. Document infra needs
-      honestly (GPU, training data volume from logged contests). Reward design must
-      be written up and ablated, not assumed.
+- [x] Stage 2 planning gate: disabled-by-default contextual-bandit shadow planner
+      over existing `SignificanceConfig` weights. It only proposes bounded deltas
+      after Stage 1 clears stricter evidence gates and never mutates runtime
+      policy.
+- [ ] Stage 2 runtime experiment: actual online contextual-bandit learning over
+      the EXISTING significance weights. Reward = contest-derived (affirm=+,
+      challenge=-) with task-outcome as a secondary check, penalised for any floor
+      violation or any attempt to demote a pinned/floored item. Compare against
+      the hand-tuned baseline; ship only if it wins without violating invariants.
+- [x] Stage 3 readiness gate: fail-closed checklist for GPU/cost plan, dataset
+      card, reward ablations, invariant property tests, and held-out continuity
+      evaluation. Passing it only allows offline research, not deployment.
+- [ ] Stage 3 actual training (only if 1-2 prove out): small policy model trained
+      with GRPO/PPO over the constrained non-destructive action space. Document
+      infra needs honestly (GPU, training data volume from logged contests).
+      Reward design must be written up and ablated, not assumed.
 - [ ] Eval requirement for ALL stages: report whether the learned policy beats the
       hand-tuned significance function on a held-out continuity task, and PROVE it
       never violated never-delete / floor across the eval (property test over the
       action trace). No invariant violations is a hard gate, not a metric.
-- [ ] Anti-sycophancy clause in the doc: if RL does not beat the deterministic
+- [x] Anti-sycophancy clause in the doc: if RL does not beat the deterministic
       baseline, the honest outcome is "deterministic significance is sufficient;
       RL not justified" — and that null result gets written up, not buried.
 

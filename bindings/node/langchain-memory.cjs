@@ -51,6 +51,8 @@ class LangChainMemory {
   }
 
   async clear() {
+    // Compatibility-only no-op. Shibahama memories are durable; callers should
+    // rotate namespaces or stores when they need an empty context.
     return undefined;
   }
 }

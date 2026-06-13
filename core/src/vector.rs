@@ -211,8 +211,8 @@ impl VectorIndex for HnswVectorIndex {
     }
 }
 
-/// Transport boundary used by the Qdrant vector backend adapter.
-pub trait QdrantTransport {
+/// Transport boundary used by the remote vector backend adapter.
+pub trait RemoteVectorTransport {
     /// Upserts a vector into `collection`.
     ///
     /// # Errors
@@ -262,15 +262,15 @@ pub trait QdrantTransport {
     fn delete(&mut self, collection: &str, id: MemoryId) -> Result<(), VectorIndexError>;
 }
 
-/// Qdrant-backed vector index adapter.
-pub struct QdrantVectorIndex<T> {
+/// Vector index adapter backed by an injected remote transport.
+pub struct RemoteVectorIndex<T> {
     collection: String,
     dimensions: usize,
     transport: T,
 }
 
-impl<T> QdrantVectorIndex<T> {
-    /// Creates a Qdrant adapter over an injected transport.
+impl<T> RemoteVectorIndex<T> {
+    /// Creates a remote vector adapter over an injected transport.
     pub fn new(collection: impl Into<String>, dimensions: usize, transport: T) -> Self {
         Self {
             collection: collection.into(),
@@ -296,7 +296,7 @@ impl<T> QdrantVectorIndex<T> {
     }
 }
 
-impl<T: QdrantTransport> VectorIndex for QdrantVectorIndex<T> {
+impl<T: RemoteVectorTransport> VectorIndex for RemoteVectorIndex<T> {
     fn add(&mut self, id: MemoryId, vector: &[f32]) -> Result<(), VectorIndexError> {
         self.ensure_dimensions(vector)?;
         self.transport.upsert(&self.collection, id, vector)
@@ -342,12 +342,12 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct FakeQdrantTransport {
+    struct FakeRemoteVectorTransport {
         vectors: HashMap<MemoryId, Vec<f32>>,
         collections: Vec<String>,
     }
 
-    impl QdrantTransport for FakeQdrantTransport {
+    impl RemoteVectorTransport for FakeRemoteVectorTransport {
         fn upsert(
             &mut self,
             collection: &str,
@@ -489,9 +489,9 @@ mod tests {
     }
 
     #[test]
-    fn qdrant_adapter_satisfies_vector_index_trait() {
-        let transport = FakeQdrantTransport::default();
-        let mut index = QdrantVectorIndex::new("memories", 2, transport);
+    fn remote_vector_adapter_satisfies_vector_index_trait() {
+        let transport = FakeRemoteVectorTransport::default();
+        let mut index = RemoteVectorIndex::new("memories", 2, transport);
         let near = MemoryId::new_v7();
         let far = MemoryId::new_v7();
 
@@ -530,9 +530,9 @@ mod tests {
     }
 
     #[test]
-    fn qdrant_adapter_batch_search_uses_transport_collection() {
-        let transport = FakeQdrantTransport::default();
-        let mut index = QdrantVectorIndex::new("memories", 2, transport);
+    fn remote_vector_adapter_batch_search_uses_transport_collection() {
+        let transport = FakeRemoteVectorTransport::default();
+        let mut index = RemoteVectorIndex::new("memories", 2, transport);
         let first = MemoryId::new_v7();
         let second = MemoryId::new_v7();
 

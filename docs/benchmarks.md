@@ -118,7 +118,10 @@ They also retain support for the repo's neutral JSONL shape:
 ```
 
 They are not bundled datasets. To run either suite, provide a dataset export
-with `--dataset`.
+with `--dataset`. Result JSON records the dataset path, byte size, SHA-256, and
+whether the suite used a built-in generator or an external file. Per-case
+metadata also records whether the loader used the neutral JSONL shape, official
+LoCoMo JSON, or official LongMemEval JSON.
 
 ## Running Local Benchmarks
 
@@ -231,8 +234,8 @@ Use `--output path/to/result.json` to preserve the measured latency report.
 When adding or updating benchmark results:
 
 - commit the exact generated JSON and Markdown summary together;
-- include the command, suite, systems, top-k, seed, and dataset path in the JSON
-  config;
+- include the command, suite, systems, top-k, seed, dataset path, dataset byte
+  size, and dataset SHA-256 in the JSON config when an external dataset is used;
 - keep generated local smoke results separate from hosted-service results;
 - do not reuse placeholder labels for ablations unless the harness actually
   toggles significance, reconstruction, or graph behavior.

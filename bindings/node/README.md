@@ -19,3 +19,7 @@ const memory = new LangChainMemory(engine, {
 await memory.saveContext({ input: "remember short replies" }, { output: "stored" });
 const variables = await memory.loadMemoryVariables({ input: "short replies" });
 ```
+
+`LangChainMemory.clear()` is a compatibility-only no-op. It does not delete or
+invalidate durable Shibahama memories; use separate stores or namespaces when a
+caller needs isolated context.

@@ -16,7 +16,7 @@ recall.
 | Core API facade | `core/src/api.rs` | Stable high-level API: `write`, `recall`, `reinforce`, `why`, and `timeline`. |
 | Data model | `core/src/model.rs` | Memory ids, provenance, bi-temporal bounds, credence, tiers, graph entities, graph relations, and access events. |
 | Storage | `core/src/storage.rs` | Append-only event log, materialized state, snapshots, graph storage, compaction, auditing, and redb-backed persistence. |
-| Vector retrieval | `core/src/vector.rs` | Pluggable vector-index trait plus in-process HNSW and Qdrant-adapter implementations. |
+| Vector retrieval | `core/src/vector.rs` | Pluggable vector-index trait plus in-process HNSW and an injected remote-transport adapter boundary. |
 | Retrieval orchestration | `core/src/retrieval.rs` | Vector recall, valid-time filtering, ranking, graph expansion, read safety, and surfaced-access recording. |
 | Significance | `core/src/significance.rs` | Transparent scoring from decay, access reinforcement, outcomes, contradiction penalties, and graph centrality input. |
 | Reconstruction | `core/src/reconstruction.rs` | Staleness triggers, explicit reconstruction gate, quarantine, corroboration, and re-validation planning. |
@@ -193,8 +193,7 @@ Some architecture pieces are represented as extension points rather than final
 production implementations:
 
 - `RedbMemoryStore` is the only concrete durable store backend.
-- Qdrant support is an adapter over an injected transport boundary, not a bundled
-  network client.
+- Remote vector support is an injected transport boundary, not a bundled network client.
 - Multi-reader/single-writer or MVCC behavior is inherited from redb but has not
   yet been documented as a tested Shibahama concurrency contract.
 - LoCoMo and LongMemEval benchmark runs still need external dataset exports.

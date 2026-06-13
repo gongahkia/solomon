@@ -8,8 +8,10 @@ use crate::consolidation::{
     plan_offline_consolidation,
 };
 use crate::learned_policy::{
-    OfflinePolicyDecision, OfflinePolicyEvaluationConfig, OfflinePolicyEvaluationReport,
-    evaluate_offline_policy,
+    ContextualBanditExperimentConfig, ContextualBanditExperimentReport, OfflinePolicyDecision,
+    OfflinePolicyEvaluationConfig, OfflinePolicyEvaluationReport, Stage3TrainingReadinessConfig,
+    Stage3TrainingReadinessReport, assess_stage3_training_readiness, evaluate_offline_policy,
+    plan_contextual_bandit_experiment,
 };
 use crate::model::{
     AccessOutcome, CredenceTier, HumanSignal, HumanSignalAction, MemoryId, MemoryItem, Provenance,
@@ -935,6 +937,31 @@ impl<V: VectorIndex> Shibahama<V> {
         ))
     }
 
+    /// Plans a disabled-by-default Stage 2 contextual-bandit shadow experiment.
+    ///
+    /// The report is read-only and never mutates runtime significance configuration.
+    #[must_use]
+    pub fn plan_contextual_bandit_experiment(
+        &self,
+        stage1_report: &OfflinePolicyEvaluationReport,
+        significance_config: SignificanceConfig,
+        config: ContextualBanditExperimentConfig,
+    ) -> ContextualBanditExperimentReport {
+        plan_contextual_bandit_experiment(stage1_report, significance_config, config)
+    }
+
+    /// Assesses whether Stage 3 policy-model training research is ready to begin.
+    ///
+    /// This is a readiness gate only and never authorizes runtime learned-policy deployment.
+    #[must_use]
+    pub fn assess_stage3_training_readiness(
+        &self,
+        stage2_report: &ContextualBanditExperimentReport,
+        config: &Stage3TrainingReadinessConfig,
+    ) -> Stage3TrainingReadinessReport {
+        assess_stage3_training_readiness(stage2_report, config)
+    }
+
     /// Recalls current fact memories for a query embedding.
     ///
     /// # Errors
@@ -1719,6 +1746,27 @@ where
                 .evaluate_offline_policy(&decisions, config)
         })
         .await?
+    }
+
+    /// Plans a disabled-by-default Stage 2 contextual-bandit shadow experiment.
+    #[must_use]
+    pub fn plan_contextual_bandit_experiment(
+        &self,
+        stage1_report: &OfflinePolicyEvaluationReport,
+        significance_config: SignificanceConfig,
+        config: ContextualBanditExperimentConfig,
+    ) -> ContextualBanditExperimentReport {
+        plan_contextual_bandit_experiment(stage1_report, significance_config, config)
+    }
+
+    /// Assesses whether Stage 3 policy-model training research is ready to begin.
+    #[must_use]
+    pub fn assess_stage3_training_readiness(
+        &self,
+        stage2_report: &ContextualBanditExperimentReport,
+        config: &Stage3TrainingReadinessConfig,
+    ) -> Stage3TrainingReadinessReport {
+        assess_stage3_training_readiness(stage2_report, config)
     }
 
     /// Recalls current fact memories for an owned query embedding.

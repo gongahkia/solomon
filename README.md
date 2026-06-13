@@ -22,8 +22,8 @@ audit trail. Recall returns contextual candidates, not bare text.
 
 The repository is pre-release. The Rust core, CLI, Python binding, Node binding,
 benchmark harness, examples, Tideline debugger, consolidation pass, human signal
-verbs, and offline learned-policy evaluation gate are implemented locally. PyPI,
-npm, and final registry publication are still pending release credentials.
+verbs, and read-only learned-policy gates are implemented locally. PyPI, npm,
+and final registry publication are still pending release credentials.
 
 ## Table of Contents
 
@@ -109,9 +109,9 @@ cargo run -p shibahama-cli -- recall \
   or demoting tiers, and flagging stale important memories.
 - Records human signals through `challenge`, `affirm`, `correct`, `pin`, and
   `unpin`, all as append-only audit events.
-- Exposes an offline learned-policy evaluator that can test candidate memory
-  decisions against logged human signals without training or mutating runtime
-  state.
+- Exposes read-only learned-policy gates that can evaluate candidate decisions,
+  plan a disabled Stage 2 shadow experiment, and assess Stage 3 research
+  readiness without training or mutating runtime state.
 
 Shibahama is not a replacement for plain RAG on stateless one-shot QA. If the
 whole useful corpus fits cheaply in context, if answers do not depend on
@@ -144,6 +144,8 @@ Offline and human-in-the-loop operations:
 - `pin`
 - `unpin`
 - `evaluate_offline_policy`
+- `plan_contextual_bandit_experiment`
+- `assess_stage3_training_readiness`
 
 Inspection and maintenance:
 
@@ -323,8 +325,8 @@ system returns the current fact rather than the stale one:
 
 | Suite | System | Queries | Accuracy | Stale Answer Rate | Mean Token Cost | p95 ms | Status |
 |---|---|---:|---:|---:|---:|---:|---|
-| currencybench | shibahama | 12 | 1.000 | 0.000 | 5.917 | 0.719 | ok |
-| currencybench | warehouse | 12 | 0.000 | 1.000 | 11.833 | 0.017 | ok |
+| currencybench | shibahama | 12 | 1.000 | 0.000 | 5.917 | 5.427 | ok |
+| currencybench | warehouse | 12 | 0.000 | 1.000 | 11.833 | 0.038 | ok |
 
 The coding-agent benchmark harness remains experimental and no longer has a
 checked-in result artifact. The runnable [`examples/coding-agent/`](./examples/coding-agent/)
@@ -349,8 +351,9 @@ Shibahama treats memory as untrusted input.
 - Stored role/directive-looking text is neutralized at read time.
 - Server logs are metadata-only and avoid memory content, raw query text, and
   embeddings.
-- The default redb store is plaintext at rest. The encryption trait is an
-  extension point, not active encryption.
+- The default redb store is plaintext at rest. Rust callers can opt into
+  payload encryption with `Aes256GcmEncryption`; key management remains the
+  caller's responsibility.
 
 Read [`docs/security.md`](./docs/security.md) before using Shibahama with
 sensitive stores.

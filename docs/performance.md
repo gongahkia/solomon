@@ -38,7 +38,7 @@ debugging significance.
 The `VectorIndex` trait includes both `batch_upsert` and `search_batch`.
 Backends can override either method when their native API can execute a true
 batch. The in-process HNSW adapter validates all query dimensions up front and
-then runs the backend search for each query. The Qdrant adapter forwards batch
+then runs the backend search for each query. The remote vector adapter forwards batch
 search through the transport boundary, whose default implementation falls back
 to repeated searches when a concrete transport has no native batch endpoint.
 

@@ -68,6 +68,8 @@ try {
   assert.deepEqual(memory.memoryVariables, ["history"]);
   assert.ok(loaded.history.includes("Human: remember adapters"));
   await memory.clear();
+  const loadedAfterClear = await memory.loadMemoryVariables({ input: "adapters" });
+  assert.ok(loadedAfterClear.history.includes("Human: remember adapters"));
 } finally {
   await rm(dir, { force: true, recursive: true });
 }

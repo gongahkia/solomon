@@ -52,6 +52,38 @@ Engine behavior for `invalidate` requests.
 
 Embedding metadata supplied to `write_with_embedding`.
 
+### `pub enum ExplicitReconstructionStatus`
+
+Status for one explicit reconstruction trigger.
+
+### `pub struct ExplicitReconstructionOutcome`
+
+Result for one trigger processed by explicit reconstruction.
+
+### `pub struct ConsolidationOutcome`
+
+Applied result for one offline consolidation decision.
+
+### `pub struct ConsolidationPassReport`
+
+Result of one offline consolidation pass.
+
+### `pub struct HumanSignalRequest`
+
+Caller metadata attached to a human-in-the-loop signal.
+
+### `pub fn new( actor: impl Into<String>, reason: impl Into<String>, timestamp: OffsetDateTime, ) -> Self`
+
+Creates an explicit human signal request.
+
+### `pub struct HumanSignalOutcome`
+
+Result for a direct human signal that mutates credence or floor state.
+
+### `pub struct HumanCorrectionOutcome`
+
+Result for a human correction routed through quarantine and corroboration.
+
 ### `pub struct AsyncWriteEmbedding`
 
 Owned embedding metadata for async write calls.
@@ -87,6 +119,10 @@ Allows instruction/directive memories to be returned.
 ### `pub const fn with_ranking(mut self, ranking: RecallRankingConfig) -> Self`
 
 Overrides ranking weights for this request.
+
+### `pub const fn with_significance(mut self, significance: SignificanceConfig) -> Self`
+
+Overrides the significance policy used by this request.
 
 ### `pub const fn with_staleness(mut self, staleness: RecallStalenessConfig) -> Self`
 
@@ -168,6 +204,18 @@ Returns all current materialized memory rows.
 
 Returns all durable event-log records in sequence order.
 
+### `pub fn evaluate_offline_policy( &self, decisions: &[OfflinePolicyDecision], config: OfflinePolicyEvaluationConfig, ) -> Result<OfflinePolicyEvaluationReport, ShibahamaError>`
+
+Evaluates offline learned-policy candidates against current memory state and event logs.
+
+### `pub fn plan_contextual_bandit_experiment( &self, stage1_report: &OfflinePolicyEvaluationReport, significance_config: SignificanceConfig, config: ContextualBanditExperimentConfig, ) -> ContextualBanditExperimentReport`
+
+Plans a disabled-by-default Stage 2 contextual-bandit shadow experiment.
+
+### `pub fn assess_stage3_training_readiness( &self, stage2_report: &ContextualBanditExperimentReport, config: &Stage3TrainingReadinessConfig, ) -> Stage3TrainingReadinessReport`
+
+Assesses whether Stage 3 policy-model training research is ready to begin.
+
 ### `pub fn recall( &self, request: &RecallRequest<'_>, ) -> Result<Vec<RecallCandidate>, ShibahamaError>`
 
 Recalls current fact memories for a query embedding.
@@ -175,6 +223,54 @@ Recalls current fact memories for a query embedding.
 ### `pub fn stream_recall( &self, request: &RecallRequest<'_>, ) -> Result<RecallStream, ShibahamaError>`
 
 Recalls current fact memories and returns an owning iterator over ranked candidates.
+
+### `pub fn consolidate( &self, now: OffsetDateTime, ) -> Result<ConsolidationPassReport, ShibahamaError>`
+
+Runs the offline/idle consolidation pass.
+
+### `pub fn reconstruct_from_recall<S>( &self, candidates: &[RecallCandidate], source: &S, corroboration_signals: &[(MemoryId, Vec<CorroborationSignal>)], now: OffsetDateTime, ) -> Result<Vec<ExplicitReconstructionOutcome>, ShibahamaError> where S: RevalidationSource,`
+
+Runs the gated reconstruction loop for stale load-bearing recall candidates.
+
+### `pub fn challenge( &self, id: MemoryId, reason: impl Into<String>, ) -> Result<bool, ShibahamaError>`
+
+Challenges a memory with a human-readable reason.
+
+### `pub fn challenge_with_request( &self, id: MemoryId, request: HumanSignalRequest, ) -> Result<Option<HumanSignalOutcome>, ShibahamaError>`
+
+Challenges a memory with explicit actor, reason, and timestamp metadata.
+
+### `pub fn affirm(&self, id: MemoryId) -> Result<bool, ShibahamaError>`
+
+Affirms a memory using default API actor metadata.
+
+### `pub fn affirm_with_request( &self, id: MemoryId, request: HumanSignalRequest, ) -> Result<Option<HumanSignalOutcome>, ShibahamaError>`
+
+Affirms a memory with explicit actor, reason, and timestamp metadata.
+
+### `pub fn correct( &self, id: MemoryId, proposed_content: impl Into<String>, ) -> Result<Option<HumanCorrectionOutcome>, ShibahamaError>`
+
+Corrects a memory with proposed replacement content.
+
+### `pub fn correct_with_request( &self, id: MemoryId, proposed_content: impl Into<String>, request: HumanSignalRequest, ) -> Result<Option<HumanCorrectionOutcome>, ShibahamaError>`
+
+Corrects a memory with explicit actor, reason, and timestamp metadata.
+
+### `pub fn pin(&self, id: MemoryId) -> Result<bool, ShibahamaError>`
+
+Pins a memory using default API actor metadata.
+
+### `pub fn pin_with_request( &self, id: MemoryId, request: HumanSignalRequest, ) -> Result<Option<HumanSignalOutcome>, ShibahamaError>`
+
+Pins a memory by raising its credence floor with explicit metadata.
+
+### `pub fn unpin(&self, id: MemoryId) -> Result<bool, ShibahamaError>`
+
+Removes a human floor pin using default API actor metadata.
+
+### `pub fn unpin_with_request( &self, id: MemoryId, request: HumanSignalRequest, ) -> Result<Option<HumanSignalOutcome>, ShibahamaError>`
+
+Removes a human floor pin with explicit metadata.
 
 ### `pub fn timeline( &self, request: &RecallRequest<'_>, ) -> Result<Vec<RecallCandidate>, ShibahamaError>`
 
@@ -187,20 +283,6 @@ Replays timeline recall and returns an owning iterator over ranked candidates.
 ### `pub fn reinforce(&self, id: MemoryId, outcome: AccessOutcome) -> Result<bool, ShibahamaError>`
 
 Reinforces a memory with a usage outcome.
-
-### Human signal verbs
-
-`challenge`, `affirm`, `correct`, `pin`, and `unpin` record append-only human
-signals with actor, timestamp, and reason metadata. Challenges lower credence and
-flag review, affirmations raise credence, corrections reuse reconstruction
-quarantine/corroboration, and pins change the credence floor. These events are
-RL-ready audit records but are not connected to an automatic runtime policy.
-
-### `pub fn evaluate_offline_policy(&self, decisions: &[OfflinePolicyDecision], config: OfflinePolicyEvaluationConfig) -> Result<OfflinePolicyEvaluationReport, ShibahamaError>`
-
-Evaluates caller-supplied learned-policy candidates against current memory rows,
-event-log human signals, and the deterministic significance baseline. This is
-read-only: it does not train, mutate memory, delete, overwrite, or apply actions.
 
 ### `pub fn why(&self, id: MemoryId) -> Result<Option<WhyTrace>, ShibahamaError>`
 
@@ -262,6 +344,18 @@ Returns all current materialized memory rows.
 
 Returns all durable event-log records in sequence order.
 
+### `pub async fn evaluate_offline_policy( &self, decisions: Vec<OfflinePolicyDecision>, config: OfflinePolicyEvaluationConfig, ) -> Result<OfflinePolicyEvaluationReport, ShibahamaError>`
+
+Evaluates offline learned-policy candidates against current memory state and event logs.
+
+### `pub fn plan_contextual_bandit_experiment( &self, stage1_report: &OfflinePolicyEvaluationReport, significance_config: SignificanceConfig, config: ContextualBanditExperimentConfig, ) -> ContextualBanditExperimentReport`
+
+Plans a disabled-by-default Stage 2 contextual-bandit shadow experiment.
+
+### `pub fn assess_stage3_training_readiness( &self, stage2_report: &ContextualBanditExperimentReport, config: &Stage3TrainingReadinessConfig, ) -> Stage3TrainingReadinessReport`
+
+Assesses whether Stage 3 policy-model training research is ready to begin.
+
 ### `pub async fn recall( &self, request: AsyncRecallRequest, ) -> Result<Vec<RecallCandidate>, ShibahamaError>`
 
 Recalls current fact memories for an owned query embedding.
@@ -277,6 +371,50 @@ Replays recalled memories as they were believed at `request.now`.
 ### `pub async fn stream_timeline( &self, request: AsyncRecallRequest, ) -> Result<RecallStream, ShibahamaError>`
 
 Replays timeline recall and returns an owning iterator over ranked candidates.
+
+### `pub async fn consolidate( &self, now: OffsetDateTime, ) -> Result<ConsolidationPassReport, ShibahamaError>`
+
+Runs the offline/idle consolidation pass.
+
+### `pub async fn challenge( &self, id: MemoryId, reason: impl Into<String>, ) -> Result<bool, ShibahamaError>`
+
+Challenges a memory with a human-readable reason.
+
+### `pub async fn challenge_with_request( &self, id: MemoryId, request: HumanSignalRequest, ) -> Result<Option<HumanSignalOutcome>, ShibahamaError>`
+
+Challenges a memory with explicit metadata.
+
+### `pub async fn affirm(&self, id: MemoryId) -> Result<bool, ShibahamaError>`
+
+Affirms a memory using default API actor metadata.
+
+### `pub async fn affirm_with_request( &self, id: MemoryId, request: HumanSignalRequest, ) -> Result<Option<HumanSignalOutcome>, ShibahamaError>`
+
+Affirms a memory with explicit metadata.
+
+### `pub async fn correct( &self, id: MemoryId, proposed_content: impl Into<String>, ) -> Result<Option<HumanCorrectionOutcome>, ShibahamaError>`
+
+Corrects a memory with proposed replacement content.
+
+### `pub async fn correct_with_request( &self, id: MemoryId, proposed_content: impl Into<String>, request: HumanSignalRequest, ) -> Result<Option<HumanCorrectionOutcome>, ShibahamaError>`
+
+Corrects a memory with explicit metadata.
+
+### `pub async fn pin(&self, id: MemoryId) -> Result<bool, ShibahamaError>`
+
+Pins a memory using default API actor metadata.
+
+### `pub async fn pin_with_request( &self, id: MemoryId, request: HumanSignalRequest, ) -> Result<Option<HumanSignalOutcome>, ShibahamaError>`
+
+Pins a memory with explicit metadata.
+
+### `pub async fn unpin(&self, id: MemoryId) -> Result<bool, ShibahamaError>`
+
+Removes a human floor pin using default API actor metadata.
+
+### `pub async fn unpin_with_request( &self, id: MemoryId, request: HumanSignalRequest, ) -> Result<Option<HumanSignalOutcome>, ShibahamaError>`
+
+Removes a human floor pin with explicit metadata.
 
 ### `pub async fn reinforce( &self, id: MemoryId, outcome: AccessOutcome, ) -> Result<bool, ShibahamaError>`
 
@@ -378,7 +516,7 @@ Invalidate a memory at a Unix timestamp without deleting its history.
 
 Async wrapper for `invalidate` using a worker thread.
 
-### `def recall( self, query_vector, top_k: int, now_unix: int | None = None, raw_query_context: str | None = None, include_cold: bool = False, include_instructions: bool = False, max_context_tokens: int | None = None, ) -> list[RecallCandidate]:`
+### `def recall( self, query_vector, top_k: int, now_unix: int | None = None, raw_query_context: str | None = None, include_cold: bool = False, include_instructions: bool = False, max_context_tokens: int | None = None, similarity_weight: float = 1.0, significance_weight: float = 1.0, recency_weight: float = 0.0, graph_weight: float = 0.0, related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None, ) -> list[RecallCandidate]:`
 
 Recall current memories for a query embedding.
 
@@ -402,7 +540,7 @@ Return current memory rows as a pandas DataFrame.
 
 Return current memory rows as a PyArrow table.
 
-### `def stream_recall( self, query_vector, top_k: int, now_unix: int | None = None, raw_query_context: str | None = None, include_cold: bool = False, include_instructions: bool = False, max_context_tokens: int | None = None, ) -> RecallStream:`
+### `def stream_recall( self, query_vector, top_k: int, now_unix: int | None = None, raw_query_context: str | None = None, include_cold: bool = False, include_instructions: bool = False, max_context_tokens: int | None = None, similarity_weight: float = 1.0, significance_weight: float = 1.0, recency_weight: float = 0.0, graph_weight: float = 0.0, related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None, ) -> RecallStream:`
 
 Return an iterator over current recall candidates.
 
@@ -472,8 +610,8 @@ Async wrapper for `save_context` using a worker thread.
 
 ### `def clear(self) -> None:`
 
-No-op clear method for LangChain compatibility.
+Compatibility-only no-op; does not delete or invalidate Shibahama memories.
 
 ### `async def aclear(self) -> None:`
 
-Async no-op clear method for LangChain compatibility.
+Async compatibility-only no-op; does not delete or invalidate memories.

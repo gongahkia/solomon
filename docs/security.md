@@ -163,25 +163,36 @@ but their request log entries still record only metadata and counts.
 ## Encryption At Rest
 
 `core/src/encryption.rs` defines an `EncryptionAtRest` trait with `encrypt` and
-`decrypt` hooks, plus a `NoopEncryption` implementation used for tests and
-extension wiring.
+`decrypt` hooks. `NoopEncryption` is the default provider used by
+`RedbMemoryStore::open`, so the default redb store is plaintext at rest.
 
-The current default redb store should be treated as plaintext at rest. The
-encryption trait is present as an integration point; it is not a claim that
-memory content, event logs, snapshots, embeddings, or compacted cold content are
-encrypted by default.
+Rust callers can opt in with `RedbMemoryStore::open_with_encryption` and
+`Aes256GcmEncryption`. The encrypted provider wraps table payload values for the
+event log, materialized memory rows, embeddings, compacted cold content, graph
+entities, and graph relations. It authenticates the table name and row key as
+AEAD associated data, so a copied payload cannot be silently replayed into a
+different table/key context. Opening an encrypted store with the wrong key, or
+with the plaintext provider, fails closed during recovery.
 
-If a deployment needs encryption at rest today, use filesystem, volume, or
-platform encryption around the store path, and do not treat Shibahama snapshots
-as sanitized exports.
+This is payload encryption, not a complete secret-management system. Shibahama
+does not generate, persist, rotate, unwrap, or escrow encryption keys. The redb
+file can still expose database metadata such as table names, row keys, file size,
+and write patterns. Deployments that need stronger operational guarantees should
+combine the provider with filesystem, volume, or platform encryption.
+
+Plaintext snapshot export is disabled for encrypted stores. Snapshots from
+plaintext stores remain sensitive operational artifacts, not sanitized audit
+summaries.
 
 ## Public Surface Checklist
 
 The current public security-relevant surfaces are:
 
 - `shibahama_core::encryption::EncryptionAtRest`, exported through
-  `core/src/lib.rs`, for future encryption-at-rest providers;
+  `core/src/lib.rs`, for encryption-at-rest providers;
 - `shibahama_core::encryption::NoopEncryption`, the explicit no-op provider;
+- `shibahama_core::encryption::Aes256GcmEncryption`, the optional AES-256-GCM
+  provider for encrypted redb payloads;
 - server request logs from `shibahama serve`, emitted through
   `log_server_request` as metadata and cost counters only;
 - `ShibahamaConfig::ingest_credence`, which swaps source-kind default credence
@@ -197,9 +208,9 @@ The current public security-relevant surfaces are:
 - `why(memory_id)` traces, which expose provenance, credence, tier, currency,
   significance, and audit information for a memory.
 
-This confirms the encryption hook and metadata-only logging behavior are visible
-from the repository's public surfaces. It does not mean encryption is active by
-default.
+This confirms optional payload encryption and metadata-only logging behavior are
+visible from the repository's public surfaces. It does not mean encryption is
+active by default.
 
 ## Snapshots And Exports
 
@@ -215,7 +226,8 @@ reviewed separately.
 
 The current repository does not yet guarantee:
 
-- built-in encryption at rest for the default redb backend;
+- encryption at rest for the default redb backend;
+- built-in encryption key management or rotation;
 - hard multi-tenant isolation inside one store;
 - a complete prompt-injection defense for all host-agent usage patterns;
 - deletion or right-to-erasure semantics, because the core invariant is

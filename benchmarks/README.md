@@ -46,8 +46,10 @@ leaderboard. Flat retrieval and long-context baselines may win on one-shot QA,
 especially when the relevant history is small enough to search or place in
 context. Treat CurrencyBench stale-answer rate, token cost, and time to
 correction as the primary local metrics. Treat LoCoMo and LongMemEval results as
-valid only when the official exports and raw run artifacts are present, and
-report flat-retrieval baselines honestly even when they are better.
+valid only when the official exports and raw run artifacts are present. Runs with
+`--dataset` record the dataset path, byte size, SHA-256, and loader format so the
+artifact can be audited later. Report flat-retrieval baselines honestly even when
+they are better.
 
 ## Feature Ablations
 

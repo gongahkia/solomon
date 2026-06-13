@@ -32,14 +32,22 @@ Each case has:
 - an expected current answer;
 - a forbidden stale answer.
 
-The deterministic v0 suite currently includes four cases:
+The deterministic v0 suite currently includes twelve cases:
 
 | Case | Change | Expected | Forbidden |
 | --- | --- | --- | --- |
-| `billing-owner` | Billing ownership moved from Maya to Jules. | `Jules` | `Maya` |
-| `api-route` | User lookup moved from v1 to v2. | `/api/v2/users/{id}` | `/api/v1/users/{id}` |
-| `deploy-region` | Production region changed after a latency incident. | `us-west-2` | `us-east-1` |
+| `incident-channel` | Incident channel moved to a new room. | `#incident-response` | `#incident-war-room` |
+| `support-sla` | Enterprise support SLA changed. | `1 hour` | `4 hours` |
 | `feature-flag` | Checkout kill switch flag was renamed. | `checkout_halt_writes` | `checkout_disable_all` |
+| `pricing-plan` | Pricing plan was renamed before launch. | `Pro` | `Growth` |
+| `cache-ttl` | Profile cache TTL changed after freshness review. | `5 minutes` | `30 minutes` |
+| `runbook-owner` | Payments runbook owner changed after rotation. | `Lin` | `Omar` |
+| `model-alias` | Summarizer model alias changed after migration. | `summary-stable-v2` | `summary-stable-v1` |
+| `api-route` | User lookup moved from v1 to v2. | `/api/v2/users/{id}` | `/api/v1/users/{id}` |
+| `billing-owner` | Billing ownership moved from Maya to Jules. | `Jules` | `Maya` |
+| `deploy-region` | Production region changed after a latency incident. | `us-west-2` | `us-east-1` |
+| `release-branch` | Release branch advanced after cutover. | `release/2026-06` | `release/2026-05` |
+| `database-primary` | Customer database primary moved during failover. | `db-primary-c` | `db-primary-a` |
 
 Cases are shuffled with a deterministic seed so systems cannot rely on fixed
 ordering.
@@ -148,6 +156,8 @@ When changing CurrencyBench:
 - regenerate `currencybench-v0.jsonl` with `generate.py`;
 - update this README if cases, metrics, or interpretation change;
 - commit JSON and Markdown result artifacts together;
+- keep the JSON config's dataset byte size and SHA-256 when running from
+  `--dataset`;
 - do not expand the benchmark with private or unreleasable data;
 - keep hosted-adapter credentials out of result files and logs.
 

@@ -13,6 +13,21 @@ reproducible from a fresh checkout today. LoCoMo and LongMemEval have official
 dataset loaders, but checked-in result claims still require caller-supplied
 dataset exports and committed run artifacts.
 
+## Claim Boundary
+
+The benchmark story is intentionally narrower than "beats flat retrieval on
+every memory QA task." Recent memory-benchmark work shows that plain retrieval,
+retrieval-stage tuning, or long context can be extremely strong on static
+one-shot QA. See [`null-hypothesis.md`](null-hypothesis.md) for the full threat
+model and citations.
+
+Shibahama's home turf is continuity: facts that recur, change, become stale, or
+need a visible reason why they should not be trusted. Result summaries should
+therefore foreground stale-answer rate, retrieval token cost, time to correction,
+and mutation/forgetting behavior before broad leaderboard accuracy. LoCoMo and
+LongMemEval results must be reported alongside flat retrieval baselines, even
+when those baselines win.
+
 ## Systems
 
 The harness uses a shared adapter interface with three operations: reset a case,

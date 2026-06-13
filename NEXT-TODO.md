@@ -65,18 +65,18 @@ hierarchies on LoCoMo/LongMemEval, and long-context models can sometimes bypass
 memory structures entirely. Do NOT hide this. Owning it is more credible than
 dodging it.
 
-11. Add `docs/null-hypothesis.md` that states the threat plainly: usage-aware
+11. [x] Add `docs/null-hypothesis.md` that states the threat plainly: usage-aware
     reconstructive memory may not beat flat retrieval on standard one-shot QA
     accuracy. Then define precisely the regime where it SHOULD win and why:
     - continuity / repeated-use tasks where the same facts recur and CHANGE over
       time (currency), measured by stale-answer-rate and token-economics, not
       one-shot recall. (Cite the 2026 framing: memory is an economics/continuity
       win before an across-the-board recall win; "some agents improve from use".)
-12. Make the benchmark story match: position CurrencyBench + a continuity task as
+12. [x] Make the benchmark story match: position CurrencyBench + a continuity task as
     the home turf; report flat-retrieval baselines honestly even where they win on
     plain accuracy. The claim is "wins on stale-rate + tokens on continuity tasks",
     not "beats everyone on LoCoMo".
-13. Put a short, honest "When NOT to use Shibahama" section in the README (flat
+13. [x] Put a short, honest "When NOT to use Shibahama" section in the README (flat
     RAG is fine for stateless one-shot QA). This honesty is a feature.
 
 ## Part 4 — RL for memory operations (TODO-ONLY — do not build yet)

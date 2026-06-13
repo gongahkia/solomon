@@ -39,6 +39,16 @@ placeholders. The adapter registry validates this metadata at import time, so a
 future hosted adapter must declare checked-in result artifacts before it can be
 used by the harness.
 
+## Interpreting Results
+
+The expected Shibahama win condition is continuity, not every static recall
+leaderboard. Flat retrieval and long-context baselines may win on one-shot QA,
+especially when the relevant history is small enough to search or place in
+context. Treat CurrencyBench stale-answer rate, token cost, and time to
+correction as the primary local metrics. Treat LoCoMo and LongMemEval results as
+valid only when the official exports and raw run artifacts are present, and
+report flat-retrieval baselines honestly even when they are better.
+
 ## Feature Ablations
 
 Run the local feature-isolation suite:

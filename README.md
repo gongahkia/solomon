@@ -85,6 +85,8 @@ The current repository includes:
   supersession.
 - Reconstruction gate, quarantine, corroboration, and invalidate-not-overwrite
   replacement flow.
+- Human signal APIs for challenge, affirm, correct, pin, and unpin, with
+  append-only actor/timestamp/reason audit events.
 - Read-safety filters for stored role/directive-looking content.
 - CLI and optional HTTP server mode with namespace filtering, API-key auth, and
   metadata-only request logs.
@@ -94,6 +96,19 @@ The current repository includes:
 
 Architecture details live in [`docs/architecture.md`](docs/architecture.md), and
 plain-language concepts live in [`docs/concepts.md`](docs/concepts.md).
+
+## When Not To Use Shibahama
+
+Use plain RAG, keyword search, or long context when the job is stateless one-shot
+QA over mostly static content. If the whole useful corpus fits cheaply in
+context, if answers do not depend on supersession or current validity, or if you
+only need nearest-neighbor snippets, Shibahama's event log, credence, tiering,
+and reconstruction machinery may be unnecessary.
+
+Shibahama is aimed at continuity tasks where facts recur and change, stale
+answers are costly, and it matters to inspect why a memory is trusted,
+challenged, cold, or superseded. The benchmark boundary is documented in
+[`docs/null-hypothesis.md`](docs/null-hypothesis.md).
 
 ## Quickstart From This Checkout
 

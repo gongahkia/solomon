@@ -2,7 +2,7 @@
 
 This file is the current-state TODO, not an aspirational completion ledger. A checked item means the current
 worktree has code and tests or runnable evidence for it. An unchecked item is partial, shallow, unverified, or
-not built yet. There is no Phase 18 in this plan.
+not built yet.
 
 Kaypoh boundary status: Solomon is now self-contained. The local boundary engine is vendored under
 `src/solomon/boundary/engine/` from Kaypoh commit `7415069e57d69398e2c44ef6ababafb0c04a988b`; no `../kaypoh`
@@ -157,3 +157,17 @@ checkout is required at runtime.
 - [x] Annotated git tag `v0.1.0` is present in this worktree for the current release state.
 - [x] Built pip artifacts and desktop binary are present in `dist/`: sdist, wheel, and `solomon-local`.
 - [x] Early-user outreach and eval submission are externally tracked through the public GitHub `v0.1.0` release, attached release artifacts, and live GitHub issues #1-#5.
+
+## Phase 18 — Deterministic plans, contestability, and regulatory evidence
+
+- [x] Deterministic primitive plans are implemented as first-class API behavior through `/plans/execute`,
+  with sanctioned primitive validation, plan/store/result hashing, metadata-only `primitive_plan` audit
+  events, answer-path plan summaries, and deterministic tests in `tests/test_primitives.py`.
+- [x] Contestability is implemented as first-class service and API behavior through `contest`, `affirm`,
+  and `pin`, with role-gated correction promotion, quarantined proposed corrections, dependency staleness
+  propagation, recall-visible contest metadata, and coverage in `tests/test_contestability.py`.
+- [x] Regulatory evidence is documented in `docs/regulatory-evidence.md` and README, mapping provenance,
+  currency, deterministic call plans, verification, audit, boundary, and contest history to EU AI Act,
+  NIST AI RMF, ISO/IEC 42001, and multi-jurisdiction review needs.
+- [x] The documentation keeps the flag-don't-adjudicate stance: Solomon produces evidence about its own
+  behavior and currency, but does not certify compliance, decide legal correctness, or provide legal advice.

@@ -60,6 +60,17 @@ Core invariants:
 - Kaypoh mappings are volatile and flushed after reidentification.
 - Audit logs store metadata and hashes, not privileged prompt content.
 
+## Regulator-ready by construction
+
+Every model-backed answer carries a reproducible primitive plan, source provenance, currency state,
+verification status, dependency context, boundary metadata, and visible contest history. The `why` and
+audit-pack paths turn those fields into evidence about what Solomon did, why it did it, on what basis, and
+which human or system actor was accountable.
+
+Solomon produces evidence about its own reasoning and currency. It does not certify legal compliance,
+decide the law, or replace the firm's instructions-for-use, human oversight, or regulator-facing review
+process. See [Regulatory evidence](docs/regulatory-evidence.md).
+
 ## Demo
 
 Run the headline scenario:
@@ -113,5 +124,6 @@ uv run solomon recall "structure X regulation"
 - [Concepts](docs/concepts.md)
 - [Kaypoh integration](docs/kaypoh-integration.md)
 - [Threat model](docs/threat-model.md)
+- [Regulatory evidence](docs/regulatory-evidence.md)
 - [Benchmarks](docs/benchmarks.md)
 - [ADRs](docs/adr/README.md)

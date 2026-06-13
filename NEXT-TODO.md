@@ -60,12 +60,14 @@ contest improve the store.
     contest propagates staleness to dependents; role rules enforced. Covered by `tests/test_contestability.py`.
 
 ## Part 3 — EU AI Act / multi-jurisdiction regulator-ready evidence (document heavily)
-Context: EU AI Act full enforcement opens 2 Aug 2026; Art. 13 requires high-risk
-systems to provide interpretable explanations of how outputs were produced. The
+Context: EU AI Act Article 113 sets a general application date of 2 August 2026
+with staged exceptions; the European Commission identifies August 2026 for the
+Act's transparency rules. Article 13 requires high-risk systems to support
+interpretation and appropriate use of outputs. The
 audit chain (currently framed as privilege defense) should be documented as
 GENERAL regulator-ready evidence, multi-jurisdictional.
 
-11. Add `docs/regulatory-evidence.md`:
+11. [x] Add `docs/regulatory-evidence.md`:
     - Reframe the audit chain as regulator-ready evidence generation, not only
       privilege defense. Map Solomon's artifacts (provenance, currency state,
       verification record, the deterministic call-plan from Part 1, contest
@@ -77,16 +79,19 @@ GENERAL regulator-ready evidence, multi-jurisdictional.
       evidence model maps to other regimes (e.g. NIST AI RMF, ISO/IEC 42001, and
       — reuse Kaypoh's existing 18-jurisdiction statute framing — note that the
       evidence chain is jurisdiction-agnostic while the *substantive* rules differ).
-      Be explicit that Solomon provides the evidence structure, not legal advice.
-12. Add a short README section: "Regulator-ready by construction" — every answer
+      Be explicit that Solomon provides the evidence structure, not legal advice. Covered in
+      `docs/regulatory-evidence.md` with source links to the EU AI Act, European Commission, NIST AI RMF,
+      NIST AI RMF Playbook, and ISO/IEC 42001.
+12. [x] Add a short README section: "Regulator-ready by construction" — every answer
     carries a reproducible plan + provenance + currency + contest history.
-13. Keep the flag-don't-adjudicate honesty: documentation must state Solomon
+13. [x] Keep the flag-don't-adjudicate honesty: documentation must state Solomon
     produces EVIDENCE about its own reasoning and currency, and does NOT certify
     legal compliance or decide the law.
 
 ## Reconcile the TODO
-14. Add Parts 1–2 as honest, accurately-checked phases; add Part 3 as documentation
-    tasks. Don't over-check. Annotate partials truthfully.
+14. [x] Add Parts 1–2 as honest, accurately-checked phases; add Part 3 as documentation
+    tasks. Don't over-check. Annotate partials truthfully. `TODO.md` now has Phase 18 with checked
+    implementation items for Parts 1 and 2, and checked documentation-only items for Part 3.
 
 ## Report back
 The primitive-plan executor + determinism/reproducibility test results; the

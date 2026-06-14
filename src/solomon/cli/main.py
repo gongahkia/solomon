@@ -32,6 +32,7 @@ from solomon.graph.models import EdgeConfidence, EdgeType
 from solomon.graph.suggestions import SuggestionDecision
 from solomon.graph.visualization import GraphFormat
 from solomon.mcp.server import run_sse_server, run_stdio_server, run_streamable_http_server
+from solomon.mcp.tools import SolomonMCPRuntime
 
 app = typer.Typer(help="Solomon command-line interface.")
 mcp_app = typer.Typer(help="Run Solomon MCP transports.")
@@ -159,6 +160,28 @@ def recall(
         RecallRequest(query=query, review_mode=review_mode, max_context_tokens=max_context_tokens)
     )
     _print_json(results, sort_keys=True)
+
+
+@app.command("preflight")
+def preflight(
+    query: Annotated[str, typer.Argument(help="Question or search query.")],
+    matter_id: Annotated[str | None, typer.Option("--matter-id", help="Restrict to a matter scope.")] = None,
+    client_id: Annotated[str | None, typer.Option("--client-id", help="Restrict to a client scope.")] = None,
+    max_items: Annotated[int, typer.Option("--max-items", min=1, help="Maximum current items to return.")] = 5,
+    max_context_tokens: Annotated[
+        int | None,
+        typer.Option("--max-context-tokens", min=1, help="Maximum estimated context tokens to assemble."),
+    ] = None,
+) -> None:
+    """Return MCP-shaped current context safe for prompt injection."""
+    result = SolomonMCPRuntime(_service()).preflight_context(
+        query=query,
+        matter_id=matter_id,
+        client_id=client_id,
+        max_items=max_items,
+        max_context_tokens=max_context_tokens,
+    )
+    _print_json(result, sort_keys=True)
 
 
 def _print_currency(item_id: str) -> None:

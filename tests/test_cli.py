@@ -149,6 +149,12 @@ def test_cli_mcp_aligned_verbs_and_migration_shims(monkeypatch: pytest.MonkeyPat
     assert ingest.exit_code == 0
     item = json.loads(ingest.output)
 
+    preflight = runner.invoke(app, ["preflight", "reg r section 12"])
+    assert preflight.exit_code == 0
+    preflight_payload = json.loads(preflight.output)
+    assert preflight_payload["items"][0]["item"]["id"] == item["id"]
+    assert preflight_payload["boundary"]["status"] == "passed"
+
     dependency = runner.invoke(
         app,
         [

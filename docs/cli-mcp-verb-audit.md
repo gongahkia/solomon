@@ -9,7 +9,7 @@ Rule: MCP tool names use `solomon.<snake_case>`. CLI equivalents use kebab-case 
 | MCP tool | Preferred CLI | Migration shim |
 | --- | --- | --- |
 | `solomon.health` | `solomon health` | `solomon diagnostics` remains as richer local diagnostics |
-| `solomon.preflight_context` | pending: `solomon preflight` | none |
+| `solomon.preflight_context` | `solomon preflight <query>` | none |
 | `solomon.check_currency` | `solomon check-currency <item-id>` | `solomon show-currency <item-id>` |
 | `solomon.get_dependencies` | `solomon get-dependencies <item-id>` | none |
 | `solomon.verify_position` | `solomon verify-position <item-id> --outcome <decision> --by <id>` | none |

@@ -61,7 +61,6 @@ Headline deliverable. Everything else exists to support this.
 
 ## Workstream 4 — CLI/SDK polish (secondary infrastructure surface)
 
-61. [C] Add missing CLI commands: `solomon mcp serve`, `solomon console serve`, `solomon impact <authority>`, `solomon audit-pack <id>`, `solomon preflight <query>`.
 62. [C] Help text + examples for every command. `--help` should be portfolio-grade.
 63. [X] Publish `solomon` to TestPyPI; verify install path.
 64. [X] Cut v0.2.0 release on tag; PyPI publish via GH Actions.

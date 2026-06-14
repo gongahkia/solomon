@@ -39,7 +39,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2A — Design
 
-21. [D] Document error taxonomy: `boundary_rejected`, `currency_unknown`, `scope_denied`, `model_routing_failure`, `verification_required`. Land in `docs/mcp/errors.md`.
 22. [D] Document tool-call examples (request/response pairs) per tool, `docs/mcp/examples.md`.
 
 ### 2B — Implementation

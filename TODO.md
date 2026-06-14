@@ -64,7 +64,6 @@ Headline deliverable. Everything else exists to support this.
 63. [X] Publish `solomon` to TestPyPI; verify install path.
 64. [X] Cut v0.2.0 release on tag; PyPI publish via GH Actions.
 66. [C] Publish TS SDK to npm under `@solomon/sdk` (scope name TBD).
-68. [D] `docs/sdk/python.md` and `docs/sdk/typescript.md`: language-specific quickstarts.
 
 ---
 

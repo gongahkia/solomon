@@ -373,6 +373,7 @@ curl http://localhost:8140/health
 - [`docs/release-artifacts.md`](./docs/release-artifacts.md): v0.1.0 artifact hashes and release evidence.
 - [`docs/api/openapi.json`](./docs/api/openapi.json): generated OpenAPI contract.
 - [`docs/cli-mcp-verb-audit.md`](./docs/cli-mcp-verb-audit.md): CLI names aligned to MCP tool names.
+- [`docs/sdk/`](./docs/sdk/): Python and TypeScript SDK quickstarts.
 - [`docs/adr/README.md`](./docs/adr/README.md): architecture decision records.
 
 ## Development & Evaluation

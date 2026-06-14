@@ -14,7 +14,12 @@ from solomon.api.service import IngestRequest, SolomonService
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.mcp.auth import MCPAuthConfig, bearer_token_matches, token_from_env
 from solomon.mcp.logging import hash_mcp_input
-from solomon.mcp.server import available_tool_names, create_fastmcp_server, create_server_config
+from solomon.mcp.server import (
+    available_tool_names,
+    create_fastmcp_server,
+    create_server_config,
+    create_streamable_http_app,
+)
 from solomon.mcp.tools import READ_ONLY_TOOLS, mcp_tool_specs
 from solomon.mcp.transport import MCPTransportConfig
 
@@ -40,6 +45,7 @@ def test_mcp_tool_specs_mark_write_tools() -> None:
 def test_mcp_transport_config_url_only_for_http() -> None:
     assert MCPTransportConfig(kind="stdio").url is None
     assert MCPTransportConfig(kind="streamable-http", host="localhost", port=9000).url == "http://localhost:9000/mcp"
+    assert MCPTransportConfig(kind="sse", host="localhost", port=9000).url == "http://localhost:9000/sse"
 
 
 def test_mcp_auth_reads_configured_env_and_compares_constant_time() -> None:
@@ -114,6 +120,14 @@ def test_stdio_server_lists_tools(tmp_path: Path) -> None:
                 assert {tool.name for tool in tools.tools} == set(available_tool_names())
 
     anyio.run(call)
+
+
+def test_streamable_http_app_exposes_mcp_endpoint(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    app = create_streamable_http_app(service)
+
+    route_paths = {getattr(route, "path", "") for route in app.routes}
+    assert "/mcp" in route_paths
 
 
 def _structured_payload(result: Any) -> dict[str, Any]:

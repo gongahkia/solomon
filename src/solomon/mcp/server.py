@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
+from starlette.applications import Starlette
 
 from solomon import __version__
 from solomon.api.schemas import SolomonModel
@@ -53,6 +54,8 @@ def create_fastmcp_server(
         host=host,
         port=port,
         streamable_http_path="/mcp",
+        sse_path="/sse",
+        message_path="/messages/",
     )
     register_solomon_tools(server, SolomonMCPRuntime(service))
     return server
@@ -73,6 +76,35 @@ def run_stdio_server(service: SolomonService | None = None) -> None:
     server.run("stdio")
 
 
+def create_streamable_http_app(
+    service: SolomonService,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8141,
+) -> Starlette:
+    return create_fastmcp_server(service, host=host, port=port).streamable_http_app()
+
+
+def run_streamable_http_server(
+    service: SolomonService | None = None,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8141,
+) -> None:
+    server = create_fastmcp_server(service or service_from_settings(), host=host, port=port)
+    server.run("streamable-http")
+
+
+def run_sse_server(
+    service: SolomonService | None = None,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8141,
+) -> None:
+    server = create_fastmcp_server(service or service_from_settings(), host=host, port=port)
+    server.run("sse")
+
+
 def default_server_config() -> SolomonMCPServerConfig:
     return create_server_config(version=__version__)
 
@@ -86,9 +118,12 @@ __all__ = [
     "available_tool_names",
     "create_fastmcp_server",
     "create_server_config",
+    "create_streamable_http_app",
     "default_server_config",
     "main",
+    "run_sse_server",
     "run_stdio_server",
+    "run_streamable_http_server",
     "service_from_settings",
 ]
 

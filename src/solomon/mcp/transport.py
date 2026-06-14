@@ -8,7 +8,7 @@ from pydantic import Field
 
 from solomon.api.schemas import SolomonModel
 
-MCPTransportKind = Literal["stdio", "streamable-http"]
+MCPTransportKind = Literal["stdio", "streamable-http", "sse"]
 
 
 class MCPTransportConfig(SolomonModel):
@@ -21,7 +21,8 @@ class MCPTransportConfig(SolomonModel):
     def url(self) -> str | None:
         if self.kind == "stdio":
             return None
-        return f"http://{self.host}:{self.port}{self.path}"
+        path = "/sse" if self.kind == "sse" and self.path == "/mcp" else self.path
+        return f"http://{self.host}:{self.port}{path}"
 
 
 __all__ = ["MCPTransportConfig", "MCPTransportKind"]

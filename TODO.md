@@ -39,7 +39,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2A — Design
 
-22. [D] Document tool-call examples (request/response pairs) per tool, `docs/mcp/examples.md`.
 
 ### 2B — Implementation
 

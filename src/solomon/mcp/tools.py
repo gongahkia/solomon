@@ -15,6 +15,7 @@ from solomon.api.service import IngestRequest, PinRequest, RecallRequest, Solomo
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeItem, KnowledgeKind, SourceKind
 from solomon.graph.suggestions import SuggestionDecision
+from solomon.mcp.logging import MCPCallLogRecord, MCPCallStatus, hash_mcp_input
 from solomon.mcp.schemas import MCP_TOOL_JSON_SCHEMAS, JsonSchema
 
 
@@ -89,13 +90,21 @@ class SolomonMCPRuntime:
             return review
         entry = self.service.audit.append(
             "mcp_call",
-            {
-                "tool_name": "solomon.preflight_context",
-                "caller_id": caller_id,
-                "matter_id": matter_id,
-                "client_id": client_id,
-                "result_count": len(results),
-            },
+            _mcp_log_payload(
+                "solomon.preflight_context",
+                caller_id=caller_id,
+                matter_id=matter_id,
+                client_id=client_id,
+                boundary_outcome=cast(str | None, review.get("classification")),
+                input_payload={
+                    "query": query,
+                    "matter_id": matter_id,
+                    "client_id": client_id,
+                    "max_items": max_items,
+                    "max_context_tokens": max_context_tokens,
+                },
+                metadata={"result_count": len(results)},
+            ),
         )
         return {
             "items": results,
@@ -128,7 +137,15 @@ class SolomonMCPRuntime:
         state = _currency_state_for_mcp(str(currency["currency_state"]))
         reasons: list[dict[str, Any]] = [{"explanation": value} for value in currency.get("explanation", [])]
         reasons.extend(cast(list[dict[str, Any]], currency.get("stale_reasons", [])))
-        _log_mcp_call(self.service, "solomon.check_currency", caller_id=caller_id, currency_outcome=state)
+        _log_mcp_call(
+            self.service,
+            "solomon.check_currency",
+            caller_id=caller_id,
+            matter_id=matter_id,
+            client_id=client_id,
+            currency_outcome=state,
+            input_payload={"knowledge_item_id": knowledge_item_id, "as_of": as_of},
+        )
         return {
             "knowledge_item_id": knowledge_item_id,
             "state": state,
@@ -159,7 +176,14 @@ class SolomonMCPRuntime:
         if scope_error is not None:
             return scope_error
         trace = self.service.why(knowledge_item_id)
-        _log_mcp_call(self.service, "solomon.get_dependencies", caller_id=caller_id)
+        _log_mcp_call(
+            self.service,
+            "solomon.get_dependencies",
+            caller_id=caller_id,
+            matter_id=matter_id,
+            client_id=client_id,
+            input_payload={"knowledge_item_id": knowledge_item_id, "direction": direction, "depth": depth},
+        )
         return {
             "knowledge_item_id": knowledge_item_id,
             "upstream": trace.dependencies if direction in {"upstream", "both"} else [],
@@ -207,13 +231,20 @@ class SolomonMCPRuntime:
         currency = self.service.evaluate_currency(knowledge_item_id)
         entry = self.service.audit.append(
             "mcp_call",
-            {
-                "tool_name": "solomon.verify_position",
-                "caller_id": caller_id,
-                "item_id": knowledge_item_id,
-                "decision": decision,
-                "evidence_ref_sha256": _sha256(evidence_ref),
-            },
+            _mcp_log_payload(
+                "solomon.verify_position",
+                caller_id=caller_id,
+                matter_id=matter_id,
+                client_id=client_id,
+                currency_outcome=_currency_state_for_mcp(str(currency["currency_state"])),
+                input_payload={
+                    "knowledge_item_id": knowledge_item_id,
+                    "decision": decision,
+                    "successor_id": successor_id,
+                    "recorded_at": recorded_at,
+                },
+                metadata={"evidence_ref_sha256": _sha256(evidence_ref)},
+            ),
         )
         return {
             "item": item.model_dump(mode="json"),
@@ -252,13 +283,21 @@ class SolomonMCPRuntime:
         suggestions = self.service.dependency_suggestions(item_id=item.id, decision=SuggestionDecision.PENDING)
         entry = self.service.audit.append(
             "mcp_call",
-            {
-                "tool_name": "solomon.ingest",
-                "caller_id": caller_id,
-                "item_id": item.id,
-                "matter_id": item.matter_id,
-                "client_id": item.client_id,
-            },
+            _mcp_log_payload(
+                "solomon.ingest",
+                caller_id=caller_id,
+                matter_id=item.matter_id,
+                client_id=item.client_id,
+                boundary_outcome=cast(str | None, review.get("classification")),
+                input_payload={
+                    "source_ref": source_ref,
+                    "scope": scope,
+                    "kind": kind,
+                    "source_kind": source_kind,
+                    "author": author,
+                },
+                metadata={"item_id": item.id},
+            ),
         )
         return {
             "item": item.model_dump(mode="json"),
@@ -291,7 +330,13 @@ class SolomonMCPRuntime:
             manifest = (pack_dir / "manifest.json").read_text(encoding="utf-8")
         entry = self.service.audit.append(
             "mcp_call",
-            {"tool_name": "solomon.audit_pack", "caller_id": caller_id, "item_id": knowledge_item_id, "format": format},
+            _mcp_log_payload(
+                "solomon.audit_pack",
+                caller_id=caller_id,
+                matter_id=matter_id,
+                client_id=client_id,
+                input_payload={"knowledge_item_id": knowledge_item_id, "format": format},
+            ),
         )
         return {
             "knowledge_item_id": knowledge_item_id,
@@ -326,7 +371,14 @@ class SolomonMCPRuntime:
             decision=SuggestionDecision(decision),
             limit=limit,
         )
-        _log_mcp_call(self.service, "solomon.dependency_suggestions", caller_id=caller_id)
+        _log_mcp_call(
+            self.service,
+            "solomon.dependency_suggestions",
+            caller_id=caller_id,
+            matter_id=matter_id,
+            client_id=client_id,
+            input_payload={"knowledge_item_id": knowledge_item_id, "decision": decision, "limit": limit},
+        )
         return {
             "suggestions": [suggestion.model_dump(mode="json") for suggestion in suggestions],
             "scope": {"matter_id": item.matter_id, "client_id": item.client_id, "caller_id": caller_id},
@@ -355,6 +407,7 @@ class SolomonMCPRuntime:
             caller_id=caller_id,
             matter_id=matter_id,
             client_id=client_id,
+            input_payload={"external_authority_id": external_authority_id, "as_of": as_of},
         )
         return {
             "external_authority_id": external_authority_id,
@@ -460,17 +513,53 @@ def _log_mcp_call(
     matter_id: str | None = None,
     client_id: str | None = None,
     currency_outcome: str | None = None,
+    boundary_outcome: str | None = None,
+    input_payload: dict[str, Any] | None = None,
+    status: MCPCallStatus = "ok",
+    error_code: str | None = None,
 ) -> None:
     service.audit.append(
         "mcp_call",
-        {
-            "tool_name": tool_name,
-            "caller_id": caller_id,
-            "matter_id": matter_id,
-            "client_id": client_id,
-            "currency_outcome": currency_outcome,
-        },
+        _mcp_log_payload(
+            tool_name,
+            caller_id=caller_id,
+            matter_id=matter_id,
+            client_id=client_id,
+            currency_outcome=currency_outcome,
+            boundary_outcome=boundary_outcome,
+            input_payload=input_payload,
+            status=status,
+            error_code=error_code,
+        ),
     )
+
+
+def _mcp_log_payload(
+    tool_name: str,
+    *,
+    caller_id: str | None = None,
+    matter_id: str | None = None,
+    client_id: str | None = None,
+    currency_outcome: str | None = None,
+    boundary_outcome: str | None = None,
+    input_payload: dict[str, Any] | None = None,
+    status: MCPCallStatus = "ok",
+    error_code: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = MCPCallLogRecord(
+        tool_name=tool_name,
+        input_sha256=hash_mcp_input(input_payload or {}),
+        status=status,
+        caller_id=caller_id,
+        matter_id=matter_id,
+        client_id=client_id,
+        currency_outcome=currency_outcome,
+        boundary_outcome=boundary_outcome,
+        error_code=error_code,
+        metadata=metadata or {},
+    )
+    return payload.model_dump(mode="json")
 
 
 def _review_mcp_output(
@@ -508,12 +597,13 @@ def _review_mcp_output(
     if classification in service.boundary.policy.unsafe_classifications:
         service.audit.append(
             "mcp_call",
-            {
-                "tool_name": tool_name,
-                "boundary_outcome": classification,
-                "error_code": "boundary_rejected",
-                "matter_id": matter_id,
-            },
+            _mcp_log_payload(
+                tool_name,
+                matter_id=matter_id,
+                status="error",
+                boundary_outcome=classification,
+                error_code="boundary_rejected",
+            ),
         )
         return _error_result(
             "boundary_rejected",

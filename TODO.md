@@ -42,7 +42,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2B — Implementation
 
-31. [C] Structured logging on every MCP call: tool name, caller, scope, currency outcome, boundary outcome. Land in audit journal.
 32. [C] Rate-limit middleware (token-bucket per caller), configurable.
 33. [C] Graceful shutdown + connection draining.
 34. [C] Health-check tool `solomon.health()` exposing version, store status, journal status, boundary status.

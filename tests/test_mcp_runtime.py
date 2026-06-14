@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -127,6 +128,42 @@ def test_mcp_preflight_rejects_boundary_unsafe_output(tmp_path: Path) -> None:
     assert result["ok"] is False
     assert result["error"]["code"] == "boundary_rejected"
     assert result["error"]["details"]["classification"] == "HIGH_RISK"
+
+
+def test_mcp_call_logging_records_required_fields(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="structure x under regulation r section 12",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo-1",
+            matter_id="matter-a",
+            client_id="client-a",
+        )
+    )
+    runtime = SolomonMCPRuntime(service)
+
+    runtime.check_currency(
+        knowledge_item_id=item.id,
+        matter_id="matter-a",
+        client_id="client-a",
+        caller_id="claude:test",
+    )
+
+    entries = [
+        json.loads(line)
+        for line in (tmp_path / "journal" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    mcp_entries = [entry for entry in entries if entry["event_type"] == "mcp_call"]
+    payload = mcp_entries[-1]["payload"]
+    assert payload["tool_name"] == "solomon.check_currency"
+    assert payload["caller_id"] == "claude:test"
+    assert payload["matter_id"] == "matter-a"
+    assert payload["client_id"] == "client-a"
+    assert payload["currency_outcome"] == "live"
+    assert payload["boundary_outcome"] is None
+    assert payload["input_sha256"]
 
 
 class HighRiskBoundaryClient:

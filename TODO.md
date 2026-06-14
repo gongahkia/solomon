@@ -45,7 +45,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2C — Tests
 
-35. [C] Unit tests per MCP tool: happy path, boundary-reject, scope-deny, stale propagation, audit-pack content.
 
 ### 2D — Compatibility & directory listing
 

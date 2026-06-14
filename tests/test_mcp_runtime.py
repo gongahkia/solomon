@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import string
 import tempfile
@@ -12,7 +13,7 @@ from typing import Any
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from solomon.api.service import DependencyRequest, IngestRequest, SolomonService
+from solomon.api.service import AuthorityChangeRequest, DependencyRequest, IngestRequest, SolomonService
 from solomon.boundary.solomon import SolomonBoundary
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.graph.models import EdgeType
@@ -161,6 +162,120 @@ def test_mcp_preflight_rejects_boundary_unsafe_output(tmp_path: Path) -> None:
     assert result["ok"] is False
     assert result["error"]["code"] == "boundary_rejected"
     assert result["error"]["details"]["classification"] == "HIGH_RISK"
+
+
+def test_mcp_ingest_rejects_boundary_unsafe_output(tmp_path: Path) -> None:
+    client = RecordingHighRiskBoundaryClient()
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    service.boundary = SolomonBoundary(client)
+    runtime = SolomonMCPRuntime(service)
+
+    result = runtime.ingest(
+        text="boundary blocked item",
+        source_ref="memo-unsafe",
+        scope={"matter_id": "matter-a", "client_id": "client-a"},
+        kind="position",
+        source_kind="partner",
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "boundary_rejected"
+    assert client.review_requests[-1]["document_type"] == "mcp_tool_result"
+
+
+def test_mcp_item_scoped_tools_deny_wrong_scope(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="structure x under regulation r section 12",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo-1",
+            matter_id="matter-a",
+            client_id="client-a",
+        )
+    )
+    runtime = SolomonMCPRuntime(service)
+
+    results = [
+        runtime.check_currency(knowledge_item_id=item.id, matter_id="matter-b", client_id="client-b"),
+        runtime.get_dependencies(knowledge_item_id=item.id, matter_id="matter-b", client_id="client-b"),
+        runtime.verify_position(
+            knowledge_item_id=item.id,
+            verifier_id="partner-a",
+            decision="reaffirm",
+            evidence_ref="memo-1",
+            matter_id="matter-b",
+            client_id="client-b",
+        ),
+        runtime.audit_pack(knowledge_item_id=item.id, matter_id="matter-b", client_id="client-b"),
+        runtime.dependency_suggestions(knowledge_item_id=item.id, matter_id="matter-b", client_id="client-b"),
+    ]
+
+    assert {result["error"]["code"] for result in results} == {"scope_denied"}
+
+
+def test_mcp_impact_stale_propagation_updates_currency(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="structure x depends on regulation r section 12",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo-1",
+            matter_id="matter-a",
+            client_id="client-a",
+        )
+    )
+    service.add_dependency(
+        DependencyRequest(
+            source_id=item.id,
+            target_id="reg-r-12",
+            edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+            target_kind="external_authority",
+        )
+    )
+    runtime = SolomonMCPRuntime(service)
+
+    impact = runtime.impact(external_authority_id="reg-r-12", matter_id="matter-a", client_id="client-a")
+    service.register_authority_change(
+        "reg-r-12",
+        AuthorityChangeRequest(new_version="v2", changed_at="2026-01-01T00:00:00+00:00"),
+    )
+    currency = runtime.check_currency(knowledge_item_id=item.id, matter_id="matter-a", client_id="client-a")
+
+    assert impact["stale_item_ids"] == [item.id]
+    assert currency["state"] == "stale_pending"
+    assert currency["reasons"]
+
+
+def test_mcp_audit_pack_contains_verifiable_manifest(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="structure x under regulation r section 12",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo-1",
+            matter_id="matter-a",
+            client_id="client-a",
+        )
+    )
+    runtime = SolomonMCPRuntime(service)
+
+    pack = runtime.audit_pack(knowledge_item_id=item.id, matter_id="matter-a", client_id="client-a")
+    manifest = json.loads(pack["pack"]["manifest_json"])
+    unsigned_manifest = dict(manifest)
+    supplied_hash = unsigned_manifest.pop("manifest_sha256")
+    computed_hash = hashlib.sha256(
+        json.dumps(unsigned_manifest, sort_keys=True, indent=2).encode("utf-8")
+    ).hexdigest()
+
+    assert manifest["schema"] == "solomon.audit_pack.v1"
+    assert manifest["journal_file"] == "journal.jsonl"
+    assert manifest["journal_sha256"]
+    assert supplied_hash == computed_hash
+    assert pack["hash_chain"]["entry_hash"]
 
 
 def test_mcp_call_logging_records_required_fields(tmp_path: Path) -> None:

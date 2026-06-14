@@ -13,6 +13,8 @@ npm run build
 
 Load the generated `dist/` folder from `chrome://extensions` with Developer Mode enabled.
 
+See [docs/implementation-notes.md](./docs/implementation-notes.md) for current architecture decisions and platform risks.
+
 ## Current Scope
 
 The first implementation pass is intentionally local-first:

@@ -154,7 +154,16 @@ The novel structure: a graph where firm knowledge hangs off the things it relies
 - Any context assembled for a model call → `/pseudonymize` before egress; response → `/reidentify`.
 - Routing: matter sensitivity decides remote-ZDR vs local model. Strict matters never egress even sanitised.
 
-### 6.5 Audit chain
+### 6.5 Curator console scope
+The curator console is limited to three screens:
+
+1. **Verification Desk** — review items needing reaffirm, supersede, retire, or pin decisions.
+2. **Dependency Review** — accept or reject suggested internal/external dependency edges.
+3. **Audit Pack export** — generate provenance, dependency, verification, boundary, and hash-chain artifacts.
+
+It is not a chat surface. It is not a retrieval UI. It is not a drafting product. External legal-AI surfaces call Solomon through MCP/API; the console exists only for human curation actions that need traceable review.
+
+### 6.6 Audit chain
 Append-only journal: what was known, when, on what basis, what verification ran, what crossed the boundary (metadata only). This is the privilege/defensibility artifact.
 
 ---

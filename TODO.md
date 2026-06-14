@@ -20,7 +20,6 @@ Portfolio-mode execution plan. Infra-first, MCP-primary, OSS, SEA jurisdiction f
 
 PRD/README pivot from CLI-first to MCP-first infrastructure with thin curator console. No engine changes here; pure rewrite.
 
-5. [D] Replace README headline. Draft 3 candidates; pick one. Lead with "MCP-native currency layer for internal legal knowledge — works behind Claude, Copilot, Harvey, iManage."
 6. [D] Rewrite README Quick Start: lead with `solomon mcp serve` + Claude Desktop config snippet. Demote raw CLI to "Power users / dev loop" subsection.
 7. [D] Re-record headline demo GIF: Claude Desktop calls Solomon via MCP, receives "this position is stale, here's what superseded it, here's the audit pack." Replace existing CLI stale-house-view GIF as headline; keep CLI GIF lower in README.
 8. [D] Update README Table of Contents to reflect new ordering: MCP → Curator Console → CLI/SDK → Boundary → Audit → Evaluations.

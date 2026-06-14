@@ -12,7 +12,7 @@
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square">
 </p>
 
-Currency-aware good-law infrastructure for a firm's own knowledge.
+**MCP-native currency layer for internal legal knowledge — works behind Claude, Copilot, Harvey, iManage.**
 
 Solomon tracks whether internal positions, clauses, house views, notes, and prior advice are still live,
 what they depend on, and why re-verification is due. It keeps firm knowledge behind a vendored

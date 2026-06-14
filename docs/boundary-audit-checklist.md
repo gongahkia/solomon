@@ -34,8 +34,8 @@ firm knowledge, the Solomon boundary, model endpoints, storage, tenants, and aud
 
 ```bash
 uv run ruff check .
-uv run mypy src tests scripts examples/stale-house-view/run.py benchmarks/performance_budget.py
-uv run mypy examples/internal-supersession/run.py
+uv run mypy src tests scripts examples/scenarios/stale-house-view/run.py benchmarks/performance_budget.py
+uv run mypy examples/scenarios/internal-supersession/run.py
 uv run pytest tests/test_boundary.py tests/test_security_governance.py tests/test_audit.py tests/test_api_client_cli.py
 ```
 

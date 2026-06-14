@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from solomon.api.schemas import SolomonModel
 from solomon.currency.models import KnowledgeItem
-from solomon.store.sqlite import SQLiteKnowledgeStore
+from solomon.store.types import KnowledgeStoreProtocol
 
 
 class SupersessionProposal(SolomonModel):
@@ -44,7 +44,7 @@ def propose_supersession(newer: KnowledgeItem, candidates: list[KnowledgeItem]) 
 
 
 def confirm_supersession(
-    store: SQLiteKnowledgeStore,
+    store: KnowledgeStoreProtocol,
     proposal: SupersessionProposal,
 ) -> tuple[KnowledgeItem, KnowledgeItem]:
     successor = store.get_item(proposal.successor_id)

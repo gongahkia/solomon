@@ -55,7 +55,7 @@ uv run pytest
 Run the headline stale-house-view scenario:
 
 ```bash
-uv run python examples/stale-house-view/run.py
+uv run python examples/scenarios/stale-house-view/run.py
 ```
 
 Start the API:
@@ -217,9 +217,9 @@ with SolomonClient("http://127.0.0.1:8140") as client:
 
 Included scenarios:
 
-- [`examples/stale-house-view/`](./examples/stale-house-view/): a 2023 memo becomes stale after a 2025
+- [`examples/scenarios/stale-house-view/`](./examples/scenarios/stale-house-view/): a 2023 memo becomes stale after a 2025
   authority change; the warehouse baseline misses it.
-- [`examples/internal-supersession/`](./examples/internal-supersession/): a 2024 position supersedes a
+- [`examples/scenarios/internal-supersession/`](./examples/scenarios/internal-supersession/): a 2024 position supersedes a
   2022 position while the older item remains available for review and audit.
 
 ## How It Works
@@ -413,7 +413,7 @@ uv run python benchmarks/performance_budget.py
 Run the headline demo:
 
 ```bash
-uv run python examples/stale-house-view/run.py
+uv run python examples/scenarios/stale-house-view/run.py
 ```
 
 Regenerate README media and API artifacts:

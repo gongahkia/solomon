@@ -8,7 +8,7 @@ from types import ModuleType
 
 
 def _load_example() -> ModuleType:
-    path = Path("examples/stale-house-view/run.py")
+    path = Path("examples/scenarios/stale-house-view/run.py")
     spec = importlib.util.spec_from_file_location("stale_house_view", path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

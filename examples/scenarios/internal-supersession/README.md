@@ -8,7 +8,7 @@ quietly superseded by a 2024 position on the same topic and jurisdiction.
 Run:
 
 ```bash
-uv run python examples/internal-supersession/run.py
+uv run python examples/scenarios/internal-supersession/run.py
 ```
 
 Expected behavior:

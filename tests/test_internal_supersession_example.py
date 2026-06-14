@@ -8,7 +8,7 @@ from typing import Any
 
 
 def _load_example() -> Any:
-    path = Path(__file__).resolve().parents[1] / "examples" / "internal-supersession" / "run.py"
+    path = Path(__file__).resolve().parents[1] / "examples" / "scenarios" / "internal-supersession" / "run.py"
     spec = importlib.util.spec_from_file_location("internal_supersession_example", path)
     if spec is None or spec.loader is None:
         raise RuntimeError("failed to load internal supersession example")

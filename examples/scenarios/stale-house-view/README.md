@@ -13,5 +13,5 @@ This runnable example demonstrates Solomon's wedge:
 Run:
 
 ```bash
-uv run python examples/stale-house-view/run.py
+uv run python examples/scenarios/stale-house-view/run.py
 ```

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Verification Desk{% endblock %}
+
+{% block content %}
+<section class="workspace">
+  <aside class="pane pane-list">
+    <div class="pane-head">
+      <div>
+        <p class="eyebrow">Curator console</p>
+        <h1>Verification Desk</h1>
+      </div>
+      <a class="icon-button" href="/console/verification" title="Refresh">↻</a>
+    </div>
+    <div class="filters" aria-label="Review filters">
+      <span>stale</span>
+      <span>contested</span>
+      <span>needs review</span>
+    </div>
+    <div id="review-list">
+      {% include "partials/verification_list.html" %}
+    </div>
+  </aside>
+  <section class="pane pane-preview" id="preview-panel">
+    {% include "partials/verification_preview.html" %}
+  </section>
+</section>
+{% endblock %}

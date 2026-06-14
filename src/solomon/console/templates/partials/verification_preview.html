@@ -1,0 +1,83 @@
+{% if error %}
+  <div class="notice error">{{ error }}</div>
+{% endif %}
+
+{% if selected %}
+  <div class="preview-grid">
+    <section class="summary">
+      <p class="eyebrow">Selected item</p>
+      <h2>{{ selected.item.id }}</h2>
+      <dl class="kv">
+        <dt>Currency</dt>
+        <dd>{{ selected.currency.currency_state }}</dd>
+        <dt>Credence</dt>
+        <dd>{{ selected.credence_tier }}</dd>
+        <dt>Verified</dt>
+        <dd>{{ selected.verification.verified_state }}</dd>
+        <dt>Source</dt>
+        <dd>{{ selected.provenance.source_ref }}</dd>
+        <dt>Reason</dt>
+        <dd>{{ selected.reason }}</dd>
+      </dl>
+    </section>
+
+    <section class="evidence">
+      <h3>Evidence</h3>
+      <p class="excerpt">{{ selected.item.content }}</p>
+      <div class="columns">
+        <div>
+          <h4>Dependencies</h4>
+          <ul>
+            {% for edge in selected.dependencies %}
+              <li>{{ edge.target_id }} · {{ edge.edge_type }}</li>
+            {% else %}
+              <li>none</li>
+            {% endfor %}
+          </ul>
+        </div>
+        <div>
+          <h4>Dependents</h4>
+          <ul>
+            {% for edge in selected.dependents %}
+              <li>{{ edge.source_id }} · {{ edge.edge_type }}</li>
+            {% else %}
+              <li>none</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <form
+    class="decision"
+    method="post"
+    action="/console/verification/items/{{ selected.item.id }}/decision"
+    hx-post="/console/verification/items/{{ selected.item.id }}/decision"
+    hx-target="#preview-panel"
+    hx-swap="innerHTML"
+  >
+    <fieldset>
+      <legend>Partner decision</legend>
+      <label><input type="radio" name="decision" value="reaffirm" checked> reaffirm</label>
+      <label><input type="radio" name="decision" value="supersede"> supersede</label>
+      <label><input type="radio" name="decision" value="retire"> retire</label>
+      <label><input type="radio" name="decision" value="pin"> pin</label>
+    </fieldset>
+    <label>
+      Evidence ref
+      <input name="evidence_ref" autocomplete="off" placeholder="memo-2026-01">
+    </label>
+    <label>
+      Successor id
+      <input name="successor_id" autocomplete="off" placeholder="required for supersede">
+    </label>
+    <label>
+      Partner id
+      <input name="partner_id" autocomplete="off" placeholder="Partner A">
+    </label>
+    <button type="submit">Submit decision</button>
+  </form>
+{% else %}
+  <div class="empty">Select an item.</div>
+{% endif %}

@@ -51,7 +51,7 @@
         throw new Error(response?.error ?? "Classification failed");
       }
 
-      return response.note ?? null;
+      return response;
     } catch (error) {
       console.warn("[decorum] Classification request failed", error);
       return null;
@@ -105,19 +105,23 @@
     const label = document.createElement("span");
     label.textContent = "Rate this note";
 
-    const helpfulButton = document.createElement("button");
-    helpfulButton.className = "decorum-note-button";
-    helpfulButton.type = "button";
-    helpfulButton.dataset.rating = "helpful";
-    helpfulButton.setAttribute("aria-pressed", "false");
-    helpfulButton.textContent = "Helpful";
+    const ratings = [
+      ["helpful", "Helpful"],
+      ["incorrect", "Incorrect"],
+      ["unfair_tone_read", "Unfair"],
+      ["missing_context", "Missing context"],
+      ["too_noisy", "Too noisy"]
+    ];
 
-    const notHelpfulButton = document.createElement("button");
-    notHelpfulButton.className = "decorum-note-button";
-    notHelpfulButton.type = "button";
-    notHelpfulButton.dataset.rating = "not_helpful";
-    notHelpfulButton.setAttribute("aria-pressed", "false");
-    notHelpfulButton.textContent = "Not helpful";
+    const buttons = ratings.map(([rating, text]) => {
+      const button = document.createElement("button");
+      button.className = "decorum-note-button";
+      button.type = "button";
+      button.dataset.rating = rating;
+      button.setAttribute("aria-pressed", "false");
+      button.textContent = text;
+      return button;
+    });
 
     actions.addEventListener("click", (event) => {
       const button = event.target.closest(".decorum-note-button");
@@ -138,7 +142,7 @@
       });
     });
 
-    actions.append(label, helpfulButton, notHelpfulButton);
+    actions.append(label, ...buttons);
     return actions;
   }
 
@@ -170,7 +174,7 @@
 
     const meta = document.createElement("p");
     meta.className = "decorum-note-meta";
-    meta.textContent = `Confidence ${formatConfidence(note.confidence)}. Local tonal classifier; no factual retrieval used.`;
+    meta.textContent = `Confidence ${formatConfidence(note.confidence)}. This flags a writing pattern, not the author. No factual retrieval used.`;
 
     header.append(icon, headerText);
     body.append(reason, meta);
@@ -179,7 +183,9 @@
     return card;
   }
 
-  function appendNote(element, note, post) {
+  function appendNote(element, classification, post) {
+    const note = classification.note;
+
     if (findExistingCard(post.id)) {
       return false;
     }
@@ -199,6 +205,7 @@
     sendRuntimeMessage({
       type: "DECORUM_NOTE_SHOWN",
       note,
+      classification,
       post,
       shownAt: new Date().toISOString()
     });
@@ -242,14 +249,15 @@
       return;
     }
 
-    const note = await requestClassification(post);
+    const classification = await requestClassification(post);
+    const note = classification?.note ?? null;
 
     if (!note) {
       element.dataset.decorumNoteState = "skipped";
       return;
     }
 
-    const inserted = appendNote(element, note, post);
+    const inserted = appendNote(element, classification, post);
 
     if (inserted) {
       console.info("[decorum] Rendered tonal note", {
@@ -313,6 +321,14 @@
     if (areaName === "local" && changes.decorumSettings) {
       enforceSettings().catch((error) => {
         console.error("[decorum] Failed to enforce settings", error);
+      });
+    }
+  });
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type === "DECORUM_SETTINGS_UPDATED") {
+      enforceSettings().catch((error) => {
+        console.error("[decorum] Failed to enforce broadcast settings", error);
       });
     }
   });

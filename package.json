@@ -7,7 +7,8 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "check": "node scripts/check.mjs",
-    "test": "npm run check && npm run test:runtime && npm run test:visual",
+    "test": "npm run check && npm run test:classifier && npm run test:runtime && npm run test:visual",
+    "test:classifier": "node scripts/test-classifier.mjs",
     "test:runtime": "node scripts/test-runtime.mjs",
     "test:visual": "node scripts/test-visual.mjs"
   },

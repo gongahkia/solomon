@@ -1,10 +1,19 @@
+import {
+  LOCAL_CLASSIFIER_VERSION,
+  createSkippedClassifierResponse,
+  createShownClassifierResponse,
+  createTraceId,
+  stableHash,
+  validateClassifierRequest
+} from "../shared/classifier-contract.js";
+
 const TONAL_RULES = [
   {
     kind: "engagement_bait",
-    label: "Engagement-bait",
+    label: "Engagement pattern",
     confidence: 0.88,
     reason:
-      "The post asks for low-friction reactions instead of adding substantive context.",
+      "The post asks readers for low-friction reactions, which can inflate engagement without adding context.",
     patterns: [
       /\bcomment\s+(yes|below|your|if)\b/i,
       /\bshare\s+this\b/i,
@@ -15,10 +24,10 @@ const TONAL_RULES = [
   },
   {
     kind: "humblebrag",
-    label: "Humblebrag",
+    label: "Achievement framing",
     confidence: 0.84,
     reason:
-      "The post frames self-promotion as humility or gratitude while foregrounding the achievement.",
+      "The post frames an achievement through humility or gratitude while still foregrounding the achievement.",
     patterns: [
       /\b(humbled|honou?red|grateful)\s+to\s+(announce|share|say)\b/i,
       /\bi'?m\s+(humbled|honou?red)\b/i,
@@ -27,10 +36,10 @@ const TONAL_RULES = [
   },
   {
     kind: "fake_vulnerability",
-    label: "Fake vulnerability",
+    label: "Vulnerability framing",
     confidence: 0.82,
     reason:
-      "The post uses a vulnerability setup that resolves into a polished career lesson.",
+      "The post uses a personal-disclosure setup that resolves into a polished career lesson.",
     patterns: [
       /\bi\s+almost\s+didn'?t\s+post\s+this\b/i,
       /\bthis\s+is\s+hard\s+to\s+share\b/i,
@@ -39,7 +48,7 @@ const TONAL_RULES = [
   },
   {
     kind: "ai_ghostwritten",
-    label: "AI-ghostwritten",
+    label: "Generic AI-like phrasing",
     confidence: 0.81,
     reason:
       "The post leans on generic, template-like phrasing with little concrete detail.",
@@ -65,10 +74,10 @@ const TONAL_RULES = [
   },
   {
     kind: "sycophancy",
-    label: "Sycophancy",
+    label: "Praise-heavy framing",
     confidence: 0.78,
     reason:
-      "The post uses praise-heavy language that reads more like approval seeking than analysis.",
+      "The post uses praise-heavy language without much supporting analysis.",
     patterns: [
       /\bincredible\s+leader(ship)?\b/i,
       /\bvisionary\s+leader\b/i,
@@ -77,7 +86,7 @@ const TONAL_RULES = [
   },
   {
     kind: "waffle",
-    label: "Waffle",
+    label: "Broad filler phrasing",
     confidence: 0.76,
     reason:
       "The post uses broad claims and filler phrasing without enough concrete substance.",
@@ -88,21 +97,6 @@ const TONAL_RULES = [
     ]
   }
 ];
-
-function stableHash(input) {
-  let hash = 2166136261;
-
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-
-  return (hash >>> 0).toString(36);
-}
-
-function normalizeText(value) {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
-}
 
 function findRuleMatches(text) {
   const matches = [];
@@ -123,48 +117,64 @@ function findRuleMatches(text) {
   return matches.sort((left, right) => right.rule.confidence - left.rule.confidence);
 }
 
-export function createTraceId(post, kind, timestamp = new Date().toISOString()) {
-  const randomPart = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-  const traceHash = stableHash(`${post.id}:${kind}:${timestamp}:${randomPart}`);
-  return `trace:${traceHash}`;
-}
+export function classifyPostTone(request, options = {}) {
+  const validation = validateClassifierRequest(request);
 
-export function classifyPostTone(post, options = {}) {
-  const text = normalizeText(post?.text);
+  if (!validation.ok) {
+    return createSkippedClassifierResponse({
+      request,
+      skippedReason: "contract_validation_failed"
+    });
+  }
+
+  const text = request.post.text;
 
   if (!text) {
-    return {
-      note: null,
+    return createSkippedClassifierResponse({
+      request,
       skippedReason: "empty_post"
-    };
+    });
   }
 
   const [match] = findRuleMatches(text);
 
   if (!match) {
-    return {
-      note: null,
+    return createSkippedClassifierResponse({
+      request,
       skippedReason: "no_tonal_signal"
-    };
+    });
   }
 
   const generatedAt = options.generatedAt ?? new Date().toISOString();
-  const postId = String(post.id ?? stableHash(text.slice(0, 500)));
+  const postId = request.post.id;
   const note = {
-    traceId: createTraceId({ id: postId }, match.rule.kind, generatedAt),
+    traceId: createTraceId({
+      requestId: request.requestId,
+      postId,
+      kind: match.rule.kind,
+      generatedAt
+    }),
     dedupeKey: `post:${stableHash(`${postId}:${match.rule.kind}`)}`,
     kind: match.rule.kind,
     label: match.rule.label,
     reason: match.rule.reason,
     confidence: match.rule.confidence,
-    model: "local-tonal-rules-v1",
+    model: LOCAL_CLASSIFIER_VERSION,
     evidence: match.evidence.slice(0, 3),
     sources: [],
     generatedAt
   };
 
-  return {
-    note,
-    skippedReason: null
-  };
+  if (note.confidence < request.settingsSnapshot.minimumConfidence) {
+    return createSkippedClassifierResponse({
+      request,
+      skippedReason: "below_confidence_threshold",
+      candidate: note
+    });
+  }
+
+  return createShownClassifierResponse({
+    request,
+    note
+  });
 }

@@ -213,6 +213,12 @@
     }
   });
 
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type === "DECORUM_SETTINGS_UPDATED") {
+      scheduleScan();
+    }
+  });
+
   window.Decorum = window.Decorum ?? {};
   window.Decorum.detector = {
     scan,

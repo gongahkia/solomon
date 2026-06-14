@@ -59,29 +59,29 @@ try {
     initialDomState.header === "Readers added context they thought people might want to know.",
     "note header should match the intended Community Notes wording"
   );
-  assert(initialDomState.label === "Engagement-bait: ", "first matching tonal label should be rendered");
+  assert(initialDomState.label === "Engagement pattern: ", "first matching tonal label should be rendered");
   assert(initialDomState.traceId?.startsWith("trace:"), "rendered note should have a trace ID");
   assert(initialDomState.confidence >= 0.75, "rendered note should clear default confidence threshold");
 
   serviceWorker = await chromium.serviceWorker();
   await serviceWorker.send("Runtime.enable");
 
-  await evaluate(
-    serviceWorker,
-    "chrome.storage.local.set({ decorumSettings: { enabled: true, tonalClassifierEnabled: true, minimumConfidence: 0.99 } })",
-    { awaitPromise: true }
-  );
+  async function updateSettings(settings) {
+    await evaluate(
+      serviceWorker,
+      `globalThis.DecorumBackground.updateSettings(${JSON.stringify(settings)})`,
+      { awaitPromise: true }
+    );
+  }
+
+  await updateSettings({ enabled: true, tonalClassifierEnabled: true, minimumConfidence: 0.99 });
   await waitForExpression(
     page,
     "document.querySelectorAll('.decorum-note-card').length === 0",
     "threshold should remove visible note"
   );
 
-  await evaluate(
-    serviceWorker,
-    "chrome.storage.local.set({ decorumSettings: { enabled: true, tonalClassifierEnabled: true, minimumConfidence: 0.75 } })",
-    { awaitPromise: true }
-  );
+  await updateSettings({ enabled: true, tonalClassifierEnabled: true, minimumConfidence: 0.75 });
   await waitForExpression(
     page,
     "document.querySelectorAll('.decorum-note-card').length === 1",
@@ -94,22 +94,14 @@ try {
   );
   assert(secondTraceId !== initialDomState.traceId, "re-rendered note should get a unique trace ID");
 
-  await evaluate(
-    serviceWorker,
-    "chrome.storage.local.set({ decorumSettings: { enabled: false, tonalClassifierEnabled: true, minimumConfidence: 0.75 } })",
-    { awaitPromise: true }
-  );
+  await updateSettings({ enabled: false, tonalClassifierEnabled: true, minimumConfidence: 0.75 });
   await waitForExpression(
     page,
     "document.querySelectorAll('.decorum-note-card').length === 0",
     "disabling Decorum should remove visible notes"
   );
 
-  await evaluate(
-    serviceWorker,
-    "chrome.storage.local.set({ decorumSettings: { enabled: true, tonalClassifierEnabled: true, minimumConfidence: 0.75 } })",
-    { awaitPromise: true }
-  );
+  await updateSettings({ enabled: true, tonalClassifierEnabled: true, minimumConfidence: 0.75 });
   await waitForExpression(
     page,
     "document.querySelectorAll('.decorum-note-card').length === 1",
@@ -120,7 +112,7 @@ try {
     page,
     `(() => {
       const button = [...document.querySelectorAll('.decorum-note-button')]
-        .find((candidate) => candidate.textContent === 'Not helpful');
+        .find((candidate) => candidate.textContent === 'Incorrect');
       button.click();
       return true;
     })()`
@@ -136,7 +128,7 @@ try {
 
       return entries.length >= 3 &&
         uniqueTraceIds.size === traceIds.length &&
-        entries.some((entry) => entry.rating === 'not_helpful' && entry.falsePositive === true) &&
+        entries.some((entry) => entry.rating === 'incorrect' && entry.falsePositive === true) &&
         entries.every((entry) => entry.postId === 'urn:li:activity:1001')
           ? JSON.stringify({ entries, currentTraceId })
           : '';

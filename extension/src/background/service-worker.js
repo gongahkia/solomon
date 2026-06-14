@@ -1,4 +1,11 @@
 import { classifyPostTone } from "./tonal-classifier.js";
+import {
+  createClassifierRequest,
+  createSkippedClassifierResponse,
+  isNegativeRating,
+  normalizeRating,
+  validateClassifierResponse
+} from "../shared/classifier-contract.js";
 
 const DEFAULT_SETTINGS = {
   enabled: true,
@@ -83,6 +90,7 @@ function compactPost(post, sender) {
     id: String(post?.id ?? `decorum:${Date.now()}`),
     author: String(post?.author ?? ""),
     textPreview: text.slice(0, 280),
+    text,
     url: String(post?.url ?? sender.tab?.url ?? ""),
     detectedAt: String(post?.detectedAt ?? new Date().toISOString()),
     tabId: sender.tab?.id ?? null
@@ -104,6 +112,7 @@ async function recordDetectedPost(post, sender) {
 function compactLedgerEntry(message, sender) {
   const note = message.note ?? {};
   const post = message.post ?? {};
+  const classification = message.classification ?? {};
   const compactedPost = compactPost(post, sender);
 
   return {
@@ -119,10 +128,17 @@ function compactLedgerEntry(message, sender) {
     sources: Array.isArray(note.sources) ? note.sources.slice(0, 5) : [],
     postAuthor: compactedPost.author,
     postPreview: compactedPost.textPreview,
+    postText: compactedPost.text,
     postUrl: compactedPost.url,
     shownAt: String(message.shownAt ?? new Date().toISOString()),
+    request: classification.request ?? null,
+    classifier: classification.classifier ?? null,
+    decision: classification.decision ?? null,
+    contractVersion: classification.contractVersion ?? null,
+    responseId: classification.responseId ?? null,
     rating: null,
     ratedAt: null,
+    ratingCategory: null,
     falsePositive: false
   };
 }
@@ -141,7 +157,7 @@ async function recordShownNote(message, sender) {
 
 async function recordNoteRating(message) {
   const { noteLedger } = await getState();
-  const rating = message.rating === "not_helpful" ? "not_helpful" : "helpful";
+  const rating = normalizeRating(message.rating);
   const ratedAt = String(message.ratedAt ?? new Date().toISOString());
   const traceId = String(message.traceId ?? "");
 
@@ -150,8 +166,9 @@ async function recordNoteRating(message) {
       ? {
           ...entry,
           rating,
+          ratingCategory: rating,
           ratedAt,
-          falsePositive: rating === "not_helpful"
+          falsePositive: isNegativeRating(rating)
         }
       : entry
   );
@@ -168,7 +185,23 @@ async function updateSettings(settings) {
   });
 
   await chrome.storage.local.set({ decorumSettings: nextSettings });
+  await broadcastSettingsUpdated(nextSettings);
   return nextSettings;
+}
+
+async function broadcastSettingsUpdated(settings) {
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+
+  await Promise.allSettled(
+    tabs
+      .filter((tab) => Number.isInteger(tab.id))
+      .map((tab) =>
+        chrome.tabs.sendMessage(tab.id, {
+          type: "DECORUM_SETTINGS_UPDATED",
+          settings
+        })
+      )
+  );
 }
 
 async function classifyPost(post) {
@@ -182,27 +215,22 @@ async function classifyPost(post) {
   }
 
   if (!settings.tonalClassifierEnabled) {
-    return {
-      note: null,
+    const request = createClassifierRequest({ post, settings });
+    return createSkippedClassifierResponse({
+      request,
       skippedReason: "tonal_classifier_disabled"
-    };
+    });
   }
 
-  const result = classifyPostTone(post);
+  const request = createClassifierRequest({ post, settings });
+  const response = classifyPostTone(request);
+  const validation = validateClassifierResponse(response);
 
-  if (!result.note) {
-    return result;
+  if (!validation.ok) {
+    console.warn("[decorum] Classifier response failed validation", validation.errors);
   }
 
-  if (result.note.confidence < settings.minimumConfidence) {
-    return {
-      note: null,
-      skippedReason: "below_confidence_threshold",
-      candidate: result.note
-    };
-  }
-
-  return result;
+  return response;
 }
 
 async function handleMessage(message, sender) {
@@ -271,3 +299,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return true;
 });
+
+globalThis.DecorumBackground = {
+  classifyPost,
+  getState,
+  updateSettings
+};

@@ -1,0 +1,72 @@
+[
+  {
+    "name": "engagement bait asks for comments",
+    "post": {
+      "id": "eval:engagement",
+      "author": "Casey Founder",
+      "text": "Comment YES if you want the playbook. Thoughts?",
+      "url": "https://www.linkedin.com/feed/update/eval-engagement"
+    },
+    "expect": {
+      "status": "shown",
+      "kind": "engagement_bait",
+      "minimumConfidence": 0.75
+    }
+  },
+  {
+    "name": "humblebrag achievement framing",
+    "post": {
+      "id": "eval:humblebrag",
+      "author": "Morgan Leader",
+      "text": "Humbled to announce our Series A after years of hard work.",
+      "url": "https://www.linkedin.com/feed/update/eval-humblebrag"
+    },
+    "expect": {
+      "status": "shown",
+      "kind": "humblebrag",
+      "minimumConfidence": 0.75
+    }
+  },
+  {
+    "name": "generic AI-like wording",
+    "post": {
+      "id": "eval:ai-like",
+      "author": "Taylor Ops",
+      "text": "In today's fast-paced world, teams must unlock their full potential.",
+      "url": "https://www.linkedin.com/feed/update/eval-ai-like"
+    },
+    "expect": {
+      "status": "shown",
+      "kind": "ai_ghostwritten",
+      "minimumConfidence": 0.75
+    }
+  },
+  {
+    "name": "neutral operational update",
+    "post": {
+      "id": "eval:neutral",
+      "author": "Priya Analyst",
+      "text": "We published the Q2 support schedule today. The migration window starts on Monday.",
+      "url": "https://www.linkedin.com/feed/update/eval-neutral"
+    },
+    "expect": {
+      "status": "skipped",
+      "skippedReason": "no_tonal_signal",
+      "minimumConfidence": 0.75
+    }
+  },
+  {
+    "name": "below threshold candidate stays hidden",
+    "post": {
+      "id": "eval:threshold",
+      "author": "Jordan Manager",
+      "text": "The future is now for customer support teams.",
+      "url": "https://www.linkedin.com/feed/update/eval-threshold"
+    },
+    "expect": {
+      "status": "skipped",
+      "skippedReason": "below_confidence_threshold",
+      "minimumConfidence": 0.8
+    }
+  }
+]

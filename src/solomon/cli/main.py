@@ -33,7 +33,9 @@ from solomon.mcp.server import run_sse_server, run_stdio_server, run_streamable_
 
 app = typer.Typer(help="Solomon command-line interface.")
 mcp_app = typer.Typer(help="Run Solomon MCP transports.")
+console_app = typer.Typer(help="Run Solomon curator console.")
 app.add_typer(mcp_app, name="mcp")
+app.add_typer(console_app, name="console")
 console = Console()
 
 
@@ -86,6 +88,24 @@ def mcp_serve(
         run_sse_server(host=host, port=port)
         return
     run_stdio_server()
+
+
+@console_app.command("serve")
+def console_serve(
+    host: Annotated[str, typer.Option("--host", help="Console bind host.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", min=1, max=65535, help="Console bind port.")] = 8150,
+    reload: Annotated[bool, typer.Option("--reload", help="Reload console server on source changes.")] = False,
+) -> None:
+    """Serve the Solomon curator console."""
+    import uvicorn
+
+    uvicorn.run(
+        "solomon.console.app:create_console_app",
+        factory=True,
+        host=host,
+        port=port,
+        reload=reload,
+    )
 
 
 def _service() -> SolomonService:

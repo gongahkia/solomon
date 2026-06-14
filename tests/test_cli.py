@@ -70,6 +70,28 @@ def test_cli_mcp_serve_rejects_conflicting_http_modes() -> None:
     assert "mutually exclusive" in result.output
 
 
+def test_cli_console_serve_dispatches_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def run(app_path: str, **kwargs: object) -> None:
+        calls.append({"app_path": app_path, **kwargs})
+
+    monkeypatch.setattr("uvicorn.run", run)
+
+    result = runner.invoke(app, ["console", "serve", "--host", "127.0.0.2", "--port", "8151", "--reload"])
+
+    assert result.exit_code == 0
+    assert calls == [
+        {
+            "app_path": "solomon.console.app:create_console_app",
+            "factory": True,
+            "host": "127.0.0.2",
+            "port": 8151,
+            "reload": True,
+        }
+    ]
+
+
 def test_cli_ingest_recall_and_why_use_same_local_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _configure_cli_store(monkeypatch, tmp_path)
 

@@ -56,7 +56,6 @@ Headline deliverable. Everything else exists to support this.
 
 ## Workstream 3 — Curator console (thin web UI, exactly 3 screens)
 
-53. [C] Implement Audit Pack screen with JSON + PDF export.
 54. [C] Add `solomon console serve` CLI subcommand.
 55. [C] Console auth: dev-mode single user + bearer token. Document SSO is out-of-scope (portfolio).
 56. [C] Static screenshots → `docs/assets/console/`.

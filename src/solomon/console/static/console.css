@@ -296,6 +296,34 @@ select {
   margin: -2px 0 10px;
 }
 
+.audit-search {
+  grid-template-columns: 1fr auto;
+}
+
+.export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.button-link {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #111827;
+  text-decoration: none;
+  background: #ffffff;
+}
+
+.tabs-panel {
+  display: grid;
+  gap: 14px;
+}
+
 .graph-list {
   display: grid;
   gap: 8px;

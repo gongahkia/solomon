@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
-from solomon.api.service import DependencySuggestionDecisionRequest, PinRequest, SolomonService, VerificationRequest
+from solomon.api.service import (
+    DependencySuggestionDecisionRequest,
+    PinRequest,
+    RecallRequest,
+    SolomonService,
+    VerificationRequest,
+)
 from solomon.config import Settings, get_settings
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import CredenceTier, CurrencyState, KnowledgeItem, VerifiedState
@@ -69,6 +77,10 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
             authority_id=authority_id,
             depth=depth,
         )
+
+    @app.get("/console/audit-pack")
+    def audit_pack(request: Request, item_id: str | None = None, q: str | None = None) -> Response:
+        return _render_audit_pack(request, resolved_service, item_id=item_id, query=q)
 
     @app.get("/console/verification/items")
     def verification_items(request: Request) -> Response:
@@ -160,6 +172,32 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
             status_code=200 if error is None else 400,
         )
 
+    @app.get("/console/audit-pack/items/{item_id}/export")
+    def export_audit_pack(item_id: str, format: str = "json") -> Response:
+        try:
+            trace = resolved_service.why(item_id)
+        except SolomonError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if format == "pdf":
+            return Response(
+                content=_minimal_pdf(
+                    [
+                        "Solomon audit pack",
+                        f"item_id: {trace.item.id}",
+                        f"currency_state: {trace.currency['currency_state']}",
+                        f"source_ref: {trace.provenance['source_ref']}",
+                        f"dependencies: {len(trace.dependencies)}",
+                    ]
+                ),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{item_id}-audit-pack.pdf"'},
+            )
+        manifest, journal_jsonl = _exported_pack_files(resolved_service)
+        return JSONResponse(
+            content=_audit_pack_payload(trace, manifest=manifest, journal_jsonl=journal_jsonl),
+            headers={"Content-Disposition": f'attachment; filename="{item_id}-audit-pack.json"'},
+        )
+
     return app
 
 
@@ -227,6 +265,81 @@ def _render_dependencies(
         },
         status_code=status_code,
     )
+
+
+def _render_audit_pack(
+    request: Request,
+    service: SolomonService,
+    *,
+    item_id: str | None,
+    query: str | None,
+    error: str | None = None,
+) -> Response:
+    candidates = _audit_candidates(service, query)
+    selected_id = item_id or (candidates[0]["id"] if candidates else None)
+    selected = _audit_context(service, selected_id)
+    return TEMPLATES.TemplateResponse(
+        request,
+        "audit_pack.html",
+        {"candidates": candidates, "selected": selected, "q": query or "", "error": error},
+    )
+
+
+def _audit_candidates(service: SolomonService, query: str | None) -> list[dict[str, Any]]:
+    if query:
+        try:
+            item = service.why(query).item
+            return [item.model_dump(mode="json")]
+        except SolomonError:
+            results = service.recall(RecallRequest(query=query, review_mode=True, limit=10))
+            return [result["item"] for result in results]
+    return [item.model_dump(mode="json") for item in service.store.get_many()[:20]]
+
+
+def _audit_context(service: SolomonService, item_id: str | None) -> dict[str, Any] | None:
+    if item_id is None:
+        return None
+    try:
+        trace = service.why(item_id)
+    except SolomonError:
+        return None
+    verification = service.audit.verify().model_dump(mode="json")
+    manifest, _journal_jsonl = _exported_pack_files(service)
+    return {
+        "item": trace.item.model_dump(mode="json"),
+        "currency": trace.currency,
+        "dependencies": trace.dependencies,
+        "dependents": trace.dependents,
+        "provenance": trace.provenance,
+        "credence_tier": trace.credence_tier,
+        "verification": trace.verification,
+        "journal": verification,
+        "manifest": manifest,
+    }
+
+
+def _audit_pack_payload(trace: Any, *, manifest: dict[str, Any], journal_jsonl: str) -> dict[str, Any]:
+    return {
+        "schema": "solomon.console.audit_pack.v1",
+        "knowledge_item_id": trace.item.id,
+        "item": trace.item.model_dump(mode="json"),
+        "currency": trace.currency,
+        "dependencies": trace.dependencies,
+        "dependents": trace.dependents,
+        "provenance": trace.provenance,
+        "credence_tier": trace.credence_tier,
+        "verification": trace.verification,
+        "manifest": manifest,
+        "journal_jsonl": journal_jsonl,
+    }
+
+
+def _exported_pack_files(service: SolomonService) -> tuple[dict[str, Any], str]:
+    with TemporaryDirectory(prefix="solomon-console-audit-") as temp_dir:
+        pack_dir = service.export_audit_pack(Path(temp_dir))
+        manifest = json.loads((pack_dir / "manifest.json").read_text(encoding="utf-8"))
+        journal_jsonl = (pack_dir / str(manifest["journal_file"])).read_text(encoding="utf-8")
+    return manifest, journal_jsonl
 
 
 def _suggestion_rows(
@@ -396,6 +509,45 @@ def _service_database_url(settings: Settings) -> str:
     if settings.database_url != DEFAULT_DATABASE_URL:
         return settings.database_url
     return str(settings.data_dir / "solomon.sqlite3")
+
+
+def _minimal_pdf(lines: list[str]) -> bytes:
+    text_commands = ["BT", "/F1 12 Tf", "72 740 Td"]
+    for index, line in enumerate(lines):
+        if index:
+            text_commands.append("0 -18 Td")
+        text_commands.append(f"({_pdf_escape(line)}) Tj")
+    text_commands.append("ET")
+    stream = "\n".join(text_commands).encode("ascii")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream",
+    ]
+    chunks = [b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"]
+    offsets = [0]
+    for number, body in enumerate(objects, start=1):
+        offsets.append(sum(len(chunk) for chunk in chunks))
+        chunks.append(f"{number} 0 obj\n".encode("ascii") + body + b"\nendobj\n")
+    xref_offset = sum(len(chunk) for chunk in chunks)
+    xref = [b"xref\n0 6\n0000000000 65535 f \n"]
+    xref.extend(f"{offset:010d} 00000 n \n".encode("ascii") for offset in offsets[1:])
+    chunks.extend(
+        [
+            *xref,
+            b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n",
+            str(xref_offset).encode("ascii"),
+            b"\n%%EOF\n",
+        ]
+    )
+    return b"".join(chunks)
+
+
+def _pdf_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
 __all__ = ["create_console_app"]

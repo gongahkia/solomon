@@ -63,7 +63,6 @@ Headline deliverable. Everything else exists to support this.
 
 63. [X] Publish `solomon` to TestPyPI; verify install path.
 64. [X] Cut v0.2.0 release on tag; PyPI publish via GH Actions.
-65. [C] TypeScript SDK in `packages/solomon-ts/` mirroring MCP tools. Demonstrates vendor integration without Python. Scope: typed client over HTTP/SSE MCP transport.
 66. [C] Publish TS SDK to npm under `@solomon/sdk` (scope name TBD).
 67. [C] Examples directory restructure: `examples/mcp/`, `examples/console/`, `examples/cli/`, `examples/sdk-ts/`, `examples/scenarios/`.
 68. [D] `docs/sdk/python.md` and `docs/sdk/typescript.md`: language-specific quickstarts.

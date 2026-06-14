@@ -126,6 +126,69 @@ def test_cli_ingest_recall_and_why_use_same_local_store(monkeypatch: pytest.Monk
     assert "source: memo-cli" in why.output
 
 
+def test_cli_mcp_aligned_verbs_and_migration_shims(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _configure_cli_store(monkeypatch, tmp_path)
+
+    health = runner.invoke(app, ["health"])
+    assert health.exit_code == 0
+    assert json.loads(health.output)["store"]["ok"] is True
+
+    ingest = runner.invoke(
+        app,
+        [
+            "ingest",
+            "reg r section 12 governs structure x",
+            "--source-ref",
+            "memo-cli-aligned",
+            "--kind",
+            "position",
+            "--source-kind",
+            "partner",
+        ],
+    )
+    assert ingest.exit_code == 0
+    item = json.loads(ingest.output)
+
+    dependency = runner.invoke(
+        app,
+        [
+            "add-dependency",
+            "--source-id",
+            item["id"],
+            "--target-id",
+            "regulation-r-section-12",
+        ],
+    )
+    assert dependency.exit_code == 0
+
+    check = runner.invoke(app, ["check-currency", item["id"]])
+    show = runner.invoke(app, ["show-currency", item["id"]])
+    assert check.exit_code == 0
+    assert show.exit_code == 0
+    assert json.loads(check.output)["currency_state"] == "Live"
+    assert json.loads(show.output)["currency_state"] == "Live"
+
+    dependencies = runner.invoke(app, ["get-dependencies", item["id"]])
+    assert dependencies.exit_code == 0
+    assert json.loads(dependencies.output)["dependencies"][0]["target_id"] == "regulation-r-section-12"
+
+    impact = runner.invoke(app, ["impact", "regulation-r-section-12"])
+    impact_query = runner.invoke(app, ["impact-query", "regulation-r-section-12"])
+    assert impact.exit_code == 0
+    assert impact_query.exit_code == 0
+    assert json.loads(impact.output)["changed_dependency_id"] == "regulation-r-section-12"
+    assert json.loads(impact_query.output)["changed_dependency_id"] == "regulation-r-section-12"
+
+    verified = runner.invoke(app, ["verify-position", item["id"], "--outcome", "reaffirm", "--by", "Partner A"])
+    assert verified.exit_code == 0
+    assert json.loads(verified.output)["verified_by"] == "Partner A"
+
+    pack_dir = tmp_path / "pack"
+    audit_pack = runner.invoke(app, ["audit-pack", item["id"], str(pack_dir)])
+    assert audit_pack.exit_code == 0
+    assert (pack_dir / "manifest.json").exists()
+
+
 def test_cli_dependency_suggestion_queue(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _configure_cli_store(monkeypatch, tmp_path)
 

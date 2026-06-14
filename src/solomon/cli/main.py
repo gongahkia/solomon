@@ -21,9 +21,11 @@ from solomon.api.service import (
     ReferenceExtractionRequest,
     SolomonService,
     StalenessPredictionRequest,
+    VerificationRequest,
 )
 from solomon.boundary.solomon import probe_boundary_client
 from solomon.config import get_settings
+from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.currency.prediction import load_pending_amendments
 from solomon.graph.models import EdgeConfidence, EdgeType
@@ -67,6 +69,20 @@ def diagnostics() -> None:
         "version": __version__,
         "settings": settings.public_diagnostics(),
         "boundary": probe_boundary_client(settings.boundary_engine_path).model_dump(),
+    }
+    _print_json(payload, sort_keys=True)
+
+
+@app.command()
+def health() -> None:
+    """Print MCP-aligned local health."""
+    settings = get_settings()
+    service = _service()
+    payload = {
+        "version": __version__,
+        "store": {"ok": True, "item_count": len(service.store.get_many())},
+        "journal": service.audit.verify().model_dump(mode="json"),
+        "boundary": probe_boundary_client(settings.boundary_engine_path).model_dump(mode="json"),
     }
     _print_json(payload, sort_keys=True)
 
@@ -145,14 +161,48 @@ def recall(
     _print_json(results, sort_keys=True)
 
 
-@app.command("show-currency")
-def show_currency(item_id: str) -> None:
+def _print_currency(item_id: str) -> None:
     _print_json(_service().evaluate_currency(item_id), sort_keys=True)
 
 
-@app.command("impact-query")
-def impact_query(authority_id: str) -> None:
+@app.command("check-currency")
+def check_currency(item_id: Annotated[str, typer.Argument(help="Knowledge item id.")]) -> None:
+    """Check whether a knowledge item is live, stale, superseded, or retired."""
+    _print_currency(item_id)
+
+
+@app.command("show-currency", hidden=True)
+def show_currency(item_id: str) -> None:
+    _print_currency(item_id)
+
+
+def _print_impact(authority_id: str) -> None:
     _print_json(_service().impact_query(authority_id), sort_keys=True)
+
+
+@app.command("impact")
+def impact(authority_id: Annotated[str, typer.Argument(help="External authority id.")]) -> None:
+    """Return internal items affected by an external authority."""
+    _print_impact(authority_id)
+
+
+@app.command("impact-query", hidden=True)
+def impact_query(authority_id: str) -> None:
+    _print_impact(authority_id)
+
+
+@app.command("get-dependencies")
+def get_dependencies(item_id: Annotated[str, typer.Argument(help="Knowledge item id.")]) -> None:
+    """Return upstream and downstream dependency edges for a knowledge item."""
+    trace = _service().why(item_id)
+    _print_json(
+        {
+            "item_id": item_id,
+            "dependencies": trace.dependencies,
+            "dependents": trace.dependents,
+        },
+        sort_keys=True,
+    )
 
 
 @app.command("dependency-graph")
@@ -272,6 +322,21 @@ def reject_dependency_suggestion(
     _print_json(suggestion.model_dump(mode="json"))
 
 
+@app.command("verify-position")
+def verify_position(
+    item_id: Annotated[str, typer.Argument(help="Knowledge item id.")],
+    outcome: Annotated[VerificationOutcome, typer.Option("--outcome")],
+    by: Annotated[str, typer.Option("--by", help="Verifier identifier.")],
+    successor_id: Annotated[str | None, typer.Option("--successor-id", help="Required for supersede.")] = None,
+) -> None:
+    """Record a human verification decision with evidence."""
+    item = _service().record_verification(
+        item_id,
+        VerificationRequest(by=by, outcome=outcome, successor_id=successor_id),
+    )
+    _print_json(item.model_dump(mode="json"))
+
+
 @app.command("why")
 def why(item_id: str) -> None:
     trace = _service().why(item_id)
@@ -281,7 +346,18 @@ def why(item_id: str) -> None:
     console.print(f"dependencies: {len(trace.dependencies)}")
 
 
-@app.command("export-audit-pack")
+@app.command("audit-pack")
+def audit_pack(
+    item_id: Annotated[str, typer.Argument(help="Knowledge item id.")],
+    destination: Annotated[Path, typer.Argument(help="Destination directory.")],
+) -> None:
+    """Export audit-pack evidence after validating the selected item."""
+    service = _service()
+    _ = service.why(item_id)
+    console.print(str(service.export_audit_pack(destination)))
+
+
+@app.command("export-audit-pack", hidden=True)
 def export_audit_pack(destination: Annotated[Path, typer.Argument(help="Destination directory.")]) -> None:
     console.print(str(_service().export_audit_pack(destination)))
 

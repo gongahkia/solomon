@@ -95,48 +95,44 @@ The boundary is solved. The currency engine is the project.
 
 ## 6. Architecture
 
-A Python system inside the firm perimeter. Durable knowledge never leaves; only Solomon-sanitized, just-in-time context crosses to a model endpoint that retains nothing. Dual endpoint: a remote ZDR provider for power, a local in-perimeter model for strict matters — the routing decision is part of the system.
+A Python infrastructure layer inside the firm perimeter. Durable knowledge never leaves; external work surfaces call Solomon over MCP/API for scoped, current, boundary-checked context. The curator console is a side-channel for review and export, not the primary lawyer interface.
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│  FIRM PERIMETER                                                        │
-│                                                                        │
-│  Lawyer ──query──▶ ┌────────────────────────────────────────────┐     │
-│                    │ SOLOMON                                     │     │
-│                    │                                             │     │
-│                    │  ┌───────────────┐   ┌──────────────────┐   │     │
-│                    │  │ Currency      │   │ Dependency graph │   │     │
-│                    │  │ engine        │◀─▶│ internal know-   │   │     │
-│                    │  │ (good-law for │   │ ledge → external │   │     │
-│                    │  │  firm know.)  │   │ authority edges  │   │     │
-│                    │  └───────┬───────┘   └──────────────────┘   │     │
-│                    │          │                                  │     │
-│                    │  ┌───────▼────────┐  ┌──────────────────┐   │     │
-│                    │  │ Bi-temporal    │  │ Credence ledger  │   │     │
-│                    │  │ knowledge store│  │ + verification   │   │     │
-│                    │  │ valid/ingest   │  │ state per fact   │   │     │
-│                    │  │ supersede≠del  │  └──────────────────┘   │     │
-│                    │  └───────┬────────┘                         │     │
-│                    │          │ retrieved context                │     │
-│                    │          ▼                                  │     │
-│                    │  ┌────────────────────────────────────┐     │     │
-│                    │  │ Solomon boundary client             │     │     │
-│                    │  │ /review (ingest gate)               │     │     │
-│                    │  │ /pseudonymize (out) /reidentify(in) │     │     │
-│                    │  └───────────────┬────────────────────┘     │     │
-│                    │                  │ sanitised tokens only    │     │
-│                    │  ┌───────────────▼────────────────────┐     │     │
-│                    │  │ Audit journal (append-only)         │     │     │
-│                    │  └─────────────────────────────────────┘    │     │
-│                    └──────────────────┬──────────────────────────┘     │
-│                                       │ sanitised, ephemeral ctx       │
-└───────────────────────────────────────┼────────────────────────────────┘
-                                        │
-                      ┌─────────────────▼─────────────────┐
-                      │ Model endpoint (stateless, ZDR)   │
-                      │  • remote ZDR provider (power)    │
-                      │  • local in-perimeter (strict)    │
-                      └───────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  EXISTING WORK SURFACES                                                     │
+│                                                                              │
+│  Claude / Claude Code      Microsoft Copilot      Harvey-like vendor agent   │
+│          │                        │                         │                │
+│          └────────────── MCP/API tool calls ────────────────┘                │
+└───────────────────────────────────┬──────────────────────────────────────────┘
+                                    │ scoped preflight / currency / audit calls
+┌───────────────────────────────────▼──────────────────────────────────────────┐
+│  FIRM PERIMETER                                                              │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │ SOLOMON MCP/API GATEWAY                                                │  │
+│  │ preflight_context · check_currency · impact · verify_position          │  │
+│  └───────────────┬────────────────────────────────────────────────────────┘  │
+│                  │                                                           │
+│  ┌───────────────▼──────────────┐   ┌────────────────────────────────────┐   │
+│  │ Solomon boundary client       │   │ Curator console (side-channel)     │   │
+│  │ /review · /pseudonymize       │   │ human review · dependency confirm  │   │
+│  └───────────────┬──────────────┘   │ audit-pack export                  │   │
+│                  │                  └───────────────┬────────────────────┘   │
+│  ┌───────────────▼──────────────┐                   │ verification writes    │
+│  │ Currency engine               │◀──────────────────┘                       │
+│  │ live · stale-pending · retire │                                           │
+│  └───────┬──────────────────────┘                                           │
+│          │                                                                  │
+│  ┌───────▼────────────┐   ┌──────────────────┐   ┌──────────────────────┐   │
+│  │ Bi-temporal store  │◀─▶│ Dependency graph │◀─▶│ Credence/verif state │   │
+│  │ valid/ingest time  │   │ internal/external│   │ per knowledge item   │   │
+│  └───────┬────────────┘   └──────────────────┘   └──────────────────────┘   │
+│          │                                                                  │
+│  ┌───────▼──────────────────────────────────────────────────────────────┐    │
+│  │ Audit journal (append-only metadata, hash chain, audit-pack source)  │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 6.1 The currency engine (core)

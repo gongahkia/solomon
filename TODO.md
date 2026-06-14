@@ -46,7 +46,6 @@ Headline deliverable. Everything else exists to support this.
 ### 2C — Tests
 
 35. [C] Unit tests per MCP tool: happy path, boundary-reject, scope-deny, stale propagation, audit-pack content.
-36. [C] Integration test: end-to-end MCP STDIO session simulating Claude Desktop calling `preflight_context`.
 37. [C] Property-based tests (Hypothesis): random ingest + supersession sequences → MCP `check_currency` agrees with internal engine.
 38. [C] Snapshot tests for tool JSONSchemas (any change requires explicit update).
 39. [C] Fuzz test on boundary preflight at MCP boundary (large pasted text, unicode edge cases, base64 blobs).

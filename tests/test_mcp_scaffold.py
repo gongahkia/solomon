@@ -124,6 +124,53 @@ def test_stdio_server_lists_tools(tmp_path: Path) -> None:
     anyio.run(call)
 
 
+def test_stdio_server_calls_preflight_context(tmp_path: Path) -> None:
+    database_url = f"sqlite:///{tmp_path / 'data' / 'solomon.sqlite3'}"
+    service = SolomonService(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=database_url,
+    )
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="structure x under regulation r section 12",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo-stdio",
+            matter_id="matter-a",
+            client_id="client-a",
+        )
+    )
+
+    async def call() -> None:
+        params = StdioServerParameters(
+            command="uv",
+            args=["run", "python", "-m", "solomon.mcp.server"],
+            cwd=Path.cwd(),
+            env={
+                "SOLOMON_DATA_DIR": str(tmp_path / "data"),
+                "SOLOMON_JOURNAL_DIR": str(tmp_path / "journal"),
+                "SOLOMON_DATABASE_URL": database_url,
+            },
+        )
+        async with stdio_client(params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.call_tool(
+                    "solomon.preflight_context",
+                    {
+                        "query": "structure x regulation",
+                        "matter_id": "matter-a",
+                        "client_id": "client-a",
+                        "max_items": 1,
+                    },
+                )
+                payload = _structured_payload(result)
+                assert payload["items"][0]["item"]["id"] == item.id
+
+    anyio.run(call)
+
+
 def test_streamable_http_app_exposes_mcp_endpoint(tmp_path: Path) -> None:
     service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
     app = create_streamable_http_app(service)

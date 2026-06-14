@@ -10,8 +10,10 @@ from typing import Any, Protocol, cast
 
 from mcp.types import ToolAnnotations
 
+from solomon import __version__
 from solomon.api.schemas import SolomonModel
 from solomon.api.service import IngestRequest, PinRequest, RecallRequest, SolomonService, VerificationRequest
+from solomon.boundary.solomon import probe_boundary_client
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeItem, KnowledgeKind, SourceKind
 from solomon.graph.suggestions import SuggestionDecision
@@ -29,6 +31,7 @@ class MCPToolSpec(SolomonModel):
 
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
+    "solomon.health": "Return Solomon MCP health, version, store, journal, and boundary status.",
     "solomon.preflight_context": "Return current, scoped firm context safe to inject into a prompt.",
     "solomon.check_currency": "Check whether a knowledge item is live, stale-pending, superseded, or retired.",
     "solomon.get_dependencies": "Return upstream and downstream dependency edges for a knowledge item.",
@@ -40,6 +43,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
 }
 
 READ_ONLY_TOOLS = {
+    "solomon.health",
     "solomon.preflight_context",
     "solomon.check_currency",
     "solomon.get_dependencies",
@@ -83,6 +87,27 @@ class SolomonMCPRuntime:
             retryable=True,
             details={"caller_id": caller_id or "anonymous"},
         )
+
+    def health(self, *, caller_id: str | None = None) -> dict[str, Any]:
+        limited = self._rate_limit_error("solomon.health", caller_id)
+        if limited is not None:
+            return limited
+        items = self.service.store.get_many()
+        journal = self.service.audit.verify().model_dump(mode="json")
+        boundary = probe_boundary_client().model_dump(mode="json")
+        _log_mcp_call(
+            self.service,
+            "solomon.health",
+            caller_id=caller_id,
+            input_payload={},
+            metadata={"item_count": len(items)},
+        )
+        return {
+            "version": __version__,
+            "store": {"ok": True, "item_count": len(items)},
+            "journal": journal,
+            "boundary": boundary,
+        }
 
     def preflight_context(
         self,
@@ -484,6 +509,12 @@ def register_solomon_tools(server: FastMCPProtocol, runtime: SolomonMCPRuntime) 
         )
 
     server.tool(
+        name="solomon.health",
+        description=TOOL_DESCRIPTIONS["solomon.health"],
+        annotations=annotations_for("solomon.health"),
+        structured_output=True,
+    )(runtime.health)
+    server.tool(
         name="solomon.preflight_context",
         description=TOOL_DESCRIPTIONS["solomon.preflight_context"],
         annotations=annotations_for("solomon.preflight_context"),
@@ -560,6 +591,7 @@ def _log_mcp_call(
     input_payload: dict[str, Any] | None = None,
     status: MCPCallStatus = "ok",
     error_code: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     service.audit.append(
         "mcp_call",
@@ -573,6 +605,7 @@ def _log_mcp_call(
             input_payload=input_payload,
             status=status,
             error_code=error_code,
+            metadata=metadata,
         ),
     )
 

@@ -65,6 +65,12 @@ def test_mcp_runtime_maps_all_required_tools_to_service(tmp_path: Path) -> None:
         )
     )
 
+    health = runtime.health(caller_id="claude:test")
+    assert health["version"]
+    assert health["store"]["item_count"] == 3
+    assert health["journal"]["ok"] is True
+    assert health["boundary"]["importable"] is True
+
     preflight = runtime.preflight_context(query="structure x", matter_id="matter-a", client_id="client-a")
     assert preflight["items"][0]["item"]["id"] in {item.id, successor.id}
 

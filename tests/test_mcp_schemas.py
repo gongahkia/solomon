@@ -13,6 +13,7 @@ from solomon.mcp.schemas import (
 )
 
 EXPECTED_TOOL_NAMES = {
+    "solomon.health",
     "solomon.preflight_context",
     "solomon.check_currency",
     "solomon.get_dependencies",

@@ -179,7 +179,19 @@ class ImpactOutput(SolomonModel):
     scope: EffectiveScope
 
 
+class HealthInput(SolomonModel):
+    caller_id: str | None = None
+
+
+class HealthOutput(SolomonModel):
+    version: str
+    store: JsonObject
+    journal: JsonObject
+    boundary: JsonObject
+
+
 TOOL_SCHEMA_MODELS: dict[str, SchemaPair] = {
+    "solomon.health": (HealthInput, HealthOutput),
     "solomon.preflight_context": (PreflightContextInput, PreflightContextOutput),
     "solomon.check_currency": (CheckCurrencyInput, CheckCurrencyOutput),
     "solomon.get_dependencies": (GetDependenciesInput, GetDependenciesOutput),
@@ -213,6 +225,8 @@ __all__ = [
     "DependencySuggestionsOutput",
     "GetDependenciesInput",
     "GetDependenciesOutput",
+    "HealthInput",
+    "HealthOutput",
     "ImpactInput",
     "ImpactOutput",
     "IngestInput",

@@ -15,6 +15,8 @@ npm run build
 Load the generated `dist/` folder from `chrome://extensions` with Developer Mode enabled.
 
 See [docs/implementation-notes.md](./docs/implementation-notes.md) for current architecture decisions and platform risks.
+See [docs/gateway/classifier-gateway.md](./docs/gateway/classifier-gateway.md) for the remote classifier boundary.
+See [docs/distribution.md](./docs/distribution.md) for the current private-prototype distribution posture.
 
 ## Current Scope
 

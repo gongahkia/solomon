@@ -14,7 +14,9 @@ const root = resolve(import.meta.dirname, "..");
 const fixturesDir = resolve(root, "tests", "fixtures");
 const snapshotPath = resolve(root, "tests", "visual", "note-card.snapshot.json");
 const visualArtifactPath = resolve(root, ".tmp", "visual", "note-card.png");
+const referencePath = resolve(root, "tests", "visual", "x-community-notes-reference.json");
 const updateSnapshot = process.env.DECORUM_UPDATE_VISUAL === "1";
+const strictScreenshotHash = process.env.DECORUM_STRICT_VISUAL !== "0";
 
 function normalizeMetricSnapshot(actual) {
   return {
@@ -56,13 +58,42 @@ async function readSnapshot() {
 }
 
 function compareSnapshot(expected, actual) {
+  const expectedForComparison = strictScreenshotHash
+    ? expected
+    : {
+        ...expected,
+        screenshot: {
+          ...expected.screenshot,
+          sha256: actual.screenshot.sha256,
+          bytes: actual.screenshot.bytes
+        }
+      };
   const expectedJson = JSON.stringify(expected, null, 2);
+  const comparisonJson = JSON.stringify(expectedForComparison, null, 2);
   const actualJson = JSON.stringify(actual, null, 2);
 
   assert(
-    expectedJson === actualJson,
+    comparisonJson === actualJson,
     `visual snapshot mismatch\nExpected:\n${expectedJson}\nActual:\n${actualJson}\nArtifact: ${visualArtifactPath}`
   );
+}
+
+async function compareReference(actual) {
+  const reference = JSON.parse(await readFile(referencePath, "utf8"));
+
+  assert(
+    actual.header.text === reference.headerText,
+    "note header should match the Community Notes reference wording"
+  );
+  assert(actual.card.borderColor === reference.card.borderColor, "note border color drifted");
+  assert(
+    actual.card.backgroundColor === reference.card.backgroundColor,
+    "note background color drifted"
+  );
+  assert(actual.card.color === reference.card.textColor, "note text color drifted");
+  assert(actual.header.color === reference.header.color, "note header color drifted");
+  assert(actual.header.fontSize === reference.header.fontSize, "note header font size drifted");
+  assert(actual.header.fontWeight === reference.header.fontWeight, "note header weight drifted");
 }
 
 const server = await startStaticServer(fixturesDir);
@@ -163,6 +194,7 @@ try {
     await writeFile(snapshotPath, `${JSON.stringify(actual, null, 2)}\n`);
     console.log(`Visual snapshot ${expected ? "updated" : "created"} at ${snapshotPath}`);
   } else {
+    await compareReference(actual);
     compareSnapshot(expected, actual);
     console.log(`Visual snapshot test passed. Artifact: ${visualArtifactPath}`);
   }

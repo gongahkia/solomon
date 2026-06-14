@@ -1,10 +1,31 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtemp, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
 
-const DEFAULT_CHROMIUM = process.env.CHROMIUM_BIN ?? "chromium-browser";
+function resolveChromiumBinary() {
+  if (process.env.CHROMIUM_BIN) {
+    return process.env.CHROMIUM_BIN;
+  }
+
+  for (const candidate of [
+    "chromium-browser",
+    "chromium",
+    "google-chrome",
+    "google-chrome-stable"
+  ]) {
+    const result = spawnSync("which", [candidate], {
+      encoding: "utf8"
+    });
+
+    if (result.status === 0 && result.stdout.trim()) {
+      return result.stdout.trim();
+    }
+  }
+
+  return "chromium-browser";
+}
 
 export class AssertionError extends Error {
   constructor(message) {
@@ -186,7 +207,7 @@ export async function startChromium({ extensionDir, startUrl, viewport = "1100,9
     startUrl
   ];
 
-  const browser = spawn(DEFAULT_CHROMIUM, args, {
+  const browser = spawn(resolveChromiumBinary(), args, {
     stdio: ["ignore", "pipe", "pipe"]
   });
 

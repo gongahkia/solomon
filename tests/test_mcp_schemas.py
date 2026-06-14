@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -23,11 +26,18 @@ EXPECTED_TOOL_NAMES = {
     "solomon.dependency_suggestions",
     "solomon.impact",
 }
+SCHEMA_SNAPSHOT = Path(__file__).parent / "fixtures" / "mcp_tool_schemas.json"
 
 
 def test_mcp_tool_schemas_cover_required_surface() -> None:
     assert set(TOOL_SCHEMA_MODELS) == EXPECTED_TOOL_NAMES
     assert set(MCP_TOOL_JSON_SCHEMAS) == EXPECTED_TOOL_NAMES
+
+
+def test_mcp_tool_json_schemas_match_snapshot() -> None:
+    expected = json.loads(SCHEMA_SNAPSHOT.read_text(encoding="utf-8"))
+
+    assert MCP_TOOL_JSON_SCHEMAS == expected
 
 
 @pytest.mark.parametrize("tool_name", sorted(EXPECTED_TOOL_NAMES))

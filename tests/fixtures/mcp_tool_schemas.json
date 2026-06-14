@@ -1,0 +1,1395 @@
+{
+  "solomon.audit_pack": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "caller_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Id"
+        },
+        "client_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Id"
+        },
+        "format": {
+          "default": "json",
+          "enum": [
+            "json",
+            "pdf"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "knowledge_item_id": {
+          "minLength": 1,
+          "title": "Knowledge Item Id",
+          "type": "string"
+        },
+        "matter_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matter Id"
+        }
+      },
+      "required": [
+        "knowledge_item_id"
+      ],
+      "title": "AuditPackInput",
+      "type": "object"
+    },
+    "output": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "enum": [
+            "json",
+            "pdf"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "hash_chain": {
+          "additionalProperties": true,
+          "title": "Hash Chain",
+          "type": "object"
+        },
+        "knowledge_item_id": {
+          "title": "Knowledge Item Id",
+          "type": "string"
+        },
+        "pack": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Pack"
+        }
+      },
+      "required": [
+        "knowledge_item_id",
+        "format",
+        "pack",
+        "hash_chain"
+      ],
+      "title": "AuditPackOutput",
+      "type": "object"
+    }
+  },
+  "solomon.check_currency": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        },
+        "caller_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Id"
+        },
+        "client_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Id"
+        },
+        "knowledge_item_id": {
+          "minLength": 1,
+          "title": "Knowledge Item Id",
+          "type": "string"
+        },
+        "matter_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matter Id"
+        }
+      },
+      "required": [
+        "knowledge_item_id"
+      ],
+      "title": "CheckCurrencyInput",
+      "type": "object"
+    },
+    "output": {
+      "additionalProperties": false,
+      "properties": {
+        "knowledge_item_id": {
+          "title": "Knowledge Item Id",
+          "type": "string"
+        },
+        "last_verified_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Verified At"
+        },
+        "reasons": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "state": {
+          "enum": [
+            "live",
+            "stale_pending",
+            "superseded",
+            "retired"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "successor_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Successor Id"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        }
+      },
+      "required": [
+        "knowledge_item_id",
+        "state"
+      ],
+      "title": "CheckCurrencyOutput",
+      "type": "object"
+    }
+  },
+  "solomon.dependency_suggestions": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "caller_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Id"
+        },
+        "client_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Id"
+        },
+        "decision": {
+          "default": "pending",
+          "enum": [
+            "pending",
+            "confirmed",
+            "rejected"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "knowledge_item_id": {
+          "minLength": 1,
+          "title": "Knowledge Item Id",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "matter_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matter Id"
+        }
+      },
+      "required": [
+        "knowledge_item_id"
+      ],
+      "title": "DependencySuggestionsInput",
+      "type": "object"
+    },
+    "output": {
+      "$defs": {
+        "EffectiveScope": {
+          "additionalProperties": false,
+          "properties": {
+            "caller_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Caller Id"
+            },
+            "client_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Client Id"
+            },
+            "matter_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Matter Id"
+            }
+          },
+          "title": "EffectiveScope",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/EffectiveScope"
+        },
+        "suggestions": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Suggestions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "suggestions",
+        "scope"
+      ],
+      "title": "DependencySuggestionsOutput",
+      "type": "object"
+    }
+  },
+  "solomon.get_dependencies": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "caller_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Id"
+        },
+        "client_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Id"
+        },
+        "depth": {
+          "default": 1,
+          "maximum": 8,
+          "minimum": 1,
+          "title": "Depth",
+          "type": "integer"
+        },
+        "direction": {
+          "default": "both",
+          "enum": [
+            "upstream",
+            "downstream",
+            "both"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "knowledge_item_id": {
+          "minLength": 1,
+          "title": "Knowledge Item Id",
+          "type": "string"
+        },
+        "matter_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matter Id"
+        }
+      },
+      "required": [
+        "knowledge_item_id"
+      ],
+      "title": "GetDependenciesInput",
+      "type": "object"
+    },
+    "output": {
+      "additionalProperties": false,
+      "properties": {
+        "downstream": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Downstream",
+          "type": "array"
+        },
+        "knowledge_item_id": {
+          "title": "Knowledge Item Id",
+          "type": "string"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        },
+        "upstream": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Upstream",
+          "type": "array"
+        }
+      },
+      "required": [
+        "knowledge_item_id"
+      ],
+      "title": "GetDependenciesOutput",
+      "type": "object"
+    }
+  },
+  "solomon.health": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "caller_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Id"
+        }
+      },
+      "title": "HealthInput",
+      "type": "object"
+    },
+    "output": {
+      "additionalProperties": false,
+      "properties": {
+        "boundary": {
+          "additionalProperties": true,
+          "title": "Boundary",
+          "type": "object"
+        },
+        "journal": {
+          "additionalProperties": true,
+          "title": "Journal",
+          "type": "object"
+        },
+        "store": {
+          "additionalProperties": true,
+          "title": "Store",
+          "type": "object"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "store",
+        "journal",
+        "boundary"
+      ],
+      "title": "HealthOutput",
+      "type": "object"
+    }
+  },
+  "solomon.impact": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        },
+        "caller_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Id"
+        },
+        "client_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Id"
+        },
+        "external_authority_id": {
+          "minLength": 1,
+          "title": "External Authority Id",
+          "type": "string"
+        },
+        "matter_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matter Id"
+        }
+      },
+      "required": [
+        "external_authority_id"
+      ],
+      "title": "ImpactInput",
+      "type": "object"
+    },
+    "output": {
+      "$defs": {
+        "EffectiveScope": {
+          "additionalProperties": false,
+          "properties": {
+            "caller_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Caller Id"
+            },
+            "client_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Client Id"
+            },
+            "matter_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Matter Id"
+            }
+          },
+          "title": "EffectiveScope",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "external_authority_id": {
+          "title": "External Authority Id",
+          "type": "string"
+        },
+        "reasons": {
+          "additionalProperties": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "title": "Reasons",
+          "type": "object"
+        },
+        "scope": {
+          "$ref": "#/$defs/EffectiveScope"
+        },
+        "stale_item_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Stale Item Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "external_authority_id",
+        "scope"
+      ],
+      "title": "ImpactOutput",
+      "type": "object"
+    }
+  },
+  "solomon.ingest": {
+    "input": {
+      "$defs": {
+        "IngestScope": {
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Client Id"
+            },
+            "jurisdiction": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Jurisdiction"
+            },
+            "matter_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Matter Id"
+            }
+          },
+          "title": "IngestScope",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "caller_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Id"
+        },
+        "kind": {
+          "default": "note",
+          "enum": [
+            "position",
+            "clause",
+            "house-view",
+            "advice",
+            "note"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/IngestScope"
+        },
+        "source_kind": {
+          "default": "associate",
+          "enum": [
+            "partner",
+            "associate",
+            "matter-doc",
+            "external-feed",
+            "model"
+          ],
+          "title": "Source Kind",
+          "type": "string"
+        },
+        "source_ref": {
+          "minLength": 1,
+          "title": "Source Ref",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "source_ref",
+        "scope"
+      ],
+      "title": "IngestInput",
+      "type": "object"
+    },
+    "output": {
+      "$defs": {
+        "AuditMetadata": {
+          "additionalProperties": false,
+          "properties": {
+            "entry_hash": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Entry Hash"
+            },
+            "entry_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Entry Id"
+            },
+            "journal_path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Journal Path"
+            }
+          },
+          "title": "AuditMetadata",
+          "type": "object"
+        },
+        "BoundaryMetadata": {
+          "additionalProperties": false,
+          "properties": {
+            "classification": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Classification"
+            },
+            "context_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Context Id"
+            },
+            "finding_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Finding Count",
+              "type": "integer"
+            },
+            "status": {
+              "enum": [
+                "passed",
+                "rejected",
+                "not_applicable"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "BoundaryMetadata",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "audit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuditMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "boundary": {
+          "$ref": "#/$defs/BoundaryMetadata"
+        },
+        "dependency_suggestions": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Dependency Suggestions",
+          "type": "array"
+        },
+        "item": {
+          "additionalProperties": true,
+          "title": "Item",
+          "type": "object"
+        }
+      },
+      "required": [
+        "item",
+        "boundary"
+      ],
+      "title": "IngestOutput",
+      "type": "object"
+    }
+  },
+  "solomon.preflight_context": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "caller_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Id"
+        },
+        "client_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Id"
+        },
+        "matter_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matter Id"
+        },
+        "max_context_tokens": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Context Tokens"
+        },
+        "max_items": {
+          "default": 5,
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Max Items",
+          "type": "integer"
+        },
+        "query": {
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "PreflightContextInput",
+      "type": "object"
+    },
+    "output": {
+      "$defs": {
+        "AuditMetadata": {
+          "additionalProperties": false,
+          "properties": {
+            "entry_hash": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Entry Hash"
+            },
+            "entry_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Entry Id"
+            },
+            "journal_path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Journal Path"
+            }
+          },
+          "title": "AuditMetadata",
+          "type": "object"
+        },
+        "BoundaryMetadata": {
+          "additionalProperties": false,
+          "properties": {
+            "classification": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Classification"
+            },
+            "context_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Context Id"
+            },
+            "finding_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Finding Count",
+              "type": "integer"
+            },
+            "status": {
+              "enum": [
+                "passed",
+                "rejected",
+                "not_applicable"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "BoundaryMetadata",
+          "type": "object"
+        },
+        "EffectiveScope": {
+          "additionalProperties": false,
+          "properties": {
+            "caller_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Caller Id"
+            },
+            "client_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Client Id"
+            },
+            "matter_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Matter Id"
+            }
+          },
+          "title": "EffectiveScope",
+          "type": "object"
+        },
+        "ExcludedContextItem": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Code"
+            },
+            "item_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Item Id"
+            },
+            "reason": {
+              "title": "Reason",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "title": "ExcludedContextItem",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "audit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuditMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "boundary": {
+          "$ref": "#/$defs/BoundaryMetadata"
+        },
+        "excluded": {
+          "items": {
+            "$ref": "#/$defs/ExcludedContextItem"
+          },
+          "title": "Excluded",
+          "type": "array"
+        },
+        "items": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "scope": {
+          "$ref": "#/$defs/EffectiveScope"
+        }
+      },
+      "required": [
+        "items",
+        "scope",
+        "boundary"
+      ],
+      "title": "PreflightContextOutput",
+      "type": "object"
+    }
+  },
+  "solomon.verify_position": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "caller_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Id"
+        },
+        "client_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Id"
+        },
+        "decision": {
+          "enum": [
+            "reaffirm",
+            "supersede",
+            "retire",
+            "pin"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "evidence_ref": {
+          "minLength": 1,
+          "title": "Evidence Ref",
+          "type": "string"
+        },
+        "knowledge_item_id": {
+          "minLength": 1,
+          "title": "Knowledge Item Id",
+          "type": "string"
+        },
+        "matter_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matter Id"
+        },
+        "recorded_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recorded At"
+        },
+        "successor_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Successor Id"
+        },
+        "verifier_id": {
+          "minLength": 1,
+          "title": "Verifier Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "knowledge_item_id",
+        "verifier_id",
+        "decision",
+        "evidence_ref"
+      ],
+      "title": "VerifyPositionInput",
+      "type": "object"
+    },
+    "output": {
+      "$defs": {
+        "AuditMetadata": {
+          "additionalProperties": false,
+          "properties": {
+            "entry_hash": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Entry Hash"
+            },
+            "entry_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Entry Id"
+            },
+            "journal_path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Journal Path"
+            }
+          },
+          "title": "AuditMetadata",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "audit": {
+          "$ref": "#/$defs/AuditMetadata"
+        },
+        "currency": {
+          "additionalProperties": true,
+          "title": "Currency",
+          "type": "object"
+        },
+        "item": {
+          "additionalProperties": true,
+          "title": "Item",
+          "type": "object"
+        }
+      },
+      "required": [
+        "item",
+        "currency",
+        "audit"
+      ],
+      "title": "VerifyPositionOutput",
+      "type": "object"
+    }
+  }
+}

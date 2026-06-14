@@ -6,7 +6,9 @@
   "description": "Community-Notes-style context cards for LinkedIn posts.",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check": "node scripts/check.mjs"
+    "check": "node scripts/check.mjs",
+    "test": "npm run check && npm run test:runtime",
+    "test:runtime": "node scripts/test-runtime.mjs"
   },
   "engines": {
     "node": ">=22"

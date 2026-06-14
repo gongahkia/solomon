@@ -42,7 +42,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2B — Implementation
 
-33. [C] Graceful shutdown + connection draining.
 34. [C] Health-check tool `solomon.health()` exposing version, store status, journal status, boundary status.
 
 ### 2C — Tests

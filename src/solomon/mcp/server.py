@@ -9,6 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
+from uvicorn import Config, Server
 
 from solomon import __version__
 from solomon.api.schemas import SolomonModel
@@ -16,7 +17,7 @@ from solomon.api.service import SolomonService
 from solomon.config import get_settings
 from solomon.mcp.auth import MCPAuthConfig, bearer_token_matches, token_from_env
 from solomon.mcp.tools import MCPToolSpec, SolomonMCPRuntime, mcp_tool_specs, register_solomon_tools
-from solomon.mcp.transport import MCPTransportConfig, MCPTransportKind
+from solomon.mcp.transport import MCPShutdownConfig, MCPTransportConfig, MCPTransportKind
 
 
 class SolomonMCPServerConfig(SolomonModel):
@@ -127,9 +128,7 @@ def run_streamable_http_server(
     host: str = "127.0.0.1",
     port: int = 8141,
 ) -> None:
-    import uvicorn
-
-    uvicorn.run(
+    run_uvicorn_app(
         create_streamable_http_app(service or service_from_settings(), host=host, port=port),
         host=host,
         port=port,
@@ -142,13 +141,38 @@ def run_sse_server(
     host: str = "127.0.0.1",
     port: int = 8141,
 ) -> None:
-    import uvicorn
-
-    uvicorn.run(create_sse_app(service or service_from_settings(), host=host, port=port), host=host, port=port)
+    run_uvicorn_app(create_sse_app(service or service_from_settings(), host=host, port=port), host=host, port=port)
 
 
 def default_server_config() -> SolomonMCPServerConfig:
     return create_server_config(version=__version__)
+
+
+def uvicorn_config_for_app(
+    app: ASGIApp,
+    *,
+    host: str,
+    port: int,
+    shutdown: MCPShutdownConfig | None = None,
+) -> Config:
+    resolved_shutdown = shutdown or MCPShutdownConfig.from_env()
+    return Config(
+        app,
+        host=host,
+        port=port,
+        log_level="info",
+        timeout_graceful_shutdown=resolved_shutdown.graceful_shutdown_seconds,
+    )
+
+
+def run_uvicorn_app(
+    app: ASGIApp,
+    *,
+    host: str,
+    port: int,
+    shutdown: MCPShutdownConfig | None = None,
+) -> None:
+    Server(uvicorn_config_for_app(app, host=host, port=port, shutdown=shutdown)).run()
 
 
 def main() -> None:
@@ -183,7 +207,9 @@ __all__ = [
     "run_sse_server",
     "run_stdio_server",
     "run_streamable_http_server",
+    "run_uvicorn_app",
     "service_from_settings",
+    "uvicorn_config_for_app",
 ]
 
 

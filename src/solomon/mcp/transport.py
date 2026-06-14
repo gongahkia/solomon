@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Literal
 
 from pydantic import Field
@@ -25,4 +26,14 @@ class MCPTransportConfig(SolomonModel):
         return f"http://{self.host}:{self.port}{path}"
 
 
-__all__ = ["MCPTransportConfig", "MCPTransportKind"]
+class MCPShutdownConfig(SolomonModel):
+    graceful_shutdown_seconds: int = Field(default=10, ge=0)
+
+    @classmethod
+    def from_env(cls) -> MCPShutdownConfig:
+        return cls(
+            graceful_shutdown_seconds=int(os.environ.get("SOLOMON_MCP_GRACEFUL_SHUTDOWN_SECONDS", "10"))
+        )
+
+
+__all__ = ["MCPShutdownConfig", "MCPTransportConfig", "MCPTransportKind"]

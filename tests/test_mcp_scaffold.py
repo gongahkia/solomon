@@ -20,9 +20,10 @@ from solomon.mcp.server import (
     create_fastmcp_server,
     create_server_config,
     create_streamable_http_app,
+    uvicorn_config_for_app,
 )
 from solomon.mcp.tools import READ_ONLY_TOOLS, mcp_tool_specs
-from solomon.mcp.transport import MCPTransportConfig
+from solomon.mcp.transport import MCPShutdownConfig, MCPTransportConfig
 
 
 def test_mcp_server_config_exposes_all_schema_tools() -> None:
@@ -129,6 +130,19 @@ def test_streamable_http_app_exposes_mcp_endpoint(tmp_path: Path) -> None:
 
     route_paths = {getattr(route, "path", "") for route in app.routes}
     assert "/mcp" in route_paths
+
+
+def test_uvicorn_config_uses_graceful_shutdown_timeout(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    app = create_streamable_http_app(service)
+    config = uvicorn_config_for_app(
+        app,
+        host="127.0.0.1",
+        port=8141,
+        shutdown=MCPShutdownConfig(graceful_shutdown_seconds=3),
+    )
+
+    assert config.timeout_graceful_shutdown == 3
 
 
 def test_streamable_http_app_enforces_bearer_token(tmp_path: Path) -> None:

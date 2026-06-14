@@ -7,8 +7,9 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "check": "node scripts/check.mjs",
-    "test": "npm run check && npm run test:runtime",
-    "test:runtime": "node scripts/test-runtime.mjs"
+    "test": "npm run check && npm run test:runtime && npm run test:visual",
+    "test:runtime": "node scripts/test-runtime.mjs",
+    "test:visual": "node scripts/test-visual.mjs"
   },
   "engines": {
     "node": ">=22"

@@ -1,6 +1,6 @@
 const DEFAULT_SETTINGS = {
   enabled: true,
-  mockNotesEnabled: false,
+  mockNotesEnabled: true,
   minimumConfidence: 0.75
 };
 

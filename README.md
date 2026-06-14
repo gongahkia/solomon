@@ -19,6 +19,7 @@ The first implementation pass is intentionally local-first:
 
 - MV3 extension shell
 - LinkedIn content script entrypoint
+- Prototype note card rendered under the first detected post
 - Chrome side panel shell
 - Local settings storage
 

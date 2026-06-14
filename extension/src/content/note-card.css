@@ -1,0 +1,152 @@
+.decorum-note-card {
+  display: grid;
+  gap: 10px;
+  margin: 10px 16px 12px;
+  border: 1px solid #cfd9de;
+  border-radius: 12px;
+  padding: 12px;
+  background: #ffffff;
+  color: #0f1419;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.42;
+}
+
+.decorum-note-card,
+.decorum-note-card * {
+  box-sizing: border-box;
+}
+
+.decorum-note-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #536471;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.decorum-note-icon {
+  display: inline-grid;
+  flex: 0 0 18px;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1;
+}
+
+.decorum-note-body {
+  display: grid;
+  gap: 8px;
+}
+
+.decorum-note-body p,
+.decorum-note-trace p {
+  margin: 0;
+}
+
+.decorum-note-label {
+  font-weight: 700;
+}
+
+.decorum-note-meta {
+  color: #536471;
+  font-size: 13px;
+}
+
+.decorum-note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.decorum-note-actions span {
+  color: #536471;
+  font-size: 13px;
+}
+
+.decorum-note-button {
+  min-height: 30px;
+  border: 1px solid #cfd9de;
+  border-radius: 999px;
+  padding: 4px 12px;
+  background: #ffffff;
+  color: #0f1419;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.decorum-note-button:hover {
+  background: #f7f9f9;
+}
+
+.decorum-note-button[aria-pressed="true"] {
+  border-color: #1d9bf0;
+  color: #1d9bf0;
+  font-weight: 700;
+}
+
+.decorum-note-trace {
+  border-top: 1px solid #eff3f4;
+  padding-top: 8px;
+  color: #536471;
+  font-size: 13px;
+}
+
+.decorum-note-trace summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.decorum-note-trace dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 10px;
+  margin: 8px 0 0;
+}
+
+.decorum-note-trace dt {
+  font-weight: 700;
+}
+
+.decorum-note-trace dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-color-scheme: dark) {
+  .decorum-note-card {
+    border-color: #536471;
+    background: #000000;
+    color: #e7e9ea;
+  }
+
+  .decorum-note-button {
+    border-color: #536471;
+    background: #000000;
+    color: #e7e9ea;
+  }
+
+  .decorum-note-button:hover {
+    background: #071013;
+  }
+
+  .decorum-note-trace {
+    border-top-color: #2f3336;
+  }
+}

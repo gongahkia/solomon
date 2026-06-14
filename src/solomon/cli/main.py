@@ -29,8 +29,11 @@ from solomon.currency.prediction import load_pending_amendments
 from solomon.graph.models import EdgeConfidence, EdgeType
 from solomon.graph.suggestions import SuggestionDecision
 from solomon.graph.visualization import GraphFormat
+from solomon.mcp.server import run_sse_server, run_stdio_server, run_streamable_http_server
 
 app = typer.Typer(help="Solomon command-line interface.")
+mcp_app = typer.Typer(help="Run Solomon MCP transports.")
+app.add_typer(mcp_app, name="mcp")
 console = Console()
 
 
@@ -64,6 +67,25 @@ def diagnostics() -> None:
         "boundary": probe_boundary_client(settings.boundary_engine_path).model_dump(),
     }
     _print_json(payload, sort_keys=True)
+
+
+@mcp_app.command("serve")
+def mcp_serve(
+    http: Annotated[bool, typer.Option("--http", help="Serve Streamable HTTP MCP instead of stdio.")] = False,
+    sse: Annotated[bool, typer.Option("--sse", help="Serve legacy SSE MCP instead of stdio.")] = False,
+    host: Annotated[str, typer.Option("--host", help="HTTP/SSE bind host.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", min=1, max=65535, help="HTTP/SSE bind port.")] = 8141,
+) -> None:
+    """Serve Solomon as an MCP server."""
+    if http and sse:
+        raise typer.BadParameter("--http and --sse are mutually exclusive")
+    if http:
+        run_streamable_http_server(host=host, port=port)
+        return
+    if sse:
+        run_sse_server(host=host, port=port)
+        return
+    run_stdio_server()
 
 
 def _service() -> SolomonService:

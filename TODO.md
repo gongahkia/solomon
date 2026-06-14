@@ -42,7 +42,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2B — Implementation
 
-27. [C] Add `solomon mcp serve` CLI subcommand (STDIO default, `--http` flag for SSE, `--port`, `--host`).
 28. [C] Boundary preflight wrapper: every MCP tool that returns firm content runs through `/review` first; reject with structured error if MNPI/PII leaks.
 29. [C] Scope enforcement at MCP layer: `matter_id` / `client_id` args restrict the knowledge store query.
 30. [C] Auth: bearer-token via env var `SOLOMON_MCP_TOKEN`. No OAuth. No SSO. (Portfolio scope.)

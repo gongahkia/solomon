@@ -39,6 +39,37 @@ def test_cli_version_and_diagnostics(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert payload["boundary"]["importable"] is True
 
 
+def test_cli_mcp_serve_dispatches_stdio(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr("solomon.cli.main.run_stdio_server", lambda: calls.append("stdio"))
+
+    result = runner.invoke(app, ["mcp", "serve"])
+
+    assert result.exit_code == 0
+    assert calls == ["stdio"]
+
+
+def test_cli_mcp_serve_dispatches_http(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str, int]] = []
+
+    def run_http(*, host: str, port: int) -> None:
+        calls.append(("http", host, port))
+
+    monkeypatch.setattr("solomon.cli.main.run_streamable_http_server", run_http)
+
+    result = runner.invoke(app, ["mcp", "serve", "--http", "--host", "127.0.0.2", "--port", "9000"])
+
+    assert result.exit_code == 0
+    assert calls == [("http", "127.0.0.2", 9000)]
+
+
+def test_cli_mcp_serve_rejects_conflicting_http_modes() -> None:
+    result = runner.invoke(app, ["mcp", "serve", "--http", "--sse"])
+
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.output
+
+
 def test_cli_ingest_recall_and_why_use_same_local_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _configure_cli_store(monkeypatch, tmp_path)
 

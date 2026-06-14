@@ -29,6 +29,18 @@
   const scannedElements = new WeakSet();
   let scanTimer = null;
 
+  function isSupportedSurface() {
+    if (document.documentElement.dataset.decorumFixture === "linkedin-feed") {
+      return true;
+    }
+
+    if (location.hostname !== "www.linkedin.com") {
+      return false;
+    }
+
+    return location.pathname === "/feed/" || location.pathname.startsWith("/posts/");
+  }
+
   function normalizeText(value) {
     return value.replace(/\s+/g, " ").trim();
   }
@@ -152,7 +164,7 @@
   async function scan(root = document) {
     const settings = await getSettings();
 
-    if (!settings.enabled) {
+    if (!settings.enabled || !isSupportedSurface()) {
       return [];
     }
 
@@ -195,11 +207,20 @@
     subtree: true
   });
 
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === "local" && changes.decorumSettings) {
+      scheduleScan();
+    }
+  });
+
   window.Decorum = window.Decorum ?? {};
   window.Decorum.detector = {
     scan,
-    getDetectedPosts: () => [...detectedPosts.values()]
+    getDetectedPosts: () => [...detectedPosts.values()],
+    isSupportedSurface
   };
 
-  scan().catch((error) => console.error("[decorum] Initial post scan failed", error));
+  window.setTimeout(() => {
+    scan().catch((error) => console.error("[decorum] Initial post scan failed", error));
+  }, 0);
 })();

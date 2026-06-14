@@ -1,7 +1,7 @@
 const DEFAULT_STATE = {
   settings: {
     enabled: true,
-    mockNotesEnabled: true,
+    tonalClassifierEnabled: true,
     minimumConfidence: 0.75
   },
   detectedPosts: [],
@@ -53,7 +53,7 @@ async function sendMessage(message) {
 
 function renderSettings(settings) {
   elements.enabledInput.checked = settings.enabled;
-  elements.mockNotesInput.checked = settings.mockNotesEnabled;
+  elements.mockNotesInput.checked = settings.tonalClassifierEnabled;
   elements.confidenceInput.value = String(Math.round(settings.minimumConfidence * 100));
   elements.confidenceOutput.textContent = formatConfidence(settings.minimumConfidence);
   elements.statusMessage.textContent = settings.enabled ? "Enabled" : "Disabled";
@@ -166,8 +166,8 @@ elements.enabledInput.addEventListener("change", () => {
 });
 
 elements.mockNotesInput.addEventListener("change", () => {
-  updateSettings({ mockNotesEnabled: elements.mockNotesInput.checked }).catch((error) => {
-    console.error("[decorum] Failed to update prototype note setting", error);
+  updateSettings({ tonalClassifierEnabled: elements.mockNotesInput.checked }).catch((error) => {
+    console.error("[decorum] Failed to update tonal classifier setting", error);
   });
 });
 

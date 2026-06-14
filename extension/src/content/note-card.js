@@ -1,22 +1,13 @@
 (() => {
   const DEFAULT_SETTINGS = {
     enabled: true,
-    mockNotesEnabled: true,
+    tonalClassifierEnabled: true,
     minimumConfidence: 0.75
   };
 
-  const MOCK_NOTE = {
-    traceId: "trace:prototype-note-card",
-    kind: "tonal_flag",
-    label: "Prototype tonal flag",
-    reason:
-      "This is a placement test. Real notes stay hidden unless Decorum clears the confidence gate.",
-    confidence: 0.91,
-    model: "static-mock",
-    sources: []
-  };
-
-  let mockNotePlaced = false;
+  const knownPosts = new Map();
+  const renderedPosts = new Map();
+  let reevaluateTimer = null;
 
   function formatConfidence(value) {
     return `${Math.round(value * 100)}%`;
@@ -49,6 +40,24 @@
     }
   }
 
+  async function requestClassification(post) {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "DECORUM_CLASSIFY_POST",
+        post
+      });
+
+      if (!response?.ok) {
+        throw new Error(response?.error ?? "Classification failed");
+      }
+
+      return response.note ?? null;
+    } catch (error) {
+      console.warn("[decorum] Classification request failed", error);
+      return null;
+    }
+  }
+
   function createTrace(note, post) {
     const details = document.createElement("details");
     details.className = "decorum-note-trace";
@@ -62,7 +71,8 @@
       ["Signal", note.kind],
       ["Confidence", formatConfidence(note.confidence)],
       ["Model", note.model],
-      ["Post ID", post.id]
+      ["Post ID", post.id],
+      ["Evidence", note.evidence?.join(", ") || "none"]
     ];
 
     for (const [label, value] of rows) {
@@ -160,7 +170,7 @@
 
     const meta = document.createElement("p");
     meta.className = "decorum-note-meta";
-    meta.textContent = `Confidence ${formatConfidence(note.confidence)}. No retrieval sources used for this prototype note.`;
+    meta.textContent = `Confidence ${formatConfidence(note.confidence)}. Local tonal classifier; no factual retrieval used.`;
 
     header.append(icon, headerText);
     body.append(reason, meta);
@@ -170,13 +180,21 @@
   }
 
   function appendNote(element, note, post) {
-    if (element.querySelector(".decorum-note-card")) {
+    if (findExistingCard(post.id)) {
       return false;
     }
 
     const card = createNoteCard(note, post);
-    element.append(card);
+    card.dataset.decorumPostId = post.id;
+    card.dataset.decorumConfidence = String(note.confidence);
+
+    element.insertAdjacentElement("afterend", card);
     element.dataset.decorumNoteState = "shown";
+    renderedPosts.set(post.id, {
+      note,
+      element,
+      card
+    });
 
     sendRuntimeMessage({
       type: "DECORUM_NOTE_SHOWN",
@@ -188,27 +206,90 @@
     return true;
   }
 
-  async function maybeRenderMockNote(post, element) {
-    const settings = await getSettings();
+  function findExistingCard(postId) {
+    return document.querySelector(
+      `.decorum-note-card[data-decorum-post-id="${CSS.escape(postId)}"]`
+    );
+  }
 
-    if (
-      mockNotePlaced ||
-      !settings.enabled ||
-      !settings.mockNotesEnabled ||
-      MOCK_NOTE.confidence < settings.minimumConfidence
-    ) {
+  function removeRenderedNote(postId, reason) {
+    const rendered = renderedPosts.get(postId);
+    const card = rendered?.card ?? findExistingCard(postId);
+
+    if (card) {
+      card.remove();
+    }
+
+    if (rendered?.element) {
+      rendered.element.dataset.decorumNoteState = reason;
+    }
+
+    renderedPosts.delete(postId);
+  }
+
+  function removeAllRenderedNotes(reason) {
+    for (const postId of [...renderedPosts.keys()]) {
+      removeRenderedNote(postId, reason);
+    }
+
+    for (const card of document.querySelectorAll(".decorum-note-card")) {
+      card.remove();
+    }
+  }
+
+  async function maybeRenderNote(post, element) {
+    if (renderedPosts.has(post.id) || findExistingCard(post.id)) {
       return;
     }
 
-    const inserted = appendNote(element, MOCK_NOTE, post);
+    const note = await requestClassification(post);
+
+    if (!note) {
+      element.dataset.decorumNoteState = "skipped";
+      return;
+    }
+
+    const inserted = appendNote(element, note, post);
 
     if (inserted) {
-      mockNotePlaced = true;
-      console.info("[decorum] Rendered prototype note", {
+      console.info("[decorum] Rendered tonal note", {
         postId: post.id,
-        traceId: MOCK_NOTE.traceId
+        traceId: note.traceId
       });
     }
+  }
+
+  async function enforceSettings() {
+    const settings = await getSettings();
+
+    if (!settings.enabled || !settings.tonalClassifierEnabled) {
+      removeAllRenderedNotes("hidden_by_settings");
+      return;
+    }
+
+    for (const [postId, rendered] of renderedPosts) {
+      if (rendered.note.confidence < settings.minimumConfidence) {
+        removeRenderedNote(postId, "below_threshold");
+      }
+    }
+
+    scheduleReevaluation();
+  }
+
+  function scheduleReevaluation() {
+    if (reevaluateTimer) {
+      window.clearTimeout(reevaluateTimer);
+    }
+
+    reevaluateTimer = window.setTimeout(() => {
+      reevaluateTimer = null;
+
+      for (const { post, element } of knownPosts.values()) {
+        maybeRenderNote(post, element).catch((error) => {
+          console.error("[decorum] Failed to reevaluate post", error);
+        });
+      }
+    }, 100);
   }
 
   window.addEventListener("decorum:post-detected", (event) => {
@@ -218,8 +299,21 @@
       return;
     }
 
-    maybeRenderMockNote(post, element).catch((error) => {
-      console.error("[decorum] Failed to render prototype note", error);
+    knownPosts.set(post.id, {
+      post,
+      element
     });
+
+    maybeRenderNote(post, element).catch((error) => {
+      console.error("[decorum] Failed to render tonal note", error);
+    });
+  });
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === "local" && changes.decorumSettings) {
+      enforceSettings().catch((error) => {
+        console.error("[decorum] Failed to enforce settings", error);
+      });
+    }
   });
 })();

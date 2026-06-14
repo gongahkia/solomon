@@ -21,8 +21,8 @@ The first implementation pass is intentionally local-first:
 
 - MV3 extension shell
 - LinkedIn content script entrypoint
-- Prototype note card rendered under the first detected post
+- Local tonal classifier rendered under detected posts that clear the confidence gate
 - Chrome side panel shell
 - Local settings storage
 
-Model calls and retrieval are not bundled into the client until the trust, cost, and key-management boundaries are explicit.
+Remote model calls and retrieval are not bundled into the client until the trust, cost, and key-management boundaries are explicit.

@@ -7,7 +7,8 @@
     "default_title": "Open Decorum"
   },
   "background": {
-    "service_worker": "src/background/service-worker.js"
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
   },
   "permissions": ["storage", "sidePanel"],
   "host_permissions": ["https://www.linkedin.com/*"],
@@ -16,7 +17,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.linkedin.com/*"],
+      "matches": ["https://www.linkedin.com/feed/*", "https://www.linkedin.com/posts/*"],
       "js": ["src/content/detector.js", "src/content/note-card.js"],
       "css": ["src/content/base.css", "src/content/note-card.css"],
       "run_at": "document_idle"

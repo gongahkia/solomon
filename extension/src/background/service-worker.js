@@ -1,6 +1,8 @@
+import { classifyPostTone } from "./tonal-classifier.js";
+
 const DEFAULT_SETTINGS = {
   enabled: true,
-  mockNotesEnabled: true,
+  tonalClassifierEnabled: true,
   minimumConfidence: 0.75
 };
 
@@ -64,9 +66,12 @@ function clampConfidence(value) {
 }
 
 function sanitizeSettings(settings) {
+  const tonalClassifierEnabled =
+    settings.tonalClassifierEnabled ?? settings.mockNotesEnabled ?? true;
+
   return {
     enabled: Boolean(settings.enabled),
-    mockNotesEnabled: Boolean(settings.mockNotesEnabled),
+    tonalClassifierEnabled: Boolean(tonalClassifierEnabled),
     minimumConfidence: clampConfidence(settings.minimumConfidence)
   };
 }
@@ -108,7 +113,9 @@ function compactLedgerEntry(message, sender) {
     label: String(note.label ?? "Context note"),
     reason: String(note.reason ?? ""),
     confidence: clampConfidence(note.confidence),
+    dedupeKey: String(note.dedupeKey ?? ""),
     model: String(note.model ?? "unknown"),
+    evidence: Array.isArray(note.evidence) ? note.evidence.slice(0, 5) : [],
     sources: Array.isArray(note.sources) ? note.sources.slice(0, 5) : [],
     postAuthor: compactedPost.author,
     postPreview: compactedPost.textPreview,
@@ -164,6 +171,40 @@ async function updateSettings(settings) {
   return nextSettings;
 }
 
+async function classifyPost(post) {
+  const { settings } = await getState();
+
+  if (!settings.enabled) {
+    return {
+      note: null,
+      skippedReason: "decorum_disabled"
+    };
+  }
+
+  if (!settings.tonalClassifierEnabled) {
+    return {
+      note: null,
+      skippedReason: "tonal_classifier_disabled"
+    };
+  }
+
+  const result = classifyPostTone(post);
+
+  if (!result.note) {
+    return result;
+  }
+
+  if (result.note.confidence < settings.minimumConfidence) {
+    return {
+      note: null,
+      skippedReason: "below_confidence_threshold",
+      candidate: result.note
+    };
+  }
+
+  return result;
+}
+
 async function handleMessage(message, sender) {
   switch (message?.type) {
     case "DECORUM_GET_STATE":
@@ -178,6 +219,9 @@ async function handleMessage(message, sender) {
       return {
         post: await recordDetectedPost(message.post, sender)
       };
+
+    case "DECORUM_CLASSIFY_POST":
+      return classifyPost(message.post);
 
     case "DECORUM_NOTE_SHOWN":
       return {

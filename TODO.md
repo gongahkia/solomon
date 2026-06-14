@@ -39,15 +39,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2A — Design
 
-19. [C] Spec MCP tool surface in `docs/mcp/tools.md`. Required tools:
-    - `solomon.preflight_context(query, matter_id?, client_id?, max_items?)` — returns current, non-stale firm context safe to inject into a prompt.
-    - `solomon.check_currency(knowledge_item_id)` — returns `live | stale_pending | superseded | retired` + reasons + last-verified timestamp.
-    - `solomon.get_dependencies(knowledge_item_id, direction=upstream|downstream|both, depth=N)`.
-    - `solomon.verify_position(knowledge_item_id, verifier_id, decision, evidence_ref)` — write path for curator console parity.
-    - `solomon.ingest(text, source_ref, scope)` — boundary-checked ingest.
-    - `solomon.audit_pack(knowledge_item_id, format=json|pdf)` — provenance + dependency + verification history + boundary metadata + hash chain.
-    - `solomon.dependency_suggestions(knowledge_item_id)` — proposed edges for human confirmation.
-    - `solomon.impact(external_authority_id)` — internal items that depend on this and need re-verification.
 20. [C] For each tool, define JSONSchema input/output in `src/solomon/mcp/schemas.py`.
 21. [D] Document error taxonomy: `boundary_rejected`, `currency_unknown`, `scope_denied`, `model_routing_failure`, `verification_required`. Land in `docs/mcp/errors.md`.
 22. [D] Document tool-call examples (request/response pairs) per tool, `docs/mcp/examples.md`.

@@ -10,12 +10,42 @@
     <main class="panel-shell">
       <header class="panel-header">
         <h1>Decorum</h1>
-        <p>Quiet context for LinkedIn posts.</p>
+        <p id="status-message">Loading...</p>
       </header>
 
-      <section class="panel-section">
-        <h2>Status</h2>
-        <p id="status-message">Extension shell loaded.</p>
+      <section class="panel-section" aria-labelledby="settings-title">
+        <h2 id="settings-title">Settings</h2>
+
+        <label class="toggle-row">
+          <span>Enabled</span>
+          <input id="enabled-input" type="checkbox">
+        </label>
+
+        <label class="toggle-row">
+          <span>Prototype note</span>
+          <input id="mock-notes-input" type="checkbox">
+        </label>
+
+        <label class="range-row" for="confidence-input">
+          <span>Minimum confidence</span>
+          <output id="confidence-output" for="confidence-input">75%</output>
+        </label>
+        <input id="confidence-input" type="range" min="50" max="99" step="1">
+      </section>
+
+      <section class="panel-section" aria-labelledby="activity-title">
+        <h2 id="activity-title">Detected Posts</h2>
+        <p id="detected-summary">0 seen</p>
+        <ol id="detected-list" class="item-list"></ol>
+      </section>
+
+      <section class="panel-section" aria-labelledby="ledger-title">
+        <div class="section-heading-row">
+          <h2 id="ledger-title">Ledger</h2>
+          <button id="clear-ledger-button" class="text-button" type="button">Clear</button>
+        </div>
+        <p id="ledger-summary">0 notes shown</p>
+        <ol id="ledger-list" class="item-list"></ol>
       </section>
     </main>
     <script src="panel.js"></script>

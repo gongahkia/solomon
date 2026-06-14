@@ -116,6 +116,14 @@
     }
   }
 
+  async function sendRuntimeMessage(message) {
+    try {
+      await chrome.runtime.sendMessage(message);
+    } catch (error) {
+      console.warn("[decorum] Failed to persist detected post", error);
+    }
+  }
+
   function emitPostDetected(post, element) {
     detectedPosts.set(post.id, post);
     element.dataset.decorumPostId = post.id;
@@ -133,6 +141,11 @@
       id: post.id,
       author: post.author || "unknown",
       textPreview: post.text.slice(0, 120)
+    });
+
+    sendRuntimeMessage({
+      type: "DECORUM_POST_DETECTED",
+      post
     });
   }
 

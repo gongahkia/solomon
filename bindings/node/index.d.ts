@@ -84,74 +84,70 @@ export declare class Shibahama {
    * Returns an error when current item state cannot be read.
    */
   memoryItems(): Array<MemoryItem>
+  /**
+   * Returns durable event-log records as JSON.
+   *
+   * # Errors
+   *
+   * Returns an error when event records cannot be read or serialized.
+   */
   eventRecordsJson(): string
-  eventRecords(): Record<string, unknown>
+  /**
+   * Returns one memory's why trace and related events as JSON.
+   *
+   * # Errors
+   *
+   * Returns an error when the memory id is invalid or storage cannot be read.
+   */
   auditJson(memoryId: string, nowUnix?: number | undefined | null): string
-  audit(memoryId: string, nowUnix?: number | undefined | null): Record<string, unknown>
+  /**
+   * Runs the offline consolidation pass and returns its report as JSON.
+   *
+   * # Errors
+   *
+   * Returns an error when consolidation cannot be planned or applied.
+   */
   consolidateJson(nowUnix?: number | undefined | null): string
-  consolidate(nowUnix?: number | undefined | null): Record<string, unknown>
-  challengeJson(
-    memoryId: string,
-    reason: string,
-    actor?: string | undefined | null,
-    timestampUnix?: number | undefined | null,
-  ): string
-  challenge(
-    memoryId: string,
-    reason: string,
-    actor?: string | undefined | null,
-    timestampUnix?: number | undefined | null,
-  ): Record<string, unknown>
-  affirmJson(
-    memoryId: string,
-    reason?: string | undefined | null,
-    actor?: string | undefined | null,
-    timestampUnix?: number | undefined | null,
-  ): string
-  affirm(
-    memoryId: string,
-    reason?: string | undefined | null,
-    actor?: string | undefined | null,
-    timestampUnix?: number | undefined | null,
-  ): Record<string, unknown>
-  correctJson(
-    memoryId: string,
-    proposedContent: string,
-    reason?: string | undefined | null,
-    actor?: string | undefined | null,
-    timestampUnix?: number | undefined | null,
-  ): string
-  correct(
-    memoryId: string,
-    proposedContent: string,
-    reason?: string | undefined | null,
-    actor?: string | undefined | null,
-    timestampUnix?: number | undefined | null,
-  ): Record<string, unknown>
-  pinJson(
-    memoryId: string,
-    reason?: string | undefined | null,
-    actor?: string | undefined | null,
-    timestampUnix?: number | undefined | null,
-  ): string
-  pin(
-    memoryId: string,
-    reason?: string | undefined | null,
-    actor?: string | undefined | null,
-    timestampUnix?: number | undefined | null,
-  ): Record<string, unknown>
-  unpinJson(
-    memoryId: string,
-    reason?: string | undefined | null,
-    actor?: string | undefined | null,
-    timestampUnix?: number | undefined | null,
-  ): string
-  unpin(
-    memoryId: string,
-    reason?: string | undefined | null,
-    actor?: string | undefined | null,
-    timestampUnix?: number | undefined | null,
-  ): Record<string, unknown>
+  /**
+   * Challenges a memory and returns the mutation report as JSON.
+   *
+   * # Errors
+   *
+   * Returns an error when the memory id is invalid or persistence fails.
+   */
+  challengeJson(memoryId: string, reason: string, actor?: string | undefined | null, timestampUnix?: number | undefined | null): string
+  /**
+   * Affirms a memory and returns the mutation report as JSON.
+   *
+   * # Errors
+   *
+   * Returns an error when the memory id is invalid or persistence fails.
+   */
+  affirmJson(memoryId: string, reason?: string | undefined | null, actor?: string | undefined | null, timestampUnix?: number | undefined | null): string
+  /**
+   * Pins a memory and returns the mutation report as JSON.
+   *
+   * # Errors
+   *
+   * Returns an error when the memory id is invalid or persistence fails.
+   */
+  pinJson(memoryId: string, reason?: string | undefined | null, actor?: string | undefined | null, timestampUnix?: number | undefined | null): string
+  /**
+   * Unpins a memory and returns the mutation report as JSON.
+   *
+   * # Errors
+   *
+   * Returns an error when the memory id is invalid or persistence fails.
+   */
+  unpinJson(memoryId: string, reason?: string | undefined | null, actor?: string | undefined | null, timestampUnix?: number | undefined | null): string
+  /**
+   * Corrects a memory and returns the mutation report as JSON.
+   *
+   * # Errors
+   *
+   * Returns an error when the memory id is invalid or persistence fails.
+   */
+  correctJson(memoryId: string, proposedContent: string, reason?: string | undefined | null, actor?: string | undefined | null, timestampUnix?: number | undefined | null): string
 }
 
 export interface MemoryItem {

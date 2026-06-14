@@ -51,7 +51,6 @@ Headline deliverable. Everything else exists to support this.
 42. [C] Smoke test in Claude Desktop; record video.
 43. [C] Smoke test in Claude Code; record video.
 44. [C] Smoke test in Cursor and Continue (best-effort). Note any compatibility gaps. [Speculation] Cursor supports stdio MCP natively.
-46. [D] `docs/mcp/install.md`: install + register-with-client instructions per client.
 
 ---
 

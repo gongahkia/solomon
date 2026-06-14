@@ -42,7 +42,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2B — Implementation
 
-26. [C] Wire each tool from §19 to existing Solomon Python API (`solomon.client`, `solomon.currency`, `solomon.graph`, `solomon.audit`). No duplicated logic.
 27. [C] Add `solomon mcp serve` CLI subcommand (STDIO default, `--http` flag for SSE, `--port`, `--host`).
 28. [C] Boundary preflight wrapper: every MCP tool that returns firm content runs through `/review` first; reject with structured error if MNPI/PII leaks.
 29. [C] Scope enforcement at MCP layer: `matter_id` / `client_id` args restrict the knowledge store query.

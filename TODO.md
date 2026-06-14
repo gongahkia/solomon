@@ -42,7 +42,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2B — Implementation
 
-24. [C] Implement STDIO transport (Claude Desktop / Claude Code default).
 25. [C] Implement HTTP/SSE transport for remote-MCP scenarios.
 26. [C] Wire each tool from §19 to existing Solomon Python API (`solomon.client`, `solomon.currency`, `solomon.graph`, `solomon.audit`). No duplicated logic.
 27. [C] Add `solomon mcp serve` CLI subcommand (STDIO default, `--http` flag for SSE, `--port`, `--host`).

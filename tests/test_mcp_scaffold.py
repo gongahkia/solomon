@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
+import anyio
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
 from solomon import __version__
+from solomon.api.service import IngestRequest, SolomonService
+from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.mcp.auth import MCPAuthConfig, bearer_token_matches, token_from_env
 from solomon.mcp.logging import hash_mcp_input
-from solomon.mcp.server import available_tool_names, create_server_config
+from solomon.mcp.server import available_tool_names, create_fastmcp_server, create_server_config
 from solomon.mcp.tools import READ_ONLY_TOOLS, mcp_tool_specs
 from solomon.mcp.transport import MCPTransportConfig
 
@@ -48,3 +57,71 @@ def test_mcp_input_hash_is_stable_across_key_order() -> None:
     right = hash_mcp_input({"a": 1, "b": 2})
 
     assert left == right
+
+
+def test_fastmcp_server_registers_solomon_tools(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    server = create_fastmcp_server(service)
+
+    async def check() -> None:
+        tools = await server.list_tools()
+        assert {tool.name for tool in tools} == set(available_tool_names())
+        assert "solomon.preflight_context" in {tool.name for tool in tools}
+
+    anyio.run(check)
+
+
+def test_fastmcp_runtime_calls_service(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="structure x under regulation r section 12",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo",
+        )
+    )
+    server = create_fastmcp_server(service)
+
+    async def call() -> None:
+        result = await server.call_tool(
+            "solomon.check_currency",
+            {"knowledge_item_id": item.id},
+        )
+        payload = _structured_payload(result)
+        assert payload["knowledge_item_id"] == item.id
+        assert payload["state"] == "live"
+
+    anyio.run(call)
+
+
+def test_stdio_server_lists_tools(tmp_path: Path) -> None:
+    async def call() -> None:
+        params = StdioServerParameters(
+            command="uv",
+            args=["run", "python", "-m", "solomon.mcp.server"],
+            cwd=Path.cwd(),
+            env={
+                "SOLOMON_DATA_DIR": str(tmp_path / "data"),
+                "SOLOMON_JOURNAL_DIR": str(tmp_path / "journal"),
+                "SOLOMON_DATABASE_URL": f"sqlite:///{tmp_path / 'data' / 'solomon.sqlite3'}",
+            },
+        )
+        async with stdio_client(params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                tools = await session.list_tools()
+                assert {tool.name for tool in tools.tools} == set(available_tool_names())
+
+    anyio.run(call)
+
+
+def _structured_payload(result: Any) -> dict[str, Any]:
+    if isinstance(result, dict):
+        return result
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], dict):
+        return result[1]
+    structured = getattr(result, "structuredContent", None)
+    if isinstance(structured, dict):
+        return structured
+    raise AssertionError(f"unexpected MCP result shape: {result!r}")

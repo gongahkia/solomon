@@ -357,6 +357,7 @@ curl http://localhost:8140/health
 
 - [`docs/architecture.md`](./docs/architecture.md): service architecture, deterministic primitive plans,
   contestability, storage, tenancy, auth, boundary, and reference extraction.
+- [`docs/console/`](./docs/console/): curator console screens, screenshots, GIFs, and stack decision.
 - [`docs/concepts.md`](./docs/concepts.md): currency, bi-temporality, dependency graph, credence, and
   verification concepts.
 - [`docs/boundary-integration.md`](./docs/boundary-integration.md): Solomon boundary behavior.
@@ -418,6 +419,7 @@ Regenerate README media and API artifacts:
 
 ```bash
 uv run python scripts/render_stale_house_view_gif.py
+uv run python scripts/render_console_gifs.py
 uv run python scripts/export_openapi.py
 ```
 
@@ -451,17 +453,19 @@ Package surfaces:
 
 ## Screenshots
 
-The README currently embeds the stale-house-view demo GIF from [`docs/assets/`](./docs/assets/).
+### Verification Desk
 
-Useful screenshots to add under `docs/assets/`:
+![Verification Desk](./docs/assets/console/verification-desk.png)
 
-- FastAPI `/docs` showing the active Solomon API surface.
-- Example `/recall` result with dependency and currency evidence.
-- Example `/plans/execute` response showing deterministic step hashes.
-- Example `/contest/{item_id}` response showing visible contest history and quarantined correction.
-- Audit-pack verification output.
+### Dependency Review
 
-Once those files exist, this section can embed them with relative links.
+![Dependency Review](./docs/assets/console/dependency-review.png)
+
+### Audit Pack
+
+![Audit Pack](./docs/assets/console/audit-pack.png)
+
+Animated walkthroughs live beside the PNGs in [`docs/assets/console/`](./docs/assets/console/).
 
 ## License
 

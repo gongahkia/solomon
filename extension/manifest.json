@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Decorum",
+  "version": "0.1.0",
+  "description": "Adds restrained context cards under LinkedIn posts when Decorum has enough signal.",
+  "action": {
+    "default_title": "Open Decorum"
+  },
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  "permissions": ["storage", "sidePanel"],
+  "host_permissions": ["https://www.linkedin.com/*"],
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["src/content/detector.js"],
+      "css": ["src/content/base.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

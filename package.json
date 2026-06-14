@@ -1,0 +1,14 @@
+{
+  "name": "decorum",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Community-Notes-style context cards for LinkedIn posts.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/check.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

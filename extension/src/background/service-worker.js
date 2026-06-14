@@ -21,6 +21,13 @@ const STORAGE_KEYS = {
 
 const MAX_DETECTED_POSTS = 50;
 const MAX_LEDGER_ENTRIES = 100;
+let storageWriteQueue = Promise.resolve();
+
+function enqueueStorageWrite(operation) {
+  const nextWrite = storageWriteQueue.then(operation, operation);
+  storageWriteQueue = nextWrite.catch(() => {});
+  return nextWrite;
+}
 
 async function ensureDefaults() {
   const { decorumSettings, decorumDetectedPosts, decorumNoteLedger } =
@@ -98,15 +105,17 @@ function compactPost(post, sender) {
 }
 
 async function recordDetectedPost(post, sender) {
-  const { detectedPosts } = await getState();
-  const nextPost = compactPost(post, sender);
-  const withoutExisting = detectedPosts.filter((item) => item.id !== nextPost.id);
+  return enqueueStorageWrite(async () => {
+    const { detectedPosts } = await getState();
+    const nextPost = compactPost(post, sender);
+    const withoutExisting = detectedPosts.filter((item) => item.id !== nextPost.id);
 
-  await chrome.storage.local.set({
-    decorumDetectedPosts: [nextPost, ...withoutExisting].slice(0, MAX_DETECTED_POSTS)
+    await chrome.storage.local.set({
+      decorumDetectedPosts: [nextPost, ...withoutExisting].slice(0, MAX_DETECTED_POSTS)
+    });
+
+    return nextPost;
   });
-
-  return nextPost;
 }
 
 function compactLedgerEntry(message, sender) {
@@ -144,37 +153,41 @@ function compactLedgerEntry(message, sender) {
 }
 
 async function recordShownNote(message, sender) {
-  const { noteLedger } = await getState();
-  const nextEntry = compactLedgerEntry(message, sender);
-  const withoutExisting = noteLedger.filter((entry) => entry.traceId !== nextEntry.traceId);
+  return enqueueStorageWrite(async () => {
+    const { noteLedger } = await getState();
+    const nextEntry = compactLedgerEntry(message, sender);
+    const withoutExisting = noteLedger.filter((entry) => entry.traceId !== nextEntry.traceId);
 
-  await chrome.storage.local.set({
-    decorumNoteLedger: [nextEntry, ...withoutExisting].slice(0, MAX_LEDGER_ENTRIES)
+    await chrome.storage.local.set({
+      decorumNoteLedger: [nextEntry, ...withoutExisting].slice(0, MAX_LEDGER_ENTRIES)
+    });
+
+    return nextEntry;
   });
-
-  return nextEntry;
 }
 
 async function recordNoteRating(message) {
-  const { noteLedger } = await getState();
-  const rating = normalizeRating(message.rating);
-  const ratedAt = String(message.ratedAt ?? new Date().toISOString());
-  const traceId = String(message.traceId ?? "");
+  return enqueueStorageWrite(async () => {
+    const { noteLedger } = await getState();
+    const rating = normalizeRating(message.rating);
+    const ratedAt = String(message.ratedAt ?? new Date().toISOString());
+    const traceId = String(message.traceId ?? "");
 
-  const nextLedger = noteLedger.map((entry) =>
-    entry.traceId === traceId
-      ? {
-          ...entry,
-          rating,
-          ratingCategory: rating,
-          ratedAt,
-          falsePositive: isNegativeRating(rating)
-        }
-      : entry
-  );
+    const nextLedger = noteLedger.map((entry) =>
+      entry.traceId === traceId
+        ? {
+            ...entry,
+            rating,
+            ratingCategory: rating,
+            ratedAt,
+            falsePositive: isNegativeRating(rating)
+          }
+        : entry
+    );
 
-  await chrome.storage.local.set({ decorumNoteLedger: nextLedger });
-  return nextLedger.find((entry) => entry.traceId === traceId) ?? null;
+    await chrome.storage.local.set({ decorumNoteLedger: nextLedger });
+    return nextLedger.find((entry) => entry.traceId === traceId) ?? null;
+  });
 }
 
 async function updateSettings(settings) {

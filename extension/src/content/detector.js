@@ -27,6 +27,15 @@
   const postSelector = POST_SELECTORS.join(",");
   const detectedPosts = new Map();
   const scannedElements = new WeakSet();
+  const pendingRoots = new Set();
+  const metrics = {
+    scanCount: 0,
+    observedMutationCount: 0,
+    observedNodeCount: 0,
+    scannedCandidateCount: 0,
+    detectedPostCount: 0,
+    lastScanDurationMs: 0
+  };
   let scanTimer = null;
 
   function isSupportedSurface() {
@@ -97,6 +106,22 @@
     return !parentPost;
   }
 
+  function getCandidatePostElements(root) {
+    const candidates = [];
+
+    if (root.nodeType === Node.ELEMENT_NODE) {
+      if (root.matches(postSelector)) {
+        candidates.push(root);
+      }
+
+      candidates.push(...root.querySelectorAll(postSelector));
+    } else if (root.querySelectorAll) {
+      candidates.push(...root.querySelectorAll(postSelector));
+    }
+
+    return [...new Set(candidates)].filter(isTopLevelPost);
+  }
+
   function extractPost(element) {
     const text = firstTextFrom(element, TEXT_SELECTORS);
 
@@ -161,14 +186,28 @@
     });
   }
 
-  async function scan(root = document) {
+  function publishMetrics() {
+    document.documentElement.dataset.decorumScanCount = String(metrics.scanCount);
+    document.documentElement.dataset.decorumDetectedPostCount = String(
+      metrics.detectedPostCount
+    );
+    document.documentElement.dataset.decorumScannedCandidateCount = String(
+      metrics.scannedCandidateCount
+    );
+  }
+
+  async function scanRoots(roots) {
+    const startedAt = performance.now();
+    metrics.scanCount += 1;
     const settings = await getSettings();
 
     if (!settings.enabled || !isSupportedSurface()) {
+      publishMetrics();
       return [];
     }
 
-    const elements = [...root.querySelectorAll(postSelector)].filter(isTopLevelPost);
+    const elements = [...new Set(roots.flatMap(getCandidatePostElements))];
+    metrics.scannedCandidateCount += elements.length;
     const posts = [];
 
     for (const element of elements) {
@@ -187,22 +226,54 @@
       emitPostDetected(post, element);
     }
 
+    metrics.detectedPostCount = detectedPosts.size;
+    metrics.lastScanDurationMs = Math.round((performance.now() - startedAt) * 100) / 100;
+    publishMetrics();
     return posts;
   }
 
-  function scheduleScan() {
+  function scan(root = document) {
+    return scanRoots([root]);
+  }
+
+  function scheduleScan(root = document) {
+    pendingRoots.add(root);
+
     if (scanTimer) {
       window.clearTimeout(scanTimer);
     }
 
     scanTimer = window.setTimeout(() => {
       scanTimer = null;
-      scan().catch((error) => console.error("[decorum] Post scan failed", error));
+      const roots = [...pendingRoots];
+      pendingRoots.clear();
+      scanRoots(roots).catch((error) => console.error("[decorum] Post scan failed", error));
     }, 250);
   }
 
-  const observer = new MutationObserver(scheduleScan);
-  observer.observe(document.documentElement, {
+  function shouldScanAddedNode(node) {
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return false;
+    }
+
+    return node.matches(postSelector) || Boolean(node.querySelector(postSelector));
+  }
+
+  const targetedObserver = new MutationObserver((mutations) => {
+    metrics.observedMutationCount += mutations.length;
+
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        metrics.observedNodeCount += 1;
+
+        if (shouldScanAddedNode(node)) {
+          scheduleScan(node);
+        }
+      }
+    }
+  });
+
+  targetedObserver.observe(document.documentElement, {
     childList: true,
     subtree: true
   });
@@ -223,7 +294,8 @@
   window.Decorum.detector = {
     scan,
     getDetectedPosts: () => [...detectedPosts.values()],
-    isSupportedSurface
+    isSupportedSurface,
+    getMetrics: () => ({ ...metrics })
   };
 
   window.setTimeout(() => {

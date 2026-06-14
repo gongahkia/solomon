@@ -56,7 +56,6 @@ Headline deliverable. Everything else exists to support this.
 
 ## Workstream 3 — Curator console (thin web UI, exactly 3 screens)
 
-59. [D] `docs/console/user-guide.md`: 1-page walkthrough for a fictional KM lawyer.
 
 ---
 

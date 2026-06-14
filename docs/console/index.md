@@ -22,6 +22,7 @@ Three server-rendered screens cover the portfolio console scope: verification re
 
 ## Screen notes
 
+- [User guide](user-guide.md)
 - [Verification Desk wireframe](verification-desk.md)
 - [Dependency Review wireframe](dependency-review.md)
 - [Audit Pack wireframe](audit-pack.md)

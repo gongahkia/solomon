@@ -71,3 +71,41 @@ def test_cli_ingest_recall_and_why_use_same_local_store(monkeypatch: pytest.Monk
     assert item["id"] in why.output
     assert "credence: FirmAuthoritative" in why.output
     assert "source: memo-cli" in why.output
+
+
+def test_cli_dependency_suggestion_queue(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _configure_cli_store(monkeypatch, tmp_path)
+
+    ingest = runner.invoke(
+        app,
+        [
+            "ingest",
+            "This position relies on Regulation R section 12.",
+            "--source-ref",
+            "memo-cli-deps",
+            "--kind",
+            "position",
+            "--source-kind",
+            "partner",
+        ],
+    )
+    assert ingest.exit_code == 0
+    item = json.loads(ingest.output)
+
+    pending = runner.invoke(app, ["dependency-suggestions", "--item-id", item["id"]])
+    assert pending.exit_code == 0
+    suggestions = json.loads(pending.output)
+    assert suggestions[0]["decision"] == "pending"
+    assert suggestions[0]["suggested_edge"]["target_id"] == "regulation-r-section-12"
+
+    confirm = runner.invoke(
+        app,
+        ["confirm-dependency-suggestion", suggestions[0]["id"], "--by", "Partner A"],
+    )
+    assert confirm.exit_code == 0
+    edge = json.loads(confirm.output)
+    assert edge["confidence"] == "human_confirmed"
+
+    confirmed = runner.invoke(app, ["dependency-suggestions", "--item-id", item["id"], "--decision", "confirmed"])
+    assert confirmed.exit_code == 0
+    assert json.loads(confirmed.output)[0]["decision"] == "confirmed"

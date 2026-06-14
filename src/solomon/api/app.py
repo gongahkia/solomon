@@ -27,6 +27,8 @@ from solomon.api.service import (
     AuthorityChangeRequest,
     ContestRequest,
     DependencyRequest,
+    DependencySuggestionDecisionRequest,
+    DependencySuggestionRequest,
     IngestRequest,
     PinRequest,
     PrimitivePlanRequest,
@@ -46,6 +48,7 @@ from solomon.api.tenancy import (
 from solomon.boundary.kaypoh import KaypohImportStatus, probe_kaypoh_client
 from solomon.config import Settings, get_settings
 from solomon.errors import SolomonError
+from solomon.graph.suggestions import SuggestionDecision
 from solomon.graph.visualization import GraphFormat
 from solomon.orchestrator.models import (
     LocalModelEndpoint,
@@ -304,6 +307,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/dependencies")
     def add_dependency(request: Request, payload: DependencyRequest) -> dict[str, Any]:
         return active_service(request).add_dependency(payload).model_dump(mode="json")
+
+    @app.post("/dependencies/suggest")
+    def suggest_dependencies(request: Request, payload: DependencySuggestionRequest) -> list[dict[str, Any]]:
+        return [
+            suggestion.model_dump(mode="json")
+            for suggestion in active_service(request).suggest_dependencies(payload, router=active_router())
+        ]
+
+    @app.get("/dependencies/suggestions")
+    def dependency_suggestions(
+        request: Request,
+        item_id: str | None = None,
+        decision: SuggestionDecision | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        return [
+            suggestion.model_dump(mode="json")
+            for suggestion in active_service(request).dependency_suggestions(
+                item_id=item_id,
+                decision=decision,
+                limit=limit,
+            )
+        ]
+
+    @app.post("/dependencies/suggestions/{suggestion_id}/confirm")
+    def confirm_dependency_suggestion(
+        request: Request,
+        suggestion_id: str,
+        payload: DependencySuggestionDecisionRequest,
+    ) -> dict[str, Any]:
+        return active_service(request).confirm_dependency_suggestion(suggestion_id, payload).model_dump(mode="json")
+
+    @app.post("/dependencies/suggestions/{suggestion_id}/reject")
+    def reject_dependency_suggestion(
+        request: Request,
+        suggestion_id: str,
+        payload: DependencySuggestionDecisionRequest,
+    ) -> dict[str, Any]:
+        return active_service(request).reject_dependency_suggestion(suggestion_id, payload).model_dump(mode="json")
 
     @app.post("/plans/execute")
     def execute_plan(request: Request, payload: PrimitivePlanRequest) -> dict[str, Any]:

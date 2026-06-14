@@ -37,7 +37,16 @@ from solomon.currency.prediction import PendingAuthorityAmendment, StalenessRisk
 from solomon.errors import BadRequestError, NotFoundError, PolicyRefusalError
 from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
 from solomon.graph.propagation import CurrencyPropagator
-from solomon.graph.suggestions import ReferenceExtraction, extract_defined_terms_and_citations
+from solomon.graph.suggestions import (
+    DependencySuggestion,
+    ReferenceExtraction,
+    SuggestionDecision,
+    confirm_suggestion,
+    extract_defined_terms_and_citations,
+    reject_suggestion,
+    suggest_authority_dependencies,
+    suggest_authority_dependencies_with_llm,
+)
 from solomon.graph.visualization import GraphFormat, dependency_graph_view, render_dependency_graph
 from solomon.orchestrator.models import ModelRequest, ModelRouter, RoutedModelResult
 from solomon.orchestrator.retrieval import MatterContext, RecallOptions, RetrievalOrchestrator
@@ -132,6 +141,15 @@ class DependencyRequest(SolomonModel):
     confidence: EdgeConfidence = EdgeConfidence.HUMAN_ASSERTED
     created_by: str | None = None
     reason: str | None = None
+
+
+class DependencySuggestionRequest(SolomonModel):
+    item_id: str
+    use_llm: bool = False
+
+
+class DependencySuggestionDecisionRequest(SolomonModel):
+    by: str = Field(min_length=1)
 
 
 class AnswerRequest(SolomonModel):
@@ -253,6 +271,7 @@ class SolomonService:
         item = self._seed_verification_from_source(item)
         item = self.index.upsert_item(item)
         self.store.write_item(item)
+        self._create_dependency_suggestions(item)
         return item
 
     def recall(self, request: RecallRequest) -> list[dict[str, Any]]:
@@ -597,6 +616,85 @@ class SolomonService:
         )
         return self.graph.add_dependency(edge)
 
+    def suggest_dependencies(
+        self,
+        request: DependencySuggestionRequest,
+        *,
+        router: ModelRouter | None = None,
+    ) -> list[DependencySuggestion]:
+        item = self._get_item(request.item_id)
+        return self._create_dependency_suggestions(
+            item,
+            use_llm=request.use_llm,
+            router=router,
+        )
+
+    def dependency_suggestions(
+        self,
+        *,
+        item_id: str | None = None,
+        decision: SuggestionDecision | None = None,
+        limit: int = 100,
+    ) -> list[DependencySuggestion]:
+        return self.graph.list_dependency_suggestions(item_id=item_id, decision=decision, limit=limit)
+
+    def confirm_dependency_suggestion(
+        self,
+        suggestion_id: str,
+        request: DependencySuggestionDecisionRequest,
+    ) -> DependencyEdge:
+        suggestion = self.graph.get_dependency_suggestion(suggestion_id)
+        if suggestion.decision is SuggestionDecision.CONFIRMED:
+            return suggestion.suggested_edge
+        if suggestion.decision is SuggestionDecision.REJECTED:
+            raise BadRequestError("rejected dependency suggestions cannot be confirmed")
+        edge = confirm_suggestion(suggestion, by=request.by)
+        edge = self.graph.add_dependency(edge)
+        confirmed = suggestion.model_copy(
+            update={
+                "decision": SuggestionDecision.CONFIRMED,
+                "decided_by": request.by,
+                "decided_at": datetime.now(timezone.utc),
+                "suggested_edge": edge,
+            }
+        )
+        self.graph.update_dependency_suggestion(confirmed)
+        self.currency_cache.invalidate({edge.source_id})
+        self.audit.append(
+            "dependency_suggestion_confirmed",
+            {
+                "suggestion_id": suggestion_id,
+                "item_id": edge.source_id,
+                "target_id": edge.target_id,
+                "edge_id": edge.id,
+                "by": request.by,
+            },
+        )
+        return edge
+
+    def reject_dependency_suggestion(
+        self,
+        suggestion_id: str,
+        request: DependencySuggestionDecisionRequest,
+    ) -> DependencySuggestion:
+        suggestion = self.graph.get_dependency_suggestion(suggestion_id)
+        if suggestion.decision is SuggestionDecision.REJECTED:
+            return suggestion
+        if suggestion.decision is SuggestionDecision.CONFIRMED:
+            raise BadRequestError("confirmed dependency suggestions cannot be rejected")
+        rejected = reject_suggestion(suggestion, by=request.by)
+        self.graph.update_dependency_suggestion(rejected)
+        self.audit.append(
+            "dependency_suggestion_rejected",
+            {
+                "suggestion_id": suggestion_id,
+                "item_id": rejected.item_id,
+                "target_id": rejected.suggested_edge.target_id,
+                "by": request.by,
+            },
+        )
+        return rejected
+
     def impact_query(self, authority_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
         timestamp = as_of or self._deterministic_store_timestamp()
         return CurrencyPropagator(graph=self.graph, store=self.store).impact_query(
@@ -857,6 +955,61 @@ class SolomonService:
                 "verified_by": item.provenance.author or f"source:{item.provenance.source_kind.value}",
             }
         )
+
+    def _create_dependency_suggestions(
+        self,
+        item: KnowledgeItem,
+        *,
+        use_llm: bool = False,
+        router: ModelRouter | None = None,
+    ) -> list[DependencySuggestion]:
+        suggestions = suggest_authority_dependencies(
+            item_id=item.id,
+            content=item.content,
+            boundary=self.boundary,
+            matter_id=item.matter_id,
+        )
+        if use_llm:
+            if router is None:
+                raise BadRequestError("LLM dependency suggestion requires a model router")
+            suggestions.extend(
+                suggest_authority_dependencies_with_llm(
+                    item_id=item.id,
+                    content=item.content,
+                    boundary=self.boundary,
+                    router=router,
+                    matter_id=item.matter_id,
+                )
+            )
+        stored: list[DependencySuggestion] = []
+        existing_edges = {
+            (edge.target_id, edge.edge_type)
+            for edge in self.graph.get_dependencies(item.id)
+            if edge.valid_to is None
+        }
+        existing_suggestions = {
+            (suggestion.suggested_edge.target_id, suggestion.suggested_edge.edge_type)
+            for suggestion in self.graph.list_dependency_suggestions(item_id=item.id)
+        }
+        for suggestion in suggestions:
+            key = (suggestion.suggested_edge.target_id, suggestion.suggested_edge.edge_type)
+            if key in existing_edges or key in existing_suggestions:
+                continue
+            stored_suggestion = self.graph.add_dependency_suggestion(suggestion)
+            existing_suggestions.add(key)
+            stored.append(stored_suggestion)
+            self.audit.append(
+                "dependency_suggestion_created",
+                {
+                    "suggestion_id": stored_suggestion.id,
+                    "item_id": stored_suggestion.item_id,
+                    "target_id": stored_suggestion.suggested_edge.target_id,
+                    "edge_type": stored_suggestion.suggested_edge.edge_type.value,
+                    "source": stored_suggestion.source,
+                    "authority_ref_sha256": _digest(stored_suggestion.authority_ref),
+                },
+            )
+        return stored
 
 
 def _build_answer_prompt(query: str, recalled: list[dict[str, Any]]) -> str:

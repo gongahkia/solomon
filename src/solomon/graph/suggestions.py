@@ -6,6 +6,7 @@ import importlib
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
@@ -13,6 +14,7 @@ from pydantic import Field
 
 from solomon.api.schemas import SolomonModel
 from solomon.boundary.kaypoh import KaypohBoundary
+from solomon.currency.models import new_uuid7, now_utc
 from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
 from solomon.orchestrator.models import ModelRequest, ModelRouter
 
@@ -30,10 +32,15 @@ class SuggestionDecision(str, Enum):
 
 
 class DependencySuggestion(SolomonModel):
+    id: str = Field(default_factory=new_uuid7)
     item_id: str
     authority_ref: str
     suggested_edge: DependencyEdge
     decision: SuggestionDecision = SuggestionDecision.PENDING
+    source: Literal["deterministic", "llm"] = "deterministic"
+    created_at: datetime = Field(default_factory=now_utc)
+    decided_at: datetime | None = None
+    decided_by: str | None = None
 
 
 class DefinedTerm(SolomonModel):
@@ -112,6 +119,7 @@ def suggest_authority_dependencies(
                     confidence=EdgeConfidence.LLM_SUGGESTED,
                     reason="candidate authority reference extracted from Kaypoh-sanitized text",
                 ),
+                source="deterministic",
             )
         )
     return suggestions
@@ -154,6 +162,7 @@ def suggest_authority_dependencies_with_llm(
                     confidence=EdgeConfidence.LLM_SUGGESTED,
                     reason=f"LLM-assisted candidate from Kaypoh-sanitized text: {reason}",
                 ),
+                source="llm",
             )
         )
     return suggestions
@@ -173,6 +182,8 @@ def reject_suggestion(suggestion: DependencySuggestion, *, by: str) -> Dependenc
     return suggestion.model_copy(
         update={
             "decision": SuggestionDecision.REJECTED,
+            "decided_by": by,
+            "decided_at": now_utc(),
             "suggested_edge": suggestion.suggested_edge.model_copy(
                 update={"created_by": by, "reason": f"human rejected suggestion: {suggestion.authority_ref}"}
             ),

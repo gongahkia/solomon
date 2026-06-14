@@ -5,10 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from solomon.api.service import DependencyRequest, SolomonService
+from solomon.api.service import (
+    DependencyRequest,
+    DependencySuggestionDecisionRequest,
+    DependencySuggestionRequest,
+    IngestRequest,
+    SolomonService,
+)
 from solomon.boundary.kaypoh import KaypohBoundary
+from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.graph.models import EdgeConfidence, EdgeType
 from solomon.graph.suggestions import (
+    SuggestionDecision,
     confirm_suggestion,
     extract_defined_terms_and_citations,
     reject_suggestion,
@@ -51,6 +59,62 @@ def test_manual_dependency_tagging_service_api(tmp_path: Path) -> None:
 
     assert edge.confidence is EdgeConfidence.HUMAN_ASSERTED
     assert service.graph.get_dependencies("item-1")[0].target_id == "reg-r-12"
+
+
+def test_ingest_creates_pending_dependency_suggestions_and_dedupes_reruns(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="This position relies on Regulation R section 12.",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo-deps",
+        )
+    )
+
+    suggestions = service.dependency_suggestions(item_id=item.id)
+    rerun = service.suggest_dependencies(DependencySuggestionRequest(item_id=item.id))
+
+    assert len(suggestions) == 1
+    assert suggestions[0].decision is SuggestionDecision.PENDING
+    assert suggestions[0].suggested_edge.target_id == "regulation-r-section-12"
+    assert suggestions[0].source == "deterministic"
+    assert rerun == []
+
+
+def test_confirm_and_reject_dependency_suggestions_update_queue_and_edges(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="Regulation R section 12 controls. Regulation S section 9 also matters.",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo-deps",
+        )
+    )
+    suggestions = service.dependency_suggestions(item_id=item.id, limit=10)
+
+    confirmed_edge = service.confirm_dependency_suggestion(
+        suggestions[0].id,
+        DependencySuggestionDecisionRequest(by="Partner A"),
+    )
+    rejected = service.reject_dependency_suggestion(
+        suggestions[1].id,
+        DependencySuggestionDecisionRequest(by="Partner A"),
+    )
+
+    decisions = {suggestion.id: suggestion.decision for suggestion in service.dependency_suggestions(item_id=item.id)}
+    assert confirmed_edge.confidence is EdgeConfidence.HUMAN_CONFIRMED
+    assert service.graph.get_dependencies(item.id) == [confirmed_edge]
+    assert rejected.decision is SuggestionDecision.REJECTED
+    assert decisions[suggestions[0].id] is SuggestionDecision.CONFIRMED
+    assert decisions[suggestions[1].id] is SuggestionDecision.REJECTED
+    raw_journal = (tmp_path / "journal" / "journal.jsonl").read_text(encoding="utf-8")
+    assert "dependency_suggestion_created" in raw_journal
+    assert "dependency_suggestion_confirmed" in raw_journal
+    assert "dependency_suggestion_rejected" in raw_journal
+    assert "Regulation R section 12 controls" not in raw_journal
 
 
 def test_suggest_confirm_and_reject_dependencies() -> None:

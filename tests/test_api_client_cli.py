@@ -220,6 +220,10 @@ def test_fastapi_app_exposes_public_verbs(tmp_path: Path) -> None:
         "/affirm/{item_id}",
         "/pin/{item_id}",
         "/plans/execute",
+        "/dependencies/suggest",
+        "/dependencies/suggestions",
+        "/dependencies/suggestions/{suggestion_id}/confirm",
+        "/dependencies/suggestions/{suggestion_id}/reject",
         "/impact/{authority_id}",
         "/graph",
         "/references/extract",
@@ -371,6 +375,47 @@ def test_public_route_wrappers_apply_service_state_and_return_stable_shapes(tmp_
                     "reason": "manual route-wrapper test edge",
                 },
             )
+            suggested_item = await client.post(
+                "/ingest",
+                json={
+                    "kind": "position",
+                    "content": "Queue route wrapper relies on Regulation S section 9.",
+                    "source_kind": "partner",
+                    "source_ref": "memo-suggestion-routes",
+                    "valid_from": "2026-01-01T00:00:00+00:00",
+                    "ingested_at": "2026-01-01T00:00:00+00:00",
+                },
+            )
+            suggestions = await client.get(
+                "/dependencies/suggestions",
+                params={"item_id": suggested_item.json()["id"], "decision": "pending"},
+            )
+            suggestion_id = suggestions.json()[0]["id"]
+            suggest_rerun = await client.post(
+                "/dependencies/suggest",
+                json={"item_id": suggested_item.json()["id"]},
+            )
+            confirm_suggestion = await client.post(
+                f"/dependencies/suggestions/{suggestion_id}/confirm",
+                json={"by": "Partner A"},
+            )
+            rejected_item = await client.post(
+                "/ingest",
+                json={
+                    "kind": "position",
+                    "content": "Queue reject route wrapper relies on Regulation T section 3.",
+                    "source_kind": "partner",
+                    "source_ref": "memo-reject-routes",
+                },
+            )
+            reject_suggestions = await client.get(
+                "/dependencies/suggestions",
+                params={"item_id": rejected_item.json()["id"], "decision": "pending"},
+            )
+            reject_suggestion = await client.post(
+                f"/dependencies/suggestions/{reject_suggestions.json()[0]['id']}/reject",
+                json={"by": "Partner A"},
+            )
             currency = await client.get(f"/currency/{item_id}")
             plan = await client.post(
                 "/plans/execute",
@@ -438,6 +483,13 @@ def test_public_route_wrappers_apply_service_state_and_return_stable_shapes(tmp_
             return {
                 "created": created,
                 "dependency": dependency,
+                "suggested_item": suggested_item,
+                "suggestions": suggestions,
+                "suggest_rerun": suggest_rerun,
+                "confirm_suggestion": confirm_suggestion,
+                "rejected_item": rejected_item,
+                "reject_suggestions": reject_suggestions,
+                "reject_suggestion": reject_suggestion,
                 "currency": currency,
                 "plan": plan,
                 "impact": impact,
@@ -456,6 +508,10 @@ def test_public_route_wrappers_apply_service_state_and_return_stable_shapes(tmp_
         assert response.status_code == 200, name
     item_id = responses["created"].json()["id"]
     assert responses["dependency"].json()["source_id"] == item_id
+    assert responses["suggestions"].json()[0]["decision"] == "pending"
+    assert responses["suggest_rerun"].json() == []
+    assert responses["confirm_suggestion"].json()["confidence"] == "human_confirmed"
+    assert responses["reject_suggestion"].json()["decision"] == "rejected"
     assert responses["currency"].json()["currency_state"] == "Live"
     assert responses["plan"].json()["steps"][0]["primitive"] == "recall"
     assert responses["impact"].json()["stale_item_ids"] == [item_id]

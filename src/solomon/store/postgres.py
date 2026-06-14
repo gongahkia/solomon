@@ -15,6 +15,7 @@ from typing_extensions import Self
 
 from solomon.currency.models import CurrencyState, KnowledgeItem, now_utc
 from solomon.graph.models import DependencyEdge
+from solomon.graph.suggestions import DependencySuggestion, SuggestionDecision
 from solomon.orchestrator.retrieval import (
     EmbeddingStrategy,
     IndexedHit,
@@ -434,6 +435,41 @@ class PostgresGraphStore:
                 f"CREATE INDEX IF NOT EXISTS {self._index('idx_edges_current_target')} "
                 f"ON {self._table('dependency_edges')}(target_id, valid_to)"
             )
+            self._execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._table("dependency_suggestion_events")} (
+                    seq BIGSERIAL PRIMARY KEY,
+                    event_id TEXT NOT NULL UNIQUE,
+                    event_type TEXT NOT NULL,
+                    suggestion_id TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                )
+                """
+            )
+            self._execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._table("dependency_suggestions")} (
+                    suggestion_id TEXT PRIMARY KEY,
+                    suggestion_json TEXT NOT NULL,
+                    item_id TEXT NOT NULL,
+                    target_id TEXT NOT NULL,
+                    edge_type TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    decided_at TEXT,
+                    UNIQUE(item_id, target_id, edge_type)
+                )
+                """
+            )
+            self._execute(
+                f"CREATE INDEX IF NOT EXISTS {self._index('idx_suggestions_item')} "
+                f"ON {self._table('dependency_suggestions')}(item_id)"
+            )
+            self._execute(
+                f"CREATE INDEX IF NOT EXISTS {self._index('idx_suggestions_decision')} "
+                f"ON {self._table('dependency_suggestions')}(decision)"
+            )
 
     def add_dependency(self, edge: DependencyEdge) -> DependencyEdge:
         with self._transaction():
@@ -445,6 +481,67 @@ class PostgresGraphStore:
             )
             self._upsert_edge(edge)
         return edge
+
+    def add_dependency_suggestion(self, suggestion: DependencySuggestion) -> DependencySuggestion:
+        with self._transaction():
+            self._append_suggestion_event(
+                event_type="dependency_suggestion_created",
+                suggestion=suggestion,
+                occurred_at=suggestion.created_at,
+            )
+            self._upsert_suggestion(suggestion)
+        return suggestion
+
+    def update_dependency_suggestion(self, suggestion: DependencySuggestion) -> DependencySuggestion:
+        with self._transaction():
+            self._append_suggestion_event(
+                event_type=f"dependency_suggestion_{suggestion.decision.value}",
+                suggestion=suggestion,
+                occurred_at=suggestion.decided_at or suggestion.created_at,
+            )
+            self._upsert_suggestion(suggestion)
+        return suggestion
+
+    def get_dependency_suggestion(self, suggestion_id: str) -> DependencySuggestion:
+        row = self._execute(
+            f"""
+            SELECT suggestion_json
+            FROM {self._table("dependency_suggestions")}
+            WHERE suggestion_id = %s
+            """,
+            (suggestion_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(suggestion_id)
+        return _suggestion_from_json(_row_value(row, "suggestion_json"))
+
+    def list_dependency_suggestions(
+        self,
+        *,
+        item_id: str | None = None,
+        decision: SuggestionDecision | None = None,
+        limit: int = 100,
+    ) -> list[DependencySuggestion]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if item_id is not None:
+            clauses.append("item_id = %s")
+            params.append(item_id)
+        if decision is not None:
+            clauses.append("decision = %s")
+            params.append(decision.value)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._execute(
+            f"""
+            SELECT suggestion_json
+            FROM {self._table("dependency_suggestions")}
+            {where}
+            ORDER BY created_at, suggestion_id
+            LIMIT %s
+            """,
+            tuple([*params, limit]),
+        ).fetchall()
+        return [_suggestion_from_json(_row_value(row, "suggestion_json")) for row in rows]
 
     def close_dependency(self, edge_id: str, *, valid_to: datetime) -> DependencyEdge:
         edge = self.get_edge(edge_id)
@@ -566,6 +663,33 @@ class PostgresGraphStore:
             ),
         )
 
+    def _append_suggestion_event(
+        self,
+        *,
+        event_type: str,
+        suggestion: DependencySuggestion,
+        occurred_at: datetime,
+    ) -> None:
+        payload = {"suggestion": suggestion.model_dump(mode="json")}
+        event_id = (
+            f"{suggestion.id}:{event_type}:{occurred_at.isoformat()}:"
+            f"{len(json.dumps(payload, sort_keys=True))}"
+        )
+        self._execute(
+            f"""
+            INSERT INTO {self._table("dependency_suggestion_events")}
+            (event_id, event_type, suggestion_id, occurred_at, payload_json)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (
+                event_id,
+                event_type,
+                suggestion.id,
+                occurred_at.isoformat(),
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+            ),
+        )
+
     def _upsert_edge(self, edge: DependencyEdge) -> None:
         self._execute(
             f"""
@@ -593,6 +717,30 @@ class PostgresGraphStore:
                 edge.valid_from.isoformat(),
                 edge.valid_to.isoformat() if edge.valid_to else None,
                 edge.confidence.value,
+            ),
+        )
+
+    def _upsert_suggestion(self, suggestion: DependencySuggestion) -> None:
+        self._execute(
+            f"""
+            INSERT INTO {self._table("dependency_suggestions")}
+            (suggestion_id, suggestion_json, item_id, target_id, edge_type, decision, created_at, decided_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT(item_id, target_id, edge_type) DO UPDATE SET
+                suggestion_id = EXCLUDED.suggestion_id,
+                suggestion_json = EXCLUDED.suggestion_json,
+                decision = EXCLUDED.decision,
+                decided_at = EXCLUDED.decided_at
+            """,
+            (
+                suggestion.id,
+                suggestion.model_dump_json(),
+                suggestion.item_id,
+                suggestion.suggested_edge.target_id,
+                suggestion.suggested_edge.edge_type.value,
+                suggestion.decision.value,
+                suggestion.created_at.isoformat(),
+                suggestion.decided_at.isoformat() if suggestion.decided_at else None,
             ),
         )
 
@@ -789,6 +937,12 @@ def _edge_from_json(value: Any) -> DependencyEdge:
     if isinstance(value, str):
         return DependencyEdge.model_validate_json(value)
     return DependencyEdge.model_validate(value)
+
+
+def _suggestion_from_json(value: Any) -> DependencySuggestion:
+    if isinstance(value, str):
+        return DependencySuggestion.model_validate_json(value)
+    return DependencySuggestion.model_validate(value)
 
 
 def _payload_json_text(value: Any) -> str:

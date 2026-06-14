@@ -8,6 +8,7 @@ from pathlib import Path
 from solomon.currency.models import CredenceTier, CurrencyState, KnowledgeItem, KnowledgeKind, Provenance, SourceKind
 from solomon.graph.models import DependencyEdge, EdgeType
 from solomon.graph.propagation import CurrencyPropagator
+from solomon.graph.suggestions import DependencySuggestion, SuggestionDecision
 from solomon.orchestrator.retrieval import MatterContext, RecallOptions, RetrievalOrchestrator
 from solomon.store.factory import create_storage_bundle
 from solomon.store.postgres import PostgresGraphStore, PostgresKnowledgeStore, PostgresRetrievalIndex
@@ -101,6 +102,29 @@ def test_postgres_graph_index_and_retrieval_match_sqlite_workflow(tmp_path: Path
     assert recall[0].item.id == "item-1"
     assert impact.stale_item_ids == ["item-1"]
     assert store.get_item("item-1").currency_state is CurrencyState.STALE_PENDING_REVERIFICATION
+
+
+def test_postgres_graph_store_persists_dependency_suggestions(tmp_path: Path) -> None:
+    graph = PostgresGraphStore("postgresql://unit/solomon", connect=lambda _dsn: _connect(tmp_path))
+    suggestion = DependencySuggestion(
+        id="suggestion-1",
+        item_id="item-1",
+        authority_ref="Regulation R section 12",
+        suggested_edge=DependencyEdge(
+            id="edge-suggested",
+            source_id="item-1",
+            target_id="regulation-r-section-12",
+            edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+            target_kind="external_authority",
+        ),
+    )
+
+    graph.add_dependency_suggestion(suggestion)
+    rejected = suggestion.model_copy(update={"decision": SuggestionDecision.REJECTED, "decided_by": "Partner A"})
+    graph.update_dependency_suggestion(rejected)
+
+    assert graph.get_dependency_suggestion("suggestion-1").decision is SuggestionDecision.REJECTED
+    assert graph.list_dependency_suggestions(item_id="item-1", decision=SuggestionDecision.REJECTED) == [rejected]
 
 
 def test_storage_bundle_can_create_postgres_store_graph_and_index(tmp_path: Path) -> None:

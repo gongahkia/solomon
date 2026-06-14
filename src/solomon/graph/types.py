@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Protocol
 
 from solomon.graph.models import DependencyEdge
+from solomon.graph.suggestions import DependencySuggestion, SuggestionDecision
 from solomon.store.types import KnowledgeStoreProtocol
 
 
@@ -14,6 +15,20 @@ class DependencyGraphProtocol(Protocol):
     def close(self) -> None: ...
 
     def add_dependency(self, edge: DependencyEdge) -> DependencyEdge: ...
+
+    def add_dependency_suggestion(self, suggestion: DependencySuggestion) -> DependencySuggestion: ...
+
+    def update_dependency_suggestion(self, suggestion: DependencySuggestion) -> DependencySuggestion: ...
+
+    def get_dependency_suggestion(self, suggestion_id: str) -> DependencySuggestion: ...
+
+    def list_dependency_suggestions(
+        self,
+        *,
+        item_id: str | None = None,
+        decision: SuggestionDecision | None = None,
+        limit: int = 100,
+    ) -> list[DependencySuggestion]: ...
 
     def close_dependency(self, edge_id: str, *, valid_to: datetime) -> DependencyEdge: ...
 

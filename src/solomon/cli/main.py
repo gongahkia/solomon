@@ -10,9 +10,12 @@ import typer
 from rich.console import Console
 
 from solomon import __version__
+from solomon.api.app import _model_router_from_settings
 from solomon.api.service import (
     AuthorityChangeRequest,
     DependencyRequest,
+    DependencySuggestionDecisionRequest,
+    DependencySuggestionRequest,
     IngestRequest,
     RecallRequest,
     ReferenceExtractionRequest,
@@ -24,10 +27,15 @@ from solomon.config import get_settings
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.currency.prediction import load_pending_amendments
 from solomon.graph.models import EdgeConfidence, EdgeType
+from solomon.graph.suggestions import SuggestionDecision
 from solomon.graph.visualization import GraphFormat
 
 app = typer.Typer(help="Solomon command-line interface.")
 console = Console()
+
+
+def _print_json(payload: object, *, sort_keys: bool = False) -> None:
+    typer.echo(json.dumps(payload, indent=2, sort_keys=sort_keys))
 
 
 def _version_callback(value: bool) -> None:
@@ -55,7 +63,7 @@ def diagnostics() -> None:
         "settings": settings.public_diagnostics(),
         "kaypoh": probe_kaypoh_client(settings.kaypoh_repo_path).model_dump(),
     }
-    console.print(json.dumps(payload, indent=2, sort_keys=True))
+    _print_json(payload, sort_keys=True)
 
 
 def _service() -> SolomonService:
@@ -77,7 +85,7 @@ def ingest(
     item = _service().ingest(
         IngestRequest(kind=kind, content=content, source_kind=source_kind, source_ref=source_ref)
     )
-    console.print(item.model_dump_json(indent=2))
+    _print_json(item.model_dump(mode="json"))
 
 
 @app.command()
@@ -92,17 +100,17 @@ def recall(
     results = _service().recall(
         RecallRequest(query=query, review_mode=review_mode, max_context_tokens=max_context_tokens)
     )
-    console.print(json.dumps(results, indent=2, sort_keys=True))
+    _print_json(results, sort_keys=True)
 
 
 @app.command("show-currency")
 def show_currency(item_id: str) -> None:
-    console.print(json.dumps(_service().evaluate_currency(item_id), indent=2, sort_keys=True))
+    _print_json(_service().evaluate_currency(item_id), sort_keys=True)
 
 
 @app.command("impact-query")
 def impact_query(authority_id: str) -> None:
-    console.print(json.dumps(_service().impact_query(authority_id), indent=2, sort_keys=True))
+    _print_json(_service().impact_query(authority_id), sort_keys=True)
 
 
 @app.command("dependency-graph")
@@ -125,7 +133,7 @@ def dependency_graph(
 @app.command("extract-refs")
 def extract_refs(content: Annotated[str, typer.Argument(help="Knowledge text to scan.")]) -> None:
     extraction = _service().extract_references(ReferenceExtractionRequest(content=content))
-    console.print(extraction.model_dump_json(indent=2))
+    _print_json(extraction.model_dump(mode="json"))
 
 
 @app.command("predict-stale")
@@ -139,7 +147,7 @@ def predict_stale(
             lookahead_days=lookahead_days,
         )
     )
-    console.print(report.model_dump_json(indent=2))
+    _print_json(report.model_dump(mode="json"))
 
 
 @app.command("register-authority-change")
@@ -152,7 +160,7 @@ def register_authority_change(
         authority_id,
         AuthorityChangeRequest(new_version=new_version, changed_at=changed_at),
     )
-    console.print(json.dumps(result, indent=2, sort_keys=True))
+    _print_json(result, sort_keys=True)
 
 
 @app.command("add-dependency")
@@ -172,7 +180,54 @@ def add_dependency(
             confidence=confidence,
         )
     )
-    console.print(edge.model_dump_json(indent=2))
+    _print_json(edge.model_dump(mode="json"))
+
+
+@app.command("suggest-dependencies")
+def suggest_dependencies(
+    item_id: Annotated[str, typer.Argument(help="Knowledge item id.")],
+    llm: Annotated[bool, typer.Option("--llm", help="Use optional sanitized LLM extraction.")] = False,
+) -> None:
+    settings = get_settings()
+    suggestions = _service().suggest_dependencies(
+        DependencySuggestionRequest(item_id=item_id, use_llm=llm),
+        router=_model_router_from_settings(settings) if llm else None,
+    )
+    _print_json([suggestion.model_dump(mode="json") for suggestion in suggestions])
+
+
+@app.command("dependency-suggestions")
+def dependency_suggestions(
+    item_id: Annotated[str | None, typer.Option("--item-id", help="Restrict to one knowledge item.")] = None,
+    decision: Annotated[SuggestionDecision | None, typer.Option("--decision")] = SuggestionDecision.PENDING,
+    limit: Annotated[int, typer.Option("--limit", min=1)] = 100,
+) -> None:
+    suggestions = _service().dependency_suggestions(item_id=item_id, decision=decision, limit=limit)
+    _print_json([suggestion.model_dump(mode="json") for suggestion in suggestions])
+
+
+@app.command("confirm-dependency-suggestion")
+def confirm_dependency_suggestion(
+    suggestion_id: Annotated[str, typer.Argument(help="Dependency suggestion id.")],
+    by: Annotated[str, typer.Option("--by", help="Reviewer identifier.")],
+) -> None:
+    edge = _service().confirm_dependency_suggestion(
+        suggestion_id,
+        DependencySuggestionDecisionRequest(by=by),
+    )
+    _print_json(edge.model_dump(mode="json"))
+
+
+@app.command("reject-dependency-suggestion")
+def reject_dependency_suggestion(
+    suggestion_id: Annotated[str, typer.Argument(help="Dependency suggestion id.")],
+    by: Annotated[str, typer.Option("--by", help="Reviewer identifier.")],
+) -> None:
+    suggestion = _service().reject_dependency_suggestion(
+        suggestion_id,
+        DependencySuggestionDecisionRequest(by=by),
+    )
+    _print_json(suggestion.model_dump(mode="json"))
 
 
 @app.command("why")

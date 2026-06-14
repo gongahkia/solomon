@@ -42,7 +42,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2B — Implementation
 
-23. [C] Scaffold `src/solomon/mcp/` package: `server.py`, `tools.py`, `schemas.py`, `transport.py`, `auth.py`, `logging.py`.
 24. [C] Implement STDIO transport (Claude Desktop / Claude Code default).
 25. [C] Implement HTTP/SSE transport for remote-MCP scenarios.
 26. [C] Wire each tool from §19 to existing Solomon Python API (`solomon.client`, `solomon.currency`, `solomon.graph`, `solomon.audit`). No duplicated logic.

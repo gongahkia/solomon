@@ -56,7 +56,6 @@ Headline deliverable. Everything else exists to support this.
 
 ## Workstream 3 — Curator console (thin web UI, exactly 3 screens)
 
-47. [R] Choose stack. Constraints: thin, single-process deploy, no separate FE build pipeline if avoidable. Candidates: FastAPI + Jinja + HTMX; SvelteKit; Next.js. [Inference] FastAPI + HTMX best fits portfolio simplicity and reuses existing FastAPI app. Decision in `docs/console/stack.md`.
 48. [D] Wireframe Verification Desk: inbox of items needing re-verification, evidence preview, "reaffirm / supersede / retire / pin" actions, partner sign-off field.
 49. [D] Wireframe Dependency Review: graph view of suggested + confirmed edges, accept/reject per edge, depth control, filter by external authority.
 50. [D] Wireframe Audit Pack: pick knowledge item → show provenance, dependency tree, verification history, boundary metadata, hash chain. JSON + PDF export.

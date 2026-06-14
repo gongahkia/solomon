@@ -16,6 +16,7 @@ from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeItem, KnowledgeKind, SourceKind
 from solomon.graph.suggestions import SuggestionDecision
 from solomon.mcp.logging import MCPCallLogRecord, MCPCallStatus, hash_mcp_input
+from solomon.mcp.rate_limit import TokenBucketRateLimiter
 from solomon.mcp.schemas import MCP_TOOL_JSON_SCHEMAS, JsonSchema
 
 
@@ -62,8 +63,26 @@ class FastMCPProtocol(Protocol):
 
 
 class SolomonMCPRuntime:
-    def __init__(self, service: SolomonService) -> None:
+    def __init__(self, service: SolomonService, rate_limiter: TokenBucketRateLimiter | None = None) -> None:
         self.service = service
+        self.rate_limiter = rate_limiter or TokenBucketRateLimiter()
+
+    def _rate_limit_error(self, tool_name: str, caller_id: str | None) -> dict[str, Any] | None:
+        if self.rate_limiter.allow(caller_id):
+            return None
+        _log_mcp_call(
+            self.service,
+            tool_name,
+            caller_id=caller_id,
+            status="error",
+            error_code="rate_limited",
+        )
+        return _error_result(
+            "rate_limited",
+            "MCP caller exceeded token-bucket rate limit",
+            retryable=True,
+            details={"caller_id": caller_id or "anonymous"},
+        )
 
     def preflight_context(
         self,
@@ -75,6 +94,9 @@ class SolomonMCPRuntime:
         max_context_tokens: int | None = None,
         caller_id: str | None = None,
     ) -> dict[str, Any]:
+        limited = self._rate_limit_error("solomon.preflight_context", caller_id)
+        if limited is not None:
+            return limited
         results = self.service.recall(
             RecallRequest(
                 query=query,
@@ -123,6 +145,9 @@ class SolomonMCPRuntime:
         client_id: str | None = None,
         caller_id: str | None = None,
     ) -> dict[str, Any]:
+        limited = self._rate_limit_error("solomon.check_currency", caller_id)
+        if limited is not None:
+            return limited
         scope_error = _scope_error_for_item(
             self.service,
             knowledge_item_id,
@@ -165,6 +190,9 @@ class SolomonMCPRuntime:
         client_id: str | None = None,
         caller_id: str | None = None,
     ) -> dict[str, Any]:
+        limited = self._rate_limit_error("solomon.get_dependencies", caller_id)
+        if limited is not None:
+            return limited
         _ = depth
         scope_error = _scope_error_for_item(
             self.service,
@@ -204,6 +232,9 @@ class SolomonMCPRuntime:
         client_id: str | None = None,
         caller_id: str | None = None,
     ) -> dict[str, Any]:
+        limited = self._rate_limit_error("solomon.verify_position", caller_id)
+        if limited is not None:
+            return limited
         scope_error = _scope_error_for_item(
             self.service,
             knowledge_item_id,
@@ -266,6 +297,9 @@ class SolomonMCPRuntime:
         author: str | None = None,
         caller_id: str | None = None,
     ) -> dict[str, Any]:
+        limited = self._rate_limit_error("solomon.ingest", caller_id)
+        if limited is not None:
+            return limited
         item = self.service.ingest(
             IngestRequest(
                 kind=KnowledgeKind(kind),
@@ -315,6 +349,9 @@ class SolomonMCPRuntime:
         client_id: str | None = None,
         caller_id: str | None = None,
     ) -> dict[str, Any]:
+        limited = self._rate_limit_error("solomon.audit_pack", caller_id)
+        if limited is not None:
+            return limited
         scope_error = _scope_error_for_item(
             self.service,
             knowledge_item_id,
@@ -355,6 +392,9 @@ class SolomonMCPRuntime:
         client_id: str | None = None,
         caller_id: str | None = None,
     ) -> dict[str, Any]:
+        limited = self._rate_limit_error("solomon.dependency_suggestions", caller_id)
+        if limited is not None:
+            return limited
         item = self.service.why(knowledge_item_id).item
         scope_error = _scope_error_for_item(
             self.service,
@@ -393,6 +433,9 @@ class SolomonMCPRuntime:
         client_id: str | None = None,
         caller_id: str | None = None,
     ) -> dict[str, Any]:
+        limited = self._rate_limit_error("solomon.impact", caller_id)
+        if limited is not None:
+            return limited
         result = self.service.impact_query(external_authority_id, as_of=_parse_datetime(as_of))
         stale_item_ids, reasons = _filter_impact_scope(
             self.service,

@@ -10,6 +10,7 @@ from solomon.api.service import DependencyRequest, IngestRequest, SolomonService
 from solomon.boundary.solomon import SolomonBoundary
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.graph.models import EdgeType
+from solomon.mcp.rate_limit import TokenBucketConfig, TokenBucketRateLimiter
 from solomon.mcp.tools import SolomonMCPRuntime
 
 
@@ -164,6 +165,29 @@ def test_mcp_call_logging_records_required_fields(tmp_path: Path) -> None:
     assert payload["currency_outcome"] == "live"
     assert payload["boundary_outcome"] is None
     assert payload["input_sha256"]
+
+
+def test_mcp_runtime_rate_limits_per_caller(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="structure x under regulation r section 12",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo-1",
+        )
+    )
+    limiter = TokenBucketRateLimiter(TokenBucketConfig(capacity=1, refill_per_second=0.0))
+    runtime = SolomonMCPRuntime(service, rate_limiter=limiter)
+
+    first = runtime.check_currency(knowledge_item_id=item.id, caller_id="caller-a")
+    second = runtime.check_currency(knowledge_item_id=item.id, caller_id="caller-a")
+    other = runtime.check_currency(knowledge_item_id=item.id, caller_id="caller-b")
+
+    assert first["state"] == "live"
+    assert second["ok"] is False
+    assert second["error"]["code"] == "rate_limited"
+    assert other["state"] == "live"
 
 
 class HighRiskBoundaryClient:

@@ -25,6 +25,33 @@ violate never-delete.
       account/release-owner action; `CITATION.cff`, `.zenodo.json`, and the
       submission checklist exist in-repo.
 
+## Competitive proof and user-validation blockers
+
+- [!] Add Engram (`arXiv:2606.09900`) to `docs/null-hypothesis.md` and benchmark
+      docs as the closest published comparison: bi-temporal memory,
+      non-destructive supersession, provenance chains, hybrid retrieval, and
+      LongMemEval-S claims. Do not imply Shibahama is ahead until checked-in
+      artifacts prove a stale-rate, auditability, or token-cost win on a matching
+      continuity slice.
+- [!] Run LongMemEval-S and LoCoMo from official exports and commit generated
+      JSON + Markdown artifacts. Reports must include flat/warehouse baselines,
+      full-context or published-system comparison where reproducible, retrieval
+      token cost, stale-answer rate where applicable, dataset hash, model, seed,
+      and exact command.
+- [!] Produce and commit the `coding-agent` benchmark artifact or keep all
+      coding-agent language demo-only. The current harness is not a benchmark
+      claim until the result files land under `benchmarks/results/`.
+- [!] Get three production or production-like deployments from users with real
+      long-lived memory pain. Convert setup friction, wrong recall, stale recall,
+      Tideline confusion, and API-shape issues into tracked GitHub issues before
+      adding new framework adapters.
+- [!] Tighten README and launch positioning around the three defensible
+      differentiators: never-delete invariant + credence floor, append-only human
+      signal verbs (`challenge` / `affirm` / `correct` / `pin`), and Tideline
+      legibility for reconstruction/consolidation. Do not lead with
+      "usage-aware memory" alone; 2026 competitors now claim multi-signal and
+      temporal retrieval.
+
 ## Part 1 — Offline consolidation pass ("the dream"), but LEGIBLE (first-class)
 Context: the 2026 field has converged on offline memory consolidation (Karpathy's
 LLM Wiki, Claude's "Dreams", Hermes background subagents). They all share one

@@ -44,6 +44,24 @@ def test_mcp_runtime_maps_all_required_tools_to_service(tmp_path: Path) -> None:
             target_kind="external_authority",
         )
     )
+    other_item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="other matter also depends on regulation r section 12",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo-other",
+            matter_id="matter-b",
+            client_id="client-b",
+        )
+    )
+    service.add_dependency(
+        DependencyRequest(
+            source_id=other_item.id,
+            target_id="reg-r-12",
+            edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+            target_kind="external_authority",
+        )
+    )
 
     preflight = runtime.preflight_context(query="structure x", matter_id="matter-a", client_id="client-a")
     assert preflight["items"][0]["item"]["id"] in {item.id, successor.id}
@@ -52,14 +70,19 @@ def test_mcp_runtime_maps_all_required_tools_to_service(tmp_path: Path) -> None:
     assert currency["knowledge_item_id"] == item.id
     assert currency["state"] == "live"
 
+    denied = runtime.check_currency(knowledge_item_id=item.id, matter_id="matter-b", client_id="client-b")
+    assert denied["ok"] is False
+    assert denied["error"]["code"] == "scope_denied"
+
     dependencies = runtime.get_dependencies(knowledge_item_id=item.id)
     assert dependencies["upstream"][0]["target_id"] == "reg-r-12"
 
     suggestions = runtime.dependency_suggestions(knowledge_item_id=item.id)
     assert "suggestions" in suggestions
 
-    impact = runtime.impact(external_authority_id="reg-r-12")
+    impact = runtime.impact(external_authority_id="reg-r-12", matter_id="matter-a", client_id="client-a")
     assert item.id in impact["stale_item_ids"]
+    assert other_item.id not in impact["stale_item_ids"]
 
     verification = runtime.verify_position(
         knowledge_item_id=item.id,

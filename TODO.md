@@ -42,7 +42,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2B — Implementation
 
-29. [C] Scope enforcement at MCP layer: `matter_id` / `client_id` args restrict the knowledge store query.
 30. [C] Auth: bearer-token via env var `SOLOMON_MCP_TOKEN`. No OAuth. No SSO. (Portfolio scope.)
 31. [C] Structured logging on every MCP call: tool name, caller, scope, currency outcome, boundary outcome. Land in audit journal.
 32. [C] Rate-limit middleware (token-bucket per caller), configurable.

@@ -13,7 +13,7 @@ from mcp.types import ToolAnnotations
 from solomon.api.schemas import SolomonModel
 from solomon.api.service import IngestRequest, PinRequest, RecallRequest, SolomonService, VerificationRequest
 from solomon.currency.engine import VerificationOutcome
-from solomon.currency.models import KnowledgeKind, SourceKind
+from solomon.currency.models import KnowledgeItem, KnowledgeKind, SourceKind
 from solomon.graph.suggestions import SuggestionDecision
 from solomon.mcp.schemas import MCP_TOOL_JSON_SCHEMAS, JsonSchema
 
@@ -110,8 +110,19 @@ class SolomonMCPRuntime:
         *,
         knowledge_item_id: str,
         as_of: str | None = None,
+        matter_id: str | None = None,
+        client_id: str | None = None,
         caller_id: str | None = None,
     ) -> dict[str, Any]:
+        scope_error = _scope_error_for_item(
+            self.service,
+            knowledge_item_id,
+            matter_id=matter_id,
+            client_id=client_id,
+            caller_id=caller_id,
+        )
+        if scope_error is not None:
+            return scope_error
         currency = self.service.evaluate_currency(knowledge_item_id, as_of=_parse_datetime(as_of))
         trace = self.service.why(knowledge_item_id)
         state = _currency_state_for_mcp(str(currency["currency_state"]))
@@ -133,9 +144,20 @@ class SolomonMCPRuntime:
         knowledge_item_id: str,
         direction: str = "both",
         depth: int = 1,
+        matter_id: str | None = None,
+        client_id: str | None = None,
         caller_id: str | None = None,
     ) -> dict[str, Any]:
         _ = depth
+        scope_error = _scope_error_for_item(
+            self.service,
+            knowledge_item_id,
+            matter_id=matter_id,
+            client_id=client_id,
+            caller_id=caller_id,
+        )
+        if scope_error is not None:
+            return scope_error
         trace = self.service.why(knowledge_item_id)
         _log_mcp_call(self.service, "solomon.get_dependencies", caller_id=caller_id)
         return {
@@ -154,8 +176,19 @@ class SolomonMCPRuntime:
         evidence_ref: str,
         successor_id: str | None = None,
         recorded_at: str | None = None,
+        matter_id: str | None = None,
+        client_id: str | None = None,
         caller_id: str | None = None,
     ) -> dict[str, Any]:
+        scope_error = _scope_error_for_item(
+            self.service,
+            knowledge_item_id,
+            matter_id=matter_id,
+            client_id=client_id,
+            caller_id=caller_id,
+        )
+        if scope_error is not None:
+            return scope_error
         if decision == "pin":
             item = self.service.pin(
                 knowledge_item_id,
@@ -239,8 +272,19 @@ class SolomonMCPRuntime:
         *,
         knowledge_item_id: str,
         format: str = "json",
+        matter_id: str | None = None,
+        client_id: str | None = None,
         caller_id: str | None = None,
     ) -> dict[str, Any]:
+        scope_error = _scope_error_for_item(
+            self.service,
+            knowledge_item_id,
+            matter_id=matter_id,
+            client_id=client_id,
+            caller_id=caller_id,
+        )
+        if scope_error is not None:
+            return scope_error
         _ = self.service.why(knowledge_item_id)
         with TemporaryDirectory(prefix="solomon-mcp-audit-") as temp_dir:
             pack_dir = self.service.export_audit_pack(Path(temp_dir))
@@ -262,9 +306,21 @@ class SolomonMCPRuntime:
         knowledge_item_id: str,
         decision: str = "pending",
         limit: int = 100,
+        matter_id: str | None = None,
+        client_id: str | None = None,
         caller_id: str | None = None,
     ) -> dict[str, Any]:
         item = self.service.why(knowledge_item_id).item
+        scope_error = _scope_error_for_item(
+            self.service,
+            knowledge_item_id,
+            matter_id=matter_id,
+            client_id=client_id,
+            caller_id=caller_id,
+            item=item,
+        )
+        if scope_error is not None:
+            return scope_error
         suggestions = self.service.dependency_suggestions(
             item_id=knowledge_item_id,
             decision=SuggestionDecision(decision),
@@ -286,6 +342,13 @@ class SolomonMCPRuntime:
         caller_id: str | None = None,
     ) -> dict[str, Any]:
         result = self.service.impact_query(external_authority_id, as_of=_parse_datetime(as_of))
+        stale_item_ids, reasons = _filter_impact_scope(
+            self.service,
+            cast(list[str], result["stale_item_ids"]),
+            cast(dict[str, list[dict[str, Any]]], result["reasons"]),
+            matter_id=matter_id,
+            client_id=client_id,
+        )
         _log_mcp_call(
             self.service,
             "solomon.impact",
@@ -295,8 +358,8 @@ class SolomonMCPRuntime:
         )
         return {
             "external_authority_id": external_authority_id,
-            "stale_item_ids": result["stale_item_ids"],
-            "reasons": result["reasons"],
+            "stale_item_ids": stale_item_ids,
+            "reasons": reasons,
             "scope": {"matter_id": matter_id, "client_id": client_id, "caller_id": caller_id},
         }
 
@@ -459,6 +522,66 @@ def _review_mcp_output(
             details={"classification": classification, "finding_count": finding_count},
         )
     return {"status": "passed", "classification": classification, "finding_count": finding_count, "context_id": None}
+
+
+def _scope_error_for_item(
+    service: SolomonService,
+    item_id: str,
+    *,
+    matter_id: str | None = None,
+    client_id: str | None = None,
+    caller_id: str | None = None,
+    item: KnowledgeItem | None = None,
+) -> dict[str, Any] | None:
+    resolved_item = item or service.why(item_id).item
+    if matter_id is not None and resolved_item.matter_id != matter_id:
+        return _scope_denied(item_id, matter_id=matter_id, client_id=client_id, caller_id=caller_id)
+    if client_id is not None and resolved_item.client_id != client_id:
+        return _scope_denied(item_id, matter_id=matter_id, client_id=client_id, caller_id=caller_id)
+    return None
+
+
+def _filter_impact_scope(
+    service: SolomonService,
+    item_ids: list[str],
+    reasons: dict[str, list[dict[str, Any]]],
+    *,
+    matter_id: str | None = None,
+    client_id: str | None = None,
+) -> tuple[list[str], dict[str, list[dict[str, Any]]]]:
+    if matter_id is None and client_id is None:
+        return item_ids, reasons
+    filtered_ids: list[str] = []
+    filtered_reasons: dict[str, list[dict[str, Any]]] = {}
+    for item_id in item_ids:
+        item = service.why(item_id).item
+        if matter_id is not None and item.matter_id != matter_id:
+            continue
+        if client_id is not None and item.client_id != client_id:
+            continue
+        filtered_ids.append(item_id)
+        filtered_reasons[item_id] = reasons.get(item_id, [])
+    return filtered_ids, filtered_reasons
+
+
+def _scope_denied(
+    item_id: str,
+    *,
+    matter_id: str | None,
+    client_id: str | None,
+    caller_id: str | None,
+) -> dict[str, Any]:
+    return _error_result(
+        "scope_denied",
+        "caller is not allowed to access this MCP scope",
+        retryable=False,
+        details={
+            "knowledge_item_id": item_id,
+            "matter_id": matter_id,
+            "client_id": client_id,
+            "caller_id": caller_id,
+        },
+    )
 
 
 def _content_text(payload: object) -> str:

@@ -70,6 +70,8 @@ class PreflightContextOutput(SolomonModel):
 class CheckCurrencyInput(SolomonModel):
     knowledge_item_id: str = Field(min_length=1)
     as_of: str | None = None
+    matter_id: str | None = None
+    client_id: str | None = None
     caller_id: str | None = None
 
 
@@ -86,6 +88,8 @@ class GetDependenciesInput(SolomonModel):
     knowledge_item_id: str = Field(min_length=1)
     direction: DependencyDirection = "both"
     depth: int = Field(default=1, ge=1, le=8)
+    matter_id: str | None = None
+    client_id: str | None = None
     caller_id: str | None = None
 
 
@@ -103,6 +107,8 @@ class VerifyPositionInput(SolomonModel):
     evidence_ref: str = Field(min_length=1)
     successor_id: str | None = None
     recorded_at: str | None = None
+    matter_id: str | None = None
+    client_id: str | None = None
     caller_id: str | None = None
 
 
@@ -132,6 +138,8 @@ class IngestOutput(SolomonModel):
 class AuditPackInput(SolomonModel):
     knowledge_item_id: str = Field(min_length=1)
     format: AuditPackFormat = "json"
+    matter_id: str | None = None
+    client_id: str | None = None
     caller_id: str | None = None
 
 
@@ -146,6 +154,8 @@ class DependencySuggestionsInput(SolomonModel):
     knowledge_item_id: str = Field(min_length=1)
     decision: DependencySuggestionDecision = "pending"
     limit: int = Field(default=100, ge=1, le=500)
+    matter_id: str | None = None
+    client_id: str | None = None
     caller_id: str | None = None
 
 

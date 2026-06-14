@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     allow_remote_egress: bool = False
     zero_egress_mode: bool = True
     verification_attestation_key: str | None = None
+    console_user_id: str = "dev"
+    console_bearer_token: str | None = None
 
     @model_validator(mode="after")
     def validate_egress_policy(self) -> Settings:
@@ -64,6 +66,8 @@ class Settings(BaseSettings):
             "allow_remote_egress": self.allow_remote_egress,
             "zero_egress_mode": self.zero_egress_mode,
             "verification_attestation_key_configured": self.verification_attestation_key is not None,
+            "console_user_id": self.console_user_id,
+            "console_bearer_token_configured": self.console_bearer_token is not None,
         }
 
 

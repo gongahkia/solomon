@@ -88,7 +88,9 @@ solomon console serve --host 127.0.0.1 --port 8150
 Server rules:
 
 - Same `Settings` and `SolomonService` construction as API/MCP.
-- Dev-mode bearer token only for portfolio scope.
+- Dev-mode bearer token only for portfolio scope; set `SOLOMON_CONSOLE_BEARER_TOKEN` to require `Authorization: Bearer <token>`.
+- Single configured console user only: `SOLOMON_CONSOLE_USER_ID`, default `dev`.
+- SSO, RBAC, and session management are out-of-scope for this portfolio console.
 - Mutations use existing service verbs; no duplicated business logic in templates.
 - Responses are server-rendered HTML, with HTMX partials for row actions and filters.
 - Static assets are local; no CDN dependency.

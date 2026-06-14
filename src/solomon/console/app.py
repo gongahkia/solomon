@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
+from hmac import compare_digest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -43,7 +45,22 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
     )
     app = FastAPI(title="Solomon Console")
     app.state.service = resolved_service
+    app.state.console_user_id = resolved_settings.console_user_id
     app.mount("/console/static", StaticFiles(directory=str(STATIC_DIR)), name="console-static")
+
+    @app.middleware("http")
+    async def console_auth(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        if _requires_console_auth(request.url.path, token=resolved_settings.console_bearer_token) and not _has_bearer(
+            request,
+            resolved_settings.console_bearer_token,
+        ):
+            return JSONResponse(
+                {"detail": "missing or invalid bearer token"},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        request.state.console_user_id = resolved_settings.console_user_id
+        return await call_next(request)
 
     @app.get("/", include_in_schema=False)
     def root() -> RedirectResponse:
@@ -219,6 +236,19 @@ def _render_verification(
             "error": error,
         },
     )
+
+
+def _requires_console_auth(path: str, *, token: str | None) -> bool:
+    if token is None:
+        return False
+    return (path == "/console" or path.startswith("/console/")) and not path.startswith("/console/static/")
+
+
+def _has_bearer(request: Request, token: str | None) -> bool:
+    if token is None:
+        return True
+    scheme, _, supplied = request.headers.get("authorization", "").partition(" ")
+    return scheme.lower() == "bearer" and bool(supplied) and compare_digest(supplied, token)
 
 
 def _review_rows(service: SolomonService) -> list[dict[str, Any]]:

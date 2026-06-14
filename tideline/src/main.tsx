@@ -8,6 +8,7 @@ import {
   Play,
   RefreshCcw,
   ShieldAlert,
+  SquareMousePointer,
   Waypoints,
 } from "lucide-react";
 import "./styles.css";
@@ -97,6 +98,22 @@ type TidelineSnapshot = {
   };
 };
 
+type EventRecordDetail = {
+  sequence: number;
+  recorded_at_unix?: number;
+  recordedAtUnix?: number;
+  kind: string;
+  memory_ids?: string[];
+  memoryIds?: string[];
+  event: unknown;
+};
+
+type EventLog = {
+  event_count?: number;
+  eventCount?: number;
+  events: EventRecordDetail[];
+};
+
 type WhyTrace = {
   item: MemoryItem;
   significance: {
@@ -119,6 +136,13 @@ type WhyTrace = {
   audit_trail: string[];
 };
 
+type AuditDetail = {
+  memory_id?: string;
+  memoryId?: string;
+  why: WhyTrace | null;
+  events: EventRecordDetail[];
+};
+
 type ViewName = "moment" | "consolidation" | "poisoning" | "bitemporal" | "graph" | "diff";
 type ChallengeNote = { actor: string; reason: string };
 
@@ -131,8 +155,11 @@ function App() {
   const [apiKey, setApiKey] = useState("");
   const [namespace, setNamespace] = useState("default");
   const [snapshot, setSnapshot] = useState<TidelineSnapshot | null>(null);
+  const [eventLog, setEventLog] = useState<EventLog | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedEventSequence, setSelectedEventSequence] = useState<number | null>(null);
   const [whyTrace, setWhyTrace] = useState<WhyTrace | null>(null);
+  const [auditDetail, setAuditDetail] = useState<AuditDetail | null>(null);
   const [status, setStatus] = useState("idle");
   const [live, setLive] = useState(false);
   const [activeView, setActiveView] = useState<ViewName>("moment");
@@ -166,9 +193,16 @@ function App() {
     }
 
     const data = (await response.json()) as TidelineSnapshot;
+    const eventResponse = await fetch(`${baseUrl}/events${asOfParam}`, {
+      headers: requestHeaders,
+    });
     const lastSequence = data.last_sequence ?? 0;
     setSnapshot(data);
+    if (eventResponse.ok) {
+      setEventLog((await eventResponse.json()) as EventLog);
+    }
     setSequence(lastSequence);
+    setSelectedEventSequence((current) => current ?? lastSequence);
     setDiffFrom((current) => Math.min(current, lastSequence));
     setDiffTo((current) => (current === 0 ? lastSequence : Math.min(current, lastSequence)));
     setSelectedId((current) => current ?? data.memories[0]?.id ?? null);
@@ -187,6 +221,22 @@ function App() {
       }
 
       setWhyTrace((await response.json()) as WhyTrace | null);
+    },
+    [asOf, baseUrl, requestHeaders],
+  );
+
+  const loadAudit = useCallback(
+    async (id: string) => {
+      const nowParam = asOf ? `?now_unix=${Math.floor(new Date(asOf).getTime() / 1000)}` : "";
+      const response = await fetch(`${baseUrl}/audit/${id}${nowParam}`, {
+        headers: requestHeaders,
+      });
+
+      if (!response.ok) {
+        throw new Error(`audit ${response.status}`);
+      }
+
+      setAuditDetail((await response.json()) as AuditDetail);
     },
     [asOf, baseUrl, requestHeaders],
   );
@@ -210,16 +260,26 @@ function App() {
   useEffect(() => {
     if (!selectedId) {
       setWhyTrace(null);
+      setAuditDetail(null);
       return;
     }
 
     loadWhy(selectedId).catch(() => setWhyTrace(null));
-  }, [loadWhy, selectedId]);
+    loadAudit(selectedId).catch(() => setAuditDetail(null));
+  }, [loadAudit, loadWhy, selectedId]);
 
   const events = snapshot?.events ?? [];
   const maxSequence = snapshot?.last_sequence ?? 0;
   const visibleEvents = events.filter((event) => event.sequence <= sequence);
-  const activeEvent = visibleEvents.at(-1) ?? null;
+  const selectedEvent =
+    visibleEvents.find((event) => event.sequence === selectedEventSequence) ??
+    visibleEvents.at(-1) ??
+    null;
+  const activeEvent = selectedEvent;
+  const rawEvent = useMemo(
+    () => (eventLog?.events ?? []).find((event) => event.sequence === selectedEvent?.sequence) ?? null,
+    [eventLog, selectedEvent],
+  );
   const firstSeen = useMemo(() => {
     const seen = new Map<string, number>();
 
@@ -391,7 +451,10 @@ function App() {
               type="button"
               className={event.sequence <= sequence ? "event-dot seen" : "event-dot"}
               title={`${event.sequence} ${event.kind}`}
-              onClick={() => setSequence(event.sequence)}
+              onClick={() => {
+                setSequence(event.sequence);
+                setSelectedEventSequence(event.sequence);
+              }}
             />
           ))}
         </div>
@@ -405,7 +468,17 @@ function App() {
           contestedIds={contestedIds}
           onSelect={setSelectedId}
         />
-        <WhyPanel memory={selectedMemory} trace={whyTrace} challenge={selectedChallenge} />
+        <div className="side-stack">
+          <WhyPanel memory={selectedMemory} trace={whyTrace} challenge={selectedChallenge} />
+          <DrilldownPanel
+            event={selectedEvent}
+            rawEvent={rawEvent}
+            memory={selectedMemory}
+            audit={auditDetail}
+            trace={whyTrace}
+            onSelect={setSelectedId}
+          />
+        </div>
       </section>
 
       <section className="lower-grid">
@@ -451,6 +524,96 @@ function App() {
         )}
       </section>
     </main>
+  );
+}
+
+function DrilldownPanel({
+  event,
+  rawEvent,
+  memory,
+  audit,
+  trace,
+  onSelect,
+}: {
+  event: TidelineEvent | null;
+  rawEvent: EventRecordDetail | null;
+  memory: MemoryItem | null;
+  audit: AuditDetail | null;
+  trace: WhyTrace | null;
+  onSelect: (id: string) => void;
+}) {
+  const eventRecords = audit?.events ?? [];
+  const humanEvents = eventRecords.filter((record) => record.kind === "human_signal");
+  const matchingRecord = eventRecords.find((record) => record.sequence === event?.sequence) ?? rawEvent;
+  const afterState = event?.tier_to ?? (event?.valid_to_unix ? "closed" : memory?.tier ?? "unknown");
+
+  return (
+    <section className="panel drilldown-panel">
+      <div className="panel-title">
+        <h2>Drilldown</h2>
+        <span>{event ? `#${event.sequence}` : "none"}</span>
+      </div>
+      {event ? (
+        <>
+          <div className="event-card">
+            <strong>{event.human_signal_action ?? event.consolidation_action ?? event.kind}</strong>
+            <span>{formatUnix(event.recorded_at_unix)}</span>
+            <div className="id-list">
+              {event.memory_ids.map((id) => (
+                <button key={id} type="button" onClick={() => onSelect(id)}>
+                  {shortId(id)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="transition-grid">
+            <div>
+              <b>Before</b>
+              <span>{event.tier_from ?? memory?.tier ?? "unknown"}</span>
+            </div>
+            <div>
+              <b>After</b>
+              <span>{afterState}</span>
+            </div>
+          </div>
+          {memory ? (
+            <div className="provenance-chain">
+              <b>{memory.provenance.source_kind}</b>
+              <span>{memory.provenance.source_ref ?? "no source ref"}</span>
+              <em>{memory.provenance.ingested_by}</em>
+            </div>
+          ) : null}
+          {event.consolidation_evidence.length > 0 ? (
+            <div className="compact-evidence">
+              {event.consolidation_evidence.map((evidence) => (
+                <span key={`${event.sequence}-${evidence.memory_id}`}>
+                  {shortId(evidence.memory_id)} {evidence.significance.toFixed(2)}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {humanEvents.length > 0 ? (
+            <ol className="audit-list compact-audit">
+              {humanEvents.slice(-4).map((record) => (
+                <li key={record.sequence}>
+                  #{record.sequence} {humanSignalSummary(record)}
+                </li>
+              ))}
+            </ol>
+          ) : null}
+          <pre className="raw-json">{JSON.stringify(matchingRecord?.event ?? event, null, 2)}</pre>
+          {trace ? (
+            <div className="linked-why">
+              <span>{trace.currency_state}</span>
+              <span>{trace.significance.final_score.toFixed(3)}</span>
+              <span>{trace.audit_trail.length} audit</span>
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <p className="empty">No event selected</p>
+      )}
+    </section>
   );
 }
 
@@ -1231,6 +1394,15 @@ function sequenceFromGraphEdge(id: string) {
 
 function shortId(id: string) {
   return id.length > 12 ? `${id.slice(0, 8)}...` : id;
+}
+
+function formatUnix(unix: number) {
+  return new Date(unix * 1000).toLocaleString();
+}
+
+function humanSignalSummary(record: EventRecordDetail) {
+  const raw = JSON.stringify(record.event);
+  return raw.length > 96 ? `${raw.slice(0, 93)}...` : raw;
 }
 
 function timeOffset(unix: number) {

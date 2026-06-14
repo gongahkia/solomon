@@ -3,10 +3,11 @@
 
 set -euo pipefail
 
+PYTHON_BIN="${PYTHON:-python3}"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
-python -m venv "$tmpdir/venv"
+"$PYTHON_BIN" -m venv "$tmpdir/venv"
 export VIRTUAL_ENV="$tmpdir/venv"
 export PATH="$VIRTUAL_ENV/bin:$PATH"
 
@@ -72,6 +73,16 @@ with tempfile.NamedTemporaryFile() as db:
     assert engine.reinforce(item.id, "cited")
     assert why is not None
     assert why.item.id == item.id
+    assert engine.event_records()["event_count"] >= 2
+    assert engine.audit(item.id)["memory_id"] == item.id
+    assert engine.challenge(item.id, "smoke challenge")["applied"] is True
+    assert engine.affirm(item.id)["applied"] is True
+    assert engine.pin(item.id)["applied"] is True
+    assert engine.unpin(item.id)["applied"] is True
+    corrected = engine.correct(item.id, "Python binding corrected memory")
+    assert corrected["applied"] is True
+    assert corrected["replacement"]["content"] == "Python binding corrected memory"
+    assert engine.consolidate(now_unix=0)["applied_count"] >= 0
 
     records = engine.export_records()
     items = engine.memory_items()
@@ -123,6 +134,9 @@ with tempfile.NamedTemporaryFile() as db:
         assert await engine.async_reinforce(async_item.id, "cited")
         assert async_why is not None
         assert async_why.item.id == async_item.id
+        assert (await engine.async_event_records())["event_count"] >= 1
+        assert (await engine.async_audit(async_item.id))["memory_id"] == async_item.id
+        assert (await engine.async_consolidate())["applied_count"] >= 0
 
     asyncio.run(check_async_api())
 

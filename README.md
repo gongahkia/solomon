@@ -54,7 +54,7 @@ cargo run --manifest-path examples/rust/quickstart/Cargo.toml
 Build the Python binding and run the Python example:
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip maturin
 (
@@ -158,11 +158,20 @@ Inspection and maintenance:
 
 Optional server mode:
 
-- `GET /health`
-- `GET /ready`
+- `GET /healthz`
+- `GET /readyz`
+- `GET /inspect`
+- `GET /events`
+- `GET /audit/{id}`
 - `POST /write`
 - `POST /recall`
 - `POST /reinforce`
+- `POST /consolidate`
+- `POST /challenge`
+- `POST /affirm`
+- `POST /correct`
+- `POST /pin`
+- `POST /unpin`
 - `GET /why/{id}`
 - `GET /tideline/snapshot`
 - `GET /tideline/recording`
@@ -230,6 +239,11 @@ cargo run -p shibahama-cli -- serve --path shibahama.redb --dimensions 2 --api-k
 ```
 
 Open the Vite URL and point it at `http://127.0.0.1:8765` with API key `dev`.
+For a seeded local session, run:
+
+```bash
+scripts/dev/tideline-demo.sh
+```
 
 For complete runnable snippets, see [`examples/`](./examples/).
 
@@ -311,7 +325,7 @@ API-key auth, metadata-only logs, and Tideline streams:
 
 ```bash
 cargo run -p shibahama-cli -- serve --path shibahama.redb --dimensions 2 --api-key dev
-curl -H "x-api-key: dev" http://127.0.0.1:8765/ready
+curl -H "x-api-key: dev" http://127.0.0.1:8765/readyz
 ```
 
 ## Benchmark Snapshot
@@ -389,6 +403,12 @@ Run the Rust gate:
 scripts/ci/rust.sh
 ```
 
+Run the full local preflight:
+
+```bash
+scripts/ci/all.sh
+```
+
 Run binding smoke checks:
 
 ```bash
@@ -399,7 +419,7 @@ scripts/ci/node-binding-smoke.sh
 Run the local correctness smoke:
 
 ```bash
-python scripts/ci/correctness-smoke.py
+python3 scripts/ci/correctness-smoke.py
 ```
 
 Run frontend build checks:

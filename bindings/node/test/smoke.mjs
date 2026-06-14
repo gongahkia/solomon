@@ -58,6 +58,16 @@ try {
   assert.equal(engine.reinforce(item.id, "cited"), true);
   assert.equal(why.item.id, item.id);
   assert.ok(items.some((memory) => memory.id === item.id));
+  assert.ok(engine.eventRecords().eventCount >= 2);
+  assert.equal(engine.audit(item.id).memoryId, item.id);
+  assert.equal(engine.challenge(item.id, "smoke challenge").applied, true);
+  assert.equal(engine.affirm(item.id).applied, true);
+  assert.equal(engine.pin(item.id).applied, true);
+  assert.equal(engine.unpin(item.id).applied, true);
+  const corrected = engine.correct(item.id, "Node binding corrected memory");
+  assert.equal(corrected.applied, true);
+  assert.equal(corrected.replacement.content, "Node binding corrected memory");
+  assert.ok(engine.consolidate().appliedCount >= 0);
 
   const embed = (text) => [Number(text.includes("adapters")), Number(text.includes("async"))];
   const memory = new LangChainMemory(engine, { embed, topK: 3 });

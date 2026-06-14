@@ -528,6 +528,30 @@ Async wrapper for `recall` using a worker thread.
 
 Return all current materialized memory rows.
 
+### `def event_records(self) -> dict[str, Any]:`
+
+Return durable event-log records.
+
+### `async def async_event_records(self) -> dict[str, Any]:`
+
+Async wrapper for `event_records` using a worker thread.
+
+### `def audit(self, memory_id: str, now_unix: int | None = None) -> dict[str, Any]:`
+
+Return one memory's why trace and related event records.
+
+### `async def async_audit(self, *args, **kwargs) -> dict[str, Any]:`
+
+Async wrapper for `audit` using a worker thread.
+
+### `def consolidate(self, now_unix: int | None = None) -> dict[str, Any]:`
+
+Run the offline consolidation pass.
+
+### `async def async_consolidate(self, *args, **kwargs) -> dict[str, Any]:`
+
+Async wrapper for `consolidate` using a worker thread.
+
 ### `def export_records(self) -> list[dict[str, object]]:`
 
 Return current memory rows as plain Python dictionaries.
@@ -571,6 +595,46 @@ Record a usage outcome for a memory.
 ### `async def async_reinforce(self, *args, **kwargs) -> bool:`
 
 Async wrapper for `reinforce` using a worker thread.
+
+### `def challenge( self, memory_id: str, reason: str, actor: str = "python", timestamp_unix: int | None = None, ) -> dict[str, Any]:`
+
+Challenge a memory and flag it for review.
+
+### `async def async_challenge(self, *args, **kwargs) -> dict[str, Any]:`
+
+Async wrapper for `challenge` using a worker thread.
+
+### `def affirm( self, memory_id: str, reason: str = "affirmed", actor: str = "python", timestamp_unix: int | None = None, ) -> dict[str, Any]:`
+
+Affirm a memory.
+
+### `async def async_affirm(self, *args, **kwargs) -> dict[str, Any]:`
+
+Async wrapper for `affirm` using a worker thread.
+
+### `def correct( self, memory_id: str, proposed_content: str, reason: str = "corrected", actor: str = "python", timestamp_unix: int | None = None, ) -> dict[str, Any]:`
+
+Correct a memory through quarantine and reconstruction.
+
+### `async def async_correct(self, *args, **kwargs) -> dict[str, Any]:`
+
+Async wrapper for `correct` using a worker thread.
+
+### `def pin( self, memory_id: str, reason: str = "pinned", actor: str = "python", timestamp_unix: int | None = None, ) -> dict[str, Any]:`
+
+Pin a memory's credence floor.
+
+### `async def async_pin(self, *args, **kwargs) -> dict[str, Any]:`
+
+Async wrapper for `pin` using a worker thread.
+
+### `def unpin( self, memory_id: str, reason: str = "unpinned", actor: str = "python", timestamp_unix: int | None = None, ) -> dict[str, Any]:`
+
+Remove a human credence-floor pin.
+
+### `async def async_unpin(self, *args, **kwargs) -> dict[str, Any]:`
+
+Async wrapper for `unpin` using a worker thread.
 
 ### `def why(self, memory_id: str, now_unix: int | None = None) -> WhyTrace | None:`
 

@@ -7,7 +7,7 @@
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use shibahama_core::api::{
     ConsolidationPassReport, HumanCorrectionOutcome, HumanSignalOutcome, HumanSignalRequest,
     Shibahama as CoreShibahama, ShibahamaError, WhyTrace as CoreWhyTrace, WriteEmbedding,
@@ -664,6 +664,149 @@ impl From<CoreWhyTrace> for WhyTrace {
     }
 }
 
+fn event_record_json(record: &EventRecord) -> Value {
+    json!({
+        "sequence": record.sequence,
+        "recordedAtUnix": record.recorded_at.unix_timestamp() as f64,
+        "kind": event_kind(&record.event),
+        "memoryIds": event_memory_ids(&record.event),
+        "event": serde_json::to_value(&record.event).unwrap_or_else(|error| {
+            json!({ "serializationError": error.to_string() })
+        }),
+    })
+}
+
+fn memory_item_json(item: &CoreMemoryItem) -> Value {
+    json!({
+        "id": item.id.to_string(),
+        "content": item.content,
+        "kind": memory_kind_str(item.kind),
+        "provenance": {
+            "sourceKind": source_kind_str(item.provenance.source_kind),
+            "sourceRef": item.provenance.source_ref,
+            "ingestedBy": item.provenance.ingested_by,
+        },
+        "tier": tier_str(item.tier),
+        "credence": credence_str(item.credence),
+        "significance": item.significance,
+        "credenceFloor": tier_str(item.credence_floor),
+        "validFromUnix": item.timestamps.valid_from.unix_timestamp() as f64,
+        "validToUnix": item.timestamps.valid_to.map(|timestamp| timestamp.unix_timestamp() as f64),
+        "ingestedAtUnix": item.timestamps.ingested_at.unix_timestamp() as f64,
+    })
+}
+
+fn why_trace_json(trace: &CoreWhyTrace) -> Value {
+    json!({
+        "item": memory_item_json(&trace.item),
+        "significance": trace.significance,
+        "provenance": {
+            "sourceKind": source_kind_str(trace.provenance.source_kind),
+            "sourceRef": trace.provenance.source_ref,
+            "ingestedBy": trace.provenance.ingested_by,
+        },
+        "tierCurrent": tier_str(trace.tier.current),
+        "tierCredence": credence_str(trace.tier.credence),
+        "tierCredenceFloor": tier_str(trace.tier.credence_floor),
+        "currencyState": currency_str(trace.currency.state),
+        "currencyAsOfUnix": trace.currency.as_of.unix_timestamp() as f64,
+        "validFromUnix": trace.currency.valid_from.unix_timestamp() as f64,
+        "validToUnix": trace.currency.valid_to.map(|timestamp| timestamp.unix_timestamp() as f64),
+        "ingestedAtUnix": trace.currency.ingested_at.unix_timestamp() as f64,
+        "auditTrail": trace.audit_trail.iter().map(|entry| format!("{entry:?}")).collect::<Vec<_>>(),
+    })
+}
+
+fn human_signal_json(signal: &HumanSignal) -> Value {
+    json!({
+        "action": human_signal_action_str(signal.action),
+        "memoryId": signal.memory_id.to_string(),
+        "actor": signal.actor,
+        "timestampUnix": signal.timestamp.unix_timestamp() as f64,
+        "reason": signal.reason,
+        "proposedContent": signal.proposed_content,
+        "proposalId": signal.proposal_id.map(|id| id.to_string()),
+        "previousCredence": signal.previous_credence.map(credence_str),
+        "newCredence": signal.new_credence.map(credence_str),
+        "previousCredenceFloor": signal.previous_credence_floor.map(tier_str),
+        "newCredenceFloor": signal.new_credence_floor.map(tier_str),
+    })
+}
+
+fn human_signal_outcome_json(outcome: HumanSignalOutcome) -> Value {
+    let events = [
+        outcome.records.access,
+        outcome.records.revalidation_flag,
+        Some(outcome.records.signal),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|record| event_record_json(&record))
+    .collect::<Vec<_>>();
+
+    json!({
+        "applied": true,
+        "signal": human_signal_json(&outcome.signal),
+        "events": events,
+    })
+}
+
+fn human_correction_outcome_json(outcome: HumanCorrectionOutcome) -> Value {
+    let events = vec![
+        outcome.records.invalidation,
+        outcome.records.replacement_write,
+        outcome.records.reconstruction,
+        outcome.signal_record,
+    ]
+    .into_iter()
+    .map(|record| event_record_json(&record))
+    .collect::<Vec<_>>();
+
+    json!({
+        "applied": true,
+        "signal": human_signal_json(&outcome.signal),
+        "proposal": memory_item_json(&outcome.proposal.item),
+        "replacement": memory_item_json(&outcome.replacement),
+        "events": events,
+    })
+}
+
+fn consolidation_report_json(report: ConsolidationPassReport) -> Value {
+    let applied_count = report.applied.len();
+    let outcomes = report
+        .applied
+        .into_iter()
+        .map(|outcome| {
+            let events = [
+                outcome.records.memory_write,
+                outcome.records.tier_change,
+                outcome.records.revalidation_flag,
+                Some(outcome.records.decision),
+            ]
+            .into_iter()
+            .flatten()
+            .map(|record| event_record_json(&record))
+            .collect::<Vec<_>>();
+
+            json!({
+                "action": consolidation_action_str(outcome.decision.action),
+                "inputIds": outcome.decision.input_ids.into_iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+                "outputId": outcome.decision.output.map(|item| item.id.to_string()),
+                "tierFrom": outcome.decision.tier_from.map(tier_str),
+                "tierTo": outcome.decision.tier_to.map(tier_str),
+                "why": outcome.decision.why.summary,
+                "events": events,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "passId": report.pass_id,
+        "appliedCount": applied_count,
+        "outcomes": outcomes,
+    })
+}
+
 /// Returns the Shibahama core crate version.
 #[napi]
 #[must_use]
@@ -769,6 +912,18 @@ fn parse_memory_id(value: &str) -> Result<MemoryId> {
         .map_err(|error| Error::from_reason(format!("invalid memory id: {error}")))
 }
 
+fn human_signal_request(
+    actor: &str,
+    reason: &str,
+    timestamp_unix: Option<f64>,
+) -> Result<HumanSignalRequest> {
+    Ok(HumanSignalRequest::new(
+        actor,
+        reason,
+        time_from_optional_unix(timestamp_unix)?,
+    ))
+}
+
 fn parse_source_kind(value: &str) -> Result<SourceKind> {
     match value {
         "user" => Ok(SourceKind::User),
@@ -793,13 +948,103 @@ fn parse_memory_kind(value: &str) -> Result<MemoryKind> {
 fn parse_access_outcome(value: &str) -> Result<AccessOutcome> {
     match value {
         "surfaced" => Ok(AccessOutcome::Surfaced),
-        "led_somewhere" => Ok(AccessOutcome::LedSomewhere),
+        "led_somewhere" | "led-somewhere" => Ok(AccessOutcome::LedSomewhere),
         "cited" => Ok(AccessOutcome::Cited),
         "ignored" => Ok(AccessOutcome::Ignored),
         "contradicted" => Ok(AccessOutcome::Contradicted),
         _ => Err(Error::from_reason(
             "outcome must be one of: surfaced, led_somewhere, cited, ignored, contradicted",
         )),
+    }
+}
+
+fn consolidation_action_str(value: ConsolidationAction) -> &'static str {
+    match value {
+        ConsolidationAction::Merge => "merge",
+        ConsolidationAction::Promote => "promote",
+        ConsolidationAction::Demote => "demote",
+        ConsolidationAction::FlagStale => "flag_stale",
+    }
+}
+
+fn human_signal_action_str(value: HumanSignalAction) -> &'static str {
+    match value {
+        HumanSignalAction::Challenge => "challenge",
+        HumanSignalAction::Affirm => "affirm",
+        HumanSignalAction::Correct => "correct",
+        HumanSignalAction::Pin => "pin",
+        HumanSignalAction::Unpin => "unpin",
+    }
+}
+
+fn event_kind(event: &MemoryEvent) -> &'static str {
+    match event {
+        MemoryEvent::MemoryWritten { .. } => "memory_written",
+        MemoryEvent::MemoryInvalidated { .. } => "memory_invalidated",
+        MemoryEvent::ReverificationFlagged { .. } => "reverification_flagged",
+        MemoryEvent::AccessRecorded { .. } => "access_recorded",
+        MemoryEvent::TierChanged { .. } => "tier_changed",
+        MemoryEvent::ContentCompacted { .. } => "content_compacted",
+        MemoryEvent::ReconstructionApplied { .. } => "reconstruction_applied",
+        MemoryEvent::ConsolidationDecision { .. } => "consolidation_decision",
+        MemoryEvent::HumanSignalRecorded { .. } => "human_signal",
+    }
+}
+
+fn event_memory_ids(event: &MemoryEvent) -> Vec<String> {
+    match event {
+        MemoryEvent::MemoryWritten { item } => vec![item.id.to_string()],
+        MemoryEvent::MemoryInvalidated { id, .. }
+        | MemoryEvent::ReverificationFlagged { id, .. }
+        | MemoryEvent::AccessRecorded { id, .. }
+        | MemoryEvent::TierChanged { id, .. }
+        | MemoryEvent::ContentCompacted { id, .. } => vec![id.to_string()],
+        MemoryEvent::ReconstructionApplied {
+            superseded_id,
+            replacement_id,
+            ..
+        } => vec![superseded_id.to_string(), replacement_id.to_string()],
+        MemoryEvent::ConsolidationDecision {
+            input_ids,
+            output_id,
+            ..
+        } => input_ids
+            .iter()
+            .chain(output_id.iter())
+            .map(ToString::to_string)
+            .collect(),
+        MemoryEvent::HumanSignalRecorded { signal } => [Some(signal.memory_id), signal.proposal_id]
+            .into_iter()
+            .flatten()
+            .map(|id| id.to_string())
+            .collect(),
+    }
+}
+
+fn event_touches_memory(record: &EventRecord, id: MemoryId) -> bool {
+    match &record.event {
+        MemoryEvent::MemoryWritten { item } => item.id == id,
+        MemoryEvent::MemoryInvalidated { id: event_id, .. }
+        | MemoryEvent::ReverificationFlagged { id: event_id, .. }
+        | MemoryEvent::AccessRecorded { id: event_id, .. }
+        | MemoryEvent::TierChanged { id: event_id, .. }
+        | MemoryEvent::ContentCompacted { id: event_id, .. } => *event_id == id,
+        MemoryEvent::ReconstructionApplied {
+            superseded_id,
+            replacement_id,
+            ..
+        } => *superseded_id == id || *replacement_id == id,
+        MemoryEvent::ConsolidationDecision {
+            input_ids,
+            output_id,
+            ..
+        } => input_ids.contains(&id) || output_id.is_some_and(|output_id| output_id == id),
+        MemoryEvent::HumanSignalRecorded { signal } => {
+            signal.memory_id == id
+                || signal
+                    .proposal_id
+                    .is_some_and(|proposal_id| proposal_id == id)
+        }
     }
 }
 
@@ -855,6 +1100,10 @@ fn candidate_source_str(value: RecallCandidateSource) -> String {
 }
 
 fn js_error(error: ShibahamaError) -> Error {
+    Error::from_reason(error.to_string())
+}
+
+fn json_error(error: serde_json::Error) -> Error {
     Error::from_reason(error.to_string())
 }
 

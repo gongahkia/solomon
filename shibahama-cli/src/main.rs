@@ -183,7 +183,7 @@ struct ReinforceCommand {
     /// Memory id to reinforce.
     #[arg(long)]
     memory_id: String,
-    /// Access outcome: surfaced, led_somewhere, cited, ignored, or contradicted.
+    /// Access outcome: surfaced, `led_somewhere`, cited, ignored, or contradicted.
     #[arg(long, default_value = "cited")]
     outcome: String,
 }
@@ -459,8 +459,8 @@ struct HumanCorrectionOutcomeDto {
 #[derive(Serialize)]
 #[serde(untagged)]
 enum HumanMutationDto {
-    Signal(HumanSignalOutcomeDto),
-    Correction(HumanCorrectionOutcomeDto),
+    Signal(Box<HumanSignalOutcomeDto>),
+    Correction(Box<HumanCorrectionOutcomeDto>),
     NotFound { applied: bool },
 }
 
@@ -869,7 +869,7 @@ fn human_signal(command: HumanSignalCommand, action: HumanSignalAction) -> CliRe
 
     write_json(
         &outcome.map_or(HumanMutationDto::NotFound { applied: false }, |outcome| {
-            HumanMutationDto::Signal(HumanSignalOutcomeDto::from(outcome))
+            HumanMutationDto::Signal(Box::new(HumanSignalOutcomeDto::from(outcome)))
         }),
     )
 }
@@ -882,7 +882,7 @@ fn correct(command: CorrectCommand) -> CliResult<()> {
 
     write_json(
         &outcome.map_or(HumanMutationDto::NotFound { applied: false }, |outcome| {
-            HumanMutationDto::Correction(HumanCorrectionOutcomeDto::from(outcome))
+            HumanMutationDto::Correction(Box::new(HumanCorrectionOutcomeDto::from(outcome)))
         }),
     )
 }
@@ -2086,7 +2086,7 @@ async fn server_reinforce(
 
         Ok((
             Json(json!({ "applied": applied })),
-            json!({ "request_units": 1, "memory_writes": if applied { 1 } else { 0 } }),
+            json!({ "request_units": 1, "memory_writes": i32::from(applied) }),
         ))
     })();
 
@@ -2145,7 +2145,6 @@ async fn server_challenge(
         HumanSignalAction::Challenge,
         "/challenge",
     )
-    .await
 }
 
 async fn server_affirm(
@@ -2153,7 +2152,7 @@ async fn server_affirm(
     headers: HeaderMap,
     Json(body): Json<ServerHumanSignalRequest>,
 ) -> Result<Json<HumanMutationDto>, ServerError> {
-    server_human_signal(state, headers, body, HumanSignalAction::Affirm, "/affirm").await
+    server_human_signal(state, headers, body, HumanSignalAction::Affirm, "/affirm")
 }
 
 async fn server_pin(
@@ -2161,7 +2160,7 @@ async fn server_pin(
     headers: HeaderMap,
     Json(body): Json<ServerHumanSignalRequest>,
 ) -> Result<Json<HumanMutationDto>, ServerError> {
-    server_human_signal(state, headers, body, HumanSignalAction::Pin, "/pin").await
+    server_human_signal(state, headers, body, HumanSignalAction::Pin, "/pin")
 }
 
 async fn server_unpin(
@@ -2169,7 +2168,7 @@ async fn server_unpin(
     headers: HeaderMap,
     Json(body): Json<ServerHumanSignalRequest>,
 ) -> Result<Json<HumanMutationDto>, ServerError> {
-    server_human_signal(state, headers, body, HumanSignalAction::Unpin, "/unpin").await
+    server_human_signal(state, headers, body, HumanSignalAction::Unpin, "/unpin")
 }
 
 async fn server_correct(
@@ -2177,10 +2176,10 @@ async fn server_correct(
     headers: HeaderMap,
     Json(body): Json<ServerHumanSignalRequest>,
 ) -> Result<Json<HumanMutationDto>, ServerError> {
-    server_human_signal(state, headers, body, HumanSignalAction::Correct, "/correct").await
+    server_human_signal(state, headers, body, HumanSignalAction::Correct, "/correct")
 }
 
-async fn server_human_signal(
+fn server_human_signal(
     state: ServerState,
     headers: HeaderMap,
     body: ServerHumanSignalRequest,
@@ -2209,25 +2208,25 @@ async fn server_human_signal(
                 .challenge_with_request(id, request)
                 .map_err(ServerError::internal)?
                 .map_or(HumanMutationDto::NotFound { applied: false }, |outcome| {
-                    HumanMutationDto::Signal(HumanSignalOutcomeDto::from(outcome))
+                    HumanMutationDto::Signal(Box::new(HumanSignalOutcomeDto::from(outcome)))
                 }),
             HumanSignalAction::Affirm => engine
                 .affirm_with_request(id, request)
                 .map_err(ServerError::internal)?
                 .map_or(HumanMutationDto::NotFound { applied: false }, |outcome| {
-                    HumanMutationDto::Signal(HumanSignalOutcomeDto::from(outcome))
+                    HumanMutationDto::Signal(Box::new(HumanSignalOutcomeDto::from(outcome)))
                 }),
             HumanSignalAction::Pin => engine
                 .pin_with_request(id, request)
                 .map_err(ServerError::internal)?
                 .map_or(HumanMutationDto::NotFound { applied: false }, |outcome| {
-                    HumanMutationDto::Signal(HumanSignalOutcomeDto::from(outcome))
+                    HumanMutationDto::Signal(Box::new(HumanSignalOutcomeDto::from(outcome)))
                 }),
             HumanSignalAction::Unpin => engine
                 .unpin_with_request(id, request)
                 .map_err(ServerError::internal)?
                 .map_or(HumanMutationDto::NotFound { applied: false }, |outcome| {
-                    HumanMutationDto::Signal(HumanSignalOutcomeDto::from(outcome))
+                    HumanMutationDto::Signal(Box::new(HumanSignalOutcomeDto::from(outcome)))
                 }),
             HumanSignalAction::Correct => {
                 let proposed_content = body
@@ -2237,7 +2236,9 @@ async fn server_human_signal(
                     .correct_with_request(id, proposed_content, request)
                     .map_err(ServerError::internal)?
                     .map_or(HumanMutationDto::NotFound { applied: false }, |outcome| {
-                        HumanMutationDto::Correction(HumanCorrectionOutcomeDto::from(outcome))
+                        HumanMutationDto::Correction(Box::new(HumanCorrectionOutcomeDto::from(
+                            outcome,
+                        )))
                     })
             }
         };

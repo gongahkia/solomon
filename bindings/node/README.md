@@ -20,6 +20,12 @@ await memory.saveContext({ input: "remember short replies" }, { output: "stored"
 const variables = await memory.loadMemoryVariables({ input: "short replies" });
 ```
 
+The Node wrapper exposes the practical core operations: write, recall, timeline,
+reinforce, `why`, event/audit drill-down, consolidation, challenge, affirm,
+correct, pin, and unpin. Native `*Json()` methods return JSON strings; the
+JavaScript wrapper adds parsed-object helpers such as `eventRecords()`,
+`audit()`, and `consolidate()`.
+
 `LangChainMemory.clear()` is a compatibility-only no-op. It does not delete or
 invalidate durable Shibahama memories; use separate stores or namespaces when a
 caller needs isolated context.

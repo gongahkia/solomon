@@ -16,6 +16,43 @@ export interface LangChainMemoryOptions {
   topK?: number
 }
 
+export interface Shibahama {
+  eventRecords(): Record<string, unknown>
+  audit(memoryId: string, nowUnix?: number | undefined | null): Record<string, unknown>
+  consolidate(nowUnix?: number | undefined | null): Record<string, unknown>
+  challenge(
+    memoryId: string,
+    reason: string,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
+  affirm(
+    memoryId: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
+  correct(
+    memoryId: string,
+    proposedContent: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
+  pin(
+    memoryId: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
+  unpin(
+    memoryId: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
+}
+
 export declare class LangChainMemory {
   constructor(engine: Shibahama, options: LangChainMemoryOptions)
   readonly engine: Shibahama

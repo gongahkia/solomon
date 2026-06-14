@@ -6,7 +6,7 @@
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use shibahama_core::api::{
     ConsolidationPassReport, HumanCorrectionOutcome, HumanSignalOutcome, HumanSignalRequest,
     Shibahama, ShibahamaError, WhyTrace, WriteEmbedding,
@@ -588,7 +588,13 @@ impl PyShibahama {
         actor: &str,
         timestamp_unix: Option<i64>,
     ) -> PyResult<String> {
-        self.human_signal_json(memory_id, reason, actor, timestamp_unix, HumanSignalAction::Challenge)
+        self.human_signal_json(
+            memory_id,
+            reason,
+            actor,
+            timestamp_unix,
+            HumanSignalAction::Challenge,
+        )
     }
 
     /// Affirms a memory and returns the mutation report as JSON.
@@ -600,7 +606,13 @@ impl PyShibahama {
         actor: &str,
         timestamp_unix: Option<i64>,
     ) -> PyResult<String> {
-        self.human_signal_json(memory_id, reason, actor, timestamp_unix, HumanSignalAction::Affirm)
+        self.human_signal_json(
+            memory_id,
+            reason,
+            actor,
+            timestamp_unix,
+            HumanSignalAction::Affirm,
+        )
     }
 
     /// Pins a memory and returns the mutation report as JSON.
@@ -612,7 +624,13 @@ impl PyShibahama {
         actor: &str,
         timestamp_unix: Option<i64>,
     ) -> PyResult<String> {
-        self.human_signal_json(memory_id, reason, actor, timestamp_unix, HumanSignalAction::Pin)
+        self.human_signal_json(
+            memory_id,
+            reason,
+            actor,
+            timestamp_unix,
+            HumanSignalAction::Pin,
+        )
     }
 
     /// Unpins a memory and returns the mutation report as JSON.
@@ -624,7 +642,13 @@ impl PyShibahama {
         actor: &str,
         timestamp_unix: Option<i64>,
     ) -> PyResult<String> {
-        self.human_signal_json(memory_id, reason, actor, timestamp_unix, HumanSignalAction::Unpin)
+        self.human_signal_json(
+            memory_id,
+            reason,
+            actor,
+            timestamp_unix,
+            HumanSignalAction::Unpin,
+        )
     }
 
     /// Corrects a memory and returns the mutation report as JSON.

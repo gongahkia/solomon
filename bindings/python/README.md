@@ -19,6 +19,11 @@ import shibahama
 assert shibahama.version() == shibahama.__version__
 ```
 
+The Python wrapper exposes the practical core operations: write, recall,
+timeline, reinforce, `why`, event/audit drill-down, consolidation, challenge,
+affirm, correct, pin, and unpin. Complex drill-down reports are returned as
+plain dictionaries.
+
 `LangChainMemory.clear()` and `LangChainMemory.aclear()` are
 compatibility-only no-ops. They do not delete or invalidate durable Shibahama
 memories; use separate stores or namespaces when a caller needs isolated

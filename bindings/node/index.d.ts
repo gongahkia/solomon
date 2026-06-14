@@ -84,6 +84,74 @@ export declare class Shibahama {
    * Returns an error when current item state cannot be read.
    */
   memoryItems(): Array<MemoryItem>
+  eventRecordsJson(): string
+  eventRecords(): Record<string, unknown>
+  auditJson(memoryId: string, nowUnix?: number | undefined | null): string
+  audit(memoryId: string, nowUnix?: number | undefined | null): Record<string, unknown>
+  consolidateJson(nowUnix?: number | undefined | null): string
+  consolidate(nowUnix?: number | undefined | null): Record<string, unknown>
+  challengeJson(
+    memoryId: string,
+    reason: string,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): string
+  challenge(
+    memoryId: string,
+    reason: string,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
+  affirmJson(
+    memoryId: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): string
+  affirm(
+    memoryId: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
+  correctJson(
+    memoryId: string,
+    proposedContent: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): string
+  correct(
+    memoryId: string,
+    proposedContent: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
+  pinJson(
+    memoryId: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): string
+  pin(
+    memoryId: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
+  unpinJson(
+    memoryId: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): string
+  unpin(
+    memoryId: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
 }
 
 export interface MemoryItem {
@@ -184,6 +252,43 @@ export interface LangChainMemoryOptions {
   inputKey?: string
   outputKey?: string
   topK?: number
+}
+
+export interface Shibahama {
+  eventRecords(): Record<string, unknown>
+  audit(memoryId: string, nowUnix?: number | undefined | null): Record<string, unknown>
+  consolidate(nowUnix?: number | undefined | null): Record<string, unknown>
+  challenge(
+    memoryId: string,
+    reason: string,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
+  affirm(
+    memoryId: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
+  correct(
+    memoryId: string,
+    proposedContent: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
+  pin(
+    memoryId: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
+  unpin(
+    memoryId: string,
+    reason?: string | undefined | null,
+    actor?: string | undefined | null,
+    timestampUnix?: number | undefined | null,
+  ): Record<string, unknown>
 }
 
 export declare class LangChainMemory {

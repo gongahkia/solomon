@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import json
+import string
+import tempfile
 from pathlib import Path
 from typing import Any
+
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from solomon.api.service import DependencyRequest, IngestRequest, SolomonService
 from solomon.boundary.solomon import SolomonBoundary
@@ -12,6 +17,14 @@ from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.graph.models import EdgeType
 from solomon.mcp.rate_limit import TokenBucketConfig, TokenBucketRateLimiter
 from solomon.mcp.tools import SolomonMCPRuntime
+
+SAFE_TEXT = st.text(alphabet=string.ascii_letters + string.digits + " _.,;:-", min_size=1, max_size=60)
+MCP_CURRENCY_STATES = {
+    "Live": "live",
+    "StalePendingReverification": "stale_pending",
+    "Superseded": "superseded",
+    "Retired": "retired",
+}
 
 
 def test_mcp_runtime_maps_all_required_tools_to_service(tmp_path: Path) -> None:
@@ -194,6 +207,49 @@ def test_mcp_runtime_rate_limits_per_caller(tmp_path: Path) -> None:
     assert second["ok"] is False
     assert second["error"]["code"] == "rate_limited"
     assert other["state"] == "live"
+
+
+@given(contents=st.lists(SAFE_TEXT, min_size=1, max_size=6), supersede_count=st.integers(min_value=0, max_value=5))
+@settings(deadline=None, max_examples=20)
+def test_mcp_check_currency_matches_internal_engine_property(contents: list[str], supersede_count: int) -> None:
+    with tempfile.TemporaryDirectory(prefix="solomon-mcp-currency-") as tmp:
+        root = Path(tmp)
+        service = SolomonService(data_dir=root / "data", journal_dir=root / "journal")
+        runtime = SolomonMCPRuntime(service)
+        items = [
+            service.ingest(
+                IngestRequest(
+                    kind=KnowledgeKind.POSITION,
+                    content=f"property position {index}: {content}",
+                    source_kind=SourceKind.PARTNER,
+                    source_ref=f"memo-{index}",
+                    matter_id="matter-a",
+                    client_id="client-a",
+                )
+            )
+            for index, content in enumerate(contents)
+        ]
+
+        for index in range(min(supersede_count, len(items) - 1)):
+            runtime.verify_position(
+                knowledge_item_id=items[index].id,
+                verifier_id="partner-a",
+                decision="supersede",
+                evidence_ref=f"memo-{index + 1}",
+                successor_id=items[index + 1].id,
+                matter_id="matter-a",
+                client_id="client-a",
+            )
+
+        for item in items:
+            internal = service.evaluate_currency(item.id)
+            mcp = runtime.check_currency(
+                knowledge_item_id=item.id,
+                matter_id="matter-a",
+                client_id="client-a",
+            )
+            assert mcp["state"] == MCP_CURRENCY_STATES[str(internal["currency_state"])]
+            assert mcp["successor_id"] == service.store.get_item(item.id).successor_id
 
 
 class HighRiskBoundaryClient:

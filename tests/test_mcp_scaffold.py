@@ -8,6 +8,7 @@ from typing import Any
 import anyio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from starlette.types import Message
 
 from solomon import __version__
 from solomon.api.service import IngestRequest, SolomonService
@@ -128,6 +129,45 @@ def test_streamable_http_app_exposes_mcp_endpoint(tmp_path: Path) -> None:
 
     route_paths = {getattr(route, "path", "") for route in app.routes}
     assert "/mcp" in route_paths
+
+
+def test_streamable_http_app_enforces_bearer_token(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    expected = "test-" + "mcp-token"
+    app = create_streamable_http_app(service, expected_token=expected)
+
+    async def call(headers: list[tuple[bytes, bytes]]) -> int:
+        messages: list[Message] = []
+
+        async def receive() -> Message:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message: Message) -> None:
+            messages.append(message)
+
+        await app(
+            {
+                "type": "http",
+                "asgi": {"version": "3.0"},
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "http",
+                "path": "/mcp",
+                "raw_path": b"/mcp",
+                "query_string": b"",
+                "headers": headers,
+                "client": ("127.0.0.1", 12345),
+                "server": ("127.0.0.1", 8141),
+                "state": {},
+            },
+            receive,
+            send,
+        )
+        start = next(message for message in messages if message["type"] == "http.response.start")
+        return int(start["status"])
+
+    assert anyio.run(call, []) == 401
+    assert anyio.run(call, [(b"authorization", b"Bearer wrong")]) == 401
 
 
 def _structured_payload(result: Any) -> dict[str, Any]:

@@ -5,12 +5,16 @@ from __future__ import annotations
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 from starlette.applications import Starlette
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp
 
 from solomon import __version__
 from solomon.api.schemas import SolomonModel
 from solomon.api.service import SolomonService
 from solomon.config import get_settings
-from solomon.mcp.auth import MCPAuthConfig
+from solomon.mcp.auth import MCPAuthConfig, bearer_token_matches, token_from_env
 from solomon.mcp.tools import MCPToolSpec, SolomonMCPRuntime, mcp_tool_specs, register_solomon_tools
 from solomon.mcp.transport import MCPTransportConfig, MCPTransportKind
 
@@ -21,6 +25,21 @@ class SolomonMCPServerConfig(SolomonModel):
     transport: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
     auth: MCPAuthConfig = Field(default_factory=MCPAuthConfig)
     tools: list[MCPToolSpec]
+
+
+class MCPBearerAuthMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app: ASGIApp, expected_token: str) -> None:
+        super().__init__(app)
+        self.expected_token = expected_token
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        supplied = _bearer_token_from_header(request.headers.get("authorization"))
+        if not bearer_token_matches(supplied, self.expected_token):
+            return JSONResponse(
+                {"ok": False, "error": {"code": "scope_denied", "message": "missing or invalid bearer token"}},
+                status_code=401,
+            )
+        return await call_next(request)
 
 
 def create_server_config(
@@ -81,8 +100,25 @@ def create_streamable_http_app(
     *,
     host: str = "127.0.0.1",
     port: int = 8141,
+    expected_token: str | None = None,
 ) -> Starlette:
-    return create_fastmcp_server(service, host=host, port=port).streamable_http_app()
+    return _with_bearer_auth(
+        create_fastmcp_server(service, host=host, port=port).streamable_http_app(),
+        expected_token=expected_token if expected_token is not None else token_from_env(),
+    )
+
+
+def create_sse_app(
+    service: SolomonService,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8141,
+    expected_token: str | None = None,
+) -> Starlette:
+    return _with_bearer_auth(
+        create_fastmcp_server(service, host=host, port=port).sse_app(),
+        expected_token=expected_token if expected_token is not None else token_from_env(),
+    )
 
 
 def run_streamable_http_server(
@@ -91,8 +127,13 @@ def run_streamable_http_server(
     host: str = "127.0.0.1",
     port: int = 8141,
 ) -> None:
-    server = create_fastmcp_server(service or service_from_settings(), host=host, port=port)
-    server.run("streamable-http")
+    import uvicorn
+
+    uvicorn.run(
+        create_streamable_http_app(service or service_from_settings(), host=host, port=port),
+        host=host,
+        port=port,
+    )
 
 
 def run_sse_server(
@@ -101,8 +142,9 @@ def run_sse_server(
     host: str = "127.0.0.1",
     port: int = 8141,
 ) -> None:
-    server = create_fastmcp_server(service or service_from_settings(), host=host, port=port)
-    server.run("sse")
+    import uvicorn
+
+    uvicorn.run(create_sse_app(service or service_from_settings(), host=host, port=port), host=host, port=port)
 
 
 def default_server_config() -> SolomonMCPServerConfig:
@@ -113,11 +155,28 @@ def main() -> None:
     run_stdio_server()
 
 
+def _with_bearer_auth(app: Starlette, *, expected_token: str | None) -> Starlette:
+    if expected_token is not None:
+        app.add_middleware(MCPBearerAuthMiddleware, expected_token=expected_token)
+    return app
+
+
+def _bearer_token_from_header(value: str | None) -> str | None:
+    if value is None:
+        return None
+    prefix = "Bearer "
+    if not value.startswith(prefix):
+        return None
+    return value[len(prefix) :]
+
+
 __all__ = [
+    "MCPBearerAuthMiddleware",
     "SolomonMCPServerConfig",
     "available_tool_names",
     "create_fastmcp_server",
     "create_server_config",
+    "create_sse_app",
     "create_streamable_http_app",
     "default_server_config",
     "main",

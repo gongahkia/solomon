@@ -42,7 +42,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2B — Implementation
 
-30. [C] Auth: bearer-token via env var `SOLOMON_MCP_TOKEN`. No OAuth. No SSO. (Portfolio scope.)
 31. [C] Structured logging on every MCP call: tool name, caller, scope, currency outcome, boundary outcome. Land in audit journal.
 32. [C] Rate-limit middleware (token-bucket per caller), configurable.
 33. [C] Graceful shutdown + connection draining.

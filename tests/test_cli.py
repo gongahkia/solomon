@@ -70,6 +70,42 @@ def test_cli_mcp_serve_rejects_conflicting_http_modes() -> None:
     assert "mutually exclusive" in result.output
 
 
+def test_cli_help_includes_examples_for_visible_commands() -> None:
+    commands = [
+        ["diagnostics"],
+        ["health"],
+        ["ingest"],
+        ["recall"],
+        ["preflight"],
+        ["check-currency"],
+        ["impact"],
+        ["get-dependencies"],
+        ["dependency-graph"],
+        ["extract-refs"],
+        ["predict-stale"],
+        ["register-authority-change"],
+        ["add-dependency"],
+        ["suggest-dependencies"],
+        ["dependency-suggestions"],
+        ["confirm-dependency-suggestion"],
+        ["reject-dependency-suggestion"],
+        ["verify-position"],
+        ["why"],
+        ["audit-pack"],
+        ["mcp", "serve"],
+        ["console", "serve"],
+    ]
+
+    top_level = runner.invoke(app, ["--help"])
+    assert top_level.exit_code == 0
+    assert "Example:" in top_level.output
+
+    for command in commands:
+        result = runner.invoke(app, [*command, "--help"])
+        assert result.exit_code == 0, command
+        assert "Example:" in result.output, command
+
+
 def test_cli_console_serve_dispatches_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
 

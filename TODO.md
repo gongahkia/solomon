@@ -61,7 +61,6 @@ Headline deliverable. Everything else exists to support this.
 
 ## Workstream 4 — CLI/SDK polish (secondary infrastructure surface)
 
-62. [C] Help text + examples for every command. `--help` should be portfolio-grade.
 63. [X] Publish `solomon` to TestPyPI; verify install path.
 64. [X] Cut v0.2.0 release on tag; PyPI publish via GH Actions.
 65. [C] TypeScript SDK in `packages/solomon-ts/` mirroring MCP tools. Demonstrates vendor integration without Python. Scope: typed client over HTTP/SSE MCP transport.

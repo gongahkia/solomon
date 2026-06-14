@@ -34,9 +34,20 @@ from solomon.graph.visualization import GraphFormat
 from solomon.mcp.server import run_sse_server, run_stdio_server, run_streamable_http_server
 from solomon.mcp.tools import SolomonMCPRuntime
 
-app = typer.Typer(help="Solomon command-line interface.")
-mcp_app = typer.Typer(help="Run Solomon MCP transports.")
-console_app = typer.Typer(help="Run Solomon curator console.")
+
+def _example(command: str) -> str:
+    return f"Example:\n  {command}"
+
+
+app = typer.Typer(
+    help="Solomon command-line interface.",
+    epilog=_example("uv run solomon preflight \"structure X regulation\""),
+)
+mcp_app = typer.Typer(help="Run Solomon MCP transports.", epilog=_example("uv run solomon mcp serve"))
+console_app = typer.Typer(
+    help="Run Solomon curator console.",
+    epilog=_example("uv run solomon console serve --host 127.0.0.1 --port 8150"),
+)
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(console_app, name="console")
 console = Console()
@@ -62,7 +73,7 @@ def main(
     _ = version
 
 
-@app.command()
+@app.command(epilog=_example("uv run solomon diagnostics"))
 def diagnostics() -> None:
     """Print local Solomon diagnostics."""
     settings = get_settings()
@@ -74,7 +85,7 @@ def diagnostics() -> None:
     _print_json(payload, sort_keys=True)
 
 
-@app.command()
+@app.command(epilog=_example("uv run solomon health"))
 def health() -> None:
     """Print MCP-aligned local health."""
     settings = get_settings()
@@ -88,7 +99,7 @@ def health() -> None:
     _print_json(payload, sort_keys=True)
 
 
-@mcp_app.command("serve")
+@mcp_app.command("serve", epilog=_example("uv run solomon mcp serve --http --host 127.0.0.1 --port 8141"))
 def mcp_serve(
     http: Annotated[bool, typer.Option("--http", help="Serve Streamable HTTP MCP instead of stdio.")] = False,
     sse: Annotated[bool, typer.Option("--sse", help="Serve legacy SSE MCP instead of stdio.")] = False,
@@ -107,7 +118,10 @@ def mcp_serve(
     run_stdio_server()
 
 
-@console_app.command("serve")
+@console_app.command(
+    "serve",
+    epilog=_example("uv run solomon console serve --host 127.0.0.1 --port 8150"),
+)
 def console_serve(
     host: Annotated[str, typer.Option("--host", help="Console bind host.")] = "127.0.0.1",
     port: Annotated[int, typer.Option("--port", min=1, max=65535, help="Console bind port.")] = 8150,
@@ -134,7 +148,10 @@ def _service() -> SolomonService:
     )
 
 
-@app.command()
+@app.command(
+    help="Boundary-check and ingest new firm knowledge.",
+    epilog=_example('uv run solomon ingest "Structure X relies on Regulation R section 12." --source-ref memo-1'),
+)
 def ingest(
     content: Annotated[str, typer.Argument(help="Knowledge content to ingest.")],
     source_ref: Annotated[str, typer.Option("--source-ref", help="Source reference.")],
@@ -147,7 +164,10 @@ def ingest(
     _print_json(item.model_dump(mode="json"))
 
 
-@app.command()
+@app.command(
+    help="Recall live knowledge by query.",
+    epilog=_example('uv run solomon recall "structure X regulation" --review-mode'),
+)
 def recall(
     query: Annotated[str, typer.Argument(help="Question or search query.")],
     review_mode: Annotated[bool, typer.Option("--review-mode")] = False,
@@ -162,7 +182,10 @@ def recall(
     _print_json(results, sort_keys=True)
 
 
-@app.command("preflight")
+@app.command(
+    "preflight",
+    epilog=_example('uv run solomon preflight "structure X regulation" --matter-id matter-a'),
+)
 def preflight(
     query: Annotated[str, typer.Argument(help="Question or search query.")],
     matter_id: Annotated[str | None, typer.Option("--matter-id", help="Restrict to a matter scope.")] = None,
@@ -188,7 +211,10 @@ def _print_currency(item_id: str) -> None:
     _print_json(_service().evaluate_currency(item_id), sort_keys=True)
 
 
-@app.command("check-currency")
+@app.command(
+    "check-currency",
+    epilog=_example("uv run solomon check-currency 019ec64a-83dd-71cc-9422-7b6ec405cd43"),
+)
 def check_currency(item_id: Annotated[str, typer.Argument(help="Knowledge item id.")]) -> None:
     """Check whether a knowledge item is live, stale, superseded, or retired."""
     _print_currency(item_id)
@@ -203,7 +229,7 @@ def _print_impact(authority_id: str) -> None:
     _print_json(_service().impact_query(authority_id), sort_keys=True)
 
 
-@app.command("impact")
+@app.command("impact", epilog=_example("uv run solomon impact regulation-r-section-12"))
 def impact(authority_id: Annotated[str, typer.Argument(help="External authority id.")]) -> None:
     """Return internal items affected by an external authority."""
     _print_impact(authority_id)
@@ -214,7 +240,10 @@ def impact_query(authority_id: str) -> None:
     _print_impact(authority_id)
 
 
-@app.command("get-dependencies")
+@app.command(
+    "get-dependencies",
+    epilog=_example("uv run solomon get-dependencies 019ec64a-83dd-71cc-9422-7b6ec405cd43"),
+)
 def get_dependencies(item_id: Annotated[str, typer.Argument(help="Knowledge item id.")]) -> None:
     """Return upstream and downstream dependency edges for a knowledge item."""
     trace = _service().why(item_id)
@@ -228,7 +257,11 @@ def get_dependencies(item_id: Annotated[str, typer.Argument(help="Knowledge item
     )
 
 
-@app.command("dependency-graph")
+@app.command(
+    "dependency-graph",
+    help="Render dependency graph as Mermaid or DOT.",
+    epilog=_example("uv run solomon dependency-graph --format mermaid --matter-id matter-a"),
+)
 def dependency_graph(
     output_format: Annotated[str, typer.Option("--format", help="Graph format: mermaid or dot.")] = "mermaid",
     matter_id: Annotated[str | None, typer.Option("--matter-id", help="Restrict to a matter scope.")] = None,
@@ -245,13 +278,21 @@ def dependency_graph(
     )
 
 
-@app.command("extract-refs")
+@app.command(
+    "extract-refs",
+    help="Extract references from knowledge text.",
+    epilog=_example('uv run solomon extract-refs "This relies on Regulation R section 12."'),
+)
 def extract_refs(content: Annotated[str, typer.Argument(help="Knowledge text to scan.")]) -> None:
     extraction = _service().extract_references(ReferenceExtractionRequest(content=content))
     _print_json(extraction.model_dump(mode="json"))
 
 
-@app.command("predict-stale")
+@app.command(
+    "predict-stale",
+    help="Predict staleness risk from a pending-amendment feed.",
+    epilog=_example("uv run solomon predict-stale examples/pending-amendments.json --lookahead-days 180"),
+)
 def predict_stale(
     pending_feed: Annotated[Path, typer.Argument(help="JSON or CSV feed of pending authority amendments.")],
     lookahead_days: Annotated[int, typer.Option("--lookahead-days", min=1)] = 180,
@@ -265,7 +306,14 @@ def predict_stale(
     _print_json(report.model_dump(mode="json"))
 
 
-@app.command("register-authority-change")
+@app.command(
+    "register-authority-change",
+    help="Register an external authority version change and propagate stale state.",
+    epilog=_example(
+        "uv run solomon register-authority-change regulation-r-section-12 "
+        "--new-version 2026-amendment --changed-at 2026-01-01T00:00:00+00:00"
+    ),
+)
 def register_authority_change(
     authority_id: Annotated[str, typer.Argument(help="External authority id.")],
     new_version: Annotated[str, typer.Option("--new-version", help="New authority version.")],
@@ -278,7 +326,14 @@ def register_authority_change(
     _print_json(result, sort_keys=True)
 
 
-@app.command("add-dependency")
+@app.command(
+    "add-dependency",
+    help="Add a dependency edge from a knowledge item to an authority or item.",
+    epilog=_example(
+        "uv run solomon add-dependency --source-id item-1 --target-id regulation-r-section-12 "
+        "--edge-type internal_depends_on_external"
+    ),
+)
 def add_dependency(
     source_id: Annotated[str, typer.Option("--source-id", help="Knowledge item id.")],
     target_id: Annotated[str, typer.Option("--target-id", help="Authority or item id.")],
@@ -298,7 +353,11 @@ def add_dependency(
     _print_json(edge.model_dump(mode="json"))
 
 
-@app.command("suggest-dependencies")
+@app.command(
+    "suggest-dependencies",
+    help="Create dependency suggestions for one knowledge item.",
+    epilog=_example("uv run solomon suggest-dependencies item-1"),
+)
 def suggest_dependencies(
     item_id: Annotated[str, typer.Argument(help="Knowledge item id.")],
     llm: Annotated[bool, typer.Option("--llm", help="Use optional sanitized LLM extraction.")] = False,
@@ -311,7 +370,11 @@ def suggest_dependencies(
     _print_json([suggestion.model_dump(mode="json") for suggestion in suggestions])
 
 
-@app.command("dependency-suggestions")
+@app.command(
+    "dependency-suggestions",
+    help="List dependency suggestions for review.",
+    epilog=_example("uv run solomon dependency-suggestions --decision pending --limit 20"),
+)
 def dependency_suggestions(
     item_id: Annotated[str | None, typer.Option("--item-id", help="Restrict to one knowledge item.")] = None,
     decision: Annotated[SuggestionDecision | None, typer.Option("--decision")] = SuggestionDecision.PENDING,
@@ -321,7 +384,11 @@ def dependency_suggestions(
     _print_json([suggestion.model_dump(mode="json") for suggestion in suggestions])
 
 
-@app.command("confirm-dependency-suggestion")
+@app.command(
+    "confirm-dependency-suggestion",
+    help="Confirm one dependency suggestion.",
+    epilog=_example("uv run solomon confirm-dependency-suggestion suggestion-1 --by PartnerA"),
+)
 def confirm_dependency_suggestion(
     suggestion_id: Annotated[str, typer.Argument(help="Dependency suggestion id.")],
     by: Annotated[str, typer.Option("--by", help="Reviewer identifier.")],
@@ -333,7 +400,11 @@ def confirm_dependency_suggestion(
     _print_json(edge.model_dump(mode="json"))
 
 
-@app.command("reject-dependency-suggestion")
+@app.command(
+    "reject-dependency-suggestion",
+    help="Reject one dependency suggestion.",
+    epilog=_example("uv run solomon reject-dependency-suggestion suggestion-1 --by PartnerA"),
+)
 def reject_dependency_suggestion(
     suggestion_id: Annotated[str, typer.Argument(help="Dependency suggestion id.")],
     by: Annotated[str, typer.Option("--by", help="Reviewer identifier.")],
@@ -345,7 +416,10 @@ def reject_dependency_suggestion(
     _print_json(suggestion.model_dump(mode="json"))
 
 
-@app.command("verify-position")
+@app.command(
+    "verify-position",
+    epilog=_example("uv run solomon verify-position item-1 --outcome reaffirm --by PartnerA"),
+)
 def verify_position(
     item_id: Annotated[str, typer.Argument(help="Knowledge item id.")],
     outcome: Annotated[VerificationOutcome, typer.Option("--outcome")],
@@ -360,7 +434,11 @@ def verify_position(
     _print_json(item.model_dump(mode="json"))
 
 
-@app.command("why")
+@app.command(
+    "why",
+    help="Print a compact explanation for one knowledge item.",
+    epilog=_example("uv run solomon why item-1"),
+)
 def why(item_id: str) -> None:
     trace = _service().why(item_id)
     console.print(f"{trace.item.id} [{trace.currency['currency_state']}]")
@@ -369,7 +447,10 @@ def why(item_id: str) -> None:
     console.print(f"dependencies: {len(trace.dependencies)}")
 
 
-@app.command("audit-pack")
+@app.command(
+    "audit-pack",
+    epilog=_example("uv run solomon audit-pack item-1 ./audit-pack"),
+)
 def audit_pack(
     item_id: Annotated[str, typer.Argument(help="Knowledge item id.")],
     destination: Annotated[Path, typer.Argument(help="Destination directory.")],

@@ -6,5 +6,5 @@
 - The local retrieval index is deterministic and lightweight; production semantic backends can be swapped in.
 - Solomon flags moved dependencies and overdue verification. It does not decide whether a legal position is
   wrong.
-- Boundary correctness depends on Kaypoh's detection and tokenization behavior; the committed fixture suite
+- Boundary correctness depends on Solomon's detection and tokenization behavior; the committed fixture suite
   is regression evidence, not complete DLP or legal assurance.

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Kaypoh-derived local jurisdiction packs vendored into Solomon."""
+"""Solomon local jurisdiction packs."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Local Kaypoh-derived review and tokenization engine vendored into Solomon."""
+"""Local Solomon boundary review and tokenization engine."""
 
 from __future__ import annotations
 

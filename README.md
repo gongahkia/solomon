@@ -16,7 +16,7 @@ Currency-aware good-law infrastructure for a firm's own knowledge.
 
 Solomon tracks whether internal positions, clauses, house views, notes, and prior advice are still live,
 what they depend on, and why re-verification is due. It keeps firm knowledge behind a vendored
-Kaypoh-derived zero-retention boundary and records a metadata-only audit trail for provenance, currency,
+Solomon zero-retention boundary and records a metadata-only audit trail for provenance, currency,
 credence, verification, deterministic primitive plans, and contestability.
 
 ## Table of Contents
@@ -27,7 +27,7 @@ credence, verification, deterministic primitive plans, and contestability.
 - [Examples](#examples)
 - [How It Works](#how-it-works)
 - [Regulator-ready by construction](#regulator-ready-by-construction)
-- [The Triad](#the-triad)
+- [Boundary And Memory](#boundary-and-memory)
 - [Runtime Modes](#runtime-modes)
 - [Documentation](#documentation)
 - [Development & Evaluation](#development--evaluation)
@@ -79,10 +79,10 @@ uv run solomon recall "structure X regulation"
 - Tracks dependency edges between internal knowledge and external authorities, then propagates
   `StalePendingReverification` through transitive dependents when a dependency changes.
 - Creates a durable dependency-review queue from deterministic citation/reference extraction, with optional
-  Kaypoh-sanitized LLM assistance for curator confirmation.
+  Solomon-sanitized LLM assistance for curator confirmation.
 - Recalls live knowledge by default while preserving stale, superseded, retired, and contested items for
   review and historical reconstruction.
-- Keeps model-bound context behind the vendored Kaypoh-derived boundary for review, pseudonymization,
+- Keeps model-bound context behind the Solomon boundary for review, pseudonymization,
   reidentification, document scrubbing, and fail-closed policy.
 - Routes strict and zero-egress matters to local-only model execution, with remote ZDR endpoints available
   only when deployment policy explicitly permits them.
@@ -235,7 +235,7 @@ Solomon has seven main runtime pieces:
    superseded, retired, and verification-aged states without using age-based decay as a proxy for truth.
 5. The credence layer in [`src/solomon/credence/`](./src/solomon/credence/) keeps model-inferred content
    below firm-authoritative content for load-bearing answers.
-6. The vendored boundary in [`src/solomon/boundary/`](./src/solomon/boundary/) runs Kaypoh-derived review,
+6. The boundary in [`src/solomon/boundary/`](./src/solomon/boundary/) runs Solomon review,
    pseudonymization, reidentification, document scrub, jurisdiction packs, and fail-closed model-egress
    checks.
 7. The audit layer in [`src/solomon/audit/`](./src/solomon/audit/) writes a metadata-only hash-chained
@@ -246,7 +246,7 @@ Core flow:
 ```mermaid
 flowchart TD
     Lawyer[Lawyer / API / CLI] --> Ingest[Ingest knowledge]
-    Ingest --> Boundary[Kaypoh-derived boundary review]
+    Ingest --> Boundary[Solomon boundary review]
     Boundary --> Store[Bi-temporal event store]
     Store --> Graph[Dependency graph]
     Graph --> Currency[Currency engine]
@@ -268,7 +268,7 @@ Core invariants:
 - Live items are returned by default; stale and superseded items require review mode or explicit queries.
 - The LLM never decides currency, supersession, verification, impact, timeline, or contest promotion.
 - `ModelInferred` content cannot outrank `FirmAuthoritative` content as a settled answer.
-- Kaypoh mappings are volatile and flushed after reidentification.
+- Boundary mappings are volatile and flushed after reidentification.
 - Audit logs store metadata and hashes, not privileged prompt content.
 
 ## Regulator-ready by construction
@@ -282,30 +282,27 @@ Solomon produces evidence about its own reasoning and currency. It does not cert
 decide the law, or replace the firm's instructions-for-use, human oversight, or regulator-facing review
 process. See [`docs/regulatory-evidence.md`](./docs/regulatory-evidence.md).
 
-## The Triad
+## Boundary And Memory
 
-| Project | Question | Memory stance | Solomon relationship |
-|---|---|---|---|
-| Kaypoh | What is safe to let leave the building? | Stateless boundary | Solomon vendors the local `/review`, `/pseudonymize`, `/reidentify`, and `/documents/scrub` surfaces it calls. |
-| Shibahama | What is worth remembering? | Adaptive decay | Solomon rejects decay because old legal knowledge is not automatically stale. |
-| Solomon | Is what we know still true, and can we prove it? | Permanent, bi-temporal, currency-aware | This repo. |
+Solomon owns both the zero-retention boundary and the currency engine. The boundary answers what can be
+reviewed, pseudonymized, reidentified, scrubbed, or sent to a model. The currency engine answers whether
+internal knowledge is live, stale-pending-reverification, superseded, or retired.
 
 Solomon is self-contained. The local boundary engine under [`src/solomon/boundary/engine/`](./src/solomon/boundary/engine/)
-is vendored from Kaypoh commit `7415069e57d69398e2c44ef6ababafb0c04a988b`; no sibling `../kaypoh`
-checkout is required.
+requires no sibling checkout.
 
 ## Runtime Modes
 
 ### Local SKU
 
-`solomon-local` is offline-default. It uses SQLite, the in-process Kaypoh-derived boundary, deterministic
+`solomon-local` is offline-default. It uses SQLite, the in-process Solomon boundary, deterministic
 hashed retrieval embeddings, and local-only model routing unless deployment policy explicitly enables
 remote egress.
 
 It must not require:
 
 ```text
-postgres, redis, external HTTP, remote model credentials, sibling ../kaypoh checkout
+postgres, redis, external HTTP, remote model credentials
 ```
 
 Build the local binary:
@@ -361,8 +358,7 @@ curl http://localhost:8140/health
   contestability, storage, tenancy, auth, boundary, and reference extraction.
 - [`docs/concepts.md`](./docs/concepts.md): currency, bi-temporality, dependency graph, credence, and
   verification concepts.
-- [`docs/kaypoh-integration.md`](./docs/kaypoh-integration.md): vendored Kaypoh boundary provenance and
-  integration behavior.
+- [`docs/boundary-integration.md`](./docs/boundary-integration.md): Solomon boundary behavior.
 - [`docs/trust-boundary.md`](./docs/trust-boundary.md): model egress, pseudonymization, contestability,
   and fail-closed trust-boundary rules.
 - [`docs/regulatory-evidence.md`](./docs/regulatory-evidence.md): evidence mapping for EU AI Act,

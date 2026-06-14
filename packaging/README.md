@@ -3,8 +3,8 @@
 # Packaging
 
 - `solomon-local.spec` is the PyInstaller entry for the offline local SKU.
-- Docker Compose files at the repository root are for the server SKU and assume Kaypoh server is configured
-  separately through `SOLOMON_KAYPOH_BASE_URL`.
+- Docker Compose files at the repository root are for the server SKU and use the in-process Solomon boundary by
+  default. Set `SOLOMON_BOUNDARY_BASE_URL` only for an explicitly externalized boundary deployment.
 
 ## v0.1.0 release artifacts
 

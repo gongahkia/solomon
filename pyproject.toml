@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 [project]
 name = "solomon"
 version = "0.1.0"
-description = "A good-law engine for a firm's own knowledge, behind a Kaypoh zero-retention boundary."
+description = "A good-law engine for a firm's own knowledge, behind the Solomon zero-retention boundary."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -91,5 +91,5 @@ skip_covered = true
 
 [tool.solomon.boundary]
 engine = "src/solomon/boundary/engine"
-source = "vendored-kaypoh-derived"
+source = "solomon-boundary"
 source_commit = "7415069e57d69398e2c44ef6ababafb0c04a988b"

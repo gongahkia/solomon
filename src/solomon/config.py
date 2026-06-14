@@ -16,10 +16,10 @@ class Settings(BaseSettings):
     sku: str = Field(default="local", pattern="^(local|server)$")
     data_dir: Path = Field(default=Path("./solomon-data"))
     journal_dir: Path = Field(default=Path("./solomon-journal"))
-    kaypoh_repo_path: Path = Field(default=Path("src/solomon/boundary/engine"))
-    kaypoh_base_url: str = "in-process://solomon-boundary-engine"
-    kaypoh_api_key: str | None = None
-    kaypoh_timeout_seconds: float = 30.0
+    boundary_engine_path: Path = Field(default=Path("src/solomon/boundary/engine"))
+    boundary_base_url: str = "in-process://solomon-boundary-engine"
+    boundary_api_key: str | None = None
+    boundary_timeout_seconds: float = 30.0
     server_api_key: str | None = None
     server_auto_provision_tenants: bool = True
     database_url: str = "sqlite:///./solomon-data/solomon.sqlite3"
@@ -49,11 +49,11 @@ class Settings(BaseSettings):
             "sku": self.sku,
             "data_dir": str(self.data_dir),
             "journal_dir": str(self.journal_dir),
-            "kaypoh_repo_path": str(self.kaypoh_repo_path),
-            "kaypoh_base_url": self.kaypoh_base_url,
-            "kaypoh_api_key_configured": self.kaypoh_api_key is not None,
+            "boundary_engine_path": str(self.boundary_engine_path),
+            "boundary_base_url": self.boundary_base_url,
+            "boundary_api_key_configured": self.boundary_api_key is not None,
             "server_api_key_configured": self.server_api_key is not None,
-            "kaypoh_timeout_seconds": self.kaypoh_timeout_seconds,
+            "boundary_timeout_seconds": self.boundary_timeout_seconds,
             "database_url": self.database_url,
             "server_auto_provision_tenants": self.server_auto_provision_tenants,
             "local_model_url": self.local_model_url,

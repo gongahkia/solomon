@@ -4,19 +4,19 @@ from __future__ import annotations
 
 import argparse
 
-from solomon.boundary.kaypoh import load_kaypoh_client_class
+from solomon.boundary.solomon import load_boundary_client_class
 
 
 def main() -> int:
     argparse.ArgumentParser(description="Smoke-test Solomon's vendored boundary client contract.").parse_args()
 
-    client_class = load_kaypoh_client_class()
+    client_class = load_boundary_client_class()
     with client_class() as client:
         ready = client.ready()
         if not getattr(ready, "ready", False):
             raise RuntimeError(f"Vendored boundary is not ready: {ready!r}")
         review = client.review(
-            text="Public test memo for Solomon Kaypoh smoke.",
+            text="Public test memo for Solomon boundary smoke.",
             source_jurisdiction="SG",
             destination_jurisdiction="SG",
             document_type="memo",

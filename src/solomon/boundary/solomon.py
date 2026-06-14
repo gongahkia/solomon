@@ -6,26 +6,26 @@ from typing import Any, Literal, Protocol, cast
 
 from pydantic import BaseModel, Field
 
-from solomon.boundary.engine.client import BoundaryClient, KaypohClient
+from solomon.boundary.engine.client import BoundaryClient
 from solomon.currency.models import KnowledgeItem
 
 
-class KaypohImportStatus(BaseModel):
+class BoundaryImportStatus(BaseModel):
     importable: bool
-    repo_path: str
+    engine_path: str
     client_path: str
     detail: str
 
 
 class BoundaryUnavailableError(RuntimeError):
-    """Raised when the Kaypoh boundary is unavailable and Solomon must fail closed."""
+    """Raised when the Solomon boundary is unavailable and Solomon must fail closed."""
 
 
 class BoundaryRefusedError(RuntimeError):
-    """Raised when Kaypoh policy refuses an unsafe item or egress."""
+    """Raised when Solomon boundary policy refuses an unsafe item or egress."""
 
 
-class KaypohClientProtocol(Protocol):
+class BoundaryClientProtocol(Protocol):
     def review(self, *args: Any, **kwargs: Any) -> Any: ...
 
     def pseudonymize(self, *args: Any, **kwargs: Any) -> Any: ...
@@ -104,34 +104,34 @@ def _mapping_for_reidentify(mapping: list[Any]) -> list[dict[str, str]]:
     return entries
 
 
-def load_kaypoh_client_class(_kaypoh_repo_path: object | None = None) -> type[Any]:
-    """Return Solomon's vendored Kaypoh-derived client class."""
-    return KaypohClient
+def load_boundary_client_class(_boundary_engine_path: object | None = None) -> type[Any]:
+    """Return Solomon's in-process boundary client class."""
+    return BoundaryClient
 
 
-def probe_kaypoh_client(_kaypoh_repo_path: object | None = None) -> KaypohImportStatus:
+def probe_boundary_client(_boundary_engine_path: object | None = None) -> BoundaryImportStatus:
     client_path = "src/solomon/boundary/engine/client.py"
     try:
-        load_kaypoh_client_class()
+        load_boundary_client_class()
     except Exception as exc:  # pragma: no cover - detail is environment-dependent
-        return KaypohImportStatus(
+        return BoundaryImportStatus(
             importable=False,
-            repo_path="vendored",
+            engine_path="src/solomon/boundary/engine",
             client_path=client_path,
             detail=str(exc),
         )
-    return KaypohImportStatus(
+    return BoundaryImportStatus(
         importable=True,
-        repo_path="vendored",
+        engine_path="src/solomon/boundary/engine",
         client_path=client_path,
-        detail="Vendored Kaypoh-derived BoundaryClient import succeeded",
+        detail="Solomon boundary client import succeeded",
     )
 
 
-class KaypohBoundary:
+class SolomonBoundary:
     def __init__(
         self,
-        client: KaypohClientProtocol | None = None,
+        client: BoundaryClientProtocol | None = None,
         *,
         policy: BoundaryPolicy | None = None,
     ) -> None:
@@ -161,7 +161,7 @@ class KaypohBoundary:
                 }
             )
         except Exception as exc:  # pragma: no cover - exact client failures depend on transport
-            raise BoundaryUnavailableError("Kaypoh review failed; refusing ingestion") from exc
+            raise BoundaryUnavailableError("boundary review failed; refusing ingestion") from exc
 
         classification = _classification_text(response)
         findings = [_model_dump(finding) for finding in _response_field(response, "findings", [])]
@@ -176,17 +176,17 @@ class KaypohBoundary:
             request_id=cast(str | None, _response_field(response, "request_id")),
         )
         if action == "refuse":
-            raise BoundaryRefusedError(f"Kaypoh classified item {item.id} as {classification}")
+            raise BoundaryRefusedError(f"boundary classified item {item.id} as {classification}")
 
         provenance = item.provenance.model_copy(
             update={
-                "kaypoh_review_classification": classification,
-                "kaypoh_findings": findings,
+                "boundary_review_classification": classification,
+                "boundary_findings": findings,
             }
         )
         metadata = dict(item.metadata)
         if action == "quarantine":
-            metadata["kaypoh_quarantine"] = {"classification": classification, "request_id": review.request_id}
+            metadata["boundary_quarantine"] = {"classification": classification, "request_id": review.request_id}
         return item.model_copy(update={"provenance": provenance, "metadata": metadata}), review
 
     def sanitize_context(
@@ -219,7 +219,7 @@ class KaypohBoundary:
                 }
             )
         except Exception as exc:  # pragma: no cover - exact client failures depend on transport
-            raise BoundaryUnavailableError("Kaypoh pseudonymize failed; refusing model egress") from exc
+            raise BoundaryUnavailableError("boundary pseudonymize failed; refusing model egress") from exc
 
         mapping = _mapping_for_reidentify(list(_response_field(response, "mapping", [])))
         context_id = str(_response_field(response, "document_hash", "")) or (
@@ -246,7 +246,7 @@ class KaypohBoundary:
         try:
             response = self.client.reidentify(anonymized_text=model_text, mapping=mapping)
         except Exception as exc:  # pragma: no cover - exact client failures depend on transport
-            raise BoundaryUnavailableError("Kaypoh reidentify failed") from exc
+            raise BoundaryUnavailableError("boundary reidentify failed") from exc
         finally:
             self._volatile_mappings.pop(context_id, None)
 
@@ -272,7 +272,7 @@ class KaypohBoundary:
                 document_mime_type=document_mime_type,
             )
         except Exception as exc:  # pragma: no cover - exact client failures depend on transport
-            raise BoundaryUnavailableError("Kaypoh document scrub failed; refusing ingestion") from exc
+            raise BoundaryUnavailableError("boundary document scrub failed; refusing ingestion") from exc
 
     def volatile_mapping_count(self) -> int:
         return len(self._volatile_mappings)

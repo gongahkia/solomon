@@ -16,7 +16,7 @@ from pydantic import Field
 from solomon.api.schemas import SolomonModel
 from solomon.boundary.engine.jurisdictions import resolve_pack, supported_jurisdiction_codes
 from solomon.boundary.engine.review import review_text
-from solomon.boundary.kaypoh import KaypohBoundary
+from solomon.boundary.solomon import SolomonBoundary
 from solomon.currency.models import (
     CredenceTier,
     CurrencyState,
@@ -460,10 +460,10 @@ def boundary_fidelity_eval(events: list[dict[str, str]], *, forbidden_terms: set
 
 def run_boundary_fidelity_suite(
     *,
-    boundary: KaypohBoundary | None = None,
+    boundary: SolomonBoundary | None = None,
     cases: list[BoundaryFidelityCase] | None = None,
 ) -> BoundaryFidelityResult:
-    resolved_boundary = boundary or KaypohBoundary()
+    resolved_boundary = boundary or SolomonBoundary()
     resolved_cases = cases or DEFAULT_BOUNDARY_FIDELITY_CASES
     leaked: list[str] = []
     for case in resolved_cases:

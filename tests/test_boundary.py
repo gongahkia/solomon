@@ -8,11 +8,11 @@ from typing import Any
 import pytest
 
 from solomon.boundary.engine.client import BoundaryClient
-from solomon.boundary.kaypoh import (
+from solomon.boundary.solomon import (
     BoundaryPolicy,
     BoundaryRefusedError,
     BoundaryUnavailableError,
-    KaypohBoundary,
+    SolomonBoundary,
     check_placeholder_survival,
 )
 from solomon.currency.models import KnowledgeItem, KnowledgeKind, Provenance, SourceKind
@@ -30,7 +30,7 @@ class FakeResponse:
     replacement_count: int = 1
 
 
-class FakeKaypohClient:
+class FakeBoundaryClient:
     def __init__(self) -> None:
         self.review_requests: list[dict[str, Any]] = []
         self.pseudonymize_requests: list[dict[str, Any]] = []
@@ -70,30 +70,30 @@ def _item() -> KnowledgeItem:
     )
 
 
-def test_ingestion_gate_quarantines_and_captures_kaypoh_findings() -> None:
-    client = FakeKaypohClient()
-    boundary = KaypohBoundary(client, policy=BoundaryPolicy(unsafe_action="quarantine"))
+def test_ingestion_gate_quarantines_and_captures_boundary_findings() -> None:
+    client = FakeBoundaryClient()
+    boundary = SolomonBoundary(client, policy=BoundaryPolicy(unsafe_action="quarantine"))
 
     gated, review = boundary.review_for_ingest(_item(), source_jurisdiction="SG", destination_jurisdiction="US")
 
     assert review.action == "quarantine"
-    assert gated.provenance.kaypoh_review_classification == "HIGH_RISK"
-    assert gated.provenance.kaypoh_findings == [{"severity": "high"}]
-    assert gated.metadata["kaypoh_quarantine"]["classification"] == "HIGH_RISK"
+    assert gated.provenance.boundary_review_classification == "HIGH_RISK"
+    assert gated.provenance.boundary_findings == [{"severity": "high"}]
+    assert gated.metadata["boundary_quarantine"]["classification"] == "HIGH_RISK"
     assert client.review_requests[0]["source_jurisdiction"] == "SG"
     assert client.review_requests[0]["destination_jurisdiction"] == "US"
 
 
 def test_ingestion_gate_can_refuse_by_policy() -> None:
-    boundary = KaypohBoundary(FakeKaypohClient(), policy=BoundaryPolicy(unsafe_action="refuse"))
+    boundary = SolomonBoundary(FakeBoundaryClient(), policy=BoundaryPolicy(unsafe_action="refuse"))
 
     with pytest.raises(BoundaryRefusedError):
         boundary.review_for_ingest(_item())
 
 
 def test_sanitize_reidentify_uses_volatile_mapping_and_structured_tokens() -> None:
-    client = FakeKaypohClient()
-    boundary = KaypohBoundary(client)
+    client = FakeBoundaryClient()
+    boundary = SolomonBoundary(client)
 
     sanitized = boundary.sanitize_context("Send Jane the memo.", matter_id="matter-1")
     result = boundary.reidentify_response(sanitized.context_id, "Send [PERSON_1] the memo.")
@@ -108,22 +108,22 @@ def test_sanitize_reidentify_uses_volatile_mapping_and_structured_tokens() -> No
 
 
 def test_raw_text_egress_requires_matter_opt_in() -> None:
-    boundary = KaypohBoundary(FakeKaypohClient())
+    boundary = SolomonBoundary(FakeBoundaryClient())
 
     with pytest.raises(BoundaryRefusedError, match="raw_text"):
         boundary.sanitize_context("raw", matter_id="matter-1", input_mode="raw_text")
 
-    allowed = KaypohBoundary(
-        FakeKaypohClient(),
+    allowed = SolomonBoundary(
+        FakeBoundaryClient(),
         policy=BoundaryPolicy(llm_input_mode="raw_text", raw_text_matter_opt_ins={"matter-1"}),
     )
     assert allowed.sanitize_context("raw", matter_id="matter-1").input_mode == "raw_text"
 
 
-def test_boundary_fails_closed_when_kaypoh_is_unavailable() -> None:
-    client = FakeKaypohClient()
+def test_boundary_fails_closed_when_engine_is_unavailable() -> None:
+    client = FakeBoundaryClient()
     client.fail = True
-    boundary = KaypohBoundary(client)
+    boundary = SolomonBoundary(client)
 
     with pytest.raises(BoundaryUnavailableError):
         boundary.review_for_ingest(_item())
@@ -146,7 +146,7 @@ def test_placeholder_survival_flags_dropped_tokens() -> None:
     assert result.missing_placeholders == ["[CLIENT_1]"]
 
 
-def test_vendored_boundary_exposes_kaypoh_required_surface_parity() -> None:
+def test_boundary_exposes_required_surface_parity() -> None:
     client = BoundaryClient()
 
     capabilities = client.capabilities()

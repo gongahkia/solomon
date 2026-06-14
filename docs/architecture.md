@@ -8,7 +8,7 @@ Solomon is a Python 3.10+ FastAPI service and CLI. It is organized around durabl
 - `store`: SQLite event store, backend factory, encrypted artifacts.
 - `graph`: bi-temporal dependency edges, propagation, and suggestions.
 - `credence`: source-tier policy, load-bearing guardrails, prompt-context separation.
-- `boundary`: Kaypoh review, pseudonymize, reidentify, scrub, and fail-closed policy.
+- `boundary`: Solomon review, pseudonymize, reidentify, scrub, and fail-closed policy.
 - `orchestrator`: retrieval and model routing.
 - `audit`: hash-chained metadata-only journal and audit-pack export.
 - `api` and `cli`: public verbs.
@@ -16,7 +16,7 @@ Solomon is a Python 3.10+ FastAPI service and CLI. It is organized around durabl
 ## Request Lifecycle
 
 1. Ingest creates a `KnowledgeItem` with provenance and source-derived credence.
-2. The vendored Kaypoh-derived review engine gates storage before the item is written.
+2. The Solomon boundary review engine gates storage before the item is written.
 3. Dependency edges are manually tagged or suggested from boundary-sanitized text and parsed legal references.
 4. Authority changes propagate staleness through graph dependents.
 5. Recall searches the local index, filters Live items by default, expands dependencies, and applies credence.
@@ -83,19 +83,18 @@ lower-tier actors can flag contests but cannot override human-affirmed knowledge
 
 ## Reference Extraction
 
-`/references/extract` runs after optional Kaypoh sanitization. Citation parsing uses `eyecite` for full,
+`/references/extract` runs after optional Solomon boundary sanitization. Citation parsing uses `eyecite` for full,
 short, statutory, `supra`, and `id.` citation forms, then Solomon's deterministic grammar fills gaps for
 firm-style authority references such as "Regulation R section 12", non-US case strings, and defined terms.
 Each returned citation includes its parser source and source-text span so reviewers can inspect the exact
 evidence before confirming a dependency edge.
 
 Dependency suggestions are now durable review records. Ingest creates deterministic pending suggestions;
-`/dependencies/suggest` can re-run extraction and optionally use Kaypoh-sanitized LLM assistance. Curators can
+`/dependencies/suggest` can re-run extraction and optionally use Solomon-sanitized LLM assistance. Curators can
 list, confirm, or reject suggestions through `/dependencies/suggestions`; confirmed suggestions create
 `human_confirmed` dependency edges, while rejected suggestions remain review history.
 
 ## Boundary
 
-The boundary engine is vendored under `src/solomon/boundary/engine/` from Kaypoh commit
-`7415069e57d69398e2c44ef6ababafb0c04a988b`. If that in-process boundary errors, ingestion and model egress
-fail closed.
+The boundary engine lives under `src/solomon/boundary/engine/`. If that in-process boundary errors, ingestion
+and model egress fail closed.

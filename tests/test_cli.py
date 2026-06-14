@@ -36,7 +36,7 @@ def test_cli_version_and_diagnostics(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert payload["version"] == __version__
     assert payload["settings"]["data_dir"] == str(tmp_path / "data")
     assert payload["settings"]["journal_dir"] == str(tmp_path / "journal")
-    assert payload["kaypoh"]["importable"] is True
+    assert payload["boundary"]["importable"] is True
 
 
 def test_cli_ingest_recall_and_why_use_same_local_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

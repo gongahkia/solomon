@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Kaypoh-derived boundary schemas vendored into Solomon."""
+"""Solomon boundary schemas."""
 
 from __future__ import annotations
 
@@ -88,4 +88,4 @@ class BoundaryCapabilities(BaseModel):
     privacy_operations: list[str]
     jurisdiction_codes: list[str]
     detector_families: list[str]
-    parity_reference: str = "../kaypoh/docs/schema.md"
+    parity_reference: str = "solomon-boundary-schema"

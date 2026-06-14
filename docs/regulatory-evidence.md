@@ -22,7 +22,7 @@ Every answer should be explainable from these artifacts:
 | Was the basis still current? | `evaluate_currency`, `impact_query`, verification records, authority-change events, supersession links, stale reasons, and timeline/as-of reconstruction. |
 | Who was accountable? | `verified_by`, source-derived credence tier, tenant principal metadata, partner affirmations, pin metadata, and audit actor ids where available. |
 | Could a human challenge it? | `contest` history, quarantined proposed corrections, `affirm` decisions, `pin` decisions, and never-delete supersession records. |
-| What crossed the model boundary? | Kaypoh-derived review and pseudonymization metadata, route decision, prompt hashes, mapping counts, and volatile mapping flush evidence. |
+| What crossed the model boundary? | Solomon boundary review and pseudonymization metadata, route decision, prompt hashes, mapping counts, and volatile mapping flush evidence. |
 
 The audit journal remains metadata-only: it records ids, hashes, states, route decisions, and timestamps,
 not privileged prompt text or stored legal content.
@@ -60,7 +60,7 @@ specific.
 | EU AI Act | Article 13-style output interpretation, instructions-for-use support, human oversight evidence, deployer accountability, and Article 27-style impact review inputs where applicable. |
 | NIST AI RMF 1.0 | Govern: roles, policies, boundary controls, tenant scopes, and audit records. Map: intended use, source provenance, dependencies, and matter/client context. Measure: currency status, stale-surface benchmarks, boundary-fidelity tests, and evaluation artifacts. Manage: contest, affirm, pin, supersede, retire, and authority-change propagation. |
 | ISO/IEC 42001:2023 | Evidence for an AI management system: policies and objectives, lifecycle processes, risk handling, monitoring, review, and continual improvement records around responsible AI use. |
-| Kaypoh jurisdiction packs | Solomon reuses Kaypoh's 18-jurisdiction statute framing for boundary review. The evidence chain records which context was reviewed and sanitized, but each jurisdiction's privilege, confidentiality, privacy, and professional-responsibility analysis remains outside Solomon's adjudication scope. |
+| Boundary jurisdiction packs | Solomon uses 18-jurisdiction statute framing for boundary review. The evidence chain records which context was reviewed and sanitized, but each jurisdiction's privilege, confidentiality, privacy, and professional-responsibility analysis remains outside Solomon's adjudication scope. |
 
 The important distinction is between evidence structure and legal conclusion. Solomon can show that a
 given answer came from a reproducible plan, current or stale source material, a known credence tier, and a

@@ -17,11 +17,10 @@ services:
       SOLOMON_ZERO_EGRESS_MODE: "false"
       SOLOMON_ALLOW_REMOTE_EGRESS: "${SOLOMON_ALLOW_REMOTE_EGRESS:-false}"
       SOLOMON_REMOTE_MODEL_URL: "${SOLOMON_REMOTE_MODEL_URL:-}"
-      SOLOMON_KAYPOH_BASE_URL: "${SOLOMON_KAYPOH_BASE_URL:-http://kaypoh-server:8000}"
+      SOLOMON_BOUNDARY_BASE_URL: "${SOLOMON_BOUNDARY_BASE_URL:-in-process://solomon-boundary-engine}"
     ports:
       - "8140:8140"
 
 volumes:
   solomon-data:
   solomon-journal:
-

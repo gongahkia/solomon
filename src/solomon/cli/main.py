@@ -22,7 +22,7 @@ from solomon.api.service import (
     SolomonService,
     StalenessPredictionRequest,
 )
-from solomon.boundary.kaypoh import probe_kaypoh_client
+from solomon.boundary.solomon import probe_boundary_client
 from solomon.config import get_settings
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.currency.prediction import load_pending_amendments
@@ -61,7 +61,7 @@ def diagnostics() -> None:
     payload = {
         "version": __version__,
         "settings": settings.public_diagnostics(),
-        "kaypoh": probe_kaypoh_client(settings.kaypoh_repo_path).model_dump(),
+        "boundary": probe_boundary_client(settings.boundary_engine_path).model_dump(),
     }
     _print_json(payload, sort_keys=True)
 

@@ -2,7 +2,7 @@
 
 # Optional Office Front-Ends
 
-Solomon no longer requires Kaypoh's Office add-ins at runtime. An optional front-end can still mirror their
+Solomon does not require Office add-ins at runtime. An optional front-end can still mirror the boundary
 review-before-send pattern:
 
 - A Word taskpane collects selected text and sends it to Solomon `/ingest`; Solomon's vendored boundary reviews

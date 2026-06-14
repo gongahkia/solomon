@@ -8,16 +8,16 @@ Most memory tools ask what should be remembered. Legal knowledge systems also as
 Solomon asks a narrower, sharper question: what did the firm believe, what did that belief depend on, and
 does a human need to re-check it because something moved?
 
-## The Triad
+## The Internal Split
 
-| System | Center of gravity | What it proves |
+| Layer | Center of gravity | What it proves |
 |---|---|---|
-| Kaypoh | Boundary control | Sensitive text can be reviewed, pseudonymized, and reidentified without persistent mappings. |
-| Shibahama | Memory selection | Some facts should fade or lose rank when they stop being useful. |
-| Solomon | Knowledge currency | Internal legal knowledge can be permanent, bi-temporal, dependency-aware, and still safe to use. |
+| Boundary | Boundary control | Sensitive text can be reviewed, pseudonymized, and reidentified without persistent mappings. |
+| Currency | Knowledge currency | Internal legal knowledge can be permanent, bi-temporal, dependency-aware, and still safe to use. |
+| Audit | Process evidence | The firm can defend what was known, when, on what basis, and what crossed the boundary. |
 
-Kaypoh is the front gate. Shibahama is the memory-pressure argument. Solomon is the audit and currency layer
-for a professional knowledge base where old does not mean wrong.
+The boundary is the front gate. Currency is the legal-memory model. Audit is the evidence layer for a
+professional knowledge base where old does not mean wrong.
 
 ## Why Decay Is The Wrong Primitive
 

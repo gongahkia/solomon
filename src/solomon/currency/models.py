@@ -143,8 +143,8 @@ class Provenance(SolomonModel):
     source_ref: str
     author: str | None = None
     matter_id: str | None = None
-    kaypoh_review_classification: str | None = None
-    kaypoh_findings: list[dict[str, Any]] = Field(default_factory=list)
+    boundary_review_classification: str | None = None
+    boundary_findings: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class KnowledgeItem(SolomonModel):

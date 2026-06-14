@@ -32,38 +32,37 @@ Meanwhile the documented harm is exploding: by April 2026 there were well over a
 Firm knowledge management in 2026 is crowded — a majority of top firms have deployed AI KM — but every offering (Harvey, Spellbook, Clio, Sysero, NexLaw) does the same three things: semantic search, automated metadata tagging, and precedent retrieval. They treat firm knowledge as a **timeless warehouse with good search**. Newer, better-tagged storage. None of them model **temporal truth**: that a memo true in 2023 may be false in 2026 because something it depended on changed. They will confidently return the most *similar* document, never the most *currently-valid* one.
 
 ### 2.3 The two compounding constraints
-1. **Currency, not relevance, is the hard problem for internal knowledge.** A 2019 position isn't less significant because it's old — it's either still live or it's been superseded, and that's a *truth* question. (This is precisely why Solomon rejects the decay model of its sibling project — see §9.)
+1. **Currency, not relevance, is the hard problem for internal knowledge.** A 2019 position isn't less significant because it's old — it's either still live or it's been superseded, and that's a *truth* question.
 2. **The knowledge cannot leave the perimeter.** Firm positions and client advice are confidential and often privileged. Feeding them to a model under conventional retention is exactly the exposure that ZDR procurement and the privilege-waiver risk are about. So the currency engine must operate behind a sanitising boundary.
 
 No tool addresses (1). No tool addresses (1) *and* (2) together. That intersection is Solomon.
 
 ---
 
-## 3. The triad — how Solomon is visibly distinct (read this if you only read one section)
+## 3. The product split — how Solomon is visibly distinct (read this if you only read one section)
 
-Solomon is one of three composable artifacts. The distinction is not cosmetic; each proves a different competency and takes a different stance on memory:
+Solomon is one system with two separable layers. The distinction is not cosmetic; each layer answers a different production question:
 
 | | Question it answers | Competency it proves | Memory stance | Stack |
 |---|---|---|---|---|
-| **Kaypoh** | What is safe to let leave the building? | Regulated safety infrastructure | **Stateless** — forgets by design | Python/FastAPI |
-| **Shibahama** | What is worth remembering, and how does it stay alive? | Novel systems research | **Decays** — forgets adaptively | Rust + bindings |
-| **Solomon** | Is what we know still true, and can we prove it? | Composing primitives under domain constraint | **Never forgets** — currency is the problem | Python (integration system) |
+| **Boundary** | What is safe to let leave the building? | Regulated safety infrastructure | **Stateless** — forgets by design | Python/FastAPI |
+| **Currency engine** | Is what we know still true, and can we prove it? | Domain reasoning under constraints | **Never forgets** — currency is the problem | Python |
 
-Three memory stances — stateless, decaying, permanent-with-currency — is the signal that each problem was understood on its own terms. Solomon **consumes** Kaypoh (it does not rebuild sanitisation) and **deliberately rejects** Shibahama's decay (currency, not significance-fade, is the legal problem). A reviewer sees composition, not redundancy.
+The boundary is a native Solomon subset, not a separate product. Solomon rejects age/usage decay because currency, not significance-fade, is the legal problem.
 
 ---
 
-## 4. What Solomon reuses from Kaypoh vs builds new
+## 4. What the boundary owns vs what the currency engine owns
 
-Kaypoh (sibling repo, `../kaypoh`) is a production sanitising gateway: deterministic PII/MNPI detection across 18 jurisdictions, statute-cited, with a reversible `/pseudonymize` ↔ `/reidentify` round-trip, an encrypted retention-aware mapping store, an append-only audit journal, and offline-default packaging. Solomon treats it as the **boundary layer** and builds the **currency layer** on top.
+Solomon includes a production sanitising boundary: deterministic PII/MNPI detection across 18 jurisdictions, statute-cited, with a reversible `/pseudonymize` ↔ `/reidentify` round-trip, volatile mapping storage, document scrub, and offline-default packaging. Solomon treats it as the **boundary layer** and builds the **currency layer** on top.
 
 | Concern | Source |
 |---|---|
-| Outbound sanitisation / tokenisation before any model call | **Kaypoh** `/pseudonymize` |
-| Inbound demasking of model responses | **Kaypoh** `/reidentify` |
-| Ingestion safety gate (is this safe to store / does it contain MNPI) | **Kaypoh** `/review` |
-| Metadata-only logging, audit journal, mapping-store hardening | **Kaypoh** (reuse patterns + journal) |
-| Local vs server deployment, offline SKU | **Kaypoh** SKU model (mirror it) |
+| Outbound sanitisation / tokenisation before any model call | **Boundary** `/pseudonymize` |
+| Inbound demasking of model responses | **Boundary** `/reidentify` |
+| Ingestion safety gate (is this safe to store / does it contain MNPI) | **Boundary** `/review` |
+| Volatile mapping and document scrub | **Boundary** |
+| Local vs server deployment, offline SKU | **Solomon** |
 | Bi-temporal knowledge store (valid-time / ingestion-time) | **Solomon — new** |
 | Dependency graph (internal knowledge → external authority) | **Solomon — new** |
 | Currency engine (is this still good law for us?) | **Solomon — new** |
@@ -79,13 +78,13 @@ The boundary is solved. The currency engine is the project.
 1. **Bi-temporal currency / good-law engine** — the core. Internal knowledge with valid-time and ingestion-time; supersession instead of deletion; the ability to answer "is this still live, and if not, what replaced it."
 2. **Credence + verification** — every surfaced position carries a trust tier and a verification state; nothing load-bearing is asserted without a source pointer and a "last verified" timestamp.
 3. **Audit / privilege evidence chain** — defensible proof of *what the firm knew, when, on what basis, and what verification occurred* — the artifact that survives a challenge.
-4. **Kaypoh round-trip integration** — important but solved upstream; Solomon wires it in rather than inventing it.
+4. **Boundary round-trip** — native review, pseudonymize, reidentify, scrub, and fail-closed egress handling.
 
 ---
 
 ## 6. Architecture
 
-A Python system inside the firm perimeter. Durable knowledge never leaves; only Kaypoh-sanitised, just-in-time context crosses to a model endpoint that retains nothing. Dual endpoint: a remote ZDR provider for power, a local in-perimeter model for strict matters — the routing decision is part of the system.
+A Python system inside the firm perimeter. Durable knowledge never leaves; only Solomon-sanitized, just-in-time context crosses to a model endpoint that retains nothing. Dual endpoint: a remote ZDR provider for power, a local in-perimeter model for strict matters — the routing decision is part of the system.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -110,7 +109,7 @@ A Python system inside the firm perimeter. Durable knowledge never leaves; only 
 │                    │          │ retrieved context                │     │
 │                    │          ▼                                  │     │
 │                    │  ┌────────────────────────────────────┐     │     │
-│                    │  │ Kaypoh client (../kaypoh)           │     │     │
+│                    │  │ Solomon boundary client             │     │     │
 │                    │  │ /review (ingest gate)               │     │     │
 │                    │  │ /pseudonymize (out) /reidentify(in) │     │     │
 │                    │  └───────────────┬────────────────────┘     │     │
@@ -143,13 +142,13 @@ The novel structure: a graph where firm knowledge hangs off the things it relies
 - Every item carries a `last_verified_at` and `verified_by`. Currency is a function of (validity of dependencies) × (staleness of verification).
 - A verification step surfaces the source pointer before any load-bearing output and refuses to let model-inferred items outrank firm-authoritative ones.
 
-### 6.4 Boundary (Kaypoh)
+### 6.4 Boundary
 - Ingestion → `/review` gate (flag MNPI, attribute, refuse unsafe).
 - Any context assembled for a model call → `/pseudonymize` before egress; response → `/reidentify`.
 - Routing: matter sensitivity decides remote-ZDR vs local model. Strict matters never egress even sanitised.
 
 ### 6.5 Audit chain
-Append-only journal (mirror Kaypoh's pattern): what was known, when, on what basis, what verification ran, what crossed the boundary (metadata only). This is the privilege/defensibility artifact.
+Append-only journal: what was known, when, on what basis, what verification ran, what crossed the boundary (metadata only). This is the privilege/defensibility artifact.
 
 ---
 
@@ -161,7 +160,7 @@ A reproducible, scripted scenario that dramatises currency-of-internal-knowledge
 2. **2025:** Regulation R is amended; §12 changes. Solomon ingests the change (via a feed or manual entry), the dependency graph propagates a **stale-pending-reverification** flag to the house-view memo and to the Client A advice that relied on it.
 3. **2026:** an associate asks "what's our position on structure X for a new client?"
    - **Warehouse KM baseline (Harvey/Spellbook-style):** returns the 2023 memo as the top semantic match, confidently, with no staleness signal.
-   - **Solomon:** returns the same memo but flagged — *depends on R §12, which changed 2025-xx; not re-verified since; last relied on in the Client A matter; recommend re-checking before use* — and the model never saw the client's identity (Kaypoh round-trip).
+   - **Solomon:** returns the same memo but flagged — *depends on R §12, which changed 2025-xx; not re-verified since; last relied on in the Client A matter; recommend re-checking before use* — and the model never saw the client's identity (Solomon boundary round-trip).
 4. **The audit view** shows the full chain: known-since, dependency, the change event, the flag, the verification prompt.
 
 Side-by-side with the warehouse baseline failing step 3 is the demo GIF and the core of the writeup.
@@ -172,7 +171,7 @@ Side-by-side with the warehouse baseline failing step 3 is the demo GIF and the 
 
 - **Composition under constraint is the FDE job.** Solomon is literally "take two hard-won primitives (a safety gateway, a memory discipline) and compose them into a domain solution the customer can actually deploy." That is the role.
 - **Domain judgment.** Choosing to reject decay, to model dependencies rather than similarity, and to make the system *refuse to assert* rather than fake a truth verdict — these are judgment calls a reviewer can probe and that hold up.
-- **It closes the triad.** Kaypoh (infra) + Shibahama (research) + Solomon (applied composition) reads as range: can build the boring-critical thing, the novel thing, and the thing that makes them useful together.
+- **It composes under constraint.** Boundary, currency, retrieval, routing, and audit work together inside one deployable system.
 - **Honest scope.** Solomon doesn't claim to decide the law. It surfaces currency and defers judgment — the same posture the courts and bar opinions demand of AI in legal work.
 
 ---
@@ -181,7 +180,7 @@ Side-by-side with the warehouse baseline failing step 3 is the demo GIF and the 
 
 Shibahama's thesis is **decay**: significance fades with neglect; the engine forgets adaptively. Solomon's thesis is the **inverse**: in law nothing should fade, because an old position is not a less-important position — it is either still-good or superseded, which is a currency question, not a significance one. Solomon therefore *cannot* be Shibahama with legal config; it needs a different core (dependency-driven currency, not usage-driven decay). Building both, and being able to articulate *why they needed opposite mechanisms*, is the strongest possible demonstration that each problem was understood rather than pattern-matched.
 
-Shared concepts (bi-temporality, credence, verification, never-delete) appear in both — but they're re-implemented in Solomon's Python integration codebase, not imported, because the constraints differ. Two repos, Kaypoh untouched, Solomon as a sibling that imports Kaypoh's client and reuses what's logical.
+Shared concepts (bi-temporality, credence, verification, never-delete) are implemented directly in Solomon because the constraints differ from generic memory systems.
 
 ---
 
@@ -189,7 +188,7 @@ Shared concepts (bi-temporality, credence, verification, never-delete) appear in
 
 - **Dependency capture is manual at first.** Knowing that a memo depends on R §12 requires extraction; early versions lean on human tagging + LLM-assisted suggestion. Honest about it; it's the curation cost the market already pays a person for.
 - **Solomon flags, it does not adjudicate.** It cannot decide whether an amended regulation actually breaks a position — only that the dependency moved and re-verification is due. Overclaiming here would be the exact hubris the bar warns against.
-- **Sanitisation fidelity is inherited from Kaypoh.** A tokenisation failure leaks across the boundary; Solomon's correctness is bounded by Kaypoh's (mitigated by Kaypoh's 1,400-doc eval + strict profile).
+- **Sanitisation fidelity is bounded by the boundary.** A tokenisation failure can leak across the boundary; Solomon mitigates this with strict profiles and fixture coverage.
 - **External-change ingestion is a data problem.** Knowing R §12 changed requires a feed; v1 supports manual + simple feeds, not comprehensive regulatory monitoring (that's a Shepard's-scale undertaking and explicitly out of scope).
 - **No new model training.** Solomon is orchestration + reasoning over existing models; it deliberately avoids the "train a legal model" trap.
 
@@ -197,4 +196,4 @@ Shared concepts (bi-temporality, credence, verification, never-delete) appear in
 
 ## 11. Deliverable package
 
-Single signature repo (`solomon/`, sibling to `../kaypoh`), deep README that *is* the writeup: the triad framing, the architecture, the stale-house-view demo GIF, the warehouse-baseline comparison, and an honest-limitations section. Docs live in-repo. No separate paper.
+Single signature repo (`solomon/`), deep README that *is* the writeup: the architecture, the stale-house-view demo GIF, the warehouse-baseline comparison, and an honest-limitations section. Docs live in-repo. No separate paper.

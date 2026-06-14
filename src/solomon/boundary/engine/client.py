@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Kaypoh-derived local client facade vendored into Solomon."""
+"""Solomon local boundary client facade."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ from solomon.boundary.engine.schemas import (
 
 
 class BoundaryClient:
-    """In-process equivalent of the Kaypoh client surface Solomon needs."""
+    """In-process Solomon boundary client surface."""
 
     def __init__(self, base_url: str | None = None, *, fail: bool = False, **_kwargs: Any) -> None:
         self.fail = fail
@@ -170,10 +170,6 @@ class BoundaryClient:
     def _raise_if_failed(self) -> None:
         if self.fail:
             raise RuntimeError("vendored boundary engine unavailable")
-
-
-KaypohClient = BoundaryClient
-
 
 def _resolve_text(payload: Mapping[str, Any], text: str | None) -> str:
     if payload.get("text") is not None:

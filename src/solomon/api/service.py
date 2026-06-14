@@ -12,7 +12,7 @@ from pydantic import Field
 
 from solomon.api.schemas import SolomonModel
 from solomon.audit.journal import AuditJournal, sign_verification_attestation
-from solomon.boundary.kaypoh import KaypohBoundary
+from solomon.boundary.solomon import SolomonBoundary
 from solomon.credence.policy import CredenceLedger
 from solomon.currency.cache import CurrencyEvaluationCache
 from solomon.currency.engine import (
@@ -217,7 +217,7 @@ class SolomonService:
         data_dir: Path,
         journal_dir: Path,
         attestation_key: str | None = None,
-        boundary: KaypohBoundary | None = None,
+        boundary: SolomonBoundary | None = None,
         database_url: str | None = None,
         postgres_schema: str | None = None,
     ) -> None:
@@ -240,7 +240,7 @@ class SolomonService:
         )
         self.audit = AuditJournal(journal_dir / "journal.jsonl")
         self.attestation_key = attestation_key
-        self.boundary = boundary or KaypohBoundary()
+        self.boundary = boundary or SolomonBoundary()
 
     def ingest(self, request: IngestRequest) -> KnowledgeItem:
         hardened = harden_stored_content(request.content)

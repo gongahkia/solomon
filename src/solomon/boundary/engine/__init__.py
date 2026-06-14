@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Vendored Kaypoh-derived boundary engine for Solomon."""
+"""Solomon boundary engine."""
 
-from solomon.boundary.engine.client import BoundaryClient, KaypohClient
+from solomon.boundary.engine.client import BoundaryClient
 from solomon.boundary.engine.schemas import (
     AnonymizeResponse,
     BoundaryCapabilities,
@@ -20,7 +20,6 @@ __all__ = [
     "AnonymizeResponse",
     "BoundaryCapabilities",
     "BoundaryClient",
-    "KaypohClient",
     "MappingEntry",
     "OpaqueRedaction",
     "PlaceholderReplacement",

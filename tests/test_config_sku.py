@@ -13,7 +13,7 @@ def test_local_sku_is_offline_default() -> None:
     assert settings.sku == "local"
     assert settings.allow_remote_egress is False
     assert settings.zero_egress_mode is True
-    assert settings.kaypoh_base_url == "in-process://solomon-boundary-engine"
+    assert settings.boundary_base_url == "in-process://solomon-boundary-engine"
 
 
 def test_local_sku_rejects_remote_egress() -> None:

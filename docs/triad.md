@@ -1,19 +1,15 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Kaypoh + Shibahama + Solomon
+# Boundary + Currency + Audit
+
+Solomon is organized around three internal layers:
 
 ```text
-Kaypoh      -> stateless safety boundary
-Shibahama   -> adaptive memory decay
-Solomon     -> permanent knowledge with currency
+Boundary -> review, pseudonymize, reidentify, scrub, fail closed
+Currency -> dependencies, supersession, verification, stale flags
+Audit    -> metadata-only evidence of what happened and why
 ```
 
-The three projects are deliberately different memory stances:
-
-- Kaypoh forgets by design.
-- Shibahama lets memories fade when they lose significance.
-- Solomon preserves knowledge and asks whether it still holds.
-
-That contrast is the point. Solomon composes Kaypoh's boundary with a domain-specific currency engine and
-rejects Shibahama's decay where decay would be the wrong legal model.
-
+The layers are deliberately separate. The boundary decides what can cross a model boundary. The currency
+engine decides whether firm knowledge needs re-verification. The audit layer records evidence without storing
+privileged prompt or document text.

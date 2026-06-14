@@ -229,9 +229,9 @@ def test_soak_many_items_propagation_stays_bounded(tmp_path: Path) -> None:
     assert len(impact.stale_item_ids) == expected
 
 
-def test_vendored_kaypoh_client_contract() -> None:
-    from solomon.boundary.kaypoh import load_kaypoh_client_class
+def test_boundary_client_contract() -> None:
+    from solomon.boundary.solomon import load_boundary_client_class
 
-    client_class = load_kaypoh_client_class()
+    client_class = load_boundary_client_class()
     for method in ["review", "pseudonymize", "anonymize", "redact", "reidentify", "scrub_document", "capabilities"]:
         assert hasattr(client_class, method)

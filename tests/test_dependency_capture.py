@@ -12,7 +12,7 @@ from solomon.api.service import (
     IngestRequest,
     SolomonService,
 )
-from solomon.boundary.kaypoh import KaypohBoundary
+from solomon.boundary.solomon import SolomonBoundary
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.graph.models import EdgeConfidence, EdgeType
 from solomon.graph.suggestions import (
@@ -26,7 +26,7 @@ from solomon.graph.suggestions import (
 from solomon.orchestrator.models import EndpointKind, ModelRequest, ModelResponse, ModelRouter
 
 
-class SuggestionKaypohClient:
+class SuggestionBoundaryClient:
     def pseudonymize(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return {
             "pseudonymized_text": kwargs["request"]["text"],
@@ -118,7 +118,7 @@ def test_confirm_and_reject_dependency_suggestions_update_queue_and_edges(tmp_pa
 
 
 def test_suggest_confirm_and_reject_dependencies() -> None:
-    boundary = KaypohBoundary(SuggestionKaypohClient())
+    boundary = SolomonBoundary(SuggestionBoundaryClient())
 
     suggestions = suggest_authority_dependencies(
         item_id="item-1",
@@ -156,7 +156,7 @@ def test_llm_dependency_capture_uses_boundary_sanitized_prompt() -> None:
     suggestions = suggest_authority_dependencies_with_llm(
         item_id="item-1",
         content="Client A relies on Regulation R section 12 for structure X.",
-        boundary=KaypohBoundary(),
+        boundary=SolomonBoundary(),
         router=ModelRouter(remote=remote, local=local),
         matter_id="matter-a",
     )
@@ -170,7 +170,7 @@ def test_llm_dependency_capture_uses_boundary_sanitized_prompt() -> None:
 
 
 def test_extract_defined_terms_and_citations_after_boundary_sanitization() -> None:
-    boundary = KaypohBoundary(SuggestionKaypohClient())
+    boundary = SolomonBoundary(SuggestionBoundaryClient())
 
     extraction = extract_defined_terms_and_citations(
         content=(
@@ -220,3 +220,9 @@ def test_reference_parser_handles_defined_terms_and_non_us_case_grammar() -> Non
     case = next(citation for citation in extraction.citations if citation.kind == "case")
     assert case.parser == "solomon-grammar"
     assert case.text == "Alpha Pte Ltd v. Beta LLC [2024] SGHC 12"
+
+
+def test_reference_parser_ignores_bare_v_token() -> None:
+    extraction = extract_defined_terms_and_citations(content="FuzzContent::V")
+
+    assert extraction.citations == []

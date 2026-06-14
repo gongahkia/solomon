@@ -21,7 +21,7 @@ from solomon.api.service import (
     VerificationRequest,
 )
 from solomon.boundary.engine.client import BoundaryClient
-from solomon.boundary.kaypoh import BoundaryUnavailableError, KaypohBoundary
+from solomon.boundary.solomon import BoundaryUnavailableError, SolomonBoundary
 from solomon.client import AsyncSolomonClient, SolomonAPIError, SolomonClient
 from solomon.config import Settings
 from solomon.currency.engine import VerificationOutcome
@@ -62,8 +62,8 @@ def test_service_ingest_calls_vendored_boundary_and_attaches_findings(tmp_path: 
         )
     )
 
-    assert item.provenance.kaypoh_review_classification == "SAFE"
-    assert any(finding["kind"] == "client_reference" for finding in item.provenance.kaypoh_findings)
+    assert item.provenance.boundary_review_classification == "SAFE"
+    assert any(finding["kind"] == "client_reference" for finding in item.provenance.boundary_findings)
 
 
 def test_service_ingest_persists_credence_audit_without_content(tmp_path: Path) -> None:
@@ -90,7 +90,7 @@ def test_service_fails_closed_when_vendored_boundary_fails_for_ingest_and_model_
     service = SolomonService(
         data_dir=tmp_path / "data",
         journal_dir=tmp_path / "journal",
-        boundary=KaypohBoundary(BoundaryClient(fail=True)),
+        boundary=SolomonBoundary(BoundaryClient(fail=True)),
     )
 
     with pytest.raises(BoundaryUnavailableError):

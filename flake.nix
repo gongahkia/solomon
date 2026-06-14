@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 {
-  description = "Solomon local development shell with Python, uv, and Kaypoh sibling expectations";
+  description = "Solomon local development shell with Python and uv";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -22,9 +22,8 @@
             pkgs.gitleaks
           ];
           shellHook = ''
-            echo "Solomon dev shell. Expected layout: ./solomon beside ../kaypoh."
+            echo "Solomon dev shell."
           '';
         };
       });
 }
-

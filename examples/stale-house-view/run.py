@@ -10,7 +10,7 @@ from typing import Any
 
 from solomon.api.service import AuthorityChangeRequest, IngestRequest, RecallRequest, SolomonService
 from solomon.audit.journal import what_did_we_know_report
-from solomon.boundary.kaypoh import KaypohBoundary
+from solomon.boundary.solomon import SolomonBoundary
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.graph.models import DependencyEdge, EdgeType
 from solomon.orchestrator.retrieval import RecallOptions
@@ -37,7 +37,7 @@ def warehouse_baseline(service: SolomonService, query: str) -> list[dict[str, An
 
 
 def run_scenario(root: Path) -> dict[str, Any]:
-    boundary = KaypohBoundary()
+    boundary = SolomonBoundary()
     service = SolomonService(data_dir=root / "data", journal_dir=root / "journal", boundary=boundary)
 
     memo = service.ingest(

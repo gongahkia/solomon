@@ -11,14 +11,14 @@ import pytest
 
 from solomon.api.app import create_app
 from solomon.api.service import AnswerRequest, IngestRequest, SolomonService
-from solomon.boundary.kaypoh import KaypohBoundary
+from solomon.boundary.solomon import SolomonBoundary
 from solomon.config import Settings
 from solomon.currency.models import KnowledgeContentRole, KnowledgeKind, SourceKind
 from solomon.errors import PolicyRefusalError
 from solomon.orchestrator.models import EndpointKind, ModelRequest, ModelResponse, ModelRouter
 
 
-class HygieneKaypohClient:
+class HygieneBoundaryClient:
     def __init__(self) -> None:
         self.pseudonymize_requests: list[dict[str, Any]] = []
 
@@ -110,8 +110,8 @@ def test_server_auth_enforces_admin_and_tenant_scopes(tmp_path: Path) -> None:
 
 
 def test_boundary_mapping_hygiene_never_persists_after_demasking() -> None:
-    client = HygieneKaypohClient()
-    boundary = KaypohBoundary(client)
+    client = HygieneBoundaryClient()
+    boundary = SolomonBoundary(client)
 
     sanitized = boundary.sanitize_context("Send Jane the memo.", matter_id="matter-1")
     assert boundary.volatile_mapping_count() == 1

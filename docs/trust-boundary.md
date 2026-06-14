@@ -2,7 +2,7 @@
 
 # Trust Boundary
 
-Solomon fails closed at ingest and model egress. Knowledge items must pass the vendored Kaypoh-derived
+Solomon fails closed at ingest and model egress. Knowledge items must pass the Solomon
 `/review` surface before storage. Model context must pass the vendored `/pseudonymize`; the mapping remains
 only in process memory and is flushed after `/reidentify`. `raw_text` mode is disabled by default and requires
 a per-matter opt-in.

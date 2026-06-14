@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Volatile Kaypoh-style mapping store vendored into Solomon."""
+"""Volatile Solomon boundary mapping store."""
 
 from __future__ import annotations
 

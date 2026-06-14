@@ -139,6 +139,34 @@
         "title": "AuthorityChangeRequest",
         "type": "object"
       },
+      "BoundaryImportStatus": {
+        "properties": {
+          "client_path": {
+            "title": "Client Path",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "engine_path": {
+            "title": "Engine Path",
+            "type": "string"
+          },
+          "importable": {
+            "title": "Importable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "importable",
+          "engine_path",
+          "client_path",
+          "detail"
+        ],
+        "title": "BoundaryImportStatus",
+        "type": "object"
+      },
       "ContestRequest": {
         "additionalProperties": false,
         "properties": {
@@ -287,8 +315,8 @@
       },
       "DiagnosticsResponse": {
         "properties": {
-          "kaypoh": {
-            "$ref": "#/components/schemas/KaypohImportStatus"
+          "boundary": {
+            "$ref": "#/components/schemas/BoundaryImportStatus"
           },
           "service": {
             "default": "solomon",
@@ -307,7 +335,7 @@
           }
         },
         "required": [
-          "kaypoh",
+          "boundary",
           "settings"
         ],
         "title": "DiagnosticsResponse",
@@ -466,34 +494,6 @@
         "title": "IngestRequest",
         "type": "object"
       },
-      "KaypohImportStatus": {
-        "properties": {
-          "client_path": {
-            "title": "Client Path",
-            "type": "string"
-          },
-          "detail": {
-            "title": "Detail",
-            "type": "string"
-          },
-          "importable": {
-            "title": "Importable",
-            "type": "boolean"
-          },
-          "repo_path": {
-            "title": "Repo Path",
-            "type": "string"
-          }
-        },
-        "required": [
-          "importable",
-          "repo_path",
-          "client_path",
-          "detail"
-        ],
-        "title": "KaypohImportStatus",
-        "type": "object"
-      },
       "KnowledgeContentRole": {
         "enum": [
           "fact",
@@ -647,8 +647,8 @@
       },
       "ReadyResponse": {
         "properties": {
-          "kaypoh_client_importable": {
-            "title": "Kaypoh Client Importable",
+          "boundary_client_importable": {
+            "title": "Boundary Client Importable",
             "type": "boolean"
           },
           "ready": {
@@ -658,7 +658,7 @@
         },
         "required": [
           "ready",
-          "kaypoh_client_importable"
+          "boundary_client_importable"
         ],
         "title": "ReadyResponse",
         "type": "object"
@@ -996,7 +996,7 @@
     }
   },
   "info": {
-    "summary": "Good-law engine for firm knowledge behind a Kaypoh boundary.",
+    "summary": "Good-law engine for firm knowledge behind the Solomon boundary.",
     "title": "Solomon",
     "version": "0.1.0"
   },

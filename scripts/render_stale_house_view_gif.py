@@ -54,7 +54,7 @@ def render(destination: Path) -> Path:
             [
                 "Warehouse baseline: returns memo with no staleness signal (MISS)",
                 "Solomon: returns memo flagged STALE with dependency reason",
-                "Kaypoh boundary: model prompt contains [CLIENT_1], not Client A",
+                "Solomon boundary: model prompt contains [CLIENT_1], not Client A",
             ],
         ),
     ]

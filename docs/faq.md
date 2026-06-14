@@ -16,8 +16,7 @@ correct. Currency is dependency-driven, not age-driven.
 
 No. It flags that a dependency moved or verification is due. A human decides whether the position survives.
 
-## What if Kaypoh misses something?
+## What if the boundary misses something?
 
-Solomon inherits Kaypoh's boundary limits. That is documented as a limitation, tested as an integration
-contract, and mitigated by fail-closed behavior when Kaypoh is unavailable.
-
+Solomon inherits the limits of its boundary detectors. That is documented as a limitation, tested as an
+integration contract, and mitigated by fail-closed behavior when the boundary is unavailable.

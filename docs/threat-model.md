@@ -7,7 +7,7 @@
 - Firm knowledge content and provenance.
 - Client and matter identifiers.
 - Server admin and tenant API credentials.
-- Kaypoh placeholder mappings.
+- Boundary placeholder mappings.
 - Audit journal integrity.
 - Model-bound prompts and responses.
 
@@ -15,14 +15,14 @@
 
 - Solomon store: durable but treated as untrusted on read because retrieved content may contain prompt
   injection or stale legal positions.
-- Kaypoh boundary: required for review, pseudonymization, reidentification, and document scrub.
+- Solomon boundary: required for review, pseudonymization, reidentification, and document scrub.
 - Model endpoint: receives only sanitized context unless a matter has explicit raw-text opt-in.
 - Server API: authenticates admin and tenant principals before tenant-scoped storage, diagnostics, or
   lifecycle operations are reachable.
 
 ## Primary Risks
 
-- Sensitive data egress if Kaypoh is unavailable or bypassed.
+- Sensitive data egress if the boundary is unavailable or bypassed.
 - Poisoned model-inferred knowledge outranking firm-authoritative positions.
 - Audit tampering after a bad answer.
 - Tenant credential misuse or accidental use of an admin key in a thin client.

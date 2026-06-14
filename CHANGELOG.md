@@ -9,11 +9,10 @@ Keep a Changelog structure.
 
 ### Added
 
-- Initial project foundation, CI, FastAPI shell, Kaypoh import boundary, and Phase 0 ADRs.
+- Initial project foundation, CI, FastAPI shell, Solomon boundary, and Phase 0 ADRs.
 
 ## [0.1.0] - 2026-06-11
 
 ### Added
 
 - Initial public package version reserved for the first Solomon local/server SKU release.
-

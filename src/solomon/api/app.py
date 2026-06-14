@@ -45,7 +45,7 @@ from solomon.api.tenancy import (
     TenantRegistry,
     is_valid_tenant_id,
 )
-from solomon.boundary.kaypoh import KaypohImportStatus, probe_kaypoh_client
+from solomon.boundary.solomon import BoundaryImportStatus, probe_boundary_client
 from solomon.config import Settings, get_settings
 from solomon.errors import SolomonError
 from solomon.graph.suggestions import SuggestionDecision
@@ -72,13 +72,13 @@ class HealthResponse(BaseModel):
 
 class ReadyResponse(BaseModel):
     ready: bool
-    kaypoh_client_importable: bool
+    boundary_client_importable: bool
 
 
 class DiagnosticsResponse(BaseModel):
     service: str = "solomon"
     version: str = __version__
-    kaypoh: KaypohImportStatus
+    boundary: BoundaryImportStatus
     settings: dict[str, Any]
 
 
@@ -136,7 +136,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="Solomon",
         version=__version__,
-        summary="Good-law engine for firm knowledge behind a Kaypoh boundary.",
+        summary="Good-law engine for firm knowledge behind the Solomon boundary.",
         docs_url="/docs",
         redoc_url="/redoc",
     )
@@ -215,13 +215,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/ready", response_model=ReadyResponse)
     def ready() -> ReadyResponse:
-        kaypoh = probe_kaypoh_client(resolved_settings.kaypoh_repo_path)
-        return ReadyResponse(ready=kaypoh.importable, kaypoh_client_importable=kaypoh.importable)
+        boundary = probe_boundary_client(resolved_settings.boundary_engine_path)
+        return ReadyResponse(ready=boundary.importable, boundary_client_importable=boundary.importable)
 
     @app.get("/diagnostics", response_model=DiagnosticsResponse)
     def diagnostics() -> DiagnosticsResponse:
         return DiagnosticsResponse(
-            kaypoh=probe_kaypoh_client(resolved_settings.kaypoh_repo_path),
+            boundary=probe_boundary_client(resolved_settings.boundary_engine_path),
             settings=resolved_settings.public_diagnostics(),
         )
 

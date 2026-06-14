@@ -13,7 +13,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from solomon.api.schemas import SolomonModel
-from solomon.boundary.kaypoh import KaypohBoundary
+from solomon.boundary.solomon import SolomonBoundary
 from solomon.currency.models import new_uuid7, now_utc
 from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
 from solomon.orchestrator.models import ModelRequest, ModelRouter
@@ -70,10 +70,10 @@ class ReferenceExtraction(SolomonModel):
 def extract_defined_terms_and_citations(
     *,
     content: str,
-    boundary: KaypohBoundary | None = None,
+    boundary: SolomonBoundary | None = None,
     matter_id: str | None = None,
 ) -> ReferenceExtraction:
-    """Extract review hints from Kaypoh-sanitized legal text."""
+    """Extract review hints from Solomon-sanitized legal text."""
 
     sanitized = False
     text = content
@@ -96,7 +96,7 @@ def suggest_authority_dependencies(
     *,
     item_id: str,
     content: str,
-    boundary: KaypohBoundary,
+    boundary: SolomonBoundary,
     matter_id: str | None = None,
 ) -> list[DependencySuggestion]:
     sanitized = boundary.sanitize_context(content, matter_id=matter_id)
@@ -117,7 +117,7 @@ def suggest_authority_dependencies(
                     edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
                     target_kind="external_authority",
                     confidence=EdgeConfidence.LLM_SUGGESTED,
-                    reason="candidate authority reference extracted from Kaypoh-sanitized text",
+                    reason="candidate authority reference extracted from Solomon-sanitized text",
                 ),
                 source="deterministic",
             )
@@ -129,7 +129,7 @@ def suggest_authority_dependencies_with_llm(
     *,
     item_id: str,
     content: str,
-    boundary: KaypohBoundary,
+    boundary: SolomonBoundary,
     router: ModelRouter,
     matter_id: str | None = None,
 ) -> list[DependencySuggestion]:
@@ -160,7 +160,7 @@ def suggest_authority_dependencies_with_llm(
                     edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
                     target_kind="external_authority",
                     confidence=EdgeConfidence.LLM_SUGGESTED,
-                    reason=f"LLM-assisted candidate from Kaypoh-sanitized text: {reason}",
+                    reason=f"LLM-assisted candidate from Solomon-sanitized text: {reason}",
                 ),
                 source="llm",
             )
@@ -404,7 +404,7 @@ def _parse_case_references(tokens: list[Token], text: str) -> list[CitationRefer
             continue
         start_index = _case_party_start(tokens, index)
         end_index = _case_party_end(tokens, index)
-        if start_index >= index or end_index <= index:
+        if start_index < 0 or end_index >= len(tokens) or start_index >= index or end_index <= index:
             continue
         start, end = tokens[start_index].start, tokens[end_index].end
         raw = _trim_case_citation(_clean(text[start:end]))

@@ -6,8 +6,7 @@ Solomon is legal infrastructure, so changes should be conservative, auditable, a
 
 ## Ground Rules
 
-- Do not modify the sibling `../kaypoh` repository from Solomon work.
-- Keep boundary logic fail-closed: if Kaypoh cannot review or pseudonymize, Solomon must not store unsafe
+- Keep boundary logic fail-closed: if Solomon cannot review or pseudonymize, Solomon must not store unsafe
   material or send model context out.
 - Never delete knowledge records to express currency. Supersede, retire, quarantine, or append events.
 - Add or update tests for any changed invariant, route, storage behavior, or audit record.
@@ -25,4 +24,3 @@ uv run pytest
 
 Prefer focused commits tied to a TODO item or a coherent implementation slice. Each commit should leave
 the repo in a runnable state.
-

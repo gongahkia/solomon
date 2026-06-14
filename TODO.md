@@ -56,7 +56,6 @@ Headline deliverable. Everything else exists to support this.
 
 ## Workstream 3 — Curator console (thin web UI, exactly 3 screens)
 
-50. [D] Wireframe Audit Pack: pick knowledge item → show provenance, dependency tree, verification history, boundary metadata, hash chain. JSON + PDF export.
 51. [C] Implement Verification Desk screen wired to existing Solomon API.
 52. [C] Implement Dependency Review screen.
 53. [C] Implement Audit Pack screen with JSON + PDF export.

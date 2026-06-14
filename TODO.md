@@ -39,7 +39,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2A — Design
 
-16. [R] Read latest Anthropic MCP spec. Identify required vs optional capabilities (tools, resources, prompts, sampling, roots). Output: `docs/mcp/spec-notes.md`, ≤2 pages.
 17. [R] Survey Python MCP SDK landscape: `mcp` (official), FastMCP, anthropic-mcp. Pick one with rationale. [Speculation] official `mcp` SDK is the safer long-term pick.
 18. [R] Survey 5+ reference MCP servers in adjacent domains (filesystem, Linear, Notion, Postgres, GitHub). Note auth patterns, error shapes, tool granularity, scoping.
 19. [C] Spec MCP tool surface in `docs/mcp/tools.md`. Required tools:

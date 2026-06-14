@@ -53,6 +53,14 @@ The boundary is a native Solomon subset, not a separate product. The currency en
 
 Solomon rejects age/usage decay because currency, not significance-fade, is the legal problem.
 
+### 3.5 Why infra-first, not destination app
+
+The 2026 legal-AI adoption pattern is embedded assistance, not another destination workspace. On 12 May 2026, Legaltech Hub reported Anthropic's Claude for Legal launch as 12 legal plugins plus 20+ MCP connectors built with legal-tech providers inside the existing Claude surface; Reuters Connect separately reported Anthropic giving law firms secure access from Claude into third-party legal research, document-management, and AI products. Microsoft documents Microsoft 365 Copilot as working in the context of Word, Excel, PowerPoint, Outlook, Teams, and other Microsoft 365 apps, with responses grounded in work content the user can access; Microsoft also made agentic Word, Excel, and PowerPoint capabilities generally available in April 2026. Spellbook's own positioning is the same pattern: draft and review directly in Word, without window-switching.
+
+[Inference] Solomon should therefore be infrastructure first. The winning interface is whichever surface the lawyer or vendor already has open; Solomon's job is to provide scoped, current, boundary-checked firm context to that surface through MCP/API calls. The curator console remains deliberately small: it handles verification, dependency review, and audit-pack export, but it does not become chat, retrieval, drafting, or DMS UI.
+
+Sources checked: [Legaltech Hub, "Anthropic Unveils 'Claude for Legal'..." (2026-05-12)](https://www.legaltechnologyhub.com/contents/anthropic-unveils-claude-for-legal-with-12-new-plugins-20-mcp-connectors-and-more/); [Reuters Connect via The Daily Record, "Anthropic expands Claude's AI tools..." (2026-05-13)](https://thedailyrecord.com/2026/05/13/anthropic-expands-claude-ai-tools-law-firms/); [Microsoft Learn, "Microsoft 365 Copilot overview"](https://learn.microsoft.com/en-us/microsoft-365/copilot/microsoft-365-copilot-overview); [Microsoft 365 Blog, "Copilot's agentic capabilities..." (2026-04-22)](https://www.microsoft.com/en-us/microsoft-365/blog/2026/04/22/copilots-agentic-capabilities-in-word-excel-and-powerpoint-are-generally-available/); [Spellbook product site, "Works in Word"](https://spellbook.com/).
+
 ---
 
 ## 4. What the boundary owns vs what the currency engine owns

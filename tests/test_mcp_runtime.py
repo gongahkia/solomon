@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import string
 import tempfile
@@ -19,6 +20,18 @@ from solomon.mcp.rate_limit import TokenBucketConfig, TokenBucketRateLimiter
 from solomon.mcp.tools import SolomonMCPRuntime
 
 SAFE_TEXT = st.text(alphabet=string.ascii_letters + string.digits + " _.,;:-", min_size=1, max_size=60)
+LARGE_PASTED_TEXT = st.text(
+    alphabet=string.ascii_letters + string.digits + " \n\t.,;:-",
+    min_size=2048,
+    max_size=4096,
+)
+UNICODE_EDGE_TEXT = st.text(
+    alphabet=string.ascii_letters + string.digits + " \t\n" + "\u202e\ufeff\u2066\u200d\u00a0",
+    min_size=1,
+    max_size=120,
+).map(lambda text: f"\u202e\ufeff{text}\u2066")
+BASE64_BLOB_TEXT = st.binary(min_size=256, max_size=1024).map(lambda blob: base64.b64encode(blob).decode("ascii"))
+BOUNDARY_FUZZ_TEXT = st.one_of(LARGE_PASTED_TEXT, UNICODE_EDGE_TEXT, BASE64_BLOB_TEXT)
 MCP_CURRENCY_STATES = {
     "Live": "live",
     "StalePendingReverification": "stale_pending",
@@ -250,6 +263,54 @@ def test_mcp_check_currency_matches_internal_engine_property(contents: list[str]
             )
             assert mcp["state"] == MCP_CURRENCY_STATES[str(internal["currency_state"])]
             assert mcp["successor_id"] == service.store.get_item(item.id).successor_id
+
+
+@given(payload=BOUNDARY_FUZZ_TEXT)
+@settings(deadline=None, max_examples=12)
+def test_mcp_preflight_boundary_fuzz_rejects_unsafe_output(payload: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="solomon-mcp-boundary-") as tmp:
+        root = Path(tmp)
+        client = RecordingHighRiskBoundaryClient()
+        service = SolomonService(data_dir=root / "data", journal_dir=root / "journal")
+        service.boundary = SolomonBoundary(client)
+        service.ingest(
+            IngestRequest(
+                kind=KnowledgeKind.POSITION,
+                content=f"boundary fuzz payload {payload}",
+                source_kind=SourceKind.PARTNER,
+                source_ref="fuzz",
+                matter_id="matter-a",
+                client_id="client-a",
+            )
+        )
+        runtime = SolomonMCPRuntime(service)
+
+        result = runtime.preflight_context(query="boundary fuzz payload", matter_id="matter-a", client_id="client-a")
+
+        assert result["ok"] is False
+        assert result["error"]["code"] == "boundary_rejected"
+        assert result["error"]["details"]["classification"] == "HIGH_RISK"
+        assert "items" not in result
+        assert client.review_requests[-1]["document_type"] == "mcp_tool_result"
+        assert "boundary fuzz payload" in client.review_requests[-1]["text"]
+
+
+class RecordingHighRiskBoundaryClient:
+    def __init__(self) -> None:
+        self.review_requests: list[dict[str, Any]] = []
+
+    def review(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        self.review_requests.append(dict(kwargs["request"]))
+        return {"classification": "HIGH_RISK", "findings": [{"kind": "fuzz"}]}
+
+    def pseudonymize(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"pseudonymized_text": kwargs["request"]["text"], "mapping": []}
+
+    def reidentify(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"reidentified_text": ""}
+
+    def scrub_document(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {}
 
 
 class HighRiskBoundaryClient:

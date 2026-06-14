@@ -46,7 +46,6 @@ Headline deliverable. Everything else exists to support this.
 ### 2C — Tests
 
 35. [C] Unit tests per MCP tool: happy path, boundary-reject, scope-deny, stale propagation, audit-pack content.
-39. [C] Fuzz test on boundary preflight at MCP boundary (large pasted text, unicode edge cases, base64 blobs).
 
 ### 2D — Compatibility & directory listing
 

@@ -48,7 +48,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2D — Compatibility & directory listing
 
-40. [R] Anthropic MCP directory: exact submission process, manifest schema, review criteria. Output: `docs/mcp/directory-submission.md`.
 41. [C] Build `solomon-mcp.json` manifest fit for the directory (icon, tool list, transport, auth, version).
 42. [C] Smoke test in Claude Desktop; record video.
 43. [C] Smoke test in Claude Code; record video.

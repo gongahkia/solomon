@@ -48,7 +48,6 @@ Headline deliverable. Everything else exists to support this.
 
 ### 2D — Compatibility & directory listing
 
-41. [C] Build `solomon-mcp.json` manifest fit for the directory (icon, tool list, transport, auth, version).
 42. [C] Smoke test in Claude Desktop; record video.
 43. [C] Smoke test in Claude Code; record video.
 44. [C] Smoke test in Cursor and Continue (best-effort). Note any compatibility gaps. [Speculation] Cursor supports stdio MCP natively.

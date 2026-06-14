@@ -1,4 +1,5 @@
 # Solomon
+<!-- mcp-name: io.github.gongahkia/solomon -->
 
 <p align="center">
   <img src="./docs/assets/stale-house-view-demo.gif" width="75%" alt="Solomon stale house-view demo">

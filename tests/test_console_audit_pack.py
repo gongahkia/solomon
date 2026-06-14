@@ -25,6 +25,7 @@ def test_audit_pack_screen_loads_item(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert "Audit Pack" in response.text
+    assert 'class="tab active" href="/console/audit-pack"' in response.text
     assert item_id in response.text
     assert "Export JSON" in response.text
     assert "Export PDF" in response.text

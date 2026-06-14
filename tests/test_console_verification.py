@@ -25,6 +25,7 @@ def test_verification_desk_lists_stale_items(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert "Verification Desk" in response.text
+    assert 'class="tab active" href="/console/verification"' in response.text
     assert item_id in response.text
     assert "StalePendingReverification" in response.text
 

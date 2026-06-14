@@ -16,4 +16,4 @@ solomon-journal/
 *.db
 *.sqlite
 *.sqlite3
-
+.playwright-cli/

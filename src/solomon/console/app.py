@@ -234,6 +234,7 @@ def _render_verification(
             "items": rows,
             "selected": _preview_context(request, service, item_id=selected_id, error=error)["selected"],
             "error": error,
+            "active_page": "verification",
         },
     )
 
@@ -292,6 +293,7 @@ def _render_dependencies(
             "depth": depth,
             "selected": _dependency_graph_context(service, selected_item_id, depth=depth),
             "error": error,
+            "active_page": "dependencies",
         },
         status_code=status_code,
     )
@@ -311,7 +313,7 @@ def _render_audit_pack(
     return TEMPLATES.TemplateResponse(
         request,
         "audit_pack.html",
-        {"candidates": candidates, "selected": selected, "q": query or "", "error": error},
+        {"candidates": candidates, "selected": selected, "q": query or "", "error": error, "active_page": "audit_pack"},
     )
 
 

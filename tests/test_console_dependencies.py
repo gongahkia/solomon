@@ -26,6 +26,7 @@ def test_dependency_review_lists_pending_suggestions(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert "Dependency Review" in response.text
+    assert 'class="tab active" href="/console/dependencies"' in response.text
     assert suggestion.id in response.text
     assert "regulation-r-section-12" in response.text
 

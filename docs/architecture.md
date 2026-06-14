@@ -89,6 +89,11 @@ firm-style authority references such as "Regulation R section 12", non-US case s
 Each returned citation includes its parser source and source-text span so reviewers can inspect the exact
 evidence before confirming a dependency edge.
 
+Dependency suggestions are now durable review records. Ingest creates deterministic pending suggestions;
+`/dependencies/suggest` can re-run extraction and optionally use Kaypoh-sanitized LLM assistance. Curators can
+list, confirm, or reject suggestions through `/dependencies/suggestions`; confirmed suggestions create
+`human_confirmed` dependency edges, while rejected suggestions remain review history.
+
 ## Boundary
 
 The boundary engine is vendored under `src/solomon/boundary/engine/` from Kaypoh commit

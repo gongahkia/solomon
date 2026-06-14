@@ -68,6 +68,7 @@ Use the CLI:
 ```bash
 uv run solomon diagnostics
 uv run solomon ingest "Structure X relies on Regulation R section 12." --source-ref memo-1
+uv run solomon dependency-suggestions
 uv run solomon recall "structure X regulation"
 ```
 
@@ -77,6 +78,8 @@ uv run solomon recall "structure X regulation"
   matter/client scope, verification metadata, and supersession links.
 - Tracks dependency edges between internal knowledge and external authorities, then propagates
   `StalePendingReverification` through transitive dependents when a dependency changes.
+- Creates a durable dependency-review queue from deterministic citation/reference extraction, with optional
+  Kaypoh-sanitized LLM assistance for curator confirmation.
 - Recalls live knowledge by default while preserving stale, superseded, retired, and contested items for
   review and historical reconstruction.
 - Keeps model-bound context behind the vendored Kaypoh-derived boundary for review, pseudonymization,
@@ -119,6 +122,10 @@ Currency, dependency, and references:
 - `POST /verification/{item_id}`
 - `POST /authorities/{authority_id}/changes`
 - `POST /dependencies`
+- `POST /dependencies/suggest`
+- `GET /dependencies/suggestions`
+- `POST /dependencies/suggestions/{suggestion_id}/confirm`
+- `POST /dependencies/suggestions/{suggestion_id}/reject`
 - `GET /impact/{authority_id}`
 - `GET /graph`
 - `POST /references/extract`

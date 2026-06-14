@@ -1296,6 +1296,7 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "serde_json",
  "shibahama-core",
  "time",
  "uuid",
@@ -1306,6 +1307,7 @@ name = "shibahama-python"
 version = "0.1.0"
 dependencies = [
  "pyo3",
+ "serde_json",
  "shibahama-core",
  "time",
  "uuid",

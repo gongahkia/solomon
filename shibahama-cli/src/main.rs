@@ -14,10 +14,13 @@ use axum::{Json, Router};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use shibahama_core::api::{Shibahama, WhyTrace, WriteEmbedding};
+use shibahama_core::api::{
+    ConsolidationPassReport, HumanCorrectionOutcome, HumanSignalOutcome, HumanSignalRequest,
+    Shibahama, WhyTrace, WriteEmbedding,
+};
 use shibahama_core::model::{
-    ConsolidationAction, ConsolidationWhy, CredenceTier, HumanSignalAction, MemoryId, MemoryItem,
-    MemoryKind, Provenance, SourceKind, Tier,
+    AccessOutcome, ConsolidationAction, ConsolidationWhy, CredenceTier, HumanSignal,
+    HumanSignalAction, MemoryId, MemoryItem, MemoryKind, Provenance, SourceKind, Tier,
 };
 use shibahama_core::retrieval::{
     RecallCandidate, RecallCandidateCurrency, RecallCandidateSource, RecallRequest,
@@ -60,8 +63,26 @@ enum Command {
     Write(WriteCommand),
     /// Recall memories for a query embedding.
     Recall(RecallCommand),
+    /// Record a usage outcome for a memory.
+    Reinforce(ReinforceCommand),
     /// Explain why a memory has its current state.
     Why(WhyCommand),
+    /// Run the offline consolidation pass.
+    Consolidate(ConsolidateCommand),
+    /// Challenge a memory and flag it for review.
+    Challenge(HumanSignalCommand),
+    /// Affirm a memory.
+    Affirm(HumanSignalCommand),
+    /// Correct a memory through quarantine and reconstruction.
+    Correct(CorrectCommand),
+    /// Pin a memory's credence floor.
+    Pin(HumanSignalCommand),
+    /// Remove a human credence-floor pin.
+    Unpin(HumanSignalCommand),
+    /// Export durable event-log records.
+    Events(EventsCommand),
+    /// Inspect the audit trail for one memory.
+    Audit(AuditCommand),
     /// Inspect current materialized memory state.
     Inspect(InspectCommand),
     /// Export materialized memory state.
@@ -156,6 +177,18 @@ struct RecallCommand {
 }
 
 #[derive(Args)]
+struct ReinforceCommand {
+    #[command(flatten)]
+    store: StoreArgs,
+    /// Memory id to reinforce.
+    #[arg(long)]
+    memory_id: String,
+    /// Access outcome: surfaced, led_somewhere, cited, ignored, or contradicted.
+    #[arg(long, default_value = "cited")]
+    outcome: String,
+}
+
+#[derive(Args)]
 struct WhyCommand {
     #[command(flatten)]
     store: StoreArgs,
@@ -168,6 +201,72 @@ struct WhyCommand {
     /// Output format.
     #[arg(long, default_value = "text")]
     format: WhyFormat,
+}
+
+#[derive(Args)]
+struct ConsolidateCommand {
+    #[command(flatten)]
+    store: StoreArgs,
+    /// Consolidation instant as Unix seconds.
+    #[arg(long)]
+    now_unix: Option<i64>,
+}
+
+#[derive(Args)]
+struct HumanSignalCommand {
+    #[command(flatten)]
+    store: StoreArgs,
+    /// Memory id to update.
+    #[arg(long)]
+    memory_id: String,
+    /// Human-readable reason.
+    #[arg(long)]
+    reason: String,
+    /// Actor supplying the signal.
+    #[arg(long, default_value = "cli")]
+    actor: String,
+    /// Signal timestamp as Unix seconds.
+    #[arg(long)]
+    timestamp_unix: Option<i64>,
+}
+
+#[derive(Args)]
+struct CorrectCommand {
+    #[command(flatten)]
+    store: StoreArgs,
+    /// Memory id to correct.
+    #[arg(long)]
+    memory_id: String,
+    /// Proposed replacement content.
+    #[arg(long)]
+    proposed_content: String,
+    /// Human-readable reason.
+    #[arg(long, default_value = "corrected")]
+    reason: String,
+    /// Actor supplying the correction.
+    #[arg(long, default_value = "cli")]
+    actor: String,
+    /// Signal timestamp as Unix seconds.
+    #[arg(long)]
+    timestamp_unix: Option<i64>,
+}
+
+#[derive(Args)]
+struct EventsCommand {
+    #[command(flatten)]
+    store: StoreArgs,
+    /// Maximum records to return from the end of the event log.
+    #[arg(long)]
+    limit: Option<usize>,
+}
+
+#[derive(Args)]
+struct AuditCommand {
+    #[command(flatten)]
+    store: StoreArgs,
+    /// Memory id to audit.
+    #[arg(long)]
+    memory_id: String,
 }
 
 #[derive(Args)]
@@ -289,6 +388,21 @@ struct RecallCandidateDto {
 }
 
 #[derive(Serialize)]
+struct EventRecordDto {
+    sequence: u64,
+    recorded_at_unix: i64,
+    kind: String,
+    memory_ids: Vec<String>,
+    event: serde_json::Value,
+}
+
+#[derive(Serialize)]
+struct EventLogDto {
+    event_count: usize,
+    events: Vec<EventRecordDto>,
+}
+
+#[derive(Serialize)]
 struct WhyTraceDto {
     item: MemoryItemDto,
     significance: SignificanceBreakdown,
@@ -302,6 +416,70 @@ struct WhyTraceDto {
     valid_to_unix: Option<i64>,
     ingested_at_unix: i64,
     audit_trail: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct AuditDetailDto {
+    memory_id: String,
+    why: Option<WhyTraceDto>,
+    events: Vec<EventRecordDto>,
+}
+
+#[derive(Serialize)]
+struct HumanSignalDto {
+    action: String,
+    memory_id: String,
+    actor: String,
+    timestamp_unix: i64,
+    reason: String,
+    proposed_content: Option<String>,
+    proposal_id: Option<String>,
+    previous_credence: Option<String>,
+    new_credence: Option<String>,
+    previous_credence_floor: Option<String>,
+    new_credence_floor: Option<String>,
+}
+
+#[derive(Serialize)]
+struct HumanSignalOutcomeDto {
+    applied: bool,
+    signal: HumanSignalDto,
+    events: Vec<EventRecordDto>,
+}
+
+#[derive(Serialize)]
+struct HumanCorrectionOutcomeDto {
+    applied: bool,
+    signal: HumanSignalDto,
+    proposal: MemoryItemDto,
+    replacement: MemoryItemDto,
+    events: Vec<EventRecordDto>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum HumanMutationDto {
+    Signal(HumanSignalOutcomeDto),
+    Correction(HumanCorrectionOutcomeDto),
+    NotFound { applied: bool },
+}
+
+#[derive(Serialize)]
+struct ConsolidationOutcomeDto {
+    action: String,
+    input_ids: Vec<String>,
+    output_id: Option<String>,
+    tier_from: Option<String>,
+    tier_to: Option<String>,
+    why: String,
+    events: Vec<EventRecordDto>,
+}
+
+#[derive(Serialize)]
+struct ConsolidationPassDto {
+    pass_id: String,
+    applied_count: usize,
+    outcomes: Vec<ConsolidationOutcomeDto>,
 }
 
 #[derive(Serialize)]
@@ -427,6 +605,27 @@ struct ServerRecallRequest {
 }
 
 #[derive(Deserialize)]
+struct ServerReinforceRequest {
+    memory_id: String,
+    outcome: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ServerConsolidateRequest {
+    now_unix: Option<i64>,
+    allow_store_wide: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct ServerHumanSignalRequest {
+    memory_id: String,
+    reason: Option<String>,
+    actor: Option<String>,
+    timestamp_unix: Option<i64>,
+    proposed_content: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct WhyQuery {
     now_unix: Option<i64>,
 }
@@ -434,6 +633,12 @@ struct WhyQuery {
 #[derive(Deserialize)]
 struct TidelineQuery {
     as_of_unix: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct EventsQuery {
+    as_of_unix: Option<i64>,
+    limit: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -460,6 +665,13 @@ impl ServerError {
     fn unauthorized(error: impl Display) -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
+            message: error.to_string(),
+        }
+    }
+
+    fn not_found(error: impl Display) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
             message: error.to_string(),
         }
     }
@@ -501,7 +713,16 @@ fn run() -> CliResult<()> {
         Command::Init(command) => init(command),
         Command::Write(command) => write(command),
         Command::Recall(command) => recall(command),
+        Command::Reinforce(command) => reinforce(command),
         Command::Why(command) => why(command),
+        Command::Consolidate(command) => consolidate(command),
+        Command::Challenge(command) => challenge(command),
+        Command::Affirm(command) => affirm(command),
+        Command::Correct(command) => correct(command),
+        Command::Pin(command) => pin(command),
+        Command::Unpin(command) => unpin(command),
+        Command::Events(command) => events(command),
+        Command::Audit(command) => audit(command),
         Command::Inspect(command) => inspect(command),
         Command::Export(command) => export(command),
         Command::Serve(command) => serve(command),
@@ -584,6 +805,16 @@ fn recall(command: RecallCommand) -> CliResult<()> {
     write_json(&candidates)
 }
 
+fn reinforce(command: ReinforceCommand) -> CliResult<()> {
+    let engine = open_engine(&command.store, None)?;
+    let id = parse_memory_id(&command.memory_id)?;
+    let outcome = parse_access_outcome(&command.outcome)?;
+
+    write_json(&json!({
+        "applied": engine.reinforce(id, outcome)?,
+    }))
+}
+
 fn why(command: WhyCommand) -> CliResult<()> {
     let engine = open_engine(&command.store, None)?;
     let id = parse_memory_id(&command.memory_id)?;
@@ -594,6 +825,104 @@ fn why(command: WhyCommand) -> CliResult<()> {
         WhyFormat::Text => write_why_text(id, trace.as_ref()),
         WhyFormat::Json => write_json(&trace.map(WhyTraceDto::from)),
     }
+}
+
+fn consolidate(command: ConsolidateCommand) -> CliResult<()> {
+    let engine = open_engine(&command.store, None)?;
+    let now = time_from_optional_unix(command.now_unix)?;
+    let report = engine.consolidate(now)?;
+
+    write_json(&ConsolidationPassDto::from(report))
+}
+
+fn challenge(command: HumanSignalCommand) -> CliResult<()> {
+    human_signal(command, HumanSignalAction::Challenge)
+}
+
+fn affirm(command: HumanSignalCommand) -> CliResult<()> {
+    human_signal(command, HumanSignalAction::Affirm)
+}
+
+fn pin(command: HumanSignalCommand) -> CliResult<()> {
+    human_signal(command, HumanSignalAction::Pin)
+}
+
+fn unpin(command: HumanSignalCommand) -> CliResult<()> {
+    human_signal(command, HumanSignalAction::Unpin)
+}
+
+fn human_signal(command: HumanSignalCommand, action: HumanSignalAction) -> CliResult<()> {
+    let engine = open_engine(&command.store, None)?;
+    let id = parse_memory_id(&command.memory_id)?;
+    let request = human_signal_request(&command.actor, &command.reason, command.timestamp_unix)?;
+    let outcome = match action {
+        HumanSignalAction::Challenge => engine.challenge_with_request(id, request)?,
+        HumanSignalAction::Affirm => engine.affirm_with_request(id, request)?,
+        HumanSignalAction::Pin => engine.pin_with_request(id, request)?,
+        HumanSignalAction::Unpin => engine.unpin_with_request(id, request)?,
+        HumanSignalAction::Correct => {
+            return Err(Box::new(CliError(
+                "correct uses the `correct` command".to_owned(),
+            )));
+        }
+    };
+
+    write_json(
+        &outcome.map_or(HumanMutationDto::NotFound { applied: false }, |outcome| {
+            HumanMutationDto::Signal(HumanSignalOutcomeDto::from(outcome))
+        }),
+    )
+}
+
+fn correct(command: CorrectCommand) -> CliResult<()> {
+    let engine = open_engine(&command.store, None)?;
+    let id = parse_memory_id(&command.memory_id)?;
+    let request = human_signal_request(&command.actor, &command.reason, command.timestamp_unix)?;
+    let outcome = engine.correct_with_request(id, command.proposed_content, request)?;
+
+    write_json(
+        &outcome.map_or(HumanMutationDto::NotFound { applied: false }, |outcome| {
+            HumanMutationDto::Correction(HumanCorrectionOutcomeDto::from(outcome))
+        }),
+    )
+}
+
+fn events(command: EventsCommand) -> CliResult<()> {
+    let engine = open_engine(&command.store, None)?;
+    let mut events = engine
+        .event_records()?
+        .into_iter()
+        .map(EventRecordDto::from)
+        .collect::<Vec<_>>();
+
+    if let Some(limit) = command.limit
+        && events.len() > limit
+    {
+        events = events.split_off(events.len() - limit);
+    }
+
+    write_json(&EventLogDto {
+        event_count: events.len(),
+        events,
+    })
+}
+
+fn audit(command: AuditCommand) -> CliResult<()> {
+    let engine = open_engine(&command.store, None)?;
+    let id = parse_memory_id(&command.memory_id)?;
+    let why = engine.why(id)?.map(WhyTraceDto::from);
+    let events = engine
+        .event_records()?
+        .into_iter()
+        .filter(|record| event_touches_memory(record, id))
+        .map(EventRecordDto::from)
+        .collect::<Vec<_>>();
+
+    write_json(&AuditDetailDto {
+        memory_id: id.to_string(),
+        why,
+        events,
+    })
 }
 
 fn inspect(command: InspectCommand) -> CliResult<()> {
@@ -654,6 +983,15 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
         .route("/inspect", get(server_inspect))
         .route("/write", post(server_write))
         .route("/recall", post(server_recall))
+        .route("/reinforce", post(server_reinforce))
+        .route("/consolidate", post(server_consolidate))
+        .route("/challenge", post(server_challenge))
+        .route("/affirm", post(server_affirm))
+        .route("/correct", post(server_correct))
+        .route("/pin", post(server_pin))
+        .route("/unpin", post(server_unpin))
+        .route("/events", get(server_events))
+        .route("/audit/{memory_id}", get(server_audit))
         .route("/why/{memory_id}", get(server_why))
         .route("/tideline/snapshot", get(server_tideline_snapshot))
         .route("/tideline/recording", get(server_tideline_recording))
@@ -800,6 +1138,94 @@ fn optional_time_from_unix(value: Option<i64>) -> Result<Option<OffsetDateTime>,
         .map_err(ServerError::bad_request)
 }
 
+fn server_json_result<T>(
+    method: &'static str,
+    route: &'static str,
+    context: &ServerRequestContext,
+    result: Result<(Json<T>, serde_json::Value), ServerError>,
+) -> Result<Json<T>, ServerError> {
+    match result {
+        Ok((response, cost)) => {
+            log_server_request(
+                method,
+                route,
+                Some(&context.namespace),
+                context.principal,
+                StatusCode::OK,
+                cost,
+            );
+            Ok(response)
+        }
+        Err(error) => {
+            log_server_request(
+                method,
+                route,
+                Some(&context.namespace),
+                context.principal,
+                error.status,
+                json!({ "request_units": 1 }),
+            );
+            Err(error)
+        }
+    }
+}
+
+fn ensure_memory_in_namespace(
+    engine: &Shibahama<HnswVectorIndex>,
+    id: MemoryId,
+    namespace: &str,
+) -> Result<MemoryItem, ServerError> {
+    let Some(item) = engine
+        .memory_items()
+        .map_err(ServerError::internal)?
+        .into_iter()
+        .find(|item| item.id == id)
+    else {
+        return Err(ServerError::not_found(format!("memory {id} not found")));
+    };
+
+    if memory_in_namespace(&item, namespace) {
+        Ok(item)
+    } else {
+        Err(ServerError::not_found(format!(
+            "memory {id} not found in namespace {namespace}"
+        )))
+    }
+}
+
+fn event_records_for_namespace(
+    state: &ServerState,
+    namespace: &str,
+    as_of: Option<OffsetDateTime>,
+) -> Result<Vec<EventRecord>, ServerError> {
+    let engine = state
+        .engine
+        .lock()
+        .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+    let namespace_memories = engine
+        .memory_items()
+        .map_err(ServerError::internal)?
+        .into_iter()
+        .filter(|item| memory_in_namespace(item, namespace))
+        .filter(|item| as_of.is_none_or(|instant| memory_believed_at(item, instant)))
+        .collect::<Vec<_>>();
+    let namespace_ids = namespace_memories
+        .iter()
+        .map(|item| item.id)
+        .collect::<BTreeSet<_>>();
+
+    engine
+        .event_records()
+        .map_err(ServerError::internal)
+        .map(|records| {
+            records
+                .into_iter()
+                .filter(|record| as_of.is_none_or(|instant| record.recorded_at <= instant))
+                .filter(|record| event_touches_namespace(record, &namespace_ids, namespace))
+                .collect()
+        })
+}
+
 fn tideline_snapshot_for_namespace(
     state: &ServerState,
     namespace: &str,
@@ -889,6 +1315,33 @@ fn event_touches_namespace(
                 || signal
                     .proposal_id
                     .is_some_and(|id| namespace_ids.contains(&id))
+        }
+    }
+}
+
+fn event_touches_memory(record: &EventRecord, id: MemoryId) -> bool {
+    match &record.event {
+        MemoryEvent::MemoryWritten { item } => item.id == id,
+        MemoryEvent::MemoryInvalidated { id: event_id, .. }
+        | MemoryEvent::ReverificationFlagged { id: event_id, .. }
+        | MemoryEvent::AccessRecorded { id: event_id, .. }
+        | MemoryEvent::TierChanged { id: event_id, .. }
+        | MemoryEvent::ContentCompacted { id: event_id, .. } => *event_id == id,
+        MemoryEvent::ReconstructionApplied {
+            superseded_id,
+            replacement_id,
+            ..
+        } => *superseded_id == id || *replacement_id == id,
+        MemoryEvent::ConsolidationDecision {
+            input_ids,
+            output_id,
+            ..
+        } => input_ids.contains(&id) || output_id.is_some_and(|output_id| output_id == id),
+        MemoryEvent::HumanSignalRecorded { signal } => {
+            signal.memory_id == id
+                || signal
+                    .proposal_id
+                    .is_some_and(|proposal_id| proposal_id == id)
         }
     }
 }
@@ -1061,6 +1514,50 @@ fn human_signal_action_str(action: HumanSignalAction) -> &'static str {
         HumanSignalAction::Correct => "correct",
         HumanSignalAction::Pin => "pin",
         HumanSignalAction::Unpin => "unpin",
+    }
+}
+
+fn event_kind(event: &MemoryEvent) -> &'static str {
+    match event {
+        MemoryEvent::MemoryWritten { .. } => "memory_written",
+        MemoryEvent::MemoryInvalidated { .. } => "memory_invalidated",
+        MemoryEvent::ReverificationFlagged { .. } => "reverification_flagged",
+        MemoryEvent::AccessRecorded { .. } => "access_recorded",
+        MemoryEvent::TierChanged { .. } => "tier_changed",
+        MemoryEvent::ContentCompacted { .. } => "content_compacted",
+        MemoryEvent::ReconstructionApplied { .. } => "reconstruction_applied",
+        MemoryEvent::ConsolidationDecision { .. } => "consolidation_decision",
+        MemoryEvent::HumanSignalRecorded { .. } => "human_signal",
+    }
+}
+
+fn event_memory_ids(event: &MemoryEvent) -> Vec<String> {
+    match event {
+        MemoryEvent::MemoryWritten { item } => vec![item.id.to_string()],
+        MemoryEvent::MemoryInvalidated { id, .. }
+        | MemoryEvent::ReverificationFlagged { id, .. }
+        | MemoryEvent::AccessRecorded { id, .. }
+        | MemoryEvent::TierChanged { id, .. }
+        | MemoryEvent::ContentCompacted { id, .. } => vec![id.to_string()],
+        MemoryEvent::ReconstructionApplied {
+            superseded_id,
+            replacement_id,
+            ..
+        } => vec![superseded_id.to_string(), replacement_id.to_string()],
+        MemoryEvent::ConsolidationDecision {
+            input_ids,
+            output_id,
+            ..
+        } => input_ids
+            .iter()
+            .chain(output_id.iter())
+            .map(ToString::to_string)
+            .collect(),
+        MemoryEvent::HumanSignalRecorded { signal } => [Some(signal.memory_id), signal.proposal_id]
+            .into_iter()
+            .flatten()
+            .map(|id| id.to_string())
+            .collect(),
     }
 }
 
@@ -1567,6 +2064,268 @@ async fn server_recall(
     }
 }
 
+async fn server_reinforce(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerReinforceRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/reinforce")?;
+    let result: Result<(Json<serde_json::Value>, serde_json::Value), ServerError> = (|| {
+        let id = parse_memory_id(&body.memory_id).map_err(ServerError::bad_request)?;
+        let outcome = parse_access_outcome(body.outcome.as_deref().unwrap_or("cited"))
+            .map_err(ServerError::bad_request)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+
+        ensure_memory_in_namespace(&engine, id, &context.namespace)?;
+        let applied = engine
+            .reinforce(id, outcome)
+            .map_err(ServerError::internal)?;
+
+        Ok((
+            Json(json!({ "applied": applied })),
+            json!({ "request_units": 1, "memory_writes": if applied { 1 } else { 0 } }),
+        ))
+    })();
+
+    server_json_result("POST", "/reinforce", &context, result)
+}
+
+async fn server_consolidate(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerConsolidateRequest>,
+) -> Result<Json<ConsolidationPassDto>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/consolidate")?;
+    let result: Result<(Json<ConsolidationPassDto>, serde_json::Value), ServerError> = (|| {
+        let now = time_from_optional_unix(body.now_unix).map_err(ServerError::bad_request)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let all_memories = engine.memory_items().map_err(ServerError::internal)?;
+        let store_wide = all_memories
+            .iter()
+            .any(|item| !memory_in_namespace(item, &context.namespace));
+
+        if store_wide && body.allow_store_wide != Some(true) {
+            return Err(ServerError::bad_request(
+                "consolidation is store-wide; send allow_store_wide=true when other namespaces or non-server memories exist",
+            ));
+        }
+
+        let report = engine.consolidate(now).map_err(ServerError::internal)?;
+        let applied_count = report.applied.len();
+
+        Ok((
+            Json(ConsolidationPassDto::from(report)),
+            json!({
+                "request_units": 1,
+                "memories_scanned": all_memories.len(),
+                "consolidation_decisions": applied_count,
+                "store_wide": store_wide,
+            }),
+        ))
+    })();
+
+    server_json_result("POST", "/consolidate", &context, result)
+}
+
+async fn server_challenge(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerHumanSignalRequest>,
+) -> Result<Json<HumanMutationDto>, ServerError> {
+    server_human_signal(
+        state,
+        headers,
+        body,
+        HumanSignalAction::Challenge,
+        "/challenge",
+    )
+    .await
+}
+
+async fn server_affirm(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerHumanSignalRequest>,
+) -> Result<Json<HumanMutationDto>, ServerError> {
+    server_human_signal(state, headers, body, HumanSignalAction::Affirm, "/affirm").await
+}
+
+async fn server_pin(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerHumanSignalRequest>,
+) -> Result<Json<HumanMutationDto>, ServerError> {
+    server_human_signal(state, headers, body, HumanSignalAction::Pin, "/pin").await
+}
+
+async fn server_unpin(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerHumanSignalRequest>,
+) -> Result<Json<HumanMutationDto>, ServerError> {
+    server_human_signal(state, headers, body, HumanSignalAction::Unpin, "/unpin").await
+}
+
+async fn server_correct(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerHumanSignalRequest>,
+) -> Result<Json<HumanMutationDto>, ServerError> {
+    server_human_signal(state, headers, body, HumanSignalAction::Correct, "/correct").await
+}
+
+async fn server_human_signal(
+    state: ServerState,
+    headers: HeaderMap,
+    body: ServerHumanSignalRequest,
+    action: HumanSignalAction,
+    route: &'static str,
+) -> Result<Json<HumanMutationDto>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", route)?;
+    let result: Result<(Json<HumanMutationDto>, serde_json::Value), ServerError> = (|| {
+        let id = parse_memory_id(&body.memory_id).map_err(ServerError::bad_request)?;
+        let reason = body
+            .reason
+            .as_deref()
+            .unwrap_or_else(|| human_signal_action_str(action));
+        let actor = body.actor.as_deref().unwrap_or("server");
+        let request = human_signal_request(actor, reason, body.timestamp_unix)
+            .map_err(ServerError::bad_request)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+
+        ensure_memory_in_namespace(&engine, id, &context.namespace)?;
+
+        let response = match action {
+            HumanSignalAction::Challenge => engine
+                .challenge_with_request(id, request)
+                .map_err(ServerError::internal)?
+                .map_or(HumanMutationDto::NotFound { applied: false }, |outcome| {
+                    HumanMutationDto::Signal(HumanSignalOutcomeDto::from(outcome))
+                }),
+            HumanSignalAction::Affirm => engine
+                .affirm_with_request(id, request)
+                .map_err(ServerError::internal)?
+                .map_or(HumanMutationDto::NotFound { applied: false }, |outcome| {
+                    HumanMutationDto::Signal(HumanSignalOutcomeDto::from(outcome))
+                }),
+            HumanSignalAction::Pin => engine
+                .pin_with_request(id, request)
+                .map_err(ServerError::internal)?
+                .map_or(HumanMutationDto::NotFound { applied: false }, |outcome| {
+                    HumanMutationDto::Signal(HumanSignalOutcomeDto::from(outcome))
+                }),
+            HumanSignalAction::Unpin => engine
+                .unpin_with_request(id, request)
+                .map_err(ServerError::internal)?
+                .map_or(HumanMutationDto::NotFound { applied: false }, |outcome| {
+                    HumanMutationDto::Signal(HumanSignalOutcomeDto::from(outcome))
+                }),
+            HumanSignalAction::Correct => {
+                let proposed_content = body
+                    .proposed_content
+                    .ok_or_else(|| ServerError::bad_request("correct requires proposed_content"))?;
+                engine
+                    .correct_with_request(id, proposed_content, request)
+                    .map_err(ServerError::internal)?
+                    .map_or(HumanMutationDto::NotFound { applied: false }, |outcome| {
+                        HumanMutationDto::Correction(HumanCorrectionOutcomeDto::from(outcome))
+                    })
+            }
+        };
+
+        Ok((
+            Json(response),
+            json!({ "request_units": 1, "memory_writes": 1 }),
+        ))
+    })();
+
+    server_json_result("POST", route, &context, result)
+}
+
+async fn server_events(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Query(query): Query<EventsQuery>,
+) -> Result<Json<EventLogDto>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "GET", "/events")?;
+    let result: Result<(Json<EventLogDto>, serde_json::Value), ServerError> = (|| {
+        let as_of = optional_time_from_unix(query.as_of_unix)?;
+        let mut events = event_records_for_namespace(&state, &context.namespace, as_of)?
+            .into_iter()
+            .map(EventRecordDto::from)
+            .collect::<Vec<_>>();
+
+        if let Some(limit) = query.limit
+            && events.len() > limit
+        {
+            events = events.split_off(events.len() - limit);
+        }
+
+        let event_count = events.len();
+
+        Ok((
+            Json(EventLogDto {
+                event_count,
+                events,
+            }),
+            json!({ "request_units": 1, "events_returned": event_count }),
+        ))
+    })();
+
+    server_json_result("GET", "/events", &context, result)
+}
+
+async fn server_audit(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    AxumPath(memory_id): AxumPath<String>,
+    Query(query): Query<WhyQuery>,
+) -> Result<Json<AuditDetailDto>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "GET", "/audit/{memory_id}")?;
+    let result: Result<(Json<AuditDetailDto>, serde_json::Value), ServerError> = (|| {
+        let id = parse_memory_id(&memory_id).map_err(ServerError::bad_request)?;
+        let now = time_from_optional_unix(query.now_unix).map_err(ServerError::bad_request)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+
+        ensure_memory_in_namespace(&engine, id, &context.namespace)?;
+        let why = engine
+            .why_at(id, now)
+            .map_err(ServerError::internal)?
+            .map(WhyTraceDto::from);
+        let events = engine
+            .event_records()
+            .map_err(ServerError::internal)?
+            .into_iter()
+            .filter(|record| event_touches_memory(record, id))
+            .map(EventRecordDto::from)
+            .collect::<Vec<_>>();
+        let event_count = events.len();
+
+        Ok((
+            Json(AuditDetailDto {
+                memory_id: id.to_string(),
+                why,
+                events,
+            }),
+            json!({ "request_units": 1, "events_returned": event_count }),
+        ))
+    })();
+
+    server_json_result("GET", "/audit/{memory_id}", &context, result)
+}
+
 async fn server_why(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -1834,6 +2593,32 @@ fn parse_memory_id(value: &str) -> CliResult<MemoryId> {
     Ok(MemoryId::from(Uuid::parse_str(value)?))
 }
 
+fn parse_access_outcome(value: &str) -> CliResult<AccessOutcome> {
+    match value {
+        "surfaced" => Ok(AccessOutcome::Surfaced),
+        "led_somewhere" | "led-somewhere" => Ok(AccessOutcome::LedSomewhere),
+        "cited" => Ok(AccessOutcome::Cited),
+        "ignored" => Ok(AccessOutcome::Ignored),
+        "contradicted" => Ok(AccessOutcome::Contradicted),
+        _ => Err(Box::new(CliError(
+            "outcome must be one of: surfaced, led_somewhere, cited, ignored, contradicted"
+                .to_owned(),
+        ))),
+    }
+}
+
+fn human_signal_request(
+    actor: &str,
+    reason: &str,
+    timestamp_unix: Option<i64>,
+) -> CliResult<HumanSignalRequest> {
+    Ok(HumanSignalRequest::new(
+        actor,
+        reason,
+        time_from_optional_unix(timestamp_unix)?,
+    ))
+}
+
 fn parse_source_kind(value: &str) -> CliResult<SourceKind> {
     match value {
         "user" => Ok(SourceKind::User),
@@ -2072,6 +2857,26 @@ impl From<RecallCandidate> for RecallCandidateDto {
     }
 }
 
+impl From<EventRecord> for EventRecordDto {
+    fn from(value: EventRecord) -> Self {
+        let kind = event_kind(&value.event).to_owned();
+        let memory_ids = event_memory_ids(&value.event);
+        let event = serde_json::to_value(value.event).unwrap_or_else(|error| {
+            json!({
+                "serialization_error": error.to_string(),
+            })
+        });
+
+        Self {
+            sequence: value.sequence,
+            recorded_at_unix: value.recorded_at.unix_timestamp(),
+            kind,
+            memory_ids,
+            event,
+        }
+    }
+}
+
 impl From<WhyTrace> for WhyTraceDto {
     fn from(value: WhyTrace) -> Self {
         Self {
@@ -2100,6 +2905,123 @@ impl From<WhyTrace> for WhyTraceDto {
                     )
                 })
                 .collect(),
+        }
+    }
+}
+
+impl From<HumanSignal> for HumanSignalDto {
+    fn from(value: HumanSignal) -> Self {
+        Self {
+            action: human_signal_action_str(value.action).to_owned(),
+            memory_id: value.memory_id.to_string(),
+            actor: value.actor,
+            timestamp_unix: value.timestamp.unix_timestamp(),
+            reason: value.reason,
+            proposed_content: value.proposed_content,
+            proposal_id: value.proposal_id.map(|id| id.to_string()),
+            previous_credence: value
+                .previous_credence
+                .map(|credence| credence_str(credence).to_owned()),
+            new_credence: value
+                .new_credence
+                .map(|credence| credence_str(credence).to_owned()),
+            previous_credence_floor: value
+                .previous_credence_floor
+                .map(|tier| tier_str(tier).to_owned()),
+            new_credence_floor: value
+                .new_credence_floor
+                .map(|tier| tier_str(tier).to_owned()),
+        }
+    }
+}
+
+impl From<HumanSignalOutcome> for HumanSignalOutcomeDto {
+    fn from(value: HumanSignalOutcome) -> Self {
+        let events = [
+            value.records.access,
+            value.records.revalidation_flag,
+            Some(value.records.signal),
+        ]
+        .into_iter()
+        .flatten()
+        .map(EventRecordDto::from)
+        .collect();
+
+        Self {
+            applied: true,
+            signal: HumanSignalDto::from(value.signal),
+            events,
+        }
+    }
+}
+
+impl From<HumanCorrectionOutcome> for HumanCorrectionOutcomeDto {
+    fn from(value: HumanCorrectionOutcome) -> Self {
+        let events = vec![
+            value.records.invalidation,
+            value.records.replacement_write,
+            value.records.reconstruction,
+            value.signal_record,
+        ]
+        .into_iter()
+        .map(EventRecordDto::from)
+        .collect();
+
+        Self {
+            applied: true,
+            signal: HumanSignalDto::from(value.signal),
+            proposal: MemoryItemDto::from(value.proposal.item),
+            replacement: MemoryItemDto::from(value.replacement),
+            events,
+        }
+    }
+}
+
+impl From<ConsolidationPassReport> for ConsolidationPassDto {
+    fn from(value: ConsolidationPassReport) -> Self {
+        let applied_count = value.applied.len();
+        let outcomes = value
+            .applied
+            .into_iter()
+            .map(|outcome| {
+                let events = [
+                    outcome.records.memory_write,
+                    outcome.records.tier_change,
+                    outcome.records.revalidation_flag,
+                    Some(outcome.records.decision),
+                ]
+                .into_iter()
+                .flatten()
+                .map(EventRecordDto::from)
+                .collect();
+
+                ConsolidationOutcomeDto {
+                    action: consolidation_action_str(outcome.decision.action).to_owned(),
+                    input_ids: outcome
+                        .decision
+                        .input_ids
+                        .into_iter()
+                        .map(|id| id.to_string())
+                        .collect(),
+                    output_id: outcome.decision.output.map(|item| item.id.to_string()),
+                    tier_from: outcome
+                        .decision
+                        .tier_from
+                        .map(|tier| tier_str(tier).to_owned()),
+                    tier_to: outcome
+                        .decision
+                        .tier_to
+                        .map(|tier| tier_str(tier).to_owned()),
+                    why: outcome.decision.why.summary,
+                    events,
+                }
+            })
+            .collect();
+
+        Self {
+            pass_id: value.pass_id,
+            applied_count,
+            outcomes,
         }
     }
 }

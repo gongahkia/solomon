@@ -147,6 +147,14 @@ class Shibahama:
         related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None,
     ) -> list[RecallCandidate]: ...
     def memory_items(self) -> list[MemoryItem]: ...
+    def event_records(self) -> dict[str, Any]: ...
+    async def async_event_records(self) -> dict[str, Any]: ...
+    def audit(self, memory_id: str, now_unix: int | None = None) -> dict[str, Any]: ...
+    async def async_audit(
+        self, memory_id: str, now_unix: int | None = None
+    ) -> dict[str, Any]: ...
+    def consolidate(self, now_unix: int | None = None) -> dict[str, Any]: ...
+    async def async_consolidate(self, now_unix: int | None = None) -> dict[str, Any]: ...
     def export_records(self) -> list[dict[str, object]]: ...
     def to_pandas(self) -> Any: ...
     def to_arrow(self) -> Any: ...
@@ -220,6 +228,78 @@ class Shibahama:
     async def async_reinforce(
         self, memory_id: str, outcome: AccessOutcome = "cited"
     ) -> bool: ...
+    def challenge(
+        self,
+        memory_id: str,
+        reason: str,
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]: ...
+    async def async_challenge(
+        self,
+        memory_id: str,
+        reason: str,
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]: ...
+    def affirm(
+        self,
+        memory_id: str,
+        reason: str = "affirmed",
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]: ...
+    async def async_affirm(
+        self,
+        memory_id: str,
+        reason: str = "affirmed",
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]: ...
+    def correct(
+        self,
+        memory_id: str,
+        proposed_content: str,
+        reason: str = "corrected",
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]: ...
+    async def async_correct(
+        self,
+        memory_id: str,
+        proposed_content: str,
+        reason: str = "corrected",
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]: ...
+    def pin(
+        self,
+        memory_id: str,
+        reason: str = "pinned",
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]: ...
+    async def async_pin(
+        self,
+        memory_id: str,
+        reason: str = "pinned",
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]: ...
+    def unpin(
+        self,
+        memory_id: str,
+        reason: str = "unpinned",
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]: ...
+    async def async_unpin(
+        self,
+        memory_id: str,
+        reason: str = "unpinned",
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]: ...
     def why(self, memory_id: str, now_unix: int | None = None) -> WhyTrace | None: ...
     async def async_why(
         self, memory_id: str, now_unix: int | None = None

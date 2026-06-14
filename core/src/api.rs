@@ -1341,11 +1341,15 @@ impl<V: VectorIndex> Shibahama<V> {
             return Ok(None);
         };
         let proposed_content = proposed_content.into();
+        let correction_source_ref = original.provenance.source_ref.as_ref().map_or_else(
+            || format!("human-correction:{id}"),
+            |source_ref| format!("{source_ref};human-correction:{id}"),
+        );
         let mut event = MemoryWriteEvent::new(
             proposed_content.clone(),
             Provenance::new(
                 SourceKind::User,
-                Some(format!("human-correction:{id}")),
+                Some(correction_source_ref),
                 request.actor.clone(),
             ),
             request.timestamp,

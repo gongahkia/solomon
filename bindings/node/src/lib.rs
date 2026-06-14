@@ -7,19 +7,21 @@
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use serde_json::{json, Value};
 use shibahama_core::api::{
+    ConsolidationPassReport, HumanCorrectionOutcome, HumanSignalOutcome, HumanSignalRequest,
     Shibahama as CoreShibahama, ShibahamaError, WhyTrace as CoreWhyTrace, WriteEmbedding,
 };
 use shibahama_core::model::{
-    AccessOutcome, CredenceTier, MemoryId, MemoryItem as CoreMemoryItem, MemoryKind,
-    Provenance as CoreProvenance, SourceKind, Tier,
+    AccessOutcome, ConsolidationAction, CredenceTier, HumanSignal, HumanSignalAction, MemoryId,
+    MemoryItem as CoreMemoryItem, MemoryKind, Provenance as CoreProvenance, SourceKind, Tier,
 };
 use shibahama_core::retrieval::{
     RecallCandidate as CoreRecallCandidate, RecallCandidateCurrency, RecallCandidateSource,
     RecallRequest,
 };
 use shibahama_core::significance::SignificanceBreakdown as CoreSignificanceBreakdown;
-use shibahama_core::storage::MemoryWriteEvent;
+use shibahama_core::storage::{EventRecord, MemoryEvent, MemoryWriteEvent};
 use shibahama_core::vector::HnswVectorIndex;
 use std::sync::Mutex;
 use time::OffsetDateTime;
@@ -349,6 +351,217 @@ impl Shibahama {
         let items = inner.memory_items().map_err(js_error)?;
 
         Ok(items.into_iter().map(MemoryItem::from).collect())
+    }
+
+    /// Returns durable event-log records as JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when event records cannot be read or serialized.
+    #[napi]
+    pub fn event_records_json(&self) -> Result<String> {
+        let inner = self.inner.lock().map_err(lock_error)?;
+        let events = inner
+            .event_records()
+            .map_err(js_error)?
+            .iter()
+            .map(event_record_json)
+            .collect::<Vec<_>>();
+
+        serde_json::to_string(&json!({
+            "eventCount": events.len(),
+            "events": events,
+        }))
+        .map_err(json_error)
+    }
+
+    /// Returns one memory's why trace and related events as JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the memory id is invalid or storage cannot be read.
+    #[napi]
+    pub fn audit_json(&self, memory_id: String, now_unix: Option<f64>) -> Result<String> {
+        let id = parse_memory_id(&memory_id)?;
+        let now = time_from_optional_unix(now_unix)?;
+        let inner = self.inner.lock().map_err(lock_error)?;
+        let why = inner.why_at(id, now).map_err(js_error)?;
+        let events = inner
+            .event_records()
+            .map_err(js_error)?
+            .iter()
+            .filter(|record| event_touches_memory(record, id))
+            .map(event_record_json)
+            .collect::<Vec<_>>();
+
+        serde_json::to_string(&json!({
+            "memoryId": id.to_string(),
+            "why": why.as_ref().map(why_trace_json),
+            "events": events,
+        }))
+        .map_err(json_error)
+    }
+
+    /// Runs the offline consolidation pass and returns its report as JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when consolidation cannot be planned or applied.
+    #[napi]
+    pub fn consolidate_json(&self, now_unix: Option<f64>) -> Result<String> {
+        let now = time_from_optional_unix(now_unix)?;
+        let inner = self.inner.lock().map_err(lock_error)?;
+        let report = inner.consolidate(now).map_err(js_error)?;
+
+        serde_json::to_string(&consolidation_report_json(report)).map_err(json_error)
+    }
+
+    /// Challenges a memory and returns the mutation report as JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the memory id is invalid or persistence fails.
+    #[napi]
+    pub fn challenge_json(
+        &self,
+        memory_id: String,
+        reason: String,
+        actor: Option<String>,
+        timestamp_unix: Option<f64>,
+    ) -> Result<String> {
+        self.human_signal_json(
+            &memory_id,
+            &reason,
+            actor.as_deref().unwrap_or("node"),
+            timestamp_unix,
+            HumanSignalAction::Challenge,
+        )
+    }
+
+    /// Affirms a memory and returns the mutation report as JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the memory id is invalid or persistence fails.
+    #[napi]
+    pub fn affirm_json(
+        &self,
+        memory_id: String,
+        reason: Option<String>,
+        actor: Option<String>,
+        timestamp_unix: Option<f64>,
+    ) -> Result<String> {
+        self.human_signal_json(
+            &memory_id,
+            reason.as_deref().unwrap_or("affirmed"),
+            actor.as_deref().unwrap_or("node"),
+            timestamp_unix,
+            HumanSignalAction::Affirm,
+        )
+    }
+
+    /// Pins a memory and returns the mutation report as JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the memory id is invalid or persistence fails.
+    #[napi]
+    pub fn pin_json(
+        &self,
+        memory_id: String,
+        reason: Option<String>,
+        actor: Option<String>,
+        timestamp_unix: Option<f64>,
+    ) -> Result<String> {
+        self.human_signal_json(
+            &memory_id,
+            reason.as_deref().unwrap_or("pinned"),
+            actor.as_deref().unwrap_or("node"),
+            timestamp_unix,
+            HumanSignalAction::Pin,
+        )
+    }
+
+    /// Unpins a memory and returns the mutation report as JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the memory id is invalid or persistence fails.
+    #[napi]
+    pub fn unpin_json(
+        &self,
+        memory_id: String,
+        reason: Option<String>,
+        actor: Option<String>,
+        timestamp_unix: Option<f64>,
+    ) -> Result<String> {
+        self.human_signal_json(
+            &memory_id,
+            reason.as_deref().unwrap_or("unpinned"),
+            actor.as_deref().unwrap_or("node"),
+            timestamp_unix,
+            HumanSignalAction::Unpin,
+        )
+    }
+
+    /// Corrects a memory and returns the mutation report as JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the memory id is invalid or persistence fails.
+    #[napi]
+    pub fn correct_json(
+        &self,
+        memory_id: String,
+        proposed_content: String,
+        reason: Option<String>,
+        actor: Option<String>,
+        timestamp_unix: Option<f64>,
+    ) -> Result<String> {
+        let id = parse_memory_id(&memory_id)?;
+        let request = human_signal_request(
+            actor.as_deref().unwrap_or("node"),
+            reason.as_deref().unwrap_or("corrected"),
+            timestamp_unix,
+        )?;
+        let inner = self.inner.lock().map_err(lock_error)?;
+        let outcome = inner
+            .correct_with_request(id, proposed_content, request)
+            .map_err(js_error)?;
+
+        serde_json::to_string(&outcome.map_or_else(
+            || json!({ "applied": false }),
+            human_correction_outcome_json,
+        ))
+        .map_err(json_error)
+    }
+}
+
+impl Shibahama {
+    fn human_signal_json(
+        &self,
+        memory_id: &str,
+        reason: &str,
+        actor: &str,
+        timestamp_unix: Option<f64>,
+        action: HumanSignalAction,
+    ) -> Result<String> {
+        let id = parse_memory_id(memory_id)?;
+        let request = human_signal_request(actor, reason, timestamp_unix)?;
+        let inner = self.inner.lock().map_err(lock_error)?;
+        let outcome = match action {
+            HumanSignalAction::Challenge => inner.challenge_with_request(id, request),
+            HumanSignalAction::Affirm => inner.affirm_with_request(id, request),
+            HumanSignalAction::Pin => inner.pin_with_request(id, request),
+            HumanSignalAction::Unpin => inner.unpin_with_request(id, request),
+            HumanSignalAction::Correct => return Err(Error::from_reason("use correctJson")),
+        }
+        .map_err(js_error)?;
+
+        serde_json::to_string(
+            &outcome.map_or_else(|| json!({ "applied": false }), human_signal_outcome_json),
+        )
+        .map_err(json_error)
     }
 }
 

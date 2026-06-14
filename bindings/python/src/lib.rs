@@ -6,16 +6,21 @@
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use shibahama_core::api::{Shibahama, ShibahamaError, WhyTrace, WriteEmbedding};
+use serde_json::{json, Value};
+use shibahama_core::api::{
+    ConsolidationPassReport, HumanCorrectionOutcome, HumanSignalOutcome, HumanSignalRequest,
+    Shibahama, ShibahamaError, WhyTrace, WriteEmbedding,
+};
 use shibahama_core::model::{
-    AccessOutcome, CredenceTier, MemoryId, MemoryItem, MemoryKind, Provenance, SourceKind, Tier,
+    AccessOutcome, ConsolidationAction, CredenceTier, HumanSignal, HumanSignalAction, MemoryId,
+    MemoryItem, MemoryKind, Provenance, SourceKind, Tier,
 };
 use shibahama_core::retrieval::{
     RecallCandidate, RecallCandidateCurrency, RecallCandidateSource, RecallRankingConfig,
     RecallRequest, RelatedMemoryProvider,
 };
 use shibahama_core::significance::SignificanceBreakdown;
-use shibahama_core::storage::{MemoryWriteEvent, StorageError};
+use shibahama_core::storage::{EventRecord, MemoryEvent, MemoryWriteEvent, StorageError};
 use shibahama_core::vector::HnswVectorIndex;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -396,6 +401,56 @@ impl PyShibahama {
         Ok(items.into_iter().map(PyMemoryItem::from).collect())
     }
 
+    /// Returns durable event-log records as JSON.
+    fn event_records_json(&self) -> PyResult<String> {
+        let inner = self.inner.lock().map_err(lock_error)?;
+        let events = inner
+            .event_records()
+            .map_err(py_error)?
+            .iter()
+            .map(event_record_json)
+            .collect::<Vec<_>>();
+
+        serde_json::to_string(&json!({
+            "event_count": events.len(),
+            "events": events,
+        }))
+        .map_err(json_error)
+    }
+
+    /// Returns one memory's why trace and related events as JSON.
+    #[pyo3(signature = (memory_id, now_unix = None))]
+    fn audit_json(&self, memory_id: &str, now_unix: Option<i64>) -> PyResult<String> {
+        let id = parse_memory_id(memory_id)?;
+        let now = time_from_optional_unix(now_unix)?;
+        let inner = self.inner.lock().map_err(lock_error)?;
+        let why = inner.why_at(id, now).map_err(py_error)?;
+        let events = inner
+            .event_records()
+            .map_err(py_error)?
+            .iter()
+            .filter(|record| event_touches_memory(record, id))
+            .map(event_record_json)
+            .collect::<Vec<_>>();
+
+        serde_json::to_string(&json!({
+            "memory_id": id.to_string(),
+            "why": why.as_ref().map(why_trace_json),
+            "events": events,
+        }))
+        .map_err(json_error)
+    }
+
+    /// Runs the offline consolidation pass and returns its report as JSON.
+    #[pyo3(signature = (now_unix = None))]
+    fn consolidate_json(&self, now_unix: Option<i64>) -> PyResult<String> {
+        let now = time_from_optional_unix(now_unix)?;
+        let inner = self.inner.lock().map_err(lock_error)?;
+        let report = inner.consolidate(now).map_err(py_error)?;
+
+        serde_json::to_string(&consolidation_report_json(report)).map_err(json_error)
+    }
+
     /// Streams current fact memories for a query embedding.
     #[pyo3(signature = (
         query_vector,
@@ -524,6 +579,84 @@ impl PyShibahama {
         inner.reinforce(id, outcome).map_err(py_error)
     }
 
+    /// Challenges a memory and returns the mutation report as JSON.
+    #[pyo3(signature = (memory_id, reason, actor = "python", timestamp_unix = None))]
+    fn challenge_json(
+        &self,
+        memory_id: &str,
+        reason: &str,
+        actor: &str,
+        timestamp_unix: Option<i64>,
+    ) -> PyResult<String> {
+        self.human_signal_json(memory_id, reason, actor, timestamp_unix, HumanSignalAction::Challenge)
+    }
+
+    /// Affirms a memory and returns the mutation report as JSON.
+    #[pyo3(signature = (memory_id, reason = "affirmed", actor = "python", timestamp_unix = None))]
+    fn affirm_json(
+        &self,
+        memory_id: &str,
+        reason: &str,
+        actor: &str,
+        timestamp_unix: Option<i64>,
+    ) -> PyResult<String> {
+        self.human_signal_json(memory_id, reason, actor, timestamp_unix, HumanSignalAction::Affirm)
+    }
+
+    /// Pins a memory and returns the mutation report as JSON.
+    #[pyo3(signature = (memory_id, reason = "pinned", actor = "python", timestamp_unix = None))]
+    fn pin_json(
+        &self,
+        memory_id: &str,
+        reason: &str,
+        actor: &str,
+        timestamp_unix: Option<i64>,
+    ) -> PyResult<String> {
+        self.human_signal_json(memory_id, reason, actor, timestamp_unix, HumanSignalAction::Pin)
+    }
+
+    /// Unpins a memory and returns the mutation report as JSON.
+    #[pyo3(signature = (memory_id, reason = "unpinned", actor = "python", timestamp_unix = None))]
+    fn unpin_json(
+        &self,
+        memory_id: &str,
+        reason: &str,
+        actor: &str,
+        timestamp_unix: Option<i64>,
+    ) -> PyResult<String> {
+        self.human_signal_json(memory_id, reason, actor, timestamp_unix, HumanSignalAction::Unpin)
+    }
+
+    /// Corrects a memory and returns the mutation report as JSON.
+    #[pyo3(signature = (
+        memory_id,
+        proposed_content,
+        reason = "corrected",
+        actor = "python",
+        timestamp_unix = None
+    ))]
+    fn correct_json(
+        &self,
+        memory_id: &str,
+        proposed_content: String,
+        reason: &str,
+        actor: &str,
+        timestamp_unix: Option<i64>,
+    ) -> PyResult<String> {
+        let id = parse_memory_id(memory_id)?;
+        let request = human_signal_request(actor, reason, timestamp_unix)?;
+        let inner = self.inner.lock().map_err(lock_error)?;
+        let outcome = inner
+            .correct_with_request(id, proposed_content, request)
+            .map_err(py_error)?;
+
+        serde_json::to_string(&outcome.map_or_else(
+            || json!({ "applied": false }),
+            human_correction_outcome_json,
+        ))
+        .map_err(json_error)
+    }
+
     /// Explains why a memory currently has its state.
     #[pyo3(signature = (memory_id, now_unix = None))]
     fn why(&self, memory_id: &str, now_unix: Option<i64>) -> PyResult<Option<PyWhyTrace>> {
@@ -533,6 +666,36 @@ impl PyShibahama {
         let why = inner.why_at(id, now).map_err(py_error)?;
 
         Ok(why.map(PyWhyTrace::from))
+    }
+}
+
+impl PyShibahama {
+    fn human_signal_json(
+        &self,
+        memory_id: &str,
+        reason: &str,
+        actor: &str,
+        timestamp_unix: Option<i64>,
+        action: HumanSignalAction,
+    ) -> PyResult<String> {
+        let id = parse_memory_id(memory_id)?;
+        let request = human_signal_request(actor, reason, timestamp_unix)?;
+        let inner = self.inner.lock().map_err(lock_error)?;
+        let outcome = match action {
+            HumanSignalAction::Challenge => inner.challenge_with_request(id, request),
+            HumanSignalAction::Affirm => inner.affirm_with_request(id, request),
+            HumanSignalAction::Pin => inner.pin_with_request(id, request),
+            HumanSignalAction::Unpin => inner.unpin_with_request(id, request),
+            HumanSignalAction::Correct => {
+                return Err(PyValueError::new_err("use correct_json for corrections"));
+            }
+        }
+        .map_err(py_error)?;
+
+        serde_json::to_string(
+            &outcome.map_or_else(|| json!({ "applied": false }), human_signal_outcome_json),
+        )
+        .map_err(json_error)
     }
 }
 
@@ -632,6 +795,149 @@ impl From<WhyTrace> for PyWhyTrace {
     }
 }
 
+fn event_record_json(record: &EventRecord) -> Value {
+    json!({
+        "sequence": record.sequence,
+        "recorded_at_unix": record.recorded_at.unix_timestamp(),
+        "kind": event_kind(&record.event),
+        "memory_ids": event_memory_ids(&record.event),
+        "event": serde_json::to_value(&record.event).unwrap_or_else(|error| {
+            json!({ "serialization_error": error.to_string() })
+        }),
+    })
+}
+
+fn memory_item_json(item: &MemoryItem) -> Value {
+    json!({
+        "id": item.id.to_string(),
+        "content": item.content,
+        "kind": memory_kind_str(item.kind),
+        "provenance": {
+            "source_kind": source_kind_str(item.provenance.source_kind),
+            "source_ref": item.provenance.source_ref,
+            "ingested_by": item.provenance.ingested_by,
+        },
+        "tier": tier_str(item.tier),
+        "credence": credence_str(item.credence),
+        "significance": item.significance,
+        "credence_floor": tier_str(item.credence_floor),
+        "valid_from_unix": item.timestamps.valid_from.unix_timestamp(),
+        "valid_to_unix": item.timestamps.valid_to.map(OffsetDateTime::unix_timestamp),
+        "ingested_at_unix": item.timestamps.ingested_at.unix_timestamp(),
+    })
+}
+
+fn why_trace_json(trace: &WhyTrace) -> Value {
+    json!({
+        "item": memory_item_json(&trace.item),
+        "significance": trace.significance,
+        "provenance": {
+            "source_kind": source_kind_str(trace.provenance.source_kind),
+            "source_ref": trace.provenance.source_ref,
+            "ingested_by": trace.provenance.ingested_by,
+        },
+        "tier_current": tier_str(trace.tier.current),
+        "tier_credence": credence_str(trace.tier.credence),
+        "tier_credence_floor": tier_str(trace.tier.credence_floor),
+        "currency_state": currency_str(trace.currency.state),
+        "currency_as_of_unix": trace.currency.as_of.unix_timestamp(),
+        "valid_from_unix": trace.currency.valid_from.unix_timestamp(),
+        "valid_to_unix": trace.currency.valid_to.map(OffsetDateTime::unix_timestamp),
+        "ingested_at_unix": trace.currency.ingested_at.unix_timestamp(),
+        "audit_trail": trace.audit_trail.iter().map(|entry| format!("{entry:?}")).collect::<Vec<_>>(),
+    })
+}
+
+fn human_signal_json(signal: &HumanSignal) -> Value {
+    json!({
+        "action": human_signal_action_str(signal.action),
+        "memory_id": signal.memory_id.to_string(),
+        "actor": signal.actor,
+        "timestamp_unix": signal.timestamp.unix_timestamp(),
+        "reason": signal.reason,
+        "proposed_content": signal.proposed_content,
+        "proposal_id": signal.proposal_id.map(|id| id.to_string()),
+        "previous_credence": signal.previous_credence.map(credence_str),
+        "new_credence": signal.new_credence.map(credence_str),
+        "previous_credence_floor": signal.previous_credence_floor.map(tier_str),
+        "new_credence_floor": signal.new_credence_floor.map(tier_str),
+    })
+}
+
+fn human_signal_outcome_json(outcome: HumanSignalOutcome) -> Value {
+    let events = [
+        outcome.records.access,
+        outcome.records.revalidation_flag,
+        Some(outcome.records.signal),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|record| event_record_json(&record))
+    .collect::<Vec<_>>();
+
+    json!({
+        "applied": true,
+        "signal": human_signal_json(&outcome.signal),
+        "events": events,
+    })
+}
+
+fn human_correction_outcome_json(outcome: HumanCorrectionOutcome) -> Value {
+    let events = vec![
+        outcome.records.invalidation,
+        outcome.records.replacement_write,
+        outcome.records.reconstruction,
+        outcome.signal_record,
+    ]
+    .into_iter()
+    .map(|record| event_record_json(&record))
+    .collect::<Vec<_>>();
+
+    json!({
+        "applied": true,
+        "signal": human_signal_json(&outcome.signal),
+        "proposal": memory_item_json(&outcome.proposal.item),
+        "replacement": memory_item_json(&outcome.replacement),
+        "events": events,
+    })
+}
+
+fn consolidation_report_json(report: ConsolidationPassReport) -> Value {
+    let applied_count = report.applied.len();
+    let outcomes = report
+        .applied
+        .into_iter()
+        .map(|outcome| {
+            let events = [
+                outcome.records.memory_write,
+                outcome.records.tier_change,
+                outcome.records.revalidation_flag,
+                Some(outcome.records.decision),
+            ]
+            .into_iter()
+            .flatten()
+            .map(|record| event_record_json(&record))
+            .collect::<Vec<_>>();
+
+            json!({
+                "action": consolidation_action_str(outcome.decision.action),
+                "input_ids": outcome.decision.input_ids.into_iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+                "output_id": outcome.decision.output.map(|item| item.id.to_string()),
+                "tier_from": outcome.decision.tier_from.map(tier_str),
+                "tier_to": outcome.decision.tier_to.map(tier_str),
+                "why": outcome.decision.why.summary,
+                "events": events,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "pass_id": report.pass_id,
+        "applied_count": applied_count,
+        "outcomes": outcomes,
+    })
+}
+
 /// Returns the Shibahama core crate version.
 #[pyfunction]
 fn version() -> &'static str {
@@ -715,6 +1021,18 @@ fn parse_memory_id(value: &str) -> PyResult<MemoryId> {
         .map_err(|error| PyValueError::new_err(format!("invalid memory id: {error}")))
 }
 
+fn human_signal_request(
+    actor: &str,
+    reason: &str,
+    timestamp_unix: Option<i64>,
+) -> PyResult<HumanSignalRequest> {
+    Ok(HumanSignalRequest::new(
+        actor,
+        reason,
+        time_from_optional_unix(timestamp_unix)?,
+    ))
+}
+
 fn parse_related_memory_provider(
     value: BTreeMap<String, Vec<String>>,
 ) -> PyResult<PyRelatedMemoryProvider> {
@@ -759,13 +1077,103 @@ fn parse_memory_kind(value: &str) -> PyResult<MemoryKind> {
 fn parse_access_outcome(value: &str) -> PyResult<AccessOutcome> {
     match value {
         "surfaced" => Ok(AccessOutcome::Surfaced),
-        "led_somewhere" => Ok(AccessOutcome::LedSomewhere),
+        "led_somewhere" | "led-somewhere" => Ok(AccessOutcome::LedSomewhere),
         "cited" => Ok(AccessOutcome::Cited),
         "ignored" => Ok(AccessOutcome::Ignored),
         "contradicted" => Ok(AccessOutcome::Contradicted),
         _ => Err(PyValueError::new_err(
             "outcome must be one of: surfaced, led_somewhere, cited, ignored, contradicted",
         )),
+    }
+}
+
+fn consolidation_action_str(value: ConsolidationAction) -> &'static str {
+    match value {
+        ConsolidationAction::Merge => "merge",
+        ConsolidationAction::Promote => "promote",
+        ConsolidationAction::Demote => "demote",
+        ConsolidationAction::FlagStale => "flag_stale",
+    }
+}
+
+fn human_signal_action_str(value: HumanSignalAction) -> &'static str {
+    match value {
+        HumanSignalAction::Challenge => "challenge",
+        HumanSignalAction::Affirm => "affirm",
+        HumanSignalAction::Correct => "correct",
+        HumanSignalAction::Pin => "pin",
+        HumanSignalAction::Unpin => "unpin",
+    }
+}
+
+fn event_kind(event: &MemoryEvent) -> &'static str {
+    match event {
+        MemoryEvent::MemoryWritten { .. } => "memory_written",
+        MemoryEvent::MemoryInvalidated { .. } => "memory_invalidated",
+        MemoryEvent::ReverificationFlagged { .. } => "reverification_flagged",
+        MemoryEvent::AccessRecorded { .. } => "access_recorded",
+        MemoryEvent::TierChanged { .. } => "tier_changed",
+        MemoryEvent::ContentCompacted { .. } => "content_compacted",
+        MemoryEvent::ReconstructionApplied { .. } => "reconstruction_applied",
+        MemoryEvent::ConsolidationDecision { .. } => "consolidation_decision",
+        MemoryEvent::HumanSignalRecorded { .. } => "human_signal",
+    }
+}
+
+fn event_memory_ids(event: &MemoryEvent) -> Vec<String> {
+    match event {
+        MemoryEvent::MemoryWritten { item } => vec![item.id.to_string()],
+        MemoryEvent::MemoryInvalidated { id, .. }
+        | MemoryEvent::ReverificationFlagged { id, .. }
+        | MemoryEvent::AccessRecorded { id, .. }
+        | MemoryEvent::TierChanged { id, .. }
+        | MemoryEvent::ContentCompacted { id, .. } => vec![id.to_string()],
+        MemoryEvent::ReconstructionApplied {
+            superseded_id,
+            replacement_id,
+            ..
+        } => vec![superseded_id.to_string(), replacement_id.to_string()],
+        MemoryEvent::ConsolidationDecision {
+            input_ids,
+            output_id,
+            ..
+        } => input_ids
+            .iter()
+            .chain(output_id.iter())
+            .map(ToString::to_string)
+            .collect(),
+        MemoryEvent::HumanSignalRecorded { signal } => [Some(signal.memory_id), signal.proposal_id]
+            .into_iter()
+            .flatten()
+            .map(|id| id.to_string())
+            .collect(),
+    }
+}
+
+fn event_touches_memory(record: &EventRecord, id: MemoryId) -> bool {
+    match &record.event {
+        MemoryEvent::MemoryWritten { item } => item.id == id,
+        MemoryEvent::MemoryInvalidated { id: event_id, .. }
+        | MemoryEvent::ReverificationFlagged { id: event_id, .. }
+        | MemoryEvent::AccessRecorded { id: event_id, .. }
+        | MemoryEvent::TierChanged { id: event_id, .. }
+        | MemoryEvent::ContentCompacted { id: event_id, .. } => *event_id == id,
+        MemoryEvent::ReconstructionApplied {
+            superseded_id,
+            replacement_id,
+            ..
+        } => *superseded_id == id || *replacement_id == id,
+        MemoryEvent::ConsolidationDecision {
+            input_ids,
+            output_id,
+            ..
+        } => input_ids.contains(&id) || output_id.is_some_and(|output_id| output_id == id),
+        MemoryEvent::HumanSignalRecorded { signal } => {
+            signal.memory_id == id
+                || signal
+                    .proposal_id
+                    .is_some_and(|proposal_id| proposal_id == id)
+        }
     }
 }
 
@@ -821,6 +1229,10 @@ fn candidate_source_str(value: RecallCandidateSource) -> String {
 }
 
 fn py_error(error: ShibahamaError) -> PyErr {
+    PyRuntimeError::new_err(error.to_string())
+}
+
+fn json_error(error: serde_json::Error) -> PyErr {
     PyRuntimeError::new_err(error.to_string())
 }
 

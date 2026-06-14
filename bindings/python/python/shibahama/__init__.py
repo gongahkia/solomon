@@ -3,6 +3,7 @@
 """Python bindings for Shibahama."""
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from typing import Any, Callable, Mapping, Sequence
 
@@ -107,6 +108,30 @@ class Shibahama:
     def memory_items(self) -> list[MemoryItem]:
         """Return all current materialized memory rows."""
         return self._inner.memory_items()
+
+    def event_records(self) -> dict[str, Any]:
+        """Return durable event-log records."""
+        return json.loads(self._inner.event_records_json())
+
+    async def async_event_records(self) -> dict[str, Any]:
+        """Async wrapper for `event_records` using a worker thread."""
+        return await asyncio.to_thread(self.event_records)
+
+    def audit(self, memory_id: str, now_unix: int | None = None) -> dict[str, Any]:
+        """Return one memory's why trace and related event records."""
+        return json.loads(self._inner.audit_json(memory_id, now_unix))
+
+    async def async_audit(self, *args, **kwargs) -> dict[str, Any]:
+        """Async wrapper for `audit` using a worker thread."""
+        return await asyncio.to_thread(self.audit, *args, **kwargs)
+
+    def consolidate(self, now_unix: int | None = None) -> dict[str, Any]:
+        """Run the offline consolidation pass."""
+        return json.loads(self._inner.consolidate_json(now_unix))
+
+    async def async_consolidate(self, *args, **kwargs) -> dict[str, Any]:
+        """Async wrapper for `consolidate` using a worker thread."""
+        return await asyncio.to_thread(self.consolidate, *args, **kwargs)
 
     def export_records(self) -> list[dict[str, object]]:
         """Return current memory rows as plain Python dictionaries."""
@@ -235,6 +260,85 @@ class Shibahama:
     async def async_reinforce(self, *args, **kwargs) -> bool:
         """Async wrapper for `reinforce` using a worker thread."""
         return await asyncio.to_thread(self.reinforce, *args, **kwargs)
+
+    def challenge(
+        self,
+        memory_id: str,
+        reason: str,
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]:
+        """Challenge a memory and flag it for review."""
+        return json.loads(self._inner.challenge_json(memory_id, reason, actor, timestamp_unix))
+
+    async def async_challenge(self, *args, **kwargs) -> dict[str, Any]:
+        """Async wrapper for `challenge` using a worker thread."""
+        return await asyncio.to_thread(self.challenge, *args, **kwargs)
+
+    def affirm(
+        self,
+        memory_id: str,
+        reason: str = "affirmed",
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]:
+        """Affirm a memory."""
+        return json.loads(self._inner.affirm_json(memory_id, reason, actor, timestamp_unix))
+
+    async def async_affirm(self, *args, **kwargs) -> dict[str, Any]:
+        """Async wrapper for `affirm` using a worker thread."""
+        return await asyncio.to_thread(self.affirm, *args, **kwargs)
+
+    def correct(
+        self,
+        memory_id: str,
+        proposed_content: str,
+        reason: str = "corrected",
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]:
+        """Correct a memory through quarantine and reconstruction."""
+        return json.loads(
+            self._inner.correct_json(
+                memory_id,
+                proposed_content,
+                reason,
+                actor,
+                timestamp_unix,
+            )
+        )
+
+    async def async_correct(self, *args, **kwargs) -> dict[str, Any]:
+        """Async wrapper for `correct` using a worker thread."""
+        return await asyncio.to_thread(self.correct, *args, **kwargs)
+
+    def pin(
+        self,
+        memory_id: str,
+        reason: str = "pinned",
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]:
+        """Pin a memory's credence floor."""
+        return json.loads(self._inner.pin_json(memory_id, reason, actor, timestamp_unix))
+
+    async def async_pin(self, *args, **kwargs) -> dict[str, Any]:
+        """Async wrapper for `pin` using a worker thread."""
+        return await asyncio.to_thread(self.pin, *args, **kwargs)
+
+    def unpin(
+        self,
+        memory_id: str,
+        reason: str = "unpinned",
+        actor: str = "python",
+        timestamp_unix: int | None = None,
+    ) -> dict[str, Any]:
+        """Remove a human credence-floor pin."""
+        return json.loads(self._inner.unpin_json(memory_id, reason, actor, timestamp_unix))
+
+    async def async_unpin(self, *args, **kwargs) -> dict[str, Any]:
+        """Async wrapper for `unpin` using a worker thread."""
+        return await asyncio.to_thread(self.unpin, *args, **kwargs)
 
     def why(self, memory_id: str, now_unix: int | None = None) -> WhyTrace | None:
         """Explain the current significance, provenance, tier, and currency state."""

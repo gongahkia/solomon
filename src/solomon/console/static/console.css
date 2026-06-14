@@ -271,6 +271,61 @@ input {
   padding: 6px 8px;
 }
 
+select {
+  width: 100%;
+  min-height: 34px;
+  margin-top: 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #ffffff;
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.8fr) minmax(160px, 1.2fr) minmax(80px, 0.6fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.inline-actions {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  margin: -2px 0 10px;
+}
+
+.graph-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.edge {
+  border: 1px solid #d8dde5;
+  border-radius: 6px;
+  padding: 10px;
+  overflow-wrap: anywhere;
+}
+
+.edge span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.edge.confirmed {
+  border-left: 4px solid #22c55e;
+}
+
+.edge.pending {
+  border-left: 4px solid #f59e0b;
+}
+
+.edge.dependent {
+  border-left: 4px solid #60a5fa;
+}
+
 .notice.error {
   border-color: #fca5a5;
   color: #991b1b;
@@ -285,7 +340,9 @@ input {
   .workspace,
   .preview-grid,
   .decision,
-  .columns {
+  .columns,
+  .toolbar,
+  .inline-actions {
     grid-template-columns: 1fr;
   }
 

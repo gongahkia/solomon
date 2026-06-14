@@ -12,11 +12,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
-from solomon.api.service import PinRequest, SolomonService, VerificationRequest
+from solomon.api.service import DependencySuggestionDecisionRequest, PinRequest, SolomonService, VerificationRequest
 from solomon.config import Settings, get_settings
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import CredenceTier, CurrencyState, KnowledgeItem, VerifiedState
 from solomon.errors import SolomonError
+from solomon.graph.suggestions import DependencySuggestion, SuggestionDecision
 
 DEFAULT_DATABASE_URL = str(Settings.model_fields["database_url"].default)
 PACKAGE_DIR = Path(__file__).parent
@@ -51,6 +52,23 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
     @app.get("/console/verification")
     def verification(request: Request, item_id: str | None = None) -> Response:
         return _render_verification(request, resolved_service, item_id=item_id)
+
+    @app.get("/console/dependencies")
+    def dependencies(
+        request: Request,
+        decision: str = "pending",
+        item_id: str | None = None,
+        authority_id: str | None = None,
+        depth: int = 1,
+    ) -> Response:
+        return _render_dependencies(
+            request,
+            resolved_service,
+            decision=decision,
+            item_id=item_id,
+            authority_id=authority_id,
+            depth=depth,
+        )
 
     @app.get("/console/verification/items")
     def verification_items(request: Request) -> Response:
@@ -96,6 +114,52 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
             status_code=status_code,
         )
 
+    @app.post("/console/dependencies/suggestions/{suggestion_id}/confirm")
+    async def confirm_dependency(request: Request, suggestion_id: str) -> Response:
+        form = await request.form()
+        reviewer_id = str(form.get("reviewer_id") or "").strip()
+        error = None
+        if not reviewer_id:
+            error = "reviewer id is required"
+        else:
+            try:
+                resolved_service.confirm_dependency_suggestion(
+                    suggestion_id,
+                    DependencySuggestionDecisionRequest(by=reviewer_id),
+                )
+            except (SolomonError, ValueError) as exc:
+                error = str(exc)
+        return _render_dependencies(
+            request,
+            resolved_service,
+            decision="pending",
+            error=error,
+            status_code=200 if error is None else 400,
+        )
+
+    @app.post("/console/dependencies/suggestions/{suggestion_id}/reject")
+    async def reject_dependency(request: Request, suggestion_id: str) -> Response:
+        form = await request.form()
+        reviewer_id = str(form.get("reviewer_id") or "").strip()
+        error = None
+        if not reviewer_id:
+            error = "reviewer id is required"
+        else:
+            try:
+                resolved_service.reject_dependency_suggestion(
+                    suggestion_id,
+                    DependencySuggestionDecisionRequest(by=reviewer_id),
+                )
+            except (SolomonError, ValueError) as exc:
+                error = str(exc)
+        return _render_dependencies(
+            request,
+            resolved_service,
+            decision="pending",
+            error=error,
+            status_code=200 if error is None else 400,
+        )
+
     return app
 
 
@@ -135,6 +199,97 @@ def _review_rows(service: SolomonService) -> list[dict[str, Any]]:
             }
         )
     return sorted(rows, key=lambda row: (str(row["item"].get("matter_id") or ""), str(row["item"]["id"])))
+
+
+def _render_dependencies(
+    request: Request,
+    service: SolomonService,
+    *,
+    decision: str,
+    item_id: str | None = None,
+    authority_id: str | None = None,
+    depth: int = 1,
+    error: str | None = None,
+    status_code: int = 200,
+) -> Response:
+    rows = _suggestion_rows(service, decision=decision, authority_id=authority_id)
+    selected_item_id = item_id or (rows[0]["suggestion"]["item_id"] if rows else None)
+    return TEMPLATES.TemplateResponse(
+        request,
+        "dependencies.html",
+        {
+            "rows": rows,
+            "decision": decision,
+            "authority_id": authority_id or "",
+            "depth": depth,
+            "selected": _dependency_graph_context(service, selected_item_id, depth=depth),
+            "error": error,
+        },
+        status_code=status_code,
+    )
+
+
+def _suggestion_rows(
+    service: SolomonService,
+    *,
+    decision: str,
+    authority_id: str | None,
+) -> list[dict[str, Any]]:
+    resolved_decision = _suggestion_decision(decision)
+    suggestions = service.dependency_suggestions(decision=resolved_decision, limit=200)
+    rows = [_suggestion_row(suggestion) for suggestion in suggestions]
+    if authority_id:
+        rows = [
+            row
+            for row in rows
+            if authority_id.lower() in str(row["suggestion"]["suggested_edge"]["target_id"]).lower()
+            or authority_id.lower() in str(row["suggestion"]["authority_ref"]).lower()
+        ]
+    return rows
+
+
+def _suggestion_row(suggestion: DependencySuggestion) -> dict[str, Any]:
+    payload = suggestion.model_dump(mode="json")
+    return {
+        "suggestion": payload,
+        "target_id": payload["suggested_edge"]["target_id"],
+        "edge_type": payload["suggested_edge"]["edge_type"],
+        "confidence": payload["suggested_edge"]["confidence"],
+    }
+
+
+def _dependency_graph_context(
+    service: SolomonService,
+    item_id: str | None,
+    *,
+    depth: int,
+) -> dict[str, Any] | None:
+    if item_id is None:
+        return None
+    try:
+        trace = service.why(item_id)
+    except SolomonError:
+        return None
+    pending = [
+        _suggestion_row(suggestion)
+        for suggestion in service.dependency_suggestions(item_id=item_id, decision=SuggestionDecision.PENDING, limit=50)
+    ]
+    return {
+        "item": trace.item.model_dump(mode="json"),
+        "dependencies": trace.dependencies,
+        "dependents": trace.dependents if depth > 1 else [],
+        "pending": pending,
+        "depth": depth,
+    }
+
+
+def _suggestion_decision(value: str) -> SuggestionDecision | None:
+    if value == "all":
+        return None
+    try:
+        return SuggestionDecision(value)
+    except ValueError:
+        return SuggestionDecision.PENDING
 
 
 def _needs_review(item: KnowledgeItem, currency: dict[str, Any]) -> bool:

@@ -12,13 +12,17 @@
   <img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
 
-Usage-aware, reconstructive memory for long-running LLM agents.
+Auditable, non-destructive memory for long-running LLM agents.
 
 Shibahama is built for the failure mode where an agent can retrieve old context
 but cannot tell whether that context is still current, trusted, load-bearing, or
 safe to use. It keeps memory as durable state with history: every item carries
 provenance, valid time, ingestion time, credence, tier, significance, and an
 audit trail. Recall returns contextual candidates, not bare text.
+
+The defensible center is narrow: never-delete history with credence floors,
+append-only human signals, and Tideline-visible reconstruction/consolidation.
+Usage signals matter, but they are not the whole claim.
 
 The repository is pre-release. The Rust core, CLI, Python binding, Node binding,
 benchmark harness, examples, Tideline debugger, consolidation pass, human signal
@@ -94,6 +98,8 @@ cargo run -p shibahama-cli -- recall \
 
 - Stores memories with mandatory provenance and bi-temporal validity:
   `valid_from`, `valid_to`, and `ingested_at`.
+- Invalidates superseded memories without deleting them; credence floors protect
+  pinned or explicit rejection memories from decaying below a caller-set floor.
 - Separates credence from retrieval score so authoritative memories cannot be
   buried by low-trust but similar snippets.
 - Computes usage-driven significance from access history, outcomes, decay,
@@ -342,9 +348,13 @@ system returns the current fact rather than the stale one:
 | currencybench | shibahama | 12 | 1.000 | 0.000 | 5.917 | 5.427 | ok |
 | currencybench | warehouse | 12 | 0.000 | 1.000 | 11.833 | 0.038 | ok |
 
-The coding-agent benchmark harness remains experimental and no longer has a
-checked-in result artifact. The runnable [`examples/coding-agent/`](./examples/coding-agent/)
-demo is kept separate from benchmark claims.
+The checked-in `coding-agent-local` artifact is a compact continuity smoke for
+rejected approaches and moved files:
+
+| Suite | System | Queries | Accuracy | Stale Answer Rate | Mean Token Cost | p95 ms | Status |
+|---|---|---:|---:|---:|---:|---:|---|
+| coding-agent | shibahama | 2 | 1.000 | 0.000 | 36.000 | 123.357 | ok |
+| coding-agent | warehouse | 2 | 0.000 | 1.000 | 29.000 | 0.062 | ok |
 
 The checked-in `ablation-local` artifact isolates significance,
 reconstruction/supersession, and graph expansion toggles. Full Shibahama scores

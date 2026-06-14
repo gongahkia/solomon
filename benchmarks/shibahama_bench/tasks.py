@@ -212,25 +212,38 @@ def currencybench(seed: int = 7) -> list[BenchmarkCase]:
 def coding_agent_memory_task(seed: int = 7) -> list[BenchmarkCase]:
     """Return a compact long-horizon coding-agent memory scenario."""
 
-    rng = random.Random(seed)
+    _ = seed
     observations = [
         Observation(
             "Rejected approach: do not add a global singleton store; tests need isolated stores.",
             0,
             "decision:singleton-rejected",
+            reinforce_count=3,
         ),
         Observation(
-            "File move: core/src/retrieval.rs now owns recall ranking; old path core/src/rank.rs was removed.",
+            "Backlog idea from an old review: add a global singleton store for test convenience.",
+            30,
+            "idea:singleton-old",
+        ),
+        Observation(
+            "Decision reaffirmed: do not add a global singleton store; use per-test temp stores.",
+            90,
+            "decision:singleton-current",
+            supersedes_source_ref="idea:singleton-old",
+            reinforce_count=2,
+        ),
+        Observation(
+            "File location: recall ranking changes live in core/src/rank.rs.",
+            60,
+            "file:rank-old",
+        ),
+        Observation(
+            "File move: core/src/retrieval.rs now owns recall ranking; core/src/rank.rs was removed.",
             120,
-            "filemove:retrieval",
-        ),
-        Observation(
-            "Decision: use source_ref prefixes for server namespace isolation.",
-            240,
-            "decision:namespace-prefix",
+            "file:rank-current",
+            supersedes_source_ref="file:rank-old",
         ),
     ]
-    rng.shuffle(observations)
 
     return [
         BenchmarkCase(
@@ -240,13 +253,13 @@ def coding_agent_memory_task(seed: int = 7) -> list[BenchmarkCase]:
                 BenchmarkQuery(
                     prompt="Should we add a global singleton store for tests?",
                     expected="do not add a global singleton store",
-                    forbidden="add a global singleton store",
+                    forbidden="Backlog idea from an old review",
                     now_unix=360,
                 ),
                 BenchmarkQuery(
                     prompt="Where should recall ranking changes go?",
                     expected="core/src/retrieval.rs",
-                    forbidden="core/src/rank.rs",
+                    forbidden="File location: recall ranking changes live in core/src/rank.rs",
                     now_unix=360,
                 ),
             ),

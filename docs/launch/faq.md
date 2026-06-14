@@ -26,6 +26,18 @@ CurrencyBench and the coding-agent demo are designed around that hypothesis:
 plain retrieval can find related text, but it should fail when stale related text
 is actively dangerous.
 
+## How is Shibahama different from other agent-memory systems?
+
+The defensible difference is not "it uses memory signals." Current systems
+already claim multi-signal and temporal retrieval. Shibahama's narrower claim is
+that never-delete history, credence floors, append-only human signals
+(`challenge`, `affirm`, `correct`, `pin`), and Tideline-visible
+reconstruction/consolidation make memory behavior easier to audit and contest.
+
+Engram is the closest published comparison for bi-temporal, non-destructive
+memory. Shibahama should not imply superiority there without checked-in
+LongMemEval-S, LoCoMo, or continuity-task artifacts.
+
 ## Why not put all of this in the prompt?
 
 Prompting can ask a model to be careful, but it cannot by itself enforce durable

@@ -24,6 +24,16 @@ It also reports substantial accuracy drops for commercial assistants and
 long-context models under sustained interaction:
 https://arxiv.org/abs/2410.10813.
 
+Engram is the closest direct comparison for Shibahama's current thesis. It
+claims a bi-temporal memory engine with lossless episodes, non-destructive
+supersession, provenance chains, hybrid dense/lexical/graph/recency retrieval,
+and a reproducible LongMemEval-S run scoring 83.6% from about 9.6K retrieved
+tokens versus 73.2% for full context at about 79K tokens. Shibahama should not
+claim bi-temporal invalidation or never-delete history as sufficient
+differentiators unless it also proves a better stale-rate, auditability, or
+token-cost result on a matching continuity slice:
+https://arxiv.org/abs/2606.09900.
+
 Recent 2026 work makes the threat sharper. MemTier reports that LoCoMo scores can
 be insensitive to memory architecture when conversations are available in
 context, and argues LongMemEval-S is more discriminating because it requires
@@ -71,6 +81,8 @@ baselines, including cases where those baselines win.
 Every public benchmark claim should include:
 
 - a flat retrieval or keyword baseline;
+- the closest reproducible bi-temporal/non-destructive comparison, currently
+  Engram, when that feature family is part of the claim;
 - retrieval token cost;
 - stale-answer rate when the dataset contains changing facts;
 - Shibahama ablations for significance, reconstruction/supersession, and graph

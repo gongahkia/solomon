@@ -28,6 +28,13 @@ and mutation/forgetting behavior before broad leaderboard accuracy. LoCoMo and
 LongMemEval results must be reported alongside flat retrieval baselines, even
 when those baselines win.
 
+The closest published comparison to the bi-temporal, non-destructive part of the
+thesis is Engram (`arXiv:2606.09900`). Any claim about supersession,
+point-in-time recall, provenance-preserving invalidation, or token-efficient
+LongMemEval-S retrieval must compare against Engram where the benchmark setup is
+reproducible. Shibahama should lead with stale-rate, auditability, human signals,
+and Tideline legibility only when those are measured or directly demonstrated.
+
 ## Systems
 
 The harness uses a shared adapter interface with three operations: reset a case,
@@ -77,9 +84,18 @@ The checked-in summary is:
 ### Coding-Agent Memory Task
 
 `coding-agent` is a compact long-horizon coding-agent benchmark. It includes
-project decisions, rejected approaches, and file moves. It remains experimental
-and has no checked-in result artifact; do not cite it as a passing benchmark
-until a non-placeholder result is generated and committed.
+project decisions, rejected approaches, superseded backlog ideas, and file
+moves. It is a local continuity smoke, not an external-system comparison.
+
+The checked-in result files are:
+
+- `benchmarks/results/coding-agent-local.json`
+- `benchmarks/results/coding-agent-local.md`
+
+As of the current artifact, Shibahama scores `1.000` accuracy with `0.000`
+stale-answer rate; the warehouse baseline scores `0.000` accuracy with `1.000`
+stale-answer rate. Shibahama uses more retrieved tokens in this tiny fixture, so
+the claim here is stale-rate behavior, not token efficiency.
 
 ### Feature Ablation Suite
 
@@ -147,14 +163,14 @@ python benchmarks/run.py \
   --markdown benchmarks/results/currencybench-local.md
 ```
 
-Run the experimental coding-agent benchmark:
+Run the local coding-agent continuity smoke:
 
 ```sh
 python benchmarks/run.py \
   --suite coding-agent \
   --systems shibahama,warehouse \
-  --output /tmp/coding-agent-experimental.json \
-  --markdown /tmp/coding-agent-experimental.md
+  --output benchmarks/results/coding-agent-local.json \
+  --markdown benchmarks/results/coding-agent-local.md
 ```
 
 Run the local feature ablations:

@@ -1,7 +1,7 @@
 # Shibahama Launch Writeup
 
 Long-lived agents do not only need more memory. They need memory with currency,
-trust, and history.
+trust, human contestability, and inspectable history.
 
 The common failure is familiar: an agent remembers a related fact but not whether
 the fact was superseded, rejected, low-trust, or only useful in a previous phase
@@ -10,7 +10,10 @@ suggested again, and model-authored notes slowly become indistinguishable from
 source-backed decisions.
 
 Shibahama is an embeddable memory engine for that failure mode. It treats memory
-as a durable stream of claims instead of a bag of text chunks.
+as a durable stream of claims instead of a bag of text chunks. Its narrow
+positioning is append-only, never-delete memory with credence floors, explicit
+human signal verbs, and a debugger that shows why reconstruction or
+consolidation happened.
 
 ## What It Stores
 
@@ -83,6 +86,11 @@ LongMemEval loaders accept official dataset exports, but checked-in comparison
 claims still require committed run artifacts. External-system adapters should
 not be claimed until they are backed by reproducible successful runs.
 
+Engram is now the closest published comparison for bi-temporal, non-destructive
+agent memory. Any launch claim about supersession, point-in-time recall, or
+token-efficient LongMemEval-S retrieval needs either a direct reproducible
+comparison or a narrower claim that avoids implying superiority.
+
 The current claim is narrower: Shibahama has the mechanics needed for
-currency-aware, provenance-aware, reconstructive memory, and the repo contains
-local tests and demos for those mechanics.
+currency-aware, provenance-aware, human-contestable reconstructive memory, and
+the repo contains local tests and demos for those mechanics.

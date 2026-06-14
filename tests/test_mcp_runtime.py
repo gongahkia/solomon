@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from solomon.api.service import DependencyRequest, IngestRequest, SolomonService
+from solomon.boundary.solomon import SolomonBoundary
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.graph.models import EdgeType
 from solomon.mcp.tools import SolomonMCPRuntime
@@ -82,3 +84,37 @@ def test_mcp_runtime_maps_all_required_tools_to_service(tmp_path: Path) -> None:
     assert audit_pack["knowledge_item_id"] == item.id
     assert audit_pack["format"] == "json"
     assert "manifest_json" in audit_pack["pack"]
+
+
+def test_mcp_preflight_rejects_boundary_unsafe_output(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="structure x under regulation r section 12",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo-1",
+        )
+    )
+    service.boundary = SolomonBoundary(HighRiskBoundaryClient())
+    runtime = SolomonMCPRuntime(service)
+
+    result = runtime.preflight_context(query=item.content)
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "boundary_rejected"
+    assert result["error"]["details"]["classification"] == "HIGH_RISK"
+
+
+class HighRiskBoundaryClient:
+    def review(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"classification": "HIGH_RISK", "findings": [{"kind": "mnpi_or_high_risk_secret"}]}
+
+    def pseudonymize(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"pseudonymized_text": "", "mapping": []}
+
+    def reidentify(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"reidentified_text": ""}
+
+    def scrub_document(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {}

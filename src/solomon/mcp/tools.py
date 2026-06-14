@@ -84,6 +84,9 @@ class SolomonMCPRuntime:
                 max_context_tokens=max_context_tokens,
             )
         )
+        review = _review_mcp_output(self.service, "solomon.preflight_context", results, matter_id=matter_id)
+        if "error" in review:
+            return review
         entry = self.service.audit.append(
             "mcp_call",
             {
@@ -98,7 +101,7 @@ class SolomonMCPRuntime:
             "items": results,
             "excluded": [],
             "scope": {"matter_id": matter_id, "client_id": client_id, "caller_id": caller_id},
-            "boundary": {"status": "not_applicable", "classification": None, "finding_count": 0, "context_id": None},
+            "boundary": review,
             "audit": _audit_metadata(entry.seq, entry.entry_hash, self.service.audit.path),
         }
 
@@ -210,6 +213,9 @@ class SolomonMCPRuntime:
                 client_id=cast(str | None, scope.get("client_id")),
             )
         )
+        review = _review_mcp_output(self.service, "solomon.ingest", item.content, matter_id=item.matter_id)
+        if "error" in review:
+            return review
         suggestions = self.service.dependency_suggestions(item_id=item.id, decision=SuggestionDecision.PENDING)
         entry = self.service.audit.append(
             "mcp_call",
@@ -223,12 +229,7 @@ class SolomonMCPRuntime:
         )
         return {
             "item": item.model_dump(mode="json"),
-            "boundary": {
-                "status": "passed",
-                "classification": item.provenance.boundary_review_classification,
-                "finding_count": len(item.provenance.boundary_findings),
-                "context_id": None,
-            },
+            "boundary": review,
             "dependency_suggestions": [suggestion.model_dump(mode="json") for suggestion in suggestions],
             "audit": _audit_metadata(entry.seq, entry.entry_hash, self.service.audit.path),
         }
@@ -407,6 +408,82 @@ def _log_mcp_call(
             "currency_outcome": currency_outcome,
         },
     )
+
+
+def _review_mcp_output(
+    service: SolomonService,
+    tool_name: str,
+    payload: object,
+    *,
+    matter_id: str | None = None,
+) -> dict[str, Any]:
+    text = _content_text(payload)
+    if not text:
+        return {"status": "passed", "classification": "SAFE", "finding_count": 0, "context_id": None}
+    try:
+        response = service.boundary.client.review(
+            request={
+                "text": text,
+                "source_jurisdiction": service.boundary.policy.default_source_jurisdiction,
+                "destination_jurisdiction": service.boundary.policy.default_destination_jurisdiction,
+                "document_type": "mcp_tool_result",
+                "review_profile": service.boundary.policy.review_profile,
+                "matter_id": matter_id,
+                "include_suggestions": True,
+            }
+        )
+    except Exception as exc:  # pragma: no cover - client failures are implementation-dependent
+        return _error_result(
+            "boundary_rejected",
+            "boundary review failed; refusing MCP content return",
+            retryable=True,
+            details={"tool_name": tool_name, "error": str(exc)},
+        )
+    classification = _response_value(response, "classification", "SAFE")
+    findings = _response_value(response, "findings", [])
+    finding_count = len(findings) if isinstance(findings, list) else 0
+    if classification in service.boundary.policy.unsafe_classifications:
+        service.audit.append(
+            "mcp_call",
+            {
+                "tool_name": tool_name,
+                "boundary_outcome": classification,
+                "error_code": "boundary_rejected",
+                "matter_id": matter_id,
+            },
+        )
+        return _error_result(
+            "boundary_rejected",
+            "boundary classified MCP output as unsafe",
+            retryable=False,
+            details={"classification": classification, "finding_count": finding_count},
+        )
+    return {"status": "passed", "classification": classification, "finding_count": finding_count, "context_id": None}
+
+
+def _content_text(payload: object) -> str:
+    if isinstance(payload, str):
+        return payload
+    if isinstance(payload, list):
+        chunks: list[str] = []
+        for entry in payload:
+            if isinstance(entry, dict):
+                item = entry.get("item")
+                if isinstance(item, dict) and isinstance(item.get("content"), str):
+                    chunks.append(item["content"])
+        return "\n\n".join(chunks)
+    return ""
+
+
+def _response_value(response: object, field: str, default: Any) -> Any:
+    if isinstance(response, dict):
+        return response.get(field, default)
+    value = getattr(response, field, default)
+    return getattr(value, "value", value)
+
+
+def _error_result(code: str, message: str, *, retryable: bool, details: dict[str, Any]) -> dict[str, Any]:
+    return {"ok": False, "error": {"code": code, "message": message, "retryable": retryable, "details": details}}
 
 
 def _audit_metadata(seq: int, entry_hash: str, journal_path: Path) -> dict[str, str]:

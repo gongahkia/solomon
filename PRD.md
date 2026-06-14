@@ -41,14 +41,17 @@ No tool addresses (1). No tool addresses (1) *and* (2) together. That intersecti
 
 ## 3. The product split — how Solomon is visibly distinct (read this if you only read one section)
 
-Solomon is one system with two separable layers. The distinction is not cosmetic; each layer answers a different production question:
+Solomon is one system with three separable layers. The distinction is not cosmetic; each layer answers a different production question:
 
 | | Question it answers | Competency it proves | Memory stance | Stack |
 |---|---|---|---|---|
 | **Boundary** | What is safe to let leave the building? | Regulated safety infrastructure | **Stateless** — forgets by design | Python/FastAPI |
 | **Currency engine** | Is what we know still true, and can we prove it? | Domain reasoning under constraints | **Never forgets** — currency is the problem | Python |
+| **MCP/API layer** | How do existing legal-AI tools ask for current firm context? | Infra-grade integration surface | **Just-in-time** — injects only scoped, current context | MCP, HTTP API, thin CLI |
 
-The boundary is a native Solomon subset, not a separate product. Solomon rejects age/usage decay because currency, not significance-fade, is the legal problem.
+The boundary is a native Solomon subset, not a separate product. The currency engine is the source of truth. The MCP/API layer is the primary product surface: Claude, Copilot, Harvey-like vendors, iManage-style knowledge systems, and internal tools should call Solomon for preflight context, currency checks, impact analysis, verification writes, and audit packs. A standalone curator console exists only as a thin side-channel for human review; it is not the destination app and it does not replace the legal tools lawyers already use.
+
+Solomon rejects age/usage decay because currency, not significance-fade, is the legal problem.
 
 ---
 

@@ -17,7 +17,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Author `CONTRIBUTING.md` (build, test, RFC process)
 - [ ] Author `SECURITY.md` (responsible disclosure address, scope)
 - [x] Set up `.editorconfig`, `.gitattributes`
-- [ ] Choose Zig toolchain version and pin in `build.zig.zon`
+- [x] Choose Zig toolchain version and pin in `build.zig.zon`
 - [ ] Initialize `build.zig` skeleton (debug + release + benchmark steps)
 - [ ] Set up GitHub Actions matrix: macOS-14, ubuntu-22.04, ubuntu-24.04
 - [ ] Configure release-please / cargo-dist equivalent for Zig (manual tag-driven release for v0)

@@ -34,6 +34,17 @@ pub fn main() !void {
 
     const socket_path = if (config.socket_path) |path| path else try paths.defaultSocketPath(allocator);
     defer if (config.socket_path == null) allocator.free(socket_path);
+
+    if (config.health) {
+        try adminRequest(socket_path, "health\n");
+        return;
+    }
+
+    if (config.metrics) {
+        try adminRequest(socket_path, "metrics\n");
+        return;
+    }
+
     const log_path = if (config.log_path) |path| path else try paths.defaultLogPath(allocator);
     defer if (config.log_path == null) allocator.free(log_path);
 
@@ -96,12 +107,33 @@ fn daemonize() !void {
     try std.posix.dup2(null_fd, std.posix.STDERR_FILENO);
 }
 
+fn adminRequest(socket_path: []const u8, request: []const u8) !void {
+    var stream = try std.net.connectUnixSocket(socket_path);
+    defer stream.close();
+
+    try writeAll(stream.handle, request);
+
+    var response: [4096]u8 = undefined;
+    const n = try std.posix.read(stream.handle, &response);
+    try std.fs.File.stdout().writeAll(response[0..n]);
+}
+
+fn writeAll(fd: std.posix.fd_t, bytes: []const u8) !void {
+    var remaining = bytes;
+    while (remaining.len > 0) {
+        const written = try std.posix.write(fd, remaining);
+        remaining = remaining[written..];
+    }
+}
+
 const help_text =
     \\usage: shisad [options]
     \\
     \\options:
     \\  -h, --help            print help
     \\      --version         print version
+    \\      --health          query daemon health
+    \\      --metrics         query daemon metrics
     \\      --foreground      do not daemonize
     \\      --daemonize       daemonize with fork+setsid (default)
     \\      --socket <path>   override daemon socket path

@@ -3,6 +3,8 @@ const std = @import("std");
 pub const Config = struct {
     daemonize: bool = true,
     help: bool = false,
+    health: bool = false,
+    metrics: bool = false,
     version: bool = false,
     socket_path: ?[]const u8 = null,
     log_path: ?[]const u8 = null,
@@ -22,6 +24,10 @@ pub fn parse(args: []const []const u8) ParseError!Config {
 
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             config.help = true;
+        } else if (std.mem.eql(u8, arg, "--health")) {
+            config.health = true;
+        } else if (std.mem.eql(u8, arg, "--metrics")) {
+            config.metrics = true;
         } else if (std.mem.eql(u8, arg, "--version")) {
             config.version = true;
         } else if (std.mem.eql(u8, arg, "--foreground")) {
@@ -54,7 +60,16 @@ test "defaults to daemonizing" {
     const config = try parse(&.{});
     try std.testing.expect(config.daemonize);
     try std.testing.expect(!config.help);
+    try std.testing.expect(!config.health);
+    try std.testing.expect(!config.metrics);
     try std.testing.expect(!config.version);
+}
+
+test "parses admin flags" {
+    const args = [_][]const u8{ "--health", "--metrics" };
+    const config = try parse(args[0..]);
+    try std.testing.expect(config.health);
+    try std.testing.expect(config.metrics);
 }
 
 test "parses foreground and paths" {

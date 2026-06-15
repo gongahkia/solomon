@@ -45,7 +45,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Implement crash-restart supervisor (separate `shisa supervisor` binary or `--supervise` flag)
 - [x] Implement structured logging to `~/Library/Logs/shisa/shisad.log`
 - [x] Implement log rotation (size-based, 5×10MB ring)
-- [ ] Implement `shisad --version`, `--health`, `--metrics` admin endpoints
+- [x] Implement `shisad --version`, `--health`, `--metrics` admin endpoints
 
 ### 1.2 Wire protocol v0
 - [ ] Define request frame (length-prefixed JSON): `{cwd, exit, jobs, duration, shell, cols, rows}`

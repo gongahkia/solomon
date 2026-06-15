@@ -3,6 +3,7 @@ const std = @import("std");
 pub const Server = struct {
     socket_path: []const u8,
     listener: std.net.Server,
+    connections: u64 = 0,
 
     pub fn init(socket_path: []const u8) !Server {
         if (std.fs.path.dirname(socket_path)) |parent| {
@@ -52,17 +53,26 @@ pub const Server = struct {
 
     pub fn acceptOne(self: *Server) !void {
         const connection = try self.listener.accept();
-        try handleConnection(connection);
+        self.connections += 1;
+        try self.handleConnection(connection);
+    }
+
+    fn handleConnection(self: *Server, connection: std.net.Server.Connection) !void {
+        defer connection.stream.close();
+
+        var buffer: [4096]u8 = undefined;
+        const n = try std.posix.read(connection.stream.handle, &buffer);
+        const request = buffer[0..n];
+
+        if (std.mem.startsWith(u8, request, "metrics")) {
+            var response: [128]u8 = undefined;
+            const line = try std.fmt.bufPrint(&response, "{{\"connections\":{d}}}\n", .{self.connections});
+            try writeAll(connection.stream.handle, line);
+        } else {
+            try writeAll(connection.stream.handle, "ok\n");
+        }
     }
 };
-
-fn handleConnection(connection: std.net.Server.Connection) !void {
-    defer connection.stream.close();
-
-    var buffer: [4096]u8 = undefined;
-    _ = try std.posix.read(connection.stream.handle, &buffer);
-    try writeAll(connection.stream.handle, "ok\n");
-}
 
 fn writeAll(fd: std.posix.fd_t, bytes: []const u8) !void {
     var remaining = bytes;
@@ -97,6 +107,31 @@ test "accepts one unix socket connection" {
     var response: [16]u8 = undefined;
     const n = try std.posix.read(client.handle, &response);
     try std.testing.expectEqualStrings("ok\n", response[0..n]);
+
+    thread.join();
+}
+
+test "returns metrics response" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
+
+    var client = try std.net.connectUnixSocket(socket_path);
+    defer client.close();
+    _ = try std.posix.write(client.handle, "metrics\n");
+
+    var response: [128]u8 = undefined;
+    const n = try std.posix.read(client.handle, &response);
+    try std.testing.expectEqualStrings("{\"connections\":1}\n", response[0..n]);
 
     thread.join();
 }

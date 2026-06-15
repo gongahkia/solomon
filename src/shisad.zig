@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const cli = @import("daemon/cli.zig");
 const lock = @import("daemon/lock.zig");
 const paths = @import("daemon/paths.zig");
+const server = @import("daemon/server.zig");
 
 const version = "0.1.0-dev";
 
@@ -45,13 +46,18 @@ pub fn main() !void {
         try daemonize();
     }
 
-    try run(config);
+    try run(config, socket_path);
 }
 
-fn run(config: cli.Config) !void {
+fn run(config: cli.Config, socket_path: []const u8) !void {
+    var daemon_server = try server.Server.init(socket_path);
+    defer daemon_server.deinit();
+
     if (!config.daemonize) {
-        try std.fs.File.stdout().writeAll("shisad: daemon entry ready\n");
+        try std.fs.File.stdout().writeAll("shisad: listening\n");
     }
+
+    try daemon_server.serve();
 }
 
 fn daemonize() !void {

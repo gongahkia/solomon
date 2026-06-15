@@ -33,7 +33,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Stand up minimal landing page on `shisa.sh` (single HTML, install one-liner, link to repo)
 - [x] Write the architecture overview doc (`docs/architecture.md`)
 - [x] Pick the wire protocol (length-prefixed JSON per RFC-0001)
-- [ ] Decide socket path convention (`$XDG_RUNTIME_DIR/shisa.sock` on Linux, `~/Library/Caches/shisa/shisa.sock` on macOS)
+- [x] Decide socket path convention (`$XDG_RUNTIME_DIR/shisa.sock` on Linux, `~/Library/Caches/shisa/shisa.sock` on macOS)
 
 ## Phase 1 — Single-shell MVP (zsh on macOS)
 

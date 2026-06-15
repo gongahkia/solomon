@@ -51,7 +51,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Define request frame (length-prefixed JSON): `{cwd, exit, jobs, duration, shell, cols, rows}`
 - [x] Define response frame: `{prompt, redraw_token?}`
 - [x] Implement encoder/decoder in Zig with fuzz tests
-- [ ] Implement client library (`shisa-client.zig`) for use by `shisa prompt`
+- [x] Implement client library (`shisa-client.zig`) for use by `shisa prompt`
 - [ ] Implement `shisa prompt` CLI that connects to daemon and prints
 
 ### 1.3 Sync modules (v0)

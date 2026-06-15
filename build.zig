@@ -141,6 +141,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const proto_frame_test_run = b.addRunArtifact(proto_frame_tests);
+    const client_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/shisa-client.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const client_test_run = b.addRunArtifact(client_tests);
     const server_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/server.zig"),
@@ -157,5 +165,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&supervisor_test_run.step);
     test_step.dependOn(&proto_types_test_run.step);
     test_step.dependOn(&proto_frame_test_run.step);
+    test_step.dependOn(&client_test_run.step);
     test_step.dependOn(&server_test_run.step);
 }

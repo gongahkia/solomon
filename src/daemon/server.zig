@@ -33,9 +33,20 @@ pub const Server = struct {
         self.* = undefined;
     }
 
-    pub fn serve(self: *Server) !void {
-        while (true) {
-            try self.acceptOne();
+    pub fn serve(self: *Server, shutdown_requested: *const std.atomic.Value(bool)) !void {
+        while (!shutdown_requested.load(.seq_cst)) {
+            var poll_fds = [_]std.posix.pollfd{.{
+                .fd = self.listener.stream.handle,
+                .events = std.posix.POLL.IN,
+                .revents = 0,
+            }};
+
+            const ready = try std.posix.poll(&poll_fds, 100);
+            if (ready == 0) continue;
+
+            if ((poll_fds[0].revents & std.posix.POLL.IN) != 0) {
+                try self.acceptOne();
+            }
         }
     }
 

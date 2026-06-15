@@ -41,7 +41,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] `shisad` entry: parse CLI args, daemonize with `posix_spawn` or fork+setsid
 - [x] Implement single-instance lock via flock on the socket path
 - [x] Implement unix-domain socket server (accept loop, per-conn handler)
-- [ ] Implement graceful shutdown on SIGTERM/SIGINT (drain in-flight requests, unlink socket)
+- [x] Implement graceful shutdown on SIGTERM/SIGINT (drain in-flight requests, unlink socket)
 - [ ] Implement crash-restart supervisor (separate `shisa supervisor` binary or `--supervise` flag)
 - [ ] Implement structured logging to `~/Library/Logs/shisa/shisad.log`
 - [ ] Implement log rotation (size-based, 5×10MB ring)

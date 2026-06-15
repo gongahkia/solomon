@@ -4,6 +4,7 @@ const cli = @import("daemon/cli.zig");
 const lock = @import("daemon/lock.zig");
 const paths = @import("daemon/paths.zig");
 const server = @import("daemon/server.zig");
+const signals = @import("daemon/signals.zig");
 
 const version = "0.1.0-dev";
 
@@ -46,6 +47,7 @@ pub fn main() !void {
         try daemonize();
     }
 
+    signals.installShutdownHandlers();
     try run(config, socket_path);
 }
 
@@ -57,7 +59,7 @@ fn run(config: cli.Config, socket_path: []const u8) !void {
         try std.fs.File.stdout().writeAll("shisad: listening\n");
     }
 
-    try daemon_server.serve();
+    try daemon_server.serve(&signals.shutdown_requested);
 }
 
 fn daemonize() !void {

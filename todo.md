@@ -13,7 +13,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Reserve `@shisa` on npm in case of node-side install tooling
 - [x] Decide canonical README/landing copy + the one-line pitch
 - [x] Author `LICENSE` (MIT) at repo root
-- [ ] Author `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1)
+- [x] Author `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1)
 - [ ] Author `CONTRIBUTING.md` (build, test, RFC process)
 - [ ] Author `SECURITY.md` (responsible disclosure address, scope)
 - [x] Set up `.editorconfig`, `.gitattributes`

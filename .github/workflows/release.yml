@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-14
+          - ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+          use-cache: true
+          cache-key: release-${{ hashFiles('build.zig.zon') }}
+
+      - run: zig build release
+
+      - name: Package artifact
+        run: |
+          set -eu
+          os=$(printf "%s" "$RUNNER_OS" | tr "[:upper:]" "[:lower:]")
+          arch=$(printf "%s" "$RUNNER_ARCH" | tr "[:upper:]" "[:lower:]")
+          name="shisa-${GITHUB_REF_NAME}-${os}-${arch}"
+          mkdir -p "dist/$name"
+          cp zig-out/bin/shisa "dist/$name/"
+          cp LICENSE README.md "dist/$name/"
+          tar -czf "dist/$name.tar.gz" -C dist "$name"
+          shasum -a 256 "dist/$name.tar.gz" > "dist/$name.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shisa-${{ github.ref_name }}-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    runs-on: ubuntu-24.04
+    needs:
+      - build
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Manual v0 release. Artifacts and SHA-256 checksums are attached." \
+            dist/*

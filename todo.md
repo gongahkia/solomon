@@ -20,7 +20,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Choose Zig toolchain version and pin in `build.zig.zon`
 - [x] Initialize `build.zig` skeleton (debug + release + benchmark steps)
 - [x] Set up GitHub Actions matrix: macOS-14, ubuntu-22.04, ubuntu-24.04
-- [ ] Configure release-please / cargo-dist equivalent for Zig (manual tag-driven release for v0)
+- [x] Configure release-please / cargo-dist equivalent for Zig (manual tag-driven release for v0)
 - [x] Set up sccache-equivalent caching for Zig builds in CI
 - [x] Write RFC-0001: Daemon wire protocol (framing, message types, versioning)
 - [x] Write RFC-0002: Module execution classes (sync, async, cached)

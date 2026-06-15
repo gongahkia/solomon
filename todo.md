@@ -57,7 +57,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 ### 1.3 Sync modules (v0)
 - [x] `cwd` module: display current directory with home-tilde and configurable truncation
 - [x] `exit_status` module: show non-zero exit codes with color
-- [ ] `jobs` module: background job count
+- [x] `jobs` module: background job count
 - [ ] `cmd_duration` module: show last command duration when above threshold
 - [ ] `user` and `host` modules (hidden by default, surface in SSH)
 - [ ] `git_branch` module (sync version, cached): branch name + dirty indicator

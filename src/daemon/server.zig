@@ -1,6 +1,7 @@
 const std = @import("std");
 const cwd_module = @import("modules/cwd.zig");
 const exit_status_module = @import("modules/exit_status.zig");
+const jobs_module = @import("modules/jobs.zig");
 const json = @import("json.zig");
 
 const header_bytes = 4;
@@ -106,17 +107,29 @@ fn renderResponse(request_payload: []const u8) ![]u8 {
 
     const exit_status = try exit_status_module.render(std.heap.page_allocator, parsed.value.exit);
     defer if (exit_status) |segment| std.heap.page_allocator.free(segment);
+    const jobs = try jobs_module.render(std.heap.page_allocator, parsed.value.jobs);
+    defer if (jobs) |segment| std.heap.page_allocator.free(segment);
 
-    const prompt = if (exit_status) |segment|
-        try std.fmt.allocPrint(std.heap.page_allocator, "{s} {s}> ", .{ cwd, segment })
-    else
-        try std.fmt.allocPrint(std.heap.page_allocator, "{s}> ", .{cwd});
+    const prompt = try formatPrompt(std.heap.page_allocator, cwd, exit_status, jobs);
     defer std.heap.page_allocator.free(prompt);
 
     const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, prompt);
     defer std.heap.page_allocator.free(escaped_prompt);
 
     return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"prompt\":\"{s}\",\"redraw_token\":null}}", .{escaped_prompt});
+}
+
+fn formatPrompt(allocator: std.mem.Allocator, cwd: []const u8, exit_status: ?[]const u8, jobs: ?[]const u8) ![]u8 {
+    if (exit_status) |exit_segment| {
+        if (jobs) |jobs_segment| {
+            return std.fmt.allocPrint(allocator, "{s} {s} {s}> ", .{ cwd, exit_segment, jobs_segment });
+        }
+        return std.fmt.allocPrint(allocator, "{s} {s}> ", .{ cwd, exit_segment });
+    }
+    if (jobs) |jobs_segment| {
+        return std.fmt.allocPrint(allocator, "{s} {s}> ", .{ cwd, jobs_segment });
+    }
+    return std.fmt.allocPrint(allocator, "{s}> ", .{cwd});
 }
 
 fn writeFrame(fd: std.posix.fd_t, payload: []const u8) !void {

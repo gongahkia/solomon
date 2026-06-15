@@ -198,3 +198,184 @@ This project is successful (not just shipped) when:
 - Theme spec: extend starship's preset format, or invent fresh?
 - Wire protocol: line-delimited JSON vs. MessagePack vs. a hand-rolled framed binary?
 - How does `shisa --no-daemon` behave? (degraded sync mode for restricted envs.)
+
+---
+
+# Extended Capabilities — Plugin Packs
+
+Sections 1–17 above define the **core**. The core is opinionated, lean, perf-obsessed, and shippable on its own. Everything below is shipped as **official plugin packs** sitting on top of the same daemon, cache, and capability-gated Lua sandbox defined in §5.5–§8.
+
+Three reasons this architecture matters:
+
+1. **Each pack is opt-in.** A user who wants only "Starship but never blocks" never sees AI, cloud, or jj code paths.
+2. **The packs are the differentiation moat.** Daemon-perf gets us baseline competitiveness with starship; the packs are what make Shisa land in users' dotfiles and stay.
+3. **Pack scope is honest.** Each pack lists what it explicitly does **not** do, to prevent feature creep killing perf.
+
+## 18. AI plugin pack (`shisa.ai`)
+
+**Pitch:** the prompt that helps you finish the command you were about to type, without sending a byte to anyone's servers by default.
+
+Local-first. Bundles a recommended small model recipe (`qwen2.5:1.5b`, `gemma3:1b`, or `phi3:mini` — final pick TBD by benchmark) via Ollama. Cloud providers (OpenAI, Anthropic, Gemini) require explicit `shisa plugin trust shisa.ai --net` and a key; the daemon enforces.
+
+### Shipped modules
+
+| Module                       | Trigger             | What it does                                                                 |
+|------------------------------|---------------------|------------------------------------------------------------------------------|
+| `nextcmd`                    | hotkey (e.g. Ctrl-O)| Suggests the next command given history + cwd + last output. Inline preview.|
+| `nl2cmd`                     | type `?? <english>` | Converts natural language to a command. Always shows preview, never auto-runs.|
+| `explain`                    | hotkey on a command | Plain-English breakdown of the command + every flag.                          |
+| `risk`                       | pre-exec (Enter)    | Rules-engine first (fast, deterministic); SLM second (slow, optional).        |
+| `errfix`                     | post non-zero exit  | Surfaces a `shisa: try `<x>`?` hint based on last stderr.                     |
+| `histsearch`                 | hotkey (e.g. Ctrl-R)| Semantic search over shell history with local embeddings (atuin-style).       |
+| `cdhint`                     | post-`cd` to new dir| Surfaces "looks like a Node project; common commands: ..." (rule-driven).    |
+
+### Explicit non-goals
+- **Not an agent.** Never runs commands without explicit confirmation. No autonomous loops.
+- **Not Warp / Claude Code / Aider replacement.** Those are full coding agents; `shisa.ai` is prompt-line inline assist only.
+- **Not a shell history replacement.** Optional integration with atuin via a thin adapter; does not import/sync atuin's DB.
+- **Not a chat panel.** No conversation UI. Prompt-line and inline only.
+
+### Privacy contract
+- Default config: no network capability granted. The plugin literally cannot reach the internet.
+- Cloud opt-in requires `shisa plugin trust shisa.ai --net=<provider>` per-provider, per-installation. Re-prompted on plugin upgrade.
+- Every cloud request is logged locally (`~/.local/state/shisa/ai-requests.jsonl`) with redactable payload hashes for audit.
+- A `shisa ai redact` rule file lets users define regex strings (`/sk-[A-Za-z0-9]+/`, `/AKIA[0-9A-Z]+/`) that are scrubbed before any provider call.
+
+## 19. Cloud-safety plugin pack (`shisa.cloud`)
+
+**Pitch:** stop nuking prod. The prompt screams when you're somewhere dangerous, and refuses to let you bypass it casually.
+
+Cloud-safety is where the daemon's pre-exec hook pays for itself most obviously. Built atop the same Lua plugin model, but exposing extra integration points (pre-exec gate, multi-segment rendering, fsnotify on config files).
+
+### Shipped modules
+
+| Module                     | What it shows / does                                                                                       |
+|----------------------------|------------------------------------------------------------------------------------------------------------|
+| `cloud_ctx`                | Unified segment: AWS profile · GCP project · Azure subscription · k8s context+namespace. Daemon-cached.    |
+| `risk_tier`                | Classifies the current cloud context as prod / staging / dev / unknown via regex + user rules. Colors the prompt's background bar.|
+| `prod_guard`               | Pre-exec hook: when risk_tier=prod AND command matches a destructive pattern, demand typed confirmation.   |
+| `iam_whoami`               | Current AWS/GCP/Azure principal/IAM user. Surfaces in detailed mode, hidden by default.                    |
+| `sso_expiry`               | Reads cached SSO token expiry (AWS SSO, gcloud, az, Vault, 1Password CLI) and warns when < 30 min remain.  |
+| `iac_workspace`            | Terraform / Pulumi / CDK workspace + lock state. Pre-exec warns if locked or drifted.                       |
+| `region_drift`             | Warns when env `AWS_REGION` differs from profile-configured region. Same for `CLOUDSDK_CORE_PROJECT` etc.   |
+| `cost_glance`              | Optional, hourly-refresh, cached month-to-date cloud spend. Heavy module; off by default; opt-in.          |
+| `vpn_status`               | Detects active corp VPN (route table / wireguard / Tailscale / NetBird). Useful as a tier-gate.            |
+| `ssh_target`               | When inside an active SSH session, displays the remote host with a risk-tier classification.                |
+| `container_provenance`     | Inside docker / podman / devcontainer / nix-shell / distrobox / toolbx — show which one.                   |
+
+### prod_guard contract
+
+```
+$ kubectl delete ns checkout
+shisa: ⛔ this command targets a PROD-classified context (k8s://acme-prod).
+       to proceed, type the tier name and press Enter:
+> PROD
+shisa: proceeding...
+```
+
+The guard's blocklist ships with sane defaults (`kubectl delete`, `kubectl drain`, `terraform destroy`, `aws ec2 terminate-instances`, `aws s3 rb`, `gcloud * delete`, `rm -rf`, `dd of=/dev/`, `mkfs`, `DROP TABLE`, etc.). Users extend via `~/.config/shisa/prod_guard.toml`. Shisa never *blocks* the command — it *gates* it. A user can always bypass with `--force` or by typing the tier name; the goal is breaking muscle memory, not adversarial defense.
+
+### Explicit non-goals
+- **Not a policy engine.** This is a habit-breaking UI layer, not OPA. Bypassable by design.
+- **Not a cost dashboard.** `cost_glance` is a glance, not a finops tool. For real cost work, link out to AWS/GCP consoles or aws-finops-dashboard.
+- **Not a credential manager.** `sso_expiry` reads cached state; it does not refresh, rotate, or store credentials.
+
+## 20. VCS moat (`shisa.vcs`)
+
+This is the section where Shisa builds a durable competitive moat. Starship's git module is the gold standard, but starship has no first-class support for jj, sapling, or hg, and patchy support for stacked-diff workflows. Shisa treats VCS plurality as a first-class concern.
+
+### Shipped modules
+
+| VCS                              | Status                          | Why it matters                                                                                              |
+|----------------------------------|----------------------------------|-------------------------------------------------------------------------------------------------------------|
+| Git                              | Tier 1                          | Universal. Async, cached, fsnotify.                                                                          |
+| Jujutsu (jj)                     | Tier 1                          | 28k stars, fastest-growing alternative, Git-compatible. First-class support = mindshare.                     |
+| Sapling (sl)                     | Tier 1                          | Meta's scalable VCS, OSS, used by Mercurial-flavor + smartlog teams.                                          |
+| Mercurial (hg)                   | Tier 1                          | Still active at Facebook, Mozilla, large enterprise. Underserved by modern prompts.                          |
+| Fossil                           | Tier 2 (community plugin)       | Small loyal base. Plugin-able rather than core.                                                              |
+| Pijul                            | Tier 2 (community plugin)       | Niche.                                                                                                       |
+| Bazaar / Breezy                  | Tier 2 (community plugin)       | Legacy.                                                                                                      |
+
+### Stacked-diff awareness (`shisa.vcs.stack`)
+
+Detects which stacking tool is in use and surfaces the stack:
+
+| Tool                  | Detection                                                            |
+|-----------------------|----------------------------------------------------------------------|
+| Graphite (`gt`)       | `.graphite_repo_config` present                                       |
+| ghstack               | Branch naming pattern + `.ghstackrc`                                  |
+| spr / git-spr         | `.git/refs/spr/`                                                      |
+| `st` (stack tool)     | `.git/st-meta` (or equivalent)                                        |
+| git-spice (`gs`)      | `.git/spice-meta` (or equivalent)                                     |
+| git-town              | `.git-town-branches.yml`                                              |
+| Sapling stacks        | `sl smartlog` derivable                                               |
+| GitHub native stacked PRs (`gh stack`) | Available as of 2026; detect via remote config        |
+
+Shows the current position in the stack (e.g., `2/5 ↑↓`) so the user knows what they're on top of.
+
+### Worktrees (`shisa.vcs.worktree`)
+
+- Indicator: `wt:feature-x` when the cwd is inside a worktree
+- Inventory: `shisa worktrees` lists all worktrees for the repo, marks the active one
+- Multi-worktree safety: warn when two worktrees have uncommitted changes on related branches
+
+### Explicit non-goals
+- **Not a git CLI replacement.** Shisa is not lazygit, magit, or gh. It surfaces VCS state in the prompt and pre-exec hook.
+- **Not a stack manager.** It doesn't push, restack, or restitch. It displays what your stacking tool already tracks.
+
+## 21. Activity & focus pack (`shisa.activity`)
+
+Small, well-defined pack covering the few non-stateful UX wins that don't fit elsewhere.
+
+| Module               | What it does                                                                              |
+|----------------------|-------------------------------------------------------------------------------------------|
+| `long_running`       | When a foreground command has been running > N seconds, prompt shows a discreet timer.    |
+| `cmd_complete_bell`  | Terminal bell / OSC-9 / desktop notification when a long command finishes.                 |
+| `tmux_pane`          | When inside tmux, surface pane/window if helpful (configurable).                           |
+| `right_prompt`       | Right-aligned secondary segment (time, battery, host) without consuming command space.    |
+
+### Explicit non-goals
+- Battery / cpu / network graphs (use bottom/btop).
+- Notifications for arbitrary system events (use a notifier).
+
+## 22. Plugin pack release strategy
+
+Pack lifecycle:
+
+1. **Incubation:** Pack lives in `incubator/<pack>` directory of main repo. Marked experimental. No stability guarantee.
+2. **Graduation:** Pack is split into its own repo (`shisa-<pack>`), gets its own release cadence, and is published to the marketplace index.
+3. **Vetted:** Pack is signed by maintainers and earns the `verified` badge in `shisa plugin list`.
+4. **EOL:** Pack is moved to an archive list, kept installable, but new installs surface a warning.
+
+Pack version is independent of core. Core declares `min_pack_api_version`. Packs declare `requires_core` semver range. Daemon refuses to load incompatible combos and prints a clear remediation.
+
+## 23. Updated roadmap (extension; existing phases unchanged)
+
+- **Phase 9 — Post-GA** (already defined; reused as continuous track).
+- **Phase 10 — VCS moat pack (`shisa.vcs`).** Jujutsu first, then sapling, then hg. Stacked-diff awareness ships in 10.x.
+- **Phase 11 — Cloud-safety pack (`shisa.cloud`).** Multi-cloud context + risk_tier + prod_guard first. Cost / drift / SSO last.
+- **Phase 12 — AI pack (`shisa.ai`).** Local Ollama integration. Ship `nextcmd`, `nl2cmd`, `risk`, `explain`, `errfix` in order of user value.
+- **Phase 13 — Activity & focus pack (`shisa.activity`).** Smaller. Slot in opportunistically.
+- **Phase 14 — Plugin marketplace polish.** Verified badges, signed manifests, installable from `shisa plugin install <name>`.
+
+These phases run in parallel to continuous core hardening. Pack work must not regress core perf targets.
+
+## 24. Honest scope opinions
+
+The following ideas surfaced during research and are **explicitly rejected** for v1 to keep the project shippable. Each is rejected with a reason, not because it's bad, but because it's a different product:
+
+- **Full AI agent / autonomous mode.** This is Claude Code / Aider / Goose / OpenCode territory. Shisa stays inline + opt-in.
+- **Terminal emulator.** This is WezTerm / Alacritty / Ghostty / Warp / Wave territory.
+- **Replacing the shell.** Nu, fish, Brush, Ion already exist.
+- **Cloud cost dashboard.** aws-finops-dashboard already serves this need. `cost_glance` is a *glance*, not a dashboard.
+- **MCP server.** Shisa is a prompt, not an agent gateway. If users want their AI agent to read shell history, atuin/suvadu/engram-mcp do that.
+- **Built-in remote sync of configs.** Dotfile sync is a solved problem (chezmoi, stow, yadm). Shisa stays local-first.
+- **GUI configurator.** A `p10k configure` style wizard is tempting, but a TOML + Lua starting template + a `shisa init --interactive` CLI cover the same UX without GUI scope.
+
+## 25. Success criteria (extended)
+
+In addition to §15:
+
+- The VCS moat must be visible: ≥ 1 viral blog post comparing Shisa's jj/sapling/hg support to starship's, within 6 months of Phase 10.
+- The cloud-safety pack must surface at least 3 documented "Shisa saved my prod" anecdotes from real users within 12 months of Phase 11.
+- The AI pack must run end-to-end on a 2020-era MacBook Air with a 1.5B-parameter model in under 800ms latency for `nextcmd`.

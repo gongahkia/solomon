@@ -21,7 +21,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Initialize `build.zig` skeleton (debug + release + benchmark steps)
 - [x] Set up GitHub Actions matrix: macOS-14, ubuntu-22.04, ubuntu-24.04
 - [ ] Configure release-please / cargo-dist equivalent for Zig (manual tag-driven release for v0)
-- [ ] Set up sccache-equivalent caching for Zig builds in CI
+- [x] Set up sccache-equivalent caching for Zig builds in CI
 - [ ] Write RFC-0001: Daemon wire protocol (framing, message types, versioning)
 - [ ] Write RFC-0002: Module execution classes (sync, async, cached)
 - [ ] Write RFC-0003: Lua plugin capability manifest schema

@@ -27,6 +27,8 @@ jobs:
       - uses: mlugg/setup-zig@v2.2.1
         with:
           version: 0.16.0
+          use-cache: true
+          cache-key: shisa-${{ hashFiles('build.zig.zon') }}
 
       - run: zig version
       - run: zig fmt --check build.zig src

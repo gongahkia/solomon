@@ -15,7 +15,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Author `LICENSE` (MIT) at repo root
 - [x] Author `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1)
 - [x] Author `CONTRIBUTING.md` (build, test, RFC process)
-- [ ] Author `SECURITY.md` (responsible disclosure address, scope)
+- [x] Author `SECURITY.md` (responsible disclosure address, scope)
 - [x] Set up `.editorconfig`, `.gitattributes`
 - [x] Choose Zig toolchain version and pin in `build.zig.zon`
 - [x] Initialize `build.zig` skeleton (debug + release + benchmark steps)

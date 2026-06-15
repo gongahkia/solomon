@@ -12,7 +12,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Reserve `shisa.sh` domain for landing + install script
 - [ ] Reserve `@shisa` on npm in case of node-side install tooling
 - [ ] Decide canonical README/landing copy + the one-line pitch
-- [ ] Author `LICENSE` (MIT) at repo root
+- [x] Author `LICENSE` (MIT) at repo root
 - [ ] Author `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1)
 - [ ] Author `CONTRIBUTING.md` (build, test, RFC process)
 - [ ] Author `SECURITY.md` (responsible disclosure address, scope)

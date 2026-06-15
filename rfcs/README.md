@@ -5,3 +5,4 @@ RFCs are required for changes to the wire protocol, plugin API, security model, 
 | RFC | Title | Status |
 | --- | --- | --- |
 | 0000 | Template | Active |
+| 0001 | Daemon Wire Protocol | Accepted |

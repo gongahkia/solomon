@@ -44,7 +44,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Implement graceful shutdown on SIGTERM/SIGINT (drain in-flight requests, unlink socket)
 - [x] Implement crash-restart supervisor (separate `shisa supervisor` binary or `--supervise` flag)
 - [x] Implement structured logging to `~/Library/Logs/shisa/shisad.log`
-- [ ] Implement log rotation (size-based, 5×10MB ring)
+- [x] Implement log rotation (size-based, 5×10MB ring)
 - [ ] Implement `shisad --version`, `--health`, `--metrics` admin endpoints
 
 ### 1.2 Wire protocol v0

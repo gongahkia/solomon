@@ -1,5 +1,8 @@
 const std = @import("std");
 
+const header_bytes = 4;
+const max_frame_bytes = 1024 * 1024;
+
 pub const Server = struct {
     socket_path: []const u8,
     listener: std.net.Server,
@@ -60,19 +63,54 @@ pub const Server = struct {
     fn handleConnection(self: *Server, connection: std.net.Server.Connection) !void {
         defer connection.stream.close();
 
-        var buffer: [4096]u8 = undefined;
-        const n = try std.posix.read(connection.stream.handle, &buffer);
-        const request = buffer[0..n];
+        const request = try readFrameAlloc(std.heap.page_allocator, connection.stream.handle);
+        defer std.heap.page_allocator.free(request);
 
         if (std.mem.startsWith(u8, request, "metrics")) {
             var response: [128]u8 = undefined;
             const line = try std.fmt.bufPrint(&response, "{{\"connections\":{d}}}\n", .{self.connections});
-            try writeAll(connection.stream.handle, line);
+            try writeFrame(connection.stream.handle, line);
+        } else if (std.mem.startsWith(u8, request, "health")) {
+            try writeFrame(connection.stream.handle, "ok\n");
         } else {
-            try writeAll(connection.stream.handle, "ok\n");
+            try writeFrame(connection.stream.handle, "{\"v\":1,\"prompt\":\"shisa> \",\"redraw_token\":null}");
         }
     }
 };
+
+fn writeFrame(fd: std.posix.fd_t, payload: []const u8) !void {
+    const encoded = try encodeFrameAlloc(std.heap.page_allocator, payload);
+    defer std.heap.page_allocator.free(encoded);
+    try writeAll(fd, encoded);
+}
+
+fn encodeFrameAlloc(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
+    if (payload.len > max_frame_bytes) return error.Oversize;
+    const encoded = try allocator.alloc(u8, header_bytes + payload.len);
+    std.mem.writeInt(u32, encoded[0..header_bytes], @as(u32, @intCast(payload.len)), .big);
+    @memcpy(encoded[header_bytes..], payload);
+    return encoded;
+}
+
+fn readFrameAlloc(allocator: std.mem.Allocator, fd: std.posix.fd_t) ![]u8 {
+    var header: [header_bytes]u8 = undefined;
+    try readExact(fd, &header);
+    const payload_len = std.mem.readInt(u32, &header, .big);
+    if (payload_len > max_frame_bytes) return error.Oversize;
+    const payload = try allocator.alloc(u8, payload_len);
+    errdefer allocator.free(payload);
+    try readExact(fd, payload);
+    return payload;
+}
+
+fn readExact(fd: std.posix.fd_t, buffer: []u8) !void {
+    var offset: usize = 0;
+    while (offset < buffer.len) {
+        const n = try std.posix.read(fd, buffer[offset..]);
+        if (n == 0) return error.ConnectionClosed;
+        offset += n;
+    }
+}
 
 fn writeAll(fd: std.posix.fd_t, bytes: []const u8) !void {
     var remaining = bytes;
@@ -100,13 +138,12 @@ test "accepts one unix socket connection" {
 
     const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
 
-    var client = try std.net.connectUnixSocket(socket_path);
-    defer client.close();
-    _ = try std.posix.write(client.handle, "ping");
-
-    var response: [16]u8 = undefined;
-    const n = try std.posix.read(client.handle, &response);
-    try std.testing.expectEqualStrings("ok\n", response[0..n]);
+    var client_stream = try std.net.connectUnixSocket(socket_path);
+    defer client_stream.close();
+    try writeFrame(client_stream.handle, "health");
+    const response = try readFrameAlloc(allocator, client_stream.handle);
+    defer allocator.free(response);
+    try std.testing.expectEqualStrings("ok\n", response);
 
     thread.join();
 }
@@ -125,13 +162,12 @@ test "returns metrics response" {
 
     const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
 
-    var client = try std.net.connectUnixSocket(socket_path);
-    defer client.close();
-    _ = try std.posix.write(client.handle, "metrics\n");
-
-    var response: [128]u8 = undefined;
-    const n = try std.posix.read(client.handle, &response);
-    try std.testing.expectEqualStrings("{\"connections\":1}\n", response[0..n]);
+    var client_stream = try std.net.connectUnixSocket(socket_path);
+    defer client_stream.close();
+    try writeFrame(client_stream.handle, "metrics");
+    const response = try readFrameAlloc(allocator, client_stream.handle);
+    defer allocator.free(response);
+    try std.testing.expectEqualStrings("{\"connections\":1}\n", response);
 
     thread.join();
 }

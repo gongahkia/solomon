@@ -52,7 +52,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Define response frame: `{prompt, redraw_token?}`
 - [x] Implement encoder/decoder in Zig with fuzz tests
 - [x] Implement client library (`shisa-client.zig`) for use by `shisa prompt`
-- [ ] Implement `shisa prompt` CLI that connects to daemon and prints
+- [x] Implement `shisa prompt` CLI that connects to daemon and prints
 
 ### 1.3 Sync modules (v0)
 - [ ] `cwd` module: display current directory with home-tilde and configurable truncation

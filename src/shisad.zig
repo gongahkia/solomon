@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const client = @import("shisa-client.zig");
 const cli = @import("daemon/cli.zig");
 const daemon_log = @import("daemon/log.zig");
 const lock = @import("daemon/lock.zig");
@@ -108,22 +109,12 @@ fn daemonize() !void {
 }
 
 fn adminRequest(socket_path: []const u8, request: []const u8) !void {
-    var stream = try std.net.connectUnixSocket(socket_path);
-    defer stream.close();
-
-    try writeAll(stream.handle, request);
-
-    var response: [4096]u8 = undefined;
-    const n = try std.posix.read(stream.handle, &response);
-    try std.fs.File.stdout().writeAll(response[0..n]);
-}
-
-fn writeAll(fd: std.posix.fd_t, bytes: []const u8) !void {
-    var remaining = bytes;
-    while (remaining.len > 0) {
-        const written = try std.posix.write(fd, remaining);
-        remaining = remaining[written..];
-    }
+    var gpa_impl = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const allocator = gpa_impl.allocator();
+    const response = try client.requestAlloc(allocator, socket_path, request);
+    defer allocator.free(response);
+    try std.fs.File.stdout().writeAll(response);
 }
 
 const help_text =

@@ -14,7 +14,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Decide canonical README/landing copy + the one-line pitch
 - [x] Author `LICENSE` (MIT) at repo root
 - [x] Author `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1)
-- [ ] Author `CONTRIBUTING.md` (build, test, RFC process)
+- [x] Author `CONTRIBUTING.md` (build, test, RFC process)
 - [ ] Author `SECURITY.md` (responsible disclosure address, scope)
 - [x] Set up `.editorconfig`, `.gitattributes`
 - [x] Choose Zig toolchain version and pin in `build.zig.zon`

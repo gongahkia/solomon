@@ -23,7 +23,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Configure release-please / cargo-dist equivalent for Zig (manual tag-driven release for v0)
 - [x] Set up sccache-equivalent caching for Zig builds in CI
 - [x] Write RFC-0001: Daemon wire protocol (framing, message types, versioning)
-- [ ] Write RFC-0002: Module execution classes (sync, async, cached)
+- [x] Write RFC-0002: Module execution classes (sync, async, cached)
 - [ ] Write RFC-0003: Lua plugin capability manifest schema
 - [ ] Write RFC-0004: Cache invalidation rules (per-module fsnotify scope)
 - [x] Set up `rfcs/` directory and a template

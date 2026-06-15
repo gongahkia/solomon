@@ -125,6 +125,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const supervisor_test_run = b.addRunArtifact(supervisor_tests);
+    const proto_types_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/proto/types.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const proto_types_test_run = b.addRunArtifact(proto_types_tests);
     const server_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/server.zig"),
@@ -139,5 +147,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&lock_test_run.step);
     test_step.dependOn(&log_test_run.step);
     test_step.dependOn(&supervisor_test_run.step);
+    test_step.dependOn(&proto_types_test_run.step);
     test_step.dependOn(&server_test_run.step);
 }

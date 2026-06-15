@@ -48,7 +48,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Implement `shisad --version`, `--health`, `--metrics` admin endpoints
 
 ### 1.2 Wire protocol v0
-- [ ] Define request frame (length-prefixed JSON): `{cwd, exit, jobs, duration, shell, cols, rows}`
+- [x] Define request frame (length-prefixed JSON): `{cwd, exit, jobs, duration, shell, cols, rows}`
 - [ ] Define response frame: `{prompt, redraw_token?}`
 - [ ] Implement encoder/decoder in Zig with fuzz tests
 - [ ] Implement client library (`shisa-client.zig`) for use by `shisa prompt`

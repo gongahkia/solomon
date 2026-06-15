@@ -379,3 +379,663 @@ In addition to §15:
 - The VCS moat must be visible: ≥ 1 viral blog post comparing Shisa's jj/sapling/hg support to starship's, within 6 months of Phase 10.
 - The cloud-safety pack must surface at least 3 documented "Shisa saved my prod" anecdotes from real users within 12 months of Phase 11.
 - The AI pack must run end-to-end on a 2020-era MacBook Air with a 1.5B-parameter model in under 800ms latency for `nextcmd`.
+
+---
+
+# Implementation Specifications
+
+Sections 26+ are concrete specs that pin down what the abstractions in §5–§22 actually look like. These are normative for v1.0; sub-revisions of the spec are tracked in `rfcs/`.
+
+## 26. Wire protocol specification
+
+### 26.1 Framing
+
+Length-prefixed JSON over `SOCK_STREAM` Unix-domain socket:
+
+```
++-----------+----------------------------+
+| u32 BE    | UTF-8 JSON payload, len-N  |
++-----------+----------------------------+
+```
+
+- Max payload: 1 MiB (rejected with `E_OVERSIZE` over the same frame format).
+- One request per frame; one response per frame.
+- No keep-alive multiplexing in v1 (defer to v2). Connection-per-request keeps the model trivial.
+
+### 26.2 Request schema
+
+```json
+{
+  "v": 1,
+  "op": "render",
+  "shell": "zsh|bash|fish|nu|pwsh",
+  "cwd": "/abs/path",
+  "exit": 0,
+  "jobs": 0,
+  "duration_ms": 1234,
+  "cols": 200,
+  "rows": 50,
+  "tty": "/dev/ttys001",
+  "color_caps": "truecolor|256|16|none",
+  "glyph_caps": "nerdfont|unicode|ascii",
+  "user_id": 501,
+  "session": "uuid-v4",
+  "request_id": "uuid-v4"
+}
+```
+
+Other ops (v1): `health`, `metrics`, `reload`, `version`, `subscribe` (editor integration; see §34).
+
+### 26.3 Response schema
+
+```json
+{
+  "v": 1,
+  "request_id": "uuid-v4",
+  "prompt": "ANSI-encoded string",
+  "redraw_token": "opt-string",
+  "trailer": null,
+  "diagnostics": [],
+  "elapsed_us": 1234
+}
+```
+
+`redraw_token` is non-null when async modules are still pending. The shell echoes the token back on a `render_continue` op to receive an updated prompt without re-sending state.
+
+### 26.4 Versioning
+
+- The `v` field is required on every frame.
+- Daemon refuses `v` it doesn't understand and replies with `E_VERSION` plus the highest version it speaks.
+- The shell hook script is responsible for downgrading or upgrading the request shape.
+- Wire protocol changes go through an RFC and follow semver: `v.major` breaks; `v.minor` adds fields (clients ignore unknown).
+
+### 26.5 Error envelope
+
+```json
+{
+  "v": 1,
+  "request_id": "uuid-v4",
+  "error": { "code": "E_VERSION", "message": "...", "context": {...} }
+}
+```
+
+Error codes are an explicit enum, documented in `docs/protocol/errors.md`.
+
+### 26.6 Hot-path budget
+
+End-to-end p99 budget for a `render` op on warm cache: 2ms. Allocations: zero on the hot path. The daemon owns pre-allocated arenas keyed by `session`. Profile assertions in tests.
+
+## 27. Lua plugin API surface
+
+### 27.1 Plugin manifest (`plugin.lua`)
+
+```lua
+return {
+  name = "kubectl-context",
+  version = "0.2.1",
+  api_version = "1",
+  description = "kube context + ns segment",
+  author = "alice <alice@example.com>",
+  license = "MIT",
+  capabilities = {
+    fs_read   = { "~/.kube/config", "~/.kube/cache/" },
+    fs_watch  = { "~/.kube/config" },
+    exec      = false,
+    net       = false,
+    secrets   = false,
+    env_read  = { "KUBECONFIG" },
+    pre_exec  = false,
+  },
+  modules = { "k8s_ctx" },
+}
+```
+
+### 27.2 Module entry contract
+
+```lua
+function k8s_ctx.render(ctx)
+  -- ctx is read-only proxy. Methods: ctx:cwd(), ctx:env(name), ctx:read(path),
+  -- ctx:fs_event_for(path), ctx:cache_get(key), ctx:cache_put(key, value, ttl_ms)
+  return {
+    text     = "k8s://acme-prod/payments",
+    style    = { fg = "red", bold = true },
+    risk     = "prod",          -- contributes to risk_tier aggregation
+    glyph    = "\u{e75e}",      -- with ASCII fallback
+    a11y     = "Kubernetes context acme-prod namespace payments",
+  }
+end
+```
+
+### 27.3 Module lifecycle
+
+- `on_load(ctx)` — once, after the plugin is loaded; may register fs watchers
+- `render(ctx)` — called per prompt; **must be <1ms or be declared async**
+- `update(ctx, event)` — called on watcher events; updates cache
+- `pre_exec(ctx, command)` — optional; may return `{ ok = false, prompt_for_confirm = "..." }`
+- `on_unload(ctx)` — cleanup
+
+### 27.4 Sandbox rules
+
+- Stripped Lua stdlib: removed are `os.execute`, `os.exit`, `os.remove`, `os.rename`, `io.popen`, `io.open` (whitelisted via `ctx:read`), `loadfile`, `dofile`, `require` (whitelisted to project-local files), `package.loadlib`, `debug.*` (most).
+- Allowed: pure-Lua `string`, `table`, `math`, `utf8`, restricted `os` (time only).
+- Memory limit per plugin: 16 MiB hard cap, instrumented allocator. Plugins above cap are killed and logged.
+- CPU budget per `render`: 1 ms wall (hard kill after 5 ms in debug, fail-fast).
+
+### 27.5 Capability gates
+
+Capabilities are declared in the manifest and enforced by the daemon. Re-prompting required on upgrade if the requested capability set changes. The daemon refuses to load plugins with undeclared capability usage at runtime.
+
+A plugin trying to use `ctx:exec()` without the `exec` capability errors immediately and is logged.
+
+### 27.6 Stable API guarantees
+
+- `ctx.api_version` is semver. Plugins declare `api_version` they target; daemon supports the last two majors.
+- New functions in the `ctx` namespace ship as `api_version`-additive; never break compatibility within a major.
+
+## 28. Theme & rendering spec
+
+### 28.1 Color model
+
+Internal color model uses Oklab (perceptually uniform) for interpolation. Output is downcast to terminal capability:
+
+- truecolor → 24-bit RGB
+- 256 → ANSI 256 palette (nearest in Oklab)
+- 16 → ANSI 16
+- none → no color, glyph-only
+
+### 28.2 Theme file
+
+```toml
+[meta]
+name = "okiya-night"
+author = "shisa-core"
+version = "1.0.0"
+contrast_min = 4.5            # WCAG AA enforced at theme-validate time
+license = "MIT-0"
+
+[palette]
+fg       = "oklch(0.95 0.02 200)"
+bg       = "oklch(0.18 0.02 200)"
+accent   = "oklch(0.75 0.15 150)"
+warn     = "oklch(0.80 0.20 90)"
+danger   = "oklch(0.65 0.25 30)"
+
+[modules.cwd]
+fg = "@accent"
+bold = true
+
+[modules.risk_tier]
+prod    = { bg = "@danger",  fg = "white", bold = true, glyph = "" }
+staging = { bg = "@warn",    fg = "black" }
+dev     = { fg = "@accent" }
+```
+
+### 28.3 Theme validator (`shisa theme validate`)
+
+Run before publish:
+- All semantic pairs (`fg/bg`) meet `contrast_min`.
+- All glyphs have an ASCII fallback declared.
+- Theme works on 16-color, 256-color, truecolor.
+- A11y mode rendering tested.
+
+### 28.4 Glyph fallback
+
+```toml
+[glyphs]
+git     = { nerdfont = "", unicode = "⎇", ascii = "git" }
+prod    = { nerdfont = "", unicode = "⚠",  ascii = "!!" }
+```
+
+Daemon picks the right tier from `glyph_caps`. Themes declaring `nerdfont` glyphs must also declare unicode + ascii fallbacks; validator enforces.
+
+### 28.5 Multi-line layout
+
+Themes can declare segment arrangement:
+
+```toml
+[layout]
+lines = [
+  ["risk_tier", "cloud_ctx", "vcs", "%filler%", "right_segments"],
+  ["cwd"],
+  ["prompt_char"],
+]
+right_segments = ["cmd_duration", "time"]
+```
+
+Filler is a single expanding-width spacer per line.
+
+## 29. Daemon lifecycle & supervisor
+
+### 29.1 Process model
+
+- One `shisad` per user (enforced by `flock` on the socket path lock file).
+- Optional `shisa-supervisor` lightweight watchdog (~200 KiB binary) that restarts `shisad` on crash with exponential backoff.
+- The shell hook never connects to the supervisor; it always connects to the socket.
+
+### 29.2 Auto-spawn
+
+If `shisa prompt` finds no daemon, it forks `shisad` itself with `--auto-spawn`, waits up to 100 ms for the socket, falls back to a sync renderer if not ready in time.
+
+### 29.3 Graceful shutdown
+
+- `SIGTERM`: drain in-flight requests (5 s deadline), unlink socket, exit 0.
+- `SIGINT`: same.
+- `SIGUSR1`: reload config.
+- `SIGUSR2`: dump goroutine-equivalent stack to log.
+
+### 29.4 Health checks
+
+- `shisad --health` → exits 0 if reachable.
+- `shisad --metrics` → JSON dump of cache stats, render histogram, plugin status.
+- Heartbeat between shisad and supervisor every 1 s.
+
+### 29.5 Multi-user / multi-host
+
+- Per-user socket: never shared across users.
+- SSH'd-in sessions get their own daemon on the remote host (auto-spawn applies).
+- sudo: `sudo shisa prompt` opens to root's daemon, not the original user's. Document this surprise.
+
+## 30. Cache architecture
+
+### 30.1 Layers
+
+- **L1: rendered-prompt LRU**, keyed by `(cwd, exit, jobs, duration_bucket, cache_rev)`. Capacity: 1024 entries. Pure in-memory.
+- **L2: module-output cache**, keyed by `(plugin_id, scope)`. Persisted optionally to `~/.cache/shisa/cache.bin` for cold-start hydration.
+- **L3: external-command cache**, keyed by `(cmd, args, cwd)`. Invalidated by fsnotify on declared paths.
+
+### 30.2 Invalidation
+
+- File event → invalidate all entries whose `fs_watch` declarations match.
+- Time-based: each module declares `max_age_ms`; expired entries refresh on next render.
+- Manual: `shisa cache clear [--module=foo]`.
+
+### 30.3 Cache revision
+
+A monotonic `cache_rev` is incremented on every invalidation. L1 keys include `cache_rev` so eviction is automatic.
+
+## 31. Async / redraw mechanism per shell
+
+### 31.1 Zsh
+
+- Implemented via `zle reset-prompt` triggered by a self-pipe FD that the daemon writes to once an async module fills.
+- Hook script keeps an FD open per session.
+
+### 31.2 Bash
+
+- `bind -x` plus a custom escape sequence (`\e]9000\a`) the daemon emits; the binding re-invokes the prompt.
+- Document Bash 4+ requirement; older shells get a graceful-degraded sync prompt.
+
+### 31.3 Fish
+
+- Native `prompt_pwd` + `fish_prompt` + `commandline -f repaint`.
+- Async via `fish-async-prompt` mechanism without bringing in that library.
+
+### 31.4 Nushell
+
+- `PROMPT_COMMAND` returns initial. A second prompt eval fires on async-fill via a custom `nu` event hook.
+
+### 31.5 PowerShell
+
+- `prompt` function + `Register-EngineEvent` for async-fill, where supported. Documented degradation list.
+
+## 32. Security threat model
+
+STRIDE-flavored survey of the surface area:
+
+| Category    | Concrete threat                              | Mitigation                                                                 |
+|-------------|----------------------------------------------|----------------------------------------------------------------------------|
+| Spoofing    | Other user attaches to my daemon socket      | Socket in `$XDG_RUNTIME_DIR` (Linux) / user Library cache (macOS), 0700.   |
+| Spoofing    | Malicious plugin impersonates a vetted one   | Marketplace requires signed manifests; daemon checks signature on install. |
+| Tampering   | Plugin modifies host process state           | Sandbox; capability gates; stripped Lua stdlib.                            |
+| Repudiation | "I didn't run that destructive command"      | prod_guard audit log; opt-in shisa.history adapter.                        |
+| Info disc.  | Plugin reads `.env`, sends to attacker       | `net` capability gated; `fs_read` scoped; redaction rules.                 |
+| Info disc.  | AI plugin sends prompt to cloud provider     | `net` gated; per-provider opt-in; redaction rules; local-only default.     |
+| DoS         | Plugin infinite-loops in `render`            | 1 ms wall budget, 5 ms hard kill, plugin disabled after 3 strikes.          |
+| Elev. priv. | Lua sandbox escape via FFI / metatable abuse | Stripped stdlib; fuzz bridge; bug bounty; quick-pull mechanism.            |
+| Supply chain| Daemon binary tampered                       | Sigstore signing, SBOM published, SLSA Level 2 attestation, repro builds.   |
+
+A `docs/threat-model.md` keeps this current; an annual review is scheduled.
+
+## 33. Accessibility commitment (WCAG AA + a11y mode)
+
+### 33.1 Baseline
+
+- All built-in themes pass 4.5:1 contrast for text and 3:1 for UI signals.
+- Every color-encoded signal also has a glyph and a text alternative.
+- The `risk_tier=prod` segment is bold, glyph-marked, and tagged in `a11y` strings — not color-only.
+
+### 33.2 `--a11y` mode
+
+```
+$ shisa init --a11y
+```
+
+- Strips all colors; uses ASCII glyphs and labels.
+- Adds explicit text labels (`[prod]`, `[git: main *]`, `[aws: acme-prod]`).
+- Disables NerdFont glyph requirement.
+- Compatible with screen-reader-friendly terminals (Mac VoiceOver, NVDA-piped terminals).
+
+### 33.3 Screen-reader integration
+
+- The prompt emits OSC-7 (current directory) and a custom OSC-1337-style `a11y-summary` sequence on a11y mode, summarizing context in one line for screen readers.
+- Optional `shisa.a11y.live` plugin announces risk-tier transitions via terminal bell or DBus notification.
+
+### 33.4 Contrast CI
+
+- All themes run through a contrast checker on every PR.
+- New themes refused until pass.
+- Public theme gallery shows the contrast ratio next to each.
+
+### 33.5 Keyboard-only operation
+
+- All Shisa CLI subcommands are non-interactive by default (use `--interactive` to opt into TUIs).
+- Interactive wizards are TTY-tolerant; no graphical popups.
+
+## 34. Editor integration spec
+
+### 34.1 Why
+
+Editors with statuslines (Helix, Neovim, Zed) re-implement git, cloud, k8s context. Shisa already has all this state computed and cached. Expose it.
+
+### 34.2 `subscribe` op
+
+```json
+{ "v":1, "op":"subscribe", "topics":["vcs", "cloud_ctx", "risk_tier"], "cwd":"/abs" }
+```
+
+The daemon streams snapshot + incremental updates (NDJSON) until the socket closes. No polling cost.
+
+### 34.3 Read-only
+
+The subscribe endpoint is strictly read-only. No editor can mutate Shisa state; this prevents an editor extension being used to bypass `prod_guard`.
+
+### 34.4 Bridges
+
+- `contrib/editor-bridges/helix-shisa.toml` — statusline integration
+- `contrib/editor-bridges/shisa.nvim` — small Lua plugin for Neovim
+- `contrib/editor-bridges/shisa-zed` — extension shipped via Zed's marketplace
+
+Each bridge stays minimal: connect, subscribe, render. No business logic.
+
+### 34.5 Auth & privacy
+
+Editors only see the data the user's terminal already sees. No new privacy surface. Editor bridges declare which topics they subscribe to in their own config.
+
+## 35. Governance & Vouch
+
+### 35.1 Model
+
+BDFL-start with explicit transition triggers. The transition is *committed in writing* before launch so it isn't theoretical.
+
+### 35.2 Triggers
+
+- 5 active contributors (≥ 10 merged PRs each over 12 months) → form a 3-person Steering Group via PEP-13 style vote.
+- 1,000 GitHub stars + 100 plugin authors → spin up the marketplace stewardship sub-team.
+- Either trigger met → bring on a co-maintainer with full commit rights.
+
+### 35.3 Commit access via Vouch
+
+Shisa adopts [Vouch](https://news.lavx.hu/article/mitchell-hashimoto-launches-vouch-explicit-trust-management-for-open-source-communities) (Mitchell Hashimoto's trust-management system, designed to combat AI-slop PRs).
+
+- New contributors start at unvouched. Their PRs are still welcome but require review by ≥ 2 vouched contributors.
+- Vouching is granted only by those with write access; vouched users cannot themselves vouch.
+- Vouch state is tracked in `VOUCHES` (POSIX-parseable text file) at the repo root.
+- A `shisa vouch verify` CLI subcommand validates the file's structure.
+
+### 35.4 RFC process
+
+- All proposals affecting wire protocol, plugin API, security, or theme spec require an RFC in `rfcs/`.
+- Numbered, dated, owned, with explicit "rejected alternatives" and "non-goals" sections.
+- 14-day public comment window minimum.
+- Lazy consensus: silence is acceptance after comment window.
+- BDFL can override RFC consensus with a written reason in the merge commit; rare, public.
+
+### 35.5 Code of conduct
+
+Contributor Covenant 2.1. Enforcement via maintainer team; escalations via project email. Bans are public; appeals tracked in a private repo.
+
+## 36. Funding & sustainability
+
+### 36.1 Stance
+
+Shisa is OSS-free-forever. No paid tier. No private plugins. No cloud lock-in.
+
+### 36.2 Funding sources
+
+- GitHub Sponsors (individuals + companies)
+- Open Collective (transparent ledger)
+- Optional fiscal-host (e.g., Software Freedom Conservancy) once income > $5k/yr
+- No corporate sponsorship that comes with feature demands
+
+### 36.3 Use of funds
+
+Documented in `FUNDING.md`:
+1. Bug bounty pool for sandbox escapes
+2. Maintainer stipends (only after maintainer team exists)
+3. Conference travel for talks
+4. Domain + landing-page hosting
+5. Audit (a11y, security) commissions
+
+### 36.4 No selling out
+
+Shisa will never relicense to a more restrictive license. The MIT decision is final.
+
+## 37. Brand & identity
+
+### 37.1 Mascot
+
+A stylized lion-dog (shisa) glyph. Two-tone, geometric, terminal-color-friendly. Used as repo icon, landing page hero, sticker designs.
+
+### 37.2 Voice
+
+- Calm, technical, opinionated.
+- Never breathless. Never AI-style "delve" or "underscore".
+- Never makes claims it can't benchmark.
+
+### 37.3 Visual tokens
+
+- Primary palette: warm dark grays + a single accent (`#FF6E50`-ish coral).
+- Typography: a humanist sans for prose, JetBrains Mono for code samples.
+- Slide deck + README + landing must look like the same product.
+
+### 37.4 Domain & socials
+
+- `shisa.sh` (canonical)
+- GitHub: `shisa-org/shisa`
+- Mastodon over Twitter for project announcements
+- Discord + GH Discussions for community
+
+## 38. Documentation strategy
+
+### 38.1 Tiers
+
+- **Quickstart:** `shisa.sh/quickstart` — install + 5 min to a working prompt.
+- **Recipes:** task-driven, copy-paste-runnable.
+- **Reference:** generated from sources (config schema, CLI, plugin API).
+- **Internals:** the architecture, threat model, RFCs, profiling notes.
+
+### 38.2 Tooling
+
+- mdBook for docs site (Rust-built, fits the ecosystem, fast).
+- Schema docs auto-generated from `build.zig` + a `shisa schema dump`.
+- Examples folder is CI-tested.
+- All docs run through `vale` for style consistency.
+
+### 38.3 Videos
+
+- 3 short YouTube videos for launch: "Why Shisa", "5-min Setup", "Plugin in 10 lines".
+- Captioned for a11y. Transcripts checked into the repo.
+
+## 39. Testing strategy & quality gates
+
+### 39.1 Layers
+
+| Layer            | What                                                   | Where                                   |
+|------------------|--------------------------------------------------------|-----------------------------------------|
+| Unit             | Zig source-level                                       | `zig build test`                        |
+| Property         | Wire protocol roundtrip, theme rendering invariants    | `zig build test-prop`                   |
+| Snapshot         | Prompt outputs against fixtures                        | `tests/snapshots/`                      |
+| Fuzz             | Protocol decoder, Lua bridge, redaction rules          | `zig build fuzz` + nightly OSS-Fuzz     |
+| Integration      | Real shell sessions via `expect`/`pexpect`             | `tests/shells/`                         |
+| End-to-end       | Dockerized full-OS runs                                | `tests/e2e/`                            |
+| Benchmark        | hyperfine + microbench + memory                        | `zig build bench`                       |
+| Contract         | Plugin API compatibility on min/max api_version        | `zig build test-contract`               |
+| Accessibility    | Contrast ratios, screen-reader plumbing                | `zig build test-a11y`                   |
+
+### 39.2 Quality gates
+
+- Every PR: unit, property, snapshot, contract, accessibility.
+- Tagged release: also fuzz (1-hour CI), full integration, e2e, benchmark.
+- Benchmark regression > 10% on warm render → PR blocked.
+
+### 39.3 Test environments
+
+- macOS-14, macOS-15 (CI)
+- Ubuntu-22.04, Ubuntu-24.04, Arch-rolling, Fedora-40 (CI)
+- WSL2 on Windows-11 (CI)
+- Real-hardware perf bench monthly on a documented baseline machine
+
+## 40. Release engineering + supply chain
+
+### 40.1 Versioning
+
+Semver. `v0.x` is API-unstable; `v1.0` is the first stable wire protocol + plugin API.
+
+### 40.2 Release cadence
+
+- Monthly minor releases, first Tuesday of each month.
+- Patch releases as needed (security: within 72 hours of fix).
+- Quarterly stability summaries.
+
+### 40.3 Supply-chain
+
+- Reproducible builds (deterministic `zig build` with locked dependencies).
+- SBOM generated per release (SPDX format).
+- Sigstore cosign keyless signing for every artifact.
+- SLSA Level 2 attestation in CI (verifiable provenance).
+- Public release-checksum file signed.
+- `shisa update --verify` checks signatures before applying.
+
+### 40.4 Distribution channels
+
+- GitHub Releases (primary)
+- `brew install shisa` (Homebrew tap → core)
+- `aur/shisa-bin` and `aur/shisa-git`
+- Nixpkgs derivation
+- `scoop install shisa` (WSL)
+- `cargo binstall` shim (post-v1)
+- AppImage for portable Linux
+- Flatpak (community)
+- Snap (community)
+- DEB + RPM packages
+- `curl -sSL shisa.sh/install | sh` (with signature verification)
+
+### 40.5 Deprecation policy
+
+- One major version of overlap when removing a deprecated API.
+- Deprecation announced in release notes + `shisa doctor` warnings.
+- Migration tooling shipped before removal.
+
+## 41. Internationalization
+
+### 41.1 Glyphs vs translations
+
+- Glyphs are universal (NerdFont + Unicode).
+- User-facing strings (errors, CLI help, doctor messages) are translatable.
+- Prompt segments are user-configured templates; no translation of user text.
+
+### 41.2 Locale support
+
+- gettext-style message catalogs in `i18n/`.
+- Initial: en-US. Translations welcomed via PR.
+- Locale selected by `LANG` / `LC_*` env or `shisa config set locale=...`.
+
+### 41.3 Right-to-left rendering
+
+- Detect RTL locale and reverse segment order in the prompt when configured.
+- Tested with Arabic, Hebrew, Persian fixture strings.
+
+### 41.4 CJK width handling
+
+- East Asian Width (UAX-11) compliance in segment widths.
+- Tested with Chinese / Japanese / Korean fixture strings.
+
+## 42. Migration tooling (expanded)
+
+Beyond `import-starship` (§7 / Phase 7):
+
+- `shisa import-p10k` — translates Powerlevel10k config (zsh-only source).
+- `shisa import-oh-my-posh` — translates oh-my-posh JSON themes.
+- `shisa import-tide` — translates tide settings (fish-only source).
+- `shisa import-pure` — minimalist baseline.
+- All importers emit a `migration-notes.md` next to the new config listing what couldn't be translated.
+
+## 43. Glyph & font compatibility
+
+### 43.1 Tiers
+
+- `nerdfont`: full NerdFont set.
+- `unicode`: standard Unicode symbols.
+- `ascii`: alphanumerics + punctuation only.
+
+### 43.2 Detection
+
+- The shell hook reports `glyph_caps` heuristically (e.g. `TERM_PROGRAM`, `LANG`, env hints).
+- Override via `shisa config set glyph_caps=ascii`.
+- `shisa font check` runs a font-rendering probe and recommends settings.
+
+### 43.3 NerdFont version pinning
+
+- Themes declare minimum NerdFont version they require.
+- Themes using post-v3.0 codepoints are flagged at install.
+- Symbols-Only variant supported as fallback for users keeping their preferred base font.
+
+## 44. Advanced VCS states (git-focused, mirrors for jj/sapling/hg)
+
+The `git` module surfaces:
+
+- Clean / dirty / staged / unstaged / untracked counts
+- Active operation: rebase / merge / cherry-pick / revert / bisect / am
+- Detached HEAD state
+- Sparse-checkout active (with cone vs non-cone)
+- LFS active + pointer-only state
+- Submodule states (dirty, behind, ahead)
+- Worktree (which one)
+- Branch ahead/behind upstream
+- Conflict file count
+- Stash count
+- Last fetch age (warns if > N hours stale)
+- HEAD's signed-commit state (gpg/ssh signed?)
+
+Each state has an inline glyph + ASCII fallback + a11y label. Jujutsu / Sapling / Mercurial mirror this surface to their native concepts.
+
+## 45. v2 roadmap (post-1.0)
+
+- **Native Windows support** (ReadDirectoryChangesW, PowerShell hook polish).
+- **Persistent daemon across reboots** (system service install).
+- **Encrypted, opt-in dotfile sync** via age + git remote (no Shisa server involved).
+- **Per-project Shisa config layering** (`./shisa.toml` overrides) with secure precedence rules.
+- **Plugin marketplace 2.0** (search, ratings, audit reports).
+- **Mobile (Termux, iSH) basic support** if community asks for it.
+- **Web preview** (`shisa web preview <config>`) for sharing prompt designs.
+- **MCP-bridge plugin** (separate repo) for power users who want their AI agent to consult Shisa's cached cloud / VCS state.
+
+These are scoped intentionally loose. The v2 RFC opens 30 days after v1.0 ships.
+
+## 46. Failure modes & graceful degradation
+
+| Failure                                  | Behavior                                                    |
+|------------------------------------------|-------------------------------------------------------------|
+| Daemon socket missing                    | Auto-spawn daemon; fallback to sync prompt in < 5 ms.        |
+| Daemon panics                            | Supervisor restarts with backoff; user prompt unaffected.    |
+| Plugin renders > 5 ms                    | Plugin disabled for the session; warning in `shisa doctor`. |
+| Plugin uses undeclared capability        | Plugin disabled; loud error.                                |
+| Lua sandbox detects escape attempt       | Plugin quarantined; user notified.                          |
+| fsnotify watcher limit exceeded (Linux)  | Fall back to periodic refresh; advise raising the limit.    |
+| Out-of-disk for cache                    | LRU eviction; cache size reduced; warned in doctor.         |
+| Network unreachable (cloud-AI plugin)    | Plugin returns inline error; never blocks the prompt.       |
+| Tampered binary                          | `shisa update --verify` fails closed.                       |
+| User's terminal lacks truecolor          | Theme downgrades automatically.                             |
+| User's terminal lacks NerdFont           | Glyphs downgrade to Unicode or ASCII automatically.          |
+| Shell version too old                    | `init` script emits a one-line warning; minimal sync mode.   |
+| Sudo'd shell session                     | Documented behavior: connects to root's daemon, not user's.  |

@@ -11,7 +11,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Reserve `shisa-prompt` crate name as a placeholder (in case we ever ship Rust wrappers)
 - [ ] Reserve `shisa.sh` domain for landing + install script
 - [ ] Reserve `@shisa` on npm in case of node-side install tooling
-- [ ] Decide canonical README/landing copy + the one-line pitch
+- [x] Decide canonical README/landing copy + the one-line pitch
 - [x] Author `LICENSE` (MIT) at repo root
 - [ ] Author `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1)
 - [ ] Author `CONTRIBUTING.md` (build, test, RFC process)

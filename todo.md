@@ -49,7 +49,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 
 ### 1.2 Wire protocol v0
 - [x] Define request frame (length-prefixed JSON): `{cwd, exit, jobs, duration, shell, cols, rows}`
-- [ ] Define response frame: `{prompt, redraw_token?}`
+- [x] Define response frame: `{prompt, redraw_token?}`
 - [ ] Implement encoder/decoder in Zig with fuzz tests
 - [ ] Implement client library (`shisa-client.zig`) for use by `shisa prompt`
 - [ ] Implement `shisa prompt` CLI that connects to daemon and prints

@@ -22,6 +22,12 @@ pub const Request = struct {
     rows: u16,
 };
 
+pub const Response = struct {
+    v: u32 = version,
+    prompt: []const u8,
+    redraw_token: ?[]const u8 = null,
+};
+
 test "request type carries v1 render inputs" {
     const request = Request{
         .cwd = "/tmp",
@@ -39,4 +45,15 @@ test "request type carries v1 render inputs" {
     try std.testing.expectEqual(@as(u32, 2), request.jobs);
     try std.testing.expectEqual(@as(u64, 300), request.duration_ms);
     try std.testing.expectEqual(Shell.zsh, request.shell);
+}
+
+test "response type carries prompt and optional redraw token" {
+    const response = Response{
+        .prompt = "shisa> ",
+        .redraw_token = "abc",
+    };
+
+    try std.testing.expectEqual(@as(u32, 1), response.v);
+    try std.testing.expectEqualStrings("shisa> ", response.prompt);
+    try std.testing.expectEqualStrings("abc", response.redraw_token.?);
 }

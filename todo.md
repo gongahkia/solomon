@@ -16,7 +16,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Author `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1)
 - [ ] Author `CONTRIBUTING.md` (build, test, RFC process)
 - [ ] Author `SECURITY.md` (responsible disclosure address, scope)
-- [ ] Set up `.editorconfig`, `.gitattributes`
+- [x] Set up `.editorconfig`, `.gitattributes`
 - [ ] Choose Zig toolchain version and pin in `build.zig.zon`
 - [ ] Initialize `build.zig` skeleton (debug + release + benchmark steps)
 - [ ] Set up GitHub Actions matrix: macOS-14, ubuntu-22.04, ubuntu-24.04

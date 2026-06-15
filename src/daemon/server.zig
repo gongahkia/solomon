@@ -1,5 +1,6 @@
 const std = @import("std");
 const cwd_module = @import("modules/cwd.zig");
+const exit_status_module = @import("modules/exit_status.zig");
 const json = @import("json.zig");
 
 const header_bytes = 4;
@@ -103,7 +104,13 @@ fn renderResponse(request_payload: []const u8) ![]u8 {
     const cwd = try cwd_module.render(std.heap.page_allocator, parsed.value.cwd, home, 3);
     defer std.heap.page_allocator.free(cwd);
 
-    const prompt = try std.fmt.allocPrint(std.heap.page_allocator, "{s}> ", .{cwd});
+    const exit_status = try exit_status_module.render(std.heap.page_allocator, parsed.value.exit);
+    defer if (exit_status) |segment| std.heap.page_allocator.free(segment);
+
+    const prompt = if (exit_status) |segment|
+        try std.fmt.allocPrint(std.heap.page_allocator, "{s} {s}> ", .{ cwd, segment })
+    else
+        try std.fmt.allocPrint(std.heap.page_allocator, "{s}> ", .{cwd});
     defer std.heap.page_allocator.free(prompt);
 
     const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, prompt);

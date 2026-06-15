@@ -31,7 +31,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Set up PR template (checklist: tests, benchmarks-run, RFC-referenced)
 - [ ] Create project board with milestones aligned to phases
 - [ ] Stand up minimal landing page on `shisa.sh` (single HTML, install one-liner, link to repo)
-- [ ] Write the architecture overview doc (`docs/architecture.md`)
+- [x] Write the architecture overview doc (`docs/architecture.md`)
 - [ ] Pick the wire protocol (line-delimited JSON for v0, swap to binary if benchmarks demand)
 - [ ] Decide socket path convention (`$XDG_RUNTIME_DIR/shisa.sock` on Linux, `~/Library/Caches/shisa/shisa.sock` on macOS)
 

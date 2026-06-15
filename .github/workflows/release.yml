@@ -38,6 +38,7 @@ jobs:
           name="shisa-${GITHUB_REF_NAME}-${os}-${arch}"
           mkdir -p "dist/$name"
           cp zig-out/bin/shisa "dist/$name/"
+          cp zig-out/bin/shisad "dist/$name/"
           cp LICENSE README.md "dist/$name/"
           tar -czf "dist/$name.tar.gz" -C dist "$name"
           shasum -a 256 "dist/$name.tar.gz" > "dist/$name.tar.gz.sha256"

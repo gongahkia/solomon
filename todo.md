@@ -38,7 +38,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 ## Phase 1 — Single-shell MVP (zsh on macOS)
 
 ### 1.1 Daemon skeleton
-- [ ] `shisad` entry: parse CLI args, daemonize with `posix_spawn` or fork+setsid
+- [x] `shisad` entry: parse CLI args, daemonize with `posix_spawn` or fork+setsid
 - [ ] Implement single-instance lock via flock on the socket path
 - [ ] Implement unix-domain socket server (accept loop, per-conn handler)
 - [ ] Implement graceful shutdown on SIGTERM/SIGINT (drain in-flight requests, unlink socket)

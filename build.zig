@@ -14,6 +14,16 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
+    const daemon = b.addExecutable(.{
+        .name = "shisad",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/shisad.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(daemon);
+
     const debug_exe = b.addExecutable(.{
         .name = "shisa",
         .root_module = b.createModule(.{
@@ -23,8 +33,18 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const debug_install = b.addInstallArtifact(debug_exe, .{});
+    const debug_daemon = b.addExecutable(.{
+        .name = "shisad",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/shisad.zig"),
+            .target = target,
+            .optimize = .Debug,
+        }),
+    });
+    const debug_daemon_install = b.addInstallArtifact(debug_daemon, .{});
     const debug_step = b.step("debug", "Build debug binary");
     debug_step.dependOn(&debug_install.step);
+    debug_step.dependOn(&debug_daemon_install.step);
 
     const release_exe = b.addExecutable(.{
         .name = "shisa",
@@ -35,8 +55,18 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const release_install = b.addInstallArtifact(release_exe, .{});
+    const release_daemon = b.addExecutable(.{
+        .name = "shisad",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/shisad.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+    const release_daemon_install = b.addInstallArtifact(release_daemon, .{});
     const release_step = b.step("release", "Build release binary");
     release_step.dependOn(&release_install.step);
+    release_step.dependOn(&release_daemon_install.step);
 
     const bench_exe = b.addExecutable(.{
         .name = "shisa-bench",
@@ -63,6 +93,15 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const test_run = b.addRunArtifact(tests);
+    const cli_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/daemon/cli.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const cli_test_run = b.addRunArtifact(cli_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&test_run.step);
+    test_step.dependOn(&cli_test_run.step);
 }

@@ -1,7 +1,20 @@
 const std = @import("std");
+const cwd_module = @import("modules/cwd.zig");
+const json = @import("json.zig");
 
 const header_bytes = 4;
 const max_frame_bytes = 1024 * 1024;
+
+const RenderRequest = struct {
+    v: u32 = 1,
+    cwd: []const u8,
+    exit: i32 = 0,
+    jobs: u32 = 0,
+    duration_ms: u64 = 0,
+    shell: []const u8 = "zsh",
+    cols: u16 = 80,
+    rows: u16 = 24,
+};
 
 pub const Server = struct {
     socket_path: []const u8,
@@ -73,10 +86,31 @@ pub const Server = struct {
         } else if (std.mem.startsWith(u8, request, "health")) {
             try writeFrame(connection.stream.handle, "ok\n");
         } else {
-            try writeFrame(connection.stream.handle, "{\"v\":1,\"prompt\":\"shisa> \",\"redraw_token\":null}");
+            const response = try renderResponse(request);
+            defer std.heap.page_allocator.free(response);
+            try writeFrame(connection.stream.handle, response);
         }
     }
 };
+
+fn renderResponse(request_payload: []const u8) ![]u8 {
+    var parsed = try std.json.parseFromSlice(RenderRequest, std.heap.page_allocator, request_payload, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const home = std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch null;
+    defer if (home) |home_path| std.heap.page_allocator.free(home_path);
+
+    const cwd = try cwd_module.render(std.heap.page_allocator, parsed.value.cwd, home, 3);
+    defer std.heap.page_allocator.free(cwd);
+
+    const prompt = try std.fmt.allocPrint(std.heap.page_allocator, "{s}> ", .{cwd});
+    defer std.heap.page_allocator.free(prompt);
+
+    const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, prompt);
+    defer std.heap.page_allocator.free(escaped_prompt);
+
+    return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"prompt\":\"{s}\",\"redraw_token\":null}}", .{escaped_prompt});
+}
 
 fn writeFrame(fd: std.posix.fd_t, payload: []const u8) !void {
     const encoded = try encodeFrameAlloc(std.heap.page_allocator, payload);
@@ -168,6 +202,30 @@ test "returns metrics response" {
     const response = try readFrameAlloc(allocator, client_stream.handle);
     defer allocator.free(response);
     try std.testing.expectEqualStrings("{\"connections\":1}\n", response);
+
+    thread.join();
+}
+
+test "renders cwd prompt response" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
+
+    var client_stream = try std.net.connectUnixSocket(socket_path);
+    defer client_stream.close();
+    try writeFrame(client_stream.handle, "{\"v\":1,\"cwd\":\"/tmp/project\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24}");
+    const response = try readFrameAlloc(allocator, client_stream.handle);
+    defer allocator.free(response);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"prompt\":\"/tmp/project> \"") != null);
 
     thread.join();
 }

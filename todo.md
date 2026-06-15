@@ -55,7 +55,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Implement `shisa prompt` CLI that connects to daemon and prints
 
 ### 1.3 Sync modules (v0)
-- [ ] `cwd` module: display current directory with home-tilde and configurable truncation
+- [x] `cwd` module: display current directory with home-tilde and configurable truncation
 - [ ] `exit_status` module: show non-zero exit codes with color
 - [ ] `jobs` module: background job count
 - [ ] `cmd_duration` module: show last command duration when above threshold

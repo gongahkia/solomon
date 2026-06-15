@@ -141,6 +141,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const jobs_test_run = b.addRunArtifact(jobs_tests);
+    const cmd_duration_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/daemon/modules/cmd_duration.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const cmd_duration_test_run = b.addRunArtifact(cmd_duration_tests);
     const daemon_json_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/json.zig"),
@@ -197,6 +205,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cwd_test_run.step);
     test_step.dependOn(&exit_status_test_run.step);
     test_step.dependOn(&jobs_test_run.step);
+    test_step.dependOn(&cmd_duration_test_run.step);
     test_step.dependOn(&daemon_json_test_run.step);
     test_step.dependOn(&supervisor_test_run.step);
     test_step.dependOn(&proto_types_test_run.step);

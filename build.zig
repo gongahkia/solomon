@@ -101,7 +101,16 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const cli_test_run = b.addRunArtifact(cli_tests);
+    const lock_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/daemon/lock.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const lock_test_run = b.addRunArtifact(lock_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&test_run.step);
     test_step.dependOn(&cli_test_run.step);
+    test_step.dependOn(&lock_test_run.step);
 }

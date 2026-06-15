@@ -39,7 +39,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 
 ### 1.1 Daemon skeleton
 - [x] `shisad` entry: parse CLI args, daemonize with `posix_spawn` or fork+setsid
-- [ ] Implement single-instance lock via flock on the socket path
+- [x] Implement single-instance lock via flock on the socket path
 - [ ] Implement unix-domain socket server (accept loop, per-conn handler)
 - [ ] Implement graceful shutdown on SIGTERM/SIGINT (drain in-flight requests, unlink socket)
 - [ ] Implement crash-restart supervisor (separate `shisa supervisor` binary or `--supervise` flag)

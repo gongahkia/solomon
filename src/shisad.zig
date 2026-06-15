@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const cli = @import("daemon/cli.zig");
+const lock = @import("daemon/lock.zig");
+const paths = @import("daemon/paths.zig");
 
 const version = "0.1.0-dev";
 
@@ -26,6 +28,18 @@ pub fn main() !void {
         try std.fs.File.stdout().writeAll("shisad " ++ version ++ "\n");
         return;
     }
+
+    const socket_path = if (config.socket_path) |path| path else try paths.defaultSocketPath(allocator);
+    defer if (config.socket_path == null) allocator.free(socket_path);
+
+    var instance_lock = lock.InstanceLock.acquire(allocator, socket_path) catch |err| switch (err) {
+        error.AlreadyRunning => {
+            try std.fs.File.stderr().writeAll("shisad: another daemon already owns the socket lock\n");
+            return err;
+        },
+        else => return err,
+    };
+    defer instance_lock.deinit();
 
     if (config.daemonize) {
         try daemonize();

@@ -26,7 +26,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Write RFC-0002: Module execution classes (sync, async, cached)
 - [ ] Write RFC-0003: Lua plugin capability manifest schema
 - [ ] Write RFC-0004: Cache invalidation rules (per-module fsnotify scope)
-- [ ] Set up `rfcs/` directory and a template
+- [x] Set up `rfcs/` directory and a template
 - [x] Set up issue templates (bug, perf regression, plugin request, RFC)
 - [x] Set up PR template (checklist: tests, benchmarks-run, RFC-referenced)
 - [ ] Create project board with milestones aligned to phases

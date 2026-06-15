@@ -3,6 +3,7 @@ const cmd_duration_module = @import("modules/cmd_duration.zig");
 const cwd_module = @import("modules/cwd.zig");
 const exit_status_module = @import("modules/exit_status.zig");
 const jobs_module = @import("modules/jobs.zig");
+const user_host_module = @import("modules/user_host.zig");
 const json = @import("json.zig");
 
 const header_bytes = 4;
@@ -112,8 +113,10 @@ fn renderResponse(request_payload: []const u8) ![]u8 {
     defer if (jobs) |segment| std.heap.page_allocator.free(segment);
     const cmd_duration = try cmd_duration_module.render(std.heap.page_allocator, parsed.value.duration_ms, 1000);
     defer if (cmd_duration) |segment| std.heap.page_allocator.free(segment);
+    const user_host = try renderUserHost();
+    defer if (user_host) |segment| std.heap.page_allocator.free(segment);
 
-    const prompt = try formatPrompt(std.heap.page_allocator, cwd, exit_status, jobs, cmd_duration);
+    const prompt = try formatPrompt(std.heap.page_allocator, cwd, exit_status, jobs, cmd_duration, user_host);
     defer std.heap.page_allocator.free(prompt);
 
     const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, prompt);
@@ -122,7 +125,20 @@ fn renderResponse(request_payload: []const u8) ![]u8 {
     return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"prompt\":\"{s}\",\"redraw_token\":null}}", .{escaped_prompt});
 }
 
-fn formatPrompt(allocator: std.mem.Allocator, cwd: []const u8, exit_status: ?[]const u8, jobs: ?[]const u8, cmd_duration: ?[]const u8) ![]u8 {
+fn renderUserHost() !?[]u8 {
+    const ssh = std.process.getEnvVarOwned(std.heap.page_allocator, "SSH_CONNECTION") catch null;
+    defer if (ssh) |value| std.heap.page_allocator.free(value);
+
+    const user = std.process.getEnvVarOwned(std.heap.page_allocator, "USER") catch try std.heap.page_allocator.dupe(u8, "unknown");
+    defer std.heap.page_allocator.free(user);
+
+    var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
+    const host = std.posix.gethostname(&host_buffer) catch "unknown";
+
+    return user_host_module.render(std.heap.page_allocator, ssh, user, host);
+}
+
+fn formatPrompt(allocator: std.mem.Allocator, cwd: []const u8, exit_status: ?[]const u8, jobs: ?[]const u8, cmd_duration: ?[]const u8, user_host: ?[]const u8) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
 
@@ -130,6 +146,7 @@ fn formatPrompt(allocator: std.mem.Allocator, cwd: []const u8, exit_status: ?[]c
     if (exit_status) |segment| try appendSegment(allocator, &out, segment);
     if (jobs) |segment| try appendSegment(allocator, &out, segment);
     if (cmd_duration) |segment| try appendSegment(allocator, &out, segment);
+    if (user_host) |segment| try appendSegment(allocator, &out, segment);
     try out.appendSlice(allocator, "> ");
 
     return out.toOwnedSlice(allocator);

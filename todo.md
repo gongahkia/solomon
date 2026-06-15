@@ -59,7 +59,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] `exit_status` module: show non-zero exit codes with color
 - [x] `jobs` module: background job count
 - [x] `cmd_duration` module: show last command duration when above threshold
-- [ ] `user` and `host` modules (hidden by default, surface in SSH)
+- [x] `user` and `host` modules (hidden by default, surface in SSH)
 - [ ] `git_branch` module (sync version, cached): branch name + dirty indicator
 - [ ] `time` module: optional clock segment
 

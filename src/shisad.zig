@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const cli = @import("daemon/cli.zig");
+const daemon_log = @import("daemon/log.zig");
 const lock = @import("daemon/lock.zig");
 const paths = @import("daemon/paths.zig");
 const server = @import("daemon/server.zig");
@@ -33,9 +34,16 @@ pub fn main() !void {
 
     const socket_path = if (config.socket_path) |path| path else try paths.defaultSocketPath(allocator);
     defer if (config.socket_path == null) allocator.free(socket_path);
+    const log_path = if (config.log_path) |path| path else try paths.defaultLogPath(allocator);
+    defer if (config.log_path == null) allocator.free(log_path);
+
+    var logger = try daemon_log.Logger.open(allocator, log_path);
+    defer logger.deinit();
+    try logger.info("startup", "shisad starting");
 
     var instance_lock = lock.InstanceLock.acquire(allocator, socket_path) catch |err| switch (err) {
         error.AlreadyRunning => {
+            try logger.warn("lock_busy", "another daemon owns the socket lock");
             try std.fs.File.stderr().writeAll("shisad: another daemon already owns the socket lock\n");
             return err;
         },
@@ -48,16 +56,18 @@ pub fn main() !void {
     }
 
     signals.installShutdownHandlers();
-    try run(config, socket_path);
+    try run(config, socket_path, &logger);
+    try logger.info("shutdown", "shisad stopped");
 }
 
-fn run(config: cli.Config, socket_path: []const u8) !void {
+fn run(config: cli.Config, socket_path: []const u8, logger: *daemon_log.Logger) !void {
     var daemon_server = try server.Server.init(socket_path);
     defer daemon_server.deinit();
 
     if (!config.daemonize) {
         try std.fs.File.stdout().writeAll("shisad: listening\n");
     }
+    try logger.info("listening", "unix socket server listening");
 
     try daemon_server.serve(&signals.shutdown_requested);
 }

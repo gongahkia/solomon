@@ -109,6 +109,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const lock_test_run = b.addRunArtifact(lock_tests);
+    const log_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/daemon/log.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const log_test_run = b.addRunArtifact(log_tests);
     const supervisor_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/supervisor.zig"),
@@ -129,6 +137,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&test_run.step);
     test_step.dependOn(&cli_test_run.step);
     test_step.dependOn(&lock_test_run.step);
+    test_step.dependOn(&log_test_run.step);
     test_step.dependOn(&supervisor_test_run.step);
     test_step.dependOn(&server_test_run.step);
 }

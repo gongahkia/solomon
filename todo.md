@@ -43,7 +43,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Implement unix-domain socket server (accept loop, per-conn handler)
 - [x] Implement graceful shutdown on SIGTERM/SIGINT (drain in-flight requests, unlink socket)
 - [x] Implement crash-restart supervisor (separate `shisa supervisor` binary or `--supervise` flag)
-- [ ] Implement structured logging to `~/Library/Logs/shisa/shisad.log`
+- [x] Implement structured logging to `~/Library/Logs/shisa/shisad.log`
 - [ ] Implement log rotation (size-based, 5×10MB ring)
 - [ ] Implement `shisad --version`, `--health`, `--metrics` admin endpoints
 

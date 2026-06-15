@@ -25,7 +25,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Write RFC-0001: Daemon wire protocol (framing, message types, versioning)
 - [x] Write RFC-0002: Module execution classes (sync, async, cached)
 - [x] Write RFC-0003: Lua plugin capability manifest schema
-- [ ] Write RFC-0004: Cache invalidation rules (per-module fsnotify scope)
+- [x] Write RFC-0004: Cache invalidation rules (per-module fsnotify scope)
 - [x] Set up `rfcs/` directory and a template
 - [x] Set up issue templates (bug, perf regression, plugin request, RFC)
 - [x] Set up PR template (checklist: tests, benchmarks-run, RFC-referenced)

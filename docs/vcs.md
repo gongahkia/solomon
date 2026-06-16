@@ -74,3 +74,11 @@ Detection:
 - Stack position rendering uses provider-prefixed segments like `stack:gh-stack:2/5 ↑↓`.
 - `gh stack view --json` exposes `currentBranch` plus ordered `branches[]` with `isCurrent`; Shisa parses those fields for GitHub stack positions.
 - `shisa stack [--cwd PATH]` prints the detected provider, root, marker, and branch evidence when available.
+
+## Worktrees
+
+Detection:
+
+- Linked Git worktree detection reads a `.git` file that points at `.git/worktrees/<id>`.
+- Primary worktrees with a `.git/` directory are not labeled as linked worktrees.
+- Prompt rendering appends `wt:<name>` to the Git segment when `cwd` is inside a linked worktree.

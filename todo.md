@@ -249,7 +249,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Add a `shisa stack` CLI to dump the detected stack as text
 
 ### 10.5 Worktree (`shisa.vcs.worktree`)
-- [ ] Show `wt:<name>` when cwd is inside a worktree
+- [x] Show `wt:<name>` when cwd is inside a worktree
 - [ ] `shisa worktrees` CLI lists all worktrees, marks active
 - [ ] Multi-worktree dirty-tree warning across worktrees
 

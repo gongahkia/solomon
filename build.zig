@@ -3,6 +3,21 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const vcs_worktree_module = b.createModule(.{
+        .root_source_file = b.path("src/vcs/worktree.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const vcs_worktree_debug_module = b.createModule(.{
+        .root_source_file = b.path("src/vcs/worktree.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    const vcs_worktree_release_module = b.createModule(.{
+        .root_source_file = b.path("src/vcs/worktree.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
 
     const exe = b.addExecutable(.{
         .name = "shisa",
@@ -22,6 +37,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    daemon.root_module.addImport("vcs_worktree", vcs_worktree_module);
     b.installArtifact(daemon);
 
     const debug_exe = b.addExecutable(.{
@@ -41,6 +57,7 @@ pub fn build(b: *std.Build) void {
             .optimize = .Debug,
         }),
     });
+    debug_daemon.root_module.addImport("vcs_worktree", vcs_worktree_debug_module);
     const debug_daemon_install = b.addInstallArtifact(debug_daemon, .{});
     const debug_step = b.step("debug", "Build debug binary");
     debug_step.dependOn(&debug_install.step);
@@ -63,6 +80,7 @@ pub fn build(b: *std.Build) void {
             .optimize = .ReleaseFast,
         }),
     });
+    release_daemon.root_module.addImport("vcs_worktree", vcs_worktree_release_module);
     const release_daemon_install = b.addInstallArtifact(release_daemon, .{});
     const release_step = b.step("release", "Build release binary");
     release_step.dependOn(&release_install.step);
@@ -181,6 +199,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const vcs_stack_test_run = b.addRunArtifact(vcs_stack_tests);
+    const vcs_worktree_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/vcs/worktree.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const vcs_worktree_test_run = b.addRunArtifact(vcs_worktree_tests);
     const lock_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/lock.zig"),
@@ -276,6 +302,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    git_branch_tests.root_module.addImport("vcs_worktree", vcs_worktree_module);
     const git_branch_test_run = b.addRunArtifact(git_branch_tests);
     const language_versions_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -308,6 +335,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    dispatcher_tests.root_module.addImport("vcs_worktree", vcs_worktree_module);
     const dispatcher_test_run = b.addRunArtifact(dispatcher_tests);
     const supervisor_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -348,6 +376,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    server_tests.root_module.addImport("vcs_worktree", vcs_worktree_module);
     const server_test_run = b.addRunArtifact(server_tests);
     const zsh_integration = b.addSystemCommand(&.{ "bash", "test/integration/zsh_fake_socket.sh" });
     zsh_integration.step.dependOn(&debug_install.step);
@@ -377,6 +406,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&vcs_sl_test_run.step);
     test_step.dependOn(&vcs_hg_test_run.step);
     test_step.dependOn(&vcs_stack_test_run.step);
+    test_step.dependOn(&vcs_worktree_test_run.step);
     test_step.dependOn(&lock_test_run.step);
     test_step.dependOn(&log_test_run.step);
     test_step.dependOn(&cache_test_run.step);

@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const vcs_worktree = @import("vcs_worktree");
 
 pub const module_id = "git_branch";
 pub const WatchPath = struct {
@@ -290,6 +291,11 @@ fn probeCancellable(allocator: std.mem.Allocator, cache: ?*Cache, generation: u6
     if (branch.len == 0) return null;
 
     const dirty = try isDirty(allocator, cache, generation, cwd_path);
+    const worktree_segment = worktreeSegmentAlloc(allocator, cwd_path) catch null;
+    defer if (worktree_segment) |segment| allocator.free(segment);
+    if (worktree_segment) |segment| {
+        return try std.fmt.allocPrint(allocator, "git:{s}{s} {s}", .{ branch, if (dirty) "*" else "", segment });
+    }
     return try std.fmt.allocPrint(allocator, "git:{s}{s}", .{ branch, if (dirty) "*" else "" });
 }
 
@@ -343,6 +349,12 @@ fn isDirty(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_pa
     defer allocator.free(status_result.stderr);
 
     return exitedZero(status_result.term) and std.mem.trim(u8, status_result.stdout, " \t\r\n").len > 0;
+}
+
+fn worktreeSegmentAlloc(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
+    var detection = (try vcs_worktree.detect(allocator, cwd_path)) orelse return null;
+    defer detection.deinit(allocator);
+    return try vcs_worktree.renderAlloc(allocator, detection);
 }
 
 fn runCommand(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8, argv: []const []const u8, max_output_bytes: usize) !std.process.Child.RunResult {
@@ -435,6 +447,36 @@ test "renders branch and dirty indicator" {
     const rendered = (try cache.render(allocator, dir_path)).?;
     defer allocator.free(rendered);
     try std.testing.expectEqualStrings("git:main*", rendered);
+}
+
+test "renders linked worktree name" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-git-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    try runGit(allocator, dir_path, &.{ "git", "init", "-b", "main" });
+
+    const tracked_file = try std.fmt.allocPrint(allocator, "{s}/tracked.txt", .{dir_path});
+    defer allocator.free(tracked_file);
+    var file = try std.fs.createFileAbsolute(tracked_file, .{});
+    try file.writeAll("tracked");
+    file.close();
+    try runGit(allocator, dir_path, &.{ "git", "add", "tracked.txt" });
+    try runGit(allocator, dir_path, &.{ "git", "-c", "user.name=shisa", "-c", "user.email=shisa@example.invalid", "commit", "-m", "init" });
+
+    const linked_path = try std.fmt.allocPrint(allocator, "{s}-linked", .{dir_path});
+    defer allocator.free(linked_path);
+    defer std.fs.cwd().deleteTree(linked_path) catch {};
+    try runGit(allocator, dir_path, &.{ "git", "worktree", "add", linked_path, "-b", "feature" });
+
+    var cache = Cache{};
+    defer cache.deinit(allocator);
+    const rendered = (try cache.render(allocator, linked_path)).?;
+    defer allocator.free(rendered);
+    const expected = try std.fmt.allocPrint(allocator, "git:feature wt:{s}", .{std.fs.path.basename(linked_path)});
+    defer allocator.free(expected);
+    try std.testing.expectEqualStrings(expected, rendered);
 }
 
 test "watch scope includes git metadata and worktree" {

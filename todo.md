@@ -294,7 +294,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ### 11.4 IAM whoami (`iam_whoami`)
 - [x] AWS STS GetCallerIdentity cached value
-- [ ] GCP `gcloud auth list` cached
+- [x] GCP `gcloud auth list` cached
 - [ ] Azure `az account show` cached
 - [ ] k8s `kubectl config current-context` user
 

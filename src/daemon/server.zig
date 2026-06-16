@@ -218,6 +218,32 @@ pub const Server = struct {
             .paths = paths[0..],
             .debounce_ms = git_scope.debounce_ms,
         });
+        try self.logInotifyLimitWarning();
+    }
+
+    fn logInotifyLimitWarning(self: *Server) !void {
+        const logger = self.logger orelse return;
+        const max_user_watches = fsnotify.readLinuxMaxUserWatches(std.heap.page_allocator) catch return;
+        const status = self.fs_watcher.inotifyLimitStatus(max_user_watches);
+        if (status.within_limit == false) {
+            const message = try std.fmt.allocPrint(
+                std.heap.page_allocator,
+                "watched_paths={d} max_user_watches={d}",
+                .{ status.watched_paths, status.max_user_watches.? },
+            );
+            defer std.heap.page_allocator.free(message);
+            try logger.warn("inotify_limit_exceeded", message);
+        } else if (status.remaining) |remaining| {
+            if (remaining < 128) {
+                const message = try std.fmt.allocPrint(
+                    std.heap.page_allocator,
+                    "watched_paths={d} max_user_watches={d} remaining={d}",
+                    .{ status.watched_paths, status.max_user_watches.?, remaining },
+                );
+                defer std.heap.page_allocator.free(message);
+                try logger.warn("inotify_limit_low", message);
+            }
+        }
     }
 };
 

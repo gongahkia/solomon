@@ -24,6 +24,13 @@ pub const Invalidation = struct {
     cwd: []const u8,
 };
 
+pub const InotifyLimitStatus = struct {
+    watched_paths: usize,
+    max_user_watches: ?u64,
+    within_limit: ?bool,
+    remaining: ?u64,
+};
+
 const OwnedPath = struct {
     path: []u8,
     recursive: bool,
@@ -123,6 +130,16 @@ pub const Watcher = struct {
         return self.registrations.items.len;
     }
 
+    pub fn watchedPathCount(self: Watcher) usize {
+        var total: usize = 0;
+        for (self.registrations.items) |registration| total += registration.paths.len;
+        return total;
+    }
+
+    pub fn inotifyLimitStatus(self: Watcher, max_user_watches: ?u64) InotifyLimitStatus {
+        return inotifyLimitStatusForCount(self.watchedPathCount(), max_user_watches);
+    }
+
     pub fn hasScope(self: Watcher, module_id: []const u8, cwd: []const u8) bool {
         for (self.registrations.items) |registration| {
             if (std.mem.eql(u8, registration.module_id, module_id) and std.mem.eql(u8, registration.cwd, cwd)) return true;
@@ -137,6 +154,38 @@ pub fn selectBackend(os_tag: std.Target.Os.Tag) Backend {
         .linux => .inotify,
         else => .unsupported,
     };
+}
+
+pub fn readLinuxMaxUserWatches(allocator: std.mem.Allocator) !?u64 {
+    if (builtin.os.tag != .linux) return null;
+    const contents = std.fs.cwd().readFileAlloc(allocator, "/proc/sys/fs/inotify/max_user_watches", 128) catch |err| switch (err) {
+        error.FileNotFound, error.AccessDenied => return null,
+        else => return err,
+    };
+    defer allocator.free(contents);
+    return parseUnsigned(contents);
+}
+
+pub fn inotifyLimitStatusForCount(watched_paths: usize, max_user_watches: ?u64) InotifyLimitStatus {
+    const watched: u64 = @intCast(watched_paths);
+    const limit = max_user_watches orelse return .{
+        .watched_paths = watched_paths,
+        .max_user_watches = null,
+        .within_limit = null,
+        .remaining = null,
+    };
+    return .{
+        .watched_paths = watched_paths,
+        .max_user_watches = limit,
+        .within_limit = watched <= limit,
+        .remaining = if (watched <= limit) limit - watched else 0,
+    };
+}
+
+fn parseUnsigned(contents: []const u8) !u64 {
+    const trimmed = std.mem.trim(u8, contents, " \t\r\n");
+    if (trimmed.len == 0) return error.InvalidUnsigned;
+    return std.fmt.parseInt(u64, trimmed, 10);
 }
 
 fn registrationMatches(registration: Registration, path: []const u8) bool {
@@ -201,6 +250,43 @@ test "deduplicates watched scopes" {
 
     try std.testing.expect(watcher.hasScope("git_branch", "/repo"));
     try std.testing.expectEqual(@as(usize, 1), watcher.count());
+}
+
+test "counts watched paths" {
+    var watcher = Watcher.init(std.testing.allocator);
+    defer watcher.deinit();
+
+    const paths = [_]WatchPath{
+        .{ .path = "/repo/.git/HEAD" },
+        .{ .path = "/repo/.git/index" },
+    };
+    try watcher.watch(.{
+        .module_id = "git_branch",
+        .cwd = "/repo",
+        .paths = &paths,
+    });
+
+    try std.testing.expectEqual(@as(usize, 2), watcher.watchedPathCount());
+}
+
+test "reports inotify limit status" {
+    const ok = inotifyLimitStatusForCount(8, 16);
+    try std.testing.expectEqual(@as(usize, 8), ok.watched_paths);
+    try std.testing.expectEqual(@as(u64, 16), ok.max_user_watches.?);
+    try std.testing.expect(ok.within_limit.?);
+    try std.testing.expectEqual(@as(u64, 8), ok.remaining.?);
+
+    const exceeded = inotifyLimitStatusForCount(17, 16);
+    try std.testing.expect(!exceeded.within_limit.?);
+    try std.testing.expectEqual(@as(u64, 0), exceeded.remaining.?);
+
+    const unknown = inotifyLimitStatusForCount(4, null);
+    try std.testing.expect(unknown.within_limit == null);
+}
+
+test "parses trimmed unsigned sysctl values" {
+    try std.testing.expectEqual(@as(u64, 524288), try parseUnsigned("524288\n"));
+    try std.testing.expectError(error.InvalidCharacter, parseUnsigned("nope\n"));
 }
 
 test "debounces invalidations by scope" {

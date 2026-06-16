@@ -25,6 +25,20 @@ pub const OperationSummary = struct {
     }
 };
 
+pub const ChangeSummary = struct {
+    change_id: []u8,
+    commit_id: []u8,
+    description: []u8,
+    divergent: bool,
+
+    pub fn deinit(self: *ChangeSummary, allocator: std.mem.Allocator) void {
+        allocator.free(self.change_id);
+        allocator.free(self.commit_id);
+        allocator.free(self.description);
+        self.* = undefined;
+    }
+};
+
 pub const Cache = struct {
     valid: bool = false,
     root_path: ?[]u8 = null,
@@ -169,6 +183,36 @@ pub fn renderOperationSummary(allocator: std.mem.Allocator, cwd_path: []const u8
     return std.fmt.allocPrint(allocator, "jj:op:{s} {s}", .{ short_id, operation.description });
 }
 
+pub fn readChangeSummary(allocator: std.mem.Allocator, cwd_path: []const u8) !?ChangeSummary {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{
+            "jj",
+            "log",
+            "--no-graph",
+            "-r",
+            "@",
+            "--color",
+            "never",
+            "-T",
+            "change_id.short(8) ++ \"\\n\" ++ commit_id.short(8) ++ \"\\n\" ++ coalesce(description.first_line(), \"(no description set)\") ++ \"\\n\" ++ if(divergent, \"divergent\", \"\") ++ \"\\n\"",
+        },
+        .cwd = cwd_path,
+        .max_output_bytes = 16 * 1024,
+        .expand_arg0 = .expand,
+    }) catch return null;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!exitedZero(result.term)) return null;
+    return parseChangeSummary(allocator, result.stdout);
+}
+
+pub fn renderChangeSummary(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
+    var summary = (try readChangeSummary(allocator, cwd_path)) orelse return null;
+    defer summary.deinit(allocator);
+    return formatChangeSummaryAlloc(allocator, summary);
+}
+
 pub fn parseLatestOperation(allocator: std.mem.Allocator, output: []const u8) !?OperationSummary {
     var lines = std.mem.tokenizeScalar(u8, output, '\n');
     const header = lines.next() orelse return null;
@@ -186,6 +230,36 @@ pub fn parseLatestOperation(allocator: std.mem.Allocator, output: []const u8) !?
         .id = owned_id,
         .description = owned_description,
     };
+}
+
+pub fn parseChangeSummary(allocator: std.mem.Allocator, output: []const u8) !?ChangeSummary {
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    const change_id = std.mem.trim(u8, lines.next() orelse return null, " \t\r");
+    const commit_id = std.mem.trim(u8, lines.next() orelse return null, " \t\r");
+    const description = std.mem.trim(u8, lines.next() orelse return null, " \t\r");
+    const divergence = std.mem.trim(u8, lines.next() orelse "", " \t\r");
+    if (change_id.len == 0 or commit_id.len == 0) return null;
+
+    const rendered_description = if (description.len == 0) "(no description set)" else description;
+    const owned_change_id = try allocator.dupe(u8, change_id);
+    errdefer allocator.free(owned_change_id);
+    const owned_commit_id = try allocator.dupe(u8, commit_id);
+    errdefer allocator.free(owned_commit_id);
+    const owned_description = try allocator.dupe(u8, rendered_description);
+    return .{
+        .change_id = owned_change_id,
+        .commit_id = owned_commit_id,
+        .description = owned_description,
+        .divergent = std.mem.eql(u8, divergence, "divergent"),
+    };
+}
+
+pub fn formatChangeSummaryAlloc(allocator: std.mem.Allocator, summary: ChangeSummary) ![]u8 {
+    const short_change_id = summary.change_id[0..@min(summary.change_id.len, 8)];
+    if (summary.divergent) {
+        return std.fmt.allocPrint(allocator, "jj:{s} {s} divergent", .{ short_change_id, summary.description });
+    }
+    return std.fmt.allocPrint(allocator, "jj:{s} {s}", .{ short_change_id, summary.description });
 }
 
 fn exitedZero(term: std.process.Child.Term) bool {
@@ -293,6 +367,51 @@ test "formats jj operation summary" {
     try std.testing.expectEqualStrings("jj:op:abcdef12 snapshot working copy", rendered);
 }
 
+test "parses current jj change summary" {
+    const output =
+        \\yztrvqqq
+        \\1234abcd
+        \\working desc
+        \\divergent
+        \\
+    ;
+    var summary = (try parseChangeSummary(std.testing.allocator, output)).?;
+    defer summary.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("yztrvqqq", summary.change_id);
+    try std.testing.expectEqualStrings("1234abcd", summary.commit_id);
+    try std.testing.expectEqualStrings("working desc", summary.description);
+    try std.testing.expect(summary.divergent);
+}
+
+test "formats current jj change summary" {
+    var summary = ChangeSummary{
+        .change_id = try std.testing.allocator.dupe(u8, "yztrvqqqxxxx"),
+        .commit_id = try std.testing.allocator.dupe(u8, "1234abcd"),
+        .description = try std.testing.allocator.dupe(u8, "working desc"),
+        .divergent = false,
+    };
+    defer summary.deinit(std.testing.allocator);
+
+    const rendered = try formatChangeSummaryAlloc(std.testing.allocator, summary);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("jj:yztrvqqq working desc", rendered);
+}
+
+test "defaults empty jj change description" {
+    const output =
+        \\yztrvqqq
+        \\1234abcd
+        \\
+        \\
+    ;
+    var summary = (try parseChangeSummary(std.testing.allocator, output)).?;
+    defer summary.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("(no description set)", summary.description);
+    try std.testing.expect(!summary.divergent);
+}
+
 test "cache invalidates by jj root" {
     const allocator = std.testing.allocator;
     var cache = Cache{
@@ -330,4 +449,40 @@ test "reads real jj op log when jj is installed" {
     defer operation.deinit(allocator);
     try std.testing.expect(operation.id.len >= 8);
     try std.testing.expect(std.mem.indexOf(u8, operation.description, "workspace") != null);
+}
+
+test "reads real jj current change when jj is installed" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-jj-change-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const init = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "jj", "git", "init" },
+        .cwd = dir_path,
+        .max_output_bytes = 4096,
+        .expand_arg0 = .expand,
+    }) catch return error.SkipZigTest;
+    defer allocator.free(init.stdout);
+    defer allocator.free(init.stderr);
+    if (!exitedZero(init.term)) return error.SkipZigTest;
+
+    const describe = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "jj", "describe", "-m", "working desc" },
+        .cwd = dir_path,
+        .max_output_bytes = 4096,
+        .expand_arg0 = .expand,
+    }) catch return error.SkipZigTest;
+    defer allocator.free(describe.stdout);
+    defer allocator.free(describe.stderr);
+    if (!exitedZero(describe.term)) return error.SkipZigTest;
+
+    var summary = (try readChangeSummary(allocator, dir_path)) orelse return error.SkipZigTest;
+    defer summary.deinit(allocator);
+    try std.testing.expect(summary.change_id.len >= 8);
+    try std.testing.expect(summary.commit_id.len >= 8);
+    try std.testing.expectEqualStrings("working desc", summary.description);
 }

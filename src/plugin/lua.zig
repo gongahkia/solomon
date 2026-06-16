@@ -13,6 +13,8 @@ const LuaLOpenLibs = *const fn (?*LuaState) callconv(.c) void;
 const LuaLLoadString = *const fn (?*LuaState, [*:0]const u8) callconv(.c) CInt;
 const LuaPCall = *const fn (?*LuaState, CInt, CInt, CInt) callconv(.c) CInt;
 const LuaGetField = *const fn (?*LuaState, CInt, [*:0]const u8) callconv(.c) void;
+const LuaSetField = *const fn (?*LuaState, CInt, [*:0]const u8) callconv(.c) void;
+const LuaPushNil = *const fn (?*LuaState) callconv(.c) void;
 const LuaType = *const fn (?*LuaState, CInt) callconv(.c) CInt;
 const LuaSetTop = *const fn (?*LuaState, CInt) callconv(.c) void;
 
@@ -23,6 +25,8 @@ const Api = struct {
     luaL_loadstring: LuaLLoadString,
     lua_pcall: LuaPCall,
     lua_getfield: LuaGetField,
+    lua_setfield: LuaSetField,
+    lua_pushnil: LuaPushNil,
     lua_type: LuaType,
     lua_settop: LuaSetTop,
 };
@@ -46,6 +50,13 @@ pub const Runtime = struct {
             .api = api,
             .state = state,
         };
+    }
+
+    pub fn initSandboxed(allocator: std.mem.Allocator) !Runtime {
+        var runtime = try init(allocator);
+        errdefer runtime.deinit();
+        try runtime.stripDangerousGlobals();
+        return runtime;
     }
 
     pub fn deinit(self: *Runtime) void {
@@ -75,6 +86,25 @@ pub const Runtime = struct {
         const is_nil = self.api.lua_type(self.state, -1) == lua_tnil;
         self.clearStack();
         return is_nil;
+    }
+
+    fn stripDangerousGlobals(self: *Runtime) !void {
+        const globals = [_][]const u8{
+            "os",
+            "io",
+            "package",
+            "require",
+            "dofile",
+            "loadfile",
+        };
+        for (globals) |name| try self.stripGlobal(name);
+    }
+
+    fn stripGlobal(self: *Runtime, name: []const u8) !void {
+        const global = try self.allocator.dupeZ(u8, name);
+        defer self.allocator.free(global);
+        self.api.lua_pushnil(self.state);
+        self.api.lua_setfield(self.state, lua_globalsindex, global.ptr);
     }
 
     fn clearStack(self: *Runtime) void {
@@ -107,6 +137,8 @@ fn loadApi(lib: *std.DynLib) !Api {
         .luaL_loadstring = lib.lookup(LuaLLoadString, "luaL_loadstring") orelse return error.LuaSymbolMissing,
         .lua_pcall = lib.lookup(LuaPCall, "lua_pcall") orelse return error.LuaSymbolMissing,
         .lua_getfield = lib.lookup(LuaGetField, "lua_getfield") orelse return error.LuaSymbolMissing,
+        .lua_setfield = lib.lookup(LuaSetField, "lua_setfield") orelse return error.LuaSymbolMissing,
+        .lua_pushnil = lib.lookup(LuaPushNil, "lua_pushnil") orelse return error.LuaSymbolMissing,
         .lua_type = lib.lookup(LuaType, "lua_type") orelse return error.LuaSymbolMissing,
         .lua_settop = lib.lookup(LuaSetTop, "lua_settop") orelse return error.LuaSymbolMissing,
     };
@@ -121,4 +153,22 @@ test "loads luajit and runs code" {
 
     try runtime.doString("shisa_test_value = 40 + 2");
     try std.testing.expect(!(try runtime.globalIsNil("shisa_test_value")));
+}
+
+test "sandbox strips dangerous globals" {
+    var runtime = Runtime.initSandboxed(std.testing.allocator) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    defer runtime.deinit();
+
+    try std.testing.expect(try runtime.globalIsNil("os"));
+    try std.testing.expect(try runtime.globalIsNil("io"));
+    try std.testing.expect(try runtime.globalIsNil("package"));
+    try std.testing.expect(try runtime.globalIsNil("require"));
+    try std.testing.expect(try runtime.globalIsNil("dofile"));
+    try std.testing.expect(try runtime.globalIsNil("loadfile"));
+    try std.testing.expectError(error.LuaRuntimeError, runtime.doString("return require('x')"));
+    try runtime.doString("shisa_safe_value = tostring(42)");
+    try std.testing.expect(!(try runtime.globalIsNil("shisa_safe_value")));
 }

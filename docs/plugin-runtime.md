@@ -12,3 +12,8 @@ Loading:
 
 - Runtime lookup tries common Homebrew LuaJIT library paths, then `libluajit-5.1.dylib`, `libluajit.dylib`, `libluajit-5.1.so`, and `libluajit-5.1.so.2`.
 - If LuaJIT is unavailable, runtime tests skip and plugin loading must fail closed.
+
+Sandbox:
+
+- `Runtime.initSandboxed` opens standard libraries, then removes `os`, `io`, `package`, `require`, `dofile`, and `loadfile` from the global table.
+- Host APIs must still enforce the manifest capability gate for filesystem, exec, network, env, secrets, and pre-exec access.

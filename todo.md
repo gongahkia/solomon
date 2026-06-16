@@ -222,7 +222,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Show working-copy commit vs. parent commits
 - [x] Async update on jj operations
 - [x] Snapshot tests against fixture jj repos
-- [ ] Benchmark on a 10k-change jj repo
+- [x] Benchmark on a 10k-change jj repo
 
 ### 10.2 Sapling (sl) — Tier 1
 - [ ] Detect sapling repos (`.sl/` directory)

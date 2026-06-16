@@ -19,3 +19,4 @@ Planned state sources:
 - `jj log --no-graph -r @` with `conflict` and `self.conflicted_files()` for inline conflict state.
 - `jj log --no-graph -r @` with commit id and `parents.map()` for working-copy position.
 - `test/fixtures/jj/*` snapshot fixture repos cover deterministic parser/render output.
+- `bench/jj-10k.sh` benchmarks the jj commands Shisa wraps on a 10k-change imported repo.

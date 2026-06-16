@@ -24,3 +24,24 @@ Tuning:
 
 - `SHISA_BENCH_RUNS=50`
 - `SHISA_BENCH_WARMUP=10`
+
+## jj 10k-Change Harness
+
+Run:
+
+```sh
+bench/jj-10k.sh
+```
+
+The harness creates a temporary Git history with 10,000 commits, imports it into jj, places `@` on top of `main`, and times the jj commands used by `shisa.vcs`.
+
+Outputs:
+
+- `bench-results/jj-10k.json`
+- `bench-results/jj-10k.md`
+
+Tuning:
+
+- `SHISA_JJ_BENCH_CHANGES=20000`
+- `SHISA_JJ_BENCH_RUNS=50`
+- `SHISA_JJ_BENCH_KEEP_REPO=1`

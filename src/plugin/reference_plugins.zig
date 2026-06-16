@@ -8,6 +8,7 @@ const reference_manifests = [_][]const u8{
     "examples/plugins/aws-profile/plugin.lua",
     "examples/plugins/fossil/plugin.lua",
     "examples/plugins/pijul/plugin.lua",
+    "examples/plugins/breezy/plugin.lua",
 };
 
 test "reference plugin manifests load in strict mode" {

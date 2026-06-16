@@ -134,3 +134,4 @@ Reference manifests live under `examples/plugins/`:
 - `aws-profile`: AWS config/env capabilities.
 - `fossil`: community Fossil VCS status template.
 - `pijul`: community Pijul VCS status template.
+- `breezy`: community Bazaar/Breezy VCS status template.

@@ -14,6 +14,13 @@ const GcloudAuthJson = struct {
     expiry: []const u8 = "",
 };
 
+const AzureAccessTokenJson = struct {
+    expiresOn: []const u8 = "",
+    expires_on: []const u8 = "",
+    expiresAt: []const u8 = "",
+    expires_at: []const u8 = "",
+};
+
 pub fn awsSsoCacheDirAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
     const home_path = home orelse return null;
     return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.aws/sso/cache", .{home_path}));
@@ -92,6 +99,44 @@ fn gcloudExpiryField(entry: GcloudAuthJson) ?[]const u8 {
     return null;
 }
 
+pub fn azureAccessTokensPathAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
+    const home_path = home orelse return null;
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.azure/accessTokens.json", .{home_path}));
+}
+
+pub fn readAzureAccessTokenExpiryAlloc(allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 256 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(source);
+    return parseAzureAccessTokenExpiryAlloc(allocator, source);
+}
+
+pub fn parseAzureAccessTokenExpiryAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 {
+    var parsed = std.json.parseFromSlice([]AzureAccessTokenJson, allocator, source, .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+    var soonest: ?[]const u8 = null;
+    for (parsed.value) |entry| {
+        const expiry = azureExpiryField(entry) orelse continue;
+        if (soonest == null or std.mem.lessThan(u8, expiry, soonest.?)) soonest = expiry;
+    }
+    if (soonest) |expiry| return @as(?[]u8, try allocator.dupe(u8, expiry));
+    return null;
+}
+
+fn azureExpiryField(entry: AzureAccessTokenJson) ?[]const u8 {
+    const expires_on = std.mem.trim(u8, entry.expiresOn, " \t\r\n");
+    if (expires_on.len != 0) return expires_on;
+    const expires_on_alt = std.mem.trim(u8, entry.expires_on, " \t\r\n");
+    if (expires_on_alt.len != 0) return expires_on_alt;
+    const expires_at = std.mem.trim(u8, entry.expiresAt, " \t\r\n");
+    if (expires_at.len != 0) return expires_at;
+    const expires_at_alt = std.mem.trim(u8, entry.expires_at, " \t\r\n");
+    if (expires_at_alt.len != 0) return expires_at_alt;
+    return null;
+}
+
 test "parses aws sso expiry" {
     const expiry = (try parseAwsSsoExpiryAlloc(std.testing.allocator,
         \\{
@@ -153,4 +198,32 @@ test "builds gcloud auth cache path for expiry" {
     const path = (try gcloudAuthCachePathAlloc(std.testing.allocator, "/home/me")).?;
     defer std.testing.allocator.free(path);
     try std.testing.expectEqualStrings("/home/me/.cache/shisa/gcloud-auth-list.json", path);
+}
+
+test "parses azure access token soonest expiry" {
+    const expiry = (try parseAzureAccessTokenExpiryAlloc(std.testing.allocator,
+        \\[
+        \\  {"resource": "https://management.azure.com/", "expiresOn": "2026-06-16 12:00:00.000000"},
+        \\  {"resource": "https://graph.microsoft.com/", "expiresOn": "2026-06-16 10:00:00.000000"}
+        \\]
+    )).?;
+    defer std.testing.allocator.free(expiry);
+    try std.testing.expectEqualStrings("2026-06-16 10:00:00.000000", expiry);
+}
+
+test "parses azure access token fallback expiry fields" {
+    const expiry = (try parseAzureAccessTokenExpiryAlloc(std.testing.allocator,
+        \\[
+        \\  {"expires_at": "2026-06-16T12:00:00Z"},
+        \\  {"expires_on": "2026-06-16T10:00:00Z"}
+        \\]
+    )).?;
+    defer std.testing.allocator.free(expiry);
+    try std.testing.expectEqualStrings("2026-06-16T10:00:00Z", expiry);
+}
+
+test "builds azure access tokens path" {
+    const path = (try azureAccessTokensPathAlloc(std.testing.allocator, "/home/me")).?;
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/home/me/.azure/accessTokens.json", path);
 }

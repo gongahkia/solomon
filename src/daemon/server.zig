@@ -3,6 +3,7 @@ const dispatcher = @import("dispatcher.zig");
 const git_branch_module = @import("modules/git_branch.zig");
 const language_versions_module = @import("modules/language_versions.zig");
 const daemon_log = @import("log.zig");
+const warmup = @import("warmup.zig");
 const json = @import("json.zig");
 
 const header_bytes = 4;
@@ -66,6 +67,7 @@ pub const Server = struct {
     }
 
     pub fn serve(self: *Server, shutdown_requested: *const std.atomic.Value(bool)) !void {
+        try self.warmupCaches(std.heap.page_allocator);
         while (!shutdown_requested.load(.seq_cst)) {
             var poll_fds = [_]std.posix.pollfd{.{
                 .fd = self.listener.stream.handle,
@@ -79,6 +81,24 @@ pub const Server = struct {
             if ((poll_fds[0].revents & std.posix.POLL.IN) != 0) {
                 try self.acceptOne();
             }
+        }
+    }
+
+    fn warmupCaches(self: *Server, allocator: std.mem.Allocator) !void {
+        const history_path = warmup.historyPath(allocator) catch return;
+        defer allocator.free(history_path);
+        const contents = std.fs.cwd().readFileAlloc(allocator, history_path, 1024 * 1024) catch return;
+        defer allocator.free(contents);
+        const dirs = try warmup.topDirsFromZshHistory(allocator, contents, 10);
+        defer {
+            for (dirs) |dir| allocator.free(dir);
+            allocator.free(dirs);
+        }
+        for (dirs) |dir| {
+            var git = self.git_branch_cache.renderAsync(allocator, dir) catch continue;
+            git.deinit(allocator);
+            var lang = self.language_versions_cache.renderAsync(allocator, dir) catch continue;
+            lang.deinit(allocator);
         }
     }
 

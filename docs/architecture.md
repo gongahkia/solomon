@@ -46,6 +46,8 @@ The renderer builds a configured module pipeline and composes ANSI prompt output
 
 See [RFC-0002](../rfcs/0002-module-execution-classes.md).
 
+The user-facing `shisa.toml` schema is defined in [config-schema.md](config-schema.md).
+
 ### Cache
 
 Shisa uses three cache layers:

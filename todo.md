@@ -72,7 +72,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Add `ZSH_VERSION` compat shims for ≥ 5.0
 
 ### 1.5 Configuration
-- [ ] Define `shisa.toml` schema (modules list, theme, per-module options)
+- [x] Define `shisa.toml` schema (modules list, theme, per-module options)
 - [ ] Implement TOML parser usage and validation with helpful error spans
 - [ ] Ship a `shisa init` command that writes a default config to `~/.config/shisa/shisa.toml`
 - [ ] Ship a `shisa explain` command that dumps the resolved module pipeline

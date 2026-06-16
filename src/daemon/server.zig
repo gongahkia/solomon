@@ -3,6 +3,7 @@ const cloud_ctx_module = @import("modules/cloud_ctx.zig");
 const dispatcher = @import("dispatcher.zig");
 const git_branch_module = @import("modules/git_branch.zig");
 const language_versions_module = @import("modules/language_versions.zig");
+const prod_guard_module = @import("modules/prod_guard.zig");
 const risk_tier_module = @import("modules/risk_tier.zig");
 const daemon_log = @import("log.zig");
 const warmup = @import("warmup.zig");
@@ -210,10 +211,13 @@ pub const Server = struct {
         const reason = risk_tier_module.explain(parsed.value.command, null);
         const escaped_pattern = try json.escapeAlloc(std.heap.page_allocator, if (reason.pattern.len == 0) "-" else reason.pattern);
         defer std.heap.page_allocator.free(escaped_pattern);
+        const destructive = prod_guard_module.destructivePattern(parsed.value.command);
+        const escaped_destructive = try json.escapeAlloc(std.heap.page_allocator, destructive orelse "-");
+        defer std.heap.page_allocator.free(escaped_destructive);
         return std.fmt.allocPrint(
             std.heap.page_allocator,
-            "{{\"v\":1,\"allow\":true,\"tier\":\"{s}\",\"source\":\"{s}\",\"pattern\":\"{s}\"}}",
-            .{ risk_tier_module.tierName(reason.tier), risk_tier_module.sourceName(reason.source), escaped_pattern },
+            "{{\"v\":1,\"allow\":true,\"tier\":\"{s}\",\"source\":\"{s}\",\"pattern\":\"{s}\",\"destructive\":{},\"destructive_pattern\":\"{s}\"}}",
+            .{ risk_tier_module.tierName(reason.tier), risk_tier_module.sourceName(reason.source), escaped_pattern, destructive != null, escaped_destructive },
         );
     }
 
@@ -488,6 +492,7 @@ test "preexec response classifies command tier" {
     defer std.heap.page_allocator.free(response);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"tier\":\"prod\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"allow\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"destructive\":false") != null);
 }
 
 test "fs event invalidates git branch cache" {

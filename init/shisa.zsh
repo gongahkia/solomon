@@ -74,7 +74,9 @@ shisa_preexec_guard() {
   local shell_name=${1}
   local command=${2:-}
   [[ -n ${command} ]] || return 0
-  "${SHISA_BIN}" cloud preexec --shell "${shell_name}" -- "${command}"
+  local socket_path
+  socket_path=$(shisa_socket_path)
+  "${SHISA_BIN}" cloud preexec --socket "${socket_path}" --shell "${shell_name}" -- "${command}"
 }
 
 setopt prompt_subst

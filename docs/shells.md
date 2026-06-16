@@ -17,7 +17,7 @@
 - Uses `%~> ` as fallback when the daemon socket is missing.
 - Redraw path is signal-driven: `TRAPUSR1` calls `zle reset-prompt`.
 - Transient prompt replaces accepted lines with `%~> `.
-- When `SHISA_PROD_GUARD=1`, `preexec` calls `shisa cloud preexec --shell zsh -- <command>`.
+- When `SHISA_PROD_GUARD=1`, `preexec` sends `shisa cloud preexec --socket <socket> --shell zsh -- <command>` to the daemon.
 
 ## bash
 
@@ -26,7 +26,7 @@
 - Captures duration with a `DEBUG` trap and `$EPOCHREALTIME`; Bash builds without `$EPOCHREALTIME` report `0ms`.
 - Uses a Readline binding (`SHISA_ASYNC_KEYSEQ`, default `\C-x\C-s`) for async redraw.
 - Bash redraw limitation: an external notifier must inject the bound key sequence into the active tty. Redraw only works while Readline is active, not while a foreground command is running.
-- When `SHISA_PROD_GUARD=1`, the `DEBUG` trap calls `shisa cloud preexec --shell bash -- <command>`.
+- When `SHISA_PROD_GUARD=1`, the `DEBUG` trap sends `shisa cloud preexec --socket <socket> --shell bash -- <command>` to the daemon.
 
 ## fish
 
@@ -34,7 +34,7 @@
 - Captures exit via `$status`, jobs via `jobs -p`, and duration via `$CMD_DURATION`.
 - Enables `SHISA_INSTANT=1` by default, so cached prompts render before a daemon request.
 - Redraw path is fish-native: handlers can `emit shisa_async_redraw`, which calls `commandline -f repaint`.
-- When `SHISA_PROD_GUARD=1`, `fish_preexec` calls `shisa cloud preexec --shell fish -- <command>`.
+- When `SHISA_PROD_GUARD=1`, `fish_preexec` sends `shisa cloud preexec --socket <socket> --shell fish -- <command>` to the daemon.
 
 ## nushell
 

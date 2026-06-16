@@ -3,6 +3,7 @@ const cloud_ctx_module = @import("modules/cloud_ctx.zig");
 const dispatcher = @import("dispatcher.zig");
 const git_branch_module = @import("modules/git_branch.zig");
 const language_versions_module = @import("modules/language_versions.zig");
+const risk_tier_module = @import("modules/risk_tier.zig");
 const daemon_log = @import("log.zig");
 const warmup = @import("warmup.zig");
 const json = @import("json.zig");
@@ -23,6 +24,13 @@ const RenderRequest = struct {
     cols: u16 = 80,
     rows: u16 = 24,
     cloud_ctx: cloud_ctx_module.Options = .{},
+};
+
+const PreexecRequest = struct {
+    v: u32 = 1,
+    kind: []const u8 = "",
+    shell: []const u8 = "",
+    command: []const u8 = "",
 };
 
 pub const Server = struct {
@@ -128,6 +136,10 @@ pub const Server = struct {
             try writeFrame(connection.stream.handle, line);
         } else if (std.mem.startsWith(u8, request, "health")) {
             try writeFrame(connection.stream.handle, "ok\n");
+        } else if (isPreexecRequest(request)) {
+            const response = try self.preexecResponse(request);
+            defer std.heap.page_allocator.free(response);
+            try writeFrame(connection.stream.handle, response);
         } else {
             const response = try self.renderResponse(request);
             defer std.heap.page_allocator.free(response);
@@ -189,6 +201,20 @@ pub const Server = struct {
             return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"prompt\":\"{s}\",\"redraw_token\":\"{s}\"}}", .{ escaped_prompt, escaped_token });
         }
         return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"prompt\":\"{s}\",\"redraw_token\":null}}", .{escaped_prompt});
+    }
+
+    fn preexecResponse(self: *Server, request_payload: []const u8) ![]u8 {
+        _ = self;
+        var parsed = try std.json.parseFromSlice(PreexecRequest, std.heap.page_allocator, request_payload, .{ .ignore_unknown_fields = true });
+        defer parsed.deinit();
+        const reason = risk_tier_module.explain(parsed.value.command, null);
+        const escaped_pattern = try json.escapeAlloc(std.heap.page_allocator, if (reason.pattern.len == 0) "-" else reason.pattern);
+        defer std.heap.page_allocator.free(escaped_pattern);
+        return std.fmt.allocPrint(
+            std.heap.page_allocator,
+            "{{\"v\":1,\"allow\":true,\"tier\":\"{s}\",\"source\":\"{s}\",\"pattern\":\"{s}\"}}",
+            .{ risk_tier_module.tierName(reason.tier), risk_tier_module.sourceName(reason.source), escaped_pattern },
+        );
     }
 
     fn logSlowWarning(self: *Server, slow_warning: ?dispatcher.SlowWarning) !void {
@@ -341,6 +367,11 @@ fn nowNs() u64 {
     return @intCast(std.time.nanoTimestamp());
 }
 
+fn isPreexecRequest(request: []const u8) bool {
+    return std.mem.indexOf(u8, request, "\"kind\":\"preexec\"") != null or
+        std.mem.indexOf(u8, request, "\"kind\": \"preexec\"") != null;
+}
+
 fn acceptOneThread(server: *Server) !void {
     try server.acceptOne();
 }
@@ -439,6 +470,24 @@ test "renders optional time segment" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"prompt\":\"/tmp/project time:") != null);
 
     thread.join();
+}
+
+test "preexec response classifies command tier" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const response = try server.preexecResponse("{\"v\":1,\"kind\":\"preexec\",\"shell\":\"zsh\",\"command\":\"kubectl get pods --context api-prd-use1\"}");
+    defer std.heap.page_allocator.free(response);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"tier\":\"prod\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"allow\":true") != null);
 }
 
 test "fs event invalidates git branch cache" {

@@ -64,7 +64,8 @@ function shisa_preexec_guard --on-event fish_preexec
     test "$SHISA_PROD_GUARD" = 1; or return 0
     set -l command (string join ' ' -- $argv)
     test -n "$command"; or return 0
-    command "$SHISA_BIN" cloud preexec --shell fish -- "$command"
+    set -l socket_path (shisa_socket_path)
+    command "$SHISA_BIN" cloud preexec --socket "$socket_path" --shell fish -- "$command"
 end
 
 function shisa_async_redraw --on-event shisa_async_redraw

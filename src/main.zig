@@ -338,7 +338,8 @@ test "doctor reports path and backend statuses" {
 
 fn cloudCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (args.len >= 1 and std.mem.eql(u8, args[0], "preexec")) {
-        _ = try parseCloudPreexecArgs(args[1..]);
+        const config = try parseCloudPreexecArgs(args[1..]);
+        try cloudPreexec(allocator, config);
         return;
     }
     if (args.len != 2 or !std.mem.eql(u8, args[0], "explain")) return error.UnknownCloudArgument;
@@ -353,6 +354,7 @@ fn cloudCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
 }
 
 const CloudPreexec = struct {
+    socket_path: ?[]const u8 = null,
     shell: []const u8 = "",
     command: []const u8,
 };
@@ -362,7 +364,9 @@ fn parseCloudPreexecArgs(args: []const []const u8) !CloudPreexec {
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
-        if (std.mem.eql(u8, arg, "--shell")) {
+        if (std.mem.eql(u8, arg, "--socket")) {
+            parsed.socket_path = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, arg, "--shell")) {
             parsed.shell = try nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--")) {
             parsed.command = try nextValue(args, &i);
@@ -375,6 +379,27 @@ fn parseCloudPreexecArgs(args: []const []const u8) !CloudPreexec {
     }
     if (parsed.command.len == 0) return error.MissingValue;
     return parsed;
+}
+
+fn cloudPreexec(allocator: std.mem.Allocator, config: CloudPreexec) !void {
+    const socket_path = if (config.socket_path) |path| path else try paths.defaultSocketPath(allocator);
+    defer if (config.socket_path == null) allocator.free(socket_path);
+    const payload = try buildCloudPreexecPayload(allocator, config);
+    defer allocator.free(payload);
+    const response = client.requestAlloc(allocator, socket_path, payload) catch return;
+    allocator.free(response);
+}
+
+fn buildCloudPreexecPayload(allocator: std.mem.Allocator, config: CloudPreexec) ![]u8 {
+    const escaped_shell = try jsonEscapeAlloc(allocator, config.shell);
+    defer allocator.free(escaped_shell);
+    const escaped_command = try jsonEscapeAlloc(allocator, config.command);
+    defer allocator.free(escaped_command);
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"v\":1,\"kind\":\"preexec\",\"shell\":\"{s}\",\"command\":\"{s}\"}}",
+        .{ escaped_shell, escaped_command },
+    );
 }
 
 fn cloudExplainAlloc(allocator: std.mem.Allocator, value: []const u8, home: ?[]const u8) ![]u8 {
@@ -390,9 +415,16 @@ fn cloudExplainAlloc(allocator: std.mem.Allocator, value: []const u8, home: ?[]c
 }
 
 test "cloud preexec args parse" {
-    const parsed = try parseCloudPreexecArgs(&.{ "--shell", "zsh", "--", "kubectl delete pod x" });
+    const parsed = try parseCloudPreexecArgs(&.{ "--socket", "/tmp/shisa.sock", "--shell", "zsh", "--", "kubectl delete pod x" });
+    try std.testing.expectEqualStrings("/tmp/shisa.sock", parsed.socket_path.?);
     try std.testing.expectEqualStrings("zsh", parsed.shell);
     try std.testing.expectEqualStrings("kubectl delete pod x", parsed.command);
+}
+
+test "cloud preexec payload escapes command" {
+    const payload = try buildCloudPreexecPayload(std.testing.allocator, .{ .shell = "zsh", .command = "echo \"prod\"" });
+    defer std.testing.allocator.free(payload);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"command\":\"echo \\\"prod\\\"\"") != null);
 }
 
 test "cloud explain output shows reason" {

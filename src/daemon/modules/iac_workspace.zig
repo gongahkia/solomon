@@ -16,6 +16,10 @@ const PulumiWorkspaceJson = struct {
     work_dir: []const u8 = "",
 };
 
+const CdkJson = struct {
+    app: []const u8 = "",
+};
+
 pub fn terraformEnvironmentPathAlloc(allocator: std.mem.Allocator, cwd: []const u8) ![]u8 {
     return std.fmt.allocPrint(allocator, "{s}/.terraform/environment", .{cwd});
 }
@@ -164,6 +168,68 @@ fn fileExists(path: []const u8) !bool {
     return true;
 }
 
+pub fn cdkJsonPathAlloc(allocator: std.mem.Allocator, cwd: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/cdk.json", .{cwd});
+}
+
+pub fn cdkContextPathAlloc(allocator: std.mem.Allocator, cwd: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/cdk.context.json", .{cwd});
+}
+
+pub fn readCdkWorkspaceAlloc(allocator: std.mem.Allocator, cwd: []const u8) !?[]u8 {
+    const cdk_path = try cdkJsonPathAlloc(allocator, cwd);
+    defer allocator.free(cdk_path);
+    const app = (try readCdkAppAlloc(allocator, cdk_path)) orelse return null;
+    defer allocator.free(app);
+
+    const context_path = try cdkContextPathAlloc(allocator, cwd);
+    defer allocator.free(context_path);
+    const context = (try readCdkContextKeyAlloc(allocator, context_path)) orelse return @as(?[]u8, try allocator.dupe(u8, app));
+    defer allocator.free(context);
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}:{s}", .{ app, context }));
+}
+
+pub fn readCdkAppAlloc(allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(source);
+    return parseCdkAppAlloc(allocator, source);
+}
+
+pub fn parseCdkAppAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 {
+    var parsed = std.json.parseFromSlice(CdkJson, allocator, source, .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+    const app = std.mem.trim(u8, parsed.value.app, " \t\r\n");
+    if (app.len == 0) return null;
+    return @as(?[]u8, try allocator.dupe(u8, app));
+}
+
+pub fn readCdkContextKeyAlloc(allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(source);
+    return parseCdkContextKeyAlloc(allocator, source);
+}
+
+pub fn parseCdkContextKeyAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, source, .{}) catch return null;
+    defer parsed.deinit();
+    switch (parsed.value) {
+        .object => |object| {
+            var it = object.iterator();
+            const entry = it.next() orelse return null;
+            const key = std.mem.trim(u8, entry.key_ptr.*, " \t\r\n");
+            if (key.len == 0) return null;
+            return @as(?[]u8, try allocator.dupe(u8, key));
+        },
+        else => return null,
+    }
+}
+
 test "parses terraform environment workspace" {
     const workspace = (try parseTerraformEnvironmentAlloc(std.testing.allocator, "prod\n")).?;
     defer std.testing.allocator.free(workspace);
@@ -291,4 +357,50 @@ test "reads pulumi active stack with stack config" {
     const stack = (try readPulumiStackAlloc(allocator, dir_path, dir_path)).?;
     defer allocator.free(stack);
     try std.testing.expectEqualStrings("prod", stack);
+}
+
+test "parses cdk app and context key" {
+    const app = (try parseCdkAppAlloc(std.testing.allocator,
+        \\{
+        \\  "app": "npx ts-node bin/app.ts"
+        \\}
+    )).?;
+    defer std.testing.allocator.free(app);
+    try std.testing.expectEqualStrings("npx ts-node bin/app.ts", app);
+
+    const context = (try parseCdkContextKeyAlloc(std.testing.allocator,
+        \\{
+        \\  "availability-zones:account=123:region=us-east-1": ["us-east-1a"]
+        \\}
+    )).?;
+    defer std.testing.allocator.free(context);
+    try std.testing.expectEqualStrings("availability-zones:account=123:region=us-east-1", context);
+}
+
+test "reads cdk workspace from cdk files" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-cdk-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const cdk_path = try cdkJsonPathAlloc(allocator, dir_path);
+    defer allocator.free(cdk_path);
+    {
+        var file = try std.fs.createFileAbsolute(cdk_path, .{});
+        defer file.close();
+        try file.writeAll("{\"app\":\"node bin/app.js\"}");
+    }
+
+    const context_path = try cdkContextPathAlloc(allocator, dir_path);
+    defer allocator.free(context_path);
+    {
+        var file = try std.fs.createFileAbsolute(context_path, .{});
+        defer file.close();
+        try file.writeAll("{\"key\":\"value\"}");
+    }
+
+    const workspace = (try readCdkWorkspaceAlloc(allocator, dir_path)).?;
+    defer allocator.free(workspace);
+    try std.testing.expectEqualStrings("node bin/app.js:key", workspace);
 }

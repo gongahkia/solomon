@@ -308,7 +308,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ### 11.6 IaC workspace (`iac_workspace`)
 - [x] Terraform: read `.terraform/environment` or current workspace from state
-- [ ] Pulumi: read `Pulumi.<stack>.yaml` + active stack
+- [x] Pulumi: read `Pulumi.<stack>.yaml` + active stack
 - [ ] CDK: read `cdk.json` + `cdk.context.json`
 - [ ] OpenTofu: same as Terraform
 - [ ] Render workspace + lock indicator

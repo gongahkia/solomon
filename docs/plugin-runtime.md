@@ -17,3 +17,4 @@ Sandbox:
 
 - `Runtime.initSandboxed` opens standard libraries, then removes `os`, `io`, `package`, `require`, `dofile`, and `loadfile` from the global table.
 - Host APIs must still enforce the manifest capability gate for filesystem, exec, network, env, secrets, and pre-exec access.
+- `Runtime.loadManifestStrict` rejects unknown top-level manifest fields and unknown capability fields.

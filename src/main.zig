@@ -488,16 +488,20 @@ fn pluginCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
 const PluginInstallConfig = struct {
     url: []const u8,
     yes: bool = false,
+    strict: bool = false,
 };
 
 fn parsePluginInstallArgs(args: []const []const u8) !PluginInstallConfig {
     var config: PluginInstallConfig = undefined;
     var seen_url = false;
     config.yes = false;
+    config.strict = false;
 
     for (args) |arg| {
         if (std.mem.eql(u8, arg, "--yes") or std.mem.eql(u8, arg, "-y")) {
             config.yes = true;
+        } else if (std.mem.eql(u8, arg, "--plugin-sandbox-strict")) {
+            config.strict = true;
         } else if (!seen_url) {
             config.url = arg;
             seen_url = true;
@@ -525,7 +529,10 @@ fn pluginInstall(allocator: std.mem.Allocator, plugins_dir: []const u8, config: 
 
     var runtime = try plugin_lua.Runtime.initSandboxed(allocator);
     defer runtime.deinit();
-    var loaded = try runtime.loadManifest(manifest_source);
+    var loaded = if (config.strict)
+        try runtime.loadManifestStrict(manifest_source)
+    else
+        try runtime.loadManifest(manifest_source);
     defer loaded.deinit(allocator);
 
     if (!config.yes and !(try confirmPluginInstall(allocator, loaded.manifest))) return error.PluginInstallDeclined;
@@ -742,9 +749,10 @@ test "plugin list reports enabled and disabled plugins" {
 }
 
 test "parses plugin install args" {
-    const config = try parsePluginInstallArgs(&.{ "https://example.com/plugin.git", "--yes" });
+    const config = try parsePluginInstallArgs(&.{ "https://example.com/plugin.git", "--yes", "--plugin-sandbox-strict" });
     try std.testing.expectEqualStrings("https://example.com/plugin.git", config.url);
     try std.testing.expect(config.yes);
+    try std.testing.expect(config.strict);
     try std.testing.expectError(error.UnknownPluginArgument, parsePluginInstallArgs(&.{"--yes"}));
 }
 

@@ -101,6 +101,14 @@ For scripts or tests:
 shisa plugin install ./demo-plugin --yes
 ```
 
+For strict manifest audits:
+
+```sh
+shisa plugin install ./demo-plugin --yes --plugin-sandbox-strict
+```
+
+Strict mode rejects unknown top-level manifest fields and unknown capability fields.
+
 Inspect state:
 
 ```sh

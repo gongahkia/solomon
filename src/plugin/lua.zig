@@ -26,6 +26,8 @@ const LuaToLString = *const fn (?*LuaState, CInt, *usize) callconv(.c) ?[*]const
 const LuaObjLen = *const fn (?*LuaState, CInt) callconv(.c) usize;
 const LuaRawGetI = *const fn (?*LuaState, CInt, CInt) callconv(.c) void;
 const LuaType = *const fn (?*LuaState, CInt) callconv(.c) CInt;
+const LuaGetTop = *const fn (?*LuaState) callconv(.c) CInt;
+const LuaNext = *const fn (?*LuaState, CInt) callconv(.c) CInt;
 const LuaSetTop = *const fn (?*LuaState, CInt) callconv(.c) void;
 
 const Api = struct {
@@ -43,6 +45,8 @@ const Api = struct {
     lua_objlen: LuaObjLen,
     lua_rawgeti: LuaRawGetI,
     lua_type: LuaType,
+    lua_gettop: LuaGetTop,
+    lua_next: LuaNext,
     lua_settop: LuaSetTop,
 };
 
@@ -128,6 +132,14 @@ pub const Runtime = struct {
     }
 
     pub fn loadManifest(self: *Runtime, source: []const u8) !OwnedManifest {
+        return self.loadManifestWithMode(source, false);
+    }
+
+    pub fn loadManifestStrict(self: *Runtime, source: []const u8) !OwnedManifest {
+        return self.loadManifestWithMode(source, true);
+    }
+
+    fn loadManifestWithMode(self: *Runtime, source: []const u8, strict: bool) !OwnedManifest {
         try self.loadBuffer(source, "plugin.lua");
         if (self.api.lua_pcall(self.state, 0, 1, 0) != lua_ok) {
             self.clearStack();
@@ -135,7 +147,8 @@ pub const Runtime = struct {
         }
         defer self.clearStack();
         if (self.api.lua_type(self.state, 1) != lua_ttable) return error.InvalidManifest;
-        var loaded = try self.readManifestAt(1);
+        if (strict) try self.rejectUnknownFields(1, &top_level_manifest_fields);
+        var loaded = try self.readManifestAt(1, strict);
         errdefer loaded.deinit(self.allocator);
         try loaded.manifest.validate();
         return loaded;
@@ -178,7 +191,7 @@ pub const Runtime = struct {
         }
     }
 
-    fn readManifestAt(self: *Runtime, index: CInt) !OwnedManifest {
+    fn readManifestAt(self: *Runtime, index: CInt, strict: bool) !OwnedManifest {
         const name = try self.requiredStringField(index, "name");
         errdefer self.allocator.free(name);
         const version = try self.requiredStringField(index, "version");
@@ -193,7 +206,7 @@ pub const Runtime = struct {
         const update = try self.optionalStringField(index, "update");
         errdefer if (update) |value| self.allocator.free(value);
 
-        var capabilities = try self.readCapabilities(index);
+        var capabilities = try self.readCapabilities(index, strict);
         errdefer capabilities.deinit(self.allocator);
 
         const description = try self.optionalStringField(index, "description");
@@ -222,12 +235,13 @@ pub const Runtime = struct {
         });
     }
 
-    fn readCapabilities(self: *Runtime, index: CInt) !OwnedCapabilities {
+    fn readCapabilities(self: *Runtime, index: CInt, strict: bool) !OwnedCapabilities {
         try self.pushField(index, "capabilities");
         defer self.pop(1);
         if (self.api.lua_type(self.state, -1) == lua_tnil) return .{};
         if (self.api.lua_type(self.state, -1) != lua_ttable) return error.InvalidManifestCapabilities;
-        const cap_index: CInt = -1;
+        const cap_index = self.api.lua_gettop(self.state);
+        if (strict) try self.rejectUnknownFields(cap_index, &capability_fields);
         return .{
             .fs_read = try self.optionalStringListField(cap_index, "fs_read") orelse &.{},
             .fs_watch = try self.optionalStringListField(cap_index, "fs_watch") orelse &.{},
@@ -327,6 +341,17 @@ pub const Runtime = struct {
         self.api.lua_getfield(self.state, index, key_z.ptr);
     }
 
+    fn rejectUnknownFields(self: *Runtime, index: CInt, known: []const []const u8) !void {
+        self.api.lua_pushnil(self.state);
+        while (self.api.lua_next(self.state, index) != 0) {
+            if (self.api.lua_type(self.state, -2) != lua_tstring) return error.UnknownManifestField;
+            const key = try self.stringAt(-2);
+            defer self.allocator.free(key);
+            if (!stringListContains(known, key)) return error.UnknownManifestField;
+            self.pop(1);
+        }
+    }
+
     fn pop(self: *Runtime, count: CInt) void {
         self.api.lua_settop(self.state, -count - 1);
     }
@@ -334,6 +359,31 @@ pub const Runtime = struct {
     fn clearStack(self: *Runtime) void {
         self.api.lua_settop(self.state, 0);
     }
+};
+
+const top_level_manifest_fields = [_][]const u8{
+    "name",
+    "version",
+    "api_version",
+    "license",
+    "capabilities",
+    "modules",
+    "render",
+    "update",
+    "description",
+    "author",
+    "homepage",
+    "repository",
+};
+
+const capability_fields = [_][]const u8{
+    "fs_read",
+    "fs_watch",
+    "exec",
+    "net",
+    "secrets",
+    "env_read",
+    "pre_exec",
 };
 
 const OwnedCapabilities = struct {
@@ -424,6 +474,13 @@ fn freeStringList(allocator: std.mem.Allocator, items: [][]u8) void {
     allocator.free(items);
 }
 
+fn stringListContains(items: []const []const u8, value: []const u8) bool {
+    for (items) |item| {
+        if (std.mem.eql(u8, item, value)) return true;
+    }
+    return false;
+}
+
 fn openLuaJit() !std.DynLib {
     const candidates = [_][]const u8{
         "/opt/homebrew/lib/libluajit-5.1.dylib",
@@ -457,6 +514,8 @@ fn loadApi(lib: *std.DynLib) !Api {
         .lua_objlen = lib.lookup(LuaObjLen, "lua_objlen") orelse return error.LuaSymbolMissing,
         .lua_rawgeti = lib.lookup(LuaRawGetI, "lua_rawgeti") orelse return error.LuaSymbolMissing,
         .lua_type = lib.lookup(LuaType, "lua_type") orelse return error.LuaSymbolMissing,
+        .lua_gettop = lib.lookup(LuaGetTop, "lua_gettop") orelse return error.LuaSymbolMissing,
+        .lua_next = lib.lookup(LuaNext, "lua_next") orelse return error.LuaSymbolMissing,
         .lua_settop = lib.lookup(LuaSetTop, "lua_settop") orelse return error.LuaSymbolMissing,
     };
 }
@@ -552,6 +611,35 @@ test "loads minimal plugin manifest table" {
     try std.testing.expectEqualStrings("render", loaded.manifest.entry_points.render);
     try std.testing.expectEqual(manifest_schema.ListCapability.deny, loaded.manifest.capabilities.exec);
     try std.testing.expectEqual(@as(usize, 0), loaded.manifest.capabilities.fs_read.len);
+}
+
+test "strict manifest rejects unknown fields" {
+    var runtime = Runtime.initSandboxed(std.testing.allocator) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    defer runtime.deinit();
+
+    try std.testing.expectError(error.UnknownManifestField, runtime.loadManifestStrict(
+        \\return {
+        \\  name = "strict",
+        \\  version = "0.1.0",
+        \\  api_version = 1,
+        \\  license = "MIT",
+        \\  modules = { "strict" },
+        \\  surprise = true,
+        \\}
+    ));
+    try std.testing.expectError(error.UnknownManifestField, runtime.loadManifestStrict(
+        \\return {
+        \\  name = "strict",
+        \\  version = "0.1.0",
+        \\  api_version = 1,
+        \\  license = "MIT",
+        \\  capabilities = { mystery = true },
+        \\  modules = { "strict" },
+        \\}
+    ));
 }
 
 test "rejects invalid plugin manifest table" {

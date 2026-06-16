@@ -140,7 +140,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Document the plugin SDK in `docs/plugins.md` with a tutorial
 - [x] Fuzz the Lua↔Zig bridge layer
 - [ ] Stand up an awesome-shisa repo listing community plugins
-- [ ] Add a `--plugin-sandbox-strict` mode for paranoid users (denies all unknown caps)
+- [x] Add a `--plugin-sandbox-strict` mode for paranoid users (denies all unknown caps)
 
 ## Phase 6 — Nushell + PowerShell + Linux hardening
 

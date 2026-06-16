@@ -23,3 +23,14 @@ GCP auth list cache files use `gcloud auth list --format=json` output:
 ```
 
 The cache path is `~/.cache/shisa/gcloud-auth-list.json`.
+
+Azure account cache files use `az account show --output json` output:
+
+```json
+{
+  "name": "prod-sub",
+  "user": {"name": "alice@example.com", "type": "user"}
+}
+```
+
+The cache path is `~/.cache/shisa/az-account-show.json`.

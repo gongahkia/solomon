@@ -13,6 +13,17 @@ const GcloudAuthJson = struct {
     status: []const u8 = "",
 };
 
+const AzureAccountUserJson = struct {
+    name: []const u8 = "",
+    type: []const u8 = "",
+};
+
+const AzureAccountShowJson = struct {
+    name: []const u8 = "",
+    id: []const u8 = "",
+    user: AzureAccountUserJson = .{},
+};
+
 pub fn awsStsCachePathAlloc(allocator: std.mem.Allocator, home: ?[]const u8, profile: ?[]const u8) !?[]u8 {
     const home_path = home orelse return null;
     const profile_name = sanitizeProfile(profile orelse "default");
@@ -67,6 +78,32 @@ pub fn parseGcloudAuthAccountAlloc(allocator: std.mem.Allocator, source: []const
         }
     }
     if (fallback) |account| return @as(?[]u8, try allocator.dupe(u8, account));
+    return null;
+}
+
+pub fn azureAccountCachePathAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
+    const home_path = home orelse return null;
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.cache/shisa/az-account-show.json", .{home_path}));
+}
+
+pub fn readAzureAccountAlloc(allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 256 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(source);
+    return parseAzureAccountAlloc(allocator, source);
+}
+
+pub fn parseAzureAccountAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 {
+    var parsed = std.json.parseFromSlice(AzureAccountShowJson, allocator, source, .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+    const user = std.mem.trim(u8, parsed.value.user.name, " \t\r\n");
+    if (user.len != 0) return @as(?[]u8, try allocator.dupe(u8, user));
+    const name = std.mem.trim(u8, parsed.value.name, " \t\r\n");
+    if (name.len != 0) return @as(?[]u8, try allocator.dupe(u8, name));
+    const id = std.mem.trim(u8, parsed.value.id, " \t\r\n");
+    if (id.len != 0) return @as(?[]u8, try allocator.dupe(u8, id));
     return null;
 }
 
@@ -142,4 +179,32 @@ test "builds gcloud auth cache path" {
     const path = (try gcloudAuthCachePathAlloc(std.testing.allocator, "/home/me")).?;
     defer std.testing.allocator.free(path);
     try std.testing.expectEqualStrings("/home/me/.cache/shisa/gcloud-auth-list.json", path);
+}
+
+test "parses azure account user" {
+    const account = (try parseAzureAccountAlloc(std.testing.allocator,
+        \\{
+        \\  "id": "00000000-0000-0000-0000-000000000000",
+        \\  "name": "prod-sub",
+        \\  "user": {"name": "alice@example.com", "type": "user"}
+        \\}
+    )).?;
+    defer std.testing.allocator.free(account);
+    try std.testing.expectEqualStrings("alice@example.com", account);
+}
+
+test "parses azure account subscription fallback" {
+    const account = (try parseAzureAccountAlloc(std.testing.allocator,
+        \\{
+        \\  "name": "prod-sub"
+        \\}
+    )).?;
+    defer std.testing.allocator.free(account);
+    try std.testing.expectEqualStrings("prod-sub", account);
+}
+
+test "builds azure account cache path" {
+    const path = (try azureAccountCachePathAlloc(std.testing.allocator, "/home/me")).?;
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/home/me/.cache/shisa/az-account-show.json", path);
 }

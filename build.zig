@@ -125,6 +125,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const plugin_capability_test_run = b.addRunArtifact(plugin_capability_tests);
+    const plugin_lua_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/plugin/lua.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const plugin_lua_test_run = b.addRunArtifact(plugin_lua_tests);
     const lock_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/lock.zig"),
@@ -306,6 +314,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&config_test_run.step);
     test_step.dependOn(&plugin_manifest_test_run.step);
     test_step.dependOn(&plugin_capability_test_run.step);
+    test_step.dependOn(&plugin_lua_test_run.step);
     test_step.dependOn(&lock_test_run.step);
     test_step.dependOn(&log_test_run.step);
     test_step.dependOn(&cache_test_run.step);

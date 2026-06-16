@@ -129,7 +129,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 
 ## Phase 5 — Plugin SDK + Lua sandbox
 
-- [ ] Embed Lua 5.4 (or LuaJIT, evaluate both for sandbox safety)
+- [x] Embed Lua 5.4 (or LuaJIT, evaluate both for sandbox safety)
 - [ ] Strip dangerous globals (`os.execute`, `io.popen`, `io.open`, `loadfile`, `dofile`, `require`)
 - [x] Define plugin manifest schema (`capabilities`, `render`, `update`, `name`, `version`)
 - [x] Implement capability gate: fs_read scope, fs_watch scope, exec allow-list, net opt-in

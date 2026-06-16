@@ -159,7 +159,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Ship 5 built-in themes (nord-dark, gruvbox-rainbow, tokyo-night, plain, minimal-monochrome)
 - [ ] Build a theme gallery page on shisa.sh with live previews
 - [x] Build `shisa import-starship <path>` (best-effort TOML translation)
-- [ ] Map the top 30 starship modules to Shisa equivalents; document unsupported ones
+- [x] Map the top 30 starship modules to Shisa equivalents; document unsupported ones
 - [ ] Write a migration guide (`docs/migrate-from-starship.md`)
 - [ ] Add interop test: import each preset from starship/preset/* and snapshot the result
 

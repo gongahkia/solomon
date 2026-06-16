@@ -73,7 +73,7 @@ pub fn main() !void {
 }
 
 fn run(config: cli.Config, socket_path: []const u8, logger: *daemon_log.Logger) !void {
-    var daemon_server = try server.Server.init(socket_path);
+    var daemon_server = try server.Server.initWithLogger(socket_path, logger);
     defer daemon_server.deinit();
 
     if (!config.daemonize) {

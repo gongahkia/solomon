@@ -33,6 +33,7 @@ pub const ModuleSpec = struct {
 pub const RenderedPrompt = struct {
     prompt: []u8,
     redraw_token: ?[]u8 = null,
+    slow_warning: ?SlowWarning = null,
 
     pub fn deinit(self: *RenderedPrompt, allocator: std.mem.Allocator) void {
         allocator.free(self.prompt);
@@ -40,6 +41,13 @@ pub const RenderedPrompt = struct {
         self.* = undefined;
     }
 };
+
+pub const SlowWarning = struct {
+    module_id: ModuleId,
+    elapsed_ns: u64,
+};
+
+const slow_warning_ns = 5 * std.time.ns_per_ms;
 
 pub const RenderInput = struct {
     cwd: []const u8,
@@ -97,11 +105,13 @@ pub fn renderPipeline(allocator: std.mem.Allocator, caches: CacheSet, input: Ren
     defer out.deinit(allocator);
     var wrote_segment = false;
     var has_async = false;
+    var slow_warning: ?SlowWarning = null;
 
     for (pipeline) |spec| {
         var async_result: ?AsyncRender = null;
         defer if (async_result) |*value| value.deinit(allocator);
 
+        const start_ns = std.time.nanoTimestamp();
         const segment = if (spec.execution_class == .async and !input.no_async) async: {
             async_result = try dispatchAsync(allocator, caches, spec.id, input);
             if (async_result.?.pending) has_async = true;
@@ -109,6 +119,10 @@ pub fn renderPipeline(allocator: std.mem.Allocator, caches: CacheSet, input: Ren
             if (async_result.?.pending) break :async try placeholderAlloc(allocator, spec.id);
             break :async null;
         } else try dispatch(allocator, caches, spec.id, input);
+        const elapsed_ns = @as(u64, @intCast(std.time.nanoTimestamp() - start_ns));
+        if (slow_warning == null and elapsed_ns > slow_warning_ns) {
+            slow_warning = .{ .module_id = spec.id, .elapsed_ns = elapsed_ns };
+        }
         defer if (segment) |value| allocator.free(value);
         if (segment) |value| {
             if (wrote_segment) try out.append(allocator, ' ');
@@ -121,6 +135,7 @@ pub fn renderPipeline(allocator: std.mem.Allocator, caches: CacheSet, input: Ren
     return .{
         .prompt = try out.toOwnedSlice(allocator),
         .redraw_token = if (has_async) try allocator.dupe(u8, "pending") else null,
+        .slow_warning = slow_warning,
     };
 }
 
@@ -157,7 +172,7 @@ fn placeholderAlloc(allocator: std.mem.Allocator, module_id: ModuleId) ![]u8 {
     return std.fmt.allocPrint(allocator, "[pending:{s}]", .{moduleIdName(module_id)});
 }
 
-fn moduleIdName(module_id: ModuleId) []const u8 {
+pub fn moduleIdName(module_id: ModuleId) []const u8 {
     return switch (module_id) {
         .cwd => "cwd",
         .git_branch => "git_branch",
@@ -272,6 +287,10 @@ test "no async renders git synchronously" {
     defer std.testing.allocator.free(expected);
     try std.testing.expectEqualStrings(expected, rendered.prompt);
     try std.testing.expect(rendered.redraw_token == null);
+}
+
+test "module names are public for diagnostics" {
+    try std.testing.expectEqualStrings("language_versions", moduleIdName(.language_versions));
 }
 
 fn runGit(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !void {

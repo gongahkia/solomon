@@ -2,6 +2,7 @@ const std = @import("std");
 const dispatcher = @import("dispatcher.zig");
 const git_branch_module = @import("modules/git_branch.zig");
 const language_versions_module = @import("modules/language_versions.zig");
+const daemon_log = @import("log.zig");
 const json = @import("json.zig");
 
 const header_bytes = 4;
@@ -23,11 +24,16 @@ const RenderRequest = struct {
 pub const Server = struct {
     socket_path: []const u8,
     listener: std.net.Server,
+    logger: ?*daemon_log.Logger = null,
     connections: u64 = 0,
     git_branch_cache: git_branch_module.Cache = .{},
     language_versions_cache: language_versions_module.Cache = .{},
 
     pub fn init(socket_path: []const u8) !Server {
+        return initWithLogger(socket_path, null);
+    }
+
+    pub fn initWithLogger(socket_path: []const u8, logger: ?*daemon_log.Logger) !Server {
         if (std.fs.path.dirname(socket_path)) |parent| {
             try std.fs.cwd().makePath(parent);
         }
@@ -47,6 +53,7 @@ pub const Server = struct {
         return .{
             .socket_path = socket_path,
             .listener = listener,
+            .logger = logger,
         };
     }
 
@@ -131,6 +138,7 @@ pub const Server = struct {
             .host = host,
         });
         defer rendered.deinit(std.heap.page_allocator);
+        try self.logSlowWarning(rendered.slow_warning);
 
         const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, rendered.prompt);
         defer std.heap.page_allocator.free(escaped_prompt);
@@ -141,6 +149,19 @@ pub const Server = struct {
             return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"prompt\":\"{s}\",\"redraw_token\":\"{s}\"}}", .{ escaped_prompt, escaped_token });
         }
         return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"prompt\":\"{s}\",\"redraw_token\":null}}", .{escaped_prompt});
+    }
+
+    fn logSlowWarning(self: *Server, slow_warning: ?dispatcher.SlowWarning) !void {
+        const warning = slow_warning orelse return;
+        if (self.logger) |logger| {
+            const message = try std.fmt.allocPrint(
+                std.heap.page_allocator,
+                "module={s} elapsed_ns={d}",
+                .{ dispatcher.moduleIdName(warning.module_id), warning.elapsed_ns },
+            );
+            defer std.heap.page_allocator.free(message);
+            try logger.warn("slow_module", message);
+        }
     }
 };
 
@@ -284,4 +305,28 @@ test "renders optional time segment" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"prompt\":\"/tmp/project time:") != null);
 
     thread.join();
+}
+
+test "logs slow module warning" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    const log_path = try std.fmt.allocPrint(allocator, "{s}/shisad.log", .{dir_path});
+    defer allocator.free(log_path);
+
+    var logger = try daemon_log.Logger.open(allocator, log_path);
+    defer logger.deinit();
+    var server = try Server.initWithLogger(socket_path, &logger);
+    defer server.deinit();
+
+    try server.logSlowWarning(.{ .module_id = .language_versions, .elapsed_ns = 12_000_000 });
+
+    const contents = try std.fs.cwd().readFileAlloc(allocator, log_path, 4096);
+    defer allocator.free(contents);
+    try std.testing.expect(std.mem.indexOf(u8, contents, "\"event\":\"slow_module\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, contents, "module=language_versions") != null);
 }

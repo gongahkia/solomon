@@ -62,40 +62,178 @@ pub const WorkingCopySummary = struct {
 };
 
 pub const Cache = struct {
+    mutex: std.Thread.Mutex = .{},
     valid: bool = false,
+    in_flight: bool = false,
+    generation: u64 = 0,
     root_path: ?[]u8 = null,
     segment: ?[]u8 = null,
+    worker: ?std.Thread = null,
+
+    pub const AsyncRender = struct {
+        segment: ?[]u8 = null,
+        pending: bool = false,
+
+        pub fn deinit(self: *AsyncRender, allocator: std.mem.Allocator) void {
+            if (self.segment) |segment| allocator.free(segment);
+            self.* = .{};
+        }
+    };
 
     pub fn deinit(self: *Cache, allocator: std.mem.Allocator) void {
-        self.clear(allocator);
+        const worker = self.takeWorker();
+        if (worker) |thread| thread.join();
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.clearLocked(allocator);
     }
 
     pub fn invalidate(self: *Cache, allocator: std.mem.Allocator, root_path: []const u8) void {
-        if (self.root_path == null or !std.mem.eql(u8, self.root_path.?, root_path)) return;
-        self.clear(allocator);
+        var worker: ?std.Thread = null;
+        self.mutex.lock();
+        if (self.root_path != null and std.mem.eql(u8, self.root_path.?, root_path)) {
+            self.generation += 1;
+            worker = self.worker;
+            self.worker = null;
+            self.clearLocked(allocator);
+        }
+        self.mutex.unlock();
+        if (worker) |thread| thread.join();
     }
 
     pub fn render(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
-        const root = (try findRoot(allocator, cwd_path)) orelse return null;
+        const worker = self.takeWorker();
+        if (worker) |thread| thread.join();
+
+        const root = (try findRoot(allocator, cwd_path)) orelse {
+            const cancelled_worker = self.cancelAndClear(allocator);
+            if (cancelled_worker) |thread| thread.join();
+            return null;
+        };
         defer allocator.free(root);
 
+        self.mutex.lock();
+        defer self.mutex.unlock();
         if (self.valid and self.root_path != null and std.mem.eql(u8, self.root_path.?, root)) {
             if (self.segment) |segment| return try allocator.dupe(u8, segment);
             return null;
         }
 
-        self.clear(allocator);
-        self.root_path = try allocator.dupe(u8, root);
+        self.clearLocked(allocator);
+        self.root_path = allocator.dupe(u8, root) catch |err| {
+            self.clearLocked(allocator);
+            return err;
+        };
+        self.segment = renderOperationSummary(allocator, cwd_path) catch |err| {
+            self.clearLocked(allocator);
+            return err;
+        };
         self.valid = true;
-        self.segment = try renderOperationSummary(allocator, cwd_path);
         if (self.segment) |segment| return try allocator.dupe(u8, segment);
         return null;
     }
 
-    fn clear(self: *Cache, allocator: std.mem.Allocator) void {
+    pub fn renderAsync(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) !AsyncRender {
+        self.joinFinishedWorker();
+
+        const root = (try findRoot(allocator, cwd_path)) orelse {
+            const worker = self.cancelAndClear(allocator);
+            if (worker) |thread| thread.join();
+            return .{};
+        };
+        defer allocator.free(root);
+
+        const cancelled_worker = self.cancelForRootChange(allocator, root);
+        if (cancelled_worker) |thread| thread.join();
+
+        self.mutex.lock();
+        if (self.valid and self.root_path != null and std.mem.eql(u8, self.root_path.?, root)) {
+            const segment = if (self.segment) |value| allocator.dupe(u8, value) catch |err| {
+                self.mutex.unlock();
+                return err;
+            } else null;
+            self.mutex.unlock();
+            return .{ .segment = segment };
+        }
+        if (self.in_flight) {
+            self.mutex.unlock();
+            return .{ .pending = true };
+        }
+        self.mutex.unlock();
+
+        const worker_cwd = try allocator.dupe(u8, cwd_path);
+        errdefer allocator.free(worker_cwd);
+        const worker_root = try allocator.dupe(u8, root);
+        errdefer allocator.free(worker_root);
+
+        const generation = generation: {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            self.clearLocked(allocator);
+            self.root_path = try allocator.dupe(u8, root);
+            self.in_flight = true;
+            self.generation += 1;
+            break :generation self.generation;
+        };
+
+        const worker = std.Thread.spawn(.{}, asyncOperationProbe, .{ self, allocator, worker_cwd, worker_root, generation }) catch |err| {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            self.clearLocked(allocator);
+            return err;
+        };
+        self.mutex.lock();
+        self.worker = worker;
+        self.mutex.unlock();
+
+        return .{ .pending = true };
+    }
+
+    fn takeWorker(self: *Cache) ?std.Thread {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const worker = self.worker;
+        self.worker = null;
+        return worker;
+    }
+
+    fn joinFinishedWorker(self: *Cache) void {
+        self.mutex.lock();
+        const should_join = !self.in_flight and self.worker != null;
+        const worker = if (should_join) self.worker else null;
+        if (should_join) self.worker = null;
+        self.mutex.unlock();
+        if (worker) |thread| thread.join();
+    }
+
+    fn cancelAndClear(self: *Cache, allocator: std.mem.Allocator) ?std.Thread {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.generation += 1;
+        const worker = self.worker;
+        self.worker = null;
+        self.clearLocked(allocator);
+        return worker;
+    }
+
+    fn cancelForRootChange(self: *Cache, allocator: std.mem.Allocator, root_path: []const u8) ?std.Thread {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (!self.in_flight) return null;
+        if (self.root_path != null and std.mem.eql(u8, self.root_path.?, root_path)) return null;
+
+        self.generation += 1;
+        const worker = self.worker;
+        self.worker = null;
+        self.clearLocked(allocator);
+        return worker;
+    }
+
+    fn clearLocked(self: *Cache, allocator: std.mem.Allocator) void {
         if (self.root_path) |value| allocator.free(value);
         if (self.segment) |value| allocator.free(value);
         self.valid = false;
+        self.in_flight = false;
         self.root_path = null;
         self.segment = null;
     }
@@ -184,6 +322,23 @@ pub fn watchScope(allocator: std.mem.Allocator, cwd_path: []const u8) !?WatchSco
     };
 }
 
+fn asyncOperationProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8, root_path: []u8, generation: u64) void {
+    defer allocator.free(cwd_path);
+    defer allocator.free(root_path);
+    const segment = renderOperationSummary(allocator, cwd_path) catch null;
+
+    cache.mutex.lock();
+    defer cache.mutex.unlock();
+    if (cache.generation != generation or cache.root_path == null or !std.mem.eql(u8, cache.root_path.?, root_path)) {
+        if (segment) |value| allocator.free(value);
+        return;
+    }
+    if (cache.segment) |value| allocator.free(value);
+    cache.segment = segment;
+    cache.valid = true;
+    cache.in_flight = false;
+}
+
 pub fn readOperationSummary(allocator: std.mem.Allocator, cwd_path: []const u8) !?OperationSummary {
     const result = std.process.Child.run(.{
         .allocator = allocator,
@@ -202,7 +357,7 @@ pub fn renderOperationSummary(allocator: std.mem.Allocator, cwd_path: []const u8
     var operation = (try readOperationSummary(allocator, cwd_path)) orelse return null;
     defer operation.deinit(allocator);
     const short_id = operation.id[0..@min(operation.id.len, 8)];
-    return std.fmt.allocPrint(allocator, "jj:op:{s} {s}", .{ short_id, operation.description });
+    return try std.fmt.allocPrint(allocator, "jj:op:{s} {s}", .{ short_id, operation.description });
 }
 
 pub fn readChangeSummary(allocator: std.mem.Allocator, cwd_path: []const u8) !?ChangeSummary {
@@ -652,6 +807,32 @@ test "cache invalidates by jj root" {
     try std.testing.expect(!cache.valid);
 }
 
+test "async cache updates jj operation summary when jj is installed" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-jj-async-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    if (!try runCommandOk(allocator, dir_path, &.{ "jj", "git", "init" })) return error.SkipZigTest;
+
+    var cache = Cache{};
+    defer cache.deinit(allocator);
+
+    var first = try cache.renderAsync(allocator, dir_path);
+    defer first.deinit(allocator);
+    try std.testing.expect(first.pending);
+
+    const segment = try waitForAsyncSegment(&cache, allocator, dir_path);
+    defer allocator.free(segment);
+    try std.testing.expect(std.mem.indexOf(u8, segment, "jj:op:") != null);
+
+    cache.invalidate(allocator, dir_path);
+    var refreshed = try cache.renderAsync(allocator, dir_path);
+    defer refreshed.deinit(allocator);
+    try std.testing.expect(refreshed.pending);
+}
+
 test "reads real jj op log when jj is installed" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-jj-real-{x}", .{std.crypto.random.int(u64)});
@@ -776,4 +957,18 @@ fn writeFile(path: []const u8, contents: []const u8) !void {
     var file = try std.fs.createFileAbsolute(path, .{ .truncate = true });
     defer file.close();
     try file.writeAll(contents);
+}
+
+fn waitForAsyncSegment(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) ![]u8 {
+    for (0..100) |_| {
+        var rendered = try cache.renderAsync(allocator, cwd_path);
+        if (rendered.segment) |segment| {
+            rendered.segment = null;
+            rendered.deinit(allocator);
+            return segment;
+        }
+        rendered.deinit(allocator);
+        std.Thread.sleep(5 * std.time.ns_per_ms);
+    }
+    return error.Timeout;
 }

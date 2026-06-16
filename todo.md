@@ -220,7 +220,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Show current change ID (short hash), description first line, divergence
 - [x] Show conflict state (`jj`'s first-class conflicts) inline
 - [x] Show working-copy commit vs. parent commits
-- [ ] Async update on jj operations
+- [x] Async update on jj operations
 - [ ] Snapshot tests against fixture jj repos
 - [ ] Benchmark on a 10k-change jj repo
 

@@ -14,6 +14,7 @@ Planned state sources:
 
 - `.jj/repo/op_heads` for fsnotify invalidation on current jj releases.
 - `jj op log --no-graph` for operation summary; Shisa parses the latest operation id and description.
+- Async op-log rendering returns a pending state on cache misses, then refreshes cached output after `.jj/repo/op_heads` invalidation.
 - `jj log --no-graph -r @` with a template for current change id, commit id, description first line, and divergence.
 - `jj log --no-graph -r @` with `conflict` and `self.conflicted_files()` for inline conflict state.
 - `jj log --no-graph -r @` with commit id and `parents.map()` for working-copy position.

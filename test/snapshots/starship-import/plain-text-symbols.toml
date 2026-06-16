@@ -1,0 +1,10 @@
+version = 1
+theme = "plain"
+
+[prompt]
+modules = ["git_branch", "cwd", "language_versions", "user_host", "jobs", "exit_status"]
+
+[modules.language_versions]
+detect = ["python", "node", "rust", "go"]
+
+# Unsupported Starship modules: aws, azure, battery, buf, bun, c, cpp, cobol, conda, container, crystal, cmake, daml, dart, deno, dotnet, docker_context, elixir, elm, erlang, fennel, fortran, fossil_branch, gcloud, gleam, gradle, guix_shell, haskell, haxe, helm, hg_branch, java, julia, kotlin, kubernetes, lua, maven, memory_usage, meson, mojo, nats, netns, nim, nix_shell, ocaml, odin, opa, openstack, package, perl, php, pijul_channel, pixi, pulumi, purescript, quarto, raku, red, rlang, ruby, scala, shlvl, spack, solidity, sudo, swift, typst, vagrant, terraform, xmake, zig

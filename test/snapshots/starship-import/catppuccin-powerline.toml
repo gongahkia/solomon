@@ -1,0 +1,5 @@
+version = 1
+theme = "plain"
+
+[prompt]
+modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host"]

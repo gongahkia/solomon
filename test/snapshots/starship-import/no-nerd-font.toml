@@ -1,0 +1,10 @@
+version = 1
+theme = "plain"
+
+[prompt]
+modules = ["language_versions"]
+
+[modules.language_versions]
+detect = ["node"]
+
+# Unsupported Starship modules: azure, battery, erlang, pulumi

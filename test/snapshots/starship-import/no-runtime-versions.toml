@@ -1,0 +1,10 @@
+version = 1
+theme = "plain"
+
+[prompt]
+modules = ["language_versions"]
+
+[modules.language_versions]
+detect = ["python", "node", "rust", "go"]
+
+# Unsupported Starship modules: bun, buf, c, cmake, cobol, cpp, crystal, daml, dart, deno, dotnet, elixir, elm, erlang, fennel, fortran, gleam, gradle, haskell, haxe, helm, java, julia, kotlin, lua, maven, meson, mojo, nim, ocaml, odin, opa, perl, php, pixi, pulumi, purescript, quarto, raku, red, rlang, ruby, scala, solidity, swift, typst, vagrant, vlang, xmake, zig

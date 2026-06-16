@@ -161,7 +161,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Build `shisa import-starship <path>` (best-effort TOML translation)
 - [x] Map the top 30 starship modules to Shisa equivalents; document unsupported ones
 - [x] Write a migration guide (`docs/migrate-from-starship.md`)
-- [ ] Add interop test: import each preset from starship/preset/* and snapshot the result
+- [x] Add interop test: import each preset from starship/preset/* and snapshot the result
 
 ## Phase 8 — 1.0 Launch
 

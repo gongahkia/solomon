@@ -257,6 +257,7 @@ fn starshipFormatAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 
         const line_len = std.mem.indexOfScalar(u8, rest, '\n') orelse rest.len;
         const line = rest[0..line_len];
         const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len != 0 and trimmed[0] == '[') return null;
         if (std.mem.startsWith(u8, trimmed, "format")) {
             const eq_index = std.mem.indexOfScalar(u8, trimmed, '=') orelse return null;
             const value = std.mem.trim(u8, trimmed[eq_index + 1 ..], " \t\r");
@@ -321,7 +322,9 @@ fn scanStarshipTables(allocator: std.mem.Allocator, source: []const u8, imported
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len > 2 and trimmed[0] == '[' and trimmed[trimmed.len - 1] == ']') {
             const name = std.mem.trim(u8, trimmed[1 .. trimmed.len - 1], " \t\r");
-            if (!std.mem.startsWith(u8, name, "[")) try mapStarshipModule(allocator, name, imported);
+            if (!std.mem.startsWith(u8, name, "[") and std.mem.indexOfScalar(u8, name, '.') == null) {
+                try mapStarshipModule(allocator, name, imported);
+            }
         }
         offset += line_len + 1;
         if (offset > source.len) break;

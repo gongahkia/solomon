@@ -241,7 +241,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Detect Graphite (`gt`): `.graphite_repo_config`
 - [x] Detect ghstack: branch naming + `.ghstackrc`
 - [x] Detect spr / git-spr: `.git/refs/spr/`
-- [ ] Detect `st`: meta files
+- [x] Detect `st`: meta files
 - [ ] Detect git-spice (`gs`): meta files
 - [ ] Detect git-town: `.git-town-branches.yml`
 - [ ] Detect GitHub-native stacked PRs (`gh stack`) via remote config

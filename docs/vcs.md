@@ -63,3 +63,5 @@ Detection:
 - ghstack detection matches branch names shaped like `gh/<username>/<number>/{base,head,orig}` and explicit local `.ghstackrc` markers.
 - Upstream ghstack documents submitted branch names as `gh/username/1/base`, `gh/username/1/head`, and `gh/username/1/orig`: https://github.com/ezyang/ghstack
 - spr/git-spr detection checks `.git/refs/spr/` without requiring the `spr` binary.
+- st/stax detection checks `.git/refs/branch-metadata/`, `.git/refs/stax/`, and repo-root `stax.toml`.
+- stax upstream stores branch metadata under `refs/branch-metadata/` and documents repo-root `stax.toml` overlays: https://github.com/cesarferreira/stax

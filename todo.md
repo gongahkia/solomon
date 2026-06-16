@@ -86,7 +86,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Run on nixpkgs and chromium clones; record cold + warm numbers
 
 ### 1.7 Tests
-- [ ] Unit tests for protocol encode/decode
+- [x] Unit tests for protocol encode/decode
 - [ ] Integration tests using a fake socket + scripted zsh session
 - [ ] Snapshot tests for prompt rendering
 - [ ] Fuzzer for the wire protocol decoder

@@ -22,6 +22,10 @@ pub const default_config_text =
     \\mode = "ssh"
     \\
     \\[modules.cloud_ctx]
+    \\aws = true
+    \\gcp = true
+    \\azure = true
+    \\kubernetes = true
     \\
 ;
 
@@ -115,7 +119,12 @@ pub const UserHostOptions = struct {
     mode: UserHostMode = .ssh,
 };
 
-pub const CloudCtxOptions = struct {};
+pub const CloudCtxOptions = struct {
+    aws: bool = true,
+    gcp: bool = true,
+    azure: bool = true,
+    kubernetes: bool = true,
+};
 
 pub const TimeOptions = struct {
     format_24h: bool = true,
@@ -162,6 +171,10 @@ const Seen = struct {
     jobs_show_zero: bool = false,
     cmd_duration_threshold_ms: bool = false,
     user_host_mode: bool = false,
+    cloud_ctx_aws: bool = false,
+    cloud_ctx_gcp: bool = false,
+    cloud_ctx_azure: bool = false,
+    cloud_ctx_kubernetes: bool = false,
     time_format: bool = false,
     time_utc: bool = false,
 };
@@ -270,7 +283,7 @@ const Parser = struct {
             .jobs => try self.parseJobsKey(line_no, key, value),
             .cmd_duration => try self.parseCmdDurationKey(line_no, key, value),
             .user_host => try self.parseUserHostKey(line_no, key, value),
-            .cloud_ctx => return self.fail(line_no, key.column, "unknown key"),
+            .cloud_ctx => try self.parseCloudCtxKey(line_no, key, value),
             .time => try self.parseTimeKey(line_no, key, value),
         }
     }
@@ -355,6 +368,24 @@ const Parser = struct {
             .never
         else
             return self.fail(line_no, value.column, "invalid user_host mode");
+    }
+
+    fn parseCloudCtxKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
+        if (std.mem.eql(u8, key.text, "aws")) {
+            try self.markUnseen(&self.seen.cloud_ctx_aws, line_no, key.column);
+            self.modules.cloud_ctx.aws = try self.parseBool(value, line_no);
+        } else if (std.mem.eql(u8, key.text, "gcp")) {
+            try self.markUnseen(&self.seen.cloud_ctx_gcp, line_no, key.column);
+            self.modules.cloud_ctx.gcp = try self.parseBool(value, line_no);
+        } else if (std.mem.eql(u8, key.text, "azure")) {
+            try self.markUnseen(&self.seen.cloud_ctx_azure, line_no, key.column);
+            self.modules.cloud_ctx.azure = try self.parseBool(value, line_no);
+        } else if (std.mem.eql(u8, key.text, "kubernetes")) {
+            try self.markUnseen(&self.seen.cloud_ctx_kubernetes, line_no, key.column);
+            self.modules.cloud_ctx.kubernetes = try self.parseBool(value, line_no);
+        } else {
+            return self.fail(line_no, key.column, "unknown key");
+        }
     }
 
     fn parseTimeKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
@@ -654,6 +685,12 @@ test "parses per-module options" {
         \\[modules.user_host]
         \\mode = "always"
         \\
+        \\[modules.cloud_ctx]
+        \\aws = false
+        \\gcp = true
+        \\azure = false
+        \\kubernetes = true
+        \\
         \\[modules.time]
         \\format = "24h"
         \\utc = true
@@ -676,6 +713,10 @@ test "parses per-module options" {
     try std.testing.expect(config.modules.language_versions.go);
     try std.testing.expectEqual(@as(u64, 42), config.modules.cmd_duration.threshold_ms);
     try std.testing.expectEqual(UserHostMode.always, config.modules.user_host.mode);
+    try std.testing.expect(!config.modules.cloud_ctx.aws);
+    try std.testing.expect(config.modules.cloud_ctx.gcp);
+    try std.testing.expect(!config.modules.cloud_ctx.azure);
+    try std.testing.expect(config.modules.cloud_ctx.kubernetes);
     try std.testing.expect(config.modules.time.utc);
 }
 

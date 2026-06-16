@@ -65,6 +65,7 @@ pub const RenderInput = struct {
     host: []const u8,
     aws_profile: ?[]const u8 = null,
     kubeconfig: ?[]const u8 = null,
+    cloud_ctx: cloud_ctx_module.Options = .{},
 };
 
 pub const CacheSet = struct {
@@ -170,7 +171,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
         .jobs => try jobs_module.render(allocator, input.jobs),
         .cmd_duration => try cmd_duration_module.render(allocator, input.duration_ms, 1000),
         .user_host => try user_host_module.render(allocator, input.ssh, input.user, input.host),
-        .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.kubeconfig, input.home, caches.cloud_ctx),
+        .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.kubeconfig, input.home, caches.cloud_ctx, input.cloud_ctx),
     };
 }
 

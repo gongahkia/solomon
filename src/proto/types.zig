@@ -11,6 +11,13 @@ pub const Shell = enum {
     pwsh,
 };
 
+pub const CloudCtxOptions = struct {
+    aws: bool = true,
+    gcp: bool = true,
+    azure: bool = true,
+    kubernetes: bool = true,
+};
+
 pub const Request = struct {
     v: u32 = version,
     cwd: []const u8,
@@ -18,9 +25,11 @@ pub const Request = struct {
     jobs: u32,
     duration_ms: u64,
     time: bool = false,
+    no_async: bool = false,
     shell: Shell,
     cols: u16,
     rows: u16,
+    cloud_ctx: CloudCtxOptions = .{},
 };
 
 pub const Response = struct {
@@ -36,9 +45,11 @@ test "request type carries v1 render inputs" {
         .jobs = 2,
         .duration_ms = 300,
         .time = true,
+        .no_async = true,
         .shell = .zsh,
         .cols = 120,
         .rows = 40,
+        .cloud_ctx = .{ .azure = false },
     };
 
     try std.testing.expectEqual(@as(u32, 1), request.v);
@@ -47,7 +58,9 @@ test "request type carries v1 render inputs" {
     try std.testing.expectEqual(@as(u32, 2), request.jobs);
     try std.testing.expectEqual(@as(u64, 300), request.duration_ms);
     try std.testing.expect(request.time);
+    try std.testing.expect(request.no_async);
     try std.testing.expectEqual(Shell.zsh, request.shell);
+    try std.testing.expect(!request.cloud_ctx.azure);
 }
 
 test "response type carries prompt and optional redraw token" {

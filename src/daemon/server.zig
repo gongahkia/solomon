@@ -22,6 +22,7 @@ const RenderRequest = struct {
     shell: []const u8 = "zsh",
     cols: u16 = 80,
     rows: u16 = 24,
+    cloud_ctx: cloud_ctx_module.Options = .{},
 };
 
 pub const Server = struct {
@@ -174,6 +175,7 @@ pub const Server = struct {
             .host = host,
             .aws_profile = aws_profile,
             .kubeconfig = kubeconfig,
+            .cloud_ctx = parsed.value.cloud_ctx,
         });
         defer rendered.deinit(std.heap.page_allocator);
         try self.logSlowWarning(rendered.slow_warning);

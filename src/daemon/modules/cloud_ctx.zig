@@ -14,6 +14,13 @@ pub const Scope = struct {
     debounce_ms: u64 = 50,
 };
 
+pub const Options = struct {
+    aws: bool = true,
+    gcp: bool = true,
+    azure: bool = true,
+    kubernetes: bool = true,
+};
+
 pub const Cache = struct {
     mutex: std.Thread.Mutex = .{},
     gcp_valid: bool = false,
@@ -208,14 +215,14 @@ pub fn kubeWatchScope(allocator: std.mem.Allocator, kubeconfig_env: ?[]const u8,
     };
 }
 
-pub fn render(allocator: std.mem.Allocator, aws_profile_env: ?[]const u8, kubeconfig_env: ?[]const u8, home: ?[]const u8, cache: *Cache) !?[]u8 {
-    const profile = try awsProfileAlloc(allocator, aws_profile_env, home);
+pub fn render(allocator: std.mem.Allocator, aws_profile_env: ?[]const u8, kubeconfig_env: ?[]const u8, home: ?[]const u8, cache: *Cache, options: Options) !?[]u8 {
+    const profile = if (options.aws) try awsProfileAlloc(allocator, aws_profile_env, home) else null;
     defer if (profile) |value| allocator.free(value);
-    const gcp_project = try cache.gcpProjectAlloc(allocator);
+    const gcp_project = if (options.gcp) try cache.gcpProjectAlloc(allocator) else null;
     defer if (gcp_project) |value| allocator.free(value);
-    const azure_subscription = try cache.azureSubscriptionAlloc(allocator);
+    const azure_subscription = if (options.azure) try cache.azureSubscriptionAlloc(allocator) else null;
     defer if (azure_subscription) |value| allocator.free(value);
-    const kube_context = try cache.kubeContextAlloc(allocator, kubeconfig_env, home);
+    const kube_context = if (options.kubernetes) try cache.kubeContextAlloc(allocator, kubeconfig_env, home) else null;
     defer if (kube_context) |value| allocator.free(value);
 
     var out: std.ArrayList(u8) = .empty;
@@ -509,7 +516,7 @@ test "parses first named aws config profile" {
 test "renders aws cloud context" {
     var cache = Cache{ .gcp_valid = true, .azure_valid = true, .kube_valid = true };
     defer cache.deinit(std.testing.allocator);
-    const rendered = (try render(std.testing.allocator, "prod", null, null, &cache)).?;
+    const rendered = (try render(std.testing.allocator, "prod", null, null, &cache, .{})).?;
     defer std.testing.allocator.free(rendered);
     try std.testing.expectEqualStrings("cloud[aws:prod]", rendered);
 }
@@ -525,7 +532,7 @@ test "renders cached cloud contexts" {
         .kube_context = try std.testing.allocator.dupe(u8, "prod/default"),
     };
     defer cache.deinit(std.testing.allocator);
-    const rendered = (try render(std.testing.allocator, "prod", "/tmp/kubeconfig", null, &cache)).?;
+    const rendered = (try render(std.testing.allocator, "prod", "/tmp/kubeconfig", null, &cache, .{})).?;
     defer std.testing.allocator.free(rendered);
     try std.testing.expectEqualStrings("cloud[aws:prod gcp:test-project az:prod-sub k8s:prod/default]", rendered);
 }
@@ -538,9 +545,25 @@ test "renders cached gcp context without aws" {
         .kube_valid = true,
     };
     defer cache.deinit(std.testing.allocator);
-    const rendered = (try render(std.testing.allocator, null, null, null, &cache)).?;
+    const rendered = (try render(std.testing.allocator, null, null, null, &cache, .{})).?;
     defer std.testing.allocator.free(rendered);
     try std.testing.expectEqualStrings("cloud[gcp:test-project]", rendered);
+}
+
+test "hides disabled cloud providers" {
+    var cache = Cache{
+        .gcp_valid = true,
+        .gcp_project = try std.testing.allocator.dupe(u8, "test-project"),
+        .azure_valid = true,
+        .azure_subscription = try std.testing.allocator.dupe(u8, "prod-sub"),
+        .kube_valid = true,
+        .kube_path = try std.testing.allocator.dupe(u8, "/tmp/kubeconfig"),
+        .kube_context = try std.testing.allocator.dupe(u8, "prod/default"),
+    };
+    defer cache.deinit(std.testing.allocator);
+    const rendered = (try render(std.testing.allocator, "prod", "/tmp/kubeconfig", null, &cache, .{ .aws = false, .azure = false })).?;
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("cloud[gcp:test-project k8s:prod/default]", rendered);
 }
 
 test "parses gcp config-helper project" {

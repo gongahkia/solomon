@@ -1527,12 +1527,32 @@ fn buildPromptPayload(allocator: std.mem.Allocator, config: PromptConfig, cwd: [
     defer allocator.free(escaped_cwd);
     const escaped_shell = try jsonEscapeAlloc(allocator, config.shell);
     defer allocator.free(escaped_shell);
+    const cloud_ctx = try promptCloudCtxOptions(allocator);
 
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d}}}",
-        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows },
+        "{{\"v\":1,\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}}}}",
+        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, cloud_ctx.aws, cloud_ctx.gcp, cloud_ctx.azure, cloud_ctx.kubernetes },
     );
+}
+
+fn promptCloudCtxOptions(allocator: std.mem.Allocator) !shisa_config.CloudCtxOptions {
+    const path = try defaultConfigPath(allocator);
+    defer allocator.free(path);
+    const source = try readConfigOrDefault(allocator, path);
+    defer allocator.free(source);
+    var diagnostic: shisa_config.Diagnostic = .{};
+    var parsed = shisa_config.parse(allocator, source, &diagnostic) catch |err| switch (err) {
+        error.InvalidConfig => {
+            const message = try std.fmt.allocPrint(allocator, "{s}:{d}:{d}: {s}\n", .{ path, diagnostic.line, diagnostic.column, diagnostic.message });
+            defer allocator.free(message);
+            try std.fs.File.stderr().writeAll(message);
+            return err;
+        },
+        else => return err,
+    };
+    defer parsed.deinit(allocator);
+    return parsed.modules.cloud_ctx;
 }
 
 fn jsonEscapeAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {

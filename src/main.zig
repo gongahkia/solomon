@@ -4,6 +4,7 @@ const client = @import("shisa-client.zig");
 const shisa_config = @import("config.zig");
 const paths = @import("daemon/paths.zig");
 const proto = @import("proto/types.zig");
+const plugin_manifest = @import("plugin/manifest.zig");
 const supervisor = @import("supervisor.zig");
 
 const version = "0.1.0-dev";
@@ -54,6 +55,11 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, args[1], "pin")) {
         try pinCommand(allocator, args[2..]);
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "plugin")) {
+        try pluginCommand(allocator, args[2..]);
         return;
     }
 
@@ -437,6 +443,205 @@ test "appends pin once" {
     try std.testing.expectEqualStrings("/tmp/repo\n", contents);
 }
 
+fn pluginCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len == 0) return error.UnknownPluginArgument;
+
+    const plugins_dir = try pluginsDirPath(allocator);
+    defer allocator.free(plugins_dir);
+    const disabled_path = try disabledPluginsPath(allocator);
+    defer allocator.free(disabled_path);
+
+    if (std.mem.eql(u8, args[0], "list")) {
+        if (args.len != 1) return error.UnknownPluginArgument;
+        const output = try pluginListAlloc(allocator, plugins_dir, disabled_path);
+        defer allocator.free(output);
+        try std.fs.File.stdout().writeAll(output);
+    } else if (std.mem.eql(u8, args[0], "disable")) {
+        if (args.len != 2) return error.UnknownPluginArgument;
+        try setPluginDisabled(allocator, disabled_path, args[1], true);
+        const message = try std.fmt.allocPrint(allocator, "disabled {s}\n", .{args[1]});
+        defer allocator.free(message);
+        try std.fs.File.stdout().writeAll(message);
+    } else if (std.mem.eql(u8, args[0], "enable")) {
+        if (args.len != 2) return error.UnknownPluginArgument;
+        try setPluginDisabled(allocator, disabled_path, args[1], false);
+        const message = try std.fmt.allocPrint(allocator, "enabled {s}\n", .{args[1]});
+        defer allocator.free(message);
+        try std.fs.File.stdout().writeAll(message);
+    } else {
+        return error.UnknownPluginArgument;
+    }
+}
+
+fn pluginsDirPath(allocator: std.mem.Allocator) ![]u8 {
+    const config_path = try defaultConfigPath(allocator);
+    defer allocator.free(config_path);
+    const dir = std.fs.path.dirname(config_path) orelse return error.MissingConfigDir;
+    return std.fmt.allocPrint(allocator, "{s}/plugins", .{dir});
+}
+
+fn disabledPluginsPath(allocator: std.mem.Allocator) ![]u8 {
+    const config_path = try defaultConfigPath(allocator);
+    defer allocator.free(config_path);
+    const dir = std.fs.path.dirname(config_path) orelse return error.MissingConfigDir;
+    return std.fmt.allocPrint(allocator, "{s}/plugins.disabled", .{dir});
+}
+
+fn pluginListAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, disabled_path: []const u8) ![]u8 {
+    var names: std.ArrayList([]u8) = .empty;
+    defer {
+        for (names.items) |name| allocator.free(name);
+        names.deinit(allocator);
+    }
+
+    var dir = std.fs.openDirAbsolute(plugins_dir, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => return allocator.dupe(u8, ""),
+        else => return err,
+    };
+    defer dir.close();
+
+    var it = dir.iterate();
+    while (try it.next()) |entry| {
+        if (entry.kind != .directory) continue;
+        if (!plugin_manifest.isValidPluginName(entry.name)) continue;
+        try names.append(allocator, try allocator.dupe(u8, entry.name));
+    }
+    std.mem.sort([]u8, names.items, {}, lessThanString);
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    for (names.items) |name| {
+        const state = if (try pluginDisabled(allocator, disabled_path, name)) "disabled" else "enabled";
+        try appendFmt(allocator, &out, "{s} {s}\n", .{ name, state });
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn setPluginDisabled(allocator: std.mem.Allocator, disabled_path: []const u8, name: []const u8, disabled: bool) !void {
+    if (!plugin_manifest.isValidPluginName(name)) return error.InvalidPluginName;
+
+    var names = try readDisabledPlugins(allocator, disabled_path);
+    defer {
+        for (names.items) |item| allocator.free(item);
+        names.deinit(allocator);
+    }
+
+    const index = indexOfString(names.items, name);
+    if (disabled and index == null) {
+        try names.append(allocator, try allocator.dupe(u8, name));
+    } else if (!disabled and index != null) {
+        const removed = names.orderedRemove(index.?);
+        allocator.free(removed);
+    }
+    std.mem.sort([]u8, names.items, {}, lessThanString);
+    try writeDisabledPlugins(allocator, disabled_path, names.items);
+}
+
+fn pluginDisabled(allocator: std.mem.Allocator, disabled_path: []const u8, name: []const u8) !bool {
+    var names = try readDisabledPlugins(allocator, disabled_path);
+    defer {
+        for (names.items) |item| allocator.free(item);
+        names.deinit(allocator);
+    }
+    return indexOfString(names.items, name) != null;
+}
+
+fn readDisabledPlugins(allocator: std.mem.Allocator, disabled_path: []const u8) !std.ArrayList([]u8) {
+    var names: std.ArrayList([]u8) = .empty;
+    const contents = std.fs.cwd().readFileAlloc(allocator, disabled_path, 1024 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return names,
+        else => return err,
+    };
+    defer allocator.free(contents);
+
+    var lines = std.mem.tokenizeScalar(u8, contents, '\n');
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len == 0 or !plugin_manifest.isValidPluginName(trimmed)) continue;
+        if (indexOfString(names.items, trimmed) == null) {
+            try names.append(allocator, try allocator.dupe(u8, trimmed));
+        }
+    }
+    return names;
+}
+
+fn writeDisabledPlugins(allocator: std.mem.Allocator, disabled_path: []const u8, names: []const []const u8) !void {
+    if (std.fs.path.dirname(disabled_path)) |parent| {
+        try std.fs.cwd().makePath(parent);
+    }
+
+    var file = try std.fs.createFileAbsolute(disabled_path, .{ .truncate = true, .mode = 0o600 });
+    defer file.close();
+    for (names) |name| {
+        try file.writeAll(name);
+        try file.writeAll("\n");
+    }
+    _ = allocator;
+}
+
+fn indexOfString(items: []const []const u8, name: []const u8) ?usize {
+    for (items, 0..) |item, index| {
+        if (std.mem.eql(u8, item, name)) return index;
+    }
+    return null;
+}
+
+fn lessThanString(_: void, lhs: []const u8, rhs: []const u8) bool {
+    return std.mem.lessThan(u8, lhs, rhs);
+}
+
+test "plugin list reports enabled and disabled plugins" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const plugins_dir = try std.fmt.allocPrint(allocator, "{s}/plugins", .{dir_path});
+    defer allocator.free(plugins_dir);
+    try std.fs.cwd().makePath(plugins_dir);
+    const beta_path = try std.fmt.allocPrint(allocator, "{s}/beta", .{plugins_dir});
+    defer allocator.free(beta_path);
+    const alpha_path = try std.fmt.allocPrint(allocator, "{s}/alpha", .{plugins_dir});
+    defer allocator.free(alpha_path);
+    const bad_path = try std.fmt.allocPrint(allocator, "{s}/Bad", .{plugins_dir});
+    defer allocator.free(bad_path);
+    try std.fs.cwd().makePath(beta_path);
+    try std.fs.cwd().makePath(alpha_path);
+    try std.fs.cwd().makePath(bad_path);
+
+    const disabled_path = try std.fmt.allocPrint(allocator, "{s}/plugins.disabled", .{dir_path});
+    defer allocator.free(disabled_path);
+    try setPluginDisabled(allocator, disabled_path, "beta", true);
+
+    const output = try pluginListAlloc(allocator, plugins_dir, disabled_path);
+    defer allocator.free(output);
+    try std.testing.expectEqualStrings("alpha enabled\nbeta disabled\n", output);
+}
+
+test "plugin enable disable is duplicate safe" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const disabled_path = try std.fmt.allocPrint(allocator, "{s}/plugins.disabled", .{dir_path});
+    defer allocator.free(disabled_path);
+    try setPluginDisabled(allocator, disabled_path, "alpha", true);
+    try setPluginDisabled(allocator, disabled_path, "alpha", true);
+    try std.testing.expect(try pluginDisabled(allocator, disabled_path, "alpha"));
+    try setPluginDisabled(allocator, disabled_path, "alpha", false);
+    try std.testing.expect(!(try pluginDisabled(allocator, disabled_path, "alpha")));
+
+    const contents = try std.fs.cwd().readFileAlloc(allocator, disabled_path, 4096);
+    defer allocator.free(contents);
+    try std.testing.expectEqualStrings("", contents);
+}
+
+test "plugin state rejects invalid names" {
+    try std.testing.expectError(error.InvalidPluginName, setPluginDisabled(std.testing.allocator, "/tmp/shisa-plugin-invalid", "Bad", true));
+}
+
 test "parses bench export json flag" {
     const args = [_][]const u8{ "--export-json", "/tmp/out.json" };
     const config = try parseBench(args[0..]);
@@ -613,6 +818,7 @@ const help_text =
     \\  explain       print resolved module pipeline
     \\  init          write default shisa.toml
     \\  pin           mark a path as never-evicted
+    \\  plugin        list, enable, or disable plugins
     \\  prompt        render prompt through shisad
     \\  supervisor    run shisad under a crash-restart supervisor
     \\

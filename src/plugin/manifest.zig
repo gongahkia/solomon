@@ -2,6 +2,10 @@ const std = @import("std");
 
 pub const supported_api_version: u32 = 1;
 
+pub fn isValidPluginName(value: []const u8) bool {
+    return isPluginName(value);
+}
+
 pub const Manifest = struct {
     name: []const u8,
     version: []const u8,

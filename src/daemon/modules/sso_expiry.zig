@@ -6,6 +6,14 @@ const AwsSsoCacheJson = struct {
     expiresAt: []const u8 = "",
 };
 
+const GcloudAuthJson = struct {
+    account: []const u8 = "",
+    status: []const u8 = "",
+    token_expiry: []const u8 = "",
+    expiresAt: []const u8 = "",
+    expiry: []const u8 = "",
+};
+
 pub fn awsSsoCacheDirAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
     const home_path = home orelse return null;
     return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.aws/sso/cache", .{home_path}));
@@ -43,6 +51,45 @@ pub fn parseAwsSsoExpiryAlloc(allocator: std.mem.Allocator, source: []const u8) 
     const expiry = std.mem.trim(u8, parsed.value.expiresAt, " \t\r\n");
     if (expiry.len == 0) return null;
     return @as(?[]u8, try allocator.dupe(u8, expiry));
+}
+
+pub fn gcloudAuthCachePathAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
+    const home_path = home orelse return null;
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.cache/shisa/gcloud-auth-list.json", .{home_path}));
+}
+
+pub fn readGcloudAuthExpiryAlloc(allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 256 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(source);
+    return parseGcloudAuthExpiryAlloc(allocator, source);
+}
+
+pub fn parseGcloudAuthExpiryAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 {
+    var parsed = std.json.parseFromSlice([]GcloudAuthJson, allocator, source, .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+    var fallback: ?[]const u8 = null;
+    for (parsed.value) |entry| {
+        const expiry = gcloudExpiryField(entry) orelse continue;
+        if (fallback == null) fallback = expiry;
+        if (std.ascii.eqlIgnoreCase(std.mem.trim(u8, entry.status, " \t\r\n"), "ACTIVE")) {
+            return @as(?[]u8, try allocator.dupe(u8, expiry));
+        }
+    }
+    if (fallback) |expiry| return @as(?[]u8, try allocator.dupe(u8, expiry));
+    return null;
+}
+
+fn gcloudExpiryField(entry: GcloudAuthJson) ?[]const u8 {
+    const token_expiry = std.mem.trim(u8, entry.token_expiry, " \t\r\n");
+    if (token_expiry.len != 0) return token_expiry;
+    const expires_at = std.mem.trim(u8, entry.expiresAt, " \t\r\n");
+    if (expires_at.len != 0) return expires_at;
+    const expiry = std.mem.trim(u8, entry.expiry, " \t\r\n");
+    if (expiry.len != 0) return expiry;
+    return null;
 }
 
 test "parses aws sso expiry" {
@@ -89,4 +136,21 @@ test "builds aws sso cache dir" {
     const path = (try awsSsoCacheDirAlloc(std.testing.allocator, "/home/me")).?;
     defer std.testing.allocator.free(path);
     try std.testing.expectEqualStrings("/home/me/.aws/sso/cache", path);
+}
+
+test "parses gcloud active expiry" {
+    const expiry = (try parseGcloudAuthExpiryAlloc(std.testing.allocator,
+        \\[
+        \\  {"account": "old@example.com", "token_expiry": "2026-06-16T12:00:00Z"},
+        \\  {"account": "active@example.com", "status": "ACTIVE", "token_expiry": "2026-06-16T10:00:00Z"}
+        \\]
+    )).?;
+    defer std.testing.allocator.free(expiry);
+    try std.testing.expectEqualStrings("2026-06-16T10:00:00Z", expiry);
+}
+
+test "builds gcloud auth cache path for expiry" {
+    const path = (try gcloudAuthCachePathAlloc(std.testing.allocator, "/home/me")).?;
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/home/me/.cache/shisa/gcloud-auth-list.json", path);
 }

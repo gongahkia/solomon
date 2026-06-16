@@ -302,7 +302,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] AWS SSO: read `~/.aws/sso/cache/*.json`, find soonest `expiresAt`
 - [x] gcloud: parse `gcloud auth list --format=json` for expiry
 - [x] Azure: parse `~/.azure/accessTokens.json`
-- [ ] HashiCorp Vault: read `~/.vault-token` lease info
+- [x] HashiCorp Vault: read `~/.vault-token` lease info
 - [ ] 1Password CLI: `op signin status` cache
 - [ ] Render warning when any < 30 min remain (configurable)
 

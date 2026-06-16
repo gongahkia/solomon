@@ -137,6 +137,66 @@ fn azureExpiryField(entry: AzureAccessTokenJson) ?[]const u8 {
     return null;
 }
 
+pub fn vaultTokenPathAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
+    const home_path = home orelse return null;
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.vault-token", .{home_path}));
+}
+
+pub fn readVaultTokenLeaseInfoAlloc(allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(source);
+    return parseVaultTokenLeaseInfoAlloc(allocator, source);
+}
+
+pub fn parseVaultTokenLeaseInfoAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 {
+    const trimmed = std.mem.trim(u8, source, " \t\r\n");
+    if (trimmed.len == 0) return null;
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, trimmed, .{}) catch return null;
+    defer parsed.deinit();
+    return vaultLeaseInfoFromValueAlloc(allocator, parsed.value);
+}
+
+fn vaultLeaseInfoFromValueAlloc(allocator: std.mem.Allocator, value: std.json.Value) !?[]u8 {
+    switch (value) {
+        .object => |object| {
+            const fields = [_][]const u8{ "expire_time", "expireTime", "expires_at", "expiresAt", "ttl", "lease_duration", "token_duration" };
+            for (fields) |field| {
+                if (object.get(field)) |entry| {
+                    if (try jsonScalarTextAlloc(allocator, entry)) |text| return text;
+                }
+            }
+            if (object.get("auth")) |auth| {
+                if (try vaultLeaseInfoFromValueAlloc(allocator, auth)) |text| return text;
+            }
+            if (object.get("data")) |data| {
+                if (try vaultLeaseInfoFromValueAlloc(allocator, data)) |text| return text;
+            }
+            return null;
+        },
+        else => return null,
+    }
+}
+
+fn jsonScalarTextAlloc(allocator: std.mem.Allocator, value: std.json.Value) !?[]u8 {
+    switch (value) {
+        .string => |text| {
+            const trimmed = std.mem.trim(u8, text, " \t\r\n");
+            if (trimmed.len == 0) return null;
+            return @as(?[]u8, try allocator.dupe(u8, trimmed));
+        },
+        .integer => |number| return @as(?[]u8, try std.fmt.allocPrint(allocator, "{d}", .{number})),
+        .number_string => |text| {
+            const trimmed = std.mem.trim(u8, text, " \t\r\n");
+            if (trimmed.len == 0) return null;
+            return @as(?[]u8, try allocator.dupe(u8, trimmed));
+        },
+        else => return null,
+    }
+}
+
 test "parses aws sso expiry" {
     const expiry = (try parseAwsSsoExpiryAlloc(std.testing.allocator,
         \\{
@@ -226,4 +286,35 @@ test "builds azure access tokens path" {
     const path = (try azureAccessTokensPathAlloc(std.testing.allocator, "/home/me")).?;
     defer std.testing.allocator.free(path);
     try std.testing.expectEqualStrings("/home/me/.azure/accessTokens.json", path);
+}
+
+test "parses vault token expire time" {
+    const expiry = (try parseVaultTokenLeaseInfoAlloc(std.testing.allocator,
+        \\{
+        \\  "expire_time": "2026-06-16T12:00:00Z"
+        \\}
+    )).?;
+    defer std.testing.allocator.free(expiry);
+    try std.testing.expectEqualStrings("2026-06-16T12:00:00Z", expiry);
+}
+
+test "parses nested vault lease duration" {
+    const expiry = (try parseVaultTokenLeaseInfoAlloc(std.testing.allocator,
+        \\{
+        \\  "auth": {"client_token": "hvs.redacted", "lease_duration": 3600}
+        \\}
+    )).?;
+    defer std.testing.allocator.free(expiry);
+    try std.testing.expectEqualStrings("3600", expiry);
+}
+
+test "ignores raw vault token without lease metadata" {
+    const expiry = try parseVaultTokenLeaseInfoAlloc(std.testing.allocator, "hvs.redacted\n");
+    try std.testing.expect(expiry == null);
+}
+
+test "builds vault token path" {
+    const path = (try vaultTokenPathAlloc(std.testing.allocator, "/home/me")).?;
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/home/me/.vault-token", path);
 }

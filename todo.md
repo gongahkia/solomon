@@ -310,7 +310,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Terraform: read `.terraform/environment` or current workspace from state
 - [x] Pulumi: read `Pulumi.<stack>.yaml` + active stack
 - [x] CDK: read `cdk.json` + `cdk.context.json`
-- [ ] OpenTofu: same as Terraform
+- [x] OpenTofu: same as Terraform
 - [ ] Render workspace + lock indicator
 - [ ] Pre-exec warn if workspace appears stale or remotely locked
 

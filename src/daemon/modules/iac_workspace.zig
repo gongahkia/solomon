@@ -80,6 +80,10 @@ pub fn parseTerraformStateWorkspaceAlloc(allocator: std.mem.Allocator, source: [
     return null;
 }
 
+pub fn readOpenTofuWorkspaceAlloc(allocator: std.mem.Allocator, cwd: []const u8) !?[]u8 {
+    return readTerraformWorkspaceAlloc(allocator, cwd);
+}
+
 pub fn pulumiWorkspacesDirAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
     const home_path = home orelse return null;
     return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.pulumi/workspaces", .{home_path}));
@@ -308,6 +312,28 @@ test "reads terraform state fallback" {
     const workspace = (try readTerraformWorkspaceAlloc(allocator, dir_path)).?;
     defer allocator.free(workspace);
     try std.testing.expectEqualStrings("stage", workspace);
+}
+
+test "reads opentofu workspace with terraform layout" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-tofu-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    const terraform_dir = try std.fmt.allocPrint(allocator, "{s}/.terraform", .{dir_path});
+    defer allocator.free(terraform_dir);
+    try std.fs.cwd().makePath(terraform_dir);
+
+    const env_path = try terraformEnvironmentPathAlloc(allocator, dir_path);
+    defer allocator.free(env_path);
+    {
+        var file = try std.fs.createFileAbsolute(env_path, .{});
+        defer file.close();
+        try file.writeAll("prod-tofu\n");
+    }
+
+    const workspace = (try readOpenTofuWorkspaceAlloc(allocator, dir_path)).?;
+    defer allocator.free(workspace);
+    try std.testing.expectEqualStrings("prod-tofu", workspace);
 }
 
 test "parses pulumi active stack for cwd" {

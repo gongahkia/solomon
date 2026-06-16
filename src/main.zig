@@ -6,6 +6,7 @@ const proto = @import("proto/types.zig");
 const supervisor = @import("supervisor.zig");
 
 const version = "0.1.0-dev";
+const max_config_bytes = 1024 * 1024;
 
 pub fn main() !void {
     var gpa_impl = std.heap.GeneralPurposeAllocator(.{}){};
@@ -32,6 +33,11 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, args[1], "init")) {
         try initConfig(allocator, args[2..]);
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "explain")) {
+        try explainConfig(allocator, args[2..]);
         return;
     }
 
@@ -97,6 +103,77 @@ test "default config path falls back to home" {
     const path = try defaultConfigPathFromEnv(std.testing.allocator, null, "/tmp/home");
     defer std.testing.allocator.free(path);
     try std.testing.expectEqualStrings("/tmp/home/.config/shisa/shisa.toml", path);
+}
+
+fn explainConfig(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len != 0) return error.UnknownExplainArgument;
+
+    const path = try defaultConfigPath(allocator);
+    defer allocator.free(path);
+    const source = try readConfigOrDefault(allocator, path);
+    defer allocator.free(source);
+
+    var diagnostic: shisa_config.Diagnostic = .{};
+    var parsed = shisa_config.parse(allocator, source, &diagnostic) catch |err| switch (err) {
+        error.InvalidConfig => {
+            const message = try std.fmt.allocPrint(allocator, "{s}:{d}:{d}: {s}\n", .{ path, diagnostic.line, diagnostic.column, diagnostic.message });
+            defer allocator.free(message);
+            try std.fs.File.stderr().writeAll(message);
+            return err;
+        },
+        else => return err,
+    };
+    defer parsed.deinit(allocator);
+
+    const output = try explainAlloc(allocator, parsed);
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn readConfigOrDefault(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    var file = std.fs.openFileAbsolute(path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return allocator.dupe(u8, shisa_config.default_config_text),
+        else => return err,
+    };
+    defer file.close();
+    return file.readToEndAlloc(allocator, max_config_bytes);
+}
+
+fn explainAlloc(allocator: std.mem.Allocator, parsed: shisa_config.Config) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    try appendFmt(allocator, &out, "theme: {s}\n", .{parsed.theme});
+    try out.appendSlice(allocator, "pipeline:\n");
+    for (parsed.prompt_modules, 0..) |module_id, index| {
+        try appendFmt(
+            allocator,
+            &out,
+            "  {d}. {s} ({s})\n",
+            .{ index + 1, shisa_config.moduleIdName(module_id), shisa_config.moduleExecutionClass(module_id) },
+        );
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendFmt(allocator: std.mem.Allocator, out: *std.ArrayList(u8), comptime format: []const u8, args: anytype) !void {
+    const line = try std.fmt.allocPrint(allocator, format, args);
+    defer allocator.free(line);
+    try out.appendSlice(allocator, line);
+}
+
+test "explain output dumps pipeline" {
+    var diagnostic: shisa_config.Diagnostic = .{};
+    var parsed = try shisa_config.parse(std.testing.allocator, shisa_config.default_config_text, &diagnostic);
+    defer parsed.deinit(std.testing.allocator);
+
+    const output = try explainAlloc(std.testing.allocator, parsed);
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "theme: plain\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "1. cwd (sync)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "2. git_branch (cached)") != null);
 }
 
 const PromptConfig = struct {
@@ -202,6 +279,7 @@ const help_text =
     \\usage: shisa <command> [options]
     \\
     \\commands:
+    \\  explain       print resolved module pipeline
     \\  init          write default shisa.toml
     \\  prompt        render prompt through shisad
     \\  supervisor    run shisad under a crash-restart supervisor

@@ -39,6 +39,25 @@ pub const ModuleId = enum {
     time,
 };
 
+pub fn moduleIdName(module_id: ModuleId) []const u8 {
+    return switch (module_id) {
+        .cwd => "cwd",
+        .git_branch => "git_branch",
+        .exit_status => "exit_status",
+        .jobs => "jobs",
+        .cmd_duration => "cmd_duration",
+        .user_host => "user_host",
+        .time => "time",
+    };
+}
+
+pub fn moduleExecutionClass(module_id: ModuleId) []const u8 {
+    return switch (module_id) {
+        .git_branch => "cached",
+        else => "sync",
+    };
+}
+
 pub const UserHostMode = enum {
     ssh,
     always,
@@ -517,6 +536,12 @@ test "parses minimal config with defaults" {
     try std.testing.expectEqualStrings("plain", config.theme);
     try std.testing.expectEqualSlices(ModuleId, &.{ .cwd, .git_branch, .exit_status }, config.prompt_modules);
     try std.testing.expectEqual(@as(u8, 3), config.modules.cwd.truncate_to);
+}
+
+test "module metadata names execution classes" {
+    try std.testing.expectEqualStrings("cwd", moduleIdName(.cwd));
+    try std.testing.expectEqualStrings("sync", moduleExecutionClass(.cwd));
+    try std.testing.expectEqualStrings("cached", moduleExecutionClass(.git_branch));
 }
 
 test "default config parses" {

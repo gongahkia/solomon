@@ -502,6 +502,47 @@ test "formats sapling ref summary" {
     try std.testing.expectEqualStrings("sl:bm:topic branch:default", rendered);
 }
 
+test "snapshots sapling fixture repo" {
+    const allocator = std.testing.allocator;
+    const fixture_root = "test/fixtures/sl/stack";
+
+    const root = (try findRoot(allocator, fixture_root)).?;
+    defer allocator.free(root);
+    try std.testing.expectEqualStrings(fixture_root, root);
+
+    var watched = (try watchScope(allocator, fixture_root)).?;
+    defer watched.deinit(allocator);
+    try std.testing.expectEqualStrings("test/fixtures/sl/stack/.sl/store", watched.paths[0].path);
+
+    const status_output = try readFixture(allocator, "test/fixtures/sl/stack/status.txt");
+    defer allocator.free(status_output);
+    const status = parseStatusSummary(status_output);
+    const status_segment = (try formatStatusSummaryAlloc(allocator, status)).?;
+    defer allocator.free(status_segment);
+
+    const current_output = try readFixture(allocator, "test/fixtures/sl/stack/current.txt");
+    defer allocator.free(current_output);
+    const stack_output = try readFixture(allocator, "test/fixtures/sl/stack/stack.txt");
+    defer allocator.free(stack_output);
+    var position = (try parseSmartlogPosition(allocator, current_output, stack_output)).?;
+    defer position.deinit(allocator);
+    const position_segment = try formatSmartlogPositionAlloc(allocator, position);
+    defer allocator.free(position_segment);
+
+    const refs_output = try readFixture(allocator, "test/fixtures/sl/stack/refs.txt");
+    defer allocator.free(refs_output);
+    var refs = (try parseRefSummary(allocator, refs_output)).?;
+    defer refs.deinit(allocator);
+    const refs_segment = try formatRefSummaryAlloc(allocator, refs);
+    defer allocator.free(refs_segment);
+
+    const actual = try std.fmt.allocPrint(allocator, "{s}\n{s}\n{s}\n", .{ status_segment, position_segment, refs_segment });
+    defer allocator.free(actual);
+    const expected = try readFixture(allocator, "test/fixtures/sl/stack/expected.txt");
+    defer allocator.free(expected);
+    try std.testing.expectEqualStrings(expected, actual);
+}
+
 test "reads real sapling status when sl is installed" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-sl-real-{x}", .{std.crypto.random.int(u64)});
@@ -595,4 +636,8 @@ fn writeFile(path: []const u8, contents: []const u8) !void {
     var file = try std.fs.createFileAbsolute(path, .{ .truncate = true });
     defer file.close();
     try file.writeAll(contents);
+}
+
+fn readFixture(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    return try std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024);
 }

@@ -35,4 +35,5 @@ State sources:
 - `sl status --root-relative` for working-copy status counts.
 - `sl log -r . --template` plus `sl log -r '::. - public()'` for current smartlog stack position.
 - `sl log -r . --template '{branch}\n{activebookmark}\n'` for branch and active bookmark.
+- `test/fixtures/sl/*` snapshot fixture repos cover deterministic parser/render output.
 - Verified Sapling 0.2.20260522 does not accept `sl status --json`; official status docs list plain status output and options: https://sapling-scm.com/docs/commands/status/

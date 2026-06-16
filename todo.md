@@ -229,7 +229,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Read sapling state via `sl status --root-relative` (cached, fsnotify on `.sl/store`; `--json` unsupported in Sapling 0.2.20260522)
 - [x] Show smartlog position (current commit in the stack)
 - [x] Show bookmark / branch
-- [ ] Snapshot tests against fixture sapling repos
+- [x] Snapshot tests against fixture sapling repos
 
 ### 10.3 Mercurial (hg) — Tier 1
 - [ ] Detect hg repos (`.hg/`)

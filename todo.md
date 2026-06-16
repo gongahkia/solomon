@@ -238,7 +238,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Handle mq queues if active
 
 ### 10.4 Stacked-diff awareness (`shisa.vcs.stack`)
-- [ ] Detect Graphite (`gt`): `.graphite_repo_config`
+- [x] Detect Graphite (`gt`): `.graphite_repo_config`
 - [ ] Detect ghstack: branch naming + `.ghstackrc`
 - [ ] Detect spr / git-spr: `.git/refs/spr/`
 - [ ] Detect `st`: meta files

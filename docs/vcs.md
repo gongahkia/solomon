@@ -52,3 +52,11 @@ State sources:
 - When no default remote exists, Mercurial 7.2.2 exits 255 but still emits useful summary stdout; Shisa parses that stdout.
 - `hg log -r . --template` for branch, active bookmark, current changeset phase, and `topic` extra when present.
 - `hg --config extensions.mq= qqueue/qapplied/qseries` for active MQ queue, applied count, series count, and top patch; the empty default queue is suppressed.
+
+## Stack Awareness
+
+Detection:
+
+- Walk ancestors from `cwd`.
+- A directory containing `.graphite_repo_config` is treated as a Graphite stack root.
+- Graphite detection does not require the `gt` binary.

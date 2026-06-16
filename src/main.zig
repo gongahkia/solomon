@@ -4,6 +4,7 @@ const client = @import("shisa-client.zig");
 const shisa_config = @import("config.zig");
 const paths = @import("daemon/paths.zig");
 const proto = @import("proto/types.zig");
+const plugin_lua = @import("plugin/lua.zig");
 const plugin_manifest = @import("plugin/manifest.zig");
 const supervisor = @import("supervisor.zig");
 
@@ -458,6 +459,9 @@ fn pluginCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         const output = try pluginListAlloc(allocator, plugins_dir, disabled_path);
         defer allocator.free(output);
         try std.fs.File.stdout().writeAll(output);
+    } else if (std.mem.eql(u8, args[0], "install")) {
+        const config = try parsePluginInstallArgs(args[1..]);
+        try pluginInstall(allocator, plugins_dir, config);
     } else if (std.mem.eql(u8, args[0], "disable")) {
         if (args.len != 2) return error.UnknownPluginArgument;
         try setPluginDisabled(allocator, disabled_path, args[1], true);
@@ -479,6 +483,86 @@ fn pluginCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
     } else {
         return error.UnknownPluginArgument;
     }
+}
+
+const PluginInstallConfig = struct {
+    url: []const u8,
+    yes: bool = false,
+};
+
+fn parsePluginInstallArgs(args: []const []const u8) !PluginInstallConfig {
+    var config: PluginInstallConfig = undefined;
+    var seen_url = false;
+    config.yes = false;
+
+    for (args) |arg| {
+        if (std.mem.eql(u8, arg, "--yes") or std.mem.eql(u8, arg, "-y")) {
+            config.yes = true;
+        } else if (!seen_url) {
+            config.url = arg;
+            seen_url = true;
+        } else {
+            return error.UnknownPluginArgument;
+        }
+    }
+    if (!seen_url) return error.UnknownPluginArgument;
+    return config;
+}
+
+fn pluginInstall(allocator: std.mem.Allocator, plugins_dir: []const u8, config: PluginInstallConfig) !void {
+    try std.fs.cwd().makePath(plugins_dir);
+
+    const temp_path = try std.fmt.allocPrint(allocator, "{s}/.install-{x}", .{ plugins_dir, std.crypto.random.int(u64) });
+    defer allocator.free(temp_path);
+    defer std.fs.cwd().deleteTree(temp_path) catch {};
+
+    try runGitClone(allocator, config.url, temp_path);
+
+    const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{temp_path});
+    defer allocator.free(manifest_path);
+    const manifest_source = try std.fs.cwd().readFileAlloc(allocator, manifest_path, 1024 * 1024);
+    defer allocator.free(manifest_source);
+
+    var runtime = try plugin_lua.Runtime.initSandboxed(allocator);
+    defer runtime.deinit();
+    var loaded = try runtime.loadManifest(manifest_source);
+    defer loaded.deinit(allocator);
+
+    if (!config.yes and !(try confirmPluginInstall(allocator, loaded.manifest))) return error.PluginInstallDeclined;
+
+    const target_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ plugins_dir, loaded.manifest.name });
+    defer allocator.free(target_path);
+    if (std.fs.cwd().access(target_path, .{})) |_| return error.PluginAlreadyInstalled else |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    }
+
+    try std.fs.renameAbsolute(temp_path, target_path);
+    const message = try std.fmt.allocPrint(allocator, "installed {s} {s}\n", .{ loaded.manifest.name, loaded.manifest.version });
+    defer allocator.free(message);
+    try std.fs.File.stdout().writeAll(message);
+}
+
+fn runGitClone(allocator: std.mem.Allocator, url: []const u8, target_path: []const u8) !void {
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "git", "clone", "--depth", "1", url, target_path },
+        .max_output_bytes = 1024 * 1024,
+        .expand_arg0 = .expand,
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!exitedZero(result.term)) return error.PluginCloneFailed;
+}
+
+fn confirmPluginInstall(allocator: std.mem.Allocator, manifest: plugin_manifest.Manifest) !bool {
+    const prompt_text = try std.fmt.allocPrint(allocator, "Install plugin {s} {s}? [y/N] ", .{ manifest.name, manifest.version });
+    defer allocator.free(prompt_text);
+    try std.fs.File.stdout().writeAll(prompt_text);
+    const answer = try std.fs.File.stdin().readToEndAlloc(allocator, 16);
+    defer allocator.free(answer);
+    const trimmed = std.mem.trim(u8, answer, " \t\r\n");
+    return trimmed.len > 0 and (trimmed[0] == 'y' or trimmed[0] == 'Y');
 }
 
 fn pluginsDirPath(allocator: std.mem.Allocator) ![]u8 {
@@ -655,6 +739,13 @@ test "plugin list reports enabled and disabled plugins" {
     const output = try pluginListAlloc(allocator, plugins_dir, disabled_path);
     defer allocator.free(output);
     try std.testing.expectEqualStrings("alpha enabled\nbeta disabled\n", output);
+}
+
+test "parses plugin install args" {
+    const config = try parsePluginInstallArgs(&.{ "https://example.com/plugin.git", "--yes" });
+    try std.testing.expectEqualStrings("https://example.com/plugin.git", config.url);
+    try std.testing.expect(config.yes);
+    try std.testing.expectError(error.UnknownPluginArgument, parsePluginInstallArgs(&.{"--yes"}));
 }
 
 test "plugin enable disable is duplicate safe" {
@@ -876,7 +967,7 @@ const help_text =
     \\  explain       print resolved module pipeline
     \\  init          write default shisa.toml
     \\  pin           mark a path as never-evicted
-    \\  plugin        list, enable, disable, or trust plugins
+    \\  plugin        install, list, enable, disable, or trust plugins
     \\  prompt        render prompt through shisad
     \\  supervisor    run shisad under a crash-restart supervisor
     \\

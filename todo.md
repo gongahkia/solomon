@@ -133,7 +133,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Strip dangerous globals (`os.execute`, `io.popen`, `io.open`, `loadfile`, `dofile`, `require`)
 - [x] Define plugin manifest schema (`capabilities`, `render`, `update`, `name`, `version`)
 - [x] Implement capability gate: fs_read scope, fs_watch scope, exec allow-list, net opt-in
-- [ ] Implement `shisa plugin install <git-url>` (clone, audit manifest, prompt user)
+- [x] Implement `shisa plugin install <git-url>` (clone, audit manifest, prompt user)
 - [x] Implement `shisa plugin trust <name>` for capability escalation
 - [x] Implement `shisa plugin list`, `disable`, `enable`
 - [ ] Port `git`, `language version`, `kubernetes-context`, `aws-profile` to the Lua plugin API as references

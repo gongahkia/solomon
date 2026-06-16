@@ -110,7 +110,7 @@ pub const Server = struct {
         var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
         const host = std.posix.gethostname(&host_buffer) catch "unknown";
 
-        const prompt = try dispatcher.renderDefault(std.heap.page_allocator, &self.git_branch_cache, .{
+        var rendered = try dispatcher.renderDefault(std.heap.page_allocator, &self.git_branch_cache, .{
             .cwd = parsed.value.cwd,
             .home = home,
             .exit = parsed.value.exit,
@@ -122,11 +122,16 @@ pub const Server = struct {
             .user = user,
             .host = host,
         });
-        defer std.heap.page_allocator.free(prompt);
+        defer rendered.deinit(std.heap.page_allocator);
 
-        const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, prompt);
+        const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, rendered.prompt);
         defer std.heap.page_allocator.free(escaped_prompt);
 
+        if (rendered.redraw_token) |token| {
+            const escaped_token = try json.escapeAlloc(std.heap.page_allocator, token);
+            defer std.heap.page_allocator.free(escaped_token);
+            return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"prompt\":\"{s}\",\"redraw_token\":\"{s}\"}}", .{ escaped_prompt, escaped_token });
+        }
         return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"prompt\":\"{s}\",\"redraw_token\":null}}", .{escaped_prompt});
     }
 };

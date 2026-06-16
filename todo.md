@@ -293,7 +293,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Fuzz the classifier against a corpus of dangerous-looking-but-safe commands (`kubectl get`, `terraform plan`)
 
 ### 11.4 IAM whoami (`iam_whoami`)
-- [ ] AWS STS GetCallerIdentity cached value
+- [x] AWS STS GetCallerIdentity cached value
 - [ ] GCP `gcloud auth list` cached
 - [ ] Azure `az account show` cached
 - [ ] k8s `kubectl config current-context` user

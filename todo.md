@@ -64,7 +64,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] `time` module: optional clock segment
 
 ### 1.4 Zsh integration
-- [ ] Write `init/shisa.zsh` (eval'd from `.zshrc`)
+- [x] Write `init/shisa.zsh` (eval'd from `.zshrc`)
 - [ ] Wire `precmd` to capture `$?`, `$#jobstates`, and elapsed time via `$EPOCHREALTIME`
 - [ ] Wire `preexec` to record command start time
 - [ ] Set `PROMPT` to `$(shisa prompt --shell=zsh)` with `setopt prompt_subst`

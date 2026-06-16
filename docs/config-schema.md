@@ -17,7 +17,7 @@ modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd
 | Key | Type | Required | Default | Notes |
 | --- | --- | --- | --- | --- |
 | `version` | integer | yes | none | Must be `1`. |
-| `theme` | string | no | `"plain"` | Built-in theme id or absolute/tilde path to a theme TOML file. |
+| `theme` | string | no | `"plain"` | Built-in theme id or absolute/tilde path to a theme TOML file. See `docs/theme-spec.md`. |
 
 Unknown top-level keys are invalid.
 

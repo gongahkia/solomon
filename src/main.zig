@@ -451,6 +451,7 @@ const PromptConfig = struct {
     duration_ms: u64 = 0,
     time: bool = false,
     no_async: bool = false,
+    instant: bool = false,
     shell: []const u8 = "zsh",
     cols: u16 = 80,
     rows: u16 = 24,
@@ -466,11 +467,22 @@ fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const payload = try buildPromptPayload(allocator, config, cwd);
     defer allocator.free(payload);
 
+    if (config.instant) {
+        if (try readInstantPrompt(allocator)) |cached| {
+            defer allocator.free(cached);
+            try std.fs.File.stdout().writeAll(cached);
+            return;
+        }
+    }
+
     const response_payload = try client.requestAlloc(allocator, socket_path, payload);
     defer allocator.free(response_payload);
 
     var parsed = try std.json.parseFromSlice(proto.Response, allocator, response_payload, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
+    if (config.instant) {
+        try writeInstantPrompt(allocator, parsed.value.prompt);
+    }
     try std.fs.File.stdout().writeAll(parsed.value.prompt);
 }
 
@@ -494,6 +506,8 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
             config.time = true;
         } else if (std.mem.eql(u8, arg, "--no-async")) {
             config.no_async = true;
+        } else if (std.mem.eql(u8, arg, "--instant")) {
+            config.instant = true;
         } else if (std.mem.eql(u8, arg, "--shell")) {
             config.shell = try nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--cols")) {
@@ -506,6 +520,51 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
     }
 
     return config;
+}
+
+fn instantPromptPath(allocator: std.mem.Allocator) ![]u8 {
+    const config_path = try defaultConfigPath(allocator);
+    defer allocator.free(config_path);
+    const dir = std.fs.path.dirname(config_path) orelse return error.MissingConfigDir;
+    return std.fmt.allocPrint(allocator, "{s}/last-prompt", .{dir});
+}
+
+fn readInstantPrompt(allocator: std.mem.Allocator) !?[]u8 {
+    const path = try instantPromptPath(allocator);
+    defer allocator.free(path);
+    return std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024) catch |err| switch (err) {
+        error.FileNotFound => null,
+        else => return err,
+    };
+}
+
+fn writeInstantPrompt(allocator: std.mem.Allocator, prompt_text: []const u8) !void {
+    const path = try instantPromptPath(allocator);
+    defer allocator.free(path);
+    if (std.fs.path.dirname(path)) |parent| {
+        try std.fs.cwd().makePath(parent);
+    }
+    var file = try std.fs.createFileAbsolute(path, .{ .truncate = true, .mode = 0o600 });
+    defer file.close();
+    try file.writeAll(prompt_text);
+}
+
+test "instant prompt read write roundtrip" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-instant-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const path = try std.fmt.allocPrint(allocator, "{s}/last-prompt", .{dir_path});
+    defer allocator.free(path);
+    var file = try std.fs.createFileAbsolute(path, .{});
+    try file.writeAll("cached> ");
+    file.close();
+
+    const cached = try std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024);
+    defer allocator.free(cached);
+    try std.testing.expectEqualStrings("cached> ", cached);
 }
 
 fn nextValue(args: []const []const u8, index: *usize) ![]const u8 {

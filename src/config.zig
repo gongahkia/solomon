@@ -1,12 +1,13 @@
 const std = @import("std");
 const risk_tier_module = @import("daemon/modules/risk_tier.zig");
+const sso_expiry_module = @import("daemon/modules/sso_expiry.zig");
 
 pub const default_config_text =
     \\version = 1
     \\theme = "plain"
     \\
     \\[prompt]
-    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host"]
+    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry"]
     \\
     \\[modules.cwd]
     \\truncate_to = 3
@@ -34,6 +35,9 @@ pub const default_config_text =
     \\staging_bg = "warning"
     \\prod_bg = "danger"
     \\
+    \\[modules.sso_expiry]
+    \\warning_minutes = 30
+    \\
 ;
 
 pub const Diagnostic = struct {
@@ -52,6 +56,7 @@ pub const ModuleId = enum {
     user_host,
     cloud_ctx,
     risk_tier,
+    sso_expiry,
     time,
 };
 
@@ -66,6 +71,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .user_host => "user_host",
         .cloud_ctx => "cloud_ctx",
         .risk_tier => "risk_tier",
+        .sso_expiry => "sso_expiry",
         .time => "time",
     };
 }
@@ -93,6 +99,7 @@ pub const ModuleOptions = struct {
     user_host: UserHostOptions = .{},
     cloud_ctx: CloudCtxOptions = .{},
     risk_tier: RiskTierOptions = .{},
+    sso_expiry: SsoExpiryOptions = .{},
     time: TimeOptions = .{},
 };
 
@@ -138,6 +145,7 @@ pub const CloudCtxOptions = struct {
 
 pub const RiskTierOptions = risk_tier_module.BarColors;
 pub const RiskTierColor = risk_tier_module.ColorSlot;
+pub const SsoExpiryOptions = sso_expiry_module.Options;
 
 pub const TimeOptions = struct {
     format_24h: bool = true,
@@ -169,6 +177,7 @@ const Table = enum {
     user_host,
     cloud_ctx,
     risk_tier,
+    sso_expiry,
     time,
 };
 
@@ -193,6 +202,7 @@ const Seen = struct {
     risk_tier_dev_bg: bool = false,
     risk_tier_staging_bg: bool = false,
     risk_tier_prod_bg: bool = false,
+    sso_expiry_warning_minutes: bool = false,
     time_format: bool = false,
     time_utc: bool = false,
 };
@@ -202,7 +212,7 @@ const Trimmed = struct {
     column: usize,
 };
 
-const default_modules = [_]ModuleId{ .cwd, .git_branch, .language_versions, .exit_status, .jobs, .cmd_duration, .user_host };
+const default_modules = [_]ModuleId{ .cwd, .git_branch, .language_versions, .exit_status, .jobs, .cmd_duration, .user_host, .sso_expiry };
 
 pub fn parse(allocator: std.mem.Allocator, source: []const u8, diagnostic: *Diagnostic) !Config {
     diagnostic.* = .{};
@@ -303,6 +313,7 @@ const Parser = struct {
             .user_host => try self.parseUserHostKey(line_no, key, value),
             .cloud_ctx => try self.parseCloudCtxKey(line_no, key, value),
             .risk_tier => try self.parseRiskTierKey(line_no, key, value),
+            .sso_expiry => try self.parseSsoExpiryKey(line_no, key, value),
             .time => try self.parseTimeKey(line_no, key, value),
         }
     }
@@ -429,6 +440,12 @@ const Parser = struct {
         const color = try self.parseStringAlloc(value, line_no);
         defer self.allocator.free(color);
         return risk_tier_module.parseColorSlot(color) orelse self.fail(line_no, value.column, "invalid risk_tier color");
+    }
+
+    fn parseSsoExpiryKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
+        if (!std.mem.eql(u8, key.text, "warning_minutes")) return self.fail(line_no, key.column, "unknown key");
+        try self.markUnseen(&self.seen.sso_expiry_warning_minutes, line_no, key.column);
+        self.modules.sso_expiry.warning_minutes = @intCast(try self.parseIntRange(value, line_no, 1, 1440));
     }
 
     fn parseTimeKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
@@ -590,6 +607,7 @@ fn parseTableName(name: []const u8) ?Table {
     if (std.mem.eql(u8, name, "modules.user_host")) return .user_host;
     if (std.mem.eql(u8, name, "modules.cloud_ctx")) return .cloud_ctx;
     if (std.mem.eql(u8, name, "modules.risk_tier")) return .risk_tier;
+    if (std.mem.eql(u8, name, "modules.sso_expiry")) return .sso_expiry;
     if (std.mem.eql(u8, name, "modules.time")) return .time;
     return null;
 }
@@ -604,6 +622,7 @@ fn parseModuleId(id: []const u8) ?ModuleId {
     if (std.mem.eql(u8, id, "user_host")) return .user_host;
     if (std.mem.eql(u8, id, "cloud_ctx")) return .cloud_ctx;
     if (std.mem.eql(u8, id, "risk_tier")) return .risk_tier;
+    if (std.mem.eql(u8, id, "sso_expiry")) return .sso_expiry;
     if (std.mem.eql(u8, id, "time")) return .time;
     return null;
 }

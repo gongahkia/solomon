@@ -22,6 +22,7 @@ typeset -g SHISA_LAST_EXIT=0
 typeset -g SHISA_LAST_JOBS=0
 typeset -g SHISA_LAST_DURATION_MS=0
 typeset -g SHISA_PREEXEC_REALTIME=
+typeset -g SHISA_ASYNC_SIGNAL=${SHISA_ASYNC_SIGNAL:-USR1}
 
 zmodload zsh/datetime 2>/dev/null || true
 
@@ -65,6 +66,18 @@ shisa_hook_once preexec shisa_preexec
 
 setopt prompt_subst
 PROMPT='$(shisa_prompt_render)'
+
+shisa_async_redraw() {
+  emulate -L zsh
+  zle reset-prompt 2>/dev/null || true
+}
+
+if [[ ${SHISA_ASYNC_SIGNAL} == USR1 ]]; then
+  TRAPUSR1() {
+    shisa_async_redraw
+    return 0
+  }
+fi
 
 shisa_socket_path() {
   emulate -L zsh

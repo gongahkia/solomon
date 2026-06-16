@@ -123,3 +123,12 @@ shisa plugin trust demo-plugin
 - Plugin render functions are not yet wired into the daemon render pipeline.
 - Host API bindings for filesystem, exec, network, env, secrets, and pre-exec are not exposed to Lua yet.
 - `shisa plugin install` audits `plugin.lua` by sandbox-loading and validating the returned manifest table before installing.
+
+## Reference Plugins
+
+Reference manifests live under `examples/plugins/`:
+
+- `git`: git branch and dirty-state capabilities.
+- `language_versions`: python/node/rust/go probe capabilities.
+- `kubernetes-context`: kubeconfig/env capabilities.
+- `aws-profile`: AWS config/env capabilities.

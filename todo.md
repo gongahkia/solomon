@@ -136,7 +136,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Implement `shisa plugin install <git-url>` (clone, audit manifest, prompt user)
 - [x] Implement `shisa plugin trust <name>` for capability escalation
 - [x] Implement `shisa plugin list`, `disable`, `enable`
-- [ ] Port `git`, `language version`, `kubernetes-context`, `aws-profile` to the Lua plugin API as references
+- [x] Port `git`, `language version`, `kubernetes-context`, `aws-profile` to the Lua plugin API as references
 - [x] Document the plugin SDK in `docs/plugins.md` with a tutorial
 - [x] Fuzz the Lua↔Zig bridge layer
 - [ ] Stand up an awesome-shisa repo listing community plugins

@@ -87,7 +87,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 
 ### 1.7 Tests
 - [x] Unit tests for protocol encode/decode
-- [ ] Integration tests using a fake socket + scripted zsh session
+- [x] Integration tests using a fake socket + scripted zsh session
 - [ ] Snapshot tests for prompt rendering
 - [ ] Fuzzer for the wire protocol decoder
 

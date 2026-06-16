@@ -229,6 +229,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const server_test_run = b.addRunArtifact(server_tests);
+    const zsh_integration = b.addSystemCommand(&.{ "bash", "test/integration/zsh_fake_socket.sh" });
+    zsh_integration.step.dependOn(&debug_install.step);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&test_run.step);
     test_step.dependOn(&cli_test_run.step);
@@ -248,4 +250,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&proto_frame_test_run.step);
     test_step.dependOn(&client_test_run.step);
     test_step.dependOn(&server_test_run.step);
+    test_step.dependOn(&zsh_integration.step);
 }

@@ -121,10 +121,10 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Implement bash duration capture via `DEBUG` trap + `EPOCHREALTIME`
 - [x] Implement bash async redraw via `bind -x` + escape sequence trick (document limitations)
 - [x] Add bash integration tests
-- [ ] Author `init/shisa.fish` using `fish_prompt`
-- [ ] Implement fish async redraw via fish-native events
-- [ ] Add fish integration tests
-- [ ] Make instant prompt work in fish (cache-first render before daemon RTT)
+- [x] Author `init/shisa.fish` using `fish_prompt`
+- [x] Implement fish async redraw via fish-native events
+- [x] Add fish integration tests
+- [x] Make instant prompt work in fish (cache-first render before daemon RTT)
 - [x] Document per-shell feature parity in `docs/shells.md`
 
 ## Phase 5 — Plugin SDK + Lua sandbox

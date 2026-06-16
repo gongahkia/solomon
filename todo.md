@@ -132,7 +132,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Embed Lua 5.4 (or LuaJIT, evaluate both for sandbox safety)
 - [ ] Strip dangerous globals (`os.execute`, `io.popen`, `io.open`, `loadfile`, `dofile`, `require`)
 - [x] Define plugin manifest schema (`capabilities`, `render`, `update`, `name`, `version`)
-- [ ] Implement capability gate: fs_read scope, fs_watch scope, exec allow-list, net opt-in
+- [x] Implement capability gate: fs_read scope, fs_watch scope, exec allow-list, net opt-in
 - [ ] Implement `shisa plugin install <git-url>` (clone, audit manifest, prompt user)
 - [ ] Implement `shisa plugin trust <name>` for capability escalation
 - [ ] Implement `shisa plugin list`, `disable`, `enable`

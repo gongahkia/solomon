@@ -52,3 +52,11 @@ Capabilities:
 - `pre_exec`: boolean, default `false`.
 
 Validation rejects malformed names, unsupported API versions, duplicate modules, invalid entry points, and malformed capability entries.
+
+Capability checks:
+
+- Missing capability fields deny access.
+- `fs_read` and `fs_watch` match exact paths or recursive scopes ending in `/**`.
+- `~/` resolves against the loading user's home directory.
+- Relative filesystem scopes resolve under the plugin directory.
+- `exec`, `net`, and `env_read` are exact allow-lists.

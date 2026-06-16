@@ -33,4 +33,5 @@ State sources:
 
 - `.sl/store` for fsnotify invalidation.
 - `sl status --root-relative` for working-copy status counts.
+- `sl log -r . --template` plus `sl log -r '::. - public()'` for current smartlog stack position.
 - Verified Sapling 0.2.20260522 does not accept `sl status --json`; official status docs list plain status output and options: https://sapling-scm.com/docs/commands/status/

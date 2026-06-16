@@ -28,6 +28,19 @@ pub const StatusSummary = struct {
     }
 };
 
+pub const SmartlogPosition = struct {
+    node: []u8,
+    description: []u8,
+    index: u32,
+    total: u32,
+
+    pub fn deinit(self: *SmartlogPosition, allocator: std.mem.Allocator) void {
+        allocator.free(self.node);
+        allocator.free(self.description);
+        self.* = undefined;
+    }
+};
+
 pub const Cache = struct {
     valid: bool = false,
     root_path: ?[]u8 = null,
@@ -197,6 +210,65 @@ pub fn formatStatusSummaryAlloc(allocator: std.mem.Allocator, summary: StatusSum
     return try out.toOwnedSlice(allocator);
 }
 
+pub fn readSmartlogPosition(allocator: std.mem.Allocator, cwd_path: []const u8) !?SmartlogPosition {
+    const current = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "sl", "log", "-r", ".", "--template", "{node|short}\n{desc|firstline}\n" },
+        .cwd = cwd_path,
+        .max_output_bytes = 16 * 1024,
+        .expand_arg0 = .expand,
+    }) catch return null;
+    defer allocator.free(current.stdout);
+    defer allocator.free(current.stderr);
+    if (!exitedZero(current.term)) return null;
+
+    const stack = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "sl", "log", "-r", "::. - public()", "--template", "{node|short}\n" },
+        .cwd = cwd_path,
+        .max_output_bytes = 256 * 1024,
+        .expand_arg0 = .expand,
+    }) catch return null;
+    defer allocator.free(stack.stdout);
+    defer allocator.free(stack.stderr);
+    if (!exitedZero(stack.term)) return null;
+
+    return parseSmartlogPosition(allocator, current.stdout, stack.stdout);
+}
+
+pub fn parseSmartlogPosition(allocator: std.mem.Allocator, current_output: []const u8, stack_output: []const u8) !?SmartlogPosition {
+    var current_lines = std.mem.splitScalar(u8, current_output, '\n');
+    const node = std.mem.trim(u8, current_lines.next() orelse return null, " \t\r");
+    const description = std.mem.trim(u8, current_lines.next() orelse "", " \t\r");
+    if (node.len == 0) return null;
+
+    var stack_lines = std.mem.splitScalar(u8, stack_output, '\n');
+    var total: u32 = 0;
+    var index: u32 = 0;
+    while (stack_lines.next()) |raw_line| {
+        const stack_node = std.mem.trim(u8, raw_line, " \t\r");
+        if (stack_node.len == 0) continue;
+        total += 1;
+        if (std.mem.eql(u8, stack_node, node)) index = total;
+    }
+    if (index == 0 or total == 0) return null;
+
+    const owned_node = try allocator.dupe(u8, node);
+    errdefer allocator.free(owned_node);
+    const rendered_description = if (description.len == 0) "(no description)" else description;
+    const owned_description = try allocator.dupe(u8, rendered_description);
+    return .{
+        .node = owned_node,
+        .description = owned_description,
+        .index = index,
+        .total = total,
+    };
+}
+
+pub fn formatSmartlogPositionAlloc(allocator: std.mem.Allocator, position: SmartlogPosition) ![]u8 {
+    return std.fmt.allocPrint(allocator, "sl:stack:{d}/{d} {s} {s}", .{ position.index, position.total, position.node, position.description });
+}
+
 fn appendStatusPart(allocator: std.mem.Allocator, out: *std.ArrayList(u8), wrote: *bool, label: []const u8, count: u32) !void {
     if (count == 0) return;
     if (wrote.*) try out.append(allocator, ',');
@@ -324,6 +396,40 @@ test "sapling status cache invalidates by root" {
     try std.testing.expect(!cache.valid);
 }
 
+test "parses sapling smartlog position" {
+    const current =
+        \\bbbb2222
+        \\second
+        \\
+    ;
+    const stack =
+        \\aaaa1111
+        \\bbbb2222
+        \\
+    ;
+    var position = (try parseSmartlogPosition(std.testing.allocator, current, stack)).?;
+    defer position.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("bbbb2222", position.node);
+    try std.testing.expectEqualStrings("second", position.description);
+    try std.testing.expectEqual(@as(u32, 2), position.index);
+    try std.testing.expectEqual(@as(u32, 2), position.total);
+}
+
+test "formats sapling smartlog position" {
+    var position = SmartlogPosition{
+        .node = try std.testing.allocator.dupe(u8, "bbbb2222"),
+        .description = try std.testing.allocator.dupe(u8, "second"),
+        .index = 2,
+        .total = 3,
+    };
+    defer position.deinit(std.testing.allocator);
+
+    const rendered = try formatSmartlogPositionAlloc(std.testing.allocator, position);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("sl:stack:2/3 bbbb2222 second", rendered);
+}
+
 test "reads real sapling status when sl is installed" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-sl-real-{x}", .{std.crypto.random.int(u64)});
@@ -350,4 +456,48 @@ test "reads real sapling status when sl is installed" {
 
     const summary = (try readStatusSummary(allocator, dir_path)) orelse return error.SkipZigTest;
     try std.testing.expectEqual(@as(u32, 1), summary.unknown);
+}
+
+test "reads real sapling smartlog position when sl is installed" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-sl-smartlog-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    if (!try runCommandOk(allocator, dir_path, &.{ "sl", "init" })) return error.SkipZigTest;
+    if (!try runCommandOk(allocator, dir_path, &.{ "sl", "config", "--local", "ui.username", "Bench <bench@example.test>" })) return error.SkipZigTest;
+
+    const file_path = try std.fmt.allocPrint(allocator, "{s}/f.txt", .{dir_path});
+    defer allocator.free(file_path);
+    try writeFile(file_path, "one\n");
+    if (!try runCommandOk(allocator, dir_path, &.{ "sl", "add", "f.txt" })) return error.SkipZigTest;
+    if (!try runCommandOk(allocator, dir_path, &.{ "sl", "commit", "-m", "first" })) return error.SkipZigTest;
+    try writeFile(file_path, "two\n");
+    if (!try runCommandOk(allocator, dir_path, &.{ "sl", "commit", "-m", "second" })) return error.SkipZigTest;
+
+    var position = (try readSmartlogPosition(allocator, dir_path)) orelse return error.SkipZigTest;
+    defer position.deinit(allocator);
+    try std.testing.expectEqual(@as(u32, 2), position.index);
+    try std.testing.expectEqual(@as(u32, 2), position.total);
+    try std.testing.expectEqualStrings("second", position.description);
+}
+
+fn runCommandOk(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !bool {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .cwd = cwd_path,
+        .max_output_bytes = 4096,
+        .expand_arg0 = .expand,
+    }) catch return false;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    return exitedZero(result.term);
+}
+
+fn writeFile(path: []const u8, contents: []const u8) !void {
+    var file = try std.fs.createFileAbsolute(path, .{ .truncate = true });
+    defer file.close();
+    try file.writeAll(contents);
 }

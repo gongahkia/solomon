@@ -459,7 +459,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 ## Continuous (extended)
 
 - [ ] Quarterly pack-perf review: each pack's overhead measured against baseline core
-- [ ] Document every plugin capability and its risk in `docs/capabilities.md`
+- [x] Document every plugin capability and its risk in `docs/capabilities.md`
 - [ ] Maintain `docs/pack-status.md` showing incubation / graduated / vetted / EOL state per pack
 - [ ] Triage pack issues at the pack repo level, not the core repo, once graduated
 - [ ] Run the pack benchmark suite weekly on the main branch

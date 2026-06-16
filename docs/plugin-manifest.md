@@ -51,6 +51,8 @@ Capabilities:
 - `env_read`: readable environment variable names.
 - `pre_exec`: boolean, default `false`.
 
+Capability risks and review guidance are documented in `docs/capabilities.md`.
+
 Validation rejects malformed names, unsupported API versions, duplicate modules, invalid entry points, and malformed capability entries.
 
 Capability checks:

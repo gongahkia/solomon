@@ -267,7 +267,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 ## Phase 11 — Cloud-safety pack (`shisa.cloud`)
 
 ### 11.1 Multi-cloud context segment (`cloud_ctx`)
-- [ ] AWS profile from `AWS_PROFILE` env + `~/.aws/config` parse
+- [x] AWS profile from `AWS_PROFILE` env + `~/.aws/config` parse
 - [ ] GCP project from `gcloud config config-helper --format=json` (cached, fsnotify on `~/.config/gcloud/`)
 - [ ] Azure subscription from `az account show` (cached, fsnotify on `~/.azure/azureProfile.json`)
 - [ ] Kubernetes context+namespace from kubeconfig (fsnotify on `KUBECONFIG`)

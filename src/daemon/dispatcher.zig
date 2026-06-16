@@ -1,4 +1,5 @@
 const std = @import("std");
+const cloud_ctx_module = @import("modules/cloud_ctx.zig");
 const cmd_duration_module = @import("modules/cmd_duration.zig");
 const cwd_module = @import("modules/cwd.zig");
 const exit_status_module = @import("modules/exit_status.zig");
@@ -23,6 +24,7 @@ pub const ModuleId = enum {
     jobs,
     cmd_duration,
     user_host,
+    cloud_ctx,
 };
 
 pub const ModuleSpec = struct {
@@ -61,6 +63,7 @@ pub const RenderInput = struct {
     ssh: ?[]const u8,
     user: []const u8,
     host: []const u8,
+    aws_profile: ?[]const u8 = null,
 };
 
 pub const CacheSet = struct {
@@ -165,6 +168,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
         .jobs => try jobs_module.render(allocator, input.jobs),
         .cmd_duration => try cmd_duration_module.render(allocator, input.duration_ms, 1000),
         .user_host => try user_host_module.render(allocator, input.ssh, input.user, input.host),
+        .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.home),
     };
 }
 
@@ -182,6 +186,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .jobs => "jobs",
         .cmd_duration => "cmd_duration",
         .user_host => "user_host",
+        .cloud_ctx => "cloud_ctx",
     };
 }
 

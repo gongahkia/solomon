@@ -45,6 +45,7 @@ Allowed core module ids for schema v1:
 | `jobs` | sync | Background job count. |
 | `cmd_duration` | sync | Last command duration above threshold. |
 | `user_host` | sync | User and host, normally only over SSH. |
+| `cloud_ctx` | sync | Optional cloud account context; AWS profile support is available. |
 | `time` | sync | Optional UTC `HH:MM` clock segment. |
 
 Unknown module ids are invalid.
@@ -96,6 +97,10 @@ Per-module config lives under `[modules.<id>]`. Option tables may exist only for
 | Key | Type | Default | Constraints |
 | --- | --- | --- | --- |
 | `mode` | string | `"ssh"` | One of `"ssh"`, `"always"`, `"never"`. |
+
+### `[modules.cloud_ctx]`
+
+No options yet. AWS profile is resolved from `AWS_PROFILE`; when unset, Shisa reads `~/.aws/config` and uses `[default]` or the first `[profile <name>]` section.
 
 ### `[modules.time]`
 

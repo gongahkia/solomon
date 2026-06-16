@@ -143,6 +143,8 @@ pub const Server = struct {
 
         const ssh = std.process.getEnvVarOwned(std.heap.page_allocator, "SSH_CONNECTION") catch null;
         defer if (ssh) |value| std.heap.page_allocator.free(value);
+        const aws_profile = std.process.getEnvVarOwned(std.heap.page_allocator, "AWS_PROFILE") catch null;
+        defer if (aws_profile) |value| std.heap.page_allocator.free(value);
         const user = std.process.getEnvVarOwned(std.heap.page_allocator, "USER") catch try std.heap.page_allocator.dupe(u8, "unknown");
         defer std.heap.page_allocator.free(user);
         var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
@@ -163,6 +165,7 @@ pub const Server = struct {
             .ssh = ssh,
             .user = user,
             .host = host,
+            .aws_profile = aws_profile,
         });
         defer rendered.deinit(std.heap.page_allocator);
         try self.logSlowWarning(rendered.slow_warning);

@@ -21,6 +21,8 @@ pub const default_config_text =
     \\[modules.user_host]
     \\mode = "ssh"
     \\
+    \\[modules.cloud_ctx]
+    \\
 ;
 
 pub const Diagnostic = struct {
@@ -37,6 +39,7 @@ pub const ModuleId = enum {
     jobs,
     cmd_duration,
     user_host,
+    cloud_ctx,
     time,
 };
 
@@ -49,6 +52,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .jobs => "jobs",
         .cmd_duration => "cmd_duration",
         .user_host => "user_host",
+        .cloud_ctx => "cloud_ctx",
         .time => "time",
     };
 }
@@ -74,6 +78,7 @@ pub const ModuleOptions = struct {
     jobs: JobsOptions = .{},
     cmd_duration: CmdDurationOptions = .{},
     user_host: UserHostOptions = .{},
+    cloud_ctx: CloudCtxOptions = .{},
     time: TimeOptions = .{},
 };
 
@@ -110,6 +115,8 @@ pub const UserHostOptions = struct {
     mode: UserHostMode = .ssh,
 };
 
+pub const CloudCtxOptions = struct {};
+
 pub const TimeOptions = struct {
     format_24h: bool = true,
     utc: bool = true,
@@ -138,6 +145,7 @@ const Table = enum {
     jobs,
     cmd_duration,
     user_host,
+    cloud_ctx,
     time,
 };
 
@@ -262,6 +270,7 @@ const Parser = struct {
             .jobs => try self.parseJobsKey(line_no, key, value),
             .cmd_duration => try self.parseCmdDurationKey(line_no, key, value),
             .user_host => try self.parseUserHostKey(line_no, key, value),
+            .cloud_ctx => return self.fail(line_no, key.column, "unknown key"),
             .time => try self.parseTimeKey(line_no, key, value),
         }
     }
@@ -505,6 +514,7 @@ fn parseTableName(name: []const u8) ?Table {
     if (std.mem.eql(u8, name, "modules.jobs")) return .jobs;
     if (std.mem.eql(u8, name, "modules.cmd_duration")) return .cmd_duration;
     if (std.mem.eql(u8, name, "modules.user_host")) return .user_host;
+    if (std.mem.eql(u8, name, "modules.cloud_ctx")) return .cloud_ctx;
     if (std.mem.eql(u8, name, "modules.time")) return .time;
     return null;
 }
@@ -517,6 +527,7 @@ fn parseModuleId(id: []const u8) ?ModuleId {
     if (std.mem.eql(u8, id, "jobs")) return .jobs;
     if (std.mem.eql(u8, id, "cmd_duration")) return .cmd_duration;
     if (std.mem.eql(u8, id, "user_host")) return .user_host;
+    if (std.mem.eql(u8, id, "cloud_ctx")) return .cloud_ctx;
     if (std.mem.eql(u8, id, "time")) return .time;
     return null;
 }

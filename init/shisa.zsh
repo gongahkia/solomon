@@ -1,6 +1,20 @@
 [[ -n ${ZSH_VERSION:-} ]] || return 0
 [[ -z ${__SHISA_ZSH_INIT:-} ]] || return 0
 
+shisa_zsh_version_at_least_5() {
+  emulate -L zsh
+  local -a version_parts
+  version_parts=(${(s:.:)ZSH_VERSION})
+  local major=${version_parts[1]:-0}
+  local minor=${version_parts[2]:-0}
+  major=${major%%[^0-9]*}
+  minor=${minor%%[^0-9]*}
+  [[ -n ${major} && -n ${minor} ]] || return 1
+  (( major > 5 || (major == 5 && minor >= 0) ))
+}
+
+shisa_zsh_version_at_least_5 || return 0
+
 typeset -g __SHISA_ZSH_INIT=1
 typeset -g SHISA_BIN=${SHISA_BIN:-shisa}
 typeset -g SHISA_SOCKET=${SHISA_SOCKET:-}
@@ -10,6 +24,22 @@ typeset -g SHISA_LAST_DURATION_MS=0
 typeset -g SHISA_PREEXEC_REALTIME=
 
 zmodload zsh/datetime 2>/dev/null || true
+
+shisa_hook_once() {
+  emulate -L zsh
+  local hook_name=${1}
+  local hook_fn=${2}
+  case ${hook_name} in
+    precmd)
+      typeset -ga precmd_functions
+      (( ${precmd_functions[(I)${hook_fn}]} == 0 )) && precmd_functions+=("${hook_fn}")
+      ;;
+    preexec)
+      typeset -ga preexec_functions
+      (( ${preexec_functions[(I)${hook_fn}]} == 0 )) && preexec_functions+=("${hook_fn}")
+      ;;
+  esac
+}
 
 shisa_precmd() {
   local last_status=$?
@@ -24,20 +54,14 @@ shisa_precmd() {
   fi
 }
 
-typeset -ga precmd_functions
-if (( ${precmd_functions[(I)shisa_precmd]} == 0 )); then
-  precmd_functions+=(shisa_precmd)
-fi
+shisa_hook_once precmd shisa_precmd
 
 shisa_preexec() {
   emulate -L zsh
   SHISA_PREEXEC_REALTIME=${EPOCHREALTIME:-}
 }
 
-typeset -ga preexec_functions
-if (( ${preexec_functions[(I)shisa_preexec]} == 0 )); then
-  preexec_functions+=(shisa_preexec)
-fi
+shisa_hook_once preexec shisa_preexec
 
 setopt prompt_subst
 PROMPT='$(shisa_prompt_render)'

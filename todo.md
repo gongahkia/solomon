@@ -69,7 +69,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Wire `preexec` to record command start time
 - [x] Set `PROMPT` to `$(shisa prompt --shell=zsh)` with `setopt prompt_subst`
 - [x] Implement fallback prompt (printed if daemon socket missing) that's < 5ms
-- [ ] Add `ZSH_VERSION` compat shims for ≥ 5.0
+- [x] Add `ZSH_VERSION` compat shims for ≥ 5.0
 
 ### 1.5 Configuration
 - [ ] Define `shisa.toml` schema (modules list, theme, per-module options)

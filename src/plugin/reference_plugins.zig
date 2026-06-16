@@ -7,6 +7,7 @@ const reference_manifests = [_][]const u8{
     "examples/plugins/kubernetes-context/plugin.lua",
     "examples/plugins/aws-profile/plugin.lua",
     "examples/plugins/fossil/plugin.lua",
+    "examples/plugins/pijul/plugin.lua",
 };
 
 test "reference plugin manifests load in strict mode" {

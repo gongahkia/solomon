@@ -133,3 +133,4 @@ Reference manifests live under `examples/plugins/`:
 - `kubernetes-context`: kubeconfig/env capabilities.
 - `aws-profile`: AWS config/env capabilities.
 - `fossil`: community Fossil VCS status template.
+- `pijul`: community Pijul VCS status template.

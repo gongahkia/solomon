@@ -82,7 +82,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Stand up CI benchmark job that runs on every PR vs. main
 - [x] Publish a benchmark dashboard (static HTML, GitHub Pages) updated per merge
 - [x] Add benchmark regression gate (fail PR if p99 warm render regresses > 10%)
-- [ ] Build comparison harness vs. starship + p10k + oh-my-posh in same repo
+- [x] Build comparison harness vs. starship + p10k + oh-my-posh in same repo
 - [ ] Run on nixpkgs and chromium clones; record cold + warm numbers
 
 ### 1.7 Tests

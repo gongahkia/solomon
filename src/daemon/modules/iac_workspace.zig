@@ -84,6 +84,42 @@ pub fn readOpenTofuWorkspaceAlloc(allocator: std.mem.Allocator, cwd: []const u8)
     return readTerraformWorkspaceAlloc(allocator, cwd);
 }
 
+pub fn render(allocator: std.mem.Allocator, cwd: []const u8, home: ?[]const u8) !?[]u8 {
+    const locked = try lockPresent(allocator, cwd);
+
+    const terraform = try readTerraformWorkspaceAlloc(allocator, cwd);
+    defer if (terraform) |value| allocator.free(value);
+    if (terraform) |workspace| return renderSegmentAlloc(allocator, "tf", workspace, locked);
+
+    const pulumi = try readPulumiStackAlloc(allocator, cwd, home);
+    defer if (pulumi) |value| allocator.free(value);
+    if (pulumi) |stack| return renderSegmentAlloc(allocator, "pulumi", stack, locked);
+
+    const cdk = try readCdkWorkspaceAlloc(allocator, cwd);
+    defer if (cdk) |value| allocator.free(value);
+    if (cdk) |workspace| return renderSegmentAlloc(allocator, "cdk", workspace, locked);
+
+    return null;
+}
+
+fn renderSegmentAlloc(allocator: std.mem.Allocator, provider: []const u8, workspace: []const u8, locked: bool) !?[]u8 {
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "iac[{s}:{s}{s}]", .{ provider, workspace, if (locked) "!" else "" }));
+}
+
+pub fn lockPresent(allocator: std.mem.Allocator, cwd: []const u8) !bool {
+    const paths = [_][]const u8{
+        ".terraform.tfstate.lock.info",
+        "terraform.tfstate.lock.info",
+        ".terraform/terraform.tfstate.lock.info",
+    };
+    for (paths) |path| {
+        const candidate = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ cwd, path });
+        defer allocator.free(candidate);
+        if (try pathExists(candidate)) return true;
+    }
+    return false;
+}
+
 pub fn pulumiWorkspacesDirAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
     const home_path = home orelse return null;
     return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.pulumi/workspaces", .{home_path}));
@@ -169,6 +205,14 @@ fn fileExists(path: []const u8) !bool {
         else => return err,
     };
     file.close();
+    return true;
+}
+
+fn pathExists(path: []const u8) !bool {
+    std.fs.cwd().access(path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return err,
+    };
     return true;
 }
 
@@ -334,6 +378,36 @@ test "reads opentofu workspace with terraform layout" {
     const workspace = (try readOpenTofuWorkspaceAlloc(allocator, dir_path)).?;
     defer allocator.free(workspace);
     try std.testing.expectEqualStrings("prod-tofu", workspace);
+}
+
+test "renders terraform workspace with lock indicator" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-iac-render-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    const terraform_dir = try std.fmt.allocPrint(allocator, "{s}/.terraform", .{dir_path});
+    defer allocator.free(terraform_dir);
+    try std.fs.cwd().makePath(terraform_dir);
+
+    const env_path = try terraformEnvironmentPathAlloc(allocator, dir_path);
+    defer allocator.free(env_path);
+    {
+        var file = try std.fs.createFileAbsolute(env_path, .{});
+        defer file.close();
+        try file.writeAll("prod\n");
+    }
+
+    const lock_path = try std.fmt.allocPrint(allocator, "{s}/.terraform.tfstate.lock.info", .{dir_path});
+    defer allocator.free(lock_path);
+    {
+        var file = try std.fs.createFileAbsolute(lock_path, .{});
+        defer file.close();
+        try file.writeAll("{}");
+    }
+
+    const segment = (try render(allocator, dir_path, null)).?;
+    defer allocator.free(segment);
+    try std.testing.expectEqualStrings("iac[tf:prod!]", segment);
 }
 
 test "parses pulumi active stack for cwd" {

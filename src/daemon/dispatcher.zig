@@ -4,6 +4,7 @@ const cmd_duration_module = @import("modules/cmd_duration.zig");
 const cwd_module = @import("modules/cwd.zig");
 const exit_status_module = @import("modules/exit_status.zig");
 const git_branch_module = @import("modules/git_branch.zig");
+const iac_workspace_module = @import("modules/iac_workspace.zig");
 const jobs_module = @import("modules/jobs.zig");
 const language_versions_module = @import("modules/language_versions.zig");
 const sso_expiry_module = @import("modules/sso_expiry.zig");
@@ -27,6 +28,7 @@ pub const ModuleId = enum {
     user_host,
     cloud_ctx,
     sso_expiry,
+    iac_workspace,
 };
 
 pub const ModuleSpec = struct {
@@ -97,6 +99,7 @@ const default_pipeline = [_]ModuleSpec{
     .{ .id = .cmd_duration, .execution_class = executionClass(.cmd_duration) },
     .{ .id = .user_host, .execution_class = executionClass(.user_host) },
     .{ .id = .sso_expiry, .execution_class = executionClass(.sso_expiry) },
+    .{ .id = .iac_workspace, .execution_class = executionClass(.iac_workspace) },
 };
 
 pub fn executionClass(module_id: ModuleId) ExecutionClass {
@@ -177,6 +180,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
         .user_host => try user_host_module.render(allocator, input.ssh, input.user, input.host),
         .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.kubeconfig, input.home, caches.cloud_ctx, input.cloud_ctx),
         .sso_expiry => try sso_expiry_module.render(allocator, input.home, input.timestamp, input.sso_expiry),
+        .iac_workspace => try iac_workspace_module.render(allocator, input.cwd, input.home),
     };
 }
 
@@ -196,6 +200,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .user_host => "user_host",
         .cloud_ctx => "cloud_ctx",
         .sso_expiry => "sso_expiry",
+        .iac_workspace => "iac_workspace",
     };
 }
 

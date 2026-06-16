@@ -7,7 +7,7 @@ pub const default_config_text =
     \\theme = "plain"
     \\
     \\[prompt]
-    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry"]
+    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace"]
     \\
     \\[modules.cwd]
     \\truncate_to = 3
@@ -57,6 +57,7 @@ pub const ModuleId = enum {
     cloud_ctx,
     risk_tier,
     sso_expiry,
+    iac_workspace,
     time,
 };
 
@@ -72,6 +73,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .cloud_ctx => "cloud_ctx",
         .risk_tier => "risk_tier",
         .sso_expiry => "sso_expiry",
+        .iac_workspace => "iac_workspace",
         .time => "time",
     };
 }
@@ -212,7 +214,7 @@ const Trimmed = struct {
     column: usize,
 };
 
-const default_modules = [_]ModuleId{ .cwd, .git_branch, .language_versions, .exit_status, .jobs, .cmd_duration, .user_host, .sso_expiry };
+const default_modules = [_]ModuleId{ .cwd, .git_branch, .language_versions, .exit_status, .jobs, .cmd_duration, .user_host, .sso_expiry, .iac_workspace };
 
 pub fn parse(allocator: std.mem.Allocator, source: []const u8, diagnostic: *Diagnostic) !Config {
     diagnostic.* = .{};
@@ -623,6 +625,7 @@ fn parseModuleId(id: []const u8) ?ModuleId {
     if (std.mem.eql(u8, id, "cloud_ctx")) return .cloud_ctx;
     if (std.mem.eql(u8, id, "risk_tier")) return .risk_tier;
     if (std.mem.eql(u8, id, "sso_expiry")) return .sso_expiry;
+    if (std.mem.eql(u8, id, "iac_workspace")) return .iac_workspace;
     if (std.mem.eql(u8, id, "time")) return .time;
     return null;
 }
@@ -715,6 +718,8 @@ test "module metadata names execution classes" {
     try std.testing.expectEqualStrings("sync", moduleExecutionClass(.risk_tier));
     try std.testing.expectEqualStrings("sso_expiry", moduleIdName(.sso_expiry));
     try std.testing.expectEqualStrings("sync", moduleExecutionClass(.sso_expiry));
+    try std.testing.expectEqualStrings("iac_workspace", moduleIdName(.iac_workspace));
+    try std.testing.expectEqualStrings("sync", moduleExecutionClass(.iac_workspace));
     try std.testing.expectEqualStrings("async", moduleExecutionClass(.git_branch));
     try std.testing.expectEqualStrings("async", moduleExecutionClass(.language_versions));
 }

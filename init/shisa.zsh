@@ -39,6 +39,9 @@ if (( ${preexec_functions[(I)shisa_preexec]} == 0 )); then
   preexec_functions+=(shisa_preexec)
 fi
 
+setopt prompt_subst
+PROMPT='$(shisa_prompt_render)'
+
 shisa_prompt_render() {
   emulate -L zsh
   local -a args

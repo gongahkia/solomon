@@ -117,3 +117,15 @@ test "does not match safe commands" {
     try std.testing.expect(destructivePattern("kubectl get pods") == null);
     try std.testing.expect(destructivePattern("terraform plan") == null);
 }
+
+test "safe command corpus does not trigger blocklist" {
+    const source = try std.fs.cwd().readFileAlloc(std.testing.allocator, "test/fixtures/prod_guard/safe_commands.txt", 64 * 1024);
+    defer std.testing.allocator.free(source);
+
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0 or line[0] == '#') continue;
+        try std.testing.expect(destructivePattern(line) == null);
+    }
+}

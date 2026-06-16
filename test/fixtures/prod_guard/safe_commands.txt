@@ -1,0 +1,12 @@
+# dangerous-looking but safe commands
+kubectl get pods
+kubectl describe pod api-prod
+kubectl diff -f deployment.yaml
+terraform plan
+terraform show
+aws ec2 describe-instances
+aws s3 ls s3://prod-bucket
+gcloud compute instances list
+gcloud projects describe prod-project
+rm -ri /tmp/shisa-test
+dd if=/dev/zero of=./disk.img bs=1 count=1

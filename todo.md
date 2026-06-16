@@ -290,7 +290,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] `--force` bypass (logged)
 - [x] Audit log to `~/.local/state/shisa/prod_guard.jsonl`
 - [x] Bypass-log review CLI (`shisa cloud audit`)
-- [ ] Fuzz the classifier against a corpus of dangerous-looking-but-safe commands (`kubectl get`, `terraform plan`)
+- [x] Fuzz the classifier against a corpus of dangerous-looking-but-safe commands (`kubectl get`, `terraform plan`)
 
 ### 11.4 IAM whoami (`iam_whoami`)
 - [ ] AWS STS GetCallerIdentity cached value

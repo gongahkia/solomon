@@ -105,7 +105,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 
 ## Phase 3 — Caching + fsnotify
 
-- [ ] Build the in-memory cache structure (cwd-keyed map of module-output)
+- [x] Build the in-memory cache structure (cwd-keyed map of module-output)
 - [ ] Build the fsnotify watcher abstraction (FSEvents on macOS, inotify on Linux)
 - [ ] Wire git module to invalidate on `.git/HEAD`, `.git/index`, working-tree changes (debounced)
 - [ ] Implement cache eviction policy (LRU, max-N entries, max-age)

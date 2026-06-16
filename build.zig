@@ -125,6 +125,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const log_test_run = b.addRunArtifact(log_tests);
+    const cache_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/daemon/cache.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const cache_test_run = b.addRunArtifact(cache_tests);
     const cwd_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/modules/cwd.zig"),
@@ -256,6 +264,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&config_test_run.step);
     test_step.dependOn(&lock_test_run.step);
     test_step.dependOn(&log_test_run.step);
+    test_step.dependOn(&cache_test_run.step);
     test_step.dependOn(&cwd_test_run.step);
     test_step.dependOn(&exit_status_test_run.step);
     test_step.dependOn(&jobs_test_run.step);

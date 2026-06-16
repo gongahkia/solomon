@@ -235,7 +235,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Detect hg repos (`.hg/`)
 - [x] Read state via `hg summary --remote` (cached)
 - [x] Show branch, bookmark, topic (evolve), draft/public phase
-- [ ] Handle mq queues if active
+- [x] Handle mq queues if active
 
 ### 10.4 Stacked-diff awareness (`shisa.vcs.stack`)
 - [ ] Detect Graphite (`gt`): `.graphite_repo_config`

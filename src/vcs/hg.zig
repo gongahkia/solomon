@@ -58,6 +58,19 @@ pub const RefSummary = struct {
     }
 };
 
+pub const MqSummary = struct {
+    queue: []u8,
+    top_patch: []u8,
+    applied_count: u32,
+    series_count: u32,
+
+    pub fn deinit(self: *MqSummary, allocator: std.mem.Allocator) void {
+        allocator.free(self.queue);
+        allocator.free(self.top_patch);
+        self.* = undefined;
+    }
+};
+
 pub const Cache = struct {
     valid: bool = false,
     root_path: ?[]u8 = null,
@@ -169,6 +182,43 @@ pub fn readRefSummary(allocator: std.mem.Allocator, cwd_path: []const u8) !?RefS
     return parseRefSummary(allocator, result.stdout);
 }
 
+pub fn readMqSummary(allocator: std.mem.Allocator, cwd_path: []const u8) !?MqSummary {
+    const queue = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "hg", "--config", "extensions.mq=", "qqueue" },
+        .cwd = cwd_path,
+        .max_output_bytes = 16 * 1024,
+        .expand_arg0 = .expand,
+    }) catch return null;
+    defer allocator.free(queue.stdout);
+    defer allocator.free(queue.stderr);
+    if (!exitedZero(queue.term)) return null;
+
+    const applied = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "hg", "--config", "extensions.mq=", "qapplied" },
+        .cwd = cwd_path,
+        .max_output_bytes = 64 * 1024,
+        .expand_arg0 = .expand,
+    }) catch return null;
+    defer allocator.free(applied.stdout);
+    defer allocator.free(applied.stderr);
+    if (!exitedZero(applied.term)) return null;
+
+    const series = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "hg", "--config", "extensions.mq=", "qseries" },
+        .cwd = cwd_path,
+        .max_output_bytes = 64 * 1024,
+        .expand_arg0 = .expand,
+    }) catch return null;
+    defer allocator.free(series.stdout);
+    defer allocator.free(series.stderr);
+    if (!exitedZero(series.term)) return null;
+
+    return parseMqSummary(allocator, queue.stdout, applied.stdout, series.stdout);
+}
+
 pub fn parseSummary(allocator: std.mem.Allocator, output: []const u8) !?Summary {
     var parent: []const u8 = "";
     var description: []const u8 = "";
@@ -257,6 +307,65 @@ pub fn formatRefSummaryAlloc(allocator: std.mem.Allocator, summary: RefSummary) 
     if (summary.topic.len > 0) try std.fmt.format(out.writer(allocator), " topic:{s}", .{summary.topic});
     if (summary.phase.len > 0) try std.fmt.format(out.writer(allocator), " phase:{s}", .{summary.phase});
     return try out.toOwnedSlice(allocator);
+}
+
+pub fn parseMqSummary(allocator: std.mem.Allocator, queue_output: []const u8, applied_output: []const u8, series_output: []const u8) !?MqSummary {
+    const queue = parseActiveQueue(queue_output);
+    const applied = parsePatchLines(applied_output);
+    const series_count = countPatchLines(series_output);
+    if (std.mem.eql(u8, queue, "patches") and applied.count == 0 and series_count == 0) return null;
+
+    const owned_queue = try allocator.dupe(u8, queue);
+    errdefer allocator.free(owned_queue);
+    const owned_top_patch = try allocator.dupe(u8, applied.top_patch);
+    return .{
+        .queue = owned_queue,
+        .top_patch = owned_top_patch,
+        .applied_count = applied.count,
+        .series_count = series_count,
+    };
+}
+
+pub fn formatMqSummaryAlloc(allocator: std.mem.Allocator, summary: MqSummary) ![]u8 {
+    if (summary.top_patch.len > 0) {
+        return try std.fmt.allocPrint(allocator, "hg:mq:{s} {d}/{d} top:{s}", .{ summary.queue, summary.applied_count, summary.series_count, summary.top_patch });
+    }
+    return try std.fmt.allocPrint(allocator, "hg:mq:{s} {d}/{d}", .{ summary.queue, summary.applied_count, summary.series_count });
+}
+
+const PatchLines = struct {
+    count: u32,
+    top_patch: []const u8,
+};
+
+fn parseActiveQueue(output: []const u8) []const u8 {
+    var fallback: []const u8 = "patches";
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0) continue;
+        if (std.mem.endsWith(u8, line, "(active)")) {
+            return std.mem.trim(u8, line[0 .. line.len - "(active)".len], " \t");
+        }
+        if (std.mem.eql(u8, fallback, "patches")) fallback = line;
+    }
+    return fallback;
+}
+
+fn parsePatchLines(output: []const u8) PatchLines {
+    var result = PatchLines{ .count = 0, .top_patch = "" };
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0) continue;
+        result.count += 1;
+        result.top_patch = line;
+    }
+    return result;
+}
+
+fn countPatchLines(output: []const u8) u32 {
+    return parsePatchLines(output).count;
 }
 
 fn exitedZero(term: std.process.Child.Term) bool {
@@ -367,6 +476,45 @@ test "formats hg ref summary" {
     try std.testing.expectEqualStrings("hg:branch:default bm:feature topic:stack phase:draft", rendered);
 }
 
+test "parses empty default hg mq summary as absent" {
+    try std.testing.expect((try parseMqSummary(std.testing.allocator, "patches (active)\n", "", "")) == null);
+}
+
+test "parses hg mq summary output" {
+    var summary = (try parseMqSummary(std.testing.allocator,
+        \\feature (active)
+        \\patches
+        \\
+    ,
+        \\patch-one
+        \\
+    ,
+        \\patch-one
+        \\patch-two
+        \\
+    )).?;
+    defer summary.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("feature", summary.queue);
+    try std.testing.expectEqualStrings("patch-one", summary.top_patch);
+    try std.testing.expectEqual(@as(u32, 1), summary.applied_count);
+    try std.testing.expectEqual(@as(u32, 2), summary.series_count);
+}
+
+test "formats hg mq summary" {
+    var summary = MqSummary{
+        .queue = try std.testing.allocator.dupe(u8, "patches"),
+        .top_patch = try std.testing.allocator.dupe(u8, "patch-two"),
+        .applied_count = 2,
+        .series_count = 3,
+    };
+    defer summary.deinit(std.testing.allocator);
+
+    const rendered = try formatMqSummaryAlloc(std.testing.allocator, summary);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("hg:mq:patches 2/3 top:patch-two", rendered);
+}
+
 test "hg summary cache invalidates by root" {
     const allocator = std.testing.allocator;
     var cache = Cache{
@@ -430,6 +578,30 @@ test "reads real hg ref summary when hg is installed" {
     try std.testing.expectEqualStrings("default", summary.branch);
     try std.testing.expectEqualStrings("feature", summary.active_bookmark);
     try std.testing.expectEqualStrings("draft", summary.phase);
+}
+
+test "reads real hg mq summary when mq is active" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-hg-mq-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    if (!try runCommandOk(allocator, dir_path, &.{ "hg", "init" })) return error.SkipZigTest;
+    const file_path = try std.fmt.allocPrint(allocator, "{s}/f.txt", .{dir_path});
+    defer allocator.free(file_path);
+    try writeFile(file_path, "base\n");
+    if (!try runCommandOk(allocator, dir_path, &.{ "hg", "add", "f.txt" })) return error.SkipZigTest;
+    if (!try runCommandOk(allocator, dir_path, &.{ "hg", "commit", "-m", "base", "-u", "Bench <bench@example.test>" })) return error.SkipZigTest;
+    try writeFile(file_path, "patch\n");
+    if (!try runCommandOk(allocator, dir_path, &.{ "hg", "--config", "extensions.mq=", "qnew", "patch-one" })) return error.SkipZigTest;
+
+    var summary = (try readMqSummary(allocator, dir_path)) orelse return error.SkipZigTest;
+    defer summary.deinit(allocator);
+    try std.testing.expectEqualStrings("patches", summary.queue);
+    try std.testing.expectEqualStrings("patch-one", summary.top_patch);
+    try std.testing.expectEqual(@as(u32, 1), summary.applied_count);
+    try std.testing.expectEqual(@as(u32, 1), summary.series_count);
 }
 
 fn runCommandOk(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !bool {

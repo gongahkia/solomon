@@ -5,6 +5,7 @@ const git_branch_module = @import("modules/git_branch.zig");
 const language_versions_module = @import("modules/language_versions.zig");
 const prod_guard_module = @import("modules/prod_guard.zig");
 const risk_tier_module = @import("modules/risk_tier.zig");
+const sso_expiry_module = @import("modules/sso_expiry.zig");
 const daemon_log = @import("log.zig");
 const warmup = @import("warmup.zig");
 const json = @import("json.zig");
@@ -25,6 +26,7 @@ const RenderRequest = struct {
     cols: u16 = 80,
     rows: u16 = 24,
     cloud_ctx: cloud_ctx_module.Options = .{},
+    sso_expiry: sso_expiry_module.Options = .{},
 };
 
 const PreexecRequest = struct {
@@ -191,6 +193,7 @@ pub const Server = struct {
             .aws_profile = aws_profile,
             .kubeconfig = kubeconfig,
             .cloud_ctx = parsed.value.cloud_ctx,
+            .sso_expiry = parsed.value.sso_expiry,
         });
         defer rendered.deinit(std.heap.page_allocator);
         try self.logSlowWarning(rendered.slow_warning);

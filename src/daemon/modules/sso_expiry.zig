@@ -286,7 +286,7 @@ pub fn render(allocator: std.mem.Allocator, home: ?[]const u8, now_timestamp: i6
 
     const warning = best orelse return null;
     const minutes = remainingMinutes(warning.remaining_seconds);
-    return std.fmt.allocPrint(allocator, "sso[{s}:{d}m]", .{ warning.provider, minutes });
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "sso[{s}:{d}m]", .{ warning.provider, minutes }));
 }
 
 fn considerExpiry(best: *?Candidate, provider: []const u8, value: ?[]const u8, now_timestamp: i64, threshold_seconds: i64) void {

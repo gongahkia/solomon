@@ -9,7 +9,7 @@ version = 1
 theme = "plain"
 
 [prompt]
-modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host"]
+modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry"]
 ```
 
 ## Top-Level Keys
@@ -31,7 +31,7 @@ Default module order:
 
 ```toml
 [prompt]
-modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host"]
+modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry"]
 ```
 
 Allowed core module ids for schema v1:
@@ -47,6 +47,7 @@ Allowed core module ids for schema v1:
 | `user_host` | sync | User and host, normally only over SSH. |
 | `cloud_ctx` | sync | Optional cloud account context; AWS profile, cached GCP project, cached Azure subscription, and cached Kubernetes context support are available. |
 | `risk_tier` | sync | Risk classification and prompt background-bar color mapping. |
+| `sso_expiry` | sync | Warn when cached SSO/session expiry metadata is below the configured threshold. |
 | `time` | sync | Optional UTC `HH:MM` clock segment. |
 
 Unknown module ids are invalid.
@@ -120,6 +121,14 @@ AWS profile is resolved from `AWS_PROFILE`; when unset, Shisa reads `~/.aws/conf
 | `prod_bg` | string | `"danger"` | Same as `unknown_bg`. |
 
 These map risk tiers to prompt background-bar palette slots. Rule matching defaults and user-rule file format are documented in `docs/risk-tiers.md`.
+
+### `[modules.sso_expiry]`
+
+| Key | Type | Default | Constraints |
+| --- | --- | --- | --- |
+| `warning_minutes` | integer | `30` | `1..1440`. |
+
+Reads cached token expiry metadata only. Sources are documented in `docs/sso-expiry.md`.
 
 ### `[modules.time]`
 

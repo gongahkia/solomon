@@ -11,3 +11,5 @@ Azure expiry reads `~/.azure/accessTokens.json` and returns the soonest non-empt
 Vault lease info reads `~/.vault-token`. Raw token-only files return no expiry; JSON metadata returns the first non-empty expiry or TTL field from the top level, `auth`, or `data`.
 
 1Password CLI signin status reads cached JSON from `~/.cache/shisa/op-signin-status.json` and returns the first non-empty expiry or TTL field from the top level, `session`, `auth`, or `data`.
+
+The prompt renders `sso[provider:Xm]` for the soonest cached expiry below `[modules.sso_expiry].warning_minutes` (`30` by default). Absolute UTC timestamps and numeric TTL seconds are supported.

@@ -1718,21 +1718,26 @@ fn nextValue(args: []const []const u8, index: *usize) ![]const u8 {
     return args[index.*];
 }
 
+const PromptModuleOptions = struct {
+    cloud_ctx: shisa_config.CloudCtxOptions,
+    sso_expiry: shisa_config.SsoExpiryOptions,
+};
+
 fn buildPromptPayload(allocator: std.mem.Allocator, config: PromptConfig, cwd: []const u8) ![]u8 {
     const escaped_cwd = try jsonEscapeAlloc(allocator, cwd);
     defer allocator.free(escaped_cwd);
     const escaped_shell = try jsonEscapeAlloc(allocator, config.shell);
     defer allocator.free(escaped_shell);
-    const cloud_ctx = try promptCloudCtxOptions(allocator);
+    const module_options = try promptModuleOptions(allocator);
 
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}}}}",
-        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, cloud_ctx.aws, cloud_ctx.gcp, cloud_ctx.azure, cloud_ctx.kubernetes },
+        "{{\"v\":1,\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
+        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, module_options.sso_expiry.warning_minutes },
     );
 }
 
-fn promptCloudCtxOptions(allocator: std.mem.Allocator) !shisa_config.CloudCtxOptions {
+fn promptModuleOptions(allocator: std.mem.Allocator) !PromptModuleOptions {
     const path = try defaultConfigPath(allocator);
     defer allocator.free(path);
     const source = try readConfigOrDefault(allocator, path);
@@ -1748,7 +1753,10 @@ fn promptCloudCtxOptions(allocator: std.mem.Allocator) !shisa_config.CloudCtxOpt
         else => return err,
     };
     defer parsed.deinit(allocator);
-    return parsed.modules.cloud_ctx;
+    return .{
+        .cloud_ctx = parsed.modules.cloud_ctx,
+        .sso_expiry = parsed.modules.sso_expiry,
+    };
 }
 
 fn jsonEscapeAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {

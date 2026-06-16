@@ -713,6 +713,8 @@ test "module metadata names execution classes" {
     try std.testing.expectEqualStrings("sync", moduleExecutionClass(.cwd));
     try std.testing.expectEqualStrings("risk_tier", moduleIdName(.risk_tier));
     try std.testing.expectEqualStrings("sync", moduleExecutionClass(.risk_tier));
+    try std.testing.expectEqualStrings("sso_expiry", moduleIdName(.sso_expiry));
+    try std.testing.expectEqualStrings("sync", moduleExecutionClass(.sso_expiry));
     try std.testing.expectEqualStrings("async", moduleExecutionClass(.git_branch));
     try std.testing.expectEqualStrings("async", moduleExecutionClass(.language_versions));
 }
@@ -763,6 +765,9 @@ test "parses per-module options" {
         \\staging_bg = "warning"
         \\prod_bg = "danger"
         \\
+        \\[modules.sso_expiry]
+        \\warning_minutes = 15
+        \\
         \\[modules.time]
         \\format = "24h"
         \\utc = true
@@ -793,6 +798,7 @@ test "parses per-module options" {
     try std.testing.expectEqual(RiskTierColor.accent, config.modules.risk_tier.dev_bg);
     try std.testing.expectEqual(RiskTierColor.warning, config.modules.risk_tier.staging_bg);
     try std.testing.expectEqual(RiskTierColor.danger, config.modules.risk_tier.prod_bg);
+    try std.testing.expectEqual(@as(u32, 15), config.modules.sso_expiry.warning_minutes);
     try std.testing.expect(config.modules.time.utc);
 }
 

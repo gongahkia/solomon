@@ -304,7 +304,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Azure: parse `~/.azure/accessTokens.json`
 - [x] HashiCorp Vault: read `~/.vault-token` lease info
 - [x] 1Password CLI: `op signin status` cache
-- [ ] Render warning when any < 30 min remain (configurable)
+- [x] Render warning when any < 30 min remain (configurable)
 
 ### 11.6 IaC workspace (`iac_workspace`)
 - [ ] Terraform: read `.terraform/environment` or current workspace from state

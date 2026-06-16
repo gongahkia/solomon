@@ -6,6 +6,7 @@ const exit_status_module = @import("modules/exit_status.zig");
 const git_branch_module = @import("modules/git_branch.zig");
 const jobs_module = @import("modules/jobs.zig");
 const language_versions_module = @import("modules/language_versions.zig");
+const sso_expiry_module = @import("modules/sso_expiry.zig");
 const time_module = @import("modules/time.zig");
 const user_host_module = @import("modules/user_host.zig");
 
@@ -25,6 +26,7 @@ pub const ModuleId = enum {
     cmd_duration,
     user_host,
     cloud_ctx,
+    sso_expiry,
 };
 
 pub const ModuleSpec = struct {
@@ -66,6 +68,7 @@ pub const RenderInput = struct {
     aws_profile: ?[]const u8 = null,
     kubeconfig: ?[]const u8 = null,
     cloud_ctx: cloud_ctx_module.Options = .{},
+    sso_expiry: sso_expiry_module.Options = .{},
 };
 
 pub const CacheSet = struct {
@@ -93,6 +96,7 @@ const default_pipeline = [_]ModuleSpec{
     .{ .id = .jobs, .execution_class = executionClass(.jobs) },
     .{ .id = .cmd_duration, .execution_class = executionClass(.cmd_duration) },
     .{ .id = .user_host, .execution_class = executionClass(.user_host) },
+    .{ .id = .sso_expiry, .execution_class = executionClass(.sso_expiry) },
 };
 
 pub fn executionClass(module_id: ModuleId) ExecutionClass {
@@ -172,6 +176,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
         .cmd_duration => try cmd_duration_module.render(allocator, input.duration_ms, 1000),
         .user_host => try user_host_module.render(allocator, input.ssh, input.user, input.host),
         .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.kubeconfig, input.home, caches.cloud_ctx, input.cloud_ctx),
+        .sso_expiry => try sso_expiry_module.render(allocator, input.home, input.timestamp, input.sso_expiry),
     };
 }
 
@@ -190,6 +195,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .cmd_duration => "cmd_duration",
         .user_host => "user_host",
         .cloud_ctx => "cloud_ctx",
+        .sso_expiry => "sso_expiry",
     };
 }
 

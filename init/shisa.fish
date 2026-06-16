@@ -10,6 +10,7 @@ set -g __SHISA_FISH_INIT 1
 set -q SHISA_BIN; or set -g SHISA_BIN shisa
 set -q SHISA_SOCKET; or set -g SHISA_SOCKET ""
 set -q SHISA_INSTANT; or set -g SHISA_INSTANT 1
+set -q SHISA_PROD_GUARD; or set -g SHISA_PROD_GUARD 0
 
 function shisa_socket_path
     if test -n "$SHISA_SOCKET"
@@ -57,6 +58,13 @@ end
 
 function fish_prompt
     shisa_prompt_render
+end
+
+function shisa_preexec_guard --on-event fish_preexec
+    test "$SHISA_PROD_GUARD" = 1; or return 0
+    set -l command (string join ' ' -- $argv)
+    test -n "$command"; or return 0
+    command "$SHISA_BIN" cloud preexec --shell fish -- "$command"
 end
 
 function shisa_async_redraw --on-event shisa_async_redraw

@@ -24,6 +24,7 @@ typeset -g SHISA_LAST_DURATION_MS=0
 typeset -g SHISA_PREEXEC_REALTIME=
 typeset -g SHISA_ASYNC_SIGNAL=${SHISA_ASYNC_SIGNAL:-USR1}
 typeset -g SHISA_TRANSIENT_PROMPT=${SHISA_TRANSIENT_PROMPT:-1}
+typeset -g SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 
 zmodload zsh/datetime 2>/dev/null || true
 
@@ -60,10 +61,21 @@ shisa_hook_once precmd shisa_precmd
 
 shisa_preexec() {
   emulate -L zsh
+  local command=${1:-}
   SHISA_PREEXEC_REALTIME=${EPOCHREALTIME:-}
+  shisa_preexec_guard zsh "${command}"
 }
 
 shisa_hook_once preexec shisa_preexec
+
+shisa_preexec_guard() {
+  emulate -L zsh
+  [[ ${SHISA_PROD_GUARD:-0} == 1 ]] || return 0
+  local shell_name=${1}
+  local command=${2:-}
+  [[ -n ${command} ]] || return 0
+  "${SHISA_BIN}" cloud preexec --shell "${shell_name}" -- "${command}"
+}
 
 setopt prompt_subst
 PROMPT='$(shisa_prompt_render)'

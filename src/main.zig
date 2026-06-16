@@ -337,6 +337,10 @@ test "doctor reports path and backend statuses" {
 }
 
 fn cloudCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len >= 1 and std.mem.eql(u8, args[0], "preexec")) {
+        _ = try parseCloudPreexecArgs(args[1..]);
+        return;
+    }
     if (args.len != 2 or !std.mem.eql(u8, args[0], "explain")) return error.UnknownCloudArgument;
     const home = std.process.getEnvVarOwned(allocator, "HOME") catch |err| switch (err) {
         error.EnvironmentVariableNotFound => null,
@@ -346,6 +350,31 @@ fn cloudCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const output = try cloudExplainAlloc(allocator, args[1], home);
     defer allocator.free(output);
     try std.fs.File.stdout().writeAll(output);
+}
+
+const CloudPreexec = struct {
+    shell: []const u8 = "",
+    command: []const u8,
+};
+
+fn parseCloudPreexecArgs(args: []const []const u8) !CloudPreexec {
+    var parsed = CloudPreexec{ .command = "" };
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "--shell")) {
+            parsed.shell = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, arg, "--")) {
+            parsed.command = try nextValue(args, &i);
+            if (i + 1 != args.len) return error.UnknownCloudArgument;
+        } else if (parsed.command.len == 0) {
+            parsed.command = arg;
+        } else {
+            return error.UnknownCloudArgument;
+        }
+    }
+    if (parsed.command.len == 0) return error.MissingValue;
+    return parsed;
 }
 
 fn cloudExplainAlloc(allocator: std.mem.Allocator, value: []const u8, home: ?[]const u8) ![]u8 {
@@ -358,6 +387,12 @@ fn cloudExplainAlloc(allocator: std.mem.Allocator, value: []const u8, home: ?[]c
         "value: {s}\ntier: {s}\nsource: {s}\npattern: {s}\n",
         .{ value, risk_tier_module.tierName(reason.tier), risk_tier_module.sourceName(reason.source), pattern },
     );
+}
+
+test "cloud preexec args parse" {
+    const parsed = try parseCloudPreexecArgs(&.{ "--shell", "zsh", "--", "kubectl delete pod x" });
+    try std.testing.expectEqualStrings("zsh", parsed.shell);
+    try std.testing.expectEqualStrings("kubectl delete pod x", parsed.command);
 }
 
 test "cloud explain output shows reason" {
@@ -1618,7 +1653,7 @@ const help_text =
     \\commands:
     \\  bench         benchmark prompt render via hyperfine
     \\  cache         dump cache stats
-    \\  cloud         cloud helpers: explain
+    \\  cloud         cloud helpers: explain, preexec
     \\  doctor        diagnose socket, config, plugins, lua, fsnotify
     \\  explain       print resolved module pipeline
     \\  import-starship <path>

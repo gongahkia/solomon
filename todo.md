@@ -283,7 +283,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] `shisa cloud explain` CLI to print why a tier was chosen
 
 ### 11.3 Pre-exec prod guard (`prod_guard`)
-- [ ] Implement pre-exec hook protocol across shells (zsh `preexec`, bash `DEBUG` trap, fish `fish_preexec`)
+- [x] Implement pre-exec hook protocol across shells (zsh `preexec`, bash `DEBUG` trap, fish `fish_preexec`)
 - [ ] Daemon-side classifier on command + tier
 - [ ] Built-in destructive-pattern blocklist (kubectl delete/drain, terraform destroy, aws ec2 terminate, aws s3 rb, gcloud * delete, rm -rf, dd of=/dev/, mkfs, DROP TABLE)
 - [ ] Typed-confirm UX (must type the tier name to proceed)

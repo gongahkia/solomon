@@ -9,6 +9,7 @@ SHISA_LAST_JOBS=0
 SHISA_LAST_DURATION_MS=0
 SHISA_ASYNC_REDRAW=${SHISA_ASYNC_REDRAW:-1}
 SHISA_ASYNC_KEYSEQ=${SHISA_ASYNC_KEYSEQ:-'\C-x\C-s'}
+SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 SHISA_COMMAND_STARTED=0
 SHISA_COMMAND_START_US=
 SHISA_IN_PROMPT=0
@@ -77,10 +78,19 @@ shisa_debug_trap() {
     shisa_*|__SHISA_*|PROMPT_COMMAND=*|PS1=*) return 0 ;;
   esac
   [[ ${SHISA_COMMAND_STARTED:-0} == 0 ]] || return 0
+  shisa_preexec_guard bash "${command}" || return $?
   local now_us
   now_us=$(shisa_epoch_us) || return 0
   SHISA_COMMAND_START_US=${now_us}
   SHISA_COMMAND_STARTED=1
+}
+
+shisa_preexec_guard() {
+  [[ ${SHISA_PROD_GUARD:-0} == 1 ]] || return 0
+  local shell_name=${1:-bash}
+  local command=${2:-}
+  [[ -n ${command} ]] || return 0
+  "${SHISA_BIN}" cloud preexec --shell "${shell_name}" -- "${command}"
 }
 
 shisa_prompt_render() {

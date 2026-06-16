@@ -289,7 +289,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Typed-confirm UX (must type the tier name to proceed)
 - [x] `--force` bypass (logged)
 - [x] Audit log to `~/.local/state/shisa/prod_guard.jsonl`
-- [ ] Bypass-log review CLI (`shisa cloud audit`)
+- [x] Bypass-log review CLI (`shisa cloud audit`)
 - [ ] Fuzz the classifier against a corpus of dangerous-looking-but-safe commands (`kubectl get`, `terraform plan`)
 
 ### 11.4 IAM whoami (`iam_whoami`)

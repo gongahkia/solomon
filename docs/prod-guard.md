@@ -20,3 +20,9 @@ Daemon responses include tier, tier reason, and destructive-pattern metadata. De
 `shisa cloud preexec --force -- <command>` bypasses the typed confirmation and emits a `prod_guard_force` daemon log event when the command matches a destructive pattern. Shell hooks pass `--force` when `SHISA_PROD_GUARD_FORCE=1`.
 
 Destructive pre-exec decisions are appended to `~/.local/state/shisa/prod_guard.jsonl`.
+
+Review the audit log:
+
+```sh
+shisa cloud audit
+```

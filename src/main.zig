@@ -342,6 +342,10 @@ fn cloudCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try cloudPreexec(allocator, config);
         return;
     }
+    if (args.len == 1 and std.mem.eql(u8, args[0], "audit")) {
+        try cloudAudit(allocator);
+        return;
+    }
     if (args.len != 2 or !std.mem.eql(u8, args[0], "explain")) return error.UnknownCloudArgument;
     const home = std.process.getEnvVarOwned(allocator, "HOME") catch |err| switch (err) {
         error.EnvironmentVariableNotFound => null,
@@ -351,6 +355,27 @@ fn cloudCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const output = try cloudExplainAlloc(allocator, args[1], home);
     defer allocator.free(output);
     try std.fs.File.stdout().writeAll(output);
+}
+
+fn cloudAudit(allocator: std.mem.Allocator) !void {
+    const home = try std.process.getEnvVarOwned(allocator, "HOME");
+    defer allocator.free(home);
+    const output = try cloudAuditAlloc(allocator, home);
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn cloudAuditAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8 {
+    const path = try prodGuardAuditPathAlloc(allocator, home);
+    defer allocator.free(path);
+    return std.fs.cwd().readFileAlloc(allocator, path, max_config_bytes) catch |err| switch (err) {
+        error.FileNotFound => try allocator.dupe(u8, ""),
+        else => return err,
+    };
+}
+
+fn prodGuardAuditPathAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/prod_guard.jsonl", .{home});
 }
 
 const CloudPreexec = struct {
@@ -470,6 +495,26 @@ test "cloud preexec payload escapes command" {
     const payload = try buildCloudPreexecPayload(std.testing.allocator, .{ .shell = "zsh", .command = "echo \"prod\"" });
     defer std.testing.allocator.free(payload);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"command\":\"echo \\\"prod\\\"\"") != null);
+}
+
+test "cloud audit reads prod guard jsonl" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-audit-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const path = try prodGuardAuditPathAlloc(allocator, dir_path);
+    defer allocator.free(path);
+    if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
+    {
+        var file = try std.fs.createFileAbsolute(path, .{});
+        defer file.close();
+        try file.writeAll("{\"tier\":\"prod\"}\n");
+    }
+
+    const output = try cloudAuditAlloc(allocator, dir_path);
+    defer allocator.free(output);
+    try std.testing.expectEqualStrings("{\"tier\":\"prod\"}\n", output);
 }
 
 test "cloud explain output shows reason" {
@@ -1730,7 +1775,7 @@ const help_text =
     \\commands:
     \\  bench         benchmark prompt render via hyperfine
     \\  cache         dump cache stats
-    \\  cloud         cloud helpers: explain, preexec
+    \\  cloud         cloud helpers: audit, explain, preexec
     \\  doctor        diagnose socket, config, plugins, lua, fsnotify
     \\  explain       print resolved module pipeline
     \\  import-starship <path>

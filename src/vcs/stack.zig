@@ -7,6 +7,7 @@ pub const Provider = enum {
     ghstack,
     spr,
     stax,
+    git_spice,
 
     pub fn label(self: Provider) []const u8 {
         return switch (self) {
@@ -14,6 +15,7 @@ pub const Provider = enum {
             .ghstack => "ghstack",
             .spr => "spr",
             .stax => "st",
+            .git_spice => "gs",
         };
     }
 };
@@ -58,6 +60,7 @@ pub fn detect(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection {
     if (try detectGhstack(allocator, cwd_path)) |detection| return detection;
     if (try detectSpr(allocator, cwd_path)) |detection| return detection;
     if (try detectStax(allocator, cwd_path)) |detection| return detection;
+    if (try detectGitSpice(allocator, cwd_path)) |detection| return detection;
     return null;
 }
 
@@ -106,6 +109,16 @@ pub fn isSpr(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
 
 pub fn isStax(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
     const detection = try detectStax(allocator, cwd_path);
+    if (detection) |value| {
+        var owned = value;
+        owned.deinit(allocator);
+        return true;
+    }
+    return false;
+}
+
+pub fn isGitSpice(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
+    const detection = try detectGitSpice(allocator, cwd_path);
     if (detection) |value| {
         var owned = value;
         owned.deinit(allocator);
@@ -212,6 +225,52 @@ fn detectStax(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection {
     return null;
 }
 
+fn detectGitSpice(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection {
+    const root = (try findMarkerRoot(allocator, cwd_path, ".git")) orelse return null;
+    errdefer allocator.free(root);
+
+    const data_ref_path = try std.fs.path.join(allocator, &.{ root, ".git", "refs", "spice", "data" });
+    const has_data_ref = pathExists(data_ref_path) catch |err| {
+        allocator.free(data_ref_path);
+        return err;
+    };
+    if (has_data_ref) {
+        return .{
+            .provider = .git_spice,
+            .root_path = root,
+            .marker_path = data_ref_path,
+        };
+    }
+    allocator.free(data_ref_path);
+
+    const namespace_path = try std.fs.path.join(allocator, &.{ root, ".git", "refs", "spice" });
+    const has_namespace = pathExists(namespace_path) catch |err| {
+        allocator.free(namespace_path);
+        return err;
+    };
+    if (has_namespace) {
+        return .{
+            .provider = .git_spice,
+            .root_path = root,
+            .marker_path = namespace_path,
+        };
+    }
+    allocator.free(namespace_path);
+
+    const packed_refs_path = try std.fs.path.join(allocator, &.{ root, ".git", "packed-refs" });
+    errdefer allocator.free(packed_refs_path);
+    if (try packedRefsContains(allocator, packed_refs_path, "refs/spice/data")) {
+        return .{
+            .provider = .git_spice,
+            .root_path = root,
+            .marker_path = packed_refs_path,
+        };
+    }
+    allocator.free(packed_refs_path);
+    allocator.free(root);
+    return null;
+}
+
 fn readCurrentGitBranch(allocator: std.mem.Allocator, cwd_path: []const u8) !?GitBranch {
     const root = (try findMarkerRoot(allocator, cwd_path, ".git")) orelse return null;
     const head_path = try std.fs.path.join(allocator, &.{ root, ".git", "HEAD" });
@@ -287,6 +346,25 @@ fn pathExists(path: []const u8) !bool {
     return true;
 }
 
+fn packedRefsContains(allocator: std.mem.Allocator, path: []const u8, ref_name: []const u8) !bool {
+    const contents = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return err,
+    };
+    defer allocator.free(contents);
+
+    var lines = std.mem.splitScalar(u8, contents, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0 or line[0] == '#' or line[0] == '^') continue;
+        var fields = std.mem.splitScalar(u8, line, ' ');
+        _ = fields.next() orelse continue;
+        const ref_field = fields.next() orelse continue;
+        if (std.mem.eql(u8, ref_field, ref_name)) return true;
+    }
+    return false;
+}
+
 test "detects graphite stack in current directory" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-stack-{x}", .{std.crypto.random.int(u64)});
@@ -340,6 +418,7 @@ test "ignores directories without stack metadata" {
     try std.testing.expect(!(try isGhstack(allocator, dir_path)));
     try std.testing.expect(!(try isSpr(allocator, dir_path)));
     try std.testing.expect(!(try isStax(allocator, dir_path)));
+    try std.testing.expect(!(try isGitSpice(allocator, dir_path)));
 }
 
 test "detects ghstack branch names" {
@@ -468,6 +547,53 @@ test "detects stax repo config" {
     var detection = (try detect(allocator, dir_path)).?;
     defer detection.deinit(allocator);
     try std.testing.expectEqual(Provider.stax, detection.provider);
+    try std.testing.expectEqualStrings(marker_path, detection.marker_path);
+}
+
+test "detects git-spice data ref" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-stack-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const refs_path = try std.fmt.allocPrint(allocator, "{s}/.git/refs/spice", .{dir_path});
+    defer allocator.free(refs_path);
+    try std.fs.cwd().makePath(refs_path);
+    const marker_path = try std.fmt.allocPrint(allocator, "{s}/data", .{refs_path});
+    defer allocator.free(marker_path);
+    try writeFile(marker_path, "0000000000000000000000000000000000000000\n");
+
+    var detection = (try detect(allocator, dir_path)).?;
+    defer detection.deinit(allocator);
+    try std.testing.expectEqual(Provider.git_spice, detection.provider);
+    try std.testing.expectEqualStrings("gs", detection.provider.label());
+    try std.testing.expectEqualStrings(dir_path, detection.root_path);
+    try std.testing.expectEqualStrings(marker_path, detection.marker_path);
+    try std.testing.expect(try isGitSpice(allocator, dir_path));
+}
+
+test "detects git-spice packed data ref" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-stack-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    const git_path = try std.fmt.allocPrint(allocator, "{s}/.git", .{dir_path});
+    defer allocator.free(git_path);
+    try std.fs.cwd().makePath(git_path);
+
+    const marker_path = try std.fmt.allocPrint(allocator, "{s}/packed-refs", .{git_path});
+    defer allocator.free(marker_path);
+    try writeFile(marker_path,
+        \\# pack-refs with: peeled fully-peeled sorted
+        \\0000000000000000000000000000000000000000 refs/spice/data
+        \\
+    );
+
+    var detection = (try detect(allocator, dir_path)).?;
+    defer detection.deinit(allocator);
+    try std.testing.expectEqual(Provider.git_spice, detection.provider);
     try std.testing.expectEqualStrings(marker_path, detection.marker_path);
 }
 

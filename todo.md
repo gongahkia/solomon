@@ -242,7 +242,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Detect ghstack: branch naming + `.ghstackrc`
 - [x] Detect spr / git-spr: `.git/refs/spr/`
 - [x] Detect `st`: meta files
-- [ ] Detect git-spice (`gs`): meta files
+- [x] Detect git-spice (`gs`): meta files
 - [ ] Detect git-town: `.git-town-branches.yml`
 - [ ] Detect GitHub-native stacked PRs (`gh stack`) via remote config
 - [ ] Render stack position (e.g., `2/5 ↑↓`)

@@ -65,3 +65,5 @@ Detection:
 - spr/git-spr detection checks `.git/refs/spr/` without requiring the `spr` binary.
 - st/stax detection checks `.git/refs/branch-metadata/`, `.git/refs/stax/`, and repo-root `stax.toml`.
 - stax upstream stores branch metadata under `refs/branch-metadata/` and documents repo-root `stax.toml` overlays: https://github.com/cesarferreira/stax
+- git-spice detection checks `.git/refs/spice/data`, `.git/refs/spice/`, and packed refs for `refs/spice/data`.
+- git-spice internals document local storage in `refs/spice/data`: https://abhinav.github.io/git-spice/guide/internals/

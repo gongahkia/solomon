@@ -165,6 +165,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const vcs_sl_test_run = b.addRunArtifact(vcs_sl_tests);
+    const vcs_hg_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/vcs/hg.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const vcs_hg_test_run = b.addRunArtifact(vcs_hg_tests);
     const lock_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/lock.zig"),
@@ -359,6 +367,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&theme_builtin_test_run.step);
     test_step.dependOn(&vcs_jj_test_run.step);
     test_step.dependOn(&vcs_sl_test_run.step);
+    test_step.dependOn(&vcs_hg_test_run.step);
     test_step.dependOn(&lock_test_run.step);
     test_step.dependOn(&log_test_run.step);
     test_step.dependOn(&cache_test_run.step);

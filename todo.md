@@ -232,7 +232,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Snapshot tests against fixture sapling repos
 
 ### 10.3 Mercurial (hg) — Tier 1
-- [ ] Detect hg repos (`.hg/`)
+- [x] Detect hg repos (`.hg/`)
 - [ ] Read state via `hg summary --remote` (cached)
 - [ ] Show branch, bookmark, topic (evolve), draft/public phase
 - [ ] Handle mq queues if active

@@ -37,3 +37,11 @@ State sources:
 - `sl log -r . --template '{branch}\n{activebookmark}\n'` for branch and active bookmark.
 - `test/fixtures/sl/*` snapshot fixture repos cover deterministic parser/render output.
 - Verified Sapling 0.2.20260522 does not accept `sl status --json`; official status docs list plain status output and options: https://sapling-scm.com/docs/commands/status/
+
+## Mercurial
+
+Detection:
+
+- Walk ancestors from `cwd`.
+- A directory containing `.hg/` is the Mercurial root.
+- Detection does not require the `hg` binary.

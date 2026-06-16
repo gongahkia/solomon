@@ -99,7 +99,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Implement transient prompt: on `accept-line`, replace prompt with minimal form
 - [x] Build the async git module: spawn git in a worker thread, fill on completion
 - [x] Build the async language-version probe (python/node/rust/go), same model
-- [ ] Add cancellation: if the user cd's away, kill in-flight probes for the old cwd
+- [x] Add cancellation: if the user cd's away, kill in-flight probes for the old cwd
 - [x] Add a per-module slow-warning that logs to `shisad.log` (no command_timeout, but visibility)
 - [x] Add a `--no-async` debug flag for testing fallback paths
 

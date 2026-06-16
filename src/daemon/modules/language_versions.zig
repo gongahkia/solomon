@@ -1,9 +1,12 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const Cache = struct {
     mutex: std.Thread.Mutex = .{},
     valid: bool = false,
     in_flight: bool = false,
+    generation: u64 = 0,
+    active_pid: ?std.process.Child.Id = null,
     cwd: ?[]u8 = null,
     segment: ?[]u8 = null,
     worker: ?std.Thread = null,
@@ -19,6 +22,7 @@ pub const Cache = struct {
     };
 
     pub fn deinit(self: *Cache, allocator: std.mem.Allocator) void {
+        self.cancelActiveProcess();
         const worker = self.takeWorker();
         if (worker) |thread| thread.join();
         self.mutex.lock();
@@ -28,6 +32,9 @@ pub const Cache = struct {
 
     pub fn renderAsync(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) !AsyncRender {
         self.joinFinishedWorker();
+
+        const cancelled_worker = self.cancelForCwdChange(allocator, cwd_path);
+        if (cancelled_worker) |thread| thread.join();
 
         self.mutex.lock();
         if (self.valid and self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path)) {
@@ -57,9 +64,11 @@ pub const Cache = struct {
         self.clear(allocator);
         self.cwd = try allocator.dupe(u8, cwd_path);
         self.in_flight = true;
+        self.generation += 1;
+        const generation = self.generation;
         self.mutex.unlock();
 
-        const worker = std.Thread.spawn(.{}, asyncProbe, .{ self, allocator, worker_cwd }) catch |err| {
+        const worker = std.Thread.spawn(.{}, asyncProbe, .{ self, allocator, worker_cwd, generation }) catch |err| {
             self.mutex.lock();
             self.clear(allocator);
             self.mutex.unlock();
@@ -94,8 +103,59 @@ pub const Cache = struct {
         if (self.segment) |value| allocator.free(value);
         self.valid = false;
         self.in_flight = false;
+        self.active_pid = null;
         self.cwd = null;
         self.segment = null;
+    }
+
+    fn cancelForCwdChange(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) ?std.Thread {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        if (!self.in_flight) return null;
+        if (self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path)) return null;
+
+        self.generation += 1;
+        if (self.active_pid) |pid| killProcessId(pid);
+        self.active_pid = null;
+        if (self.cwd) |value| allocator.free(value);
+        if (self.segment) |value| allocator.free(value);
+        self.cwd = null;
+        self.segment = null;
+        self.valid = false;
+        self.in_flight = false;
+        const worker = self.worker;
+        self.worker = null;
+        return worker;
+    }
+
+    fn cancelActiveProcess(self: *Cache) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.generation += 1;
+        if (self.active_pid) |pid| killProcessId(pid);
+        self.active_pid = null;
+        self.in_flight = false;
+    }
+
+    fn registerChild(self: *Cache, generation: u64, pid: std.process.Child.Id) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (self.generation == generation) self.active_pid = pid;
+    }
+
+    fn clearChild(self: *Cache, generation: u64, pid: std.process.Child.Id) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (self.generation == generation and self.active_pid != null and self.active_pid.? == pid) {
+            self.active_pid = null;
+        }
+    }
+
+    fn cancelled(self: *Cache, generation: u64) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.generation != generation;
     }
 };
 
@@ -121,12 +181,16 @@ const Versions = struct {
     }
 };
 
-fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8) void {
+fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8, generation: u64) void {
     defer allocator.free(cwd_path);
-    const segment = probe(allocator, cwd_path) catch null;
+    const segment = probeCancellable(allocator, cache, generation, cwd_path) catch null;
 
     cache.mutex.lock();
     defer cache.mutex.unlock();
+    if (cache.generation != generation or cache.cwd == null or !std.mem.eql(u8, cache.cwd.?, cwd_path)) {
+        if (segment) |value| allocator.free(value);
+        return;
+    }
     if (cache.segment) |value| allocator.free(value);
     cache.segment = segment;
     cache.valid = true;
@@ -134,17 +198,24 @@ fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8) void 
 }
 
 pub fn probe(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
+    return probeCancellable(allocator, null, 0, cwd_path);
+}
+
+fn probeCancellable(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8) !?[]u8 {
     const detected = try detect(allocator, cwd_path);
     if (!detected.any()) return null;
 
     var versions = Versions{};
-    if (detected.python) versions.python = try commandVersion(allocator, cwd_path, &.{ "python3", "--version" }, .python);
+    if (detected.python) versions.python = try commandVersion(allocator, cache, generation, cwd_path, &.{ "python3", "--version" }, .python);
     defer if (versions.python) |value| allocator.free(value);
-    if (detected.node) versions.node = try commandVersion(allocator, cwd_path, &.{ "node", "--version" }, .node);
+    if (cache) |value| if (value.cancelled(generation)) return null;
+    if (detected.node) versions.node = try commandVersion(allocator, cache, generation, cwd_path, &.{ "node", "--version" }, .node);
     defer if (versions.node) |value| allocator.free(value);
-    if (detected.rust) versions.rust = try commandVersion(allocator, cwd_path, &.{ "rustc", "--version" }, .rust);
+    if (cache) |value| if (value.cancelled(generation)) return null;
+    if (detected.rust) versions.rust = try commandVersion(allocator, cache, generation, cwd_path, &.{ "rustc", "--version" }, .rust);
     defer if (versions.rust) |value| allocator.free(value);
-    if (detected.go) versions.go = try commandVersion(allocator, cwd_path, &.{ "go", "version" }, .go);
+    if (cache) |value| if (value.cancelled(generation)) return null;
+    if (detected.go) versions.go = try commandVersion(allocator, cache, generation, cwd_path, &.{ "go", "version" }, .go);
     defer if (versions.go) |value| allocator.free(value);
 
     if (!versions.any()) return null;
@@ -198,17 +269,12 @@ const VersionKind = enum {
     go,
 };
 
-fn commandVersion(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8, kind: VersionKind) !?[]u8 {
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = argv,
-        .cwd = cwd_path,
-        .max_output_bytes = 4096,
-        .expand_arg0 = .expand,
-    }) catch return null;
+fn commandVersion(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8, argv: []const []const u8, kind: VersionKind) !?[]u8 {
+    const result = runCommand(allocator, cache, generation, cwd_path, argv, 4096) catch return null;
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
     if (!exitedZero(result.term)) return null;
+    if (cache) |value| if (value.cancelled(generation)) return null;
 
     const raw = if (result.stdout.len > 0) result.stdout else result.stderr;
     const trimmed = std.mem.trim(u8, raw, " \t\r\n");
@@ -220,6 +286,44 @@ fn commandVersion(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []co
         .rust => secondToken(allocator, trimmed),
         .go => goVersion(allocator, trimmed),
     };
+}
+
+fn runCommand(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8, argv: []const []const u8, max_output_bytes: usize) !std.process.Child.RunResult {
+    if (cache) |value| if (value.cancelled(generation)) return error.Cancelled;
+
+    var child = std.process.Child.init(argv, allocator);
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Pipe;
+    child.cwd = cwd_path;
+    child.expand_arg0 = .expand;
+
+    var stdout: std.ArrayList(u8) = .empty;
+    defer stdout.deinit(allocator);
+    var stderr: std.ArrayList(u8) = .empty;
+    defer stderr.deinit(allocator);
+
+    try child.spawn();
+    errdefer _ = child.kill() catch {};
+    if (cache) |value| {
+        value.registerChild(generation, child.id);
+        if (value.cancelled(generation)) return error.Cancelled;
+    }
+    defer if (cache) |value| value.clearChild(generation, child.id);
+
+    try child.collectOutput(allocator, &stdout, &stderr, max_output_bytes);
+    return .{
+        .stdout = try stdout.toOwnedSlice(allocator),
+        .stderr = try stderr.toOwnedSlice(allocator),
+        .term = try child.wait(),
+    };
+}
+
+fn killProcessId(pid: std.process.Child.Id) void {
+    switch (builtin.os.tag) {
+        .windows => {},
+        else => std.posix.kill(pid, std.posix.SIG.KILL) catch {},
+    }
 }
 
 fn tokenAfterPrefix(allocator: std.mem.Allocator, value: []const u8, prefix: []const u8) !?[]u8 {
@@ -324,6 +428,49 @@ test "async render hides non project cwd without pending" {
     try std.testing.expect(rendered.segment == null);
 }
 
+fn runSleepForCancelTest(cache: *Cache, allocator: std.mem.Allocator, term_out: *?std.process.Child.Term) void {
+    const result = runCommand(allocator, cache, 1, "/tmp", &.{ "/bin/sleep", "10" }, 4096) catch return;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    term_out.* = result.term;
+}
+
+fn waitForActivePid(cache: *Cache) !void {
+    for (0..100) |_| {
+        cache.mutex.lock();
+        const active = cache.active_pid != null;
+        cache.mutex.unlock();
+        if (active) return;
+        std.Thread.sleep(10 * std.time.ns_per_ms);
+    }
+    return error.Timeout;
+}
+
+test "cancels active language child when cwd changes" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+
+    const allocator = std.testing.allocator;
+    var cache = Cache{};
+    defer cache.deinit(allocator);
+    cache.cwd = try allocator.dupe(u8, "/old");
+    cache.in_flight = true;
+    cache.generation = 1;
+
+    var term: ?std.process.Child.Term = null;
+    const thread = try std.Thread.spawn(.{}, runSleepForCancelTest, .{ &cache, allocator, &term });
+    try waitForActivePid(&cache);
+    _ = cache.cancelForCwdChange(allocator, "/new");
+    thread.join();
+
+    try std.testing.expect(term != null);
+    try std.testing.expect(switch (term.?) {
+        .Signal => true,
+        else => false,
+    });
+    try std.testing.expect(!cache.in_flight);
+    try std.testing.expect(cache.cwd == null);
+}
+
 test "async render fills python marker when python3 exists" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-lang-{x}", .{std.crypto.random.int(u64)});
@@ -336,7 +483,7 @@ test "async render fills python marker when python3 exists" {
     var file = try std.fs.createFileAbsolute(marker, .{});
     file.close();
 
-    const python = try commandVersion(allocator, dir_path, &.{ "python3", "--version" }, .python);
+    const python = try commandVersion(allocator, null, 0, dir_path, &.{ "python3", "--version" }, .python);
     if (python) |value| allocator.free(value) else return;
 
     var cache = Cache{};

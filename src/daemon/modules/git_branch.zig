@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const module_id = "git_branch";
 pub const WatchPath = struct {
@@ -18,11 +19,13 @@ pub const Cache = struct {
     valid: bool = false,
     in_flight: bool = false,
     generation: u64 = 0,
+    active_pid: ?std.process.Child.Id = null,
     cwd: ?[]u8 = null,
     segment: ?[]u8 = null,
     worker: ?std.Thread = null,
 
     pub fn deinit(self: *Cache, allocator: std.mem.Allocator) void {
+        self.cancelActiveProcess();
         const worker = self.takeWorker();
         if (worker) |thread| thread.join();
         self.mutex.lock();
@@ -37,9 +40,12 @@ pub const Cache = struct {
         if (self.cwd == null or !std.mem.eql(u8, self.cwd.?, cwd_path)) return;
         self.generation += 1;
         if (self.in_flight) {
+            if (self.active_pid) |pid| killProcessId(pid);
+            self.active_pid = null;
             if (self.segment) |value| allocator.free(value);
             self.segment = null;
             self.valid = false;
+            self.in_flight = false;
             return;
         }
         self.clear(allocator);
@@ -77,6 +83,9 @@ pub const Cache = struct {
 
     pub fn renderAsync(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) !AsyncRender {
         self.joinFinishedWorker();
+
+        const cancelled_worker = self.cancelForCwdChange(allocator, cwd_path);
+        if (cancelled_worker) |thread| thread.join();
 
         self.mutex.lock();
         if (self.valid and self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path)) {
@@ -145,8 +154,59 @@ pub const Cache = struct {
         if (self.segment) |value| allocator.free(value);
         self.valid = false;
         self.in_flight = false;
+        self.active_pid = null;
         self.cwd = null;
         self.segment = null;
+    }
+
+    fn cancelForCwdChange(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) ?std.Thread {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        if (!self.in_flight) return null;
+        if (self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path)) return null;
+
+        self.generation += 1;
+        if (self.active_pid) |pid| killProcessId(pid);
+        self.active_pid = null;
+        if (self.cwd) |value| allocator.free(value);
+        if (self.segment) |value| allocator.free(value);
+        self.cwd = null;
+        self.segment = null;
+        self.valid = false;
+        self.in_flight = false;
+        const worker = self.worker;
+        self.worker = null;
+        return worker;
+    }
+
+    fn cancelActiveProcess(self: *Cache) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.generation += 1;
+        if (self.active_pid) |pid| killProcessId(pid);
+        self.active_pid = null;
+        self.in_flight = false;
+    }
+
+    fn registerChild(self: *Cache, generation: u64, pid: std.process.Child.Id) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (self.generation == generation) self.active_pid = pid;
+    }
+
+    fn clearChild(self: *Cache, generation: u64, pid: std.process.Child.Id) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (self.generation == generation and self.active_pid != null and self.active_pid.? == pid) {
+            self.active_pid = null;
+        }
+    }
+
+    fn cancelled(self: *Cache, generation: u64) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.generation != generation;
     }
 };
 
@@ -200,13 +260,12 @@ pub fn watchScope(allocator: std.mem.Allocator, cwd_path: []const u8) !?WatchSco
 
 fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8, generation: u64) void {
     defer allocator.free(cwd_path);
-    const segment = probe(allocator, cwd_path) catch null;
+    const segment = probeCancellable(allocator, cache, generation, cwd_path) catch null;
 
     cache.mutex.lock();
     defer cache.mutex.unlock();
     if (cache.generation != generation or cache.cwd == null or !std.mem.eql(u8, cache.cwd.?, cwd_path)) {
         if (segment) |value| allocator.free(value);
-        cache.in_flight = false;
         return;
     }
     if (cache.segment) |value| allocator.free(value);
@@ -216,22 +275,21 @@ fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8, gener
 }
 
 pub fn probe(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
-    const branch_result = std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = &.{ "git", "branch", "--show-current" },
-        .cwd = cwd_path,
-        .max_output_bytes = 4096,
-        .expand_arg0 = .expand,
-    }) catch return null;
+    return probeCancellable(allocator, null, 0, cwd_path);
+}
+
+fn probeCancellable(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8) !?[]u8 {
+    const branch_result = runCommand(allocator, cache, generation, cwd_path, &.{ "git", "branch", "--show-current" }, 4096) catch return null;
     defer allocator.free(branch_result.stdout);
     defer allocator.free(branch_result.stderr);
 
     if (!exitedZero(branch_result.term)) return null;
+    if (cache) |value| if (value.cancelled(generation)) return null;
 
     const branch = std.mem.trim(u8, branch_result.stdout, " \t\r\n");
     if (branch.len == 0) return null;
 
-    const dirty = try isDirty(allocator, cwd_path);
+    const dirty = try isDirty(allocator, cache, generation, cwd_path);
     return try std.fmt.allocPrint(allocator, "git:{s}{s}", .{ branch, if (dirty) "*" else "" });
 }
 
@@ -279,18 +337,50 @@ fn findGitRoot(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
     return null;
 }
 
-fn isDirty(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
-    const status_result = std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = &.{ "git", "status", "--porcelain" },
-        .cwd = cwd_path,
-        .max_output_bytes = 4096,
-        .expand_arg0 = .expand,
-    }) catch return false;
+fn isDirty(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8) !bool {
+    const status_result = runCommand(allocator, cache, generation, cwd_path, &.{ "git", "status", "--porcelain" }, 4096) catch return false;
     defer allocator.free(status_result.stdout);
     defer allocator.free(status_result.stderr);
 
     return exitedZero(status_result.term) and std.mem.trim(u8, status_result.stdout, " \t\r\n").len > 0;
+}
+
+fn runCommand(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8, argv: []const []const u8, max_output_bytes: usize) !std.process.Child.RunResult {
+    if (cache) |value| if (value.cancelled(generation)) return error.Cancelled;
+
+    var child = std.process.Child.init(argv, allocator);
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Pipe;
+    child.cwd = cwd_path;
+    child.expand_arg0 = .expand;
+
+    var stdout: std.ArrayList(u8) = .empty;
+    defer stdout.deinit(allocator);
+    var stderr: std.ArrayList(u8) = .empty;
+    defer stderr.deinit(allocator);
+
+    try child.spawn();
+    errdefer _ = child.kill() catch {};
+    if (cache) |value| {
+        value.registerChild(generation, child.id);
+        if (value.cancelled(generation)) return error.Cancelled;
+    }
+    defer if (cache) |value| value.clearChild(generation, child.id);
+
+    try child.collectOutput(allocator, &stdout, &stderr, max_output_bytes);
+    return .{
+        .stdout = try stdout.toOwnedSlice(allocator),
+        .stderr = try stderr.toOwnedSlice(allocator),
+        .term = try child.wait(),
+    };
+}
+
+fn killProcessId(pid: std.process.Child.Id) void {
+    switch (builtin.os.tag) {
+        .windows => {},
+        else => std.posix.kill(pid, std.posix.SIG.KILL) catch {},
+    }
 }
 
 fn exitedZero(term: std.process.Child.Term) bool {
@@ -400,6 +490,73 @@ test "invalidate refreshes cached git segment" {
     const refreshed = (try cache.render(allocator, dir_path)).?;
     defer allocator.free(refreshed);
     try std.testing.expectEqualStrings("git:main*", refreshed);
+}
+
+fn runSleepForCancelTest(cache: *Cache, allocator: std.mem.Allocator, term_out: *?std.process.Child.Term) void {
+    const result = runCommand(allocator, cache, 1, "/tmp", &.{ "/bin/sleep", "10" }, 4096) catch return;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    term_out.* = result.term;
+}
+
+fn waitForActivePid(cache: *Cache) !void {
+    for (0..100) |_| {
+        cache.mutex.lock();
+        const active = cache.active_pid != null;
+        cache.mutex.unlock();
+        if (active) return;
+        std.Thread.sleep(10 * std.time.ns_per_ms);
+    }
+    return error.Timeout;
+}
+
+test "cancels active git child when cwd changes" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+
+    const allocator = std.testing.allocator;
+    var cache = Cache{};
+    defer cache.deinit(allocator);
+    cache.cwd = try allocator.dupe(u8, "/old");
+    cache.in_flight = true;
+    cache.generation = 1;
+
+    var term: ?std.process.Child.Term = null;
+    const thread = try std.Thread.spawn(.{}, runSleepForCancelTest, .{ &cache, allocator, &term });
+    try waitForActivePid(&cache);
+    _ = cache.cancelForCwdChange(allocator, "/new");
+    thread.join();
+
+    try std.testing.expect(term != null);
+    try std.testing.expect(switch (term.?) {
+        .Signal => true,
+        else => false,
+    });
+    try std.testing.expect(!cache.in_flight);
+    try std.testing.expect(cache.cwd == null);
+}
+
+test "git invalidation cancels active child" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+
+    const allocator = std.testing.allocator;
+    var cache = Cache{};
+    defer cache.deinit(allocator);
+    cache.cwd = try allocator.dupe(u8, "/old");
+    cache.in_flight = true;
+    cache.generation = 1;
+
+    var term: ?std.process.Child.Term = null;
+    const thread = try std.Thread.spawn(.{}, runSleepForCancelTest, .{ &cache, allocator, &term });
+    try waitForActivePid(&cache);
+    cache.invalidate(allocator, "/old");
+    thread.join();
+
+    try std.testing.expect(term != null);
+    try std.testing.expect(switch (term.?) {
+        .Signal => true,
+        else => false,
+    });
+    try std.testing.expect(!cache.in_flight);
 }
 
 test "async render fills worker cache" {

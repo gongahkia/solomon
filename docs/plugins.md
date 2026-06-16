@@ -132,3 +132,4 @@ Reference manifests live under `examples/plugins/`:
 - `language_versions`: python/node/rust/go probe capabilities.
 - `kubernetes-context`: kubeconfig/env capabilities.
 - `aws-profile`: AWS config/env capabilities.
+- `fossil`: community Fossil VCS status template.

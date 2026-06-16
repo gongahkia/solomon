@@ -13,7 +13,7 @@ Current packs:
 
 | Pack | State | Owner | Notes |
 | --- | --- | --- | --- |
-| `shisa.vcs` | incubation | core | jj/sapling/fossil/pijul/bazaar templates planned. |
+| `shisa.vcs` | incubation | core | jj/sapling core support plus fossil/pijul/bazaar community templates. |
 | `shisa.cloud` | incubation | core | Cloud safety modules planned; no network by default. |
 | `shisa.ai` | incubation | core | Optional local-first hint pack; outside core. |
 | community templates | incubation | community | Template repos planned before marketplace verification. |

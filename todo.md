@@ -254,7 +254,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Multi-worktree dirty-tree warning across worktrees
 
 ### 10.6 Community-tier plugins (templates only)
-- [ ] Publish a Fossil plugin template
+- [x] Publish a Fossil plugin template
 - [ ] Publish a Pijul plugin template
 - [ ] Publish a Bazaar/Breezy plugin template
 - [ ] Link to community repo in plugin marketplace

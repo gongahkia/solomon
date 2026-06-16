@@ -44,6 +44,11 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[1], "import-starship")) {
+        try importStarship(allocator, args[2..]);
+        return;
+    }
+
     if (std.mem.eql(u8, args[1], "bench")) {
         try bench(allocator, args[2..]);
         return;
@@ -197,6 +202,269 @@ test "explain output dumps pipeline" {
     try std.testing.expect(std.mem.indexOf(u8, output, "theme: plain\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "1. cwd (sync)") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "2. git_branch (async)") != null);
+}
+
+const StarshipImport = struct {
+    modules: std.ArrayList(shisa_config.ModuleId) = .empty,
+    unsupported: std.ArrayList([]const u8) = .empty,
+    python: bool = false,
+    node: bool = false,
+    rust: bool = false,
+    go: bool = false,
+
+    fn deinit(self: *StarshipImport, allocator: std.mem.Allocator) void {
+        self.modules.deinit(allocator);
+        for (self.unsupported.items) |name| allocator.free(name);
+        self.unsupported.deinit(allocator);
+    }
+};
+
+fn importStarship(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len != 1) return error.UnknownImportStarshipArgument;
+
+    const source = try std.fs.cwd().readFileAlloc(allocator, args[0], max_config_bytes);
+    defer allocator.free(source);
+
+    const output = try importStarshipAlloc(allocator, source);
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn importStarshipAlloc(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
+    var imported = StarshipImport{};
+    defer imported.deinit(allocator);
+
+    if (try starshipFormatAlloc(allocator, source)) |format| {
+        defer allocator.free(format);
+        try scanStarshipFormat(allocator, format, &imported);
+    } else {
+        try scanStarshipTables(allocator, source, &imported);
+    }
+
+    if (imported.modules.items.len == 0) {
+        inline for (.{ .cwd, .git_branch, .language_versions, .exit_status, .jobs, .cmd_duration, .user_host }) |module_id| {
+            try appendModule(allocator, &imported, module_id);
+        }
+    }
+
+    return renderImportedConfigAlloc(allocator, imported);
+}
+
+fn starshipFormatAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 {
+    var offset: usize = 0;
+    while (offset <= source.len) {
+        const rest = source[offset..];
+        const line_len = std.mem.indexOfScalar(u8, rest, '\n') orelse rest.len;
+        const line = rest[0..line_len];
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (std.mem.startsWith(u8, trimmed, "format")) {
+            const eq_index = std.mem.indexOfScalar(u8, trimmed, '=') orelse return null;
+            const value = std.mem.trim(u8, trimmed[eq_index + 1 ..], " \t\r");
+            return parseTomlStringAlloc(allocator, value);
+        }
+        offset += line_len + 1;
+        if (offset > source.len) break;
+    }
+    return null;
+}
+
+fn parseTomlStringAlloc(allocator: std.mem.Allocator, value: []const u8) !?[]u8 {
+    if (value.len >= 6 and std.mem.startsWith(u8, value, "\"\"\"") and std.mem.endsWith(u8, value, "\"\"\"")) {
+        return try allocator.dupe(u8, value[3 .. value.len - 3]);
+    }
+    if (value.len < 2 or value[0] != '"') return null;
+
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    var index: usize = 1;
+    while (index < value.len) : (index += 1) {
+        const byte = value[index];
+        if (byte == '"') return try out.toOwnedSlice(allocator);
+        if (byte == '\\') {
+            index += 1;
+            if (index >= value.len) return null;
+            switch (value[index]) {
+                '"' => try out.append(allocator, '"'),
+                '\\' => try out.append(allocator, '\\'),
+                'n' => try out.append(allocator, '\n'),
+                'r' => try out.append(allocator, '\r'),
+                't' => try out.append(allocator, '\t'),
+                else => try out.append(allocator, value[index]),
+            }
+        } else {
+            try out.append(allocator, byte);
+        }
+    }
+    return null;
+}
+
+fn scanStarshipFormat(allocator: std.mem.Allocator, format: []const u8, imported: *StarshipImport) !void {
+    var index: usize = 0;
+    while (index < format.len) : (index += 1) {
+        if (format[index] != '$') continue;
+        index += 1;
+        const start = index;
+        while (index < format.len and isStarshipModuleByte(format[index])) : (index += 1) {}
+        if (index == start) continue;
+        try mapStarshipModule(allocator, format[start..index], imported);
+        index -= 1;
+    }
+}
+
+fn scanStarshipTables(allocator: std.mem.Allocator, source: []const u8, imported: *StarshipImport) !void {
+    var offset: usize = 0;
+    while (offset <= source.len) {
+        const rest = source[offset..];
+        const line_len = std.mem.indexOfScalar(u8, rest, '\n') orelse rest.len;
+        const line = rest[0..line_len];
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len > 2 and trimmed[0] == '[' and trimmed[trimmed.len - 1] == ']') {
+            const name = std.mem.trim(u8, trimmed[1 .. trimmed.len - 1], " \t\r");
+            if (!std.mem.startsWith(u8, name, "[")) try mapStarshipModule(allocator, name, imported);
+        }
+        offset += line_len + 1;
+        if (offset > source.len) break;
+    }
+}
+
+fn isStarshipModuleByte(byte: u8) bool {
+    return std.ascii.isAlphanumeric(byte) or byte == '_';
+}
+
+fn mapStarshipModule(allocator: std.mem.Allocator, name: []const u8, imported: *StarshipImport) !void {
+    if (std.mem.eql(u8, name, "directory")) {
+        try appendModule(allocator, imported, .cwd);
+    } else if (std.mem.eql(u8, name, "git_branch") or std.mem.eql(u8, name, "git_status") or std.mem.eql(u8, name, "git_commit") or std.mem.eql(u8, name, "git_state")) {
+        try appendModule(allocator, imported, .git_branch);
+    } else if (std.mem.eql(u8, name, "python")) {
+        imported.python = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "nodejs")) {
+        imported.node = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "rust")) {
+        imported.rust = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "golang")) {
+        imported.go = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "status")) {
+        try appendModule(allocator, imported, .exit_status);
+    } else if (std.mem.eql(u8, name, "jobs")) {
+        try appendModule(allocator, imported, .jobs);
+    } else if (std.mem.eql(u8, name, "cmd_duration")) {
+        try appendModule(allocator, imported, .cmd_duration);
+    } else if (std.mem.eql(u8, name, "username") or std.mem.eql(u8, name, "hostname")) {
+        try appendModule(allocator, imported, .user_host);
+    } else if (std.mem.eql(u8, name, "time")) {
+        try appendModule(allocator, imported, .time);
+    } else if (!isIgnoredStarshipModule(name)) {
+        try appendUnsupported(allocator, imported, name);
+    }
+}
+
+fn isIgnoredStarshipModule(name: []const u8) bool {
+    return std.mem.eql(u8, name, "character") or
+        std.mem.eql(u8, name, "line_break") or
+        std.mem.eql(u8, name, "fill") or
+        std.mem.eql(u8, name, "os") or
+        std.mem.eql(u8, name, "shell");
+}
+
+fn appendModule(allocator: std.mem.Allocator, imported: *StarshipImport, module_id: shisa_config.ModuleId) !void {
+    for (imported.modules.items) |existing| {
+        if (existing == module_id) return;
+    }
+    try imported.modules.append(allocator, module_id);
+}
+
+fn appendUnsupported(allocator: std.mem.Allocator, imported: *StarshipImport, name: []const u8) !void {
+    for (imported.unsupported.items) |existing| {
+        if (std.mem.eql(u8, existing, name)) return;
+    }
+    const owned = try allocator.dupe(u8, name);
+    errdefer allocator.free(owned);
+    try imported.unsupported.append(allocator, owned);
+}
+
+fn renderImportedConfigAlloc(allocator: std.mem.Allocator, imported: StarshipImport) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    try out.appendSlice(allocator, "version = 1\n");
+    try out.appendSlice(allocator, "theme = \"plain\"\n\n");
+    try out.appendSlice(allocator, "[prompt]\nmodules = [");
+    for (imported.modules.items, 0..) |module_id, index| {
+        if (index != 0) try out.appendSlice(allocator, ", ");
+        try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+    }
+    try out.appendSlice(allocator, "]\n");
+
+    if (containsModule(imported, .language_versions) and (imported.python or imported.node or imported.rust or imported.go)) {
+        try out.appendSlice(allocator, "\n[modules.language_versions]\ndetect = [");
+        var count: usize = 0;
+        if (imported.python) try appendLanguage(allocator, &out, &count, "python");
+        if (imported.node) try appendLanguage(allocator, &out, &count, "node");
+        if (imported.rust) try appendLanguage(allocator, &out, &count, "rust");
+        if (imported.go) try appendLanguage(allocator, &out, &count, "go");
+        try out.appendSlice(allocator, "]\n");
+    }
+
+    if (containsModule(imported, .time)) {
+        try out.appendSlice(allocator, "\n[modules.time]\nformat = \"24h\"\nutc = true\n");
+    }
+
+    if (imported.unsupported.items.len != 0) {
+        try out.appendSlice(allocator, "\n# Unsupported Starship modules: ");
+        for (imported.unsupported.items, 0..) |name, index| {
+            if (index != 0) try out.appendSlice(allocator, ", ");
+            try out.appendSlice(allocator, name);
+        }
+        try out.append(allocator, '\n');
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn containsModule(imported: StarshipImport, module_id: shisa_config.ModuleId) bool {
+    for (imported.modules.items) |existing| {
+        if (existing == module_id) return true;
+    }
+    return false;
+}
+
+fn appendLanguage(allocator: std.mem.Allocator, out: *std.ArrayList(u8), count: *usize, name: []const u8) !void {
+    if (count.* != 0) try out.appendSlice(allocator, ", ");
+    count.* += 1;
+    try appendFmt(allocator, out, "\"{s}\"", .{name});
+}
+
+test "imports starship format into shisa modules" {
+    const source =
+        \\format = "$directory$git_branch$git_status$python$nodejs$status$jobs$cmd_duration$hostname$time$character"
+        \\
+    ;
+    const output = try importStarshipAlloc(std.testing.allocator, source);
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "modules = [\"cwd\", \"git_branch\", \"language_versions\", \"exit_status\", \"jobs\", \"cmd_duration\", \"user_host\", \"time\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "detect = [\"python\", \"node\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "[modules.time]") != null);
+}
+
+test "imports starship table fallback and records unsupported modules" {
+    const source =
+        \\[directory]
+        \\[aws]
+        \\[git_branch]
+        \\
+    ;
+    const output = try importStarshipAlloc(std.testing.allocator, source);
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "modules = [\"cwd\", \"git_branch\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Unsupported Starship modules: aws") != null);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {
@@ -973,6 +1241,8 @@ const help_text =
     \\  bench         benchmark prompt render via hyperfine
     \\  cache         dump cache stats
     \\  explain       print resolved module pipeline
+    \\  import-starship <path>
+    \\                translate starship.toml to shisa.toml
     \\  init          write default shisa.toml
     \\  pin           mark a path as never-evicted
     \\  plugin        install, list, enable, disable, or trust plugins

@@ -93,7 +93,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 
 ## Phase 2 — Async core
 
-- [ ] Implement module execution-class enum and dispatcher
+- [x] Implement module execution-class enum and dispatcher
 - [ ] Implement placeholder render (returns immediately with a sentinel slot)
 - [ ] Implement zsh redraw via `zle reset-prompt` triggered by async-fill notification
 - [ ] Implement transient prompt: on `accept-line`, replace prompt with minimal form

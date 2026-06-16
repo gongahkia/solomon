@@ -189,6 +189,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const daemon_json_test_run = b.addRunArtifact(daemon_json_tests);
+    const dispatcher_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/daemon/dispatcher.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const dispatcher_test_run = b.addRunArtifact(dispatcher_tests);
     const supervisor_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/supervisor.zig"),
@@ -248,6 +256,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&git_branch_test_run.step);
     test_step.dependOn(&cmd_duration_test_run.step);
     test_step.dependOn(&daemon_json_test_run.step);
+    test_step.dependOn(&dispatcher_test_run.step);
     test_step.dependOn(&supervisor_test_run.step);
     test_step.dependOn(&proto_types_test_run.step);
     test_step.dependOn(&proto_frame_test_run.step);

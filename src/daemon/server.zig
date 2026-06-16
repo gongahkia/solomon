@@ -1,11 +1,6 @@
 const std = @import("std");
-const cmd_duration_module = @import("modules/cmd_duration.zig");
-const cwd_module = @import("modules/cwd.zig");
-const exit_status_module = @import("modules/exit_status.zig");
+const dispatcher = @import("dispatcher.zig");
 const git_branch_module = @import("modules/git_branch.zig");
-const jobs_module = @import("modules/jobs.zig");
-const time_module = @import("modules/time.zig");
-const user_host_module = @import("modules/user_host.zig");
 const json = @import("json.zig");
 
 const header_bytes = 4;
@@ -108,24 +103,25 @@ pub const Server = struct {
         const home = std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch null;
         defer if (home) |home_path| std.heap.page_allocator.free(home_path);
 
-        const cwd = try cwd_module.render(std.heap.page_allocator, parsed.value.cwd, home, 3);
-        defer std.heap.page_allocator.free(cwd);
+        const ssh = std.process.getEnvVarOwned(std.heap.page_allocator, "SSH_CONNECTION") catch null;
+        defer if (ssh) |value| std.heap.page_allocator.free(value);
+        const user = std.process.getEnvVarOwned(std.heap.page_allocator, "USER") catch try std.heap.page_allocator.dupe(u8, "unknown");
+        defer std.heap.page_allocator.free(user);
+        var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
+        const host = std.posix.gethostname(&host_buffer) catch "unknown";
 
-        const git_branch = try self.git_branch_cache.render(std.heap.page_allocator, parsed.value.cwd);
-        defer if (git_branch) |segment| std.heap.page_allocator.free(segment);
-        const time_segment = try time_module.render(std.heap.page_allocator, parsed.value.time, std.time.timestamp());
-        defer if (time_segment) |segment| std.heap.page_allocator.free(segment);
-
-        const exit_status = try exit_status_module.render(std.heap.page_allocator, parsed.value.exit);
-        defer if (exit_status) |segment| std.heap.page_allocator.free(segment);
-        const jobs = try jobs_module.render(std.heap.page_allocator, parsed.value.jobs);
-        defer if (jobs) |segment| std.heap.page_allocator.free(segment);
-        const cmd_duration = try cmd_duration_module.render(std.heap.page_allocator, parsed.value.duration_ms, 1000);
-        defer if (cmd_duration) |segment| std.heap.page_allocator.free(segment);
-        const user_host = try renderUserHost();
-        defer if (user_host) |segment| std.heap.page_allocator.free(segment);
-
-        const prompt = try formatPrompt(std.heap.page_allocator, cwd, git_branch, time_segment, exit_status, jobs, cmd_duration, user_host);
+        const prompt = try dispatcher.renderDefault(std.heap.page_allocator, &self.git_branch_cache, .{
+            .cwd = parsed.value.cwd,
+            .home = home,
+            .exit = parsed.value.exit,
+            .jobs = parsed.value.jobs,
+            .duration_ms = parsed.value.duration_ms,
+            .time = parsed.value.time,
+            .timestamp = std.time.timestamp(),
+            .ssh = ssh,
+            .user = user,
+            .host = host,
+        });
         defer std.heap.page_allocator.free(prompt);
 
         const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, prompt);
@@ -134,40 +130,6 @@ pub const Server = struct {
         return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"prompt\":\"{s}\",\"redraw_token\":null}}", .{escaped_prompt});
     }
 };
-
-fn renderUserHost() !?[]u8 {
-    const ssh = std.process.getEnvVarOwned(std.heap.page_allocator, "SSH_CONNECTION") catch null;
-    defer if (ssh) |value| std.heap.page_allocator.free(value);
-
-    const user = std.process.getEnvVarOwned(std.heap.page_allocator, "USER") catch try std.heap.page_allocator.dupe(u8, "unknown");
-    defer std.heap.page_allocator.free(user);
-
-    var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
-    const host = std.posix.gethostname(&host_buffer) catch "unknown";
-
-    return user_host_module.render(std.heap.page_allocator, ssh, user, host);
-}
-
-fn formatPrompt(allocator: std.mem.Allocator, cwd: []const u8, git_branch: ?[]const u8, time_segment: ?[]const u8, exit_status: ?[]const u8, jobs: ?[]const u8, cmd_duration: ?[]const u8, user_host: ?[]const u8) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(allocator);
-
-    try out.appendSlice(allocator, cwd);
-    if (git_branch) |segment| try appendSegment(allocator, &out, segment);
-    if (time_segment) |segment| try appendSegment(allocator, &out, segment);
-    if (exit_status) |segment| try appendSegment(allocator, &out, segment);
-    if (jobs) |segment| try appendSegment(allocator, &out, segment);
-    if (cmd_duration) |segment| try appendSegment(allocator, &out, segment);
-    if (user_host) |segment| try appendSegment(allocator, &out, segment);
-    try out.appendSlice(allocator, "> ");
-
-    return out.toOwnedSlice(allocator);
-}
-
-fn appendSegment(allocator: std.mem.Allocator, out: *std.ArrayList(u8), segment: []const u8) !void {
-    try out.append(allocator, ' ');
-    try out.appendSlice(allocator, segment);
-}
 
 fn writeFrame(fd: std.posix.fd_t, payload: []const u8) !void {
     const encoded = try encodeFrameAlloc(std.heap.page_allocator, payload);

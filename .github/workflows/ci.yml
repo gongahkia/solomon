@@ -36,3 +36,30 @@ jobs:
       - run: zig build debug
       - run: zig build release
       - run: zig build bench
+
+  shell-hooks:
+    name: shell hooks / ${{ matrix.shell }}
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shell: nu
+            package: nushell
+            test: test/integration/nu_fake_socket.sh
+          - shell: pwsh
+            package: powershell
+            test: test/integration/pwsh_fake_socket.sh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+          use-cache: true
+          cache-key: shisa-shell-${{ matrix.shell }}-${{ hashFiles('build.zig.zon') }}
+
+      - run: brew install ${{ matrix.package }}
+      - run: zig build debug
+      - run: bash ${{ matrix.test }}

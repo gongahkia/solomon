@@ -151,7 +151,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Linux: handle Wayland-only edge cases (none expected, verify)
 - [ ] Test under systemd-nspawn, podman, distrobox
 - [ ] Test under nix-shell, devenv, flox (these mess with PATH and language versions)
-- [ ] Add CI matrix entries for nu + pwsh
+- [x] Add CI matrix entries for nu + pwsh
 
 ## Phase 7 — Theming + starship importer
 

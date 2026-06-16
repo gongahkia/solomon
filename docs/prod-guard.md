@@ -15,4 +15,4 @@ Built-in destructive command patterns:
 - `mkfs*`
 - SQL `DROP TABLE`
 
-Current daemon responses include tier, tier reason, and destructive-pattern metadata. Blocking and typed confirmation are layered on top of this decision path.
+Daemon responses include tier, tier reason, and destructive-pattern metadata. Destructive commands classified as `prod` return `allow=false` and `confirm="prod"`; the CLI requires typing the tier name before proceeding.

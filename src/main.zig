@@ -359,6 +359,14 @@ const CloudPreexec = struct {
     command: []const u8,
 };
 
+const CloudPreexecResponse = struct {
+    v: u32 = 1,
+    allow: bool = true,
+    confirm: []const u8 = "",
+    tier: []const u8 = "unknown",
+    destructive_pattern: []const u8 = "-",
+};
+
 fn parseCloudPreexecArgs(args: []const []const u8) !CloudPreexec {
     var parsed = CloudPreexec{ .command = "" };
     var i: usize = 0;
@@ -387,7 +395,8 @@ fn cloudPreexec(allocator: std.mem.Allocator, config: CloudPreexec) !void {
     const payload = try buildCloudPreexecPayload(allocator, config);
     defer allocator.free(payload);
     const response = client.requestAlloc(allocator, socket_path, payload) catch return;
-    allocator.free(response);
+    defer allocator.free(response);
+    try enforceCloudPreexecResponse(allocator, response);
 }
 
 fn buildCloudPreexecPayload(allocator: std.mem.Allocator, config: CloudPreexec) ![]u8 {
@@ -414,11 +423,43 @@ fn cloudExplainAlloc(allocator: std.mem.Allocator, value: []const u8, home: ?[]c
     );
 }
 
+fn enforceCloudPreexecResponse(allocator: std.mem.Allocator, response: []const u8) !void {
+    var parsed = try std.json.parseFromSlice(CloudPreexecResponse, allocator, response, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    if (parsed.value.allow) return;
+    if (parsed.value.confirm.len == 0) return error.PreexecDenied;
+    try promptTierConfirmation(parsed.value);
+}
+
+fn promptTierConfirmation(decision: CloudPreexecResponse) !void {
+    const stderr = std.fs.File.stderr();
+    try stderr.writeAll("shisa prod_guard: ");
+    try stderr.writeAll(decision.destructive_pattern);
+    try stderr.writeAll(" in ");
+    try stderr.writeAll(decision.tier);
+    try stderr.writeAll("; type ");
+    try stderr.writeAll(decision.confirm);
+    try stderr.writeAll(" to proceed: ");
+
+    var buffer: [128]u8 = undefined;
+    const n = try std.fs.File.stdin().read(&buffer);
+    const answer = std.mem.trim(u8, buffer[0..n], " \t\r\n");
+    if (!std.mem.eql(u8, answer, decision.confirm)) return error.PreexecDenied;
+}
+
 test "cloud preexec args parse" {
     const parsed = try parseCloudPreexecArgs(&.{ "--socket", "/tmp/shisa.sock", "--shell", "zsh", "--", "kubectl delete pod x" });
     try std.testing.expectEqualStrings("/tmp/shisa.sock", parsed.socket_path.?);
     try std.testing.expectEqualStrings("zsh", parsed.shell);
     try std.testing.expectEqualStrings("kubectl delete pod x", parsed.command);
+}
+
+test "cloud preexec response allows safe command" {
+    try enforceCloudPreexecResponse(std.testing.allocator, "{\"v\":1,\"allow\":true}");
+}
+
+test "cloud preexec response denies without confirm token" {
+    try std.testing.expectError(error.PreexecDenied, enforceCloudPreexecResponse(std.testing.allocator, "{\"v\":1,\"allow\":false}"));
 }
 
 test "cloud preexec payload escapes command" {

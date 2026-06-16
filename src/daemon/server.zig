@@ -214,10 +214,11 @@ pub const Server = struct {
         const destructive = prod_guard_module.destructivePattern(parsed.value.command);
         const escaped_destructive = try json.escapeAlloc(std.heap.page_allocator, destructive orelse "-");
         defer std.heap.page_allocator.free(escaped_destructive);
+        const allow = destructive == null or reason.tier != .prod;
         return std.fmt.allocPrint(
             std.heap.page_allocator,
-            "{{\"v\":1,\"allow\":true,\"tier\":\"{s}\",\"source\":\"{s}\",\"pattern\":\"{s}\",\"destructive\":{},\"destructive_pattern\":\"{s}\"}}",
-            .{ risk_tier_module.tierName(reason.tier), risk_tier_module.sourceName(reason.source), escaped_pattern, destructive != null, escaped_destructive },
+            "{{\"v\":1,\"allow\":{},\"confirm\":\"{s}\",\"tier\":\"{s}\",\"source\":\"{s}\",\"pattern\":\"{s}\",\"destructive\":{},\"destructive_pattern\":\"{s}\"}}",
+            .{ allow, if (allow) "" else risk_tier_module.tierName(reason.tier), risk_tier_module.tierName(reason.tier), risk_tier_module.sourceName(reason.source), escaped_pattern, destructive != null, escaped_destructive },
         );
     }
 
@@ -493,6 +494,26 @@ test "preexec response classifies command tier" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"tier\":\"prod\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"allow\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"destructive\":false") != null);
+}
+
+test "preexec response denies destructive prod command" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const response = try server.preexecResponse("{\"v\":1,\"kind\":\"preexec\",\"shell\":\"zsh\",\"command\":\"kubectl delete pod x --context api-prd-use1\"}");
+    defer std.heap.page_allocator.free(response);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"tier\":\"prod\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"allow\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"confirm\":\"prod\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"destructive_pattern\":\"kubectl delete\"") != null);
 }
 
 test "fs event invalidates git branch cache" {

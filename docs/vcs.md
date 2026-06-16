@@ -45,3 +45,8 @@ Detection:
 - Walk ancestors from `cwd`.
 - A directory containing `.hg/` is the Mercurial root.
 - Detection does not require the `hg` binary.
+
+State sources:
+
+- `hg summary --remote` for parent, branch, commit/update state, and phases.
+- When no default remote exists, Mercurial 7.2.2 exits 255 but still emits useful summary stdout; Shisa parses that stdout.

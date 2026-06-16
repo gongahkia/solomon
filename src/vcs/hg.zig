@@ -2,6 +2,87 @@ const std = @import("std");
 
 pub const module_id = "hg_state";
 
+pub const Summary = struct {
+    parent: []u8,
+    description: []u8,
+    branch: []u8,
+    commit: []u8,
+    update: []u8,
+    phases: []u8,
+
+    pub fn deinit(self: *Summary, allocator: std.mem.Allocator) void {
+        allocator.free(self.parent);
+        allocator.free(self.description);
+        allocator.free(self.branch);
+        allocator.free(self.commit);
+        allocator.free(self.update);
+        allocator.free(self.phases);
+        self.* = undefined;
+    }
+
+    pub fn clone(self: Summary, allocator: std.mem.Allocator) !Summary {
+        const parent = try allocator.dupe(u8, self.parent);
+        errdefer allocator.free(parent);
+        const description = try allocator.dupe(u8, self.description);
+        errdefer allocator.free(description);
+        const branch = try allocator.dupe(u8, self.branch);
+        errdefer allocator.free(branch);
+        const commit = try allocator.dupe(u8, self.commit);
+        errdefer allocator.free(commit);
+        const update = try allocator.dupe(u8, self.update);
+        errdefer allocator.free(update);
+        const phases = try allocator.dupe(u8, self.phases);
+        return .{
+            .parent = parent,
+            .description = description,
+            .branch = branch,
+            .commit = commit,
+            .update = update,
+            .phases = phases,
+        };
+    }
+};
+
+pub const Cache = struct {
+    valid: bool = false,
+    root_path: ?[]u8 = null,
+    summary: ?Summary = null,
+
+    pub fn deinit(self: *Cache, allocator: std.mem.Allocator) void {
+        self.clear(allocator);
+    }
+
+    pub fn invalidate(self: *Cache, allocator: std.mem.Allocator, root_path: []const u8) void {
+        if (self.root_path == null or !std.mem.eql(u8, self.root_path.?, root_path)) return;
+        self.clear(allocator);
+    }
+
+    pub fn read(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) !?Summary {
+        const root = (try findRoot(allocator, cwd_path)) orelse return null;
+        defer allocator.free(root);
+
+        if (self.valid and self.root_path != null and std.mem.eql(u8, self.root_path.?, root)) {
+            if (self.summary) |summary| return try summary.clone(allocator);
+            return null;
+        }
+
+        self.clear(allocator);
+        self.root_path = try allocator.dupe(u8, root);
+        self.valid = true;
+        self.summary = try readSummary(allocator, cwd_path);
+        if (self.summary) |summary| return try summary.clone(allocator);
+        return null;
+    }
+
+    fn clear(self: *Cache, allocator: std.mem.Allocator) void {
+        if (self.root_path) |value| allocator.free(value);
+        if (self.summary) |*summary| summary.deinit(allocator);
+        self.valid = false;
+        self.root_path = null;
+        self.summary = null;
+    }
+};
+
 pub fn findRoot(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
     var current = try allocator.dupe(u8, cwd_path);
     errdefer allocator.free(current);
@@ -44,6 +125,75 @@ pub fn isRepo(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
         return true;
     }
     return false;
+}
+
+pub fn readSummary(allocator: std.mem.Allocator, cwd_path: []const u8) !?Summary {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "hg", "summary", "--remote" },
+        .cwd = cwd_path,
+        .max_output_bytes = 64 * 1024,
+        .expand_arg0 = .expand,
+    }) catch return null;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    return parseSummary(allocator, result.stdout);
+}
+
+pub fn parseSummary(allocator: std.mem.Allocator, output: []const u8) !?Summary {
+    var parent: []const u8 = "";
+    var description: []const u8 = "";
+    var branch: []const u8 = "";
+    var commit: []const u8 = "";
+    var update: []const u8 = "";
+    var phases: []const u8 = "";
+
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trimRight(u8, raw_line, "\r");
+        if (line.len == 0) continue;
+        if (std.mem.startsWith(u8, line, "parent:")) {
+            parent = std.mem.trim(u8, line["parent:".len..], " \t");
+        } else if (std.mem.startsWith(u8, line, "branch:")) {
+            branch = std.mem.trim(u8, line["branch:".len..], " \t");
+        } else if (std.mem.startsWith(u8, line, "commit:")) {
+            commit = std.mem.trim(u8, line["commit:".len..], " \t");
+        } else if (std.mem.startsWith(u8, line, "update:")) {
+            update = std.mem.trim(u8, line["update:".len..], " \t");
+        } else if (std.mem.startsWith(u8, line, "phases:")) {
+            phases = std.mem.trim(u8, line["phases:".len..], " \t");
+        } else if (line[0] == ' ' and description.len == 0) {
+            description = std.mem.trim(u8, line, " \t");
+        }
+    }
+    if (parent.len == 0 and branch.len == 0 and commit.len == 0 and phases.len == 0) return null;
+
+    const owned_parent = try allocator.dupe(u8, parent);
+    errdefer allocator.free(owned_parent);
+    const owned_description = try allocator.dupe(u8, description);
+    errdefer allocator.free(owned_description);
+    const owned_branch = try allocator.dupe(u8, branch);
+    errdefer allocator.free(owned_branch);
+    const owned_commit = try allocator.dupe(u8, commit);
+    errdefer allocator.free(owned_commit);
+    const owned_update = try allocator.dupe(u8, update);
+    errdefer allocator.free(owned_update);
+    const owned_phases = try allocator.dupe(u8, phases);
+    return .{
+        .parent = owned_parent,
+        .description = owned_description,
+        .branch = owned_branch,
+        .commit = owned_commit,
+        .update = owned_update,
+        .phases = owned_phases,
+    };
+}
+
+fn exitedZero(term: std.process.Child.Term) bool {
+    return switch (term) {
+        .Exited => |code| code == 0,
+        else => false,
+    };
 }
 
 test "detects hg repo in current directory" {
@@ -92,4 +242,87 @@ test "ignores non hg directories" {
 
     try std.testing.expect(!(try isRepo(allocator, dir_path)));
     try std.testing.expect((try findRoot(allocator, dir_path)) == null);
+}
+
+test "parses hg summary output" {
+    const output =
+        \\parent: 0:f666183f198a tip
+        \\ first
+        \\branch: default
+        \\commit: 1 modified, 1 unknown
+        \\update: (current)
+        \\phases: 1 draft
+        \\
+    ;
+    var summary = (try parseSummary(std.testing.allocator, output)).?;
+    defer summary.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("0:f666183f198a tip", summary.parent);
+    try std.testing.expectEqualStrings("first", summary.description);
+    try std.testing.expectEqualStrings("default", summary.branch);
+    try std.testing.expectEqualStrings("1 modified, 1 unknown", summary.commit);
+    try std.testing.expectEqualStrings("(current)", summary.update);
+    try std.testing.expectEqualStrings("1 draft", summary.phases);
+}
+
+test "hg summary cache invalidates by root" {
+    const allocator = std.testing.allocator;
+    var cache = Cache{
+        .valid = true,
+        .root_path = try allocator.dupe(u8, "/repo"),
+        .summary = (try parseSummary(allocator,
+            \\parent: 0:f666183f198a tip
+            \\ first
+            \\branch: default
+            \\commit: clean
+            \\update: (current)
+            \\phases: 1 draft
+            \\
+        )).?,
+    };
+    defer cache.deinit(allocator);
+
+    cache.invalidate(allocator, "/other");
+    try std.testing.expect(cache.valid);
+    cache.invalidate(allocator, "/repo");
+    try std.testing.expect(!cache.valid);
+}
+
+test "reads real hg summary when hg is installed" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-hg-real-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    if (!try runCommandOk(allocator, dir_path, &.{ "hg", "init" })) return error.SkipZigTest;
+    const file_path = try std.fmt.allocPrint(allocator, "{s}/f.txt", .{dir_path});
+    defer allocator.free(file_path);
+    try writeFile(file_path, "one\n");
+    if (!try runCommandOk(allocator, dir_path, &.{ "hg", "add", "f.txt" })) return error.SkipZigTest;
+    if (!try runCommandOk(allocator, dir_path, &.{ "hg", "commit", "-m", "first", "-u", "Bench <bench@example.test>" })) return error.SkipZigTest;
+
+    var summary = (try readSummary(allocator, dir_path)) orelse return error.SkipZigTest;
+    defer summary.deinit(allocator);
+    try std.testing.expectEqualStrings("default", summary.branch);
+    try std.testing.expect(std.mem.indexOf(u8, summary.parent, "tip") != null);
+}
+
+fn runCommandOk(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !bool {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .cwd = cwd_path,
+        .max_output_bytes = 4096,
+        .expand_arg0 = .expand,
+    }) catch return false;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    return exitedZero(result.term);
+}
+
+fn writeFile(path: []const u8, contents: []const u8) !void {
+    var file = try std.fs.createFileAbsolute(path, .{ .truncate = true });
+    defer file.close();
+    try file.writeAll(contents);
 }

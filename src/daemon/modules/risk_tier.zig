@@ -9,6 +9,22 @@ pub const Tier = enum {
     prod,
 };
 
+pub const ColorSlot = enum {
+    fg,
+    muted,
+    accent,
+    success,
+    warning,
+    danger,
+};
+
+pub const BarColors = struct {
+    unknown_bg: ColorSlot = .muted,
+    dev_bg: ColorSlot = .success,
+    staging_bg: ColorSlot = .warning,
+    prod_bg: ColorSlot = .danger,
+};
+
 pub const Rules = struct {
     dev: [][]u8 = &.{},
     staging: [][]u8 = &.{},
@@ -76,6 +92,36 @@ pub fn tierName(tier: Tier) []const u8 {
         .dev => "dev",
         .staging => "staging",
         .prod => "prod",
+    };
+}
+
+pub fn colorSlotName(slot: ColorSlot) []const u8 {
+    return switch (slot) {
+        .fg => "fg",
+        .muted => "muted",
+        .accent => "accent",
+        .success => "success",
+        .warning => "warning",
+        .danger => "danger",
+    };
+}
+
+pub fn parseColorSlot(name: []const u8) ?ColorSlot {
+    if (std.mem.eql(u8, name, "fg")) return .fg;
+    if (std.mem.eql(u8, name, "muted")) return .muted;
+    if (std.mem.eql(u8, name, "accent")) return .accent;
+    if (std.mem.eql(u8, name, "success")) return .success;
+    if (std.mem.eql(u8, name, "warning")) return .warning;
+    if (std.mem.eql(u8, name, "danger")) return .danger;
+    return null;
+}
+
+pub fn backgroundSlot(tier: Tier, colors: BarColors) ColorSlot {
+    return switch (tier) {
+        .unknown => colors.unknown_bg,
+        .dev => colors.dev_bg,
+        .staging => colors.staging_bg,
+        .prod => colors.prod_bg,
     };
 }
 
@@ -312,6 +358,16 @@ test "prod wins over lower tiers" {
 
 test "unknown when no default matches" {
     try std.testing.expectEqual(Tier.unknown, classify("personal"));
+}
+
+test "maps tiers to background slots" {
+    const colors = BarColors{ .prod_bg = .danger, .staging_bg = .warning, .dev_bg = .success, .unknown_bg = .muted };
+    try std.testing.expectEqual(ColorSlot.danger, backgroundSlot(.prod, colors));
+    try std.testing.expectEqual(ColorSlot.warning, backgroundSlot(.staging, colors));
+    try std.testing.expectEqual(ColorSlot.success, backgroundSlot(.dev, colors));
+    try std.testing.expectEqual(ColorSlot.muted, backgroundSlot(.unknown, colors));
+    try std.testing.expectEqualStrings("danger", colorSlotName(.danger));
+    try std.testing.expectEqual(ColorSlot.accent, parseColorSlot("accent").?);
 }
 
 test "parses user rules" {

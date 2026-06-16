@@ -1,4 +1,5 @@
 const std = @import("std");
+const risk_tier_module = @import("daemon/modules/risk_tier.zig");
 
 pub const default_config_text =
     \\version = 1
@@ -26,6 +27,12 @@ pub const default_config_text =
     \\gcp = true
     \\azure = true
     \\kubernetes = true
+    \\
+    \\[modules.risk_tier]
+    \\unknown_bg = "muted"
+    \\dev_bg = "success"
+    \\staging_bg = "warning"
+    \\prod_bg = "danger"
     \\
 ;
 
@@ -83,6 +90,7 @@ pub const ModuleOptions = struct {
     cmd_duration: CmdDurationOptions = .{},
     user_host: UserHostOptions = .{},
     cloud_ctx: CloudCtxOptions = .{},
+    risk_tier: RiskTierOptions = .{},
     time: TimeOptions = .{},
 };
 
@@ -126,6 +134,9 @@ pub const CloudCtxOptions = struct {
     kubernetes: bool = true,
 };
 
+pub const RiskTierOptions = risk_tier_module.BarColors;
+pub const RiskTierColor = risk_tier_module.ColorSlot;
+
 pub const TimeOptions = struct {
     format_24h: bool = true,
     utc: bool = true,
@@ -155,6 +166,7 @@ const Table = enum {
     cmd_duration,
     user_host,
     cloud_ctx,
+    risk_tier,
     time,
 };
 
@@ -175,6 +187,10 @@ const Seen = struct {
     cloud_ctx_gcp: bool = false,
     cloud_ctx_azure: bool = false,
     cloud_ctx_kubernetes: bool = false,
+    risk_tier_unknown_bg: bool = false,
+    risk_tier_dev_bg: bool = false,
+    risk_tier_staging_bg: bool = false,
+    risk_tier_prod_bg: bool = false,
     time_format: bool = false,
     time_utc: bool = false,
 };
@@ -284,6 +300,7 @@ const Parser = struct {
             .cmd_duration => try self.parseCmdDurationKey(line_no, key, value),
             .user_host => try self.parseUserHostKey(line_no, key, value),
             .cloud_ctx => try self.parseCloudCtxKey(line_no, key, value),
+            .risk_tier => try self.parseRiskTierKey(line_no, key, value),
             .time => try self.parseTimeKey(line_no, key, value),
         }
     }
@@ -386,6 +403,30 @@ const Parser = struct {
         } else {
             return self.fail(line_no, key.column, "unknown key");
         }
+    }
+
+    fn parseRiskTierKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
+        if (std.mem.eql(u8, key.text, "unknown_bg")) {
+            try self.markUnseen(&self.seen.risk_tier_unknown_bg, line_no, key.column);
+            self.modules.risk_tier.unknown_bg = try self.parseRiskTierColor(value, line_no);
+        } else if (std.mem.eql(u8, key.text, "dev_bg")) {
+            try self.markUnseen(&self.seen.risk_tier_dev_bg, line_no, key.column);
+            self.modules.risk_tier.dev_bg = try self.parseRiskTierColor(value, line_no);
+        } else if (std.mem.eql(u8, key.text, "staging_bg")) {
+            try self.markUnseen(&self.seen.risk_tier_staging_bg, line_no, key.column);
+            self.modules.risk_tier.staging_bg = try self.parseRiskTierColor(value, line_no);
+        } else if (std.mem.eql(u8, key.text, "prod_bg")) {
+            try self.markUnseen(&self.seen.risk_tier_prod_bg, line_no, key.column);
+            self.modules.risk_tier.prod_bg = try self.parseRiskTierColor(value, line_no);
+        } else {
+            return self.fail(line_no, key.column, "unknown key");
+        }
+    }
+
+    fn parseRiskTierColor(self: *Parser, value: Trimmed, line_no: usize) !RiskTierColor {
+        const color = try self.parseStringAlloc(value, line_no);
+        defer self.allocator.free(color);
+        return risk_tier_module.parseColorSlot(color) orelse self.fail(line_no, value.column, "invalid risk_tier color");
     }
 
     fn parseTimeKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
@@ -546,6 +587,7 @@ fn parseTableName(name: []const u8) ?Table {
     if (std.mem.eql(u8, name, "modules.cmd_duration")) return .cmd_duration;
     if (std.mem.eql(u8, name, "modules.user_host")) return .user_host;
     if (std.mem.eql(u8, name, "modules.cloud_ctx")) return .cloud_ctx;
+    if (std.mem.eql(u8, name, "modules.risk_tier")) return .risk_tier;
     if (std.mem.eql(u8, name, "modules.time")) return .time;
     return null;
 }
@@ -691,6 +733,12 @@ test "parses per-module options" {
         \\azure = false
         \\kubernetes = true
         \\
+        \\[modules.risk_tier]
+        \\unknown_bg = "muted"
+        \\dev_bg = "accent"
+        \\staging_bg = "warning"
+        \\prod_bg = "danger"
+        \\
         \\[modules.time]
         \\format = "24h"
         \\utc = true
@@ -717,6 +765,10 @@ test "parses per-module options" {
     try std.testing.expect(config.modules.cloud_ctx.gcp);
     try std.testing.expect(!config.modules.cloud_ctx.azure);
     try std.testing.expect(config.modules.cloud_ctx.kubernetes);
+    try std.testing.expectEqual(RiskTierColor.muted, config.modules.risk_tier.unknown_bg);
+    try std.testing.expectEqual(RiskTierColor.accent, config.modules.risk_tier.dev_bg);
+    try std.testing.expectEqual(RiskTierColor.warning, config.modules.risk_tier.staging_bg);
+    try std.testing.expectEqual(RiskTierColor.danger, config.modules.risk_tier.prod_bg);
     try std.testing.expect(config.modules.time.utc);
 }
 

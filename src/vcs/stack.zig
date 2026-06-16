@@ -5,11 +5,13 @@ pub const module_id = "vcs_stack";
 pub const Provider = enum {
     graphite,
     ghstack,
+    spr,
 
     pub fn label(self: Provider) []const u8 {
         return switch (self) {
             .graphite => "graphite",
             .ghstack => "ghstack",
+            .spr => "spr",
         };
     }
 };
@@ -52,6 +54,7 @@ pub fn detect(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection {
         };
     }
     if (try detectGhstack(allocator, cwd_path)) |detection| return detection;
+    if (try detectSpr(allocator, cwd_path)) |detection| return detection;
     return null;
 }
 
@@ -88,6 +91,16 @@ pub fn isGhstack(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
     return false;
 }
 
+pub fn isSpr(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
+    const detection = try detectSpr(allocator, cwd_path);
+    if (detection) |value| {
+        var owned = value;
+        owned.deinit(allocator);
+        return true;
+    }
+    return false;
+}
+
 fn detectGhstack(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection {
     if (try readCurrentGitBranch(allocator, cwd_path)) |git_branch| {
         var branch = git_branch;
@@ -112,6 +125,30 @@ fn detectGhstack(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection
         };
     }
     return null;
+}
+
+fn detectSpr(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection {
+    const root = (try findMarkerRoot(allocator, cwd_path, ".git")) orelse return null;
+    errdefer allocator.free(root);
+    const marker_path = try std.fs.path.join(allocator, &.{ root, ".git", "refs", "spr" });
+
+    std.fs.cwd().access(marker_path, .{}) catch |err| switch (err) {
+        error.FileNotFound => {
+            allocator.free(root);
+            allocator.free(marker_path);
+            return null;
+        },
+        else => {
+            allocator.free(root);
+            allocator.free(marker_path);
+            return err;
+        },
+    };
+    return .{
+        .provider = .spr,
+        .root_path = root,
+        .marker_path = marker_path,
+    };
 }
 
 fn readCurrentGitBranch(allocator: std.mem.Allocator, cwd_path: []const u8) !?GitBranch {
@@ -232,6 +269,7 @@ test "ignores directories without stack metadata" {
     try std.testing.expect((try detect(allocator, dir_path)) == null);
     try std.testing.expect(!(try isGraphiteStack(allocator, dir_path)));
     try std.testing.expect(!(try isGhstack(allocator, dir_path)));
+    try std.testing.expect(!(try isSpr(allocator, dir_path)));
 }
 
 test "detects ghstack branch names" {
@@ -284,6 +322,26 @@ test "detects ghstack rc marker" {
     try std.testing.expectEqualStrings(dir_path, detection.root_path);
     try std.testing.expectEqualStrings(marker_path, detection.marker_path);
     try std.testing.expect(detection.branch_name == null);
+}
+
+test "detects spr refs marker" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-stack-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const marker_path = try std.fmt.allocPrint(allocator, "{s}/.git/refs/spr", .{dir_path});
+    defer allocator.free(marker_path);
+    try std.fs.cwd().makePath(marker_path);
+
+    var detection = (try detect(allocator, dir_path)).?;
+    defer detection.deinit(allocator);
+    try std.testing.expectEqual(Provider.spr, detection.provider);
+    try std.testing.expectEqualStrings("spr", detection.provider.label());
+    try std.testing.expectEqualStrings(dir_path, detection.root_path);
+    try std.testing.expectEqualStrings(marker_path, detection.marker_path);
+    try std.testing.expect(try isSpr(allocator, dir_path));
 }
 
 fn writeFile(path: []const u8, contents: []const u8) !void {

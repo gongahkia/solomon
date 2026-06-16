@@ -240,7 +240,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 ### 10.4 Stacked-diff awareness (`shisa.vcs.stack`)
 - [x] Detect Graphite (`gt`): `.graphite_repo_config`
 - [x] Detect ghstack: branch naming + `.ghstackrc`
-- [ ] Detect spr / git-spr: `.git/refs/spr/`
+- [x] Detect spr / git-spr: `.git/refs/spr/`
 - [ ] Detect `st`: meta files
 - [ ] Detect git-spice (`gs`): meta files
 - [ ] Detect git-town: `.git-town-branches.yml`

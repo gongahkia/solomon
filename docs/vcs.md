@@ -73,3 +73,4 @@ Detection:
 - GitHub `gh stack` documents local tracking in `.git/gh-stack` and rebase state in `.git/gh-stack-rebase-state`: https://github.com/github/gh-stack
 - Stack position rendering uses provider-prefixed segments like `stack:gh-stack:2/5 ↑↓`.
 - `gh stack view --json` exposes `currentBranch` plus ordered `branches[]` with `isCurrent`; Shisa parses those fields for GitHub stack positions.
+- `shisa stack [--cwd PATH]` prints the detected provider, root, marker, and branch evidence when available.

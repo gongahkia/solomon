@@ -9,6 +9,7 @@ const proto = @import("proto/types.zig");
 const plugin_lua = @import("plugin/lua.zig");
 const plugin_manifest = @import("plugin/manifest.zig");
 const supervisor = @import("supervisor.zig");
+const vcs_stack = @import("vcs/stack.zig");
 
 const version = "0.1.0-dev";
 const max_config_bytes = 1024 * 1024;
@@ -73,6 +74,11 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, args[1], "plugin")) {
         try pluginCommand(allocator, args[2..]);
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "stack")) {
+        try stackCommand(allocator, args[2..]);
         return;
     }
 
@@ -316,6 +322,90 @@ test "doctor reports path and backend statuses" {
     try std.testing.expectEqualStrings("missing", pathAccessStatus("/tmp/shisa-doctor-missing"));
     try std.testing.expectEqualStrings("fsevents", fsnotifyBackendName(.fsevents));
     try std.testing.expectEqualStrings("inotify", fsnotifyBackendName(.inotify));
+}
+
+const StackConfig = struct {
+    cwd: ?[]const u8 = null,
+};
+
+fn stackCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const config = try parseStackArgs(args);
+    const cwd = if (config.cwd) |path| path else try std.fs.cwd().realpathAlloc(allocator, ".");
+    defer if (config.cwd == null) allocator.free(cwd);
+
+    const output = try stackOutputAlloc(allocator, cwd);
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn parseStackArgs(args: []const []const u8) !StackConfig {
+    var config = StackConfig{};
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--cwd")) {
+            config.cwd = try nextValue(args, &i);
+        } else {
+            return error.UnknownStackArgument;
+        }
+    }
+    return config;
+}
+
+fn stackOutputAlloc(allocator: std.mem.Allocator, cwd_path: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    var detection = (try vcs_stack.detect(allocator, cwd_path)) orelse {
+        try out.appendSlice(allocator, "stack: none\n");
+        return out.toOwnedSlice(allocator);
+    };
+    defer detection.deinit(allocator);
+
+    try appendFmt(allocator, &out, "provider: {s}\n", .{detection.provider.label()});
+    try appendFmt(allocator, &out, "root: {s}\n", .{detection.root_path});
+    try appendFmt(allocator, &out, "marker: {s}\n", .{detection.marker_path});
+    if (detection.branch_name) |branch_name| {
+        try appendFmt(allocator, &out, "branch: {s}\n", .{branch_name});
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+test "stack args parse cwd override" {
+    const config = try parseStackArgs(&.{ "--cwd", "/tmp/repo" });
+    try std.testing.expectEqualStrings("/tmp/repo", config.cwd.?);
+    try std.testing.expectError(error.UnknownStackArgument, parseStackArgs(&.{"--bad"}));
+}
+
+test "stack output reports no stack" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-cli-stack-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const output = try stackOutputAlloc(allocator, dir_path);
+    defer allocator.free(output);
+    try std.testing.expectEqualStrings("stack: none\n", output);
+}
+
+test "stack output dumps detected stack" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-cli-stack-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const marker_path = try std.fmt.allocPrint(allocator, "{s}/.graphite_repo_config", .{dir_path});
+    defer allocator.free(marker_path);
+    var file = try std.fs.createFileAbsolute(marker_path, .{});
+    try file.writeAll("{}\n");
+    file.close();
+
+    const output = try stackOutputAlloc(allocator, dir_path);
+    defer allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "provider: graphite\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, dir_path) != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, marker_path) != null);
 }
 
 const StarshipImport = struct {
@@ -1365,6 +1455,7 @@ const help_text =
     \\  pin           mark a path as never-evicted
     \\  plugin        install, list, enable, disable, or trust plugins
     \\  prompt        render prompt through shisad
+    \\  stack         dump detected stacked-diff metadata
     \\  supervisor    run shisad under a crash-restart supervisor
     \\
     \\options:

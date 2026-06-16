@@ -246,7 +246,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Detect git-town: `.git-town-branches.yml`
 - [x] Detect GitHub-native stacked PRs (`gh stack`) via remote config
 - [x] Render stack position (e.g., `2/5 ↑↓`)
-- [ ] Add a `shisa stack` CLI to dump the detected stack as text
+- [x] Add a `shisa stack` CLI to dump the detected stack as text
 
 ### 10.5 Worktree (`shisa.vcs.worktree`)
 - [ ] Show `wt:<name>` when cwd is inside a worktree

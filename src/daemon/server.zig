@@ -1,4 +1,5 @@
 const std = @import("std");
+const cloud_ctx_module = @import("modules/cloud_ctx.zig");
 const dispatcher = @import("dispatcher.zig");
 const git_branch_module = @import("modules/git_branch.zig");
 const language_versions_module = @import("modules/language_versions.zig");
@@ -30,6 +31,7 @@ pub const Server = struct {
     connections: u64 = 0,
     git_branch_cache: git_branch_module.Cache = .{},
     language_versions_cache: language_versions_module.Cache = .{},
+    cloud_ctx_cache: cloud_ctx_module.Cache = .{},
     fs_watcher: fsnotify.Watcher,
 
     pub fn init(socket_path: []const u8) !Server {
@@ -64,6 +66,7 @@ pub const Server = struct {
     pub fn deinit(self: *Server) void {
         self.git_branch_cache.deinit(std.heap.page_allocator);
         self.language_versions_cache.deinit(std.heap.page_allocator);
+        self.cloud_ctx_cache.deinit(std.heap.page_allocator);
         self.fs_watcher.deinit();
         self.listener.deinit();
         std.fs.deleteFileAbsolute(self.socket_path) catch {};
@@ -140,6 +143,7 @@ pub const Server = struct {
 
         const home = std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch null;
         defer if (home) |home_path| std.heap.page_allocator.free(home_path);
+        if (home) |home_path| try self.registerCloudInvalidation(home_path);
 
         const ssh = std.process.getEnvVarOwned(std.heap.page_allocator, "SSH_CONNECTION") catch null;
         defer if (ssh) |value| std.heap.page_allocator.free(value);
@@ -153,6 +157,7 @@ pub const Server = struct {
         var rendered = try dispatcher.renderDefault(std.heap.page_allocator, .{
             .git_branch = &self.git_branch_cache,
             .language_versions = &self.language_versions_cache,
+            .cloud_ctx = &self.cloud_ctx_cache,
         }, .{
             .cwd = parsed.value.cwd,
             .home = home,
@@ -202,6 +207,8 @@ pub const Server = struct {
         while (self.fs_watcher.nextInvalidation(timestamp_ns)) |invalidation| {
             if (std.mem.eql(u8, invalidation.module_id, git_branch_module.module_id)) {
                 self.git_branch_cache.invalidate(std.heap.page_allocator, invalidation.cwd);
+            } else if (std.mem.eql(u8, invalidation.module_id, cloud_ctx_module.module_id)) {
+                self.cloud_ctx_cache.invalidateGcp(std.heap.page_allocator);
             }
         }
     }
@@ -220,6 +227,24 @@ pub const Server = struct {
             .cwd = git_scope.cwd,
             .paths = paths[0..],
             .debounce_ms = git_scope.debounce_ms,
+        });
+        try self.logInotifyLimitWarning();
+    }
+
+    fn registerCloudInvalidation(self: *Server, home_path: []const u8) !void {
+        if (self.fs_watcher.hasScope(cloud_ctx_module.module_id, home_path)) return;
+        var watched = try cloud_ctx_module.gcpWatchScope(std.heap.page_allocator, home_path);
+        defer watched.deinit(std.heap.page_allocator);
+        const cloud_scope = watched.scope();
+        var paths: [1]fsnotify.WatchPath = undefined;
+        for (cloud_scope.paths, 0..) |path, index| {
+            paths[index] = .{ .path = path.path, .recursive = path.recursive };
+        }
+        try self.fs_watcher.watch(.{
+            .module_id = cloud_scope.module_id,
+            .cwd = cloud_scope.cwd,
+            .paths = paths[0..],
+            .debounce_ms = cloud_scope.debounce_ms,
         });
         try self.logInotifyLimitWarning();
     }

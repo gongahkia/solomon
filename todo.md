@@ -268,7 +268,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ### 11.1 Multi-cloud context segment (`cloud_ctx`)
 - [x] AWS profile from `AWS_PROFILE` env + `~/.aws/config` parse
-- [ ] GCP project from `gcloud config config-helper --format=json` (cached, fsnotify on `~/.config/gcloud/`)
+- [x] GCP project from `gcloud config config-helper --format=json` (cached, fsnotify on `~/.config/gcloud/`)
 - [ ] Azure subscription from `az account show` (cached, fsnotify on `~/.azure/azureProfile.json`)
 - [ ] Kubernetes context+namespace from kubeconfig (fsnotify on `KUBECONFIG`)
 - [ ] Render unified segment with iconography per cloud

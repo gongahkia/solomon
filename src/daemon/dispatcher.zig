@@ -69,6 +69,7 @@ pub const RenderInput = struct {
 pub const CacheSet = struct {
     git_branch: *git_branch_module.Cache,
     language_versions: *language_versions_module.Cache,
+    cloud_ctx: *cloud_ctx_module.Cache,
 };
 
 const AsyncRender = struct {
@@ -168,7 +169,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
         .jobs => try jobs_module.render(allocator, input.jobs),
         .cmd_duration => try cmd_duration_module.render(allocator, input.duration_ms, 1000),
         .user_host => try user_host_module.render(allocator, input.ssh, input.user, input.host),
-        .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.home),
+        .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.home, caches.cloud_ctx),
     };
 }
 
@@ -201,9 +202,12 @@ test "renders default pipeline" {
     defer git_cache.deinit(std.testing.allocator);
     var language_cache = language_versions_module.Cache{};
     defer language_cache.deinit(std.testing.allocator);
+    var cloud_cache = cloud_ctx_module.Cache{ .valid = true };
+    defer cloud_cache.deinit(std.testing.allocator);
     var rendered = try renderDefault(std.testing.allocator, .{
         .git_branch = &git_cache,
         .language_versions = &language_cache,
+        .cloud_ctx = &cloud_cache,
     }, .{
         .cwd = "/tmp/project",
         .home = null,
@@ -233,6 +237,8 @@ test "renders async placeholder and redraw token" {
     defer git_cache.deinit(std.testing.allocator);
     var language_cache = language_versions_module.Cache{};
     defer language_cache.deinit(std.testing.allocator);
+    var cloud_cache = cloud_ctx_module.Cache{ .valid = true };
+    defer cloud_cache.deinit(std.testing.allocator);
     const pipeline = [_]ModuleSpec{
         .{ .id = .cwd, .execution_class = .sync },
         .{ .id = .git_branch, .execution_class = .async },
@@ -240,6 +246,7 @@ test "renders async placeholder and redraw token" {
     var rendered = try renderPipeline(std.testing.allocator, .{
         .git_branch = &git_cache,
         .language_versions = &language_cache,
+        .cloud_ctx = &cloud_cache,
     }, .{
         .cwd = dir_path,
         .home = null,
@@ -271,9 +278,12 @@ test "no async renders git synchronously" {
     defer git_cache.deinit(std.testing.allocator);
     var language_cache = language_versions_module.Cache{};
     defer language_cache.deinit(std.testing.allocator);
+    var cloud_cache = cloud_ctx_module.Cache{ .valid = true };
+    defer cloud_cache.deinit(std.testing.allocator);
     var rendered = try renderDefault(std.testing.allocator, .{
         .git_branch = &git_cache,
         .language_versions = &language_cache,
+        .cloud_ctx = &cloud_cache,
     }, .{
         .cwd = dir_path,
         .home = null,

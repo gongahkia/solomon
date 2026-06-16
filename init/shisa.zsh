@@ -23,6 +23,7 @@ typeset -g SHISA_LAST_JOBS=0
 typeset -g SHISA_LAST_DURATION_MS=0
 typeset -g SHISA_PREEXEC_REALTIME=
 typeset -g SHISA_ASYNC_SIGNAL=${SHISA_ASYNC_SIGNAL:-USR1}
+typeset -g SHISA_TRANSIENT_PROMPT=${SHISA_TRANSIENT_PROMPT:-1}
 
 zmodload zsh/datetime 2>/dev/null || true
 
@@ -77,6 +78,16 @@ if [[ ${SHISA_ASYNC_SIGNAL} == USR1 ]]; then
     shisa_async_redraw
     return 0
   }
+fi
+
+shisa_accept_line() {
+  emulate -L zsh
+  print -Pnr -- $'\r\e[2K%~> '
+  zle .accept-line
+}
+
+if [[ ${SHISA_TRANSIENT_PROMPT} == 1 ]]; then
+  zle -N accept-line shisa_accept_line 2>/dev/null || true
 fi
 
 shisa_socket_path() {

@@ -32,6 +32,7 @@ const PreexecRequest = struct {
     kind: []const u8 = "",
     shell: []const u8 = "",
     command: []const u8 = "",
+    force: bool = false,
 };
 
 pub const Server = struct {
@@ -205,7 +206,6 @@ pub const Server = struct {
     }
 
     fn preexecResponse(self: *Server, request_payload: []const u8) ![]u8 {
-        _ = self;
         var parsed = try std.json.parseFromSlice(PreexecRequest, std.heap.page_allocator, request_payload, .{ .ignore_unknown_fields = true });
         defer parsed.deinit();
         const reason = risk_tier_module.explain(parsed.value.command, null);
@@ -214,12 +214,24 @@ pub const Server = struct {
         const destructive = prod_guard_module.destructivePattern(parsed.value.command);
         const escaped_destructive = try json.escapeAlloc(std.heap.page_allocator, destructive orelse "-");
         defer std.heap.page_allocator.free(escaped_destructive);
-        const allow = destructive == null or reason.tier != .prod;
+        const allow = parsed.value.force or destructive == null or reason.tier != .prod;
+        if (parsed.value.force and destructive != null) try self.logProdGuardForce(reason.tier, destructive.?);
         return std.fmt.allocPrint(
             std.heap.page_allocator,
-            "{{\"v\":1,\"allow\":{},\"confirm\":\"{s}\",\"tier\":\"{s}\",\"source\":\"{s}\",\"pattern\":\"{s}\",\"destructive\":{},\"destructive_pattern\":\"{s}\"}}",
-            .{ allow, if (allow) "" else risk_tier_module.tierName(reason.tier), risk_tier_module.tierName(reason.tier), risk_tier_module.sourceName(reason.source), escaped_pattern, destructive != null, escaped_destructive },
+            "{{\"v\":1,\"allow\":{},\"forced\":{},\"confirm\":\"{s}\",\"tier\":\"{s}\",\"source\":\"{s}\",\"pattern\":\"{s}\",\"destructive\":{},\"destructive_pattern\":\"{s}\"}}",
+            .{ allow, parsed.value.force, if (allow) "" else risk_tier_module.tierName(reason.tier), risk_tier_module.tierName(reason.tier), risk_tier_module.sourceName(reason.source), escaped_pattern, destructive != null, escaped_destructive },
         );
+    }
+
+    fn logProdGuardForce(self: *Server, tier: risk_tier_module.Tier, pattern: []const u8) !void {
+        const logger = self.logger orelse return;
+        const message = try std.fmt.allocPrint(
+            std.heap.page_allocator,
+            "tier={s} pattern={s}",
+            .{ risk_tier_module.tierName(tier), pattern },
+        );
+        defer std.heap.page_allocator.free(message);
+        try logger.warn("prod_guard_force", message);
     }
 
     fn logSlowWarning(self: *Server, slow_warning: ?dispatcher.SlowWarning) !void {
@@ -514,6 +526,32 @@ test "preexec response denies destructive prod command" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"allow\":false") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"confirm\":\"prod\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"destructive_pattern\":\"kubectl delete\"") != null);
+}
+
+test "preexec force allows and logs destructive command" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    const log_path = try std.fmt.allocPrint(allocator, "{s}/shisad.log", .{dir_path});
+    defer allocator.free(log_path);
+
+    var logger = try daemon_log.Logger.open(allocator, log_path);
+    defer logger.deinit();
+    var server = try Server.initWithLogger(socket_path, &logger);
+    defer server.deinit();
+
+    const response = try server.preexecResponse("{\"v\":1,\"kind\":\"preexec\",\"force\":true,\"shell\":\"zsh\",\"command\":\"kubectl delete pod x --context api-prd-use1\"}");
+    defer std.heap.page_allocator.free(response);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"allow\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"forced\":true") != null);
+
+    const contents = try std.fs.cwd().readFileAlloc(allocator, log_path, 4096);
+    defer allocator.free(contents);
+    try std.testing.expect(std.mem.indexOf(u8, contents, "\"event\":\"prod_guard_force\"") != null);
 }
 
 test "fs event invalidates git branch cache" {

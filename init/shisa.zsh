@@ -25,6 +25,7 @@ typeset -g SHISA_PREEXEC_REALTIME=
 typeset -g SHISA_ASYNC_SIGNAL=${SHISA_ASYNC_SIGNAL:-USR1}
 typeset -g SHISA_TRANSIENT_PROMPT=${SHISA_TRANSIENT_PROMPT:-1}
 typeset -g SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
+typeset -g SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
 
 zmodload zsh/datetime 2>/dev/null || true
 
@@ -76,7 +77,10 @@ shisa_preexec_guard() {
   [[ -n ${command} ]] || return 0
   local socket_path
   socket_path=$(shisa_socket_path)
-  "${SHISA_BIN}" cloud preexec --socket "${socket_path}" --shell "${shell_name}" -- "${command}"
+  local -a args
+  args=(cloud preexec --socket "${socket_path}" --shell "${shell_name}")
+  [[ ${SHISA_PROD_GUARD_FORCE:-0} == 1 ]] && args+=(--force)
+  "${SHISA_BIN}" "${args[@]}" -- "${command}"
 }
 
 setopt prompt_subst

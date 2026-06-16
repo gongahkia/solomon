@@ -10,6 +10,7 @@ SHISA_LAST_DURATION_MS=0
 SHISA_ASYNC_REDRAW=${SHISA_ASYNC_REDRAW:-1}
 SHISA_ASYNC_KEYSEQ=${SHISA_ASYNC_KEYSEQ:-'\C-x\C-s'}
 SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
+SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
 SHISA_COMMAND_STARTED=0
 SHISA_COMMAND_START_US=
 SHISA_IN_PROMPT=0
@@ -92,7 +93,10 @@ shisa_preexec_guard() {
   [[ -n ${command} ]] || return 0
   local socket_path
   socket_path=$(shisa_socket_path)
-  "${SHISA_BIN}" cloud preexec --socket "${socket_path}" --shell "${shell_name}" -- "${command}"
+  local -a args
+  args=(cloud preexec --socket "${socket_path}" --shell "${shell_name}")
+  [[ ${SHISA_PROD_GUARD_FORCE:-0} == 1 ]] && args+=(--force)
+  "${SHISA_BIN}" "${args[@]}" -- "${command}"
 }
 
 shisa_prompt_render() {

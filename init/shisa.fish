@@ -11,6 +11,7 @@ set -q SHISA_BIN; or set -g SHISA_BIN shisa
 set -q SHISA_SOCKET; or set -g SHISA_SOCKET ""
 set -q SHISA_INSTANT; or set -g SHISA_INSTANT 1
 set -q SHISA_PROD_GUARD; or set -g SHISA_PROD_GUARD 0
+set -q SHISA_PROD_GUARD_FORCE; or set -g SHISA_PROD_GUARD_FORCE 0
 
 function shisa_socket_path
     if test -n "$SHISA_SOCKET"
@@ -65,7 +66,11 @@ function shisa_preexec_guard --on-event fish_preexec
     set -l command (string join ' ' -- $argv)
     test -n "$command"; or return 0
     set -l socket_path (shisa_socket_path)
-    command "$SHISA_BIN" cloud preexec --socket "$socket_path" --shell fish -- "$command"
+    set -l args cloud preexec --socket "$socket_path" --shell fish
+    if test "$SHISA_PROD_GUARD_FORCE" = 1
+        set args $args --force
+    end
+    command "$SHISA_BIN" $args -- "$command"
 end
 
 function shisa_async_redraw --on-event shisa_async_redraw

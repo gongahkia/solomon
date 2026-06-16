@@ -357,6 +357,7 @@ const CloudPreexec = struct {
     socket_path: ?[]const u8 = null,
     shell: []const u8 = "",
     command: []const u8,
+    force: bool = false,
 };
 
 const CloudPreexecResponse = struct {
@@ -376,6 +377,8 @@ fn parseCloudPreexecArgs(args: []const []const u8) !CloudPreexec {
             parsed.socket_path = try nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--shell")) {
             parsed.shell = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, arg, "--force")) {
+            parsed.force = true;
         } else if (std.mem.eql(u8, arg, "--")) {
             parsed.command = try nextValue(args, &i);
             if (i + 1 != args.len) return error.UnknownCloudArgument;
@@ -406,8 +409,8 @@ fn buildCloudPreexecPayload(allocator: std.mem.Allocator, config: CloudPreexec) 
     defer allocator.free(escaped_command);
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"kind\":\"preexec\",\"shell\":\"{s}\",\"command\":\"{s}\"}}",
-        .{ escaped_shell, escaped_command },
+        "{{\"v\":1,\"kind\":\"preexec\",\"shell\":\"{s}\",\"command\":\"{s}\",\"force\":{}}}",
+        .{ escaped_shell, escaped_command, config.force },
     );
 }
 
@@ -448,9 +451,10 @@ fn promptTierConfirmation(decision: CloudPreexecResponse) !void {
 }
 
 test "cloud preexec args parse" {
-    const parsed = try parseCloudPreexecArgs(&.{ "--socket", "/tmp/shisa.sock", "--shell", "zsh", "--", "kubectl delete pod x" });
+    const parsed = try parseCloudPreexecArgs(&.{ "--socket", "/tmp/shisa.sock", "--shell", "zsh", "--force", "--", "kubectl delete pod x" });
     try std.testing.expectEqualStrings("/tmp/shisa.sock", parsed.socket_path.?);
     try std.testing.expectEqualStrings("zsh", parsed.shell);
+    try std.testing.expect(parsed.force);
     try std.testing.expectEqualStrings("kubectl delete pod x", parsed.command);
 }
 

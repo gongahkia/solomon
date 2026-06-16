@@ -7,6 +7,8 @@ SHISA_SOCKET=${SHISA_SOCKET:-}
 SHISA_LAST_EXIT=0
 SHISA_LAST_JOBS=0
 SHISA_LAST_DURATION_MS=0
+SHISA_ASYNC_REDRAW=${SHISA_ASYNC_REDRAW:-1}
+SHISA_ASYNC_KEYSEQ=${SHISA_ASYNC_KEYSEQ:-'\C-x\C-s'}
 SHISA_COMMAND_STARTED=0
 SHISA_COMMAND_START_US=
 SHISA_IN_PROMPT=0
@@ -94,6 +96,15 @@ shisa_prompt_render() {
   "${SHISA_BIN}" "${args[@]}" || shisa_prompt_fallback
 }
 
+shisa_async_redraw() {
+  return 0
+}
+
+shisa_install_async_redraw() {
+  [[ ${SHISA_ASYNC_REDRAW:-1} == 1 ]] || return 0
+  bind -x "\"${SHISA_ASYNC_KEYSEQ}\": shisa_async_redraw" 2>/dev/null || true
+}
+
 shisa_prompt_command() {
   local last_status=$?
   SHISA_IN_PROMPT=1
@@ -107,5 +118,6 @@ shisa_prompt_command() {
 
 PROMPT_COMMAND=shisa_prompt_command
 trap 'case " ${FUNCNAME[*]:-} " in *" shisa_"*) ;; *) shisa_debug_trap "$BASH_COMMAND" ;; esac' DEBUG
+shisa_install_async_redraw
 shopt -s promptvars
 PS1='$(shisa_prompt_render)'

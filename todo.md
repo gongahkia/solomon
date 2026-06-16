@@ -119,8 +119,8 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 
 - [x] Author `init/shisa.bash` using `PROMPT_COMMAND`
 - [x] Implement bash duration capture via `DEBUG` trap + `EPOCHREALTIME`
-- [ ] Implement bash async redraw via `bind -x` + escape sequence trick (document limitations)
-- [ ] Add bash integration tests
+- [x] Implement bash async redraw via `bind -x` + escape sequence trick (document limitations)
+- [x] Add bash integration tests
 - [ ] Author `init/shisa.fish` using `fish_prompt`
 - [ ] Implement fish async redraw via fish-native events
 - [ ] Add fish integration tests

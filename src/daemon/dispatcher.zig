@@ -202,7 +202,7 @@ test "renders default pipeline" {
     defer git_cache.deinit(std.testing.allocator);
     var language_cache = language_versions_module.Cache{};
     defer language_cache.deinit(std.testing.allocator);
-    var cloud_cache = cloud_ctx_module.Cache{ .valid = true };
+    var cloud_cache = cloud_ctx_module.Cache{ .gcp_valid = true, .azure_valid = true };
     defer cloud_cache.deinit(std.testing.allocator);
     var rendered = try renderDefault(std.testing.allocator, .{
         .git_branch = &git_cache,
@@ -237,7 +237,7 @@ test "renders async placeholder and redraw token" {
     defer git_cache.deinit(std.testing.allocator);
     var language_cache = language_versions_module.Cache{};
     defer language_cache.deinit(std.testing.allocator);
-    var cloud_cache = cloud_ctx_module.Cache{ .valid = true };
+    var cloud_cache = cloud_ctx_module.Cache{ .gcp_valid = true, .azure_valid = true };
     defer cloud_cache.deinit(std.testing.allocator);
     const pipeline = [_]ModuleSpec{
         .{ .id = .cwd, .execution_class = .sync },
@@ -278,7 +278,7 @@ test "no async renders git synchronously" {
     defer git_cache.deinit(std.testing.allocator);
     var language_cache = language_versions_module.Cache{};
     defer language_cache.deinit(std.testing.allocator);
-    var cloud_cache = cloud_ctx_module.Cache{ .valid = true };
+    var cloud_cache = cloud_ctx_module.Cache{ .gcp_valid = true, .azure_valid = true };
     defer cloud_cache.deinit(std.testing.allocator);
     var rendered = try renderDefault(std.testing.allocator, .{
         .git_branch = &git_cache,

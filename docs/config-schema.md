@@ -45,7 +45,7 @@ Allowed core module ids for schema v1:
 | `jobs` | sync | Background job count. |
 | `cmd_duration` | sync | Last command duration above threshold. |
 | `user_host` | sync | User and host, normally only over SSH. |
-| `cloud_ctx` | sync | Optional cloud account context; AWS profile and cached GCP project support are available. |
+| `cloud_ctx` | sync | Optional cloud account context; AWS profile, cached GCP project, and cached Azure subscription support are available. |
 | `time` | sync | Optional UTC `HH:MM` clock segment. |
 
 Unknown module ids are invalid.
@@ -100,7 +100,7 @@ Per-module config lives under `[modules.<id>]`. Option tables may exist only for
 
 ### `[modules.cloud_ctx]`
 
-No options yet. AWS profile is resolved from `AWS_PROFILE`; when unset, Shisa reads `~/.aws/config` and uses `[default]` or the first `[profile <name>]` section. GCP project is cached from `gcloud config config-helper --format=json` and invalidated when `~/.config/gcloud/` changes.
+No options yet. AWS profile is resolved from `AWS_PROFILE`; when unset, Shisa reads `~/.aws/config` and uses `[default]` or the first `[profile <name>]` section. GCP project is cached from `gcloud config config-helper --format=json` and invalidated when `~/.config/gcloud/` changes. Azure subscription is cached from `az account show --output json` and invalidated when `~/.azure/azureProfile.json` changes.
 
 ### `[modules.time]`
 

@@ -16,8 +16,10 @@ pub const Scope = struct {
 
 pub const Cache = struct {
     mutex: std.Thread.Mutex = .{},
-    valid: bool = false,
+    gcp_valid: bool = false,
     gcp_project: ?[]u8 = null,
+    azure_valid: bool = false,
+    azure_subscription: ?[]u8 = null,
 
     pub fn deinit(self: *Cache, allocator: std.mem.Allocator) void {
         self.clear(allocator);
@@ -26,12 +28,18 @@ pub const Cache = struct {
     pub fn invalidateGcp(self: *Cache, allocator: std.mem.Allocator) void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        self.clearLocked(allocator);
+        self.clearGcpLocked(allocator);
+    }
+
+    pub fn invalidateAzure(self: *Cache, allocator: std.mem.Allocator) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.clearAzureLocked(allocator);
     }
 
     pub fn gcpProjectAlloc(self: *Cache, allocator: std.mem.Allocator) !?[]u8 {
         self.mutex.lock();
-        if (self.valid) {
+        if (self.gcp_valid) {
             const project = if (self.gcp_project) |value| try allocator.dupe(u8, value) else null;
             self.mutex.unlock();
             return project;
@@ -40,13 +48,37 @@ pub const Cache = struct {
 
         const project = try readGcpProjectAlloc(allocator);
         errdefer if (project) |value| allocator.free(value);
+        const cached_project = if (project) |value| try allocator.dupe(u8, value) else null;
+        errdefer if (cached_project) |value| allocator.free(value);
 
         self.mutex.lock();
         defer self.mutex.unlock();
-        self.clearLocked(allocator);
-        self.valid = true;
-        self.gcp_project = if (project) |value| try allocator.dupe(u8, value) else null;
+        self.clearGcpLocked(allocator);
+        self.gcp_project = cached_project;
+        self.gcp_valid = true;
         return project;
+    }
+
+    pub fn azureSubscriptionAlloc(self: *Cache, allocator: std.mem.Allocator) !?[]u8 {
+        self.mutex.lock();
+        if (self.azure_valid) {
+            const subscription = if (self.azure_subscription) |value| try allocator.dupe(u8, value) else null;
+            self.mutex.unlock();
+            return subscription;
+        }
+        self.mutex.unlock();
+
+        const subscription = try readAzureSubscriptionAlloc(allocator);
+        errdefer if (subscription) |value| allocator.free(value);
+        const cached_subscription = if (subscription) |value| try allocator.dupe(u8, value) else null;
+        errdefer if (cached_subscription) |value| allocator.free(value);
+
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.clearAzureLocked(allocator);
+        self.azure_subscription = cached_subscription;
+        self.azure_valid = true;
+        return subscription;
     }
 
     fn clear(self: *Cache, allocator: std.mem.Allocator) void {
@@ -56,15 +88,26 @@ pub const Cache = struct {
     }
 
     fn clearLocked(self: *Cache, allocator: std.mem.Allocator) void {
+        self.clearGcpLocked(allocator);
+        self.clearAzureLocked(allocator);
+    }
+
+    fn clearGcpLocked(self: *Cache, allocator: std.mem.Allocator) void {
         if (self.gcp_project) |value| allocator.free(value);
         self.gcp_project = null;
-        self.valid = false;
+        self.gcp_valid = false;
+    }
+
+    fn clearAzureLocked(self: *Cache, allocator: std.mem.Allocator) void {
+        if (self.azure_subscription) |value| allocator.free(value);
+        self.azure_subscription = null;
+        self.azure_valid = false;
     }
 };
 
 pub const WatchScope = struct {
     cwd: []u8,
-    gcloud_config_path: []u8,
+    watched_path: []u8,
     paths: [1]WatchPath,
 
     pub fn scope(self: *const WatchScope) Scope {
@@ -78,7 +121,7 @@ pub const WatchScope = struct {
 
     pub fn deinit(self: *WatchScope, allocator: std.mem.Allocator) void {
         allocator.free(self.cwd);
-        allocator.free(self.gcloud_config_path);
+        allocator.free(self.watched_path);
         self.* = undefined;
     }
 };
@@ -90,8 +133,20 @@ pub fn gcpWatchScope(allocator: std.mem.Allocator, home: []const u8) !WatchScope
     errdefer allocator.free(gcloud_config_path);
     return .{
         .cwd = cwd,
-        .gcloud_config_path = gcloud_config_path,
+        .watched_path = gcloud_config_path,
         .paths = .{.{ .path = gcloud_config_path, .recursive = true }},
+    };
+}
+
+pub fn azureWatchScope(allocator: std.mem.Allocator, home: []const u8) !WatchScope {
+    const azure_profile_path = try std.fmt.allocPrint(allocator, "{s}/.azure/azureProfile.json", .{home});
+    errdefer allocator.free(azure_profile_path);
+    const cwd = try allocator.dupe(u8, azure_profile_path);
+    errdefer allocator.free(cwd);
+    return .{
+        .cwd = cwd,
+        .watched_path = azure_profile_path,
+        .paths = .{.{ .path = azure_profile_path }},
     };
 }
 
@@ -100,39 +155,16 @@ pub fn render(allocator: std.mem.Allocator, aws_profile_env: ?[]const u8, home: 
     defer if (profile) |value| allocator.free(value);
     const gcp_project = try cache.gcpProjectAlloc(allocator);
     defer if (gcp_project) |value| allocator.free(value);
+    const azure_subscription = try cache.azureSubscriptionAlloc(allocator);
+    defer if (azure_subscription) |value| allocator.free(value);
 
-    if (profile) |aws| if (gcp_project) |project| {
-        return try std.fmt.allocPrint(allocator, "aws:{s} gcp:{s}", .{ aws, project });
-    };
-    if (profile) |aws| {
-        return try std.fmt.allocPrint(allocator, "aws:{s}", .{aws});
-    }
-    if (gcp_project) |project| {
-        return try std.fmt.allocPrint(allocator, "gcp:{s}", .{project});
-    }
-    return null;
-}
-
-test "renders aws and cached gcp context" {
-    var cache = Cache{
-        .valid = true,
-        .gcp_project = try std.testing.allocator.dupe(u8, "test-project"),
-    };
-    defer cache.deinit(std.testing.allocator);
-    const rendered = (try render(std.testing.allocator, "prod", null, &cache)).?;
-    defer std.testing.allocator.free(rendered);
-    try std.testing.expectEqualStrings("aws:prod gcp:test-project", rendered);
-}
-
-test "renders cached gcp context without aws" {
-    var cache = Cache{
-        .valid = true,
-        .gcp_project = try std.testing.allocator.dupe(u8, "test-project"),
-    };
-    defer cache.deinit(std.testing.allocator);
-    const rendered = (try render(std.testing.allocator, null, null, &cache)).?;
-    defer std.testing.allocator.free(rendered);
-    try std.testing.expectEqualStrings("gcp:test-project", rendered);
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    if (profile) |aws| try appendCloudSegment(allocator, &out, "aws", aws);
+    if (gcp_project) |project| try appendCloudSegment(allocator, &out, "gcp", project);
+    if (azure_subscription) |subscription| try appendCloudSegment(allocator, &out, "azure", subscription);
+    if (out.items.len == 0) return null;
+    return try out.toOwnedSlice(allocator);
 }
 
 pub fn awsProfileAlloc(allocator: std.mem.Allocator, aws_profile_env: ?[]const u8, home: ?[]const u8) !?[]u8 {
@@ -200,6 +232,42 @@ pub fn parseGcpProjectAlloc(allocator: std.mem.Allocator, source: []const u8) !?
     return @as(?[]u8, try allocator.dupe(u8, project));
 }
 
+const AzureAccountJson = struct {
+    name: []const u8 = "",
+    id: []const u8 = "",
+};
+
+pub fn parseAzureSubscriptionAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 {
+    var parsed = std.json.parseFromSlice(AzureAccountJson, allocator, source, .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+    const name = std.mem.trim(u8, parsed.value.name, " \t\r\n");
+    if (name.len != 0) return @as(?[]u8, try allocator.dupe(u8, name));
+    const id = std.mem.trim(u8, parsed.value.id, " \t\r\n");
+    if (id.len != 0) return @as(?[]u8, try allocator.dupe(u8, id));
+    return null;
+}
+
+fn readAzureSubscriptionAlloc(allocator: std.mem.Allocator) !?[]u8 {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "az", "account", "show", "--output", "json" },
+        .max_output_bytes = 256 * 1024,
+        .expand_arg0 = .expand,
+    }) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!exitedZero(result.term)) return null;
+    return parseAzureSubscriptionAlloc(allocator, result.stdout);
+}
+
+fn appendCloudSegment(allocator: std.mem.Allocator, out: *std.ArrayList(u8), provider: []const u8, value: []const u8) !void {
+    if (out.items.len != 0) try out.append(allocator, ' ');
+    try std.fmt.format(out.writer(allocator), "{s}:{s}", .{ provider, value });
+}
+
 fn readGcpProjectAlloc(allocator: std.mem.Allocator) !?[]u8 {
     const result = std.process.Child.run(.{
         .allocator = allocator,
@@ -256,11 +324,36 @@ test "parses first named aws config profile" {
 }
 
 test "renders aws cloud context" {
-    var cache = Cache{ .valid = true };
+    var cache = Cache{ .gcp_valid = true, .azure_valid = true };
     defer cache.deinit(std.testing.allocator);
     const rendered = (try render(std.testing.allocator, "prod", null, &cache)).?;
     defer std.testing.allocator.free(rendered);
     try std.testing.expectEqualStrings("aws:prod", rendered);
+}
+
+test "renders cached cloud contexts" {
+    var cache = Cache{
+        .gcp_valid = true,
+        .gcp_project = try std.testing.allocator.dupe(u8, "test-project"),
+        .azure_valid = true,
+        .azure_subscription = try std.testing.allocator.dupe(u8, "prod-sub"),
+    };
+    defer cache.deinit(std.testing.allocator);
+    const rendered = (try render(std.testing.allocator, "prod", null, &cache)).?;
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("aws:prod gcp:test-project azure:prod-sub", rendered);
+}
+
+test "renders cached gcp context without aws" {
+    var cache = Cache{
+        .gcp_valid = true,
+        .gcp_project = try std.testing.allocator.dupe(u8, "test-project"),
+        .azure_valid = true,
+    };
+    defer cache.deinit(std.testing.allocator);
+    const rendered = (try render(std.testing.allocator, null, null, &cache)).?;
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("gcp:test-project", rendered);
 }
 
 test "parses gcp config-helper project" {
@@ -279,11 +372,31 @@ test "parses gcp config-helper project" {
     try std.testing.expectEqualStrings("test-project", project);
 }
 
+test "parses azure subscription" {
+    const subscription = (try parseAzureSubscriptionAlloc(std.testing.allocator,
+        \\{
+        \\  "id": "00000000-0000-0000-0000-000000000000",
+        \\  "name": "prod-sub"
+        \\}
+    )).?;
+    defer std.testing.allocator.free(subscription);
+    try std.testing.expectEqualStrings("prod-sub", subscription);
+}
+
 test "builds gcp watch scope" {
     var scope = try gcpWatchScope(std.testing.allocator, "/home/me");
     defer scope.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings(module_id, scope.scope().module_id);
     try std.testing.expectEqualStrings("/home/me", scope.cwd);
-    try std.testing.expectEqualStrings("/home/me/.config/gcloud", scope.gcloud_config_path);
+    try std.testing.expectEqualStrings("/home/me/.config/gcloud", scope.watched_path);
     try std.testing.expect(scope.paths[0].recursive);
+}
+
+test "builds azure watch scope" {
+    var scope = try azureWatchScope(std.testing.allocator, "/home/me");
+    defer scope.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(module_id, scope.scope().module_id);
+    try std.testing.expectEqualStrings("/home/me/.azure/azureProfile.json", scope.cwd);
+    try std.testing.expectEqualStrings("/home/me/.azure/azureProfile.json", scope.watched_path);
+    try std.testing.expect(!scope.paths[0].recursive);
 }

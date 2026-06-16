@@ -209,6 +209,7 @@ pub const Server = struct {
                 self.git_branch_cache.invalidate(std.heap.page_allocator, invalidation.cwd);
             } else if (std.mem.eql(u8, invalidation.module_id, cloud_ctx_module.module_id)) {
                 self.cloud_ctx_cache.invalidateGcp(std.heap.page_allocator);
+                self.cloud_ctx_cache.invalidateAzure(std.heap.page_allocator);
             }
         }
     }
@@ -232,10 +233,17 @@ pub const Server = struct {
     }
 
     fn registerCloudInvalidation(self: *Server, home_path: []const u8) !void {
-        if (self.fs_watcher.hasScope(cloud_ctx_module.module_id, home_path)) return;
-        var watched = try cloud_ctx_module.gcpWatchScope(std.heap.page_allocator, home_path);
-        defer watched.deinit(std.heap.page_allocator);
-        const cloud_scope = watched.scope();
+        var gcp_scope = try cloud_ctx_module.gcpWatchScope(std.heap.page_allocator, home_path);
+        defer gcp_scope.deinit(std.heap.page_allocator);
+        try self.registerCloudScope(gcp_scope.scope());
+
+        var azure_scope = try cloud_ctx_module.azureWatchScope(std.heap.page_allocator, home_path);
+        defer azure_scope.deinit(std.heap.page_allocator);
+        try self.registerCloudScope(azure_scope.scope());
+    }
+
+    fn registerCloudScope(self: *Server, cloud_scope: cloud_ctx_module.Scope) !void {
+        if (self.fs_watcher.hasScope(cloud_scope.module_id, cloud_scope.cwd)) return;
         var paths: [1]fsnotify.WatchPath = undefined;
         for (cloud_scope.paths, 0..) |path, index| {
             paths[index] = .{ .path = path.path, .recursive = path.recursive };

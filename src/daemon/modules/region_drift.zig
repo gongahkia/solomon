@@ -114,6 +114,54 @@ pub fn gcpRegionDriftAlloc(allocator: std.mem.Allocator, home: ?[]const u8, clou
     return @as(?[]u8, try std.fmt.allocPrint(allocator, "gcp:{s}!={s}", .{ env_region, config_region }));
 }
 
+pub fn azureConfigPathAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
+    const home_path = home orelse return null;
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.azure/config", .{home_path}));
+}
+
+pub fn azureEnvRegion(azure_location: ?[]const u8, arm_location: ?[]const u8, azure_default_location: ?[]const u8) ?[]const u8 {
+    if (trimEnv(azure_location)) |value| return value;
+    if (trimEnv(arm_location)) |value| return value;
+    return trimEnv(azure_default_location);
+}
+
+pub fn readAzureDefaultLocationAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
+    const path = (try azureConfigPathAlloc(allocator, home)) orelse return null;
+    defer allocator.free(path);
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 256 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(source);
+    return parseAzureDefaultLocationAlloc(allocator, source);
+}
+
+pub fn parseAzureDefaultLocationAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 {
+    var in_defaults = false;
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0 or line[0] == '#' or line[0] == ';') continue;
+        if (line[0] == '[' and line[line.len - 1] == ']') {
+            const section = std.mem.trim(u8, line[1 .. line.len - 1], " \t");
+            in_defaults = std.mem.eql(u8, section, "defaults");
+            continue;
+        }
+        if (!in_defaults) continue;
+        const value = iniValue(line, "location") orelse iniValue(line, "region") orelse continue;
+        if (value.len != 0) return @as(?[]u8, try allocator.dupe(u8, value));
+    }
+    return null;
+}
+
+pub fn azureRegionDriftAlloc(allocator: std.mem.Allocator, home: ?[]const u8, azure_location: ?[]const u8, arm_location: ?[]const u8, azure_default_location: ?[]const u8) !?[]u8 {
+    const env_region = azureEnvRegion(azure_location, arm_location, azure_default_location) orelse return null;
+    const config_region = (try readAzureDefaultLocationAlloc(allocator, home)) orelse return null;
+    defer allocator.free(config_region);
+    if (std.mem.eql(u8, env_region, config_region)) return null;
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "az:{s}!={s}", .{ env_region, config_region }));
+}
+
 fn awsSectionMatchesProfile(section: []const u8, profile: []const u8) bool {
     if (std.mem.eql(u8, profile, "default")) return std.mem.eql(u8, section, "default");
     if (std.mem.eql(u8, section, profile)) return true;
@@ -218,4 +266,40 @@ test "detects gcp region drift" {
     defer allocator.free(drift);
     try std.testing.expectEqualStrings("gcp:europe-west1!=us-central1", drift);
     try std.testing.expect(try gcpRegionDriftAlloc(allocator, dir_path, "us-central1") == null);
+}
+
+test "parses azure default location" {
+    const location = (try parseAzureDefaultLocationAlloc(std.testing.allocator,
+        \\[cloud]
+        \\name = AzureCloud
+        \\
+        \\[defaults]
+        \\location = eastus
+        \\
+    )).?;
+    defer std.testing.allocator.free(location);
+    try std.testing.expectEqualStrings("eastus", location);
+}
+
+test "detects azure region drift" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-azure-region-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    const azure_dir = try std.fmt.allocPrint(allocator, "{s}/.azure", .{dir_path});
+    defer allocator.free(azure_dir);
+    try std.fs.cwd().makePath(azure_dir);
+
+    const config_path = try std.fmt.allocPrint(allocator, "{s}/config", .{azure_dir});
+    defer allocator.free(config_path);
+    {
+        var file = try std.fs.createFileAbsolute(config_path, .{});
+        defer file.close();
+        try file.writeAll("[defaults]\nlocation = eastus\n");
+    }
+
+    const drift = (try azureRegionDriftAlloc(allocator, dir_path, "westus", null, null)).?;
+    defer allocator.free(drift);
+    try std.testing.expectEqualStrings("az:westus!=eastus", drift);
+    try std.testing.expect(try azureRegionDriftAlloc(allocator, dir_path, "eastus", null, null) == null);
 }

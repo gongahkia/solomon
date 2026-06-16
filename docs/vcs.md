@@ -60,3 +60,5 @@ Detection:
 - Walk ancestors from `cwd`.
 - A directory containing `.graphite_repo_config` is treated as a Graphite stack root.
 - Graphite detection does not require the `gt` binary.
+- ghstack detection matches branch names shaped like `gh/<username>/<number>/{base,head,orig}` and explicit local `.ghstackrc` markers.
+- Upstream ghstack documents submitted branch names as `gh/username/1/base`, `gh/username/1/head`, and `gh/username/1/orig`: https://github.com/ezyang/ghstack

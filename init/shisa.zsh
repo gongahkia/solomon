@@ -29,6 +29,16 @@ if (( ${precmd_functions[(I)shisa_precmd]} == 0 )); then
   precmd_functions+=(shisa_precmd)
 fi
 
+shisa_preexec() {
+  emulate -L zsh
+  SHISA_PREEXEC_REALTIME=${EPOCHREALTIME:-}
+}
+
+typeset -ga preexec_functions
+if (( ${preexec_functions[(I)shisa_preexec]} == 0 )); then
+  preexec_functions+=(shisa_preexec)
+fi
+
 shisa_prompt_render() {
   emulate -L zsh
   local -a args

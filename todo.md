@@ -66,7 +66,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 ### 1.4 Zsh integration
 - [x] Write `init/shisa.zsh` (eval'd from `.zshrc`)
 - [x] Wire `precmd` to capture `$?`, `$#jobstates`, and elapsed time via `$EPOCHREALTIME`
-- [ ] Wire `preexec` to record command start time
+- [x] Wire `preexec` to record command start time
 - [ ] Set `PROMPT` to `$(shisa prompt --shell=zsh)` with `setopt prompt_subst`
 - [ ] Implement fallback prompt (printed if daemon socket missing) that's < 5ms
 - [ ] Add `ZSH_VERSION` compat shims for ≥ 5.0

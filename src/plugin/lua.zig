@@ -15,7 +15,7 @@ const lua_globalsindex = -10002;
 const LuaLNewState = *const fn () callconv(.c) ?*LuaState;
 const LuaClose = *const fn (?*LuaState) callconv(.c) void;
 const LuaLOpenLibs = *const fn (?*LuaState) callconv(.c) void;
-const LuaLLoadString = *const fn (?*LuaState, [*:0]const u8) callconv(.c) CInt;
+const LuaLLoadBuffer = *const fn (?*LuaState, [*]const u8, usize, [*:0]const u8) callconv(.c) CInt;
 const LuaPCall = *const fn (?*LuaState, CInt, CInt, CInt) callconv(.c) CInt;
 const LuaGetField = *const fn (?*LuaState, CInt, [*:0]const u8) callconv(.c) void;
 const LuaSetField = *const fn (?*LuaState, CInt, [*:0]const u8) callconv(.c) void;
@@ -32,7 +32,7 @@ const Api = struct {
     luaL_newstate: LuaLNewState,
     lua_close: LuaClose,
     luaL_openlibs: LuaLOpenLibs,
-    luaL_loadstring: LuaLLoadString,
+    luaL_loadbuffer: LuaLLoadBuffer,
     lua_pcall: LuaPCall,
     lua_getfield: LuaGetField,
     lua_setfield: LuaSetField,
@@ -119,12 +119,7 @@ pub const Runtime = struct {
     }
 
     pub fn doString(self: *Runtime, source: []const u8) !void {
-        const code = try self.allocator.dupeZ(u8, source);
-        defer self.allocator.free(code);
-        if (self.api.luaL_loadstring(self.state, code.ptr) != lua_ok) {
-            self.clearStack();
-            return error.LuaLoadError;
-        }
+        try self.loadBuffer(source, "shisa-string");
         if (self.api.lua_pcall(self.state, 0, 0, 0) != lua_ok) {
             self.clearStack();
             return error.LuaRuntimeError;
@@ -133,12 +128,7 @@ pub const Runtime = struct {
     }
 
     pub fn loadManifest(self: *Runtime, source: []const u8) !OwnedManifest {
-        const code = try self.allocator.dupeZ(u8, source);
-        defer self.allocator.free(code);
-        if (self.api.luaL_loadstring(self.state, code.ptr) != lua_ok) {
-            self.clearStack();
-            return error.LuaLoadError;
-        }
+        try self.loadBuffer(source, "plugin.lua");
         if (self.api.lua_pcall(self.state, 0, 1, 0) != lua_ok) {
             self.clearStack();
             return error.LuaRuntimeError;
@@ -177,6 +167,15 @@ pub const Runtime = struct {
         defer self.allocator.free(global);
         self.api.lua_pushnil(self.state);
         self.api.lua_setfield(self.state, lua_globalsindex, global.ptr);
+    }
+
+    fn loadBuffer(self: *Runtime, source: []const u8, name: []const u8) !void {
+        const name_z = try self.allocator.dupeZ(u8, name);
+        defer self.allocator.free(name_z);
+        if (self.api.luaL_loadbuffer(self.state, source.ptr, source.len, name_z.ptr) != lua_ok) {
+            self.clearStack();
+            return error.LuaLoadError;
+        }
     }
 
     fn readManifestAt(self: *Runtime, index: CInt) !OwnedManifest {
@@ -447,7 +446,7 @@ fn loadApi(lib: *std.DynLib) !Api {
         .luaL_newstate = lib.lookup(LuaLNewState, "luaL_newstate") orelse return error.LuaSymbolMissing,
         .lua_close = lib.lookup(LuaClose, "lua_close") orelse return error.LuaSymbolMissing,
         .luaL_openlibs = lib.lookup(LuaLOpenLibs, "luaL_openlibs") orelse return error.LuaSymbolMissing,
-        .luaL_loadstring = lib.lookup(LuaLLoadString, "luaL_loadstring") orelse return error.LuaSymbolMissing,
+        .luaL_loadbuffer = lib.lookup(LuaLLoadBuffer, "luaL_loadbuffer") orelse return error.LuaSymbolMissing,
         .lua_pcall = lib.lookup(LuaPCall, "lua_pcall") orelse return error.LuaSymbolMissing,
         .lua_getfield = lib.lookup(LuaGetField, "lua_getfield") orelse return error.LuaSymbolMissing,
         .lua_setfield = lib.lookup(LuaSetField, "lua_setfield") orelse return error.LuaSymbolMissing,
@@ -571,4 +570,57 @@ test "rejects invalid plugin manifest table" {
         \\  modules = { "ok" },
         \\}
     ));
+}
+
+test "fuzz lua manifest bridge invariants" {
+    return std.testing.fuzz({}, fuzzLuaManifest, .{
+        .corpus = &.{
+            "",
+            "\x00\xffnot lua",
+            "ok",
+            "bad-name",
+            "demo_plugin",
+        },
+    });
+}
+
+fn fuzzLuaManifest(_: void, input: []const u8) !void {
+    if (input.len > 1024) return;
+    const quoted = try luaQuoteAlloc(std.testing.allocator, input);
+    defer std.testing.allocator.free(quoted);
+    const source = try std.fmt.allocPrint(
+        std.testing.allocator,
+        "return {{ name = {s}, version = '0.1.0', api_version = 1, license = 'MIT', modules = {{ {s} }} }}",
+        .{ quoted, quoted },
+    );
+    defer std.testing.allocator.free(source);
+
+    var runtime = Runtime.initSandboxed(std.testing.allocator) catch |err| switch (err) {
+        error.LuaUnavailable => return,
+        else => return err,
+    };
+    defer runtime.deinit();
+
+    var loaded = runtime.loadManifest(source) catch return;
+    defer loaded.deinit(std.testing.allocator);
+    try loaded.manifest.validate();
+}
+
+fn luaQuoteAlloc(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try out.append(allocator, '\'');
+    for (input) |byte| {
+        if (byte == '\\') {
+            try out.appendSlice(allocator, "\\\\");
+        } else if (byte == '\'') {
+            try out.appendSlice(allocator, "\\'");
+        } else if (byte >= 32 and byte <= 126) {
+            try out.append(allocator, byte);
+        } else {
+            try std.fmt.format(out.writer(allocator), "\\{d:0>3}", .{byte});
+        }
+    }
+    try out.append(allocator, '\'');
+    return out.toOwnedSlice(allocator);
 }

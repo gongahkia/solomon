@@ -149,6 +149,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const user_host_test_run = b.addRunArtifact(user_host_tests);
+    const time_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/daemon/modules/time.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const time_test_run = b.addRunArtifact(time_tests);
     const git_branch_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/modules/git_branch.zig"),
@@ -222,6 +230,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&exit_status_test_run.step);
     test_step.dependOn(&jobs_test_run.step);
     test_step.dependOn(&user_host_test_run.step);
+    test_step.dependOn(&time_test_run.step);
     test_step.dependOn(&git_branch_test_run.step);
     test_step.dependOn(&cmd_duration_test_run.step);
     test_step.dependOn(&daemon_json_test_run.step);

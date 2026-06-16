@@ -48,6 +48,7 @@ const PromptConfig = struct {
     exit: i32 = 0,
     jobs: u32 = 0,
     duration_ms: u64 = 0,
+    time: bool = false,
     shell: []const u8 = "zsh",
     cols: u16 = 80,
     rows: u16 = 24,
@@ -87,6 +88,8 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
             config.jobs = try std.fmt.parseInt(u32, try nextValue(args, &i), 10);
         } else if (std.mem.eql(u8, arg, "--duration-ms")) {
             config.duration_ms = try std.fmt.parseInt(u64, try nextValue(args, &i), 10);
+        } else if (std.mem.eql(u8, arg, "--time")) {
+            config.time = true;
         } else if (std.mem.eql(u8, arg, "--shell")) {
             config.shell = try nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--cols")) {
@@ -115,8 +118,8 @@ fn buildPromptPayload(allocator: std.mem.Allocator, config: PromptConfig, cwd: [
 
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d}}}",
-        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, escaped_shell, config.cols, config.rows },
+        "{{\"v\":1,\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d}}}",
+        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, escaped_shell, config.cols, config.rows },
     );
 }
 

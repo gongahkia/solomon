@@ -17,6 +17,7 @@ pub const Request = struct {
     exit: i32,
     jobs: u32,
     duration_ms: u64,
+    time: bool = false,
     shell: Shell,
     cols: u16,
     rows: u16,
@@ -34,6 +35,7 @@ test "request type carries v1 render inputs" {
         .exit = 1,
         .jobs = 2,
         .duration_ms = 300,
+        .time = true,
         .shell = .zsh,
         .cols = 120,
         .rows = 40,
@@ -44,6 +46,7 @@ test "request type carries v1 render inputs" {
     try std.testing.expectEqual(@as(i32, 1), request.exit);
     try std.testing.expectEqual(@as(u32, 2), request.jobs);
     try std.testing.expectEqual(@as(u64, 300), request.duration_ms);
+    try std.testing.expect(request.time);
     try std.testing.expectEqual(Shell.zsh, request.shell);
 }
 

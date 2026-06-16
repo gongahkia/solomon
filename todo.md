@@ -61,7 +61,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] `cmd_duration` module: show last command duration when above threshold
 - [x] `user` and `host` modules (hidden by default, surface in SSH)
 - [x] `git_branch` module (sync version, cached): branch name + dirty indicator
-- [ ] `time` module: optional clock segment
+- [x] `time` module: optional clock segment
 
 ### 1.4 Zsh integration
 - [ ] Write `init/shisa.zsh` (eval'd from `.zshrc`)

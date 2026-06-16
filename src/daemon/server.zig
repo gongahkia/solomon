@@ -4,6 +4,7 @@ const cwd_module = @import("modules/cwd.zig");
 const exit_status_module = @import("modules/exit_status.zig");
 const git_branch_module = @import("modules/git_branch.zig");
 const jobs_module = @import("modules/jobs.zig");
+const time_module = @import("modules/time.zig");
 const user_host_module = @import("modules/user_host.zig");
 const json = @import("json.zig");
 
@@ -16,6 +17,7 @@ const RenderRequest = struct {
     exit: i32 = 0,
     jobs: u32 = 0,
     duration_ms: u64 = 0,
+    time: bool = false,
     shell: []const u8 = "zsh",
     cols: u16 = 80,
     rows: u16 = 24,
@@ -111,6 +113,8 @@ pub const Server = struct {
 
         const git_branch = try self.git_branch_cache.render(std.heap.page_allocator, parsed.value.cwd);
         defer if (git_branch) |segment| std.heap.page_allocator.free(segment);
+        const time_segment = try time_module.render(std.heap.page_allocator, parsed.value.time, std.time.timestamp());
+        defer if (time_segment) |segment| std.heap.page_allocator.free(segment);
 
         const exit_status = try exit_status_module.render(std.heap.page_allocator, parsed.value.exit);
         defer if (exit_status) |segment| std.heap.page_allocator.free(segment);
@@ -121,7 +125,7 @@ pub const Server = struct {
         const user_host = try renderUserHost();
         defer if (user_host) |segment| std.heap.page_allocator.free(segment);
 
-        const prompt = try formatPrompt(std.heap.page_allocator, cwd, git_branch, exit_status, jobs, cmd_duration, user_host);
+        const prompt = try formatPrompt(std.heap.page_allocator, cwd, git_branch, time_segment, exit_status, jobs, cmd_duration, user_host);
         defer std.heap.page_allocator.free(prompt);
 
         const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, prompt);
@@ -144,12 +148,13 @@ fn renderUserHost() !?[]u8 {
     return user_host_module.render(std.heap.page_allocator, ssh, user, host);
 }
 
-fn formatPrompt(allocator: std.mem.Allocator, cwd: []const u8, git_branch: ?[]const u8, exit_status: ?[]const u8, jobs: ?[]const u8, cmd_duration: ?[]const u8, user_host: ?[]const u8) ![]u8 {
+fn formatPrompt(allocator: std.mem.Allocator, cwd: []const u8, git_branch: ?[]const u8, time_segment: ?[]const u8, exit_status: ?[]const u8, jobs: ?[]const u8, cmd_duration: ?[]const u8, user_host: ?[]const u8) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
 
     try out.appendSlice(allocator, cwd);
     if (git_branch) |segment| try appendSegment(allocator, &out, segment);
+    if (time_segment) |segment| try appendSegment(allocator, &out, segment);
     if (exit_status) |segment| try appendSegment(allocator, &out, segment);
     if (jobs) |segment| try appendSegment(allocator, &out, segment);
     if (cmd_duration) |segment| try appendSegment(allocator, &out, segment);
@@ -278,6 +283,30 @@ test "renders cwd prompt response" {
     const response = try readFrameAlloc(allocator, client_stream.handle);
     defer allocator.free(response);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"prompt\":\"/tmp/project> \"") != null);
+
+    thread.join();
+}
+
+test "renders optional time segment" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
+
+    var client_stream = try std.net.connectUnixSocket(socket_path);
+    defer client_stream.close();
+    try writeFrame(client_stream.handle, "{\"v\":1,\"cwd\":\"/tmp/project\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"time\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24}");
+    const response = try readFrameAlloc(allocator, client_stream.handle);
+    defer allocator.free(response);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"prompt\":\"/tmp/project time:") != null);
 
     thread.join();
 }

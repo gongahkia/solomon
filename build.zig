@@ -295,6 +295,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const cloud_ctx_test_run = b.addRunArtifact(cloud_ctx_tests);
+    const risk_tier_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/daemon/modules/risk_tier.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const risk_tier_test_run = b.addRunArtifact(risk_tier_tests);
     const time_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/modules/time.zig"),
@@ -426,6 +434,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&jobs_test_run.step);
     test_step.dependOn(&user_host_test_run.step);
     test_step.dependOn(&cloud_ctx_test_run.step);
+    test_step.dependOn(&risk_tier_test_run.step);
     test_step.dependOn(&time_test_run.step);
     test_step.dependOn(&git_branch_test_run.step);
     test_step.dependOn(&language_versions_test_run.step);

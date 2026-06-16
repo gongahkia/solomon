@@ -276,7 +276,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Fast-path: never spawn subprocesses on the hot path; rely on cached file reads
 
 ### 11.2 Risk-tier classifier (`risk_tier`)
-- [ ] Define regex defaults (`prod`, `production`, `live`, `*-prd-*` → prod; `stg`, `staging` → staging; `dev`, `sandbox` → dev)
+- [x] Define regex defaults (`prod`, `production`, `live`, `*-prd-*` → prod; `stg`, `staging` → staging; `dev`, `sandbox` → dev)
 - [ ] User-defined rules in `~/.config/shisa/risk_tiers.toml`
 - [ ] Apply tier color to prompt's background bar (configurable)
 - [ ] Per-cloud override (e.g., AWS profile=prod, k8s=dev → use max-tier=prod)

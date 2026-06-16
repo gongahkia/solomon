@@ -190,7 +190,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Optional: opt-in local-LLM hint plugin (ollama-backed). Off by default. Lives outside core.
 - [ ] Optional: cloud-safety plugin pack (prod-warning, k8s-namespace-risk, IAM-principal). Lives outside core.
 - [ ] Native Windows support (ReadDirectoryChangesW) — community-led
-- [ ] Build a `shisa doctor` subcommand for self-diagnosis (socket, perms, lua plugins, fsnotify limits)
+- [x] Build a `shisa doctor` subcommand for self-diagnosis (socket, perms, lua plugins, fsnotify limits)
 - [ ] Monthly release cadence (first Tuesday of each month)
 - [ ] Quarterly retros published as blog posts
 - [ ] Bug bounty (small, via GitHub sponsors) for sandbox escapes

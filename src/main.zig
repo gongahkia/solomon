@@ -1,5 +1,7 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const daemon_cache = @import("daemon/cache.zig");
+const fsnotify = @import("daemon/fsnotify.zig");
 const client = @import("shisa-client.zig");
 const shisa_config = @import("config.zig");
 const paths = @import("daemon/paths.zig");
@@ -41,6 +43,11 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, args[1], "explain")) {
         try explainConfig(allocator, args[2..]);
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "doctor")) {
+        try doctorCommand(allocator, args[2..]);
         return;
     }
 
@@ -202,6 +209,113 @@ test "explain output dumps pipeline" {
     try std.testing.expect(std.mem.indexOf(u8, output, "theme: plain\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "1. cwd (sync)") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "2. git_branch (async)") != null);
+}
+
+const DoctorConfig = struct {
+    socket_path: ?[]const u8 = null,
+};
+
+fn doctorCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const config = try parseDoctorArgs(args);
+    const socket_path = if (config.socket_path) |path| path else try paths.defaultSocketPath(allocator);
+    defer if (config.socket_path == null) allocator.free(socket_path);
+
+    const output = try doctorOutputAlloc(allocator, socket_path);
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn parseDoctorArgs(args: []const []const u8) !DoctorConfig {
+    var config = DoctorConfig{};
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--socket")) {
+            config.socket_path = try nextValue(args, &i);
+        } else {
+            return error.UnknownDoctorArgument;
+        }
+    }
+    return config;
+}
+
+fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u8 {
+    const config_dir = try configDirPath(allocator);
+    defer allocator.free(config_dir);
+    const plugins_dir = try pluginsDirPath(allocator);
+    defer allocator.free(plugins_dir);
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    try appendFmt(allocator, &out, "socket: {s} {s}\n", .{ pathAccessStatus(socket_path), socket_path });
+    try appendFmt(allocator, &out, "daemon: {s}\n", .{try daemonHealthStatus(allocator, socket_path)});
+    try appendFmt(allocator, &out, "config_dir: {s} {s}\n", .{ pathAccessStatus(config_dir), config_dir });
+    try appendFmt(allocator, &out, "plugins_dir: {s} {s}\n", .{ pathAccessStatus(plugins_dir), plugins_dir });
+    try appendFmt(allocator, &out, "lua: {s}\n", .{luaRuntimeStatus(allocator)});
+    try appendFmt(allocator, &out, "fsnotify: {s}\n", .{fsnotifyBackendName(fsnotify.selectBackend(builtin.os.tag))});
+
+    if (builtin.os.tag == .linux) {
+        const limit = fsnotify.readLinuxMaxUserWatches(allocator) catch null;
+        if (limit) |value| {
+            try appendFmt(allocator, &out, "inotify.max_user_watches: {d}\n", .{value});
+        } else {
+            try out.appendSlice(allocator, "inotify.max_user_watches: unknown\n");
+        }
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn configDirPath(allocator: std.mem.Allocator) ![]u8 {
+    const config_path = try defaultConfigPath(allocator);
+    defer allocator.free(config_path);
+    const dir = std.fs.path.dirname(config_path) orelse return error.MissingConfigDir;
+    return allocator.dupe(u8, dir);
+}
+
+fn pathAccessStatus(path: []const u8) []const u8 {
+    std.fs.cwd().access(path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return "missing",
+        error.AccessDenied => return "denied",
+        else => return "error",
+    };
+    return "present";
+}
+
+fn daemonHealthStatus(allocator: std.mem.Allocator, socket_path: []const u8) ![]const u8 {
+    const response = client.requestAlloc(allocator, socket_path, "health\n") catch return "unreachable";
+    defer allocator.free(response);
+    const trimmed = std.mem.trim(u8, response, " \t\r\n");
+    if (std.mem.eql(u8, trimmed, "ok")) return "ok";
+    return "bad-response";
+}
+
+fn luaRuntimeStatus(allocator: std.mem.Allocator) []const u8 {
+    var runtime = plugin_lua.Runtime.initSandboxed(allocator) catch |err| switch (err) {
+        error.LuaUnavailable => return "unavailable",
+        else => return "error",
+    };
+    runtime.deinit();
+    return "available";
+}
+
+fn fsnotifyBackendName(backend: fsnotify.Backend) []const u8 {
+    return switch (backend) {
+        .fsevents => "fsevents",
+        .inotify => "inotify",
+        .unsupported => "unsupported",
+    };
+}
+
+test "doctor args parse socket override" {
+    const config = try parseDoctorArgs(&.{ "--socket", "/tmp/shisa.sock" });
+    try std.testing.expectEqualStrings("/tmp/shisa.sock", config.socket_path.?);
+}
+
+test "doctor reports path and backend statuses" {
+    try std.testing.expectEqualStrings("missing", pathAccessStatus("/tmp/shisa-doctor-missing"));
+    try std.testing.expectEqualStrings("fsevents", fsnotifyBackendName(.fsevents));
+    try std.testing.expectEqualStrings("inotify", fsnotifyBackendName(.inotify));
 }
 
 const StarshipImport = struct {
@@ -1243,6 +1357,7 @@ const help_text =
     \\commands:
     \\  bench         benchmark prompt render via hyperfine
     \\  cache         dump cache stats
+    \\  doctor        diagnose socket, config, plugins, lua, fsnotify
     \\  explain       print resolved module pipeline
     \\  import-starship <path>
     \\                translate starship.toml to shisa.toml

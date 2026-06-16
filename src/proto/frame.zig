@@ -65,3 +65,25 @@ test "fuzz-style random payload roundtrip" {
         try std.testing.expectEqualSlices(u8, payload[0..len], decoded);
     }
 }
+
+test "fuzz decoder invariants" {
+    return std.testing.fuzz({}, fuzzDecode, .{
+        .corpus = &.{
+            "",
+            "\x00\x00\x00\x00",
+            "\x00\x00\x00\x01x",
+            "\x00\x10\x00\x01",
+        },
+    });
+}
+
+fn fuzzDecode(_: void, input: []const u8) !void {
+    const payload = decode(input) catch |err| switch (err) {
+        error.Truncated, error.LengthMismatch, error.Oversize => return,
+    };
+    try std.testing.expect(input.len >= header_bytes);
+    const payload_len = std.mem.readInt(u32, input[0..header_bytes], .big);
+    try std.testing.expect(payload_len <= types.max_frame_bytes);
+    try std.testing.expectEqual(header_bytes + @as(usize, payload_len), input.len);
+    try std.testing.expectEqualSlices(u8, input[header_bytes..], payload);
+}

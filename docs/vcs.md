@@ -18,3 +18,4 @@ Planned state sources:
 - `jj log --no-graph -r @` with a template for current change id, commit id, description first line, and divergence.
 - `jj log --no-graph -r @` with `conflict` and `self.conflicted_files()` for inline conflict state.
 - `jj log --no-graph -r @` with commit id and `parents.map()` for working-copy position.
+- `test/fixtures/jj/*` snapshot fixture repos cover deterministic parser/render output.

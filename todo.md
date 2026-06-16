@@ -221,7 +221,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Show conflict state (`jj`'s first-class conflicts) inline
 - [x] Show working-copy commit vs. parent commits
 - [x] Async update on jj operations
-- [ ] Snapshot tests against fixture jj repos
+- [x] Snapshot tests against fixture jj repos
 - [ ] Benchmark on a 10k-change jj repo
 
 ### 10.2 Sapling (sl) — Tier 1

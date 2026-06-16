@@ -117,7 +117,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 
 ## Phase 4 — Cross-shell parity (bash + fish)
 
-- [ ] Author `init/shisa.bash` using `PROMPT_COMMAND`
+- [x] Author `init/shisa.bash` using `PROMPT_COMMAND`
 - [ ] Implement bash duration capture via `DEBUG` trap + `EPOCHREALTIME`
 - [ ] Implement bash async redraw via `bind -x` + escape sequence trick (document limitations)
 - [ ] Add bash integration tests

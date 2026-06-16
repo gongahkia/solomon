@@ -279,6 +279,8 @@ pub fn build(b: *std.Build) void {
     const server_test_run = b.addRunArtifact(server_tests);
     const zsh_integration = b.addSystemCommand(&.{ "bash", "test/integration/zsh_fake_socket.sh" });
     zsh_integration.step.dependOn(&debug_install.step);
+    const bash_integration = b.addSystemCommand(&.{ "bash", "test/integration/bash_fake_socket.sh" });
+    bash_integration.step.dependOn(&debug_install.step);
     const prompt_snapshot = b.addSystemCommand(&.{ "bash", "test/integration/prompt_snapshot.sh" });
     prompt_snapshot.step.dependOn(&debug_install.step);
     prompt_snapshot.step.dependOn(&debug_daemon_install.step);
@@ -308,5 +310,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&client_test_run.step);
     test_step.dependOn(&server_test_run.step);
     test_step.dependOn(&zsh_integration.step);
+    test_step.dependOn(&bash_integration.step);
     test_step.dependOn(&prompt_snapshot.step);
 }

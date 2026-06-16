@@ -41,6 +41,17 @@ pub const SmartlogPosition = struct {
     }
 };
 
+pub const RefSummary = struct {
+    branch: []u8,
+    active_bookmark: []u8,
+
+    pub fn deinit(self: *RefSummary, allocator: std.mem.Allocator) void {
+        allocator.free(self.branch);
+        allocator.free(self.active_bookmark);
+        self.* = undefined;
+    }
+};
+
 pub const Cache = struct {
     valid: bool = false,
     root_path: ?[]u8 = null,
@@ -269,6 +280,43 @@ pub fn formatSmartlogPositionAlloc(allocator: std.mem.Allocator, position: Smart
     return std.fmt.allocPrint(allocator, "sl:stack:{d}/{d} {s} {s}", .{ position.index, position.total, position.node, position.description });
 }
 
+pub fn readRefSummary(allocator: std.mem.Allocator, cwd_path: []const u8) !?RefSummary {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "sl", "log", "-r", ".", "--template", "{branch}\n{activebookmark}\n" },
+        .cwd = cwd_path,
+        .max_output_bytes = 16 * 1024,
+        .expand_arg0 = .expand,
+    }) catch return null;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!exitedZero(result.term)) return null;
+    return parseRefSummary(allocator, result.stdout);
+}
+
+pub fn parseRefSummary(allocator: std.mem.Allocator, output: []const u8) !?RefSummary {
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    const branch = std.mem.trim(u8, lines.next() orelse return null, " \t\r");
+    const active_bookmark = std.mem.trim(u8, lines.next() orelse "", " \t\r");
+    if (branch.len == 0 and active_bookmark.len == 0) return null;
+
+    const rendered_branch = if (branch.len == 0) "default" else branch;
+    const owned_branch = try allocator.dupe(u8, rendered_branch);
+    errdefer allocator.free(owned_branch);
+    const owned_active_bookmark = try allocator.dupe(u8, active_bookmark);
+    return .{
+        .branch = owned_branch,
+        .active_bookmark = owned_active_bookmark,
+    };
+}
+
+pub fn formatRefSummaryAlloc(allocator: std.mem.Allocator, summary: RefSummary) ![]u8 {
+    if (summary.active_bookmark.len > 0) {
+        return std.fmt.allocPrint(allocator, "sl:bm:{s} branch:{s}", .{ summary.active_bookmark, summary.branch });
+    }
+    return std.fmt.allocPrint(allocator, "sl:branch:{s}", .{summary.branch});
+}
+
 fn appendStatusPart(allocator: std.mem.Allocator, out: *std.ArrayList(u8), wrote: *bool, label: []const u8, count: u32) !void {
     if (count == 0) return;
     if (wrote.*) try out.append(allocator, ',');
@@ -430,6 +478,30 @@ test "formats sapling smartlog position" {
     try std.testing.expectEqualStrings("sl:stack:2/3 bbbb2222 second", rendered);
 }
 
+test "parses sapling ref summary" {
+    const output =
+        \\default
+        \\topic
+        \\
+    ;
+    var summary = (try parseRefSummary(std.testing.allocator, output)).?;
+    defer summary.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("default", summary.branch);
+    try std.testing.expectEqualStrings("topic", summary.active_bookmark);
+}
+
+test "formats sapling ref summary" {
+    var summary = RefSummary{
+        .branch = try std.testing.allocator.dupe(u8, "default"),
+        .active_bookmark = try std.testing.allocator.dupe(u8, "topic"),
+    };
+    defer summary.deinit(std.testing.allocator);
+
+    const rendered = try formatRefSummaryAlloc(std.testing.allocator, summary);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("sl:bm:topic branch:default", rendered);
+}
+
 test "reads real sapling status when sl is installed" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-sl-real-{x}", .{std.crypto.random.int(u64)});
@@ -481,6 +553,29 @@ test "reads real sapling smartlog position when sl is installed" {
     try std.testing.expectEqual(@as(u32, 2), position.index);
     try std.testing.expectEqual(@as(u32, 2), position.total);
     try std.testing.expectEqualStrings("second", position.description);
+}
+
+test "reads real sapling ref summary when sl is installed" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-sl-ref-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    if (!try runCommandOk(allocator, dir_path, &.{ "sl", "init" })) return error.SkipZigTest;
+    if (!try runCommandOk(allocator, dir_path, &.{ "sl", "config", "--local", "ui.username", "Bench <bench@example.test>" })) return error.SkipZigTest;
+
+    const file_path = try std.fmt.allocPrint(allocator, "{s}/f.txt", .{dir_path});
+    defer allocator.free(file_path);
+    try writeFile(file_path, "one\n");
+    if (!try runCommandOk(allocator, dir_path, &.{ "sl", "add", "f.txt" })) return error.SkipZigTest;
+    if (!try runCommandOk(allocator, dir_path, &.{ "sl", "commit", "-m", "first" })) return error.SkipZigTest;
+    if (!try runCommandOk(allocator, dir_path, &.{ "sl", "bookmark", "topic" })) return error.SkipZigTest;
+
+    var summary = (try readRefSummary(allocator, dir_path)) orelse return error.SkipZigTest;
+    defer summary.deinit(allocator);
+    try std.testing.expectEqualStrings("default", summary.branch);
+    try std.testing.expectEqualStrings("topic", summary.active_bookmark);
 }
 
 fn runCommandOk(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !bool {

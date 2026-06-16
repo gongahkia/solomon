@@ -24,8 +24,10 @@ pub const Options = struct {
 pub const Cache = struct {
     mutex: std.Thread.Mutex = .{},
     gcp_valid: bool = false,
+    gcp_path: ?[]u8 = null,
     gcp_project: ?[]u8 = null,
     azure_valid: bool = false,
+    azure_path: ?[]u8 = null,
     azure_subscription: ?[]u8 = null,
     kube_valid: bool = false,
     kube_path: ?[]u8 = null,
@@ -53,45 +55,57 @@ pub const Cache = struct {
         self.clearKubeLocked(allocator);
     }
 
-    pub fn gcpProjectAlloc(self: *Cache, allocator: std.mem.Allocator) !?[]u8 {
+    pub fn gcpProjectAlloc(self: *Cache, allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
+        const path = (try gcpConfigPathAlloc(allocator, home)) orelse return null;
+        defer allocator.free(path);
+
         self.mutex.lock();
-        if (self.gcp_valid) {
+        if (self.gcp_valid and self.gcp_path != null and std.mem.eql(u8, self.gcp_path.?, path)) {
             const project = if (self.gcp_project) |value| try allocator.dupe(u8, value) else null;
             self.mutex.unlock();
             return project;
         }
         self.mutex.unlock();
 
-        const project = try readGcpProjectAlloc(allocator);
+        const project = try readGcpProjectAlloc(allocator, path);
         errdefer if (project) |value| allocator.free(value);
+        const cached_path = try allocator.dupe(u8, path);
+        errdefer allocator.free(cached_path);
         const cached_project = if (project) |value| try allocator.dupe(u8, value) else null;
         errdefer if (cached_project) |value| allocator.free(value);
 
         self.mutex.lock();
         defer self.mutex.unlock();
         self.clearGcpLocked(allocator);
+        self.gcp_path = cached_path;
         self.gcp_project = cached_project;
         self.gcp_valid = true;
         return project;
     }
 
-    pub fn azureSubscriptionAlloc(self: *Cache, allocator: std.mem.Allocator) !?[]u8 {
+    pub fn azureSubscriptionAlloc(self: *Cache, allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
+        const path = (try azureProfilePathAlloc(allocator, home)) orelse return null;
+        defer allocator.free(path);
+
         self.mutex.lock();
-        if (self.azure_valid) {
+        if (self.azure_valid and self.azure_path != null and std.mem.eql(u8, self.azure_path.?, path)) {
             const subscription = if (self.azure_subscription) |value| try allocator.dupe(u8, value) else null;
             self.mutex.unlock();
             return subscription;
         }
         self.mutex.unlock();
 
-        const subscription = try readAzureSubscriptionAlloc(allocator);
+        const subscription = try readAzureSubscriptionAlloc(allocator, path);
         errdefer if (subscription) |value| allocator.free(value);
+        const cached_path = try allocator.dupe(u8, path);
+        errdefer allocator.free(cached_path);
         const cached_subscription = if (subscription) |value| try allocator.dupe(u8, value) else null;
         errdefer if (cached_subscription) |value| allocator.free(value);
 
         self.mutex.lock();
         defer self.mutex.unlock();
         self.clearAzureLocked(allocator);
+        self.azure_path = cached_path;
         self.azure_subscription = cached_subscription;
         self.azure_valid = true;
         return subscription;
@@ -138,13 +152,17 @@ pub const Cache = struct {
     }
 
     fn clearGcpLocked(self: *Cache, allocator: std.mem.Allocator) void {
+        if (self.gcp_path) |value| allocator.free(value);
         if (self.gcp_project) |value| allocator.free(value);
+        self.gcp_path = null;
         self.gcp_project = null;
         self.gcp_valid = false;
     }
 
     fn clearAzureLocked(self: *Cache, allocator: std.mem.Allocator) void {
+        if (self.azure_path) |value| allocator.free(value);
         if (self.azure_subscription) |value| allocator.free(value);
+        self.azure_path = null;
         self.azure_subscription = null;
         self.azure_valid = false;
     }
@@ -218,9 +236,9 @@ pub fn kubeWatchScope(allocator: std.mem.Allocator, kubeconfig_env: ?[]const u8,
 pub fn render(allocator: std.mem.Allocator, aws_profile_env: ?[]const u8, kubeconfig_env: ?[]const u8, home: ?[]const u8, cache: *Cache, options: Options) !?[]u8 {
     const profile = if (options.aws) try awsProfileAlloc(allocator, aws_profile_env, home) else null;
     defer if (profile) |value| allocator.free(value);
-    const gcp_project = if (options.gcp) try cache.gcpProjectAlloc(allocator) else null;
+    const gcp_project = if (options.gcp) try cache.gcpProjectAlloc(allocator, home) else null;
     defer if (gcp_project) |value| allocator.free(value);
-    const azure_subscription = if (options.azure) try cache.azureSubscriptionAlloc(allocator) else null;
+    const azure_subscription = if (options.azure) try cache.azureSubscriptionAlloc(allocator, home) else null;
     defer if (azure_subscription) |value| allocator.free(value);
     const kube_context = if (options.kubernetes) try cache.kubeContextAlloc(allocator, kubeconfig_env, home) else null;
     defer if (kube_context) |value| allocator.free(value);
@@ -276,43 +294,71 @@ pub fn parseAwsConfigProfileAlloc(allocator: std.mem.Allocator, source: []const 
     return null;
 }
 
-const GcloudCoreJson = struct {
-    project: []const u8 = "",
-};
-
-const GcloudPropertiesJson = struct {
-    core: GcloudCoreJson = .{},
-};
-
-const GcloudConfigurationJson = struct {
-    properties: GcloudPropertiesJson = .{},
-};
-
-const GcloudConfigHelperJson = struct {
-    configuration: GcloudConfigurationJson = .{},
-};
-
 pub fn parseGcpProjectAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 {
-    var parsed = std.json.parseFromSlice(GcloudConfigHelperJson, allocator, source, .{ .ignore_unknown_fields = true }) catch return null;
-    defer parsed.deinit();
-    const project = std.mem.trim(u8, parsed.value.configuration.properties.core.project, " \t\r\n");
-    if (project.len == 0) return null;
-    return @as(?[]u8, try allocator.dupe(u8, project));
+    var in_core = false;
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0 or line[0] == '#' or line[0] == ';') continue;
+        if (line[0] == '[' and line[line.len - 1] == ']') {
+            const section = std.mem.trim(u8, line[1 .. line.len - 1], " \t");
+            in_core = std.mem.eql(u8, section, "core");
+            continue;
+        }
+        if (!in_core) continue;
+        const value = iniValue(line, "project") orelse continue;
+        if (value.len != 0) return @as(?[]u8, try allocator.dupe(u8, value));
+    }
+    return null;
 }
 
-const AzureAccountJson = struct {
+pub fn gcpConfigPathAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
+    const home_path = home orelse return null;
+    const config_dir = try std.fmt.allocPrint(allocator, "{s}/.config/gcloud", .{home_path});
+    defer allocator.free(config_dir);
+    const active_path = try std.fmt.allocPrint(allocator, "{s}/active_config", .{config_dir});
+    defer allocator.free(active_path);
+
+    const active_source = std.fs.cwd().readFileAlloc(allocator, active_path, 4096) catch |err| switch (err) {
+        error.FileNotFound => null,
+        else => return err,
+    };
+    defer if (active_source) |value| allocator.free(value);
+    const active_name = if (active_source) |value| std.mem.trim(u8, value, " \t\r\n") else "default";
+    const name = if (active_name.len == 0) "default" else active_name;
+    if (!safeGcloudConfigName(name)) return null;
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/configurations/config_{s}", .{ config_dir, name }));
+}
+
+const AzureSubscriptionJson = struct {
     name: []const u8 = "",
     id: []const u8 = "",
+    isDefault: bool = false,
+};
+
+const AzureProfileJson = struct {
+    subscriptions: ?[]AzureSubscriptionJson = null,
 };
 
 pub fn parseAzureSubscriptionAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 {
-    var parsed = std.json.parseFromSlice(AzureAccountJson, allocator, source, .{ .ignore_unknown_fields = true }) catch return null;
+    var parsed = std.json.parseFromSlice(AzureProfileJson, allocator, source, .{ .ignore_unknown_fields = true }) catch return null;
     defer parsed.deinit();
-    const name = std.mem.trim(u8, parsed.value.name, " \t\r\n");
-    if (name.len != 0) return @as(?[]u8, try allocator.dupe(u8, name));
-    const id = std.mem.trim(u8, parsed.value.id, " \t\r\n");
-    if (id.len != 0) return @as(?[]u8, try allocator.dupe(u8, id));
+    const subscriptions = parsed.value.subscriptions orelse return null;
+    var fallback: ?AzureSubscriptionJson = null;
+    for (subscriptions) |subscription| {
+        if (fallback == null) fallback = subscription;
+        if (subscription.isDefault) {
+            const selected = try dupeAzureSubscriptionName(allocator, subscription);
+            if (selected != null) return selected;
+        }
+    }
+    if (fallback) |subscription| return dupeAzureSubscriptionName(allocator, subscription);
     return null;
+}
+
+pub fn azureProfilePathAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
+    const home_path = home orelse return null;
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.azure/azureProfile.json", .{home_path}));
 }
 
 pub fn kubeConfigPathAlloc(allocator: std.mem.Allocator, kubeconfig_env: ?[]const u8, home: ?[]const u8) !?[]u8 {
@@ -336,20 +382,13 @@ pub fn parseKubeContextAlloc(allocator: std.mem.Allocator, source: []const u8) !
     return @as(?[]u8, try allocator.dupe(u8, current_context));
 }
 
-fn readAzureSubscriptionAlloc(allocator: std.mem.Allocator) !?[]u8 {
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = &.{ "az", "account", "show", "--output", "json" },
-        .max_output_bytes = 256 * 1024,
-        .expand_arg0 = .expand,
-    }) catch |err| switch (err) {
+fn readAzureSubscriptionAlloc(allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
         error.FileNotFound => return null,
         else => return err,
     };
-    defer allocator.free(result.stdout);
-    defer allocator.free(result.stderr);
-    if (!exitedZero(result.term)) return null;
-    return parseAzureSubscriptionAlloc(allocator, result.stdout);
+    defer allocator.free(source);
+    return parseAzureSubscriptionAlloc(allocator, source);
 }
 
 fn readKubeContextAlloc(allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
@@ -364,6 +403,37 @@ fn readKubeContextAlloc(allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
 fn appendCloudSegment(allocator: std.mem.Allocator, out: *std.ArrayList(u8), provider: []const u8, value: []const u8) !void {
     if (out.items.len != 0) try out.append(allocator, ' ');
     try std.fmt.format(out.writer(allocator), "{s}:{s}", .{ provider, value });
+}
+
+fn readGcpProjectAlloc(allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 256 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(source);
+    return parseGcpProjectAlloc(allocator, source);
+}
+
+fn iniValue(line: []const u8, key: []const u8) ?[]const u8 {
+    const eq_index = std.mem.indexOfScalar(u8, line, '=') orelse return null;
+    const parsed_key = std.mem.trim(u8, line[0..eq_index], " \t");
+    if (!std.mem.eql(u8, parsed_key, key)) return null;
+    return std.mem.trim(u8, line[eq_index + 1 ..], " \t\r\n");
+}
+
+fn safeGcloudConfigName(name: []const u8) bool {
+    for (name) |byte| {
+        if (byte == '/' or byte == '\\' or byte == 0) return false;
+    }
+    return true;
+}
+
+fn dupeAzureSubscriptionName(allocator: std.mem.Allocator, subscription: AzureSubscriptionJson) !?[]u8 {
+    const name = std.mem.trim(u8, subscription.name, " \t\r\n");
+    if (name.len != 0) return @as(?[]u8, try allocator.dupe(u8, name));
+    const id = std.mem.trim(u8, subscription.id, " \t\r\n");
+    if (id.len != 0) return @as(?[]u8, try allocator.dupe(u8, id));
+    return null;
 }
 
 const YamlLine = struct {
@@ -458,29 +528,6 @@ fn findKubeNamespace(source: []const u8, current_context: []const u8) ?[]const u
     return null;
 }
 
-fn readGcpProjectAlloc(allocator: std.mem.Allocator) !?[]u8 {
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = &.{ "gcloud", "config", "config-helper", "--format=json" },
-        .max_output_bytes = 256 * 1024,
-        .expand_arg0 = .expand,
-    }) catch |err| switch (err) {
-        error.FileNotFound => return null,
-        else => return err,
-    };
-    defer allocator.free(result.stdout);
-    defer allocator.free(result.stderr);
-    if (!exitedZero(result.term)) return null;
-    return parseGcpProjectAlloc(allocator, result.stdout);
-}
-
-fn exitedZero(term: std.process.Child.Term) bool {
-    return switch (term) {
-        .Exited => |code| code == 0,
-        else => false,
-    };
-}
-
 test "aws profile env wins" {
     const profile = (try awsProfileAlloc(std.testing.allocator, " prod ", null)).?;
     defer std.testing.allocator.free(profile);
@@ -524,15 +571,17 @@ test "renders aws cloud context" {
 test "renders cached cloud contexts" {
     var cache = Cache{
         .gcp_valid = true,
+        .gcp_path = try std.testing.allocator.dupe(u8, "/home/me/.config/gcloud/configurations/config_default"),
         .gcp_project = try std.testing.allocator.dupe(u8, "test-project"),
         .azure_valid = true,
+        .azure_path = try std.testing.allocator.dupe(u8, "/home/me/.azure/azureProfile.json"),
         .azure_subscription = try std.testing.allocator.dupe(u8, "prod-sub"),
         .kube_valid = true,
         .kube_path = try std.testing.allocator.dupe(u8, "/tmp/kubeconfig"),
         .kube_context = try std.testing.allocator.dupe(u8, "prod/default"),
     };
     defer cache.deinit(std.testing.allocator);
-    const rendered = (try render(std.testing.allocator, "prod", "/tmp/kubeconfig", null, &cache, .{})).?;
+    const rendered = (try render(std.testing.allocator, "prod", "/tmp/kubeconfig", "/home/me", &cache, .{})).?;
     defer std.testing.allocator.free(rendered);
     try std.testing.expectEqualStrings("cloud[aws:prod gcp:test-project az:prod-sub k8s:prod/default]", rendered);
 }
@@ -540,12 +589,15 @@ test "renders cached cloud contexts" {
 test "renders cached gcp context without aws" {
     var cache = Cache{
         .gcp_valid = true,
+        .gcp_path = try std.testing.allocator.dupe(u8, "/home/me/.config/gcloud/configurations/config_default"),
         .gcp_project = try std.testing.allocator.dupe(u8, "test-project"),
         .azure_valid = true,
+        .azure_path = try std.testing.allocator.dupe(u8, "/home/me/.azure/azureProfile.json"),
         .kube_valid = true,
+        .kube_path = try std.testing.allocator.dupe(u8, "/home/me/.kube/config"),
     };
     defer cache.deinit(std.testing.allocator);
-    const rendered = (try render(std.testing.allocator, null, null, null, &cache, .{})).?;
+    const rendered = (try render(std.testing.allocator, null, null, "/home/me", &cache, .{})).?;
     defer std.testing.allocator.free(rendered);
     try std.testing.expectEqualStrings("cloud[gcp:test-project]", rendered);
 }
@@ -553,30 +605,29 @@ test "renders cached gcp context without aws" {
 test "hides disabled cloud providers" {
     var cache = Cache{
         .gcp_valid = true,
+        .gcp_path = try std.testing.allocator.dupe(u8, "/home/me/.config/gcloud/configurations/config_default"),
         .gcp_project = try std.testing.allocator.dupe(u8, "test-project"),
         .azure_valid = true,
+        .azure_path = try std.testing.allocator.dupe(u8, "/home/me/.azure/azureProfile.json"),
         .azure_subscription = try std.testing.allocator.dupe(u8, "prod-sub"),
         .kube_valid = true,
         .kube_path = try std.testing.allocator.dupe(u8, "/tmp/kubeconfig"),
         .kube_context = try std.testing.allocator.dupe(u8, "prod/default"),
     };
     defer cache.deinit(std.testing.allocator);
-    const rendered = (try render(std.testing.allocator, "prod", "/tmp/kubeconfig", null, &cache, .{ .aws = false, .azure = false })).?;
+    const rendered = (try render(std.testing.allocator, "prod", "/tmp/kubeconfig", "/home/me", &cache, .{ .aws = false, .azure = false })).?;
     defer std.testing.allocator.free(rendered);
     try std.testing.expectEqualStrings("cloud[gcp:test-project k8s:prod/default]", rendered);
 }
 
-test "parses gcp config-helper project" {
+test "parses gcp config project" {
     const project = (try parseGcpProjectAlloc(std.testing.allocator,
-        \\{
-        \\  "configuration": {
-        \\    "properties": {
-        \\      "core": {
-        \\        "project": "test-project"
-        \\      }
-        \\    }
-        \\  }
-        \\}
+        \\[core]
+        \\project = test-project
+        \\
+        \\[compute]
+        \\region = us-central1
+        \\
     )).?;
     defer std.testing.allocator.free(project);
     try std.testing.expectEqualStrings("test-project", project);
@@ -585,12 +636,29 @@ test "parses gcp config-helper project" {
 test "parses azure subscription" {
     const subscription = (try parseAzureSubscriptionAlloc(std.testing.allocator,
         \\{
-        \\  "id": "00000000-0000-0000-0000-000000000000",
-        \\  "name": "prod-sub"
+        \\  "subscriptions": [
+        \\    {
+        \\      "id": "00000000-0000-0000-0000-000000000000",
+        \\      "name": "prod-sub",
+        \\      "isDefault": true
+        \\    }
+        \\  ]
         \\}
     )).?;
     defer std.testing.allocator.free(subscription);
     try std.testing.expectEqualStrings("prod-sub", subscription);
+}
+
+test "resolves default gcp config path" {
+    const path = (try gcpConfigPathAlloc(std.testing.allocator, "/home/me")).?;
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/home/me/.config/gcloud/configurations/config_default", path);
+}
+
+test "resolves azure profile path" {
+    const path = (try azureProfilePathAlloc(std.testing.allocator, "/home/me")).?;
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/home/me/.azure/azureProfile.json", path);
 }
 
 test "resolves kubeconfig path from env list" {

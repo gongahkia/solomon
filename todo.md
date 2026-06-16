@@ -268,12 +268,12 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ### 11.1 Multi-cloud context segment (`cloud_ctx`)
 - [x] AWS profile from `AWS_PROFILE` env + `~/.aws/config` parse
-- [x] GCP project from `gcloud config config-helper --format=json` (cached, fsnotify on `~/.config/gcloud/`)
-- [x] Azure subscription from `az account show` (cached, fsnotify on `~/.azure/azureProfile.json`)
+- [x] GCP project from active Cloud SDK config file (cached, fsnotify on `~/.config/gcloud/`)
+- [x] Azure subscription from `~/.azure/azureProfile.json` (cached, fsnotify on `~/.azure/azureProfile.json`)
 - [x] Kubernetes context+namespace from kubeconfig (fsnotify on `KUBECONFIG`)
 - [x] Render unified segment with iconography per cloud
 - [x] Configurable show/hide per cloud
-- [ ] Fast-path: never spawn subprocesses on the hot path; rely on cached file reads
+- [x] Fast-path: never spawn subprocesses on the hot path; rely on cached file reads
 
 ### 11.2 Risk-tier classifier (`risk_tier`)
 - [ ] Define regex defaults (`prod`, `production`, `live`, `*-prd-*` → prod; `stg`, `staging` → staging; `dev`, `sandbox` → dev)

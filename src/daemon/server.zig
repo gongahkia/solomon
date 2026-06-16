@@ -2,6 +2,7 @@ const std = @import("std");
 const cmd_duration_module = @import("modules/cmd_duration.zig");
 const cwd_module = @import("modules/cwd.zig");
 const exit_status_module = @import("modules/exit_status.zig");
+const git_branch_module = @import("modules/git_branch.zig");
 const jobs_module = @import("modules/jobs.zig");
 const user_host_module = @import("modules/user_host.zig");
 const json = @import("json.zig");
@@ -24,6 +25,7 @@ pub const Server = struct {
     socket_path: []const u8,
     listener: std.net.Server,
     connections: u64 = 0,
+    git_branch_cache: git_branch_module.Cache = .{},
 
     pub fn init(socket_path: []const u8) !Server {
         if (std.fs.path.dirname(socket_path)) |parent| {
@@ -49,6 +51,7 @@ pub const Server = struct {
     }
 
     pub fn deinit(self: *Server) void {
+        self.git_branch_cache.deinit(std.heap.page_allocator);
         self.listener.deinit();
         std.fs.deleteFileAbsolute(self.socket_path) catch {};
         self.* = undefined;
@@ -90,40 +93,43 @@ pub const Server = struct {
         } else if (std.mem.startsWith(u8, request, "health")) {
             try writeFrame(connection.stream.handle, "ok\n");
         } else {
-            const response = try renderResponse(request);
+            const response = try self.renderResponse(request);
             defer std.heap.page_allocator.free(response);
             try writeFrame(connection.stream.handle, response);
         }
     }
+
+    fn renderResponse(self: *Server, request_payload: []const u8) ![]u8 {
+        var parsed = try std.json.parseFromSlice(RenderRequest, std.heap.page_allocator, request_payload, .{ .ignore_unknown_fields = true });
+        defer parsed.deinit();
+
+        const home = std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch null;
+        defer if (home) |home_path| std.heap.page_allocator.free(home_path);
+
+        const cwd = try cwd_module.render(std.heap.page_allocator, parsed.value.cwd, home, 3);
+        defer std.heap.page_allocator.free(cwd);
+
+        const git_branch = try self.git_branch_cache.render(std.heap.page_allocator, parsed.value.cwd);
+        defer if (git_branch) |segment| std.heap.page_allocator.free(segment);
+
+        const exit_status = try exit_status_module.render(std.heap.page_allocator, parsed.value.exit);
+        defer if (exit_status) |segment| std.heap.page_allocator.free(segment);
+        const jobs = try jobs_module.render(std.heap.page_allocator, parsed.value.jobs);
+        defer if (jobs) |segment| std.heap.page_allocator.free(segment);
+        const cmd_duration = try cmd_duration_module.render(std.heap.page_allocator, parsed.value.duration_ms, 1000);
+        defer if (cmd_duration) |segment| std.heap.page_allocator.free(segment);
+        const user_host = try renderUserHost();
+        defer if (user_host) |segment| std.heap.page_allocator.free(segment);
+
+        const prompt = try formatPrompt(std.heap.page_allocator, cwd, git_branch, exit_status, jobs, cmd_duration, user_host);
+        defer std.heap.page_allocator.free(prompt);
+
+        const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, prompt);
+        defer std.heap.page_allocator.free(escaped_prompt);
+
+        return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"prompt\":\"{s}\",\"redraw_token\":null}}", .{escaped_prompt});
+    }
 };
-
-fn renderResponse(request_payload: []const u8) ![]u8 {
-    var parsed = try std.json.parseFromSlice(RenderRequest, std.heap.page_allocator, request_payload, .{ .ignore_unknown_fields = true });
-    defer parsed.deinit();
-
-    const home = std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch null;
-    defer if (home) |home_path| std.heap.page_allocator.free(home_path);
-
-    const cwd = try cwd_module.render(std.heap.page_allocator, parsed.value.cwd, home, 3);
-    defer std.heap.page_allocator.free(cwd);
-
-    const exit_status = try exit_status_module.render(std.heap.page_allocator, parsed.value.exit);
-    defer if (exit_status) |segment| std.heap.page_allocator.free(segment);
-    const jobs = try jobs_module.render(std.heap.page_allocator, parsed.value.jobs);
-    defer if (jobs) |segment| std.heap.page_allocator.free(segment);
-    const cmd_duration = try cmd_duration_module.render(std.heap.page_allocator, parsed.value.duration_ms, 1000);
-    defer if (cmd_duration) |segment| std.heap.page_allocator.free(segment);
-    const user_host = try renderUserHost();
-    defer if (user_host) |segment| std.heap.page_allocator.free(segment);
-
-    const prompt = try formatPrompt(std.heap.page_allocator, cwd, exit_status, jobs, cmd_duration, user_host);
-    defer std.heap.page_allocator.free(prompt);
-
-    const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, prompt);
-    defer std.heap.page_allocator.free(escaped_prompt);
-
-    return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"prompt\":\"{s}\",\"redraw_token\":null}}", .{escaped_prompt});
-}
 
 fn renderUserHost() !?[]u8 {
     const ssh = std.process.getEnvVarOwned(std.heap.page_allocator, "SSH_CONNECTION") catch null;
@@ -138,11 +144,12 @@ fn renderUserHost() !?[]u8 {
     return user_host_module.render(std.heap.page_allocator, ssh, user, host);
 }
 
-fn formatPrompt(allocator: std.mem.Allocator, cwd: []const u8, exit_status: ?[]const u8, jobs: ?[]const u8, cmd_duration: ?[]const u8, user_host: ?[]const u8) ![]u8 {
+fn formatPrompt(allocator: std.mem.Allocator, cwd: []const u8, git_branch: ?[]const u8, exit_status: ?[]const u8, jobs: ?[]const u8, cmd_duration: ?[]const u8, user_host: ?[]const u8) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
 
     try out.appendSlice(allocator, cwd);
+    if (git_branch) |segment| try appendSegment(allocator, &out, segment);
     if (exit_status) |segment| try appendSegment(allocator, &out, segment);
     if (jobs) |segment| try appendSegment(allocator, &out, segment);
     if (cmd_duration) |segment| try appendSegment(allocator, &out, segment);

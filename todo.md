@@ -60,7 +60,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] `jobs` module: background job count
 - [x] `cmd_duration` module: show last command duration when above threshold
 - [x] `user` and `host` modules (hidden by default, surface in SSH)
-- [ ] `git_branch` module (sync version, cached): branch name + dirty indicator
+- [x] `git_branch` module (sync version, cached): branch name + dirty indicator
 - [ ] `time` module: optional clock segment
 
 ### 1.4 Zsh integration

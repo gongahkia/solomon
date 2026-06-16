@@ -216,7 +216,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ### 10.1 Jujutsu (jj) — Tier 1
 - [x] Detect jj repos (`.jj/` directory)
-- [ ] Read jj operation log via `jj op log --no-graph` (cached, fsnotify on `.jj/op_heads`)
+- [x] Read jj operation log via `jj op log --no-graph` (cached, fsnotify on `.jj/op_heads`)
 - [ ] Show current change ID (short hash), description first line, divergence
 - [ ] Show conflict state (`jj`'s first-class conflicts) inline
 - [ ] Show working-copy commit vs. parent commits

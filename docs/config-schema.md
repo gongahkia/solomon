@@ -9,7 +9,7 @@ version = 1
 theme = "plain"
 
 [prompt]
-modules = ["cwd", "git_branch", "exit_status", "jobs", "cmd_duration", "user_host"]
+modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host"]
 ```
 
 ## Top-Level Keys
@@ -31,7 +31,7 @@ Default module order:
 
 ```toml
 [prompt]
-modules = ["cwd", "git_branch", "exit_status", "jobs", "cmd_duration", "user_host"]
+modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host"]
 ```
 
 Allowed core module ids for schema v1:
@@ -40,6 +40,7 @@ Allowed core module ids for schema v1:
 | --- | --- | --- |
 | `cwd` | sync | Current directory, home-tilde, truncation. |
 | `git_branch` | async | Git branch name and dirty marker. |
+| `language_versions` | async | Python, Node, Rust, and Go versions for detected projects. |
 | `exit_status` | sync | Non-zero exit code segment. |
 | `jobs` | sync | Background job count. |
 | `cmd_duration` | sync | Last command duration above threshold. |
@@ -65,6 +66,12 @@ Per-module config lives under `[modules.<id>]`. Option tables may exist only for
 | --- | --- | --- | --- |
 | `show_dirty` | bool | `true` | Append `*` when worktree is dirty. |
 | `cache_ttl_ms` | integer | `250` | `0..60000`; `0` means no TTL reuse. |
+
+### `[modules.language_versions]`
+
+| Key | Type | Default | Constraints |
+| --- | --- | --- | --- |
+| `detect` | array of strings | `["python", "node", "rust", "go"]` | Schema v1 recognizes these four values. |
 
 ### `[modules.exit_status]`
 

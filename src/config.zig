@@ -5,7 +5,7 @@ pub const default_config_text =
     \\theme = "plain"
     \\
     \\[prompt]
-    \\modules = ["cwd", "git_branch", "exit_status", "jobs", "cmd_duration", "user_host"]
+    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host"]
     \\
     \\[modules.cwd]
     \\truncate_to = 3
@@ -32,6 +32,7 @@ pub const Diagnostic = struct {
 pub const ModuleId = enum {
     cwd,
     git_branch,
+    language_versions,
     exit_status,
     jobs,
     cmd_duration,
@@ -43,6 +44,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
     return switch (module_id) {
         .cwd => "cwd",
         .git_branch => "git_branch",
+        .language_versions => "language_versions",
         .exit_status => "exit_status",
         .jobs => "jobs",
         .cmd_duration => "cmd_duration",
@@ -53,7 +55,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
 
 pub fn moduleExecutionClass(module_id: ModuleId) []const u8 {
     return switch (module_id) {
-        .git_branch => "async",
+        .git_branch, .language_versions => "async",
         else => "sync",
     };
 }
@@ -67,6 +69,7 @@ pub const UserHostMode = enum {
 pub const ModuleOptions = struct {
     cwd: CwdOptions = .{},
     git_branch: GitBranchOptions = .{},
+    language_versions: LanguageVersionsOptions = .{},
     exit_status: ExitStatusOptions = .{},
     jobs: JobsOptions = .{},
     cmd_duration: CmdDurationOptions = .{},
@@ -82,6 +85,13 @@ pub const CwdOptions = struct {
 pub const GitBranchOptions = struct {
     show_dirty: bool = true,
     cache_ttl_ms: u32 = 250,
+};
+
+pub const LanguageVersionsOptions = struct {
+    python: bool = true,
+    node: bool = true,
+    rust: bool = true,
+    go: bool = true,
 };
 
 pub const ExitStatusOptions = struct {
@@ -123,6 +133,7 @@ const Table = enum {
     prompt,
     cwd,
     git_branch,
+    language_versions,
     exit_status,
     jobs,
     cmd_duration,
@@ -138,6 +149,7 @@ const Seen = struct {
     cwd_home_tilde: bool = false,
     git_branch_show_dirty: bool = false,
     git_branch_cache_ttl_ms: bool = false,
+    language_versions_detect: bool = false,
     exit_status_show_zero: bool = false,
     jobs_show_zero: bool = false,
     cmd_duration_threshold_ms: bool = false,
@@ -151,7 +163,7 @@ const Trimmed = struct {
     column: usize,
 };
 
-const default_modules = [_]ModuleId{ .cwd, .git_branch, .exit_status, .jobs, .cmd_duration, .user_host };
+const default_modules = [_]ModuleId{ .cwd, .git_branch, .language_versions, .exit_status, .jobs, .cmd_duration, .user_host };
 
 pub fn parse(allocator: std.mem.Allocator, source: []const u8, diagnostic: *Diagnostic) !Config {
     diagnostic.* = .{};
@@ -245,6 +257,7 @@ const Parser = struct {
             .prompt => try self.parsePromptKey(line_no, key, value),
             .cwd => try self.parseCwdKey(line_no, key, value),
             .git_branch => try self.parseGitBranchKey(line_no, key, value),
+            .language_versions => try self.parseLanguageVersionsKey(line_no, key, value),
             .exit_status => try self.parseExitStatusKey(line_no, key, value),
             .jobs => try self.parseJobsKey(line_no, key, value),
             .cmd_duration => try self.parseCmdDurationKey(line_no, key, value),
@@ -294,6 +307,12 @@ const Parser = struct {
         } else {
             return self.fail(line_no, key.column, "unknown key");
         }
+    }
+
+    fn parseLanguageVersionsKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
+        if (!std.mem.eql(u8, key.text, "detect")) return self.fail(line_no, key.column, "unknown key");
+        try self.markUnseen(&self.seen.language_versions_detect, line_no, key.column);
+        self.modules.language_versions = try self.parseLanguageDetectArray(value, line_no);
     }
 
     fn parseExitStatusKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
@@ -377,6 +396,49 @@ const Parser = struct {
         }
     }
 
+    fn parseLanguageDetectArray(self: *Parser, value: Trimmed, line_no: usize) !LanguageVersionsOptions {
+        if (value.text.len < 2 or value.text[0] != '[' or value.text[value.text.len - 1] != ']') {
+            return self.fail(line_no, value.column, "expected array");
+        }
+
+        var options = LanguageVersionsOptions{ .python = false, .node = false, .rust = false, .go = false };
+        var index: usize = 1;
+        while (index < value.text.len - 1) {
+            skipSpaces(value.text, &index);
+            if (index >= value.text.len - 1) break;
+            if (value.text[index] != '"') return self.fail(line_no, value.column + index, "expected string");
+            const start = index + 1;
+            index = start;
+            while (index < value.text.len - 1 and value.text[index] != '"') : (index += 1) {}
+            if (index >= value.text.len - 1) return self.fail(line_no, value.column + start, "unterminated string");
+
+            const name = value.text[start..index];
+            if (std.mem.eql(u8, name, "python")) {
+                if (options.python) return self.fail(line_no, value.column + start, "duplicate language id");
+                options.python = true;
+            } else if (std.mem.eql(u8, name, "node")) {
+                if (options.node) return self.fail(line_no, value.column + start, "duplicate language id");
+                options.node = true;
+            } else if (std.mem.eql(u8, name, "rust")) {
+                if (options.rust) return self.fail(line_no, value.column + start, "duplicate language id");
+                options.rust = true;
+            } else if (std.mem.eql(u8, name, "go")) {
+                if (options.go) return self.fail(line_no, value.column + start, "duplicate language id");
+                options.go = true;
+            } else {
+                return self.fail(line_no, value.column + start, "unknown language id");
+            }
+
+            index += 1;
+            skipSpaces(value.text, &index);
+            if (index >= value.text.len - 1) break;
+            if (value.text[index] != ',') return self.fail(line_no, value.column + index, "expected comma");
+            index += 1;
+        }
+
+        return options;
+    }
+
     fn parseStringAlloc(self: *Parser, value: Trimmed, line_no: usize) ![]u8 {
         if (value.text.len < 2 or value.text[0] != '"' or value.text[value.text.len - 1] != '"') {
             return self.fail(line_no, value.column, "expected string");
@@ -438,6 +500,7 @@ fn parseTableName(name: []const u8) ?Table {
     if (std.mem.eql(u8, name, "prompt")) return .prompt;
     if (std.mem.eql(u8, name, "modules.cwd")) return .cwd;
     if (std.mem.eql(u8, name, "modules.git_branch")) return .git_branch;
+    if (std.mem.eql(u8, name, "modules.language_versions")) return .language_versions;
     if (std.mem.eql(u8, name, "modules.exit_status")) return .exit_status;
     if (std.mem.eql(u8, name, "modules.jobs")) return .jobs;
     if (std.mem.eql(u8, name, "modules.cmd_duration")) return .cmd_duration;
@@ -449,6 +512,7 @@ fn parseTableName(name: []const u8) ?Table {
 fn parseModuleId(id: []const u8) ?ModuleId {
     if (std.mem.eql(u8, id, "cwd")) return .cwd;
     if (std.mem.eql(u8, id, "git_branch")) return .git_branch;
+    if (std.mem.eql(u8, id, "language_versions")) return .language_versions;
     if (std.mem.eql(u8, id, "exit_status")) return .exit_status;
     if (std.mem.eql(u8, id, "jobs")) return .jobs;
     if (std.mem.eql(u8, id, "cmd_duration")) return .cmd_duration;
@@ -542,6 +606,7 @@ test "module metadata names execution classes" {
     try std.testing.expectEqualStrings("cwd", moduleIdName(.cwd));
     try std.testing.expectEqualStrings("sync", moduleExecutionClass(.cwd));
     try std.testing.expectEqualStrings("async", moduleExecutionClass(.git_branch));
+    try std.testing.expectEqualStrings("async", moduleExecutionClass(.language_versions));
 }
 
 test "default config parses" {
@@ -569,6 +634,9 @@ test "parses per-module options" {
         \\show_dirty = false
         \\cache_ttl_ms = 0
         \\
+        \\[modules.language_versions]
+        \\detect = ["python", "go"]
+        \\
         \\[modules.cmd_duration]
         \\threshold_ms = 42
         \\
@@ -591,6 +659,10 @@ test "parses per-module options" {
     try std.testing.expect(!config.modules.cwd.home_tilde);
     try std.testing.expect(!config.modules.git_branch.show_dirty);
     try std.testing.expectEqual(@as(u32, 0), config.modules.git_branch.cache_ttl_ms);
+    try std.testing.expect(config.modules.language_versions.python);
+    try std.testing.expect(!config.modules.language_versions.node);
+    try std.testing.expect(!config.modules.language_versions.rust);
+    try std.testing.expect(config.modules.language_versions.go);
     try std.testing.expectEqual(@as(u64, 42), config.modules.cmd_duration.threshold_ms);
     try std.testing.expectEqual(UserHostMode.always, config.modules.user_host.mode);
     try std.testing.expect(config.modules.time.utc);

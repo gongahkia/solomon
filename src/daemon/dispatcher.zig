@@ -4,6 +4,7 @@ const cwd_module = @import("modules/cwd.zig");
 const exit_status_module = @import("modules/exit_status.zig");
 const git_branch_module = @import("modules/git_branch.zig");
 const jobs_module = @import("modules/jobs.zig");
+const language_versions_module = @import("modules/language_versions.zig");
 const time_module = @import("modules/time.zig");
 const user_host_module = @import("modules/user_host.zig");
 
@@ -16,6 +17,7 @@ pub const ExecutionClass = enum {
 pub const ModuleId = enum {
     cwd,
     git_branch,
+    language_versions,
     time,
     exit_status,
     jobs,
@@ -52,9 +54,25 @@ pub const RenderInput = struct {
     host: []const u8,
 };
 
+pub const CacheSet = struct {
+    git_branch: *git_branch_module.Cache,
+    language_versions: *language_versions_module.Cache,
+};
+
+const AsyncRender = struct {
+    segment: ?[]u8 = null,
+    pending: bool = false,
+
+    fn deinit(self: *AsyncRender, allocator: std.mem.Allocator) void {
+        if (self.segment) |segment| allocator.free(segment);
+        self.* = .{};
+    }
+};
+
 const default_pipeline = [_]ModuleSpec{
     .{ .id = .cwd, .execution_class = executionClass(.cwd) },
     .{ .id = .git_branch, .execution_class = executionClass(.git_branch) },
+    .{ .id = .language_versions, .execution_class = executionClass(.language_versions) },
     .{ .id = .time, .execution_class = executionClass(.time) },
     .{ .id = .exit_status, .execution_class = executionClass(.exit_status) },
     .{ .id = .jobs, .execution_class = executionClass(.jobs) },
@@ -64,32 +82,32 @@ const default_pipeline = [_]ModuleSpec{
 
 pub fn executionClass(module_id: ModuleId) ExecutionClass {
     return switch (module_id) {
-        .git_branch => .async,
+        .git_branch, .language_versions => .async,
         else => .sync,
     };
 }
 
-pub fn renderDefault(allocator: std.mem.Allocator, git_branch_cache: *git_branch_module.Cache, input: RenderInput) !RenderedPrompt {
-    return renderPipeline(allocator, git_branch_cache, input, default_pipeline[0..]);
+pub fn renderDefault(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput) !RenderedPrompt {
+    return renderPipeline(allocator, caches, input, default_pipeline[0..]);
 }
 
-pub fn renderPipeline(allocator: std.mem.Allocator, git_branch_cache: *git_branch_module.Cache, input: RenderInput, pipeline: []const ModuleSpec) !RenderedPrompt {
+pub fn renderPipeline(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec) !RenderedPrompt {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
     var wrote_segment = false;
     var has_async = false;
 
     for (pipeline) |spec| {
-        var async_result: ?git_branch_module.Cache.AsyncRender = null;
+        var async_result: ?AsyncRender = null;
         defer if (async_result) |*value| value.deinit(allocator);
 
         const segment = if (spec.execution_class == .async) async: {
-            async_result = try dispatchAsync(allocator, git_branch_cache, spec.id, input);
+            async_result = try dispatchAsync(allocator, caches, spec.id, input);
             if (async_result.?.pending) has_async = true;
             if (async_result.?.segment) |value| break :async try allocator.dupe(u8, value);
             if (async_result.?.pending) break :async try placeholderAlloc(allocator, spec.id);
             break :async null;
-        } else try dispatch(allocator, git_branch_cache, spec.id, input);
+        } else try dispatch(allocator, caches, spec.id, input);
         defer if (segment) |value| allocator.free(value);
         if (segment) |value| {
             if (wrote_segment) try out.append(allocator, ' ');
@@ -105,17 +123,27 @@ pub fn renderPipeline(allocator: std.mem.Allocator, git_branch_cache: *git_branc
     };
 }
 
-fn dispatchAsync(allocator: std.mem.Allocator, git_branch_cache: *git_branch_module.Cache, module_id: ModuleId, input: RenderInput) !git_branch_module.Cache.AsyncRender {
+fn dispatchAsync(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId, input: RenderInput) !AsyncRender {
     return switch (module_id) {
-        .git_branch => try git_branch_cache.renderAsync(allocator, input.cwd),
+        .git_branch => fromGit(try caches.git_branch.renderAsync(allocator, input.cwd)),
+        .language_versions => fromLanguageVersions(try caches.language_versions.renderAsync(allocator, input.cwd)),
         else => .{ .pending = true },
     };
 }
 
-fn dispatch(allocator: std.mem.Allocator, git_branch_cache: *git_branch_module.Cache, module_id: ModuleId, input: RenderInput) !?[]u8 {
+fn fromGit(rendered: git_branch_module.Cache.AsyncRender) AsyncRender {
+    return .{ .segment = rendered.segment, .pending = rendered.pending };
+}
+
+fn fromLanguageVersions(rendered: language_versions_module.Cache.AsyncRender) AsyncRender {
+    return .{ .segment = rendered.segment, .pending = rendered.pending };
+}
+
+fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId, input: RenderInput) !?[]u8 {
     return switch (module_id) {
         .cwd => try cwd_module.render(allocator, input.cwd, input.home, 3),
-        .git_branch => try git_branch_cache.render(allocator, input.cwd),
+        .git_branch => try caches.git_branch.render(allocator, input.cwd),
+        .language_versions => null,
         .time => try time_module.render(allocator, input.time, input.timestamp),
         .exit_status => try exit_status_module.render(allocator, input.exit),
         .jobs => try jobs_module.render(allocator, input.jobs),
@@ -132,6 +160,7 @@ fn moduleIdName(module_id: ModuleId) []const u8 {
     return switch (module_id) {
         .cwd => "cwd",
         .git_branch => "git_branch",
+        .language_versions => "language_versions",
         .time => "time",
         .exit_status => "exit_status",
         .jobs => "jobs",
@@ -143,12 +172,18 @@ fn moduleIdName(module_id: ModuleId) []const u8 {
 test "classifies module execution" {
     try std.testing.expectEqual(ExecutionClass.sync, executionClass(.cwd));
     try std.testing.expectEqual(ExecutionClass.async, executionClass(.git_branch));
+    try std.testing.expectEqual(ExecutionClass.async, executionClass(.language_versions));
 }
 
 test "renders default pipeline" {
-    var cache = git_branch_module.Cache{};
-    defer cache.deinit(std.testing.allocator);
-    var rendered = try renderDefault(std.testing.allocator, &cache, .{
+    var git_cache = git_branch_module.Cache{};
+    defer git_cache.deinit(std.testing.allocator);
+    var language_cache = language_versions_module.Cache{};
+    defer language_cache.deinit(std.testing.allocator);
+    var rendered = try renderDefault(std.testing.allocator, .{
+        .git_branch = &git_cache,
+        .language_versions = &language_cache,
+    }, .{
         .cwd = "/tmp/project",
         .home = null,
         .exit = 2,
@@ -172,13 +207,18 @@ test "renders async placeholder and redraw token" {
     try std.fs.cwd().makePath(dir_path);
     try runGit(std.testing.allocator, dir_path, &.{ "git", "init", "-b", "main" });
 
-    var cache = git_branch_module.Cache{};
-    defer cache.deinit(std.testing.allocator);
+    var git_cache = git_branch_module.Cache{};
+    defer git_cache.deinit(std.testing.allocator);
+    var language_cache = language_versions_module.Cache{};
+    defer language_cache.deinit(std.testing.allocator);
     const pipeline = [_]ModuleSpec{
         .{ .id = .cwd, .execution_class = .sync },
         .{ .id = .git_branch, .execution_class = .async },
     };
-    var rendered = try renderPipeline(std.testing.allocator, &cache, .{
+    var rendered = try renderPipeline(std.testing.allocator, .{
+        .git_branch = &git_cache,
+        .language_versions = &language_cache,
+    }, .{
         .cwd = dir_path,
         .home = null,
         .exit = 0,

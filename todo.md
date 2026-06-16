@@ -98,7 +98,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Implement zsh redraw via `zle reset-prompt` triggered by async-fill notification
 - [x] Implement transient prompt: on `accept-line`, replace prompt with minimal form
 - [x] Build the async git module: spawn git in a worker thread, fill on completion
-- [ ] Build the async language-version probe (python/node/rust/go), same model
+- [x] Build the async language-version probe (python/node/rust/go), same model
 - [ ] Add cancellation: if the user cd's away, kill in-flight probes for the old cwd
 - [ ] Add a per-module slow-warning that logs to `shisad.log` (no command_timeout, but visibility)
 - [ ] Add a `--no-async` debug flag for testing fallback paths

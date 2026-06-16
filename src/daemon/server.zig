@@ -1,6 +1,7 @@
 const std = @import("std");
 const dispatcher = @import("dispatcher.zig");
 const git_branch_module = @import("modules/git_branch.zig");
+const language_versions_module = @import("modules/language_versions.zig");
 const json = @import("json.zig");
 
 const header_bytes = 4;
@@ -23,6 +24,7 @@ pub const Server = struct {
     listener: std.net.Server,
     connections: u64 = 0,
     git_branch_cache: git_branch_module.Cache = .{},
+    language_versions_cache: language_versions_module.Cache = .{},
 
     pub fn init(socket_path: []const u8) !Server {
         if (std.fs.path.dirname(socket_path)) |parent| {
@@ -49,6 +51,7 @@ pub const Server = struct {
 
     pub fn deinit(self: *Server) void {
         self.git_branch_cache.deinit(std.heap.page_allocator);
+        self.language_versions_cache.deinit(std.heap.page_allocator);
         self.listener.deinit();
         std.fs.deleteFileAbsolute(self.socket_path) catch {};
         self.* = undefined;
@@ -110,7 +113,10 @@ pub const Server = struct {
         var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
         const host = std.posix.gethostname(&host_buffer) catch "unknown";
 
-        var rendered = try dispatcher.renderDefault(std.heap.page_allocator, &self.git_branch_cache, .{
+        var rendered = try dispatcher.renderDefault(std.heap.page_allocator, .{
+            .git_branch = &self.git_branch_cache,
+            .language_versions = &self.language_versions_cache,
+        }, .{
             .cwd = parsed.value.cwd,
             .home = home,
             .exit = parsed.value.exit,

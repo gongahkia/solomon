@@ -28,3 +28,9 @@ Detection:
 - Walk ancestors from `cwd`.
 - A directory containing `.sl/` is the Sapling root.
 - Detection does not require the `sl` binary.
+
+State sources:
+
+- `.sl/store` for fsnotify invalidation.
+- `sl status --root-relative` for working-copy status counts.
+- Verified Sapling 0.2.20260522 does not accept `sl status --json`; official status docs list plain status output and options: https://sapling-scm.com/docs/commands/status/

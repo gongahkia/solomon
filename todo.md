@@ -299,7 +299,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] k8s `kubectl config current-context` user
 
 ### 11.5 SSO expiry (`sso_expiry`)
-- [ ] AWS SSO: read `~/.aws/sso/cache/*.json`, find soonest `expiresAt`
+- [x] AWS SSO: read `~/.aws/sso/cache/*.json`, find soonest `expiresAt`
 - [ ] gcloud: parse `gcloud auth list --format=json` for expiry
 - [ ] Azure: parse `~/.azure/accessTokens.json`
 - [ ] HashiCorp Vault: read `~/.vault-token` lease info

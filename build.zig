@@ -315,6 +315,10 @@ pub fn build(b: *std.Build) void {
     bash_integration.step.dependOn(&debug_install.step);
     const fish_integration = b.addSystemCommand(&.{ "bash", "test/integration/fish_fake_socket.sh" });
     fish_integration.step.dependOn(&debug_install.step);
+    const nu_integration = b.addSystemCommand(&.{ "bash", "test/integration/nu_fake_socket.sh" });
+    nu_integration.step.dependOn(&debug_install.step);
+    const pwsh_integration = b.addSystemCommand(&.{ "bash", "test/integration/pwsh_fake_socket.sh" });
+    pwsh_integration.step.dependOn(&debug_install.step);
     const prompt_snapshot = b.addSystemCommand(&.{ "bash", "test/integration/prompt_snapshot.sh" });
     prompt_snapshot.step.dependOn(&debug_install.step);
     prompt_snapshot.step.dependOn(&debug_daemon_install.step);
@@ -350,5 +354,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&zsh_integration.step);
     test_step.dependOn(&bash_integration.step);
     test_step.dependOn(&fish_integration.step);
+    test_step.dependOn(&nu_integration.step);
+    test_step.dependOn(&pwsh_integration.step);
     test_step.dependOn(&prompt_snapshot.step);
 }

@@ -144,9 +144,9 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 
 ## Phase 6 — Nushell + PowerShell + Linux hardening
 
-- [ ] Author `init/shisa.nu` using nu's `PROMPT_COMMAND`
-- [ ] Author `init/shisa.ps1` using PowerShell's `prompt` function
-- [ ] Implement nu and pwsh redraw mechanisms (or document limitations)
+- [x] Author `init/shisa.nu` using nu's `PROMPT_COMMAND`
+- [x] Author `init/shisa.ps1` using PowerShell's `prompt` function
+- [x] Implement nu and pwsh redraw mechanisms (or document limitations)
 - [ ] Linux: validate inotify watcher count vs. system limits; document raising `max_user_watches`
 - [ ] Linux: handle Wayland-only edge cases (none expected, verify)
 - [ ] Test under systemd-nspawn, podman, distrobox

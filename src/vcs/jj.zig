@@ -39,6 +39,16 @@ pub const ChangeSummary = struct {
     }
 };
 
+pub const ConflictSummary = struct {
+    paths: [][]u8,
+
+    pub fn deinit(self: *ConflictSummary, allocator: std.mem.Allocator) void {
+        for (self.paths) |path| allocator.free(path);
+        allocator.free(self.paths);
+        self.* = undefined;
+    }
+};
+
 pub const Cache = struct {
     valid: bool = false,
     root_path: ?[]u8 = null,
@@ -213,6 +223,36 @@ pub fn renderChangeSummary(allocator: std.mem.Allocator, cwd_path: []const u8) !
     return formatChangeSummaryAlloc(allocator, summary);
 }
 
+pub fn readConflictSummary(allocator: std.mem.Allocator, cwd_path: []const u8) !?ConflictSummary {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{
+            "jj",
+            "log",
+            "--no-graph",
+            "-r",
+            "@",
+            "--color",
+            "never",
+            "-T",
+            "if(conflict, \"conflict\", \"\") ++ \"\\n\" ++ self.conflicted_files().map(|f| f.path().display()).join(\"\\n\") ++ \"\\n\"",
+        },
+        .cwd = cwd_path,
+        .max_output_bytes = 16 * 1024,
+        .expand_arg0 = .expand,
+    }) catch return null;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!exitedZero(result.term)) return null;
+    return parseConflictSummary(allocator, result.stdout);
+}
+
+pub fn renderConflictSummary(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
+    var summary = (try readConflictSummary(allocator, cwd_path)) orelse return null;
+    defer summary.deinit(allocator);
+    return formatConflictSummaryAlloc(allocator, summary);
+}
+
 pub fn parseLatestOperation(allocator: std.mem.Allocator, output: []const u8) !?OperationSummary {
     var lines = std.mem.tokenizeScalar(u8, output, '\n');
     const header = lines.next() orelse return null;
@@ -260,6 +300,36 @@ pub fn formatChangeSummaryAlloc(allocator: std.mem.Allocator, summary: ChangeSum
         return std.fmt.allocPrint(allocator, "jj:{s} {s} divergent", .{ short_change_id, summary.description });
     }
     return std.fmt.allocPrint(allocator, "jj:{s} {s}", .{ short_change_id, summary.description });
+}
+
+pub fn parseConflictSummary(allocator: std.mem.Allocator, output: []const u8) !?ConflictSummary {
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    const state = std.mem.trim(u8, lines.next() orelse return null, " \t\r");
+    if (!std.mem.eql(u8, state, "conflict")) return null;
+
+    var paths: std.ArrayList([]u8) = .empty;
+    errdefer {
+        for (paths.items) |path| allocator.free(path);
+        paths.deinit(allocator);
+    }
+
+    while (lines.next()) |line| {
+        const path = std.mem.trim(u8, line, " \t\r");
+        if (path.len == 0) continue;
+        const owned_path = try allocator.dupe(u8, path);
+        paths.append(allocator, owned_path) catch |err| {
+            allocator.free(owned_path);
+            return err;
+        };
+    }
+
+    return .{ .paths = try paths.toOwnedSlice(allocator) };
+}
+
+pub fn formatConflictSummaryAlloc(allocator: std.mem.Allocator, summary: ConflictSummary) ![]u8 {
+    if (summary.paths.len == 0) return allocator.dupe(u8, "jj:conflict");
+    if (summary.paths.len == 1) return std.fmt.allocPrint(allocator, "jj:conflict {s}", .{summary.paths[0]});
+    return std.fmt.allocPrint(allocator, "jj:conflict {d} files {s}", .{ summary.paths.len, summary.paths[0] });
 }
 
 fn exitedZero(term: std.process.Child.Term) bool {
@@ -412,6 +482,42 @@ test "defaults empty jj change description" {
     try std.testing.expect(!summary.divergent);
 }
 
+test "parses empty jj conflict summary" {
+    const output =
+        \\
+        \\
+    ;
+    try std.testing.expect((try parseConflictSummary(std.testing.allocator, output)) == null);
+}
+
+test "parses current jj conflict summary" {
+    const output =
+        \\conflict
+        \\src/main.zig
+        \\README.md
+        \\
+    ;
+    var summary = (try parseConflictSummary(std.testing.allocator, output)).?;
+    defer summary.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 2), summary.paths.len);
+    try std.testing.expectEqualStrings("src/main.zig", summary.paths[0]);
+    try std.testing.expectEqualStrings("README.md", summary.paths[1]);
+}
+
+test "formats current jj conflict summary" {
+    var summary = ConflictSummary{
+        .paths = try std.testing.allocator.alloc([]u8, 2),
+    };
+    summary.paths[0] = try std.testing.allocator.dupe(u8, "src/main.zig");
+    summary.paths[1] = try std.testing.allocator.dupe(u8, "README.md");
+    defer summary.deinit(std.testing.allocator);
+
+    const rendered = try formatConflictSummaryAlloc(std.testing.allocator, summary);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("jj:conflict 2 files src/main.zig", rendered);
+}
+
 test "cache invalidates by jj root" {
     const allocator = std.testing.allocator;
     var cache = Cache{
@@ -485,4 +591,49 @@ test "reads real jj current change when jj is installed" {
     try std.testing.expect(summary.change_id.len >= 8);
     try std.testing.expect(summary.commit_id.len >= 8);
     try std.testing.expectEqualStrings("working desc", summary.description);
+}
+
+test "reads real jj conflict state when jj is installed" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-jj-conflict-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    if (!try runCommandOk(allocator, dir_path, &.{ "jj", "git", "init" })) return error.SkipZigTest;
+
+    const file_path = try std.fmt.allocPrint(allocator, "{s}/f.txt", .{dir_path});
+    defer allocator.free(file_path);
+    try writeFile(file_path, "base\n");
+    if (!try runCommandOk(allocator, dir_path, &.{ "jj", "commit", "-m", "base" })) return error.SkipZigTest;
+    try writeFile(file_path, "left\n");
+    if (!try runCommandOk(allocator, dir_path, &.{ "jj", "commit", "-m", "left" })) return error.SkipZigTest;
+    if (!try runCommandOk(allocator, dir_path, &.{ "jj", "new", "@--" })) return error.SkipZigTest;
+    try writeFile(file_path, "right\n");
+    if (!try runCommandOk(allocator, dir_path, &.{ "jj", "commit", "-m", "right" })) return error.SkipZigTest;
+    if (!try runCommandOk(allocator, dir_path, &.{ "jj", "new", "subject(exact:left)", "subject(exact:right)" })) return error.SkipZigTest;
+
+    var summary = (try readConflictSummary(allocator, dir_path)) orelse return error.SkipZigTest;
+    defer summary.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 1), summary.paths.len);
+    try std.testing.expectEqualStrings("f.txt", summary.paths[0]);
+}
+
+fn runCommandOk(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !bool {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .cwd = cwd_path,
+        .max_output_bytes = 4096,
+        .expand_arg0 = .expand,
+    }) catch return false;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    return exitedZero(result.term);
+}
+
+fn writeFile(path: []const u8, contents: []const u8) !void {
+    var file = try std.fs.createFileAbsolute(path, .{ .truncate = true });
+    defer file.close();
+    try file.writeAll(contents);
 }

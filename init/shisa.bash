@@ -7,6 +7,10 @@ SHISA_SOCKET=${SHISA_SOCKET:-}
 SHISA_LAST_EXIT=0
 SHISA_LAST_JOBS=0
 SHISA_LAST_DURATION_MS=0
+SHISA_COMMAND_STARTED=0
+SHISA_COMMAND_START_US=
+SHISA_IN_PROMPT=0
+__SHISA_OLD_PROMPT_COMMAND=${PROMPT_COMMAND:-}
 
 shisa_socket_path() {
   if [[ -n ${SHISA_SOCKET:-} ]]; then
@@ -29,7 +33,7 @@ shisa_prompt_fallback() {
 }
 
 shisa_precmd() {
-  local last_status=$?
+  local last_status=${1:-$?}
   SHISA_LAST_EXIT=${last_status}
   local count=0
   local job_pid
@@ -37,8 +41,44 @@ shisa_precmd() {
     [[ -n ${job_pid} ]] && ((count += 1))
   done < <(jobs -p)
   SHISA_LAST_JOBS=${count}
-  SHISA_LAST_DURATION_MS=0
+  local now_us
+  if [[ -n ${SHISA_COMMAND_START_US:-} ]] && now_us=$(shisa_epoch_us); then
+    if ((now_us >= SHISA_COMMAND_START_US)); then
+      SHISA_LAST_DURATION_MS=$(((now_us - SHISA_COMMAND_START_US) / 1000))
+    else
+      SHISA_LAST_DURATION_MS=0
+    fi
+  else
+    SHISA_LAST_DURATION_MS=0
+  fi
+  SHISA_COMMAND_STARTED=0
+  SHISA_COMMAND_START_US=
   return "${last_status}"
+}
+
+shisa_epoch_us() {
+  local value=${EPOCHREALTIME:-}
+  [[ ${value} == *.* ]] || return 1
+  local sec=${value%%.*}
+  local frac=${value#*.}
+  frac=${frac:0:6}
+  while ((${#frac} < 6)); do
+    frac="${frac}0"
+  done
+  printf '%s' "$((10#${sec} * 1000000 + 10#${frac}))"
+}
+
+shisa_debug_trap() {
+  local command=${1:-}
+  [[ ${SHISA_IN_PROMPT:-0} == 0 ]] || return 0
+  case "${command}" in
+    shisa_*|__SHISA_*|PROMPT_COMMAND=*|PS1=*) return 0 ;;
+  esac
+  [[ ${SHISA_COMMAND_STARTED:-0} == 0 ]] || return 0
+  local now_us
+  now_us=$(shisa_epoch_us) || return 0
+  SHISA_COMMAND_START_US=${now_us}
+  SHISA_COMMAND_STARTED=1
 }
 
 shisa_prompt_render() {
@@ -54,13 +94,18 @@ shisa_prompt_render() {
   "${SHISA_BIN}" "${args[@]}" || shisa_prompt_fallback
 }
 
-shisa_append_prompt_command() {
-  case ";${PROMPT_COMMAND:-};" in
-    *";shisa_precmd;"*) ;;
-    *) PROMPT_COMMAND="shisa_precmd${PROMPT_COMMAND:+;${PROMPT_COMMAND}}" ;;
-  esac
+shisa_prompt_command() {
+  local last_status=$?
+  SHISA_IN_PROMPT=1
+  if [[ -n ${__SHISA_OLD_PROMPT_COMMAND:-} ]]; then
+    eval "${__SHISA_OLD_PROMPT_COMMAND}"
+  fi
+  shisa_precmd "${last_status}"
+  SHISA_IN_PROMPT=0
+  return "${last_status}"
 }
 
-shisa_append_prompt_command
+PROMPT_COMMAND=shisa_prompt_command
+trap 'case " ${FUNCNAME[*]:-} " in *" shisa_"*) ;; *) shisa_debug_trap "$BASH_COMMAND" ;; esac' DEBUG
 shopt -s promptvars
 PS1='$(shisa_prompt_render)'

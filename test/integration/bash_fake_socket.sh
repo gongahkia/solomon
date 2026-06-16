@@ -54,5 +54,7 @@ done
   exit 1
 }
 
-SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" bash --noprofile --norc -c 'source init/shisa.bash; shisa_precmd; shisa_prompt_render; case "$PROMPT_COMMAND" in *shisa_precmd*) ;; *) exit 2 ;; esac' >"$out"
+SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" bash --noprofile --norc -c 'source init/shisa.bash; shisa_precmd; shisa_prompt_render; [[ "$PROMPT_COMMAND" == shisa_prompt_command ]]' >"$out"
 grep -F 'fake-bash> ' "$out" >/dev/null
+
+bash --noprofile --norc -c 'source init/shisa.bash; EPOCHREALTIME=100.000000; shisa_debug_trap "sleep 1"; EPOCHREALTIME=101.234000; shisa_precmd 7; [[ ${SHISA_LAST_EXIT} == 7 ]]; [[ ${SHISA_LAST_DURATION_MS} == 1234 ]]'

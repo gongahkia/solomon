@@ -29,3 +29,9 @@ dev_bg = "success"
 staging_bg = "warning"
 prod_bg = "danger"
 ```
+
+Explain a value:
+
+```sh
+shisa cloud explain api-prd-use1
+```

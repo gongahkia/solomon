@@ -280,7 +280,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] User-defined rules in `~/.config/shisa/risk_tiers.toml`
 - [x] Apply tier color to prompt's background bar (configurable)
 - [x] Per-cloud override (e.g., AWS profile=prod, k8s=dev → use max-tier=prod)
-- [ ] `shisa cloud explain` CLI to print why a tier was chosen
+- [x] `shisa cloud explain` CLI to print why a tier was chosen
 
 ### 11.3 Pre-exec prod guard (`prod_guard`)
 - [ ] Implement pre-exec hook protocol across shells (zsh `preexec`, bash `DEBUG` trap, fish `fish_preexec`)

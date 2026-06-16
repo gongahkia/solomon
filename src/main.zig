@@ -8,6 +8,7 @@ const paths = @import("daemon/paths.zig");
 const proto = @import("proto/types.zig");
 const plugin_lua = @import("plugin/lua.zig");
 const plugin_manifest = @import("plugin/manifest.zig");
+const risk_tier_module = @import("daemon/modules/risk_tier.zig");
 const supervisor = @import("supervisor.zig");
 const vcs_stack = @import("vcs/stack.zig");
 const vcs_worktree = @import("vcs/worktree.zig");
@@ -50,6 +51,11 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, args[1], "doctor")) {
         try doctorCommand(allocator, args[2..]);
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "cloud")) {
+        try cloudCommand(allocator, args[2..]);
         return;
     }
 
@@ -328,6 +334,39 @@ test "doctor reports path and backend statuses" {
     try std.testing.expectEqualStrings("missing", pathAccessStatus("/tmp/shisa-doctor-missing"));
     try std.testing.expectEqualStrings("fsevents", fsnotifyBackendName(.fsevents));
     try std.testing.expectEqualStrings("inotify", fsnotifyBackendName(.inotify));
+}
+
+fn cloudCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len != 2 or !std.mem.eql(u8, args[0], "explain")) return error.UnknownCloudArgument;
+    const home = std.process.getEnvVarOwned(allocator, "HOME") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    defer if (home) |value| allocator.free(value);
+    const output = try cloudExplainAlloc(allocator, args[1], home);
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn cloudExplainAlloc(allocator: std.mem.Allocator, value: []const u8, home: ?[]const u8) ![]u8 {
+    var rules = try risk_tier_module.loadUserRulesAlloc(allocator, home);
+    defer if (rules) |*loaded| loaded.deinit(allocator);
+    const reason = risk_tier_module.explain(value, rules);
+    const pattern = if (reason.pattern.len == 0) "-" else reason.pattern;
+    return std.fmt.allocPrint(
+        allocator,
+        "value: {s}\ntier: {s}\nsource: {s}\npattern: {s}\n",
+        .{ value, risk_tier_module.tierName(reason.tier), risk_tier_module.sourceName(reason.source), pattern },
+    );
+}
+
+test "cloud explain output shows reason" {
+    const output = try cloudExplainAlloc(std.testing.allocator, "api-prd-use1", null);
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "tier: prod\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "source: default\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "pattern: *-prd-*\n") != null);
 }
 
 const StackConfig = struct {
@@ -1579,6 +1618,7 @@ const help_text =
     \\commands:
     \\  bench         benchmark prompt render via hyperfine
     \\  cache         dump cache stats
+    \\  cloud         cloud helpers: explain
     \\  doctor        diagnose socket, config, plugins, lua, fsnotify
     \\  explain       print resolved module pipeline
     \\  import-starship <path>

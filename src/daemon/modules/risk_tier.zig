@@ -32,6 +32,18 @@ pub const CloudContext = struct {
     kubernetes: ?[]const u8 = null,
 };
 
+pub const MatchSource = enum {
+    none,
+    default,
+    user,
+};
+
+pub const Explanation = struct {
+    tier: Tier,
+    source: MatchSource = .none,
+    pattern: []const u8 = "",
+};
+
 pub const Rules = struct {
     dev: [][]u8 = &.{},
     staging: [][]u8 = &.{},
@@ -81,6 +93,16 @@ pub fn classifyCloud(context: CloudContext, rules: ?Rules) Tier {
     return tier;
 }
 
+pub fn explain(value: []const u8, rules: ?Rules) Explanation {
+    var best = explainDefault(value);
+    if (rules) |loaded| {
+        best = maxExplanation(best, explainRules(value, loaded.dev, .dev));
+        best = maxExplanation(best, explainRules(value, loaded.staging, .staging));
+        best = maxExplanation(best, explainRules(value, loaded.prod, .prod));
+    }
+    return best;
+}
+
 pub fn rulesPathAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
     const home_path = home orelse return null;
     return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.config/shisa/risk_tiers.toml", .{home_path}));
@@ -108,6 +130,14 @@ pub fn tierName(tier: Tier) []const u8 {
         .dev => "dev",
         .staging => "staging",
         .prod => "prod",
+    };
+}
+
+pub fn sourceName(source: MatchSource) []const u8 {
+    return switch (source) {
+        .none => "none",
+        .default => "default",
+        .user => "user",
     };
 }
 
@@ -150,6 +180,37 @@ fn classifyToken(token: []const u8) Tier {
 
 fn classifyMaybeRules(value: []const u8, rules: ?Rules) Tier {
     return if (rules) |loaded| classifyWithRules(value, loaded) else classify(value);
+}
+
+fn explainDefault(value: []const u8) Explanation {
+    var best = Explanation{ .tier = .unknown };
+    best = maxExplanation(best, explainDefaultTokens(value, .prod, &.{ "prod", "production", "live" }));
+    if (containsToken(value, "prd")) best = maxExplanation(best, .{ .tier = .prod, .source = .default, .pattern = "*-prd-*" });
+    best = maxExplanation(best, explainDefaultTokens(value, .staging, &.{ "stg", "staging" }));
+    best = maxExplanation(best, explainDefaultTokens(value, .dev, &.{ "dev", "sandbox" }));
+    return best;
+}
+
+fn explainDefaultTokens(value: []const u8, tier: Tier, patterns: []const []const u8) Explanation {
+    for (patterns) |pattern| {
+        if (containsToken(value, pattern)) return .{ .tier = tier, .source = .default, .pattern = pattern };
+    }
+    return .{ .tier = .unknown };
+}
+
+fn explainRules(value: []const u8, patterns: []const []const u8, tier: Tier) Explanation {
+    for (patterns) |pattern| {
+        const matched = if (std.mem.indexOfScalar(u8, pattern, '*') != null)
+            globMatchIgnoreCase(value, pattern)
+        else
+            containsToken(value, pattern);
+        if (matched) return .{ .tier = tier, .source = .user, .pattern = pattern };
+    }
+    return .{ .tier = .unknown };
+}
+
+fn maxExplanation(left: Explanation, right: Explanation) Explanation {
+    return if (rank(right.tier) > rank(left.tier)) right else left;
 }
 
 fn matchesAny(value: []const u8, patterns: []const []const u8) bool {
@@ -380,6 +441,13 @@ test "unknown when no default matches" {
     try std.testing.expectEqual(Tier.unknown, classify("personal"));
 }
 
+test "explains default match" {
+    const reason = explain("api-prd-use1", null);
+    try std.testing.expectEqual(Tier.prod, reason.tier);
+    try std.testing.expectEqual(MatchSource.default, reason.source);
+    try std.testing.expectEqualStrings("*-prd-*", reason.pattern);
+}
+
 test "maps tiers to background slots" {
     const colors = BarColors{ .prod_bg = .danger, .staging_bg = .warning, .dev_bg = .success, .unknown_bg = .muted };
     try std.testing.expectEqual(ColorSlot.danger, backgroundSlot(.prod, colors));
@@ -434,6 +502,19 @@ test "cloud context uses user rules" {
     defer rules.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(Tier.prod, classifyCloud(.{ .aws = "critical", .kubernetes = "dev" }, rules));
+}
+
+test "explains user match" {
+    var rules = try parseRulesAlloc(std.testing.allocator,
+        \\prod = ["critical"]
+        \\
+    );
+    defer rules.deinit(std.testing.allocator);
+
+    const reason = explain("critical", rules);
+    try std.testing.expectEqual(Tier.prod, reason.tier);
+    try std.testing.expectEqual(MatchSource.user, reason.source);
+    try std.testing.expectEqualStrings("critical", reason.pattern);
 }
 
 test "resolves user rule path" {

@@ -53,7 +53,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
 
 pub fn moduleExecutionClass(module_id: ModuleId) []const u8 {
     return switch (module_id) {
-        .git_branch => "cached",
+        .git_branch => "async",
         else => "sync",
     };
 }
@@ -541,7 +541,7 @@ test "parses minimal config with defaults" {
 test "module metadata names execution classes" {
     try std.testing.expectEqualStrings("cwd", moduleIdName(.cwd));
     try std.testing.expectEqualStrings("sync", moduleExecutionClass(.cwd));
-    try std.testing.expectEqualStrings("cached", moduleExecutionClass(.git_branch));
+    try std.testing.expectEqualStrings("async", moduleExecutionClass(.git_branch));
 }
 
 test "default config parses" {

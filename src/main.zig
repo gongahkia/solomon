@@ -178,7 +178,7 @@ test "explain output dumps pipeline" {
 
     try std.testing.expect(std.mem.indexOf(u8, output, "theme: plain\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "1. cwd (sync)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "2. git_branch (cached)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "2. git_branch (async)") != null);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {

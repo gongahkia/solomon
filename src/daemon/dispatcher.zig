@@ -64,7 +64,7 @@ const default_pipeline = [_]ModuleSpec{
 
 pub fn executionClass(module_id: ModuleId) ExecutionClass {
     return switch (module_id) {
-        .git_branch => .cached,
+        .git_branch => .async,
         else => .sync,
     };
 }
@@ -80,9 +80,15 @@ pub fn renderPipeline(allocator: std.mem.Allocator, git_branch_cache: *git_branc
     var has_async = false;
 
     for (pipeline) |spec| {
+        var async_result: ?git_branch_module.Cache.AsyncRender = null;
+        defer if (async_result) |*value| value.deinit(allocator);
+
         const segment = if (spec.execution_class == .async) async: {
-            has_async = true;
-            break :async try placeholderAlloc(allocator, spec.id);
+            async_result = try dispatchAsync(allocator, git_branch_cache, spec.id, input);
+            if (async_result.?.pending) has_async = true;
+            if (async_result.?.segment) |value| break :async try allocator.dupe(u8, value);
+            if (async_result.?.pending) break :async try placeholderAlloc(allocator, spec.id);
+            break :async null;
         } else try dispatch(allocator, git_branch_cache, spec.id, input);
         defer if (segment) |value| allocator.free(value);
         if (segment) |value| {
@@ -96,6 +102,13 @@ pub fn renderPipeline(allocator: std.mem.Allocator, git_branch_cache: *git_branc
     return .{
         .prompt = try out.toOwnedSlice(allocator),
         .redraw_token = if (has_async) try allocator.dupe(u8, "pending") else null,
+    };
+}
+
+fn dispatchAsync(allocator: std.mem.Allocator, git_branch_cache: *git_branch_module.Cache, module_id: ModuleId, input: RenderInput) !git_branch_module.Cache.AsyncRender {
+    return switch (module_id) {
+        .git_branch => try git_branch_cache.renderAsync(allocator, input.cwd),
+        else => .{ .pending = true },
     };
 }
 
@@ -129,7 +142,7 @@ fn moduleIdName(module_id: ModuleId) []const u8 {
 
 test "classifies module execution" {
     try std.testing.expectEqual(ExecutionClass.sync, executionClass(.cwd));
-    try std.testing.expectEqual(ExecutionClass.cached, executionClass(.git_branch));
+    try std.testing.expectEqual(ExecutionClass.async, executionClass(.git_branch));
 }
 
 test "renders default pipeline" {
@@ -153,6 +166,12 @@ test "renders default pipeline" {
 }
 
 test "renders async placeholder and redraw token" {
+    const dir_path = try std.fmt.allocPrint(std.testing.allocator, "/tmp/shisa-dispatcher-git-{x}", .{std.crypto.random.int(u64)});
+    defer std.testing.allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    try runGit(std.testing.allocator, dir_path, &.{ "git", "init", "-b", "main" });
+
     var cache = git_branch_module.Cache{};
     defer cache.deinit(std.testing.allocator);
     const pipeline = [_]ModuleSpec{
@@ -160,7 +179,7 @@ test "renders async placeholder and redraw token" {
         .{ .id = .git_branch, .execution_class = .async },
     };
     var rendered = try renderPipeline(std.testing.allocator, &cache, .{
-        .cwd = "/tmp/project",
+        .cwd = dir_path,
         .home = null,
         .exit = 0,
         .jobs = 0,
@@ -172,6 +191,24 @@ test "renders async placeholder and redraw token" {
         .host = "h",
     }, pipeline[0..]);
     defer rendered.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("/tmp/project [pending:git_branch]> ", rendered.prompt);
+    const expected = try std.fmt.allocPrint(std.testing.allocator, "{s} [pending:git_branch]> ", .{dir_path});
+    defer std.testing.allocator.free(expected);
+    try std.testing.expectEqualStrings(expected, rendered.prompt);
     try std.testing.expectEqualStrings("pending", rendered.redraw_token.?);
+}
+
+fn runGit(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !void {
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .cwd = cwd_path,
+        .max_output_bytes = 4096,
+        .expand_arg0 = .expand,
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    try std.testing.expect(switch (result.term) {
+        .Exited => |code| code == 0,
+        else => false,
+    });
 }

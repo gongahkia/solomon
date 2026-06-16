@@ -39,7 +39,7 @@ Allowed core module ids for schema v1:
 | Module | Execution | Summary |
 | --- | --- | --- |
 | `cwd` | sync | Current directory, home-tilde, truncation. |
-| `git_branch` | cached | Git branch name and dirty marker. |
+| `git_branch` | async | Git branch name and dirty marker. |
 | `exit_status` | sync | Non-zero exit code segment. |
 | `jobs` | sync | Background job count. |
 | `cmd_duration` | sync | Last command duration above threshold. |

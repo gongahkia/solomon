@@ -1,15 +1,27 @@
 const std = @import("std");
 
 pub const Cache = struct {
+    mutex: std.Thread.Mutex = .{},
     valid: bool = false,
+    in_flight: bool = false,
     cwd: ?[]u8 = null,
     segment: ?[]u8 = null,
+    worker: ?std.Thread = null,
 
     pub fn deinit(self: *Cache, allocator: std.mem.Allocator) void {
+        const worker = self.takeWorker();
+        if (worker) |thread| thread.join();
+        self.mutex.lock();
+        defer self.mutex.unlock();
         self.clear(allocator);
     }
 
     pub fn render(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
+        const worker = self.takeWorker();
+        if (worker) |thread| thread.join();
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         if (self.valid and self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path)) {
             if (self.segment) |segment| return try allocator.dupe(u8, segment);
             return null;
@@ -24,14 +36,102 @@ pub const Cache = struct {
         return null;
     }
 
+    pub const AsyncRender = struct {
+        segment: ?[]u8 = null,
+        pending: bool = false,
+
+        pub fn deinit(self: *AsyncRender, allocator: std.mem.Allocator) void {
+            if (self.segment) |segment| allocator.free(segment);
+            self.* = .{};
+        }
+    };
+
+    pub fn renderAsync(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) !AsyncRender {
+        self.joinFinishedWorker();
+
+        self.mutex.lock();
+        if (self.valid and self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path)) {
+            const segment = if (self.segment) |value| try allocator.dupe(u8, value) else null;
+            self.mutex.unlock();
+            return .{ .segment = segment };
+        }
+        if (self.in_flight) {
+            self.mutex.unlock();
+            return .{ .pending = true };
+        }
+        self.mutex.unlock();
+
+        if (!(try looksLikeGitWorktree(allocator, cwd_path))) {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            self.clear(allocator);
+            self.valid = true;
+            self.cwd = try allocator.dupe(u8, cwd_path);
+            return .{};
+        }
+
+        const worker_cwd = try allocator.dupe(u8, cwd_path);
+        errdefer allocator.free(worker_cwd);
+
+        self.mutex.lock();
+        self.clear(allocator);
+        self.cwd = try allocator.dupe(u8, cwd_path);
+        self.in_flight = true;
+        self.mutex.unlock();
+
+        const worker = std.Thread.spawn(.{}, asyncProbe, .{ self, allocator, worker_cwd }) catch |err| {
+            self.mutex.lock();
+            self.clear(allocator);
+            self.mutex.unlock();
+            return err;
+        };
+        self.mutex.lock();
+        self.worker = worker;
+        self.mutex.unlock();
+
+        return .{ .pending = true };
+    }
+
+    fn takeWorker(self: *Cache) ?std.Thread {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const worker = self.worker;
+        self.worker = null;
+        return worker;
+    }
+
+    fn joinFinishedWorker(self: *Cache) void {
+        self.mutex.lock();
+        const should_join = !self.in_flight and self.worker != null;
+        const worker = if (should_join) self.worker else null;
+        if (should_join) self.worker = null;
+        self.mutex.unlock();
+        if (worker) |thread| thread.join();
+    }
+
     fn clear(self: *Cache, allocator: std.mem.Allocator) void {
         if (self.cwd) |value| allocator.free(value);
         if (self.segment) |value| allocator.free(value);
-        self.* = .{};
+        self.valid = false;
+        self.in_flight = false;
+        self.cwd = null;
+        self.segment = null;
     }
 };
 
-fn probe(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
+fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8) void {
+    defer allocator.free(cwd_path);
+    const segment = probe(allocator, cwd_path) catch null;
+
+    cache.mutex.lock();
+    defer cache.mutex.unlock();
+    if (cache.segment) |value| allocator.free(value);
+    cache.segment = segment;
+    cache.valid = true;
+    cache.in_flight = false;
+}
+
+pub fn probe(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
     const branch_result = std.process.Child.run(.{
         .allocator = allocator,
         .argv = &.{ "git", "branch", "--show-current" },
@@ -49,6 +149,35 @@ fn probe(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
 
     const dirty = try isDirty(allocator, cwd_path);
     return try std.fmt.allocPrint(allocator, "git:{s}{s}", .{ branch, if (dirty) "*" else "" });
+}
+
+fn looksLikeGitWorktree(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
+    var current = try allocator.dupe(u8, cwd_path);
+    defer allocator.free(current);
+
+    while (current.len > 0) {
+        const dot_git = try std.fs.path.join(allocator, &.{ current, ".git" });
+        const found = found: {
+            std.fs.cwd().access(dot_git, .{}) catch |err| switch (err) {
+                error.FileNotFound => break :found false,
+                else => {
+                    allocator.free(dot_git);
+                    return err;
+                },
+            };
+            break :found true;
+        };
+        allocator.free(dot_git);
+        if (found) return true;
+
+        const parent = std.fs.path.dirname(current) orelse break;
+        if (std.mem.eql(u8, parent, current)) break;
+        const next = try allocator.dupe(u8, parent);
+        allocator.free(current);
+        current = next;
+    }
+
+    return false;
 }
 
 fn isDirty(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
@@ -117,4 +246,47 @@ test "renders branch and dirty indicator" {
     const rendered = (try cache.render(allocator, dir_path)).?;
     defer allocator.free(rendered);
     try std.testing.expectEqualStrings("git:main*", rendered);
+}
+
+test "async render fills worker cache" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-git-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    try runGit(allocator, dir_path, &.{ "git", "init", "-b", "main" });
+
+    var cache = Cache{};
+    defer cache.deinit(allocator);
+    var first = try cache.renderAsync(allocator, dir_path);
+    defer first.deinit(allocator);
+    try std.testing.expect(first.pending);
+    try std.testing.expect(first.segment == null);
+
+    for (0..100) |_| {
+        var rendered = try cache.renderAsync(allocator, dir_path);
+        defer rendered.deinit(allocator);
+        if (rendered.segment) |segment| {
+            try std.testing.expectEqualStrings("git:main", segment);
+            return;
+        }
+        std.Thread.sleep(10 * std.time.ns_per_ms);
+    }
+    return error.Timeout;
+}
+
+test "async render hides non git cwd without pending" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-git-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    var cache = Cache{};
+    defer cache.deinit(allocator);
+    var rendered = try cache.renderAsync(allocator, dir_path);
+    defer rendered.deinit(allocator);
+    try std.testing.expect(!rendered.pending);
+    try std.testing.expect(rendered.segment == null);
 }

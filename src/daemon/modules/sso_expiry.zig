@@ -21,6 +21,15 @@ const AzureAccessTokenJson = struct {
     expires_at: []const u8 = "",
 };
 
+pub const Options = struct {
+    warning_minutes: u32 = 30,
+};
+
+const Candidate = struct {
+    provider: []const u8,
+    remaining_seconds: i64,
+};
+
 pub fn awsSsoCacheDirAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
     const home_path = home orelse return null;
     return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.aws/sso/cache", .{home_path}));
@@ -243,6 +252,127 @@ fn opSigninStatusExpiryFromValueAlloc(allocator: std.mem.Allocator, value: std.j
     }
 }
 
+pub fn render(allocator: std.mem.Allocator, home: ?[]const u8, now_timestamp: i64, options: Options) !?[]u8 {
+    const threshold_seconds = @as(i64, @intCast(options.warning_minutes)) * std.time.s_per_min;
+    var best: ?Candidate = null;
+
+    const aws = try readAwsSsoSoonestExpiryAlloc(allocator, home);
+    defer if (aws) |value| allocator.free(value);
+    considerExpiry(&best, "aws", aws, now_timestamp, threshold_seconds);
+
+    const gcloud_path = try gcloudAuthCachePathAlloc(allocator, home);
+    defer if (gcloud_path) |value| allocator.free(value);
+    const gcloud = if (gcloud_path) |path| try readGcloudAuthExpiryAlloc(allocator, path) else null;
+    defer if (gcloud) |value| allocator.free(value);
+    considerExpiry(&best, "gcp", gcloud, now_timestamp, threshold_seconds);
+
+    const azure_path = try azureAccessTokensPathAlloc(allocator, home);
+    defer if (azure_path) |value| allocator.free(value);
+    const azure = if (azure_path) |path| try readAzureAccessTokenExpiryAlloc(allocator, path) else null;
+    defer if (azure) |value| allocator.free(value);
+    considerExpiry(&best, "az", azure, now_timestamp, threshold_seconds);
+
+    const vault_path = try vaultTokenPathAlloc(allocator, home);
+    defer if (vault_path) |value| allocator.free(value);
+    const vault = if (vault_path) |path| try readVaultTokenLeaseInfoAlloc(allocator, path) else null;
+    defer if (vault) |value| allocator.free(value);
+    considerExpiry(&best, "vault", vault, now_timestamp, threshold_seconds);
+
+    const op_path = try opSigninStatusCachePathAlloc(allocator, home);
+    defer if (op_path) |value| allocator.free(value);
+    const op = if (op_path) |path| try readOpSigninStatusExpiryAlloc(allocator, path) else null;
+    defer if (op) |value| allocator.free(value);
+    considerExpiry(&best, "op", op, now_timestamp, threshold_seconds);
+
+    const warning = best orelse return null;
+    const minutes = remainingMinutes(warning.remaining_seconds);
+    return std.fmt.allocPrint(allocator, "sso[{s}:{d}m]", .{ warning.provider, minutes });
+}
+
+fn considerExpiry(best: *?Candidate, provider: []const u8, value: ?[]const u8, now_timestamp: i64, threshold_seconds: i64) void {
+    const expiry = value orelse return;
+    const remaining = remainingSeconds(expiry, now_timestamp) orelse return;
+    if (remaining >= threshold_seconds) return;
+    if (best.* == null or remaining < best.*.?.remaining_seconds) {
+        best.* = .{ .provider = provider, .remaining_seconds = remaining };
+    }
+}
+
+fn remainingSeconds(value: []const u8, now_timestamp: i64) ?i64 {
+    const trimmed = std.mem.trim(u8, value, " \t\r\n");
+    if (trimmed.len == 0) return null;
+    if (std.fmt.parseInt(i64, trimmed, 10)) |number| {
+        if (number > 1_000_000_000) return number - now_timestamp;
+        return number;
+    } else |_| {}
+    const absolute = parseDateTimeSeconds(trimmed) orelse return null;
+    return absolute - now_timestamp;
+}
+
+fn remainingMinutes(seconds: i64) i64 {
+    if (seconds <= 0) return 0;
+    return @divTrunc(seconds + 59, 60);
+}
+
+fn parseDateTimeSeconds(value: []const u8) ?i64 {
+    if (value.len < 19) return null;
+    if (value[4] != '-' or value[7] != '-' or (value[10] != 'T' and value[10] != ' ') or value[13] != ':' or value[16] != ':') return null;
+    const year = std.fmt.parseInt(u16, value[0..4], 10) catch return null;
+    const month = std.fmt.parseInt(u8, value[5..7], 10) catch return null;
+    const day = std.fmt.parseInt(u8, value[8..10], 10) catch return null;
+    const hour = std.fmt.parseInt(u8, value[11..13], 10) catch return null;
+    const minute = std.fmt.parseInt(u8, value[14..16], 10) catch return null;
+    const second = std.fmt.parseInt(u8, value[17..19], 10) catch return null;
+    const base = epochSeconds(year, month, day, hour, minute, second) orelse return null;
+
+    var index: usize = 19;
+    if (index < value.len and value[index] == '.') {
+        index += 1;
+        while (index < value.len and std.ascii.isDigit(value[index])) : (index += 1) {}
+    }
+    const suffix = std.mem.trim(u8, value[index..], " \t\r\n");
+    if (suffix.len == 0 or std.mem.eql(u8, suffix, "Z")) return base;
+    if (suffix.len == 6 and (suffix[0] == '+' or suffix[0] == '-') and suffix[3] == ':') {
+        const offset_hours = std.fmt.parseInt(i64, suffix[1..3], 10) catch return null;
+        const offset_minutes = std.fmt.parseInt(i64, suffix[4..6], 10) catch return null;
+        if (offset_hours > 23 or offset_minutes > 59) return null;
+        const offset = offset_hours * std.time.s_per_hour + offset_minutes * std.time.s_per_min;
+        return if (suffix[0] == '+') base - offset else base + offset;
+    }
+    return null;
+}
+
+fn epochSeconds(year: u16, month: u8, day: u8, hour: u8, minute: u8, second: u8) ?i64 {
+    if (year < 1970 or month < 1 or month > 12 or hour > 23 or minute > 59 or second > 59) return null;
+    const month_days = daysInMonth(year, month);
+    if (day < 1 or day > month_days) return null;
+
+    var days: i64 = 0;
+    var cursor_year: u16 = 1970;
+    while (cursor_year < year) : (cursor_year += 1) {
+        days += if (isLeapYear(cursor_year)) 366 else 365;
+    }
+    var cursor_month: u8 = 1;
+    while (cursor_month < month) : (cursor_month += 1) {
+        days += @as(i64, @intCast(daysInMonth(year, cursor_month)));
+    }
+    days += @as(i64, @intCast(day - 1));
+    return days * std.time.s_per_day + @as(i64, @intCast(hour)) * std.time.s_per_hour + @as(i64, @intCast(minute)) * std.time.s_per_min + @as(i64, @intCast(second));
+}
+
+fn isLeapYear(year: u16) bool {
+    return (year % 4 == 0 and year % 100 != 0) or year % 400 == 0;
+}
+
+fn daysInMonth(year: u16, month: u8) u8 {
+    return switch (month) {
+        1, 3, 5, 7, 8, 10, 12 => 31,
+        4, 6, 9, 11 => 30,
+        2 => if (isLeapYear(year)) 29 else 28,
+        else => 0,
+    };
+}
+
 test "parses aws sso expiry" {
     const expiry = (try parseAwsSsoExpiryAlloc(std.testing.allocator,
         \\{
@@ -391,4 +521,33 @@ test "builds op signin status cache path" {
     const path = (try opSigninStatusCachePathAlloc(std.testing.allocator, "/home/me")).?;
     defer std.testing.allocator.free(path);
     try std.testing.expectEqualStrings("/home/me/.cache/shisa/op-signin-status.json", path);
+}
+
+test "parses absolute expiry seconds" {
+    try std.testing.expectEqual(@as(i64, 1200), remainingSeconds("1970-01-01T00:20:00Z", 0).?);
+    try std.testing.expectEqual(@as(i64, 1200), remainingSeconds("1970-01-01 00:20:00.000000", 0).?);
+    try std.testing.expectEqual(@as(i64, 1200), remainingSeconds("1970-01-01T01:20:00+01:00", 0).?);
+}
+
+test "renders soonest sso warning" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-sso-render-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    const cache_dir = try std.fmt.allocPrint(allocator, "{s}/.cache/shisa", .{dir_path});
+    defer allocator.free(cache_dir);
+    try std.fs.cwd().makePath(cache_dir);
+    const op_path = try std.fmt.allocPrint(allocator, "{s}/op-signin-status.json", .{cache_dir});
+    defer allocator.free(op_path);
+    {
+        var file = try std.fs.createFileAbsolute(op_path, .{});
+        defer file.close();
+        try file.writeAll("{\"session\":{\"expires_in\":1200}}");
+    }
+
+    const warning = (try render(allocator, dir_path, 0, .{ .warning_minutes = 30 })).?;
+    defer allocator.free(warning);
+    try std.testing.expectEqualStrings("sso[op:20m]", warning);
+    const no_warning = try render(allocator, dir_path, 0, .{ .warning_minutes = 10 });
+    try std.testing.expect(no_warning == null);
 }

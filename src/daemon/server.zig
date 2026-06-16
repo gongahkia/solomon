@@ -5,6 +5,7 @@ const language_versions_module = @import("modules/language_versions.zig");
 const daemon_log = @import("log.zig");
 const warmup = @import("warmup.zig");
 const json = @import("json.zig");
+const fsnotify = @import("fsnotify.zig");
 
 const header_bytes = 4;
 const max_frame_bytes = 1024 * 1024;
@@ -29,6 +30,7 @@ pub const Server = struct {
     connections: u64 = 0,
     git_branch_cache: git_branch_module.Cache = .{},
     language_versions_cache: language_versions_module.Cache = .{},
+    fs_watcher: fsnotify.Watcher,
 
     pub fn init(socket_path: []const u8) !Server {
         return initWithLogger(socket_path, null);
@@ -55,12 +57,14 @@ pub const Server = struct {
             .socket_path = socket_path,
             .listener = listener,
             .logger = logger,
+            .fs_watcher = fsnotify.Watcher.init(std.heap.page_allocator),
         };
     }
 
     pub fn deinit(self: *Server) void {
         self.git_branch_cache.deinit(std.heap.page_allocator);
         self.language_versions_cache.deinit(std.heap.page_allocator);
+        self.fs_watcher.deinit();
         self.listener.deinit();
         std.fs.deleteFileAbsolute(self.socket_path) catch {};
         self.* = undefined;
@@ -131,6 +135,9 @@ pub const Server = struct {
         var parsed = try std.json.parseFromSlice(RenderRequest, std.heap.page_allocator, request_payload, .{ .ignore_unknown_fields = true });
         defer parsed.deinit();
 
+        self.drainFsInvalidations(nowNs());
+        try self.registerGitInvalidation(parsed.value.cwd);
+
         const home = std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch null;
         defer if (home) |home_path| std.heap.page_allocator.free(home_path);
 
@@ -183,6 +190,35 @@ pub const Server = struct {
             try logger.warn("slow_module", message);
         }
     }
+
+    pub fn recordFsEvent(self: *Server, path: []const u8, timestamp_ns: u64) void {
+        self.fs_watcher.recordEvent(path, timestamp_ns);
+    }
+
+    fn drainFsInvalidations(self: *Server, timestamp_ns: u64) void {
+        while (self.fs_watcher.nextInvalidation(timestamp_ns)) |invalidation| {
+            if (std.mem.eql(u8, invalidation.module_id, git_branch_module.module_id)) {
+                self.git_branch_cache.invalidate(std.heap.page_allocator, invalidation.cwd);
+            }
+        }
+    }
+
+    fn registerGitInvalidation(self: *Server, cwd_path: []const u8) !void {
+        if (self.fs_watcher.hasScope(git_branch_module.module_id, cwd_path)) return;
+        var watched = (try git_branch_module.watchScope(std.heap.page_allocator, cwd_path)) orelse return;
+        defer watched.deinit(std.heap.page_allocator);
+        const git_scope = watched.scope();
+        var paths: [3]fsnotify.WatchPath = undefined;
+        for (git_scope.paths, 0..) |path, index| {
+            paths[index] = .{ .path = path.path, .recursive = path.recursive };
+        }
+        try self.fs_watcher.watch(.{
+            .module_id = git_scope.module_id,
+            .cwd = git_scope.cwd,
+            .paths = paths[0..],
+            .debounce_ms = git_scope.debounce_ms,
+        });
+    }
 };
 
 fn writeFrame(fd: std.posix.fd_t, payload: []const u8) !void {
@@ -225,6 +261,10 @@ fn writeAll(fd: std.posix.fd_t, bytes: []const u8) !void {
         const written = try std.posix.write(fd, remaining);
         remaining = remaining[written..];
     }
+}
+
+fn nowNs() u64 {
+    return @intCast(std.time.nanoTimestamp());
 }
 
 fn acceptOneThread(server: *Server) !void {
@@ -327,6 +367,38 @@ test "renders optional time segment" {
     thread.join();
 }
 
+test "fs event invalidates git branch cache" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-git-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    try runGit(allocator, dir_path, &.{ "git", "init", "-b", "main" });
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24}}", .{dir_path});
+    defer allocator.free(request);
+    const clean = try server.renderResponse(request);
+    defer std.heap.page_allocator.free(clean);
+    try std.testing.expect(std.mem.indexOf(u8, clean, "git:main> ") != null);
+    try std.testing.expect(server.fs_watcher.hasScope(git_branch_module.module_id, dir_path));
+
+    const dirty_file = try std.fmt.allocPrint(allocator, "{s}/dirty.txt", .{dir_path});
+    defer allocator.free(dirty_file);
+    var file = try std.fs.createFileAbsolute(dirty_file, .{});
+    try file.writeAll("dirty");
+    file.close();
+
+    server.recordFsEvent(dirty_file, 1);
+    const dirty = try server.renderResponse(request);
+    defer std.heap.page_allocator.free(dirty);
+    try std.testing.expect(std.mem.indexOf(u8, dirty, "git:main*> ") != null);
+}
+
 test "logs slow module warning" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-{x}", .{std.crypto.random.int(u64)});
@@ -349,4 +421,20 @@ test "logs slow module warning" {
     defer allocator.free(contents);
     try std.testing.expect(std.mem.indexOf(u8, contents, "\"event\":\"slow_module\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, contents, "module=language_versions") != null);
+}
+
+fn runGit(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !void {
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .cwd = cwd_path,
+        .max_output_bytes = 4096,
+        .expand_arg0 = .expand,
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    try std.testing.expect(switch (result.term) {
+        .Exited => |code| code == 0,
+        else => false,
+    });
 }

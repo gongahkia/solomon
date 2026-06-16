@@ -107,7 +107,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 
 - [x] Build the in-memory cache structure (cwd-keyed map of module-output)
 - [x] Build the fsnotify watcher abstraction (FSEvents on macOS, inotify on Linux)
-- [ ] Wire git module to invalidate on `.git/HEAD`, `.git/index`, working-tree changes (debounced)
+- [x] Wire git module to invalidate on `.git/HEAD`, `.git/index`, working-tree changes (debounced)
 - [x] Implement cache eviction policy (LRU, max-N entries, max-age)
 - [x] Implement memoized prompt lookups (cwd + state-tuple → rendered string)
 - [x] Add a `shisa cache` subcommand to dump/inspect cache state

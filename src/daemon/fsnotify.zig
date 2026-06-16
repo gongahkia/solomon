@@ -66,6 +66,8 @@ pub const Watcher = struct {
     }
 
     pub fn watch(self: *Watcher, scope: Scope) !void {
+        if (self.hasScope(scope.module_id, scope.cwd)) return;
+
         const module_id = try self.allocator.dupe(u8, scope.module_id);
         errdefer self.allocator.free(module_id);
         const cwd = try self.allocator.dupe(u8, scope.cwd);
@@ -120,6 +122,13 @@ pub const Watcher = struct {
     pub fn count(self: Watcher) usize {
         return self.registrations.items.len;
     }
+
+    pub fn hasScope(self: Watcher, module_id: []const u8, cwd: []const u8) bool {
+        for (self.registrations.items) |registration| {
+            if (std.mem.eql(u8, registration.module_id, module_id) and std.mem.eql(u8, registration.cwd, cwd)) return true;
+        }
+        return false;
+    }
 };
 
 pub fn selectBackend(os_tag: std.Target.Os.Tag) Backend {
@@ -172,6 +181,26 @@ test "owns watched scope paths" {
     try std.testing.expectEqual(@as(usize, 1), watcher.count());
     try std.testing.expectEqualStrings("git_branch", watcher.registrations.items[0].module_id);
     try std.testing.expectEqualStrings("/repo/.git/index", watcher.registrations.items[0].paths[1].path);
+}
+
+test "deduplicates watched scopes" {
+    var watcher = Watcher.init(std.testing.allocator);
+    defer watcher.deinit();
+
+    const paths = [_]WatchPath{.{ .path = "/repo/.git/HEAD" }};
+    try watcher.watch(.{
+        .module_id = "git_branch",
+        .cwd = "/repo",
+        .paths = &paths,
+    });
+    try watcher.watch(.{
+        .module_id = "git_branch",
+        .cwd = "/repo",
+        .paths = &paths,
+    });
+
+    try std.testing.expect(watcher.hasScope("git_branch", "/repo"));
+    try std.testing.expectEqual(@as(usize, 1), watcher.count());
 }
 
 test "debounces invalidations by scope" {

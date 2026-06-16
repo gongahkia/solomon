@@ -1,9 +1,23 @@
 const std = @import("std");
 
+pub const module_id = "git_branch";
+pub const WatchPath = struct {
+    path: []const u8,
+    recursive: bool = false,
+};
+
+pub const Scope = struct {
+    module_id: []const u8,
+    cwd: []const u8,
+    paths: []const WatchPath,
+    debounce_ms: u64 = 50,
+};
+
 pub const Cache = struct {
     mutex: std.Thread.Mutex = .{},
     valid: bool = false,
     in_flight: bool = false,
+    generation: u64 = 0,
     cwd: ?[]u8 = null,
     segment: ?[]u8 = null,
     worker: ?std.Thread = null,
@@ -13,6 +27,21 @@ pub const Cache = struct {
         if (worker) |thread| thread.join();
         self.mutex.lock();
         defer self.mutex.unlock();
+        self.clear(allocator);
+    }
+
+    pub fn invalidate(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        if (self.cwd == null or !std.mem.eql(u8, self.cwd.?, cwd_path)) return;
+        self.generation += 1;
+        if (self.in_flight) {
+            if (self.segment) |value| allocator.free(value);
+            self.segment = null;
+            self.valid = false;
+            return;
+        }
         self.clear(allocator);
     }
 
@@ -77,9 +106,11 @@ pub const Cache = struct {
         self.clear(allocator);
         self.cwd = try allocator.dupe(u8, cwd_path);
         self.in_flight = true;
+        self.generation += 1;
+        const generation = self.generation;
         self.mutex.unlock();
 
-        const worker = std.Thread.spawn(.{}, asyncProbe, .{ self, allocator, worker_cwd }) catch |err| {
+        const worker = std.Thread.spawn(.{}, asyncProbe, .{ self, allocator, worker_cwd, generation }) catch |err| {
             self.mutex.lock();
             self.clear(allocator);
             self.mutex.unlock();
@@ -119,12 +150,65 @@ pub const Cache = struct {
     }
 };
 
-fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8) void {
+pub const WatchScope = struct {
+    cwd: []u8,
+    root_path: []u8,
+    head_path: []u8,
+    index_path: []u8,
+    paths: [3]WatchPath,
+
+    pub fn scope(self: *const WatchScope) Scope {
+        return .{
+            .module_id = module_id,
+            .cwd = self.cwd,
+            .paths = self.paths[0..],
+            .debounce_ms = 50,
+        };
+    }
+
+    pub fn deinit(self: *WatchScope, allocator: std.mem.Allocator) void {
+        allocator.free(self.cwd);
+        allocator.free(self.root_path);
+        allocator.free(self.head_path);
+        allocator.free(self.index_path);
+        self.* = undefined;
+    }
+};
+
+pub fn watchScope(allocator: std.mem.Allocator, cwd_path: []const u8) !?WatchScope {
+    const root_path = (try findGitRoot(allocator, cwd_path)) orelse return null;
+    errdefer allocator.free(root_path);
+    const cwd = try allocator.dupe(u8, cwd_path);
+    errdefer allocator.free(cwd);
+    const head_path = try std.fs.path.join(allocator, &.{ root_path, ".git", "HEAD" });
+    errdefer allocator.free(head_path);
+    const index_path = try std.fs.path.join(allocator, &.{ root_path, ".git", "index" });
+    errdefer allocator.free(index_path);
+
+    return .{
+        .cwd = cwd,
+        .root_path = root_path,
+        .head_path = head_path,
+        .index_path = index_path,
+        .paths = .{
+            .{ .path = head_path },
+            .{ .path = index_path },
+            .{ .path = root_path, .recursive = true },
+        },
+    };
+}
+
+fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8, generation: u64) void {
     defer allocator.free(cwd_path);
     const segment = probe(allocator, cwd_path) catch null;
 
     cache.mutex.lock();
     defer cache.mutex.unlock();
+    if (cache.generation != generation or cache.cwd == null or !std.mem.eql(u8, cache.cwd.?, cwd_path)) {
+        if (segment) |value| allocator.free(value);
+        cache.in_flight = false;
+        return;
+    }
     if (cache.segment) |value| allocator.free(value);
     cache.segment = segment;
     cache.valid = true;
@@ -152,8 +236,17 @@ pub fn probe(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
 }
 
 fn looksLikeGitWorktree(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
+    const root = try findGitRoot(allocator, cwd_path);
+    if (root) |path| {
+        allocator.free(path);
+        return true;
+    }
+    return false;
+}
+
+fn findGitRoot(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
     var current = try allocator.dupe(u8, cwd_path);
-    defer allocator.free(current);
+    errdefer allocator.free(current);
 
     while (current.len > 0) {
         const dot_git = try std.fs.path.join(allocator, &.{ current, ".git" });
@@ -168,16 +261,22 @@ fn looksLikeGitWorktree(allocator: std.mem.Allocator, cwd_path: []const u8) !boo
             break :found true;
         };
         allocator.free(dot_git);
-        if (found) return true;
+        if (found) return current;
 
-        const parent = std.fs.path.dirname(current) orelse break;
-        if (std.mem.eql(u8, parent, current)) break;
+        const parent = std.fs.path.dirname(current) orelse {
+            allocator.free(current);
+            break;
+        };
+        if (std.mem.eql(u8, parent, current)) {
+            allocator.free(current);
+            break;
+        }
         const next = try allocator.dupe(u8, parent);
         allocator.free(current);
         current = next;
     }
 
-    return false;
+    return null;
 }
 
 fn isDirty(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
@@ -246,6 +345,61 @@ test "renders branch and dirty indicator" {
     const rendered = (try cache.render(allocator, dir_path)).?;
     defer allocator.free(rendered);
     try std.testing.expectEqualStrings("git:main*", rendered);
+}
+
+test "watch scope includes git metadata and worktree" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-git-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    try runGit(allocator, dir_path, &.{ "git", "init", "-b", "main" });
+
+    var watched = (try watchScope(allocator, dir_path)).?;
+    defer watched.deinit(allocator);
+    const head_path = try std.fmt.allocPrint(allocator, "{s}/.git/HEAD", .{dir_path});
+    defer allocator.free(head_path);
+    const index_path = try std.fmt.allocPrint(allocator, "{s}/.git/index", .{dir_path});
+    defer allocator.free(index_path);
+
+    try std.testing.expectEqualStrings(module_id, watched.scope().module_id);
+    try std.testing.expectEqualStrings(dir_path, watched.scope().cwd);
+    try std.testing.expectEqualStrings(head_path, watched.paths[0].path);
+    try std.testing.expectEqualStrings(index_path, watched.paths[1].path);
+    try std.testing.expectEqualStrings(dir_path, watched.paths[2].path);
+    try std.testing.expect(watched.paths[2].recursive);
+}
+
+test "invalidate refreshes cached git segment" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-git-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    try runGit(allocator, dir_path, &.{ "git", "init", "-b", "main" });
+
+    var cache = Cache{};
+    defer cache.deinit(allocator);
+    const clean = (try cache.render(allocator, dir_path)).?;
+    defer allocator.free(clean);
+    try std.testing.expectEqualStrings("git:main", clean);
+
+    const dirty_file = try std.fmt.allocPrint(allocator, "{s}/dirty.txt", .{dir_path});
+    defer allocator.free(dirty_file);
+    var file = try std.fs.createFileAbsolute(dirty_file, .{});
+    try file.writeAll("dirty");
+    file.close();
+
+    const cached = (try cache.render(allocator, dir_path)).?;
+    defer allocator.free(cached);
+    try std.testing.expectEqualStrings("git:main", cached);
+
+    cache.invalidate(allocator, dir_path);
+    const refreshed = (try cache.render(allocator, dir_path)).?;
+    defer allocator.free(refreshed);
+    try std.testing.expectEqualStrings("git:main*", refreshed);
 }
 
 test "async render fills worker cache" {

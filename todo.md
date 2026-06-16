@@ -125,7 +125,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Implement fish async redraw via fish-native events
 - [ ] Add fish integration tests
 - [ ] Make instant prompt work in fish (cache-first render before daemon RTT)
-- [ ] Document per-shell feature parity in `docs/shells.md`
+- [x] Document per-shell feature parity in `docs/shells.md`
 
 ## Phase 5 — Plugin SDK + Lua sandbox
 

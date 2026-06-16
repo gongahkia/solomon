@@ -45,3 +45,31 @@ Tuning:
 - `SHISA_JJ_BENCH_CHANGES=20000`
 - `SHISA_JJ_BENCH_RUNS=50`
 - `SHISA_JJ_BENCH_KEEP_REPO=1`
+
+## VCS Starship-Git Harness
+
+Run:
+
+```sh
+bench/vcs-starship-git.sh
+```
+
+The harness creates clean, dirty, and linked-worktree Git repos, then benchmarks Shisa and Starship prompt rendering against the same repo paths.
+
+Outputs:
+
+- `bench-results/vcs-starship-git.json`
+- `bench-results/vcs-starship-git.md`
+
+Requirements:
+
+- `git`
+- `hyperfine`
+- `starship`
+- `zig`
+
+Tuning:
+
+- `SHISA_VCS_BENCH_RUNS=50`
+- `SHISA_VCS_BENCH_WARMUP=10`
+- `SHISA_VCS_BENCH_KEEP_REPOS=1`

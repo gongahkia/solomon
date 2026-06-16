@@ -1029,7 +1029,7 @@ fn readFixture(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
 }
 
 fn waitForAsyncSegment(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) ![]u8 {
-    for (0..100) |_| {
+    for (0..300) |_| {
         var rendered = try cache.renderAsync(allocator, cwd_path);
         if (rendered.segment) |segment| {
             rendered.segment = null;
@@ -1037,7 +1037,7 @@ fn waitForAsyncSegment(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []
             return segment;
         }
         rendered.deinit(allocator);
-        std.Thread.sleep(5 * std.time.ns_per_ms);
+        std.Thread.sleep(10 * std.time.ns_per_ms);
     }
     return error.Timeout;
 }

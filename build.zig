@@ -141,6 +141,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const warmup_test_run = b.addRunArtifact(warmup_tests);
+    const fsnotify_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/daemon/fsnotify.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const fsnotify_test_run = b.addRunArtifact(fsnotify_tests);
     const prompt_cache_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/prompt_cache.zig"),
@@ -282,6 +290,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&log_test_run.step);
     test_step.dependOn(&cache_test_run.step);
     test_step.dependOn(&warmup_test_run.step);
+    test_step.dependOn(&fsnotify_test_run.step);
     test_step.dependOn(&prompt_cache_test_run.step);
     test_step.dependOn(&cwd_test_run.step);
     test_step.dependOn(&exit_status_test_run.step);

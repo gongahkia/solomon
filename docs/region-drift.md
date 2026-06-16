@@ -7,3 +7,5 @@ AWS drift checks `AWS_REGION`, then `AWS_DEFAULT_REGION`, against the selected p
 GCP drift checks `CLOUDSDK_COMPUTE_REGION` against the active Cloud SDK config's `[compute] region`. Drift is reported as `gcp:<env>!=<config>`.
 
 Azure drift checks `AZURE_LOCATION`, then `ARM_LOCATION`, then `AZURE_DEFAULT_LOCATION`, against `~/.azure/config` `[defaults] location` or `region`. Drift is reported as `az:<env>!=<config>`.
+
+The prompt renders `region[...]` only when at least one drift is detected.

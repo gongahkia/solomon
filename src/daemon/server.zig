@@ -171,6 +171,18 @@ pub const Server = struct {
         defer if (ssh) |value| std.heap.page_allocator.free(value);
         const aws_profile = std.process.getEnvVarOwned(std.heap.page_allocator, "AWS_PROFILE") catch null;
         defer if (aws_profile) |value| std.heap.page_allocator.free(value);
+        const aws_region = std.process.getEnvVarOwned(std.heap.page_allocator, "AWS_REGION") catch null;
+        defer if (aws_region) |value| std.heap.page_allocator.free(value);
+        const aws_default_region = std.process.getEnvVarOwned(std.heap.page_allocator, "AWS_DEFAULT_REGION") catch null;
+        defer if (aws_default_region) |value| std.heap.page_allocator.free(value);
+        const cloudsdk_compute_region = std.process.getEnvVarOwned(std.heap.page_allocator, "CLOUDSDK_COMPUTE_REGION") catch null;
+        defer if (cloudsdk_compute_region) |value| std.heap.page_allocator.free(value);
+        const azure_location = std.process.getEnvVarOwned(std.heap.page_allocator, "AZURE_LOCATION") catch null;
+        defer if (azure_location) |value| std.heap.page_allocator.free(value);
+        const arm_location = std.process.getEnvVarOwned(std.heap.page_allocator, "ARM_LOCATION") catch null;
+        defer if (arm_location) |value| std.heap.page_allocator.free(value);
+        const azure_default_location = std.process.getEnvVarOwned(std.heap.page_allocator, "AZURE_DEFAULT_LOCATION") catch null;
+        defer if (azure_default_location) |value| std.heap.page_allocator.free(value);
         const user = std.process.getEnvVarOwned(std.heap.page_allocator, "USER") catch try std.heap.page_allocator.dupe(u8, "unknown");
         defer std.heap.page_allocator.free(user);
         var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
@@ -193,6 +205,12 @@ pub const Server = struct {
             .user = user,
             .host = host,
             .aws_profile = aws_profile,
+            .aws_region = aws_region,
+            .aws_default_region = aws_default_region,
+            .cloudsdk_compute_region = cloudsdk_compute_region,
+            .azure_location = azure_location,
+            .arm_location = arm_location,
+            .azure_default_location = azure_default_location,
             .kubeconfig = kubeconfig,
             .cloud_ctx = parsed.value.cloud_ctx,
             .sso_expiry = parsed.value.sso_expiry,

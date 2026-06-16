@@ -162,6 +162,39 @@ pub fn azureRegionDriftAlloc(allocator: std.mem.Allocator, home: ?[]const u8, az
     return @as(?[]u8, try std.fmt.allocPrint(allocator, "az:{s}!={s}", .{ env_region, config_region }));
 }
 
+pub fn render(
+    allocator: std.mem.Allocator,
+    home: ?[]const u8,
+    profile: ?[]const u8,
+    aws_region: ?[]const u8,
+    aws_default_region: ?[]const u8,
+    cloudsdk_compute_region: ?[]const u8,
+    azure_location: ?[]const u8,
+    arm_location: ?[]const u8,
+    azure_default_location: ?[]const u8,
+) !?[]u8 {
+    var drifts: std.ArrayList([]u8) = .empty;
+    defer {
+        for (drifts.items) |value| allocator.free(value);
+        drifts.deinit(allocator);
+    }
+
+    try appendDrift(allocator, &drifts, try awsRegionDriftAlloc(allocator, home, profile, aws_region, aws_default_region));
+    try appendDrift(allocator, &drifts, try gcpRegionDriftAlloc(allocator, home, cloudsdk_compute_region));
+    try appendDrift(allocator, &drifts, try azureRegionDriftAlloc(allocator, home, azure_location, arm_location, azure_default_location));
+    if (drifts.items.len == 0) return null;
+
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.appendSlice(allocator, "region[");
+    for (drifts.items, 0..) |drift, index| {
+        if (index != 0) try out.append(allocator, ' ');
+        try out.appendSlice(allocator, drift);
+    }
+    try out.append(allocator, ']');
+    return @as(?[]u8, try out.toOwnedSlice(allocator));
+}
+
 fn awsSectionMatchesProfile(section: []const u8, profile: []const u8) bool {
     if (std.mem.eql(u8, profile, "default")) return std.mem.eql(u8, section, "default");
     if (std.mem.eql(u8, section, profile)) return true;
@@ -182,6 +215,12 @@ fn trimEnv(value: ?[]const u8) ?[]const u8 {
         if (trimmed.len != 0) return trimmed;
     }
     return null;
+}
+
+fn appendDrift(allocator: std.mem.Allocator, drifts: *std.ArrayList([]u8), drift: ?[]u8) !void {
+    const value = drift orelse return;
+    errdefer allocator.free(value);
+    try drifts.append(allocator, value);
 }
 
 fn safeGcloudConfigName(name: []const u8) bool {
@@ -302,4 +341,27 @@ test "detects azure region drift" {
     defer allocator.free(drift);
     try std.testing.expectEqualStrings("az:westus!=eastus", drift);
     try std.testing.expect(try azureRegionDriftAlloc(allocator, dir_path, "eastus", null, null) == null);
+}
+
+test "renders region drift warning segment" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-render-region-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    const aws_dir = try std.fmt.allocPrint(allocator, "{s}/.aws", .{dir_path});
+    defer allocator.free(aws_dir);
+    try std.fs.cwd().makePath(aws_dir);
+
+    const config_path = try std.fmt.allocPrint(allocator, "{s}/config", .{aws_dir});
+    defer allocator.free(config_path);
+    {
+        var file = try std.fs.createFileAbsolute(config_path, .{});
+        defer file.close();
+        try file.writeAll("[profile prod]\nregion = us-east-1\n");
+    }
+
+    const segment = (try render(allocator, dir_path, "prod", "us-west-2", null, null, null, null, null)).?;
+    defer allocator.free(segment);
+    try std.testing.expectEqualStrings("region[aws:us-west-2!=us-east-1]", segment);
+    try std.testing.expect(try render(allocator, dir_path, "prod", "us-east-1", null, null, null, null, null) == null);
 }

@@ -7,6 +7,7 @@ const git_branch_module = @import("modules/git_branch.zig");
 const iac_workspace_module = @import("modules/iac_workspace.zig");
 const jobs_module = @import("modules/jobs.zig");
 const language_versions_module = @import("modules/language_versions.zig");
+const region_drift_module = @import("modules/region_drift.zig");
 const sso_expiry_module = @import("modules/sso_expiry.zig");
 const time_module = @import("modules/time.zig");
 const user_host_module = @import("modules/user_host.zig");
@@ -27,6 +28,7 @@ pub const ModuleId = enum {
     cmd_duration,
     user_host,
     cloud_ctx,
+    region_drift,
     sso_expiry,
     iac_workspace,
 };
@@ -68,6 +70,12 @@ pub const RenderInput = struct {
     user: []const u8,
     host: []const u8,
     aws_profile: ?[]const u8 = null,
+    aws_region: ?[]const u8 = null,
+    aws_default_region: ?[]const u8 = null,
+    cloudsdk_compute_region: ?[]const u8 = null,
+    azure_location: ?[]const u8 = null,
+    arm_location: ?[]const u8 = null,
+    azure_default_location: ?[]const u8 = null,
     kubeconfig: ?[]const u8 = null,
     cloud_ctx: cloud_ctx_module.Options = .{},
     sso_expiry: sso_expiry_module.Options = .{},
@@ -100,6 +108,7 @@ const default_pipeline = [_]ModuleSpec{
     .{ .id = .user_host, .execution_class = executionClass(.user_host) },
     .{ .id = .sso_expiry, .execution_class = executionClass(.sso_expiry) },
     .{ .id = .iac_workspace, .execution_class = executionClass(.iac_workspace) },
+    .{ .id = .region_drift, .execution_class = executionClass(.region_drift) },
 };
 
 pub fn executionClass(module_id: ModuleId) ExecutionClass {
@@ -179,6 +188,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
         .cmd_duration => try cmd_duration_module.render(allocator, input.duration_ms, 1000),
         .user_host => try user_host_module.render(allocator, input.ssh, input.user, input.host),
         .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.kubeconfig, input.home, caches.cloud_ctx, input.cloud_ctx),
+        .region_drift => try region_drift_module.render(allocator, input.home, input.aws_profile, input.aws_region, input.aws_default_region, input.cloudsdk_compute_region, input.azure_location, input.arm_location, input.azure_default_location),
         .sso_expiry => try sso_expiry_module.render(allocator, input.home, input.timestamp, input.sso_expiry),
         .iac_workspace => try iac_workspace_module.render(allocator, input.cwd, input.home),
     };
@@ -199,6 +209,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .cmd_duration => "cmd_duration",
         .user_host => "user_host",
         .cloud_ctx => "cloud_ctx",
+        .region_drift => "region_drift",
         .sso_expiry => "sso_expiry",
         .iac_workspace => "iac_workspace",
     };

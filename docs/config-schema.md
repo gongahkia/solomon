@@ -9,7 +9,7 @@ version = 1
 theme = "plain"
 
 [prompt]
-modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace"]
+modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift"]
 ```
 
 ## Top-Level Keys
@@ -31,7 +31,7 @@ Default module order:
 
 ```toml
 [prompt]
-modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace"]
+modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift"]
 ```
 
 Allowed core module ids for schema v1:
@@ -49,6 +49,7 @@ Allowed core module ids for schema v1:
 | `risk_tier` | sync | Risk classification and prompt background-bar color mapping. |
 | `sso_expiry` | sync | Warn when cached SSO/session expiry metadata is below the configured threshold. |
 | `iac_workspace` | sync | Render local Terraform/OpenTofu/Pulumi/CDK workspace metadata. |
+| `region_drift` | sync | Warn when region env vars differ from provider config defaults. |
 | `time` | sync | Optional UTC `HH:MM` clock segment. |
 
 Unknown module ids are invalid.

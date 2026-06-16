@@ -318,7 +318,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] AWS: compare `$AWS_REGION` / `$AWS_DEFAULT_REGION` to profile-configured region
 - [x] GCP: compare `$CLOUDSDK_COMPUTE_REGION` to gcloud config
 - [x] Azure: compare env vars to active subscription default
-- [ ] Render warning segment when drift detected
+- [x] Render warning segment when drift detected
 
 ### 11.8 Cost glance (`cost_glance`) — optional, heavy
 - [ ] AWS Cost Explorer client (read-only, IAM least-priv guide)

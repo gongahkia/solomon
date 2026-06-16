@@ -49,6 +49,18 @@ pub const ConflictSummary = struct {
     }
 };
 
+pub const WorkingCopySummary = struct {
+    commit_id: []u8,
+    parent_commit_ids: [][]u8,
+
+    pub fn deinit(self: *WorkingCopySummary, allocator: std.mem.Allocator) void {
+        allocator.free(self.commit_id);
+        for (self.parent_commit_ids) |id| allocator.free(id);
+        allocator.free(self.parent_commit_ids);
+        self.* = undefined;
+    }
+};
+
 pub const Cache = struct {
     valid: bool = false,
     root_path: ?[]u8 = null,
@@ -253,6 +265,36 @@ pub fn renderConflictSummary(allocator: std.mem.Allocator, cwd_path: []const u8)
     return formatConflictSummaryAlloc(allocator, summary);
 }
 
+pub fn readWorkingCopySummary(allocator: std.mem.Allocator, cwd_path: []const u8) !?WorkingCopySummary {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{
+            "jj",
+            "log",
+            "--no-graph",
+            "-r",
+            "@",
+            "--color",
+            "never",
+            "-T",
+            "commit_id.short(8) ++ \"\\n\" ++ parents.map(|c| c.commit_id().short(8)).join(\",\") ++ \"\\n\"",
+        },
+        .cwd = cwd_path,
+        .max_output_bytes = 16 * 1024,
+        .expand_arg0 = .expand,
+    }) catch return null;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!exitedZero(result.term)) return null;
+    return parseWorkingCopySummary(allocator, result.stdout);
+}
+
+pub fn renderWorkingCopySummary(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
+    var summary = (try readWorkingCopySummary(allocator, cwd_path)) orelse return null;
+    defer summary.deinit(allocator);
+    return formatWorkingCopySummaryAlloc(allocator, summary);
+}
+
 pub fn parseLatestOperation(allocator: std.mem.Allocator, output: []const u8) !?OperationSummary {
     var lines = std.mem.tokenizeScalar(u8, output, '\n');
     const header = lines.next() orelse return null;
@@ -330,6 +372,54 @@ pub fn formatConflictSummaryAlloc(allocator: std.mem.Allocator, summary: Conflic
     if (summary.paths.len == 0) return allocator.dupe(u8, "jj:conflict");
     if (summary.paths.len == 1) return std.fmt.allocPrint(allocator, "jj:conflict {s}", .{summary.paths[0]});
     return std.fmt.allocPrint(allocator, "jj:conflict {d} files {s}", .{ summary.paths.len, summary.paths[0] });
+}
+
+pub fn parseWorkingCopySummary(allocator: std.mem.Allocator, output: []const u8) !?WorkingCopySummary {
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    const commit_id = std.mem.trim(u8, lines.next() orelse return null, " \t\r");
+    const parents = std.mem.trim(u8, lines.next() orelse return null, " \t\r");
+    if (commit_id.len == 0) return null;
+
+    const owned_commit_id = try allocator.dupe(u8, commit_id);
+    errdefer allocator.free(owned_commit_id);
+
+    var parent_ids: std.ArrayList([]u8) = .empty;
+    errdefer {
+        for (parent_ids.items) |id| allocator.free(id);
+        parent_ids.deinit(allocator);
+    }
+
+    var parent_tokens = std.mem.splitScalar(u8, parents, ',');
+    while (parent_tokens.next()) |token| {
+        const parent_id = std.mem.trim(u8, token, " \t\r");
+        if (parent_id.len == 0) continue;
+        const owned_parent_id = try allocator.dupe(u8, parent_id);
+        parent_ids.append(allocator, owned_parent_id) catch |err| {
+            allocator.free(owned_parent_id);
+            return err;
+        };
+    }
+
+    return .{
+        .commit_id = owned_commit_id,
+        .parent_commit_ids = try parent_ids.toOwnedSlice(allocator),
+    };
+}
+
+pub fn formatWorkingCopySummaryAlloc(allocator: std.mem.Allocator, summary: WorkingCopySummary) ![]u8 {
+    if (summary.parent_commit_ids.len == 0) return std.fmt.allocPrint(allocator, "jj:wc:{s}", .{summary.commit_id});
+    if (summary.parent_commit_ids.len == 1) {
+        return std.fmt.allocPrint(allocator, "jj:wc:{s} parent:{s}", .{ summary.commit_id, summary.parent_commit_ids[0] });
+    }
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try std.fmt.format(out.writer(allocator), "jj:wc:{s} parents:", .{summary.commit_id});
+    for (summary.parent_commit_ids, 0..) |parent_id, index| {
+        if (index > 0) try out.append(allocator, ',');
+        try out.appendSlice(allocator, parent_id);
+    }
+    return out.toOwnedSlice(allocator);
 }
 
 fn exitedZero(term: std.process.Child.Term) bool {
@@ -518,6 +608,35 @@ test "formats current jj conflict summary" {
     try std.testing.expectEqualStrings("jj:conflict 2 files src/main.zig", rendered);
 }
 
+test "parses current jj working copy summary" {
+    const output =
+        \\1234abcd
+        \\aaaabbbb,ccccdddd
+        \\
+    ;
+    var summary = (try parseWorkingCopySummary(std.testing.allocator, output)).?;
+    defer summary.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("1234abcd", summary.commit_id);
+    try std.testing.expectEqual(@as(usize, 2), summary.parent_commit_ids.len);
+    try std.testing.expectEqualStrings("aaaabbbb", summary.parent_commit_ids[0]);
+    try std.testing.expectEqualStrings("ccccdddd", summary.parent_commit_ids[1]);
+}
+
+test "formats current jj working copy summary" {
+    var summary = WorkingCopySummary{
+        .commit_id = try std.testing.allocator.dupe(u8, "1234abcd"),
+        .parent_commit_ids = try std.testing.allocator.alloc([]u8, 2),
+    };
+    summary.parent_commit_ids[0] = try std.testing.allocator.dupe(u8, "aaaabbbb");
+    summary.parent_commit_ids[1] = try std.testing.allocator.dupe(u8, "ccccdddd");
+    defer summary.deinit(std.testing.allocator);
+
+    const rendered = try formatWorkingCopySummaryAlloc(std.testing.allocator, summary);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("jj:wc:1234abcd parents:aaaabbbb,ccccdddd", rendered);
+}
+
 test "cache invalidates by jj root" {
     const allocator = std.testing.allocator;
     var cache = Cache{
@@ -617,6 +736,27 @@ test "reads real jj conflict state when jj is installed" {
     defer summary.deinit(allocator);
     try std.testing.expectEqual(@as(usize, 1), summary.paths.len);
     try std.testing.expectEqualStrings("f.txt", summary.paths[0]);
+}
+
+test "reads real jj working copy state when jj is installed" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-jj-wc-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    if (!try runCommandOk(allocator, dir_path, &.{ "jj", "git", "init" })) return error.SkipZigTest;
+
+    const file_path = try std.fmt.allocPrint(allocator, "{s}/f.txt", .{dir_path});
+    defer allocator.free(file_path);
+    try writeFile(file_path, "base\n");
+    if (!try runCommandOk(allocator, dir_path, &.{ "jj", "commit", "-m", "base" })) return error.SkipZigTest;
+
+    var summary = (try readWorkingCopySummary(allocator, dir_path)) orelse return error.SkipZigTest;
+    defer summary.deinit(allocator);
+    try std.testing.expect(summary.commit_id.len >= 8);
+    try std.testing.expectEqual(@as(usize, 1), summary.parent_commit_ids.len);
+    try std.testing.expect(summary.parent_commit_ids[0].len >= 8);
 }
 
 fn runCommandOk(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !bool {

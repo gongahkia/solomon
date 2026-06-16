@@ -450,6 +450,8 @@ fn pluginCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
     defer allocator.free(plugins_dir);
     const disabled_path = try disabledPluginsPath(allocator);
     defer allocator.free(disabled_path);
+    const trusted_path = try trustedPluginsPath(allocator);
+    defer allocator.free(trusted_path);
 
     if (std.mem.eql(u8, args[0], "list")) {
         if (args.len != 1) return error.UnknownPluginArgument;
@@ -466,6 +468,12 @@ fn pluginCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         if (args.len != 2) return error.UnknownPluginArgument;
         try setPluginDisabled(allocator, disabled_path, args[1], false);
         const message = try std.fmt.allocPrint(allocator, "enabled {s}\n", .{args[1]});
+        defer allocator.free(message);
+        try std.fs.File.stdout().writeAll(message);
+    } else if (std.mem.eql(u8, args[0], "trust")) {
+        if (args.len != 2) return error.UnknownPluginArgument;
+        try setPluginTrusted(allocator, trusted_path, args[1]);
+        const message = try std.fmt.allocPrint(allocator, "trusted {s}\n", .{args[1]});
         defer allocator.free(message);
         try std.fs.File.stdout().writeAll(message);
     } else {
@@ -485,6 +493,13 @@ fn disabledPluginsPath(allocator: std.mem.Allocator) ![]u8 {
     defer allocator.free(config_path);
     const dir = std.fs.path.dirname(config_path) orelse return error.MissingConfigDir;
     return std.fmt.allocPrint(allocator, "{s}/plugins.disabled", .{dir});
+}
+
+fn trustedPluginsPath(allocator: std.mem.Allocator) ![]u8 {
+    const config_path = try defaultConfigPath(allocator);
+    defer allocator.free(config_path);
+    const dir = std.fs.path.dirname(config_path) orelse return error.MissingConfigDir;
+    return std.fmt.allocPrint(allocator, "{s}/plugins.trusted", .{dir});
 }
 
 fn pluginListAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, disabled_path: []const u8) ![]u8 {
@@ -520,7 +535,7 @@ fn pluginListAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, disabl
 fn setPluginDisabled(allocator: std.mem.Allocator, disabled_path: []const u8, name: []const u8, disabled: bool) !void {
     if (!plugin_manifest.isValidPluginName(name)) return error.InvalidPluginName;
 
-    var names = try readDisabledPlugins(allocator, disabled_path);
+    var names = try readPluginNames(allocator, disabled_path);
     defer {
         for (names.items) |item| allocator.free(item);
         names.deinit(allocator);
@@ -534,11 +549,11 @@ fn setPluginDisabled(allocator: std.mem.Allocator, disabled_path: []const u8, na
         allocator.free(removed);
     }
     std.mem.sort([]u8, names.items, {}, lessThanString);
-    try writeDisabledPlugins(allocator, disabled_path, names.items);
+    try writePluginNames(disabled_path, names.items);
 }
 
 fn pluginDisabled(allocator: std.mem.Allocator, disabled_path: []const u8, name: []const u8) !bool {
-    var names = try readDisabledPlugins(allocator, disabled_path);
+    var names = try readPluginNames(allocator, disabled_path);
     defer {
         for (names.items) |item| allocator.free(item);
         names.deinit(allocator);
@@ -546,9 +561,34 @@ fn pluginDisabled(allocator: std.mem.Allocator, disabled_path: []const u8, name:
     return indexOfString(names.items, name) != null;
 }
 
-fn readDisabledPlugins(allocator: std.mem.Allocator, disabled_path: []const u8) !std.ArrayList([]u8) {
+fn setPluginTrusted(allocator: std.mem.Allocator, trusted_path: []const u8, name: []const u8) !void {
+    if (!plugin_manifest.isValidPluginName(name)) return error.InvalidPluginName;
+
+    var names = try readPluginNames(allocator, trusted_path);
+    defer {
+        for (names.items) |item| allocator.free(item);
+        names.deinit(allocator);
+    }
+
+    if (indexOfString(names.items, name) == null) {
+        try names.append(allocator, try allocator.dupe(u8, name));
+    }
+    std.mem.sort([]u8, names.items, {}, lessThanString);
+    try writePluginNames(trusted_path, names.items);
+}
+
+fn pluginTrusted(allocator: std.mem.Allocator, trusted_path: []const u8, name: []const u8) !bool {
+    var names = try readPluginNames(allocator, trusted_path);
+    defer {
+        for (names.items) |item| allocator.free(item);
+        names.deinit(allocator);
+    }
+    return indexOfString(names.items, name) != null;
+}
+
+fn readPluginNames(allocator: std.mem.Allocator, path: []const u8) !std.ArrayList([]u8) {
     var names: std.ArrayList([]u8) = .empty;
-    const contents = std.fs.cwd().readFileAlloc(allocator, disabled_path, 1024 * 1024) catch |err| switch (err) {
+    const contents = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
         error.FileNotFound => return names,
         else => return err,
     };
@@ -565,18 +605,17 @@ fn readDisabledPlugins(allocator: std.mem.Allocator, disabled_path: []const u8) 
     return names;
 }
 
-fn writeDisabledPlugins(allocator: std.mem.Allocator, disabled_path: []const u8, names: []const []const u8) !void {
-    if (std.fs.path.dirname(disabled_path)) |parent| {
+fn writePluginNames(path: []const u8, names: []const []const u8) !void {
+    if (std.fs.path.dirname(path)) |parent| {
         try std.fs.cwd().makePath(parent);
     }
 
-    var file = try std.fs.createFileAbsolute(disabled_path, .{ .truncate = true, .mode = 0o600 });
+    var file = try std.fs.createFileAbsolute(path, .{ .truncate = true, .mode = 0o600 });
     defer file.close();
     for (names) |name| {
         try file.writeAll(name);
         try file.writeAll("\n");
     }
-    _ = allocator;
 }
 
 fn indexOfString(items: []const []const u8, name: []const u8) ?usize {
@@ -638,8 +677,27 @@ test "plugin enable disable is duplicate safe" {
     try std.testing.expectEqualStrings("", contents);
 }
 
+test "plugin trust is duplicate safe" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const trusted_path = try std.fmt.allocPrint(allocator, "{s}/plugins.trusted", .{dir_path});
+    defer allocator.free(trusted_path);
+    try setPluginTrusted(allocator, trusted_path, "alpha");
+    try setPluginTrusted(allocator, trusted_path, "alpha");
+    try std.testing.expect(try pluginTrusted(allocator, trusted_path, "alpha"));
+
+    const contents = try std.fs.cwd().readFileAlloc(allocator, trusted_path, 4096);
+    defer allocator.free(contents);
+    try std.testing.expectEqualStrings("alpha\n", contents);
+}
+
 test "plugin state rejects invalid names" {
     try std.testing.expectError(error.InvalidPluginName, setPluginDisabled(std.testing.allocator, "/tmp/shisa-plugin-invalid", "Bad", true));
+    try std.testing.expectError(error.InvalidPluginName, setPluginTrusted(std.testing.allocator, "/tmp/shisa-plugin-invalid", "Bad"));
 }
 
 test "parses bench export json flag" {
@@ -818,7 +876,7 @@ const help_text =
     \\  explain       print resolved module pipeline
     \\  init          write default shisa.toml
     \\  pin           mark a path as never-evicted
-    \\  plugin        list, enable, or disable plugins
+    \\  plugin        list, enable, disable, or trust plugins
     \\  prompt        render prompt through shisad
     \\  supervisor    run shisad under a crash-restart supervisor
     \\

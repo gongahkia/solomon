@@ -222,10 +222,10 @@ pub fn render(allocator: std.mem.Allocator, aws_profile_env: ?[]const u8, kubeco
     defer out.deinit(allocator);
     if (profile) |aws| try appendCloudSegment(allocator, &out, "aws", aws);
     if (gcp_project) |project| try appendCloudSegment(allocator, &out, "gcp", project);
-    if (azure_subscription) |subscription| try appendCloudSegment(allocator, &out, "azure", subscription);
+    if (azure_subscription) |subscription| try appendCloudSegment(allocator, &out, "az", subscription);
     if (kube_context) |context| try appendCloudSegment(allocator, &out, "k8s", context);
     if (out.items.len == 0) return null;
-    return try out.toOwnedSlice(allocator);
+    return try std.fmt.allocPrint(allocator, "cloud[{s}]", .{out.items});
 }
 
 pub fn awsProfileAlloc(allocator: std.mem.Allocator, aws_profile_env: ?[]const u8, home: ?[]const u8) !?[]u8 {
@@ -511,7 +511,7 @@ test "renders aws cloud context" {
     defer cache.deinit(std.testing.allocator);
     const rendered = (try render(std.testing.allocator, "prod", null, null, &cache)).?;
     defer std.testing.allocator.free(rendered);
-    try std.testing.expectEqualStrings("aws:prod", rendered);
+    try std.testing.expectEqualStrings("cloud[aws:prod]", rendered);
 }
 
 test "renders cached cloud contexts" {
@@ -527,7 +527,7 @@ test "renders cached cloud contexts" {
     defer cache.deinit(std.testing.allocator);
     const rendered = (try render(std.testing.allocator, "prod", "/tmp/kubeconfig", null, &cache)).?;
     defer std.testing.allocator.free(rendered);
-    try std.testing.expectEqualStrings("aws:prod gcp:test-project azure:prod-sub k8s:prod/default", rendered);
+    try std.testing.expectEqualStrings("cloud[aws:prod gcp:test-project az:prod-sub k8s:prod/default]", rendered);
 }
 
 test "renders cached gcp context without aws" {
@@ -540,7 +540,7 @@ test "renders cached gcp context without aws" {
     defer cache.deinit(std.testing.allocator);
     const rendered = (try render(std.testing.allocator, null, null, null, &cache)).?;
     defer std.testing.allocator.free(rendered);
-    try std.testing.expectEqualStrings("gcp:test-project", rendered);
+    try std.testing.expectEqualStrings("cloud[gcp:test-project]", rendered);
 }
 
 test "parses gcp config-helper project" {

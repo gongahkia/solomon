@@ -271,7 +271,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] GCP project from `gcloud config config-helper --format=json` (cached, fsnotify on `~/.config/gcloud/`)
 - [x] Azure subscription from `az account show` (cached, fsnotify on `~/.azure/azureProfile.json`)
 - [x] Kubernetes context+namespace from kubeconfig (fsnotify on `KUBECONFIG`)
-- [ ] Render unified segment with iconography per cloud
+- [x] Render unified segment with iconography per cloud
 - [ ] Configurable show/hide per cloud
 - [ ] Fast-path: never spawn subprocesses on the hot path; rely on cached file reads
 

@@ -18,7 +18,7 @@ Planned state sources:
 - `jj log --no-graph -r @` with a template for current change id, commit id, description first line, and divergence.
 - `jj log --no-graph -r @` with `conflict` and `self.conflicted_files()` for inline conflict state.
 - `jj log --no-graph -r @` with commit id and `parents.map()` for working-copy position.
-- `test/fixtures/jj/*` snapshot fixture repos cover deterministic parser/render output.
+- `test/fixtures/vcs/jj/*` snapshot fixture repos cover deterministic parser/render output.
 - `bench/jj-10k.sh` benchmarks the jj commands Shisa wraps on a 10k-change imported repo.
 
 ## Sapling
@@ -35,7 +35,7 @@ State sources:
 - `sl status --root-relative` for working-copy status counts.
 - `sl log -r . --template` plus `sl log -r '::. - public()'` for current smartlog stack position.
 - `sl log -r . --template '{branch}\n{activebookmark}\n'` for branch and active bookmark.
-- `test/fixtures/sl/*` snapshot fixture repos cover deterministic parser/render output.
+- `test/fixtures/vcs/sl/*` snapshot fixture repos cover deterministic parser/render output.
 - Verified Sapling 0.2.20260522 does not accept `sl status --json`; official status docs list plain status output and options: https://sapling-scm.com/docs/commands/status/
 
 ## Mercurial

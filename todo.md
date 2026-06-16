@@ -260,7 +260,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [ ] Link to community repo in plugin marketplace
 
 ### 10.7 Tests & benches
-- [ ] Per-VCS fixture corpus checked into `test/fixtures/vcs/<vcs>/`
+- [x] Per-VCS fixture corpus checked into `test/fixtures/vcs/<vcs>/`
 - [ ] CI matrix runs each VCS module against fixtures on every PR
 - [ ] Public benchmark vs. starship git on the same repos for parity confirmation
 

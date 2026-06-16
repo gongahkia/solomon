@@ -1,0 +1,5 @@
+default
+feature
+draft
+branch=default
+topic=stack

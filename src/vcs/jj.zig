@@ -798,7 +798,7 @@ test "formats current jj working copy summary" {
 
 test "snapshots linear jj fixture repo" {
     const allocator = std.testing.allocator;
-    const fixture_root = "test/fixtures/jj/linear";
+    const fixture_root = "test/fixtures/vcs/jj/linear";
 
     const root = (try findRoot(allocator, fixture_root)).?;
     defer allocator.free(root);
@@ -806,23 +806,23 @@ test "snapshots linear jj fixture repo" {
 
     var watched = (try watchScope(allocator, fixture_root)).?;
     defer watched.deinit(allocator);
-    try std.testing.expectEqualStrings("test/fixtures/jj/linear/.jj/repo/op_heads", watched.paths[0].path);
+    try std.testing.expectEqualStrings("test/fixtures/vcs/jj/linear/.jj/repo/op_heads", watched.paths[0].path);
 
-    const op_output = try readFixture(allocator, "test/fixtures/jj/linear/op-log.txt");
+    const op_output = try readFixture(allocator, "test/fixtures/vcs/jj/linear/op-log.txt");
     defer allocator.free(op_output);
     var operation = (try parseLatestOperation(allocator, op_output)).?;
     defer operation.deinit(allocator);
     const op_segment = try formatOperationSummaryAlloc(allocator, operation);
     defer allocator.free(op_segment);
 
-    const change_output = try readFixture(allocator, "test/fixtures/jj/linear/current-change.txt");
+    const change_output = try readFixture(allocator, "test/fixtures/vcs/jj/linear/current-change.txt");
     defer allocator.free(change_output);
     var change = (try parseChangeSummary(allocator, change_output)).?;
     defer change.deinit(allocator);
     const change_segment = try formatChangeSummaryAlloc(allocator, change);
     defer allocator.free(change_segment);
 
-    const wc_output = try readFixture(allocator, "test/fixtures/jj/linear/working-copy.txt");
+    const wc_output = try readFixture(allocator, "test/fixtures/vcs/jj/linear/working-copy.txt");
     defer allocator.free(wc_output);
     var wc = (try parseWorkingCopySummary(allocator, wc_output)).?;
     defer wc.deinit(allocator);
@@ -831,20 +831,20 @@ test "snapshots linear jj fixture repo" {
 
     const actual = try std.fmt.allocPrint(allocator, "{s}\n{s}\n{s}\n", .{ op_segment, change_segment, wc_segment });
     defer allocator.free(actual);
-    const expected = try readFixture(allocator, "test/fixtures/jj/linear/expected.txt");
+    const expected = try readFixture(allocator, "test/fixtures/vcs/jj/linear/expected.txt");
     defer allocator.free(expected);
     try std.testing.expectEqualStrings(expected, actual);
 }
 
 test "snapshots conflict jj fixture repo" {
     const allocator = std.testing.allocator;
-    const fixture_root = "test/fixtures/jj/conflict";
+    const fixture_root = "test/fixtures/vcs/jj/conflict";
 
     const root = (try findRoot(allocator, fixture_root)).?;
     defer allocator.free(root);
     try std.testing.expectEqualStrings(fixture_root, root);
 
-    const conflict_output = try readFixture(allocator, "test/fixtures/jj/conflict/conflict.txt");
+    const conflict_output = try readFixture(allocator, "test/fixtures/vcs/jj/conflict/conflict.txt");
     defer allocator.free(conflict_output);
     var conflict = (try parseConflictSummary(allocator, conflict_output)).?;
     defer conflict.deinit(allocator);
@@ -852,7 +852,7 @@ test "snapshots conflict jj fixture repo" {
     defer allocator.free(conflict_segment);
     const actual = try std.fmt.allocPrint(allocator, "{s}\n", .{conflict_segment});
     defer allocator.free(actual);
-    const expected = try readFixture(allocator, "test/fixtures/jj/conflict/expected.txt");
+    const expected = try readFixture(allocator, "test/fixtures/vcs/jj/conflict/expected.txt");
     defer allocator.free(expected);
     try std.testing.expectEqualStrings(expected, actual);
 }

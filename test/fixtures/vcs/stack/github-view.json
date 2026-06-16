@@ -1,0 +1,8 @@
+{
+  "currentBranch": "feature/b",
+  "branches": [
+    { "name": "feature/a" },
+    { "name": "feature/b", "isCurrent": true },
+    { "name": "feature/c" }
+  ]
+}

@@ -687,6 +687,18 @@ test "parses github stack position json" {
     try std.testing.expect(position.has_down);
 }
 
+test "snapshots stack fixture corpus" {
+    const allocator = std.testing.allocator;
+    const output = try readFixture(allocator, "test/fixtures/vcs/stack/github-view.json");
+    defer allocator.free(output);
+    const position = (try parseGithubStackPosition(allocator, output)).?;
+    const rendered = try formatStackPositionAlloc(allocator, .github_stack, position);
+    defer allocator.free(rendered);
+    const expected = try readFixture(allocator, "test/fixtures/vcs/stack/expected.txt");
+    defer allocator.free(expected);
+    try std.testing.expectEqualStrings(std.mem.trimRight(u8, expected, "\n"), rendered);
+}
+
 test "detects ghstack from git branch" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-stack-{x}", .{std.crypto.random.int(u64)});
@@ -969,4 +981,8 @@ fn writeFile(path: []const u8, contents: []const u8) !void {
     var file = try std.fs.createFileAbsolute(path, .{ .truncate = true });
     defer file.close();
     try file.writeAll(contents);
+}
+
+fn readFixture(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    return try std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024);
 }

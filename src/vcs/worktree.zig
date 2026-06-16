@@ -228,6 +228,10 @@ fn runGit(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []co
     });
 }
 
+fn readFixture(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    return try std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024);
+}
+
 test "parses linked worktree gitdir" {
     try std.testing.expectEqualStrings("/repo/.git/worktrees/feature", parseGitdir("gitdir: /repo/.git/worktrees/feature\n").?);
     try std.testing.expect(isLinkedWorktreeGitdir("/repo/.git/worktrees/feature"));
@@ -264,6 +268,20 @@ test "renders empty worktree list" {
     const rendered = try renderListAlloc(std.testing.allocator, list);
     defer std.testing.allocator.free(rendered);
     try std.testing.expectEqualStrings("worktrees: none\n", rendered);
+}
+
+test "snapshots worktree fixture corpus" {
+    const allocator = std.testing.allocator;
+    const source = try readFixture(allocator, "test/fixtures/vcs/worktree/list-porcelain.txt");
+    defer allocator.free(source);
+    var list = try parseListPorcelain(allocator, source, "/repo-linked");
+    defer list.deinit(allocator);
+    list.entries[1].dirty = true;
+    const rendered = try renderListAlloc(allocator, list);
+    defer allocator.free(rendered);
+    const expected = try readFixture(allocator, "test/fixtures/vcs/worktree/expected.txt");
+    defer allocator.free(expected);
+    try std.testing.expectEqualStrings(expected, rendered);
 }
 
 test "ignores primary worktree" {

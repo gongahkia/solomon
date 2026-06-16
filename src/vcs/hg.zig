@@ -515,6 +515,44 @@ test "formats hg mq summary" {
     try std.testing.expectEqualStrings("hg:mq:patches 2/3 top:patch-two", rendered);
 }
 
+test "snapshots hg fixture corpus" {
+    const allocator = std.testing.allocator;
+    const root = "test/fixtures/vcs/hg/summary";
+
+    const summary_output = try readFixture(allocator, root ++ "/summary.txt");
+    defer allocator.free(summary_output);
+    var summary = (try parseSummary(allocator, summary_output)).?;
+    defer summary.deinit(allocator);
+
+    const refs_output = try readFixture(allocator, root ++ "/refs.txt");
+    defer allocator.free(refs_output);
+    var refs = (try parseRefSummary(allocator, refs_output)).?;
+    defer refs.deinit(allocator);
+    const rendered_refs = try formatRefSummaryAlloc(allocator, refs);
+    defer allocator.free(rendered_refs);
+
+    const queue_output = try readFixture(allocator, root ++ "/mq-queue.txt");
+    defer allocator.free(queue_output);
+    const applied_output = try readFixture(allocator, root ++ "/mq-applied.txt");
+    defer allocator.free(applied_output);
+    const series_output = try readFixture(allocator, root ++ "/mq-series.txt");
+    defer allocator.free(series_output);
+    var mq = (try parseMqSummary(allocator, queue_output, applied_output, series_output)).?;
+    defer mq.deinit(allocator);
+    const rendered_mq = try formatMqSummaryAlloc(allocator, mq);
+    defer allocator.free(rendered_mq);
+
+    const actual = try std.fmt.allocPrint(
+        allocator,
+        "parent={s}\nbranch={s}\ncommit={s}\nref={s}\nmq={s}\n",
+        .{ summary.parent, summary.branch, summary.commit, rendered_refs, rendered_mq },
+    );
+    defer allocator.free(actual);
+    const expected = try readFixture(allocator, root ++ "/expected.txt");
+    defer allocator.free(expected);
+    try std.testing.expectEqualStrings(expected, actual);
+}
+
 test "hg summary cache invalidates by root" {
     const allocator = std.testing.allocator;
     var cache = Cache{
@@ -615,6 +653,10 @@ fn runCommandOk(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []cons
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
     return exitedZero(result.term);
+}
+
+fn readFixture(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    return try std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024);
 }
 
 fn writeFile(path: []const u8, contents: []const u8) !void {

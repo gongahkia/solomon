@@ -504,7 +504,7 @@ test "formats sapling ref summary" {
 
 test "snapshots sapling fixture repo" {
     const allocator = std.testing.allocator;
-    const fixture_root = "test/fixtures/sl/stack";
+    const fixture_root = "test/fixtures/vcs/sl/stack";
 
     const root = (try findRoot(allocator, fixture_root)).?;
     defer allocator.free(root);
@@ -512,24 +512,24 @@ test "snapshots sapling fixture repo" {
 
     var watched = (try watchScope(allocator, fixture_root)).?;
     defer watched.deinit(allocator);
-    try std.testing.expectEqualStrings("test/fixtures/sl/stack/.sl/store", watched.paths[0].path);
+    try std.testing.expectEqualStrings("test/fixtures/vcs/sl/stack/.sl/store", watched.paths[0].path);
 
-    const status_output = try readFixture(allocator, "test/fixtures/sl/stack/status.txt");
+    const status_output = try readFixture(allocator, "test/fixtures/vcs/sl/stack/status.txt");
     defer allocator.free(status_output);
     const status = parseStatusSummary(status_output);
     const status_segment = (try formatStatusSummaryAlloc(allocator, status)).?;
     defer allocator.free(status_segment);
 
-    const current_output = try readFixture(allocator, "test/fixtures/sl/stack/current.txt");
+    const current_output = try readFixture(allocator, "test/fixtures/vcs/sl/stack/current.txt");
     defer allocator.free(current_output);
-    const stack_output = try readFixture(allocator, "test/fixtures/sl/stack/stack.txt");
+    const stack_output = try readFixture(allocator, "test/fixtures/vcs/sl/stack/stack.txt");
     defer allocator.free(stack_output);
     var position = (try parseSmartlogPosition(allocator, current_output, stack_output)).?;
     defer position.deinit(allocator);
     const position_segment = try formatSmartlogPositionAlloc(allocator, position);
     defer allocator.free(position_segment);
 
-    const refs_output = try readFixture(allocator, "test/fixtures/sl/stack/refs.txt");
+    const refs_output = try readFixture(allocator, "test/fixtures/vcs/sl/stack/refs.txt");
     defer allocator.free(refs_output);
     var refs = (try parseRefSummary(allocator, refs_output)).?;
     defer refs.deinit(allocator);
@@ -538,7 +538,7 @@ test "snapshots sapling fixture repo" {
 
     const actual = try std.fmt.allocPrint(allocator, "{s}\n{s}\n{s}\n", .{ status_segment, position_segment, refs_segment });
     defer allocator.free(actual);
-    const expected = try readFixture(allocator, "test/fixtures/sl/stack/expected.txt");
+    const expected = try readFixture(allocator, "test/fixtures/vcs/sl/stack/expected.txt");
     defer allocator.free(expected);
     try std.testing.expectEqualStrings(expected, actual);
 }

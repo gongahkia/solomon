@@ -1,0 +1,5 @@
+parent=0:f666183f198a tip
+branch=default
+commit=1 modified, 1 unknown
+ref=hg:branch:default bm:feature topic:stack phase:draft
+mq=hg:mq:feature 1/2 top:patch-one

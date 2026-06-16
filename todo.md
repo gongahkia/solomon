@@ -111,7 +111,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Implement cache eviction policy (LRU, max-N entries, max-age)
 - [x] Implement memoized prompt lookups (cwd + state-tuple → rendered string)
 - [x] Add a `shisa cache` subcommand to dump/inspect cache state
-- [ ] Add a `shisa pin <path>` to mark a directory as never-evicted
+- [x] Add a `shisa pin <path>` to mark a directory as never-evicted
 - [ ] Implement instant prompt: read last-known prompt from cache before daemon RTT completes
 - [ ] Add cache warmup: on daemon start, prefetch the user's top-10 most-visited dirs (from zsh history)
 

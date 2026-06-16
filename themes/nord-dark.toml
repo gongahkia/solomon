@@ -1,0 +1,60 @@
+version = 1
+name = "nord-dark"
+extends = "plain"
+
+[capabilities]
+color = "ansi256"
+glyphs = "ascii"
+
+[palette]
+fg = "189"
+muted = "103"
+accent = "110"
+success = "150"
+warning = "222"
+danger = "204"
+
+[separators]
+segment = " "
+left = ""
+right = ""
+
+[segments.cwd]
+fg = "@accent"
+bg = ""
+style = "bold"
+glyph = ""
+ascii = ""
+suffix = ""
+
+[segments.git_branch]
+fg = "@success"
+bg = ""
+style = ""
+glyph = ""
+ascii = "git:"
+suffix = ""
+
+[segments.exit_status]
+fg = "@danger"
+bg = ""
+style = "bold"
+glyph = ""
+ascii = "exit:"
+suffix = ""
+
+[segments.jobs]
+fg = "@warning"
+bg = ""
+style = ""
+glyph = ""
+ascii = "jobs:"
+suffix = ""
+
+[segments.cmd_duration]
+fg = "@muted"
+bg = ""
+style = "dim"
+glyph = ""
+ascii = "took:"
+suffix = ""

@@ -78,7 +78,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Ship a `shisa explain` command that dumps the resolved module pipeline
 
 ### 1.6 Benchmarks (gating)
-- [ ] Build `shisa bench` subcommand (runs hyperfine internally on a known workload)
+- [x] Build `shisa bench` subcommand (runs hyperfine internally on a known workload)
 - [ ] Stand up CI benchmark job that runs on every PR vs. main
 - [ ] Publish a benchmark dashboard (static HTML, GitHub Pages) updated per merge
 - [ ] Add benchmark regression gate (fail PR if p99 warm render regresses > 10%)

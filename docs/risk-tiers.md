@@ -18,6 +18,8 @@ dev = ["local"]
 
 String rules match case-insensitive path/name tokens. Rules containing `*` match the full value as a case-insensitive glob. Higher-risk matches win.
 
+When multiple cloud contexts are present, Shisa classifies each provider value and uses the highest tier. For example, an AWS profile classified as `prod` and a Kubernetes context classified as `dev` produce an overall `prod` tier.
+
 Prompt background-bar palette slots are configured in `shisa.toml`:
 
 ```toml

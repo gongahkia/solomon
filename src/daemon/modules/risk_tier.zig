@@ -25,6 +25,13 @@ pub const BarColors = struct {
     prod_bg: ColorSlot = .danger,
 };
 
+pub const CloudContext = struct {
+    aws: ?[]const u8 = null,
+    gcp: ?[]const u8 = null,
+    azure: ?[]const u8 = null,
+    kubernetes: ?[]const u8 = null,
+};
+
 pub const Rules = struct {
     dev: [][]u8 = &.{},
     staging: [][]u8 = &.{},
@@ -62,6 +69,15 @@ pub fn classifyWithRules(value: []const u8, rules: Rules) Tier {
     if (matchesAny(value, rules.dev)) tier = maxTier(tier, .dev);
     if (matchesAny(value, rules.staging)) tier = maxTier(tier, .staging);
     if (matchesAny(value, rules.prod)) tier = maxTier(tier, .prod);
+    return tier;
+}
+
+pub fn classifyCloud(context: CloudContext, rules: ?Rules) Tier {
+    var tier = Tier.unknown;
+    if (context.aws) |value| tier = maxTier(tier, classifyMaybeRules(value, rules));
+    if (context.gcp) |value| tier = maxTier(tier, classifyMaybeRules(value, rules));
+    if (context.azure) |value| tier = maxTier(tier, classifyMaybeRules(value, rules));
+    if (context.kubernetes) |value| tier = maxTier(tier, classifyMaybeRules(value, rules));
     return tier;
 }
 
@@ -130,6 +146,10 @@ fn classifyToken(token: []const u8) Tier {
     if (asciiEql(token, "stg") or asciiEql(token, "staging")) return .staging;
     if (asciiEql(token, "dev") or asciiEql(token, "sandbox")) return .dev;
     return .unknown;
+}
+
+fn classifyMaybeRules(value: []const u8, rules: ?Rules) Tier {
+    return if (rules) |loaded| classifyWithRules(value, loaded) else classify(value);
 }
 
 fn matchesAny(value: []const u8, patterns: []const []const u8) bool {
@@ -393,6 +413,27 @@ test "user rules keep prod precedence" {
     defer rules.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(Tier.prod, classifyWithRules("prod", rules));
+}
+
+test "cloud context uses max tier" {
+    try std.testing.expectEqual(Tier.prod, classifyCloud(.{
+        .aws = "prod",
+        .kubernetes = "dev",
+    }, null));
+    try std.testing.expectEqual(Tier.staging, classifyCloud(.{
+        .gcp = "staging",
+        .azure = "sandbox",
+    }, null));
+}
+
+test "cloud context uses user rules" {
+    var rules = try parseRulesAlloc(std.testing.allocator,
+        \\prod = ["critical"]
+        \\
+    );
+    defer rules.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(Tier.prod, classifyCloud(.{ .aws = "critical", .kubernetes = "dev" }, rules));
 }
 
 test "resolves user rule path" {

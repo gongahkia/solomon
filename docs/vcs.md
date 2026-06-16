@@ -67,3 +67,5 @@ Detection:
 - stax upstream stores branch metadata under `refs/branch-metadata/` and documents repo-root `stax.toml` overlays: https://github.com/cesarferreira/stax
 - git-spice detection checks `.git/refs/spice/data`, `.git/refs/spice/`, and packed refs for `refs/spice/data`.
 - git-spice internals document local storage in `refs/spice/data`: https://abhinav.github.io/git-spice/guide/internals/
+- git-town detection checks legacy `.git-town-branches.yml`, current `git-town.toml` / `.git-town.toml` / `.git-branches.toml`, and local Git config `git-town` entries.
+- Git Town 22.7 documents config files named `git-town.toml`, `.git-town.toml`, or `.git-branches.toml`: https://www.git-town.com/configuration-file.html

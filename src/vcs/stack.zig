@@ -8,6 +8,7 @@ pub const Provider = enum {
     spr,
     stax,
     git_spice,
+    git_town,
 
     pub fn label(self: Provider) []const u8 {
         return switch (self) {
@@ -16,6 +17,7 @@ pub const Provider = enum {
             .spr => "spr",
             .stax => "st",
             .git_spice => "gs",
+            .git_town => "git-town",
         };
     }
 };
@@ -61,6 +63,7 @@ pub fn detect(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection {
     if (try detectSpr(allocator, cwd_path)) |detection| return detection;
     if (try detectStax(allocator, cwd_path)) |detection| return detection;
     if (try detectGitSpice(allocator, cwd_path)) |detection| return detection;
+    if (try detectGitTown(allocator, cwd_path)) |detection| return detection;
     return null;
 }
 
@@ -119,6 +122,16 @@ pub fn isStax(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
 
 pub fn isGitSpice(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
     const detection = try detectGitSpice(allocator, cwd_path);
+    if (detection) |value| {
+        var owned = value;
+        owned.deinit(allocator);
+        return true;
+    }
+    return false;
+}
+
+pub fn isGitTown(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
+    const detection = try detectGitTown(allocator, cwd_path);
     if (detection) |value| {
         var owned = value;
         owned.deinit(allocator);
@@ -271,6 +284,36 @@ fn detectGitSpice(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detectio
     return null;
 }
 
+fn detectGitTown(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection {
+    const marker_names = [_][]const u8{ ".git-town-branches.yml", "git-town.toml", ".git-town.toml", ".git-branches.toml" };
+    for (&marker_names) |marker_name| {
+        if (try findMarkerRoot(allocator, cwd_path, marker_name)) |root| {
+            errdefer allocator.free(root);
+            const marker_path = try std.fs.path.join(allocator, &.{ root, marker_name });
+            return .{
+                .provider = .git_town,
+                .root_path = root,
+                .marker_path = marker_path,
+            };
+        }
+    }
+
+    const root = (try findMarkerRoot(allocator, cwd_path, ".git")) orelse return null;
+    errdefer allocator.free(root);
+    const config_path = try std.fs.path.join(allocator, &.{ root, ".git", "config" });
+    errdefer allocator.free(config_path);
+    if (try gitConfigContainsGitTown(allocator, config_path)) {
+        return .{
+            .provider = .git_town,
+            .root_path = root,
+            .marker_path = config_path,
+        };
+    }
+    allocator.free(config_path);
+    allocator.free(root);
+    return null;
+}
+
 fn readCurrentGitBranch(allocator: std.mem.Allocator, cwd_path: []const u8) !?GitBranch {
     const root = (try findMarkerRoot(allocator, cwd_path, ".git")) orelse return null;
     const head_path = try std.fs.path.join(allocator, &.{ root, ".git", "HEAD" });
@@ -365,6 +408,15 @@ fn packedRefsContains(allocator: std.mem.Allocator, path: []const u8, ref_name: 
     return false;
 }
 
+fn gitConfigContainsGitTown(allocator: std.mem.Allocator, path: []const u8) !bool {
+    const contents = std.fs.cwd().readFileAlloc(allocator, path, 256 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return err,
+    };
+    defer allocator.free(contents);
+    return std.mem.indexOf(u8, contents, "[git-town") != null or std.mem.indexOf(u8, contents, "git-town.") != null;
+}
+
 test "detects graphite stack in current directory" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-stack-{x}", .{std.crypto.random.int(u64)});
@@ -419,6 +471,7 @@ test "ignores directories without stack metadata" {
     try std.testing.expect(!(try isSpr(allocator, dir_path)));
     try std.testing.expect(!(try isStax(allocator, dir_path)));
     try std.testing.expect(!(try isGitSpice(allocator, dir_path)));
+    try std.testing.expect(!(try isGitTown(allocator, dir_path)));
 }
 
 test "detects ghstack branch names" {
@@ -594,6 +647,67 @@ test "detects git-spice packed data ref" {
     var detection = (try detect(allocator, dir_path)).?;
     defer detection.deinit(allocator);
     try std.testing.expectEqual(Provider.git_spice, detection.provider);
+    try std.testing.expectEqualStrings(marker_path, detection.marker_path);
+}
+
+test "detects legacy git-town branches file" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-stack-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const marker_path = try std.fmt.allocPrint(allocator, "{s}/.git-town-branches.yml", .{dir_path});
+    defer allocator.free(marker_path);
+    try writeFile(marker_path, "main: main\n");
+
+    var detection = (try detect(allocator, dir_path)).?;
+    defer detection.deinit(allocator);
+    try std.testing.expectEqual(Provider.git_town, detection.provider);
+    try std.testing.expectEqualStrings("git-town", detection.provider.label());
+    try std.testing.expectEqualStrings(dir_path, detection.root_path);
+    try std.testing.expectEqualStrings(marker_path, detection.marker_path);
+    try std.testing.expect(try isGitTown(allocator, dir_path));
+}
+
+test "detects git-town toml config file" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-stack-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const marker_path = try std.fmt.allocPrint(allocator, "{s}/.git-town.toml", .{dir_path});
+    defer allocator.free(marker_path);
+    try writeFile(marker_path, "[branches]\nmain = \"main\"\n");
+
+    var detection = (try detect(allocator, dir_path)).?;
+    defer detection.deinit(allocator);
+    try std.testing.expectEqual(Provider.git_town, detection.provider);
+    try std.testing.expectEqualStrings(marker_path, detection.marker_path);
+}
+
+test "detects git-town git config entries" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-stack-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    const git_path = try std.fmt.allocPrint(allocator, "{s}/.git", .{dir_path});
+    defer allocator.free(git_path);
+    try std.fs.cwd().makePath(git_path);
+
+    const marker_path = try std.fmt.allocPrint(allocator, "{s}/config", .{git_path});
+    defer allocator.free(marker_path);
+    try writeFile(marker_path,
+        \\[git-town]
+        \\  main-branch = main
+        \\
+    );
+
+    var detection = (try detect(allocator, dir_path)).?;
+    defer detection.deinit(allocator);
+    try std.testing.expectEqual(Provider.git_town, detection.provider);
     try std.testing.expectEqualStrings(marker_path, detection.marker_path);
 }
 

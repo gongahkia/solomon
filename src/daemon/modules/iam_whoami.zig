@@ -107,6 +107,34 @@ pub fn parseAzureAccountAlloc(allocator: std.mem.Allocator, source: []const u8) 
     return null;
 }
 
+pub fn kubeConfigPathAlloc(allocator: std.mem.Allocator, kubeconfig_env: ?[]const u8, home: ?[]const u8) !?[]u8 {
+    if (kubeconfig_env) |value| {
+        var entries = std.mem.splitScalar(u8, value, std.fs.path.delimiter);
+        while (entries.next()) |entry| {
+            const trimmed = std.mem.trim(u8, entry, " \t\r\n");
+            if (trimmed.len != 0) return @as(?[]u8, try allocator.dupe(u8, trimmed));
+        }
+    }
+    const home_path = home orelse return null;
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.kube/config", .{home_path}));
+}
+
+pub fn readKubeUserAlloc(allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(source);
+    return parseKubeUserAlloc(allocator, source);
+}
+
+pub fn parseKubeUserAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 {
+    const current_context = findTopLevelYamlScalar(source, "current-context") orelse return null;
+    const user = findKubeContextUser(source, current_context) orelse return null;
+    if (user.len == 0) return null;
+    return @as(?[]u8, try allocator.dupe(u8, user));
+}
+
 fn sanitizeProfile(profile: []const u8) []const u8 {
     if (safeProfile(profile)) return profile;
     return "default";
@@ -118,6 +146,98 @@ fn safeProfile(profile: []const u8) bool {
         if (!(std.ascii.isAlphanumeric(byte) or byte == '_' or byte == '-' or byte == '.')) return false;
     }
     return true;
+}
+
+const YamlLine = struct {
+    indent: usize,
+    trimmed: []const u8,
+};
+
+fn yamlLine(raw_line: []const u8) ?YamlLine {
+    const line = std.mem.trimRight(u8, raw_line, "\r");
+    const trimmed = std.mem.trim(u8, line, " \t");
+    if (trimmed.len == 0 or trimmed[0] == '#') return null;
+    var indent: usize = 0;
+    while (indent < line.len and line[indent] == ' ') : (indent += 1) {}
+    return .{ .indent = indent, .trimmed = trimmed };
+}
+
+fn hasYamlKey(line: []const u8, key: []const u8) bool {
+    return line.len > key.len and std.mem.startsWith(u8, line, key) and line[key.len] == ':';
+}
+
+fn yamlScalar(line: []const u8, key: []const u8) ?[]const u8 {
+    if (!hasYamlKey(line, key)) return null;
+    var value = std.mem.trim(u8, line[key.len + 1 ..], " \t\r\n");
+    if (value.len >= 2 and ((value[0] == '"' and value[value.len - 1] == '"') or (value[0] == '\'' and value[value.len - 1] == '\''))) {
+        value = value[1 .. value.len - 1];
+    }
+    return value;
+}
+
+fn findTopLevelYamlScalar(source: []const u8, key: []const u8) ?[]const u8 {
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |raw_line| {
+        const line = yamlLine(raw_line) orelse continue;
+        if (line.indent != 0) continue;
+        const value = yamlScalar(line.trimmed, key) orelse continue;
+        if (value.len != 0) return value;
+    }
+    return null;
+}
+
+fn findKubeContextUser(source: []const u8, current_context: []const u8) ?[]const u8 {
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    var in_contexts = false;
+    var contexts_indent: usize = 0;
+    var entry_active = false;
+    var entry_indent: usize = 0;
+    var context_indent: ?usize = null;
+    var entry_name: ?[]const u8 = null;
+    var entry_user: ?[]const u8 = null;
+
+    while (lines.next()) |raw_line| {
+        const line = yamlLine(raw_line) orelse continue;
+        if (!in_contexts) {
+            if (line.indent == 0 and hasYamlKey(line.trimmed, "contexts")) {
+                in_contexts = true;
+                contexts_indent = line.indent;
+            }
+            continue;
+        }
+
+        if (line.indent <= contexts_indent and !std.mem.startsWith(u8, line.trimmed, "- ")) break;
+        if (std.mem.startsWith(u8, line.trimmed, "- ")) {
+            if (entry_active and entry_name != null and std.mem.eql(u8, entry_name.?, current_context)) return entry_user;
+            entry_active = true;
+            entry_indent = line.indent;
+            context_indent = null;
+            entry_name = null;
+            entry_user = null;
+            const rest = std.mem.trim(u8, line.trimmed[2..], " \t");
+            if (yamlScalar(rest, "name")) |value| entry_name = value;
+            if (hasYamlKey(rest, "context")) context_indent = line.indent;
+            if (yamlScalar(rest, "user")) |value| entry_user = value;
+            continue;
+        }
+
+        if (!entry_active or line.indent <= entry_indent) continue;
+        if (yamlScalar(line.trimmed, "name")) |value| entry_name = value;
+        if (hasYamlKey(line.trimmed, "context")) {
+            context_indent = line.indent;
+            continue;
+        }
+        if (context_indent) |indent| {
+            if (line.indent > indent) {
+                if (yamlScalar(line.trimmed, "user")) |value| entry_user = value;
+            } else {
+                context_indent = null;
+            }
+        }
+    }
+
+    if (entry_active and entry_name != null and std.mem.eql(u8, entry_name.?, current_context)) return entry_user;
+    return null;
 }
 
 test "parses aws sts identity arn" {
@@ -207,4 +327,29 @@ test "builds azure account cache path" {
     const path = (try azureAccountCachePathAlloc(std.testing.allocator, "/home/me")).?;
     defer std.testing.allocator.free(path);
     try std.testing.expectEqualStrings("/home/me/.cache/shisa/az-account-show.json", path);
+}
+
+test "parses kube current context user" {
+    const user = (try parseKubeUserAlloc(std.testing.allocator,
+        \\apiVersion: v1
+        \\contexts:
+        \\- context:
+        \\    cluster: prod
+        \\    user: prod-user
+        \\  name: prod
+        \\- context:
+        \\    cluster: dev
+        \\    user: dev-user
+        \\  name: dev
+        \\current-context: prod
+        \\
+    )).?;
+    defer std.testing.allocator.free(user);
+    try std.testing.expectEqualStrings("prod-user", user);
+}
+
+test "builds kubeconfig path" {
+    const path = (try kubeConfigPathAlloc(std.testing.allocator, null, "/home/me")).?;
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/home/me/.kube/config", path);
 }

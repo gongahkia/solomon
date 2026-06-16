@@ -296,7 +296,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] AWS STS GetCallerIdentity cached value
 - [x] GCP `gcloud auth list` cached
 - [x] Azure `az account show` cached
-- [ ] k8s `kubectl config current-context` user
+- [x] k8s `kubectl config current-context` user
 
 ### 11.5 SSO expiry (`sso_expiry`)
 - [ ] AWS SSO: read `~/.aws/sso/cache/*.json`, find soonest `expiresAt`

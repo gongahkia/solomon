@@ -34,3 +34,5 @@ Azure account cache files use `az account show --output json` output:
 ```
 
 The cache path is `~/.cache/shisa/az-account-show.json`.
+
+Kubernetes whoami reads the active context user from kubeconfig (`KUBECONFIG` first path, or `~/.kube/config`) without invoking `kubectl`.

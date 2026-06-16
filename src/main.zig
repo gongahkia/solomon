@@ -1,4 +1,5 @@
 const std = @import("std");
+const daemon_cache = @import("daemon/cache.zig");
 const client = @import("shisa-client.zig");
 const shisa_config = @import("config.zig");
 const paths = @import("daemon/paths.zig");
@@ -43,6 +44,11 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, args[1], "bench")) {
         try bench(allocator, args[2..]);
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "cache")) {
+        try cacheCommand(allocator, args[2..]);
         return;
     }
 
@@ -337,6 +343,30 @@ test "bench workload targets prompt command" {
     try std.testing.expectEqualStrings("'/tmp/shisa' prompt --socket '/tmp/sock' --cwd '/tmp/repo' --shell zsh --cols 80 --rows 24", workload);
 }
 
+fn cacheCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const action = if (args.len == 0) "stats" else args[0];
+    if (args.len > 1) return error.UnknownCacheArgument;
+    if (!std.mem.eql(u8, action, "stats")) return error.UnknownCacheArgument;
+
+    const output = try cacheStatsAlloc(allocator, .{});
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn cacheStatsAlloc(allocator: std.mem.Allocator, options: daemon_cache.Options) ![]u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"module_cache\":{{\"entries\":0,\"max_entries\":{d},\"max_age_ns\":{d}}},\"prompt_cache\":{{\"entries\":0}}}}\n",
+        .{ options.max_entries, options.max_age_ns },
+    );
+}
+
+test "cache stats output is json object" {
+    const output = try cacheStatsAlloc(std.testing.allocator, .{ .max_entries = 2, .max_age_ns = 3 });
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("{\"module_cache\":{\"entries\":0,\"max_entries\":2,\"max_age_ns\":3},\"prompt_cache\":{\"entries\":0}}\n", output);
+}
+
 test "parses bench export json flag" {
     const args = [_][]const u8{ "--export-json", "/tmp/out.json" };
     const config = try parseBench(args[0..]);
@@ -450,6 +480,7 @@ const help_text =
     \\
     \\commands:
     \\  bench         benchmark prompt render via hyperfine
+    \\  cache         dump cache stats
     \\  explain       print resolved module pipeline
     \\  init          write default shisa.toml
     \\  prompt        render prompt through shisad

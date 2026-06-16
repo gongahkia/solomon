@@ -110,7 +110,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Wire git module to invalidate on `.git/HEAD`, `.git/index`, working-tree changes (debounced)
 - [x] Implement cache eviction policy (LRU, max-N entries, max-age)
 - [x] Implement memoized prompt lookups (cwd + state-tuple → rendered string)
-- [ ] Add a `shisa cache` subcommand to dump/inspect cache state
+- [x] Add a `shisa cache` subcommand to dump/inspect cache state
 - [ ] Add a `shisa pin <path>` to mark a directory as never-evicted
 - [ ] Implement instant prompt: read last-known prompt from cache before daemon RTT completes
 - [ ] Add cache warmup: on daemon start, prefetch the user's top-10 most-visited dirs (from zsh history)

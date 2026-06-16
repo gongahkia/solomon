@@ -51,6 +51,7 @@ pub const ModuleId = enum {
     cmd_duration,
     user_host,
     cloud_ctx,
+    risk_tier,
     time,
 };
 
@@ -64,6 +65,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .cmd_duration => "cmd_duration",
         .user_host => "user_host",
         .cloud_ctx => "cloud_ctx",
+        .risk_tier => "risk_tier",
         .time => "time",
     };
 }
@@ -601,6 +603,7 @@ fn parseModuleId(id: []const u8) ?ModuleId {
     if (std.mem.eql(u8, id, "cmd_duration")) return .cmd_duration;
     if (std.mem.eql(u8, id, "user_host")) return .user_host;
     if (std.mem.eql(u8, id, "cloud_ctx")) return .cloud_ctx;
+    if (std.mem.eql(u8, id, "risk_tier")) return .risk_tier;
     if (std.mem.eql(u8, id, "time")) return .time;
     return null;
 }
@@ -689,6 +692,8 @@ test "parses minimal config with defaults" {
 test "module metadata names execution classes" {
     try std.testing.expectEqualStrings("cwd", moduleIdName(.cwd));
     try std.testing.expectEqualStrings("sync", moduleExecutionClass(.cwd));
+    try std.testing.expectEqualStrings("risk_tier", moduleIdName(.risk_tier));
+    try std.testing.expectEqualStrings("sync", moduleExecutionClass(.risk_tier));
     try std.testing.expectEqualStrings("async", moduleExecutionClass(.git_branch));
     try std.testing.expectEqualStrings("async", moduleExecutionClass(.language_versions));
 }

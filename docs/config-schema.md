@@ -46,6 +46,7 @@ Allowed core module ids for schema v1:
 | `cmd_duration` | sync | Last command duration above threshold. |
 | `user_host` | sync | User and host, normally only over SSH. |
 | `cloud_ctx` | sync | Optional cloud account context; AWS profile, cached GCP project, cached Azure subscription, and cached Kubernetes context support are available. |
+| `risk_tier` | sync | Risk classification and prompt background-bar color mapping. |
 | `time` | sync | Optional UTC `HH:MM` clock segment. |
 
 Unknown module ids are invalid.
@@ -108,6 +109,17 @@ Per-module config lives under `[modules.<id>]`. Option tables may exist only for
 | `kubernetes` | bool | `true` | Show Kubernetes context and namespace. |
 
 AWS profile is resolved from `AWS_PROFILE`; when unset, Shisa reads `~/.aws/config` and uses `[default]` or the first `[profile <name>]` section. GCP project is cached from the active Cloud SDK config file under `~/.config/gcloud/configurations/` and invalidated when `~/.config/gcloud/` changes. Azure subscription is cached from `~/.azure/azureProfile.json` and invalidated when that file changes. Kubernetes context is cached from the first `KUBECONFIG` path, or `~/.kube/config`, and invalidated when that file changes. Multiple providers render in one `cloud[...]` segment with ASCII provider markers: `aws`, `gcp`, `az`, and `k8s`.
+
+### `[modules.risk_tier]`
+
+| Key | Type | Default | Constraints |
+| --- | --- | --- | --- |
+| `unknown_bg` | string | `"muted"` | One of `"fg"`, `"muted"`, `"accent"`, `"success"`, `"warning"`, `"danger"`. |
+| `dev_bg` | string | `"success"` | Same as `unknown_bg`. |
+| `staging_bg` | string | `"warning"` | Same as `unknown_bg`. |
+| `prod_bg` | string | `"danger"` | Same as `unknown_bg`. |
+
+These map risk tiers to prompt background-bar palette slots. Rule matching defaults and user-rule file format are documented in `docs/risk-tiers.md`.
 
 ### `[modules.time]`
 

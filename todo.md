@@ -278,7 +278,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 ### 11.2 Risk-tier classifier (`risk_tier`)
 - [x] Define regex defaults (`prod`, `production`, `live`, `*-prd-*` → prod; `stg`, `staging` → staging; `dev`, `sandbox` → dev)
 - [x] User-defined rules in `~/.config/shisa/risk_tiers.toml`
-- [ ] Apply tier color to prompt's background bar (configurable)
+- [x] Apply tier color to prompt's background bar (configurable)
 - [ ] Per-cloud override (e.g., AWS profile=prod, k8s=dev → use max-tier=prod)
 - [ ] `shisa cloud explain` CLI to print why a tier was chosen
 

@@ -17,3 +17,13 @@ dev = ["local"]
 ```
 
 String rules match case-insensitive path/name tokens. Rules containing `*` match the full value as a case-insensitive glob. Higher-risk matches win.
+
+Prompt background-bar palette slots are configured in `shisa.toml`:
+
+```toml
+[modules.risk_tier]
+unknown_bg = "muted"
+dev_bg = "success"
+staging_bg = "warning"
+prod_bg = "danger"
+```

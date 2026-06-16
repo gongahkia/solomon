@@ -234,7 +234,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 ### 10.3 Mercurial (hg) — Tier 1
 - [x] Detect hg repos (`.hg/`)
 - [x] Read state via `hg summary --remote` (cached)
-- [ ] Show branch, bookmark, topic (evolve), draft/public phase
+- [x] Show branch, bookmark, topic (evolve), draft/public phase
 - [ ] Handle mq queues if active
 
 ### 10.4 Stacked-diff awareness (`shisa.vcs.stack`)

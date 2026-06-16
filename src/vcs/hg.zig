@@ -43,6 +43,21 @@ pub const Summary = struct {
     }
 };
 
+pub const RefSummary = struct {
+    branch: []u8,
+    active_bookmark: []u8,
+    topic: []u8,
+    phase: []u8,
+
+    pub fn deinit(self: *RefSummary, allocator: std.mem.Allocator) void {
+        allocator.free(self.branch);
+        allocator.free(self.active_bookmark);
+        allocator.free(self.topic);
+        allocator.free(self.phase);
+        self.* = undefined;
+    }
+};
+
 pub const Cache = struct {
     valid: bool = false,
     root_path: ?[]u8 = null,
@@ -140,6 +155,20 @@ pub fn readSummary(allocator: std.mem.Allocator, cwd_path: []const u8) !?Summary
     return parseSummary(allocator, result.stdout);
 }
 
+pub fn readRefSummary(allocator: std.mem.Allocator, cwd_path: []const u8) !?RefSummary {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "hg", "log", "-r", ".", "--template", "{branch}\\n{activebookmark}\\n{phase}\\n{join(extras, \"\\n\")}\\n" },
+        .cwd = cwd_path,
+        .max_output_bytes = 16 * 1024,
+        .expand_arg0 = .expand,
+    }) catch return null;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!exitedZero(result.term)) return null;
+    return parseRefSummary(allocator, result.stdout);
+}
+
 pub fn parseSummary(allocator: std.mem.Allocator, output: []const u8) !?Summary {
     var parent: []const u8 = "";
     var description: []const u8 = "";
@@ -187,6 +216,47 @@ pub fn parseSummary(allocator: std.mem.Allocator, output: []const u8) !?Summary 
         .update = owned_update,
         .phases = owned_phases,
     };
+}
+
+pub fn parseRefSummary(allocator: std.mem.Allocator, output: []const u8) !?RefSummary {
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    const branch = std.mem.trim(u8, lines.next() orelse return null, " \t\r");
+    const active_bookmark = std.mem.trim(u8, lines.next() orelse "", " \t\r");
+    const phase = std.mem.trim(u8, lines.next() orelse "", " \t\r");
+    var topic: []const u8 = "";
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (std.mem.startsWith(u8, line, "topic=")) {
+            topic = std.mem.trim(u8, line["topic=".len..], " \t");
+            break;
+        }
+    }
+    if (branch.len == 0 and active_bookmark.len == 0 and topic.len == 0 and phase.len == 0) return null;
+
+    const rendered_branch = if (branch.len == 0) "default" else branch;
+    const owned_branch = try allocator.dupe(u8, rendered_branch);
+    errdefer allocator.free(owned_branch);
+    const owned_active_bookmark = try allocator.dupe(u8, active_bookmark);
+    errdefer allocator.free(owned_active_bookmark);
+    const owned_topic = try allocator.dupe(u8, topic);
+    errdefer allocator.free(owned_topic);
+    const owned_phase = try allocator.dupe(u8, phase);
+    return .{
+        .branch = owned_branch,
+        .active_bookmark = owned_active_bookmark,
+        .topic = owned_topic,
+        .phase = owned_phase,
+    };
+}
+
+pub fn formatRefSummaryAlloc(allocator: std.mem.Allocator, summary: RefSummary) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try std.fmt.format(out.writer(allocator), "hg:branch:{s}", .{summary.branch});
+    if (summary.active_bookmark.len > 0) try std.fmt.format(out.writer(allocator), " bm:{s}", .{summary.active_bookmark});
+    if (summary.topic.len > 0) try std.fmt.format(out.writer(allocator), " topic:{s}", .{summary.topic});
+    if (summary.phase.len > 0) try std.fmt.format(out.writer(allocator), " phase:{s}", .{summary.phase});
+    return try out.toOwnedSlice(allocator);
 }
 
 fn exitedZero(term: std.process.Child.Term) bool {
@@ -265,6 +335,38 @@ test "parses hg summary output" {
     try std.testing.expectEqualStrings("1 draft", summary.phases);
 }
 
+test "parses hg ref summary output" {
+    const output =
+        \\default
+        \\feature
+        \\draft
+        \\branch=default
+        \\topic=stack
+        \\
+    ;
+    var summary = (try parseRefSummary(std.testing.allocator, output)).?;
+    defer summary.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("default", summary.branch);
+    try std.testing.expectEqualStrings("feature", summary.active_bookmark);
+    try std.testing.expectEqualStrings("stack", summary.topic);
+    try std.testing.expectEqualStrings("draft", summary.phase);
+}
+
+test "formats hg ref summary" {
+    var summary = RefSummary{
+        .branch = try std.testing.allocator.dupe(u8, "default"),
+        .active_bookmark = try std.testing.allocator.dupe(u8, "feature"),
+        .topic = try std.testing.allocator.dupe(u8, "stack"),
+        .phase = try std.testing.allocator.dupe(u8, "draft"),
+    };
+    defer summary.deinit(std.testing.allocator);
+
+    const rendered = try formatRefSummaryAlloc(std.testing.allocator, summary);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("hg:branch:default bm:feature topic:stack phase:draft", rendered);
+}
+
 test "hg summary cache invalidates by root" {
     const allocator = std.testing.allocator;
     var cache = Cache{
@@ -306,6 +408,28 @@ test "reads real hg summary when hg is installed" {
     defer summary.deinit(allocator);
     try std.testing.expectEqualStrings("default", summary.branch);
     try std.testing.expect(std.mem.indexOf(u8, summary.parent, "tip") != null);
+}
+
+test "reads real hg ref summary when hg is installed" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-hg-ref-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    if (!try runCommandOk(allocator, dir_path, &.{ "hg", "init" })) return error.SkipZigTest;
+    const file_path = try std.fmt.allocPrint(allocator, "{s}/f.txt", .{dir_path});
+    defer allocator.free(file_path);
+    try writeFile(file_path, "one\n");
+    if (!try runCommandOk(allocator, dir_path, &.{ "hg", "add", "f.txt" })) return error.SkipZigTest;
+    if (!try runCommandOk(allocator, dir_path, &.{ "hg", "commit", "-m", "first", "-u", "Bench <bench@example.test>" })) return error.SkipZigTest;
+    if (!try runCommandOk(allocator, dir_path, &.{ "hg", "bookmark", "feature" })) return error.SkipZigTest;
+
+    var summary = (try readRefSummary(allocator, dir_path)) orelse return error.SkipZigTest;
+    defer summary.deinit(allocator);
+    try std.testing.expectEqualStrings("default", summary.branch);
+    try std.testing.expectEqualStrings("feature", summary.active_bookmark);
+    try std.testing.expectEqualStrings("draft", summary.phase);
 }
 
 fn runCommandOk(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !bool {

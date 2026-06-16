@@ -50,3 +50,4 @@ State sources:
 
 - `hg summary --remote` for parent, branch, commit/update state, and phases.
 - When no default remote exists, Mercurial 7.2.2 exits 255 but still emits useful summary stdout; Shisa parses that stdout.
+- `hg log -r . --template` for branch, active bookmark, current changeset phase, and `topic` extra when present.

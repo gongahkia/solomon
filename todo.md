@@ -316,7 +316,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ### 11.7 Region drift (`region_drift`)
 - [x] AWS: compare `$AWS_REGION` / `$AWS_DEFAULT_REGION` to profile-configured region
-- [ ] GCP: compare `$CLOUDSDK_COMPUTE_REGION` to gcloud config
+- [x] GCP: compare `$CLOUDSDK_COMPUTE_REGION` to gcloud config
 - [ ] Azure: compare env vars to active subscription default
 - [ ] Render warning segment when drift detected
 

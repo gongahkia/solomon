@@ -307,7 +307,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Render warning when any < 30 min remain (configurable)
 
 ### 11.6 IaC workspace (`iac_workspace`)
-- [ ] Terraform: read `.terraform/environment` or current workspace from state
+- [x] Terraform: read `.terraform/environment` or current workspace from state
 - [ ] Pulumi: read `Pulumi.<stack>.yaml` + active stack
 - [ ] CDK: read `cdk.json` + `cdk.context.json`
 - [ ] OpenTofu: same as Terraform

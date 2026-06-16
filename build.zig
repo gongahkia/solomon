@@ -319,6 +319,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const iam_whoami_test_run = b.addRunArtifact(iam_whoami_tests);
+    const iac_workspace_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/daemon/modules/iac_workspace.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const iac_workspace_test_run = b.addRunArtifact(iac_workspace_tests);
     const sso_expiry_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/modules/sso_expiry.zig"),
@@ -461,6 +469,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&risk_tier_test_run.step);
     test_step.dependOn(&prod_guard_test_run.step);
     test_step.dependOn(&iam_whoami_test_run.step);
+    test_step.dependOn(&iac_workspace_test_run.step);
     test_step.dependOn(&sso_expiry_test_run.step);
     test_step.dependOn(&time_test_run.step);
     test_step.dependOn(&git_branch_test_run.step);

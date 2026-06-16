@@ -202,7 +202,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Triage issues weekly, target 7-day first-response SLA
 - [ ] Update the changelog on every release (keep-a-changelog format)
 - [ ] Update `docs/` whenever a user-facing flag, config field, or module changes
-- [ ] Run the fuzzer in CI nightly
+- [x] Run the fuzzer in CI nightly
 - [ ] Run the comparison benchmark vs. starship + p10k + oh-my-posh on every tagged release
 - [ ] Respond publicly when starship/p10k/oh-my-posh ship a competing feature; ship our own variant
 

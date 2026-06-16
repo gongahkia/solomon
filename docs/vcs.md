@@ -71,3 +71,5 @@ Detection:
 - Git Town 22.7 documents config files named `git-town.toml`, `.git-town.toml`, or `.git-branches.toml`: https://www.git-town.com/configuration-file.html
 - GitHub `gh stack` detection checks `.git/gh-stack`, `.git/gh-stack-rebase-state`, and GitHub remotes with stack metadata keys in `.git/config`.
 - GitHub `gh stack` documents local tracking in `.git/gh-stack` and rebase state in `.git/gh-stack-rebase-state`: https://github.com/github/gh-stack
+- Stack position rendering uses provider-prefixed segments like `stack:gh-stack:2/5 ↑↓`.
+- `gh stack view --json` exposes `currentBranch` plus ordered `branches[]` with `isCurrent`; Shisa parses those fields for GitHub stack positions.

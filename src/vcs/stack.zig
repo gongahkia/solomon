@@ -38,6 +38,13 @@ pub const Detection = struct {
     }
 };
 
+pub const StackPosition = struct {
+    index: u32,
+    total: u32,
+    has_up: bool,
+    has_down: bool,
+};
+
 const GitBranch = struct {
     root_path: []u8,
     head_path: []u8,
@@ -49,6 +56,17 @@ const GitBranch = struct {
         allocator.free(self.branch_name);
         self.* = undefined;
     }
+};
+
+const GithubStackBranchJson = struct {
+    name: []const u8 = "",
+    isCurrent: bool = false,
+    isMerged: bool = false,
+};
+
+const GithubStackViewJson = struct {
+    currentBranch: []const u8 = "",
+    branches: []GithubStackBranchJson = &.{},
 };
 
 pub fn detect(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection {
@@ -151,6 +169,58 @@ pub fn isGithubStack(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
         return true;
     }
     return false;
+}
+
+pub fn positionFromBranches(branches: []const []const u8, current_branch: []const u8) ?StackPosition {
+    if (branches.len == 0 or current_branch.len == 0) return null;
+    for (branches, 0..) |branch, zero_index| {
+        if (!std.mem.eql(u8, branch, current_branch)) continue;
+        const index: u32 = @intCast(zero_index + 1);
+        const total: u32 = @intCast(branches.len);
+        return .{
+            .index = index,
+            .total = total,
+            .has_up = index < total,
+            .has_down = index > 1,
+        };
+    }
+    return null;
+}
+
+pub fn formatStackPositionAlloc(allocator: std.mem.Allocator, provider: Provider, position: StackPosition) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try std.fmt.format(out.writer(allocator), "stack:{s}:{d}/{d}", .{ provider.label(), position.index, position.total });
+    if (position.has_up or position.has_down) {
+        try out.append(allocator, ' ');
+        if (position.has_up) try out.appendSlice(allocator, "↑");
+        if (position.has_down) try out.appendSlice(allocator, "↓");
+    }
+    return try out.toOwnedSlice(allocator);
+}
+
+pub fn parseGithubStackPosition(allocator: std.mem.Allocator, output: []const u8) !?StackPosition {
+    var parsed = std.json.parseFromSlice(GithubStackViewJson, allocator, output, .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+
+    const current_branch = std.mem.trim(u8, parsed.value.currentBranch, " \t\r\n");
+    if (parsed.value.branches.len == 0) return null;
+    var current_index: u32 = 0;
+    var total: u32 = 0;
+    for (parsed.value.branches) |branch| {
+        if (branch.name.len == 0) continue;
+        total += 1;
+        if (branch.isCurrent or (current_branch.len > 0 and std.mem.eql(u8, branch.name, current_branch))) {
+            current_index = total;
+        }
+    }
+    if (current_index == 0 or total == 0) return null;
+    return .{
+        .index = current_index,
+        .total = total,
+        .has_up = current_index < total,
+        .has_down = current_index > 1,
+    };
 }
 
 fn detectGhstack(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection {
@@ -556,6 +626,65 @@ test "detects ghstack branch names" {
     try std.testing.expect(!isGhstackBranchName("gh/alice/x/head"));
     try std.testing.expect(!isGhstackBranchName("feature/gh/alice/42/head"));
     try std.testing.expect(!isGhstackBranchName("gh/alice/42/other"));
+}
+
+test "calculates stack position from branch order" {
+    const branches = [_][]const u8{ "base", "api", "ui" };
+    const position = positionFromBranches(&branches, "api").?;
+    try std.testing.expectEqual(@as(u32, 2), position.index);
+    try std.testing.expectEqual(@as(u32, 3), position.total);
+    try std.testing.expect(position.has_up);
+    try std.testing.expect(position.has_down);
+}
+
+test "formats stack position" {
+    const rendered = try formatStackPositionAlloc(std.testing.allocator, .github_stack, .{
+        .index = 2,
+        .total = 5,
+        .has_up = true,
+        .has_down = true,
+    });
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("stack:gh-stack:2/5 ↑↓", rendered);
+}
+
+test "formats edge stack positions" {
+    const bottom = try formatStackPositionAlloc(std.testing.allocator, .git_spice, .{
+        .index = 1,
+        .total = 3,
+        .has_up = true,
+        .has_down = false,
+    });
+    defer std.testing.allocator.free(bottom);
+    try std.testing.expectEqualStrings("stack:gs:1/3 ↑", bottom);
+
+    const top = try formatStackPositionAlloc(std.testing.allocator, .stax, .{
+        .index = 3,
+        .total = 3,
+        .has_up = false,
+        .has_down = true,
+    });
+    defer std.testing.allocator.free(top);
+    try std.testing.expectEqualStrings("stack:st:3/3 ↓", top);
+}
+
+test "parses github stack position json" {
+    const output =
+        \\{
+        \\  "trunk": "main",
+        \\  "currentBranch": "feat/api-routes",
+        \\  "branches": [
+        \\    {"name": "feat/auth", "isCurrent": false, "isMerged": true},
+        \\    {"name": "feat/api-routes", "isCurrent": true, "isMerged": false},
+        \\    {"name": "feat/ui", "isCurrent": false, "isMerged": false}
+        \\  ]
+        \\}
+    ;
+    const position = (try parseGithubStackPosition(std.testing.allocator, output)).?;
+    try std.testing.expectEqual(@as(u32, 2), position.index);
+    try std.testing.expectEqual(@as(u32, 3), position.total);
+    try std.testing.expect(position.has_up);
+    try std.testing.expect(position.has_down);
 }
 
 test "detects ghstack from git branch" {

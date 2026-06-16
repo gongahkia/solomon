@@ -69,3 +69,5 @@ Detection:
 - git-spice internals document local storage in `refs/spice/data`: https://abhinav.github.io/git-spice/guide/internals/
 - git-town detection checks legacy `.git-town-branches.yml`, current `git-town.toml` / `.git-town.toml` / `.git-branches.toml`, and local Git config `git-town` entries.
 - Git Town 22.7 documents config files named `git-town.toml`, `.git-town.toml`, or `.git-branches.toml`: https://www.git-town.com/configuration-file.html
+- GitHub `gh stack` detection checks `.git/gh-stack`, `.git/gh-stack-rebase-state`, and GitHub remotes with stack metadata keys in `.git/config`.
+- GitHub `gh stack` documents local tracking in `.git/gh-stack` and rebase state in `.git/gh-stack-rebase-state`: https://github.com/github/gh-stack

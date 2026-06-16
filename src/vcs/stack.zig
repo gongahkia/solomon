@@ -9,6 +9,7 @@ pub const Provider = enum {
     stax,
     git_spice,
     git_town,
+    github_stack,
 
     pub fn label(self: Provider) []const u8 {
         return switch (self) {
@@ -18,6 +19,7 @@ pub const Provider = enum {
             .stax => "st",
             .git_spice => "gs",
             .git_town => "git-town",
+            .github_stack => "gh-stack",
         };
     }
 };
@@ -64,6 +66,7 @@ pub fn detect(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection {
     if (try detectStax(allocator, cwd_path)) |detection| return detection;
     if (try detectGitSpice(allocator, cwd_path)) |detection| return detection;
     if (try detectGitTown(allocator, cwd_path)) |detection| return detection;
+    if (try detectGithubStack(allocator, cwd_path)) |detection| return detection;
     return null;
 }
 
@@ -132,6 +135,16 @@ pub fn isGitSpice(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
 
 pub fn isGitTown(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
     const detection = try detectGitTown(allocator, cwd_path);
+    if (detection) |value| {
+        var owned = value;
+        owned.deinit(allocator);
+        return true;
+    }
+    return false;
+}
+
+pub fn isGithubStack(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
+    const detection = try detectGithubStack(allocator, cwd_path);
     if (detection) |value| {
         var owned = value;
         owned.deinit(allocator);
@@ -314,6 +327,52 @@ fn detectGitTown(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection
     return null;
 }
 
+fn detectGithubStack(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection {
+    const root = (try findMarkerRoot(allocator, cwd_path, ".git")) orelse return null;
+    errdefer allocator.free(root);
+
+    const stack_path = try std.fs.path.join(allocator, &.{ root, ".git", "gh-stack" });
+    const has_stack = pathExists(stack_path) catch |err| {
+        allocator.free(stack_path);
+        return err;
+    };
+    if (has_stack) {
+        return .{
+            .provider = .github_stack,
+            .root_path = root,
+            .marker_path = stack_path,
+        };
+    }
+    allocator.free(stack_path);
+
+    const rebase_path = try std.fs.path.join(allocator, &.{ root, ".git", "gh-stack-rebase-state" });
+    const has_rebase = pathExists(rebase_path) catch |err| {
+        allocator.free(rebase_path);
+        return err;
+    };
+    if (has_rebase) {
+        return .{
+            .provider = .github_stack,
+            .root_path = root,
+            .marker_path = rebase_path,
+        };
+    }
+    allocator.free(rebase_path);
+
+    const config_path = try std.fs.path.join(allocator, &.{ root, ".git", "config" });
+    errdefer allocator.free(config_path);
+    if (try gitConfigContainsGithubStack(allocator, config_path)) {
+        return .{
+            .provider = .github_stack,
+            .root_path = root,
+            .marker_path = config_path,
+        };
+    }
+    allocator.free(config_path);
+    allocator.free(root);
+    return null;
+}
+
 fn readCurrentGitBranch(allocator: std.mem.Allocator, cwd_path: []const u8) !?GitBranch {
     const root = (try findMarkerRoot(allocator, cwd_path, ".git")) orelse return null;
     const head_path = try std.fs.path.join(allocator, &.{ root, ".git", "HEAD" });
@@ -417,6 +476,21 @@ fn gitConfigContainsGitTown(allocator: std.mem.Allocator, path: []const u8) !boo
     return std.mem.indexOf(u8, contents, "[git-town") != null or std.mem.indexOf(u8, contents, "git-town.") != null;
 }
 
+fn gitConfigContainsGithubStack(allocator: std.mem.Allocator, path: []const u8) !bool {
+    const contents = std.fs.cwd().readFileAlloc(allocator, path, 256 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return err,
+    };
+    defer allocator.free(contents);
+    const has_github_remote = std.mem.indexOf(u8, contents, "github.com") != null;
+    const has_stack_keys = std.mem.indexOf(u8, contents, "[stack]") != null or
+        std.mem.indexOf(u8, contents, "stackParent") != null or
+        std.mem.indexOf(u8, contents, "stackparent") != null or
+        std.mem.indexOf(u8, contents, "stackPR") != null or
+        std.mem.indexOf(u8, contents, "stackpr") != null;
+    return has_github_remote and has_stack_keys;
+}
+
 test "detects graphite stack in current directory" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-stack-{x}", .{std.crypto.random.int(u64)});
@@ -472,6 +546,7 @@ test "ignores directories without stack metadata" {
     try std.testing.expect(!(try isStax(allocator, dir_path)));
     try std.testing.expect(!(try isGitSpice(allocator, dir_path)));
     try std.testing.expect(!(try isGitTown(allocator, dir_path)));
+    try std.testing.expect(!(try isGithubStack(allocator, dir_path)));
 }
 
 test "detects ghstack branch names" {
@@ -708,6 +783,56 @@ test "detects git-town git config entries" {
     var detection = (try detect(allocator, dir_path)).?;
     defer detection.deinit(allocator);
     try std.testing.expectEqual(Provider.git_town, detection.provider);
+    try std.testing.expectEqualStrings(marker_path, detection.marker_path);
+}
+
+test "detects github stack metadata file" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-stack-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    const git_path = try std.fmt.allocPrint(allocator, "{s}/.git", .{dir_path});
+    defer allocator.free(git_path);
+    try std.fs.cwd().makePath(git_path);
+
+    const marker_path = try std.fmt.allocPrint(allocator, "{s}/gh-stack", .{git_path});
+    defer allocator.free(marker_path);
+    try writeFile(marker_path, "{\"stacks\":[]}\n");
+
+    var detection = (try detect(allocator, dir_path)).?;
+    defer detection.deinit(allocator);
+    try std.testing.expectEqual(Provider.github_stack, detection.provider);
+    try std.testing.expectEqualStrings("gh-stack", detection.provider.label());
+    try std.testing.expectEqualStrings(dir_path, detection.root_path);
+    try std.testing.expectEqualStrings(marker_path, detection.marker_path);
+    try std.testing.expect(try isGithubStack(allocator, dir_path));
+}
+
+test "detects github stack git config entries" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-stack-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    const git_path = try std.fmt.allocPrint(allocator, "{s}/.git", .{dir_path});
+    defer allocator.free(git_path);
+    try std.fs.cwd().makePath(git_path);
+
+    const marker_path = try std.fmt.allocPrint(allocator, "{s}/config", .{git_path});
+    defer allocator.free(marker_path);
+    try writeFile(marker_path,
+        \\[remote "origin"]
+        \\  url = git@github.com:owner/repo.git
+        \\[branch "feature-auth"]
+        \\  stackParent = main
+        \\  stackPR = 123
+        \\
+    );
+
+    var detection = (try detect(allocator, dir_path)).?;
+    defer detection.deinit(allocator);
+    try std.testing.expectEqual(Provider.github_stack, detection.provider);
     try std.testing.expectEqualStrings(marker_path, detection.marker_path);
 }
 

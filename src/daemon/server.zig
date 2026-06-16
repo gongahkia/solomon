@@ -143,7 +143,9 @@ pub const Server = struct {
 
         const home = std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch null;
         defer if (home) |home_path| std.heap.page_allocator.free(home_path);
-        if (home) |home_path| try self.registerCloudInvalidation(home_path);
+        const kubeconfig = std.process.getEnvVarOwned(std.heap.page_allocator, "KUBECONFIG") catch null;
+        defer if (kubeconfig) |value| std.heap.page_allocator.free(value);
+        try self.registerCloudInvalidation(home, kubeconfig);
 
         const ssh = std.process.getEnvVarOwned(std.heap.page_allocator, "SSH_CONNECTION") catch null;
         defer if (ssh) |value| std.heap.page_allocator.free(value);
@@ -171,6 +173,7 @@ pub const Server = struct {
             .user = user,
             .host = host,
             .aws_profile = aws_profile,
+            .kubeconfig = kubeconfig,
         });
         defer rendered.deinit(std.heap.page_allocator);
         try self.logSlowWarning(rendered.slow_warning);
@@ -210,6 +213,7 @@ pub const Server = struct {
             } else if (std.mem.eql(u8, invalidation.module_id, cloud_ctx_module.module_id)) {
                 self.cloud_ctx_cache.invalidateGcp(std.heap.page_allocator);
                 self.cloud_ctx_cache.invalidateAzure(std.heap.page_allocator);
+                self.cloud_ctx_cache.invalidateKube(std.heap.page_allocator);
             }
         }
     }
@@ -232,14 +236,20 @@ pub const Server = struct {
         try self.logInotifyLimitWarning();
     }
 
-    fn registerCloudInvalidation(self: *Server, home_path: []const u8) !void {
-        var gcp_scope = try cloud_ctx_module.gcpWatchScope(std.heap.page_allocator, home_path);
-        defer gcp_scope.deinit(std.heap.page_allocator);
-        try self.registerCloudScope(gcp_scope.scope());
+    fn registerCloudInvalidation(self: *Server, home: ?[]const u8, kubeconfig: ?[]const u8) !void {
+        if (home) |home_path| {
+            var gcp_scope = try cloud_ctx_module.gcpWatchScope(std.heap.page_allocator, home_path);
+            defer gcp_scope.deinit(std.heap.page_allocator);
+            try self.registerCloudScope(gcp_scope.scope());
 
-        var azure_scope = try cloud_ctx_module.azureWatchScope(std.heap.page_allocator, home_path);
-        defer azure_scope.deinit(std.heap.page_allocator);
-        try self.registerCloudScope(azure_scope.scope());
+            var azure_scope = try cloud_ctx_module.azureWatchScope(std.heap.page_allocator, home_path);
+            defer azure_scope.deinit(std.heap.page_allocator);
+            try self.registerCloudScope(azure_scope.scope());
+        }
+
+        var kube_scope = (try cloud_ctx_module.kubeWatchScope(std.heap.page_allocator, kubeconfig, home)) orelse return;
+        defer kube_scope.deinit(std.heap.page_allocator);
+        try self.registerCloudScope(kube_scope.scope());
     }
 
     fn registerCloudScope(self: *Server, cloud_scope: cloud_ctx_module.Scope) !void {

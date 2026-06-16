@@ -14,7 +14,7 @@ Current packs:
 | Pack | State | Owner | Notes |
 | --- | --- | --- | --- |
 | `shisa.vcs` | incubation | core | jj/sapling core support plus fossil/pijul/bazaar community templates. |
-| `shisa.cloud` | incubation | core | AWS, cached GCP, and cached Azure context landed; no network by default. |
+| `shisa.cloud` | incubation | core | AWS, cached GCP, cached Azure, and cached Kubernetes context landed; no network by default. |
 | `shisa.ai` | incubation | core | Optional local-first hint pack; outside core. |
 | community templates | incubation | community | Template repos planned before marketplace verification. |
 

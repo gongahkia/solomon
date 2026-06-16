@@ -64,6 +64,7 @@ pub const RenderInput = struct {
     user: []const u8,
     host: []const u8,
     aws_profile: ?[]const u8 = null,
+    kubeconfig: ?[]const u8 = null,
 };
 
 pub const CacheSet = struct {
@@ -169,7 +170,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
         .jobs => try jobs_module.render(allocator, input.jobs),
         .cmd_duration => try cmd_duration_module.render(allocator, input.duration_ms, 1000),
         .user_host => try user_host_module.render(allocator, input.ssh, input.user, input.host),
-        .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.home, caches.cloud_ctx),
+        .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.kubeconfig, input.home, caches.cloud_ctx),
     };
 }
 
@@ -202,7 +203,7 @@ test "renders default pipeline" {
     defer git_cache.deinit(std.testing.allocator);
     var language_cache = language_versions_module.Cache{};
     defer language_cache.deinit(std.testing.allocator);
-    var cloud_cache = cloud_ctx_module.Cache{ .gcp_valid = true, .azure_valid = true };
+    var cloud_cache = cloud_ctx_module.Cache{ .gcp_valid = true, .azure_valid = true, .kube_valid = true };
     defer cloud_cache.deinit(std.testing.allocator);
     var rendered = try renderDefault(std.testing.allocator, .{
         .git_branch = &git_cache,
@@ -237,7 +238,7 @@ test "renders async placeholder and redraw token" {
     defer git_cache.deinit(std.testing.allocator);
     var language_cache = language_versions_module.Cache{};
     defer language_cache.deinit(std.testing.allocator);
-    var cloud_cache = cloud_ctx_module.Cache{ .gcp_valid = true, .azure_valid = true };
+    var cloud_cache = cloud_ctx_module.Cache{ .gcp_valid = true, .azure_valid = true, .kube_valid = true };
     defer cloud_cache.deinit(std.testing.allocator);
     const pipeline = [_]ModuleSpec{
         .{ .id = .cwd, .execution_class = .sync },
@@ -278,7 +279,7 @@ test "no async renders git synchronously" {
     defer git_cache.deinit(std.testing.allocator);
     var language_cache = language_versions_module.Cache{};
     defer language_cache.deinit(std.testing.allocator);
-    var cloud_cache = cloud_ctx_module.Cache{ .gcp_valid = true, .azure_valid = true };
+    var cloud_cache = cloud_ctx_module.Cache{ .gcp_valid = true, .azure_valid = true, .kube_valid = true };
     defer cloud_cache.deinit(std.testing.allocator);
     var rendered = try renderDefault(std.testing.allocator, .{
         .git_branch = &git_cache,

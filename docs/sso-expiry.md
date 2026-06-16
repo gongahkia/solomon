@@ -9,3 +9,5 @@ gcloud expiry reads cached `gcloud auth list --format=json` output from `~/.cach
 Azure expiry reads `~/.azure/accessTokens.json` and returns the soonest non-empty token expiry field.
 
 Vault lease info reads `~/.vault-token`. Raw token-only files return no expiry; JSON metadata returns the first non-empty expiry or TTL field from the top level, `auth`, or `data`.
+
+1Password CLI signin status reads cached JSON from `~/.cache/shisa/op-signin-status.json` and returns the first non-empty expiry or TTL field from the top level, `session`, `auth`, or `data`.

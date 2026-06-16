@@ -197,6 +197,52 @@ fn jsonScalarTextAlloc(allocator: std.mem.Allocator, value: std.json.Value) !?[]
     }
 }
 
+pub fn opSigninStatusCachePathAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
+    const home_path = home orelse return null;
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.cache/shisa/op-signin-status.json", .{home_path}));
+}
+
+pub fn readOpSigninStatusExpiryAlloc(allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(source);
+    return parseOpSigninStatusExpiryAlloc(allocator, source);
+}
+
+pub fn parseOpSigninStatusExpiryAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 {
+    const trimmed = std.mem.trim(u8, source, " \t\r\n");
+    if (trimmed.len == 0) return null;
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, trimmed, .{}) catch return null;
+    defer parsed.deinit();
+    return opSigninStatusExpiryFromValueAlloc(allocator, parsed.value);
+}
+
+fn opSigninStatusExpiryFromValueAlloc(allocator: std.mem.Allocator, value: std.json.Value) !?[]u8 {
+    switch (value) {
+        .object => |object| {
+            const fields = [_][]const u8{ "expires_at", "expiresAt", "expiry", "expires", "valid_until", "validUntil", "session_expires_at", "sessionExpiresAt", "expires_in", "expiresIn", "ttl" };
+            for (fields) |field| {
+                if (object.get(field)) |entry| {
+                    if (try jsonScalarTextAlloc(allocator, entry)) |text| return text;
+                }
+            }
+            if (object.get("session")) |session| {
+                if (try opSigninStatusExpiryFromValueAlloc(allocator, session)) |text| return text;
+            }
+            if (object.get("auth")) |auth| {
+                if (try opSigninStatusExpiryFromValueAlloc(allocator, auth)) |text| return text;
+            }
+            if (object.get("data")) |data| {
+                if (try opSigninStatusExpiryFromValueAlloc(allocator, data)) |text| return text;
+            }
+            return null;
+        },
+        else => return null,
+    }
+}
+
 test "parses aws sso expiry" {
     const expiry = (try parseAwsSsoExpiryAlloc(std.testing.allocator,
         \\{
@@ -317,4 +363,32 @@ test "builds vault token path" {
     const path = (try vaultTokenPathAlloc(std.testing.allocator, "/home/me")).?;
     defer std.testing.allocator.free(path);
     try std.testing.expectEqualStrings("/home/me/.vault-token", path);
+}
+
+test "parses op signin status expiry" {
+    const expiry = (try parseOpSigninStatusExpiryAlloc(std.testing.allocator,
+        \\{
+        \\  "account": "acme",
+        \\  "status": "signed_in",
+        \\  "expires_at": "2026-06-16T12:00:00Z"
+        \\}
+    )).?;
+    defer std.testing.allocator.free(expiry);
+    try std.testing.expectEqualStrings("2026-06-16T12:00:00Z", expiry);
+}
+
+test "parses nested op signin ttl" {
+    const expiry = (try parseOpSigninStatusExpiryAlloc(std.testing.allocator,
+        \\{
+        \\  "session": {"expires_in": 1800}
+        \\}
+    )).?;
+    defer std.testing.allocator.free(expiry);
+    try std.testing.expectEqualStrings("1800", expiry);
+}
+
+test "builds op signin status cache path" {
+    const path = (try opSigninStatusCachePathAlloc(std.testing.allocator, "/home/me")).?;
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/home/me/.cache/shisa/op-signin-status.json", path);
 }

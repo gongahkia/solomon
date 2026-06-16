@@ -225,7 +225,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Benchmark on a 10k-change jj repo
 
 ### 10.2 Sapling (sl) — Tier 1
-- [ ] Detect sapling repos (`.sl/` directory)
+- [x] Detect sapling repos (`.sl/` directory)
 - [ ] Read sapling state via `sl status --json` (cached, fsnotify on `.sl/store`)
 - [ ] Show smartlog position (current commit in the stack)
 - [ ] Show bookmark / branch

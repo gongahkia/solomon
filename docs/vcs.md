@@ -20,3 +20,11 @@ Planned state sources:
 - `jj log --no-graph -r @` with commit id and `parents.map()` for working-copy position.
 - `test/fixtures/jj/*` snapshot fixture repos cover deterministic parser/render output.
 - `bench/jj-10k.sh` benchmarks the jj commands Shisa wraps on a 10k-change imported repo.
+
+## Sapling
+
+Detection:
+
+- Walk ancestors from `cwd`.
+- A directory containing `.sl/` is the Sapling root.
+- Detection does not require the `sl` binary.

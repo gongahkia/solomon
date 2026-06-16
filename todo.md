@@ -79,7 +79,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 
 ### 1.6 Benchmarks (gating)
 - [x] Build `shisa bench` subcommand (runs hyperfine internally on a known workload)
-- [ ] Stand up CI benchmark job that runs on every PR vs. main
+- [x] Stand up CI benchmark job that runs on every PR vs. main
 - [ ] Publish a benchmark dashboard (static HTML, GitHub Pages) updated per merge
 - [ ] Add benchmark regression gate (fail PR if p99 warm render regresses > 10%)
 - [ ] Build comparison harness vs. starship + p10k + oh-my-posh in same repo

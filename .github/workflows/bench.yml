@@ -1,0 +1,63 @@
+name: Bench
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  prompt:
+    name: prompt / ubuntu-24.04
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout head
+        uses: actions/checkout@v4
+        with:
+          path: head
+
+      - name: Checkout main baseline
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: base
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+          use-cache: true
+          cache-key: bench-${{ hashFiles('head/build.zig.zon') }}
+
+      - name: Install hyperfine
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y hyperfine
+
+      - name: Benchmark main baseline
+        if: github.event_name == 'pull_request'
+        working-directory: base
+        run: |
+          set -eu
+          zig build release
+          ./zig-out/bin/shisa bench | tee ../bench-main.txt
+
+      - name: Benchmark head
+        working-directory: head
+        run: |
+          set -eu
+          zig build release
+          ./zig-out/bin/shisa bench | tee ../bench-head.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prompt-bench-${{ github.run_id }}
+          path: |
+            bench-main.txt
+            bench-head.txt
+          if-no-files-found: ignore

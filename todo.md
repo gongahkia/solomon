@@ -261,7 +261,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ### 10.7 Tests & benches
 - [x] Per-VCS fixture corpus checked into `test/fixtures/vcs/<vcs>/`
-- [ ] CI matrix runs each VCS module against fixtures on every PR
+- [x] CI matrix runs each VCS module against fixtures on every PR
 - [ ] Public benchmark vs. starship git on the same repos for parity confirmation
 
 ## Phase 11 — Cloud-safety pack (`shisa.cloud`)

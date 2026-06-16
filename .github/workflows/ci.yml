@@ -37,6 +37,30 @@ jobs:
       - run: zig build release
       - run: zig build bench
 
+  vcs-fixtures:
+    name: vcs fixtures / ${{ matrix.module }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - hg
+          - jj
+          - sl
+          - stack
+          - worktree
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+          use-cache: true
+          cache-key: shisa-vcs-${{ matrix.module }}-${{ hashFiles('build.zig.zon') }}
+
+      - run: zig test src/vcs/${{ matrix.module }}.zig
+
   shell-hooks:
     name: shell hooks / ${{ matrix.shell }}
     runs-on: macos-14

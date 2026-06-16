@@ -83,3 +83,4 @@ Detection:
 - Primary worktrees with a `.git/` directory are not labeled as linked worktrees.
 - Prompt rendering appends `wt:<name>` to the Git segment when `cwd` is inside a linked worktree.
 - `shisa worktrees [--cwd PATH]` lists Git worktrees from `git worktree list --porcelain` and marks the active worktree with `*`.
+- `shisa worktrees` runs `git status --porcelain` for each listed worktree and appends `*` to dirty worktree branch/status text.

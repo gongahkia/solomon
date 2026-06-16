@@ -21,6 +21,7 @@ pub const Entry = struct {
     head: ?[]u8 = null,
     bare: bool = false,
     detached: bool = false,
+    dirty: bool = false,
 
     pub fn deinit(self: *Entry, allocator: std.mem.Allocator) void {
         allocator.free(self.path);
@@ -157,11 +158,15 @@ pub fn renderListAlloc(allocator: std.mem.Allocator, list: List) ![]u8 {
         const marker: u8 = if (list.active_index != null and list.active_index.? == index) '*' else ' ';
         try std.fmt.format(out.writer(allocator), "{c} {s}", .{ marker, entry.path });
         if (entry.branch) |branch| {
-            try std.fmt.format(out.writer(allocator), " {s}", .{branch});
+            try std.fmt.format(out.writer(allocator), " {s}{s}", .{ branch, if (entry.dirty) "*" else "" });
         } else if (entry.detached) {
             try out.appendSlice(allocator, " (detached)");
+            if (entry.dirty) try out.append(allocator, '*');
         } else if (entry.bare) {
             try out.appendSlice(allocator, " (bare)");
+            if (entry.dirty) try out.append(allocator, '*');
+        } else if (entry.dirty) {
+            try out.appendSlice(allocator, " *");
         }
         try out.append(allocator, '\n');
     }
@@ -245,10 +250,11 @@ test "parses and renders worktree list" {
     try std.testing.expectEqual(@as(usize, 2), list.entries.len);
     try std.testing.expectEqual(@as(?usize, 1), list.active_index);
     try std.testing.expectEqualStrings("feature", list.entries[1].branch.?);
+    list.entries[1].dirty = true;
 
     const rendered = try renderListAlloc(std.testing.allocator, list);
     defer std.testing.allocator.free(rendered);
-    try std.testing.expectEqualStrings("  /repo main\n* /repo-linked feature\n", rendered);
+    try std.testing.expectEqualStrings("  /repo main\n* /repo-linked feature*\n", rendered);
 }
 
 test "renders empty worktree list" {

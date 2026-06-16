@@ -455,13 +455,31 @@ fn worktreesOutputAlloc(allocator: std.mem.Allocator, cwd_path: []const u8) ![]u
     };
     defer allocator.free(porcelain);
 
-    return worktreesRenderAlloc(allocator, porcelain, active_root);
+    var list = try vcs_worktree.parseListPorcelain(allocator, porcelain, active_root);
+    defer list.deinit(allocator);
+    try markDirtyWorktrees(allocator, &list);
+    return vcs_worktree.renderListAlloc(allocator, list);
 }
 
 fn worktreesRenderAlloc(allocator: std.mem.Allocator, porcelain: []const u8, active_root: []const u8) ![]u8 {
     var list = try vcs_worktree.parseListPorcelain(allocator, porcelain, active_root);
     defer list.deinit(allocator);
     return vcs_worktree.renderListAlloc(allocator, list);
+}
+
+fn markDirtyWorktrees(allocator: std.mem.Allocator, list: *vcs_worktree.List) !void {
+    for (list.entries) |*entry| {
+        entry.dirty = try gitStatusDirty(allocator, entry.path);
+    }
+}
+
+fn gitStatusDirty(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
+    const output = gitOutputAlloc(allocator, cwd_path, &.{ "git", "status", "--porcelain" }) catch |err| switch (err) {
+        error.CommandFailed, error.FileNotFound => return false,
+        else => return err,
+    };
+    defer allocator.free(output);
+    return std.mem.trim(u8, output, " \t\r\n").len != 0;
 }
 
 fn gitOutputAlloc(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) ![]u8 {

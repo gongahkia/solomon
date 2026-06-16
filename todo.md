@@ -251,7 +251,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 ### 10.5 Worktree (`shisa.vcs.worktree`)
 - [x] Show `wt:<name>` when cwd is inside a worktree
 - [x] `shisa worktrees` CLI lists all worktrees, marks active
-- [ ] Multi-worktree dirty-tree warning across worktrees
+- [x] Multi-worktree dirty-tree warning across worktrees
 
 ### 10.6 Community-tier plugins (templates only)
 - [ ] Publish a Fossil plugin template

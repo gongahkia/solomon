@@ -74,7 +74,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 ### 1.5 Configuration
 - [x] Define `shisa.toml` schema (modules list, theme, per-module options)
 - [x] Implement TOML parser usage and validation with helpful error spans
-- [ ] Ship a `shisa init` command that writes a default config to `~/.config/shisa/shisa.toml`
+- [x] Ship a `shisa init` command that writes a default config to `~/.config/shisa/shisa.toml`
 - [ ] Ship a `shisa explain` command that dumps the resolved module pipeline
 
 ### 1.6 Benchmarks (gating)

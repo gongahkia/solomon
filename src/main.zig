@@ -1,5 +1,6 @@
 const std = @import("std");
 const client = @import("shisa-client.zig");
+const shisa_config = @import("config.zig");
 const paths = @import("daemon/paths.zig");
 const proto = @import("proto/types.zig");
 const supervisor = @import("supervisor.zig");
@@ -29,6 +30,11 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[1], "init")) {
+        try initConfig(allocator, args[2..]);
+        return;
+    }
+
     if (std.mem.eql(u8, args[1], "prompt")) {
         try prompt(allocator, args[2..]);
         return;
@@ -40,6 +46,57 @@ pub fn main() !void {
 
 test "smoke" {
     try std.testing.expect(true);
+}
+
+fn initConfig(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len != 0) return error.UnknownInitArgument;
+
+    const path = try defaultConfigPath(allocator);
+    defer allocator.free(path);
+    if (std.fs.path.dirname(path)) |parent| {
+        try std.fs.cwd().makePath(parent);
+    }
+
+    var file = try std.fs.createFileAbsolute(path, .{ .exclusive = true });
+    defer file.close();
+    try file.writeAll(shisa_config.default_config_text);
+
+    const message = try std.fmt.allocPrint(allocator, "wrote {s}\n", .{path});
+    defer allocator.free(message);
+    try std.fs.File.stdout().writeAll(message);
+}
+
+fn defaultConfigPath(allocator: std.mem.Allocator) ![]u8 {
+    const xdg = std.process.getEnvVarOwned(allocator, "XDG_CONFIG_HOME") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    if (xdg) |xdg_config_home| {
+        defer allocator.free(xdg_config_home);
+        return defaultConfigPathFromEnv(allocator, xdg_config_home, null);
+    }
+
+    const home = try std.process.getEnvVarOwned(allocator, "HOME");
+    defer allocator.free(home);
+    return defaultConfigPathFromEnv(allocator, null, home);
+}
+
+fn defaultConfigPathFromEnv(allocator: std.mem.Allocator, xdg_config_home: ?[]const u8, home: ?[]const u8) ![]u8 {
+    if (xdg_config_home) |base| return std.fmt.allocPrint(allocator, "{s}/shisa/shisa.toml", .{base});
+    if (home) |base| return std.fmt.allocPrint(allocator, "{s}/.config/shisa/shisa.toml", .{base});
+    return error.MissingHome;
+}
+
+test "default config path prefers xdg" {
+    const path = try defaultConfigPathFromEnv(std.testing.allocator, "/tmp/xdg", "/tmp/home");
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/tmp/xdg/shisa/shisa.toml", path);
+}
+
+test "default config path falls back to home" {
+    const path = try defaultConfigPathFromEnv(std.testing.allocator, null, "/tmp/home");
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/tmp/home/.config/shisa/shisa.toml", path);
 }
 
 const PromptConfig = struct {
@@ -145,6 +202,7 @@ const help_text =
     \\usage: shisa <command> [options]
     \\
     \\commands:
+    \\  init          write default shisa.toml
     \\  prompt        render prompt through shisad
     \\  supervisor    run shisad under a crash-restart supervisor
     \\

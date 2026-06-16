@@ -1,5 +1,28 @@
 const std = @import("std");
 
+pub const default_config_text =
+    \\version = 1
+    \\theme = "plain"
+    \\
+    \\[prompt]
+    \\modules = ["cwd", "git_branch", "exit_status", "jobs", "cmd_duration", "user_host"]
+    \\
+    \\[modules.cwd]
+    \\truncate_to = 3
+    \\home_tilde = true
+    \\
+    \\[modules.git_branch]
+    \\show_dirty = true
+    \\cache_ttl_ms = 250
+    \\
+    \\[modules.cmd_duration]
+    \\threshold_ms = 1000
+    \\
+    \\[modules.user_host]
+    \\mode = "ssh"
+    \\
+;
+
 pub const Diagnostic = struct {
     message: []const u8 = "",
     line: usize = 0,
@@ -494,6 +517,15 @@ test "parses minimal config with defaults" {
     try std.testing.expectEqualStrings("plain", config.theme);
     try std.testing.expectEqualSlices(ModuleId, &.{ .cwd, .git_branch, .exit_status }, config.prompt_modules);
     try std.testing.expectEqual(@as(u8, 3), config.modules.cwd.truncate_to);
+}
+
+test "default config parses" {
+    var diagnostic: Diagnostic = .{};
+    var config = try parse(std.testing.allocator, default_config_text, &diagnostic);
+    defer config.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("plain", config.theme);
+    try std.testing.expectEqualSlices(ModuleId, default_modules[0..], config.prompt_modules);
 }
 
 test "parses per-module options" {

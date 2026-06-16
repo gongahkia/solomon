@@ -13,6 +13,10 @@ jobs:
   prompt:
     name: prompt / ubuntu-24.04
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
 
     steps:
       - name: Checkout head
@@ -54,6 +58,41 @@ jobs:
           zig build release
           ./zig-out/bin/shisa bench | tee ../bench-head.txt
 
+      - name: Build benchmark dashboard
+        if: github.event_name == 'push'
+        run: |
+          set -eu
+          mkdir -p site
+          {
+            printf '%s\n' '<!doctype html>'
+            printf '%s\n' '<html lang="en">'
+            printf '%s\n' '<head>'
+            printf '%s\n' '<meta charset="utf-8">'
+            printf '%s\n' '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            printf '%s\n' '<title>Shisa Prompt Benchmarks</title>'
+            printf '%s\n' '<style>body{font:16px/1.5 system-ui,sans-serif;margin:2rem;max-width:960px}pre{background:#111;color:#eee;padding:1rem;overflow:auto}code{background:#eee;padding:.1rem .25rem}</style>'
+            printf '%s\n' '</head>'
+            printf '%s\n' '<body>'
+            printf '%s\n' '<h1>Shisa Prompt Benchmarks</h1>'
+            printf '<p>Commit <code>%s</code></p>\n' "$GITHUB_SHA"
+            printf '%s\n' '<h2>Head</h2>'
+            printf '%s\n' '<pre>'
+            sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' bench-head.txt
+            printf '%s\n' '</pre>'
+            printf '%s\n' '</body>'
+            printf '%s\n' '</html>'
+          } > site/index.html
+
+      - name: Configure Pages
+        if: github.event_name == 'push'
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
       - uses: actions/upload-artifact@v4
         with:
           name: prompt-bench-${{ github.run_id }}
@@ -61,3 +100,21 @@ jobs:
             bench-main.txt
             bench-head.txt
           if-no-files-found: ignore
+
+  deploy:
+    name: pages
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    needs:
+      - prompt
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy benchmark dashboard
+        id: deployment
+        uses: actions/deploy-pages@v4

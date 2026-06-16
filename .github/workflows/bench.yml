@@ -49,14 +49,34 @@ jobs:
         run: |
           set -eu
           zig build release
-          ./zig-out/bin/shisa bench | tee ../bench-main.txt
+          ./zig-out/bin/shisa bench --export-json ../bench-main.json | tee ../bench-main.txt
 
       - name: Benchmark head
         working-directory: head
         run: |
           set -eu
           zig build release
-          ./zig-out/bin/shisa bench | tee ../bench-head.txt
+          ./zig-out/bin/shisa bench --export-json ../bench-head.json | tee ../bench-head.txt
+
+      - name: Gate p99 regression
+        if: github.event_name == 'pull_request'
+        run: |
+          set -eu
+          ruby -rjson -e '
+            def p99(path)
+              data = JSON.parse(File.read(path))
+              times = data.fetch("results").fetch(0).fetch("times").sort
+              abort("#{path}: empty times") if times.empty?
+              times[[((times.length * 0.99).ceil - 1), 0].max]
+            end
+            base = p99("bench-main.json")
+            head = p99("bench-head.json")
+            limit = base * 1.10
+            puts format("main p99: %.6fs", base)
+            puts format("head p99: %.6fs", head)
+            puts format("limit:    %.6fs", limit)
+            abort("p99 regression above 10%") if head > limit
+          '
 
       - name: Build benchmark dashboard
         if: github.event_name == 'push'
@@ -98,7 +118,9 @@ jobs:
           name: prompt-bench-${{ github.run_id }}
           path: |
             bench-main.txt
+            bench-main.json
             bench-head.txt
+            bench-head.json
           if-no-files-found: ignore
 
   deploy:

@@ -182,7 +182,7 @@ test "explain output dumps pipeline" {
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    if (args.len != 0) return error.UnknownBenchArgument;
+    const bench_config = try parseBench(args);
     try ensureHyperfine(allocator);
 
     const self_path = try std.fs.selfExePathAlloc(allocator);
@@ -208,7 +208,25 @@ fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {
     try waitForPath(socket_path, 1000);
     const workload = try benchWorkloadAlloc(allocator, self_path, socket_path, cwd);
     defer allocator.free(workload);
-    try runHyperfine(allocator, workload);
+    try runHyperfine(allocator, workload, bench_config);
+}
+
+const BenchConfig = struct {
+    export_json: ?[]const u8 = null,
+};
+
+fn parseBench(args: []const []const u8) !BenchConfig {
+    var config = BenchConfig{};
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "--export-json")) {
+            config.export_json = try nextValue(args, &i);
+        } else {
+            return error.UnknownBenchArgument;
+        }
+    }
+    return config;
 }
 
 fn ensureHyperfine(allocator: std.mem.Allocator) !void {
@@ -229,10 +247,18 @@ fn ensureHyperfine(allocator: std.mem.Allocator) !void {
     if (!exitedZero(result.term)) return error.HyperfineUnavailable;
 }
 
-fn runHyperfine(allocator: std.mem.Allocator, workload: []const u8) !void {
+fn runHyperfine(allocator: std.mem.Allocator, workload: []const u8, bench_config: BenchConfig) !void {
+    var argv: std.ArrayList([]const u8) = .empty;
+    defer argv.deinit(allocator);
+    try argv.appendSlice(allocator, &.{ "hyperfine", "--warmup", "5", "--runs", "25" });
+    if (bench_config.export_json) |path| {
+        try argv.appendSlice(allocator, &.{ "--export-json", path });
+    }
+    try argv.append(allocator, workload);
+
     const result = try std.process.Child.run(.{
         .allocator = allocator,
-        .argv = &.{ "hyperfine", "--warmup", "5", "--runs", "25", workload },
+        .argv = argv.items,
         .max_output_bytes = 8 * 1024 * 1024,
         .expand_arg0 = .expand,
     });
@@ -309,6 +335,12 @@ test "bench workload targets prompt command" {
     const workload = try benchWorkloadAlloc(std.testing.allocator, "/tmp/shisa", "/tmp/sock", "/tmp/repo");
     defer std.testing.allocator.free(workload);
     try std.testing.expectEqualStrings("'/tmp/shisa' prompt --socket '/tmp/sock' --cwd '/tmp/repo' --shell zsh --cols 80 --rows 24", workload);
+}
+
+test "parses bench export json flag" {
+    const args = [_][]const u8{ "--export-json", "/tmp/out.json" };
+    const config = try parseBench(args[0..]);
+    try std.testing.expectEqualStrings("/tmp/out.json", config.export_json.?);
 }
 
 const PromptConfig = struct {

@@ -2,6 +2,7 @@ const std = @import("std");
 const cloud_ctx_module = @import("modules/cloud_ctx.zig");
 const dispatcher = @import("dispatcher.zig");
 const git_branch_module = @import("modules/git_branch.zig");
+const iac_workspace_module = @import("modules/iac_workspace.zig");
 const language_versions_module = @import("modules/language_versions.zig");
 const prod_guard_module = @import("modules/prod_guard.zig");
 const risk_tier_module = @import("modules/risk_tier.zig");
@@ -32,6 +33,7 @@ const RenderRequest = struct {
 const PreexecRequest = struct {
     v: u32 = 1,
     kind: []const u8 = "",
+    cwd: []const u8 = "",
     shell: []const u8 = "",
     command: []const u8 = "",
     force: bool = false,
@@ -218,6 +220,10 @@ pub const Server = struct {
         const destructive = prod_guard_module.destructivePattern(parsed.value.command);
         const escaped_destructive = try json.escapeAlloc(std.heap.page_allocator, destructive orelse "-");
         defer std.heap.page_allocator.free(escaped_destructive);
+        const iac_warning = if (parsed.value.cwd.len == 0) null else try iac_workspace_module.preexecWarningAlloc(std.heap.page_allocator, parsed.value.cwd, parsed.value.command);
+        defer if (iac_warning) |value| std.heap.page_allocator.free(value);
+        const escaped_iac_warning = try json.escapeAlloc(std.heap.page_allocator, iac_warning orelse "");
+        defer std.heap.page_allocator.free(escaped_iac_warning);
         const allow = parsed.value.force or destructive == null or reason.tier != .prod;
         if (destructive) |pattern| {
             try self.appendProdGuardAudit(reason.tier, allow, parsed.value.force, pattern, parsed.value.command);
@@ -225,8 +231,8 @@ pub const Server = struct {
         }
         return std.fmt.allocPrint(
             std.heap.page_allocator,
-            "{{\"v\":1,\"allow\":{},\"forced\":{},\"confirm\":\"{s}\",\"tier\":\"{s}\",\"source\":\"{s}\",\"pattern\":\"{s}\",\"destructive\":{},\"destructive_pattern\":\"{s}\"}}",
-            .{ allow, parsed.value.force, if (allow) "" else risk_tier_module.tierName(reason.tier), risk_tier_module.tierName(reason.tier), risk_tier_module.sourceName(reason.source), escaped_pattern, destructive != null, escaped_destructive },
+            "{{\"v\":1,\"allow\":{},\"forced\":{},\"confirm\":\"{s}\",\"tier\":\"{s}\",\"source\":\"{s}\",\"pattern\":\"{s}\",\"destructive\":{},\"destructive_pattern\":\"{s}\",\"warning\":\"{s}\"}}",
+            .{ allow, parsed.value.force, if (allow) "" else risk_tier_module.tierName(reason.tier), risk_tier_module.tierName(reason.tier), risk_tier_module.sourceName(reason.source), escaped_pattern, destructive != null, escaped_destructive, escaped_iac_warning },
         );
     }
 
@@ -548,6 +554,33 @@ test "preexec response classifies command tier" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"tier\":\"prod\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"allow\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"destructive\":false") != null);
+}
+
+test "preexec response warns on locked iac workspace" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-iac-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const lock_path = try std.fmt.allocPrint(allocator, "{s}/.terraform.tfstate.lock.info", .{dir_path});
+    defer allocator.free(lock_path);
+    {
+        var file = try std.fs.createFileAbsolute(lock_path, .{});
+        defer file.close();
+        try file.writeAll("{}");
+    }
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"kind\":\"preexec\",\"cwd\":\"{s}\",\"shell\":\"zsh\",\"command\":\"terraform apply\"}}", .{dir_path});
+    defer allocator.free(request);
+    const response = try server.preexecResponse(request);
+    defer std.heap.page_allocator.free(response);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"warning\":\"iac_workspace_locked:terraform apply\"") != null);
 }
 
 test "preexec response denies destructive prod command" {

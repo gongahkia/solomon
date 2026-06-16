@@ -391,6 +391,7 @@ const CloudPreexecResponse = struct {
     confirm: []const u8 = "",
     tier: []const u8 = "unknown",
     destructive_pattern: []const u8 = "-",
+    warning: []const u8 = "",
 };
 
 fn parseCloudPreexecArgs(args: []const []const u8) !CloudPreexec {
@@ -428,14 +429,18 @@ fn cloudPreexec(allocator: std.mem.Allocator, config: CloudPreexec) !void {
 }
 
 fn buildCloudPreexecPayload(allocator: std.mem.Allocator, config: CloudPreexec) ![]u8 {
+    const cwd = try std.fs.cwd().realpathAlloc(allocator, ".");
+    defer allocator.free(cwd);
+    const escaped_cwd = try jsonEscapeAlloc(allocator, cwd);
+    defer allocator.free(escaped_cwd);
     const escaped_shell = try jsonEscapeAlloc(allocator, config.shell);
     defer allocator.free(escaped_shell);
     const escaped_command = try jsonEscapeAlloc(allocator, config.command);
     defer allocator.free(escaped_command);
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"kind\":\"preexec\",\"shell\":\"{s}\",\"command\":\"{s}\",\"force\":{}}}",
-        .{ escaped_shell, escaped_command, config.force },
+        "{{\"v\":1,\"kind\":\"preexec\",\"cwd\":\"{s}\",\"shell\":\"{s}\",\"command\":\"{s}\",\"force\":{}}}",
+        .{ escaped_cwd, escaped_shell, escaped_command, config.force },
     );
 }
 
@@ -454,9 +459,17 @@ fn cloudExplainAlloc(allocator: std.mem.Allocator, value: []const u8, home: ?[]c
 fn enforceCloudPreexecResponse(allocator: std.mem.Allocator, response: []const u8) !void {
     var parsed = try std.json.parseFromSlice(CloudPreexecResponse, allocator, response, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
+    if (parsed.value.warning.len != 0) try printCloudPreexecWarning(parsed.value.warning);
     if (parsed.value.allow) return;
     if (parsed.value.confirm.len == 0) return error.PreexecDenied;
     try promptTierConfirmation(parsed.value);
+}
+
+fn printCloudPreexecWarning(warning: []const u8) !void {
+    const stderr = std.fs.File.stderr();
+    try stderr.writeAll("shisa warning: ");
+    try stderr.writeAll(warning);
+    try stderr.writeAll("\n");
 }
 
 fn promptTierConfirmation(decision: CloudPreexecResponse) !void {

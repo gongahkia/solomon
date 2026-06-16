@@ -11,3 +11,5 @@ Pulumi stack resolution scans `~/.pulumi/workspaces/*.json` for the active stack
 CDK workspace resolution reads `cdk.json` for the `app` command and `cdk.context.json` for the first cached context key when present.
 
 The prompt renders `iac[provider:workspace]`. A trailing `!` indicates a detected local Terraform/OpenTofu lock file.
+
+Pre-exec guard responses include `warning="iac_workspace_locked:<command>"` when Terraform/OpenTofu, Pulumi, or CDK mutating commands run while a local lock file is present. The CLI prints this warning without blocking the command.

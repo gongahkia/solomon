@@ -312,7 +312,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] CDK: read `cdk.json` + `cdk.context.json`
 - [x] OpenTofu: same as Terraform
 - [x] Render workspace + lock indicator
-- [ ] Pre-exec warn if workspace appears stale or remotely locked
+- [x] Pre-exec warn if workspace appears stale or remotely locked
 
 ### 11.7 Region drift (`region_drift`)
 - [ ] AWS: compare `$AWS_REGION` / `$AWS_DEFAULT_REGION` to profile-configured region

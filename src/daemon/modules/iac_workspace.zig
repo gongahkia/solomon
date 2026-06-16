@@ -120,6 +120,61 @@ pub fn lockPresent(allocator: std.mem.Allocator, cwd: []const u8) !bool {
     return false;
 }
 
+pub fn preexecWarningAlloc(allocator: std.mem.Allocator, cwd: []const u8, command: []const u8) !?[]u8 {
+    const pattern = iacMutationPattern(command) orelse return null;
+    if (!try lockPresent(allocator, cwd)) return null;
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "iac_workspace_locked:{s}", .{pattern}));
+}
+
+pub fn iacMutationPattern(command: []const u8) ?[]const u8 {
+    var tokens = TokenList{};
+    tokens.init(command);
+    if (tokens.len < 2) return null;
+
+    if ((tokenEql(tokens.at(0), "terraform") or tokenEql(tokens.at(0), "tofu")) and tokens.len >= 2) {
+        if (tokenEql(tokens.at(1), "apply")) return "terraform apply";
+        if (tokenEql(tokens.at(1), "destroy")) return "terraform destroy";
+        if (tokenEql(tokens.at(1), "import")) return "terraform import";
+        if (tokenEql(tokens.at(1), "state")) return "terraform state";
+    }
+    if (tokenEql(tokens.at(0), "pulumi") and tokens.len >= 2) {
+        if (tokenEql(tokens.at(1), "up")) return "pulumi up";
+        if (tokenEql(tokens.at(1), "destroy")) return "pulumi destroy";
+        if (tokenEql(tokens.at(1), "refresh")) return "pulumi refresh";
+        if (tokenEql(tokens.at(1), "import")) return "pulumi import";
+    }
+    if (tokenEql(tokens.at(0), "cdk") and tokens.len >= 2) {
+        if (tokenEql(tokens.at(1), "deploy")) return "cdk deploy";
+        if (tokenEql(tokens.at(1), "destroy")) return "cdk destroy";
+    }
+    return null;
+}
+
+const max_tokens = 16;
+
+const TokenList = struct {
+    values: [max_tokens][]const u8 = undefined,
+    len: usize = 0,
+
+    fn init(self: *TokenList, command: []const u8) void {
+        self.* = .{};
+        var parts = std.mem.tokenizeAny(u8, command, " \t\r\n;");
+        while (parts.next()) |part| {
+            if (self.len == max_tokens) break;
+            self.values[self.len] = std.mem.trim(u8, part, "'\"");
+            self.len += 1;
+        }
+    }
+
+    fn at(self: TokenList, index: usize) []const u8 {
+        return self.values[index];
+    }
+};
+
+fn tokenEql(left: []const u8, right: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(left, right);
+}
+
 pub fn pulumiWorkspacesDirAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
     const home_path = home orelse return null;
     return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.pulumi/workspaces", .{home_path}));
@@ -408,6 +463,27 @@ test "renders terraform workspace with lock indicator" {
     const segment = (try render(allocator, dir_path, null)).?;
     defer allocator.free(segment);
     try std.testing.expectEqualStrings("iac[tf:prod!]", segment);
+}
+
+test "warns mutating iac command when lock exists" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-iac-preexec-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const lock_path = try std.fmt.allocPrint(allocator, "{s}/.terraform.tfstate.lock.info", .{dir_path});
+    defer allocator.free(lock_path);
+    {
+        var file = try std.fs.createFileAbsolute(lock_path, .{});
+        defer file.close();
+        try file.writeAll("{}");
+    }
+
+    const warning = (try preexecWarningAlloc(allocator, dir_path, "terraform apply")).?;
+    defer allocator.free(warning);
+    try std.testing.expectEqualStrings("iac_workspace_locked:terraform apply", warning);
+    try std.testing.expect(try preexecWarningAlloc(allocator, dir_path, "terraform plan") == null);
 }
 
 test "parses pulumi active stack for cwd" {

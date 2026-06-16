@@ -288,7 +288,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Built-in destructive-pattern blocklist (kubectl delete/drain, terraform destroy, aws ec2 terminate, aws s3 rb, gcloud * delete, rm -rf, dd of=/dev/, mkfs, DROP TABLE)
 - [x] Typed-confirm UX (must type the tier name to proceed)
 - [x] `--force` bypass (logged)
-- [ ] Audit log to `~/.local/state/shisa/prod_guard.jsonl`
+- [x] Audit log to `~/.local/state/shisa/prod_guard.jsonl`
 - [ ] Bypass-log review CLI (`shisa cloud audit`)
 - [ ] Fuzz the classifier against a corpus of dangerous-looking-but-safe commands (`kubectl get`, `terraform plan`)
 

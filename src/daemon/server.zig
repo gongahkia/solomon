@@ -44,6 +44,7 @@ pub const Server = struct {
     language_versions_cache: language_versions_module.Cache = .{},
     cloud_ctx_cache: cloud_ctx_module.Cache = .{},
     fs_watcher: fsnotify.Watcher,
+    prod_guard_audit_home: ?[]const u8 = null,
 
     pub fn init(socket_path: []const u8) !Server {
         return initWithLogger(socket_path, null);
@@ -215,7 +216,10 @@ pub const Server = struct {
         const escaped_destructive = try json.escapeAlloc(std.heap.page_allocator, destructive orelse "-");
         defer std.heap.page_allocator.free(escaped_destructive);
         const allow = parsed.value.force or destructive == null or reason.tier != .prod;
-        if (parsed.value.force and destructive != null) try self.logProdGuardForce(reason.tier, destructive.?);
+        if (destructive) |pattern| {
+            try self.appendProdGuardAudit(reason.tier, allow, parsed.value.force, pattern, parsed.value.command);
+            if (parsed.value.force) try self.logProdGuardForce(reason.tier, pattern);
+        }
         return std.fmt.allocPrint(
             std.heap.page_allocator,
             "{{\"v\":1,\"allow\":{},\"forced\":{},\"confirm\":\"{s}\",\"tier\":\"{s}\",\"source\":\"{s}\",\"pattern\":\"{s}\",\"destructive\":{},\"destructive_pattern\":\"{s}\"}}",
@@ -232,6 +236,37 @@ pub const Server = struct {
         );
         defer std.heap.page_allocator.free(message);
         try logger.warn("prod_guard_force", message);
+    }
+
+    fn appendProdGuardAudit(self: *Server, tier: risk_tier_module.Tier, allow: bool, forced: bool, pattern: []const u8, command: []const u8) !void {
+        const home_owned = if (self.prod_guard_audit_home == null)
+            std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch return
+        else
+            null;
+        defer if (home_owned) |value| std.heap.page_allocator.free(value);
+        const home = self.prod_guard_audit_home orelse home_owned.?;
+        const path = try prodGuardAuditPathAlloc(std.heap.page_allocator, home);
+        defer std.heap.page_allocator.free(path);
+        if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
+        var file = try std.fs.createFileAbsolute(path, .{
+            .read = true,
+            .truncate = false,
+            .mode = 0o600,
+        });
+        defer file.close();
+        try file.seekFromEnd(0);
+
+        const escaped_pattern = try json.escapeAlloc(std.heap.page_allocator, pattern);
+        defer std.heap.page_allocator.free(escaped_pattern);
+        const escaped_command = try json.escapeAlloc(std.heap.page_allocator, command);
+        defer std.heap.page_allocator.free(escaped_command);
+        const line = try std.fmt.allocPrint(
+            std.heap.page_allocator,
+            "{{\"ts\":{d},\"tier\":\"{s}\",\"allow\":{},\"forced\":{},\"pattern\":\"{s}\",\"command\":\"{s}\"}}\n",
+            .{ std.time.timestamp(), risk_tier_module.tierName(tier), allow, forced, escaped_pattern, escaped_command },
+        );
+        defer std.heap.page_allocator.free(line);
+        try file.writeAll(line);
     }
 
     fn logSlowWarning(self: *Server, slow_warning: ?dispatcher.SlowWarning) !void {
@@ -389,6 +424,10 @@ fn isPreexecRequest(request: []const u8) bool {
         std.mem.indexOf(u8, request, "\"kind\": \"preexec\"") != null;
 }
 
+fn prodGuardAuditPathAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/prod_guard.jsonl", .{home});
+}
+
 fn acceptOneThread(server: *Server) !void {
     try server.acceptOne();
 }
@@ -519,6 +558,7 @@ test "preexec response denies destructive prod command" {
 
     var server = try Server.init(socket_path);
     defer server.deinit();
+    server.prod_guard_audit_home = dir_path;
 
     const response = try server.preexecResponse("{\"v\":1,\"kind\":\"preexec\",\"shell\":\"zsh\",\"command\":\"kubectl delete pod x --context api-prd-use1\"}");
     defer std.heap.page_allocator.free(response);
@@ -526,6 +566,13 @@ test "preexec response denies destructive prod command" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"allow\":false") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"confirm\":\"prod\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"destructive_pattern\":\"kubectl delete\"") != null);
+
+    const audit_path = try prodGuardAuditPathAlloc(allocator, dir_path);
+    defer allocator.free(audit_path);
+    const audit = try std.fs.cwd().readFileAlloc(allocator, audit_path, 4096);
+    defer allocator.free(audit);
+    try std.testing.expect(std.mem.indexOf(u8, audit, "\"allow\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, audit, "\"pattern\":\"kubectl delete\"") != null);
 }
 
 test "preexec force allows and logs destructive command" {
@@ -543,6 +590,7 @@ test "preexec force allows and logs destructive command" {
     defer logger.deinit();
     var server = try Server.initWithLogger(socket_path, &logger);
     defer server.deinit();
+    server.prod_guard_audit_home = dir_path;
 
     const response = try server.preexecResponse("{\"v\":1,\"kind\":\"preexec\",\"force\":true,\"shell\":\"zsh\",\"command\":\"kubectl delete pod x --context api-prd-use1\"}");
     defer std.heap.page_allocator.free(response);
@@ -552,6 +600,12 @@ test "preexec force allows and logs destructive command" {
     const contents = try std.fs.cwd().readFileAlloc(allocator, log_path, 4096);
     defer allocator.free(contents);
     try std.testing.expect(std.mem.indexOf(u8, contents, "\"event\":\"prod_guard_force\"") != null);
+
+    const audit_path = try prodGuardAuditPathAlloc(allocator, dir_path);
+    defer allocator.free(audit_path);
+    const audit = try std.fs.cwd().readFileAlloc(allocator, audit_path, 4096);
+    defer allocator.free(audit);
+    try std.testing.expect(std.mem.indexOf(u8, audit, "\"forced\":true") != null);
 }
 
 test "fs event invalidates git branch cache" {

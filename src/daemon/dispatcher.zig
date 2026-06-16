@@ -48,6 +48,7 @@ pub const RenderInput = struct {
     jobs: u32,
     duration_ms: u64,
     time: bool,
+    no_async: bool = false,
     timestamp: i64,
     ssh: ?[]const u8,
     user: []const u8,
@@ -101,7 +102,7 @@ pub fn renderPipeline(allocator: std.mem.Allocator, caches: CacheSet, input: Ren
         var async_result: ?AsyncRender = null;
         defer if (async_result) |*value| value.deinit(allocator);
 
-        const segment = if (spec.execution_class == .async) async: {
+        const segment = if (spec.execution_class == .async and !input.no_async) async: {
             async_result = try dispatchAsync(allocator, caches, spec.id, input);
             if (async_result.?.pending) has_async = true;
             if (async_result.?.segment) |value| break :async try allocator.dupe(u8, value);
@@ -143,7 +144,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
     return switch (module_id) {
         .cwd => try cwd_module.render(allocator, input.cwd, input.home, 3),
         .git_branch => try caches.git_branch.render(allocator, input.cwd),
-        .language_versions => null,
+        .language_versions => try language_versions_module.probe(allocator, input.cwd),
         .time => try time_module.render(allocator, input.time, input.timestamp),
         .exit_status => try exit_status_module.render(allocator, input.exit),
         .jobs => try jobs_module.render(allocator, input.jobs),
@@ -190,6 +191,7 @@ test "renders default pipeline" {
         .jobs = 1,
         .duration_ms = 1200,
         .time = true,
+        .no_async = false,
         .timestamp = 3660,
         .ssh = null,
         .user = "u",
@@ -225,6 +227,7 @@ test "renders async placeholder and redraw token" {
         .jobs = 0,
         .duration_ms = 0,
         .time = false,
+        .no_async = false,
         .timestamp = 0,
         .ssh = null,
         .user = "u",
@@ -235,6 +238,40 @@ test "renders async placeholder and redraw token" {
     defer std.testing.allocator.free(expected);
     try std.testing.expectEqualStrings(expected, rendered.prompt);
     try std.testing.expectEqualStrings("pending", rendered.redraw_token.?);
+}
+
+test "no async renders git synchronously" {
+    const dir_path = try std.fmt.allocPrint(std.testing.allocator, "/tmp/shisa-dispatcher-git-{x}", .{std.crypto.random.int(u64)});
+    defer std.testing.allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    try runGit(std.testing.allocator, dir_path, &.{ "git", "init", "-b", "main" });
+
+    var git_cache = git_branch_module.Cache{};
+    defer git_cache.deinit(std.testing.allocator);
+    var language_cache = language_versions_module.Cache{};
+    defer language_cache.deinit(std.testing.allocator);
+    var rendered = try renderDefault(std.testing.allocator, .{
+        .git_branch = &git_cache,
+        .language_versions = &language_cache,
+    }, .{
+        .cwd = dir_path,
+        .home = null,
+        .exit = 0,
+        .jobs = 0,
+        .duration_ms = 0,
+        .time = false,
+        .no_async = true,
+        .timestamp = 0,
+        .ssh = null,
+        .user = "u",
+        .host = "h",
+    });
+    defer rendered.deinit(std.testing.allocator);
+    const expected = try std.fmt.allocPrint(std.testing.allocator, "{s} git:main> ", .{dir_path});
+    defer std.testing.allocator.free(expected);
+    try std.testing.expectEqualStrings(expected, rendered.prompt);
+    try std.testing.expect(rendered.redraw_token == null);
 }
 
 fn runGit(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !void {

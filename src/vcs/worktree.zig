@@ -15,6 +15,32 @@ pub const Detection = struct {
     }
 };
 
+pub const Entry = struct {
+    path: []u8,
+    branch: ?[]u8 = null,
+    head: ?[]u8 = null,
+    bare: bool = false,
+    detached: bool = false,
+
+    pub fn deinit(self: *Entry, allocator: std.mem.Allocator) void {
+        allocator.free(self.path);
+        if (self.branch) |branch| allocator.free(branch);
+        if (self.head) |head| allocator.free(head);
+        self.* = undefined;
+    }
+};
+
+pub const List = struct {
+    entries: []Entry,
+    active_index: ?usize = null,
+
+    pub fn deinit(self: *List, allocator: std.mem.Allocator) void {
+        for (self.entries) |*entry| entry.deinit(allocator);
+        allocator.free(self.entries);
+        self.* = undefined;
+    }
+};
+
 pub fn detect(allocator: std.mem.Allocator, cwd_path: []const u8) !?Detection {
     var current = try allocator.dupe(u8, cwd_path);
     errdefer allocator.free(current);
@@ -75,6 +101,73 @@ pub fn renderAlloc(allocator: std.mem.Allocator, detection: Detection) ![]u8 {
     return std.fmt.allocPrint(allocator, "wt:{s}", .{detection.name});
 }
 
+pub fn parseListPorcelain(allocator: std.mem.Allocator, output: []const u8, active_root: []const u8) !List {
+    var entries: std.ArrayList(Entry) = .empty;
+    errdefer {
+        for (entries.items) |*entry| entry.deinit(allocator);
+        entries.deinit(allocator);
+    }
+    var current: ?Entry = null;
+    errdefer if (current) |*entry| entry.deinit(allocator);
+
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trimRight(u8, raw_line, "\r");
+        if (line.len == 0) continue;
+        if (std.mem.startsWith(u8, line, "worktree ")) {
+            if (current) |entry| {
+                try entries.append(allocator, entry);
+                current = null;
+            }
+            current = .{ .path = try allocator.dupe(u8, line["worktree ".len..]) };
+        } else if (current) |*entry| {
+            if (std.mem.startsWith(u8, line, "HEAD ")) {
+                entry.head = try allocator.dupe(u8, line["HEAD ".len..]);
+            } else if (std.mem.startsWith(u8, line, "branch ")) {
+                entry.branch = try branchNameAlloc(allocator, line["branch ".len..]);
+            } else if (std.mem.eql(u8, line, "bare")) {
+                entry.bare = true;
+            } else if (std.mem.eql(u8, line, "detached")) {
+                entry.detached = true;
+            }
+        }
+    }
+    if (current) |entry| {
+        try entries.append(allocator, entry);
+        current = null;
+    }
+
+    const owned_entries = try entries.toOwnedSlice(allocator);
+    var active_index: ?usize = null;
+    for (owned_entries, 0..) |entry, index| {
+        if (std.mem.eql(u8, entry.path, active_root)) {
+            active_index = index;
+            break;
+        }
+    }
+    return .{ .entries = owned_entries, .active_index = active_index };
+}
+
+pub fn renderListAlloc(allocator: std.mem.Allocator, list: List) ![]u8 {
+    if (list.entries.len == 0) return allocator.dupe(u8, "worktrees: none\n");
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    for (list.entries, 0..) |entry, index| {
+        const marker: u8 = if (list.active_index != null and list.active_index.? == index) '*' else ' ';
+        try std.fmt.format(out.writer(allocator), "{c} {s}", .{ marker, entry.path });
+        if (entry.branch) |branch| {
+            try std.fmt.format(out.writer(allocator), " {s}", .{branch});
+        } else if (entry.detached) {
+            try out.appendSlice(allocator, " (detached)");
+        } else if (entry.bare) {
+            try out.appendSlice(allocator, " (bare)");
+        }
+        try out.append(allocator, '\n');
+    }
+    return out.toOwnedSlice(allocator);
+}
+
 pub fn parseGitdir(contents: []const u8) ?[]const u8 {
     const trimmed = std.mem.trim(u8, contents, " \t\r\n");
     const prefix = "gitdir:";
@@ -106,6 +199,14 @@ fn moveToParent(allocator: std.mem.Allocator, current: *[]u8) !bool {
     return true;
 }
 
+fn branchNameAlloc(allocator: std.mem.Allocator, branch_ref: []const u8) ![]u8 {
+    const prefix = "refs/heads/";
+    if (std.mem.startsWith(u8, branch_ref, prefix)) {
+        return allocator.dupe(u8, branch_ref[prefix.len..]);
+    }
+    return allocator.dupe(u8, branch_ref);
+}
+
 fn runGit(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !void {
     const result = try std.process.Child.run(.{
         .allocator = allocator,
@@ -126,6 +227,37 @@ test "parses linked worktree gitdir" {
     try std.testing.expectEqualStrings("/repo/.git/worktrees/feature", parseGitdir("gitdir: /repo/.git/worktrees/feature\n").?);
     try std.testing.expect(isLinkedWorktreeGitdir("/repo/.git/worktrees/feature"));
     try std.testing.expect(!isLinkedWorktreeGitdir("/repo/.git/modules/submodule"));
+}
+
+test "parses and renders worktree list" {
+    const source =
+        \\worktree /repo
+        \\HEAD a
+        \\branch refs/heads/main
+        \\
+        \\worktree /repo-linked
+        \\HEAD b
+        \\branch refs/heads/feature
+        \\
+    ;
+    var list = try parseListPorcelain(std.testing.allocator, source, "/repo-linked");
+    defer list.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), list.entries.len);
+    try std.testing.expectEqual(@as(?usize, 1), list.active_index);
+    try std.testing.expectEqualStrings("feature", list.entries[1].branch.?);
+
+    const rendered = try renderListAlloc(std.testing.allocator, list);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("  /repo main\n* /repo-linked feature\n", rendered);
+}
+
+test "renders empty worktree list" {
+    var list = try parseListPorcelain(std.testing.allocator, "", "/repo");
+    defer list.deinit(std.testing.allocator);
+
+    const rendered = try renderListAlloc(std.testing.allocator, list);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("worktrees: none\n", rendered);
 }
 
 test "ignores primary worktree" {

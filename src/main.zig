@@ -10,6 +10,7 @@ const plugin_lua = @import("plugin/lua.zig");
 const plugin_manifest = @import("plugin/manifest.zig");
 const supervisor = @import("supervisor.zig");
 const vcs_stack = @import("vcs/stack.zig");
+const vcs_worktree = @import("vcs/worktree.zig");
 
 const version = "0.1.0-dev";
 const max_config_bytes = 1024 * 1024;
@@ -79,6 +80,11 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, args[1], "stack")) {
         try stackCommand(allocator, args[2..]);
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "worktrees")) {
+        try worktreesCommand(allocator, args[2..]);
         return;
     }
 
@@ -406,6 +412,94 @@ test "stack output dumps detected stack" {
     try std.testing.expect(std.mem.indexOf(u8, output, "provider: graphite\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, dir_path) != null);
     try std.testing.expect(std.mem.indexOf(u8, output, marker_path) != null);
+}
+
+const WorktreesConfig = struct {
+    cwd: ?[]const u8 = null,
+};
+
+fn worktreesCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const config = try parseWorktreesArgs(args);
+    const cwd = if (config.cwd) |path| path else try std.fs.cwd().realpathAlloc(allocator, ".");
+    defer if (config.cwd == null) allocator.free(cwd);
+
+    const output = try worktreesOutputAlloc(allocator, cwd);
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn parseWorktreesArgs(args: []const []const u8) !WorktreesConfig {
+    var config = WorktreesConfig{};
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--cwd")) {
+            config.cwd = try nextValue(args, &i);
+        } else {
+            return error.UnknownWorktreesArgument;
+        }
+    }
+    return config;
+}
+
+fn worktreesOutputAlloc(allocator: std.mem.Allocator, cwd_path: []const u8) ![]u8 {
+    const active_root_output = gitOutputAlloc(allocator, cwd_path, &.{ "git", "rev-parse", "--show-toplevel" }) catch |err| switch (err) {
+        error.CommandFailed, error.FileNotFound => return allocator.dupe(u8, "worktrees: none\n"),
+        else => return err,
+    };
+    defer allocator.free(active_root_output);
+    const active_root = std.mem.trim(u8, active_root_output, " \t\r\n");
+
+    const porcelain = gitOutputAlloc(allocator, cwd_path, &.{ "git", "worktree", "list", "--porcelain" }) catch |err| switch (err) {
+        error.CommandFailed, error.FileNotFound => return allocator.dupe(u8, "worktrees: none\n"),
+        else => return err,
+    };
+    defer allocator.free(porcelain);
+
+    return worktreesRenderAlloc(allocator, porcelain, active_root);
+}
+
+fn worktreesRenderAlloc(allocator: std.mem.Allocator, porcelain: []const u8, active_root: []const u8) ![]u8 {
+    var list = try vcs_worktree.parseListPorcelain(allocator, porcelain, active_root);
+    defer list.deinit(allocator);
+    return vcs_worktree.renderListAlloc(allocator, list);
+}
+
+fn gitOutputAlloc(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) ![]u8 {
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .cwd = cwd_path,
+        .max_output_bytes = 1024 * 1024,
+        .expand_arg0 = .expand,
+    });
+    defer allocator.free(result.stderr);
+    if (!exitedZero(result.term)) {
+        allocator.free(result.stdout);
+        return error.CommandFailed;
+    }
+    return result.stdout;
+}
+
+test "worktrees args parse cwd override" {
+    const config = try parseWorktreesArgs(&.{ "--cwd", "/tmp/repo" });
+    try std.testing.expectEqualStrings("/tmp/repo", config.cwd.?);
+    try std.testing.expectError(error.UnknownWorktreesArgument, parseWorktreesArgs(&.{"--bad"}));
+}
+
+test "worktrees output marks active path" {
+    const source =
+        \\worktree /repo
+        \\HEAD a
+        \\branch refs/heads/main
+        \\
+        \\worktree /repo-linked
+        \\HEAD b
+        \\branch refs/heads/feature
+        \\
+    ;
+    const output = try worktreesRenderAlloc(std.testing.allocator, source, "/repo-linked");
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("  /repo main\n* /repo-linked feature\n", output);
 }
 
 const StarshipImport = struct {
@@ -1457,6 +1551,7 @@ const help_text =
     \\  prompt        render prompt through shisad
     \\  stack         dump detected stacked-diff metadata
     \\  supervisor    run shisad under a crash-restart supervisor
+    \\  worktrees     list Git worktrees and mark active
     \\
     \\options:
     \\  -h, --help    print help

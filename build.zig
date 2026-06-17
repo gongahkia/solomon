@@ -610,6 +610,16 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const supervisor_test_run = b.addRunArtifact(supervisor_tests);
+    const shisad_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/shisad.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    shisad_tests.root_module.addImport("vcs_worktree", vcs_worktree_module);
+    shisad_tests.root_module.addImport("plugin_lua", plugin_lua_module);
+    const shisad_test_run = b.addRunArtifact(shisad_tests);
     const proto_types_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/proto/types.zig"),
@@ -760,6 +770,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&daemon_json_test_run.step);
     test_step.dependOn(&dispatcher_test_run.step);
     test_step.dependOn(&supervisor_test_run.step);
+    test_step.dependOn(&shisad_test_run.step);
     test_step.dependOn(&proto_types_test_run.step);
     test_step.dependOn(&proto_frame_test_run.step);
     test_step.dependOn(&protocol_schema_test_run.step);

@@ -37,7 +37,7 @@ pub fn main() !void {
     defer if (config.socket_path == null) allocator.free(socket_path);
 
     if (config.health) {
-        try adminRequest(socket_path, "health\n");
+        try adminHealth(socket_path);
         return;
     }
 
@@ -115,6 +115,36 @@ fn adminRequest(socket_path: []const u8, request: []const u8) !void {
     const response = try client.requestAlloc(allocator, socket_path, request);
     defer allocator.free(response);
     try std.fs.File.stdout().writeAll(response);
+}
+
+fn adminHealth(socket_path: []const u8) !void {
+    var gpa_impl = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const allocator = gpa_impl.allocator();
+    const response = try client.requestAlloc(allocator, socket_path, "health\n");
+    defer allocator.free(response);
+    try std.fs.File.stdout().writeAll(response);
+    if (!try healthResponseOk(allocator, response)) return error.HealthCheckFailed;
+}
+
+fn healthResponseOk(allocator: std.mem.Allocator, response: []const u8) !bool {
+    if (std.mem.eql(u8, response, "ok\n")) return true;
+    const HealthResponse = struct {
+        ok: bool = false,
+    };
+    var parsed = std.json.parseFromSlice(HealthResponse, allocator, response, .{ .ignore_unknown_fields = true }) catch return false;
+    defer parsed.deinit();
+    return parsed.value.ok;
+}
+
+test "health response accepts legacy ok and JSON ok" {
+    try std.testing.expect(try healthResponseOk(std.testing.allocator, "ok\n"));
+    try std.testing.expect(try healthResponseOk(std.testing.allocator, "{\"v\":1,\"ok\":true}"));
+}
+
+test "health response rejects JSON false and malformed response" {
+    try std.testing.expect(!(try healthResponseOk(std.testing.allocator, "{\"v\":1,\"ok\":false}")));
+    try std.testing.expect(!(try healthResponseOk(std.testing.allocator, "not ok\n")));
 }
 
 const help_text =

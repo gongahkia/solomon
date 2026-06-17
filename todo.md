@@ -482,7 +482,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 ### 15.2 Request/response schemas
 - [x] Zig structs for `Request`, `Response`, `Error` mirroring §26.2–§26.5
 - [x] JSON encoder/decoder generated via comptime
-- [ ] Unknown-field tolerance for forward-compat
+- [x] Unknown-field tolerance for forward-compat
 - [ ] Required-field validation with structured error
 - [ ] Snapshot tests for every (op × shape) combination
 

@@ -236,3 +236,27 @@ test "json helpers roundtrip request and response" {
     try std.testing.expectEqualStrings("async_pending", parsed_response.value.diagnostics[0].code);
     try std.testing.expectEqual(@as(u64, 321), parsed_response.value.elapsed_us);
 }
+
+test "decode ignores unknown fields for forward compatibility" {
+    const allocator = std.testing.allocator;
+    var request = try decodeAlloc(Request, allocator,
+        \\{"v":1,"op":"render","shell":"zsh","cwd":"/tmp","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"future_request_field":true}
+    );
+    defer request.deinit();
+    try std.testing.expectEqual(Shell.zsh, request.value.shell);
+    try std.testing.expectEqualStrings("/tmp", request.value.cwd);
+
+    var response = try decodeAlloc(Response, allocator,
+        \\{"v":1,"request_id":"r1","prompt":"shisa> ","future_response_field":{"nested":1}}
+    );
+    defer response.deinit();
+    try std.testing.expectEqualStrings("r1", response.value.request_id);
+    try std.testing.expectEqualStrings("shisa> ", response.value.prompt);
+
+    var envelope = try decodeAlloc(ErrorEnvelope, allocator,
+        \\{"v":1,"request_id":"r1","error":{"code":"E_VERSION","message":"bad version","context":{},"future_error_field":"ignored"},"future_envelope_field":1}
+    );
+    defer envelope.deinit();
+    try std.testing.expectEqual(ErrorCode.E_VERSION, envelope.value.@"error".code);
+    try std.testing.expectEqualStrings("bad version", envelope.value.@"error".message);
+}

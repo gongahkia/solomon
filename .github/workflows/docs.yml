@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*"
 
 permissions:
   contents: read
@@ -13,6 +15,10 @@ jobs:
   mdbook:
     name: mdBook / ubuntu-24.04
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -33,3 +39,31 @@ jobs:
           name: docs-preview
           path: zig-out/mdbook
           if-no-files-found: error
+
+      - name: Configure Pages
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/configure-pages@v6
+
+      - name: Upload release Pages artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: zig-out/mdbook
+
+  deploy:
+    name: pages / release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    needs:
+      - mdbook
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy release docs
+        id: deployment
+        uses: actions/deploy-pages@v4

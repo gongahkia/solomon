@@ -1,0 +1,5 @@
+[default]
+region = us-east-1
+
+[profile staging]
+region = us-west-2

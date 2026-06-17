@@ -535,27 +535,17 @@ test "aws profile env wins" {
 }
 
 test "parses default aws config profile" {
-    const profile = (try parseAwsConfigProfileAlloc(std.testing.allocator,
-        \\[default]
-        \\region = us-east-1
-        \\
-        \\[profile staging]
-        \\region = us-west-2
-        \\
-    )).?;
+    const source = try readFixtureAlloc(std.testing.allocator, "test/fixtures/cloud/aws-config-default");
+    defer std.testing.allocator.free(source);
+    const profile = (try parseAwsConfigProfileAlloc(std.testing.allocator, source)).?;
     defer std.testing.allocator.free(profile);
     try std.testing.expectEqualStrings("default", profile);
 }
 
 test "parses first named aws config profile" {
-    const profile = (try parseAwsConfigProfileAlloc(std.testing.allocator,
-        \\[profile staging]
-        \\region = us-west-2
-        \\
-        \\[profile prod]
-        \\region = us-east-1
-        \\
-    )).?;
+    const source = try readFixtureAlloc(std.testing.allocator, "test/fixtures/cloud/aws-config-named");
+    defer std.testing.allocator.free(source);
+    const profile = (try parseAwsConfigProfileAlloc(std.testing.allocator, source)).?;
     defer std.testing.allocator.free(profile);
     try std.testing.expectEqualStrings("staging", profile);
 }
@@ -621,30 +611,17 @@ test "hides disabled cloud providers" {
 }
 
 test "parses gcp config project" {
-    const project = (try parseGcpProjectAlloc(std.testing.allocator,
-        \\[core]
-        \\project = test-project
-        \\
-        \\[compute]
-        \\region = us-central1
-        \\
-    )).?;
+    const source = try readFixtureAlloc(std.testing.allocator, "test/fixtures/cloud/gcloud-config");
+    defer std.testing.allocator.free(source);
+    const project = (try parseGcpProjectAlloc(std.testing.allocator, source)).?;
     defer std.testing.allocator.free(project);
     try std.testing.expectEqualStrings("test-project", project);
 }
 
 test "parses azure subscription" {
-    const subscription = (try parseAzureSubscriptionAlloc(std.testing.allocator,
-        \\{
-        \\  "subscriptions": [
-        \\    {
-        \\      "id": "00000000-0000-0000-0000-000000000000",
-        \\      "name": "prod-sub",
-        \\      "isDefault": true
-        \\    }
-        \\  ]
-        \\}
-    )).?;
+    const source = try readFixtureAlloc(std.testing.allocator, "test/fixtures/cloud/azureProfile.json");
+    defer std.testing.allocator.free(source);
+    const subscription = (try parseAzureSubscriptionAlloc(std.testing.allocator, source)).?;
     defer std.testing.allocator.free(subscription);
     try std.testing.expectEqualStrings("prod-sub", subscription);
 }
@@ -674,30 +651,17 @@ test "resolves default kubeconfig path" {
 }
 
 test "parses kube context and namespace" {
-    const context = (try parseKubeContextAlloc(std.testing.allocator,
-        \\apiVersion: v1
-        \\contexts:
-        \\- context:
-        \\    cluster: prod
-        \\    namespace: default
-        \\    user: prod-user
-        \\  name: prod
-        \\current-context: prod
-        \\
-    )).?;
+    const source = try readFixtureAlloc(std.testing.allocator, "test/fixtures/cloud/kubeconfig-with-namespace.yaml");
+    defer std.testing.allocator.free(source);
+    const context = (try parseKubeContextAlloc(std.testing.allocator, source)).?;
     defer std.testing.allocator.free(context);
     try std.testing.expectEqualStrings("prod/default", context);
 }
 
 test "parses kube context without namespace" {
-    const context = (try parseKubeContextAlloc(std.testing.allocator,
-        \\contexts:
-        \\- name: prod
-        \\  context:
-        \\    cluster: prod
-        \\current-context: prod
-        \\
-    )).?;
+    const source = try readFixtureAlloc(std.testing.allocator, "test/fixtures/cloud/kubeconfig-no-namespace.yaml");
+    defer std.testing.allocator.free(source);
+    const context = (try parseKubeContextAlloc(std.testing.allocator, source)).?;
     defer std.testing.allocator.free(context);
     try std.testing.expectEqualStrings("prod", context);
 }
@@ -727,4 +691,8 @@ test "builds kube watch scope" {
     try std.testing.expectEqualStrings("/tmp/kubeconfig", scope.cwd);
     try std.testing.expectEqualStrings("/tmp/kubeconfig", scope.watched_path);
     try std.testing.expect(!scope.paths[0].recursive);
+}
+
+fn readFixtureAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    return std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024);
 }

@@ -1,0 +1,5 @@
+[core]
+project = test-project
+
+[compute]
+region = us-central1

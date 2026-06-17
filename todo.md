@@ -352,7 +352,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Render `[docker:web]` style segment
 
 ### 11.12 Tests & benches
-- [ ] Mock cloud config fixtures under `test/fixtures/cloud/`
+- [x] Mock cloud config fixtures under `test/fixtures/cloud/`
 - [ ] Snapshot tests for each segment
 - [ ] prod_guard fuzz suite
 - [ ] Benchmark `cloud_ctx` cold path < 30ms, warm < 1ms

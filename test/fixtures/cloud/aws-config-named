@@ -1,0 +1,5 @@
+[profile staging]
+region = us-west-2
+
+[profile prod]
+region = us-east-1

@@ -343,7 +343,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Render `→ host (prod)` segment when remote
 
 ### 11.11 Container provenance (`container_provenance`)
-- [ ] Detect docker (`/.dockerenv`)
+- [x] Detect docker (`/.dockerenv`)
 - [ ] Detect podman (cgroups inspection)
 - [ ] Detect devcontainer (`$REMOTE_CONTAINERS`)
 - [ ] Detect nix-shell (`$IN_NIX_SHELL`)

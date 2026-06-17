@@ -228,7 +228,8 @@ const schema_json =
     \\        "request_id": { "type": "string" },
     \\        "reloaded": { "type": "boolean" },
     \\        "config_generation": { "type": "integer", "minimum": 0 },
-    \\        "plugin_generation": { "type": "integer", "minimum": 0 }
+    \\        "plugin_generation": { "type": "integer", "minimum": 0 },
+    \\        "plugins": { "type": "integer", "minimum": 0 }
     \\      }
     \\    },
     \\    "versionResponse": {

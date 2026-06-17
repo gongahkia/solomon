@@ -12,11 +12,21 @@ const daemon_log = @import("log.zig");
 const warmup = @import("warmup.zig");
 const json = @import("json.zig");
 const fsnotify = @import("fsnotify.zig");
+const plugin_lua = @import("plugin_lua");
 
 const header_bytes = 4;
 const max_frame_bytes = 1024 * 1024;
+const max_config_bytes = 1024 * 1024;
 pub const daemon_version = "0.1.0-dev";
 pub const protocol_version: u32 = 1;
+const default_config_text =
+    \\version = 1
+    \\theme = "plain"
+    \\
+    \\[prompt]
+    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host"]
+    \\
+;
 
 const RenderRequest = struct {
     v: u32 = 1,
@@ -44,6 +54,19 @@ const PreexecRequest = struct {
     force: bool = false,
 };
 
+const ReloadState = struct {
+    config_generation: u64 = 0,
+    plugin_generation: u64 = 0,
+    config_source: []u8 = &.{},
+    plugin_names: [][]u8 = &.{},
+
+    fn deinit(self: *ReloadState, allocator: std.mem.Allocator) void {
+        allocator.free(self.config_source);
+        freeStringList(allocator, self.plugin_names);
+        self.* = .{};
+    }
+};
+
 pub const Server = struct {
     socket_path: []const u8,
     listener: std.net.Server,
@@ -57,6 +80,9 @@ pub const Server = struct {
     cost_refresh_shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     cost_refresh_thread: ?std.Thread = null,
     cost_refresh_home: ?[]u8 = null,
+    reload_state: ReloadState = .{},
+    config_path_override: ?[]const u8 = null,
+    plugins_dir_override: ?[]const u8 = null,
 
     pub fn init(socket_path: []const u8) !Server {
         return initWithLogger(socket_path, null);
@@ -93,6 +119,7 @@ pub const Server = struct {
         self.language_versions_cache.deinit(std.heap.page_allocator);
         self.cloud_ctx_cache.deinit(std.heap.page_allocator);
         self.fs_watcher.deinit();
+        self.reload_state.deinit(std.heap.page_allocator);
         self.listener.deinit();
         std.fs.deleteFileAbsolute(self.socket_path) catch {};
         self.* = undefined;
@@ -198,6 +225,10 @@ pub const Server = struct {
             try writeFrame(connection.stream.handle, response);
         } else if (isOpRequest(request, "version")) {
             const response = try versionResponseAlloc(std.heap.page_allocator, request);
+            defer std.heap.page_allocator.free(response);
+            try writeFrame(connection.stream.handle, response);
+        } else if (isOpRequest(request, "reload")) {
+            const response = try self.reloadResponseAlloc(std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
             try writeFrame(connection.stream.handle, response);
         } else if (isPreexecRequest(request)) {
@@ -410,6 +441,86 @@ pub const Server = struct {
         );
     }
 
+    fn reloadResponseAlloc(self: *Server, allocator: std.mem.Allocator, request: []const u8) ![]u8 {
+        const request_id = try requestIdAlloc(allocator, request);
+        defer allocator.free(request_id);
+        const escaped_request_id = try json.escapeAlloc(allocator, request_id);
+        defer allocator.free(escaped_request_id);
+
+        self.reloadConfigAndPlugins(std.heap.page_allocator) catch |err| {
+            const escaped_detail = try json.escapeAlloc(allocator, @errorName(err));
+            defer allocator.free(escaped_detail);
+            return std.fmt.allocPrint(
+                allocator,
+                "{{\"v\":1,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_INTERNAL\",\"message\":\"reload failed\",\"context\":{{\"op\":\"reload\",\"detail\":\"{s}\"}}}}}}",
+                .{ escaped_request_id, escaped_detail },
+            );
+        };
+
+        return std.fmt.allocPrint(
+            allocator,
+            "{{\"v\":1,\"request_id\":\"{s}\",\"reloaded\":true,\"config_generation\":{d},\"plugin_generation\":{d},\"plugins\":{d}}}",
+            .{ escaped_request_id, self.reload_state.config_generation, self.reload_state.plugin_generation, self.reload_state.plugin_names.len },
+        );
+    }
+
+    fn reloadConfigAndPlugins(self: *Server, allocator: std.mem.Allocator) !void {
+        const config_source = try self.loadConfigSourceAlloc(allocator);
+        errdefer allocator.free(config_source);
+        const plugin_names = try self.loadPluginNamesAlloc(allocator);
+        errdefer freeStringList(allocator, plugin_names);
+
+        allocator.free(self.reload_state.config_source);
+        freeStringList(allocator, self.reload_state.plugin_names);
+        self.reload_state.config_source = config_source;
+        self.reload_state.plugin_names = plugin_names;
+        self.reload_state.config_generation += 1;
+        self.reload_state.plugin_generation += 1;
+    }
+
+    fn loadConfigSourceAlloc(self: *Server, allocator: std.mem.Allocator) ![]u8 {
+        const path = if (self.config_path_override) |override| try allocator.dupe(u8, override) else try defaultConfigPathAlloc(allocator);
+        defer allocator.free(path);
+        return readConfigOrDefaultAlloc(allocator, path);
+    }
+
+    fn loadPluginNamesAlloc(self: *Server, allocator: std.mem.Allocator) ![][]u8 {
+        const plugins_dir = if (self.plugins_dir_override) |override| try allocator.dupe(u8, override) else try defaultPluginsDirPathAlloc(allocator);
+        defer allocator.free(plugins_dir);
+
+        var dir = std.fs.openDirAbsolute(plugins_dir, .{ .iterate = true }) catch |err| switch (err) {
+            error.FileNotFound => return allocator.alloc([]u8, 0),
+            else => return err,
+        };
+        defer dir.close();
+
+        var names: std.ArrayList([]u8) = .empty;
+        errdefer deinitStringArrayList(allocator, &names);
+        var runtime: ?plugin_lua.Runtime = null;
+        defer if (runtime) |*value| value.deinit();
+
+        var it = dir.iterate();
+        while (try it.next()) |entry| {
+            if (entry.kind != .directory) continue;
+            const manifest_path = try std.fmt.allocPrint(allocator, "{s}/{s}/plugin.lua", .{ plugins_dir, entry.name });
+            defer allocator.free(manifest_path);
+            const source = std.fs.cwd().readFileAlloc(allocator, manifest_path, max_config_bytes) catch |err| switch (err) {
+                error.FileNotFound => continue,
+                else => return err,
+            };
+            defer allocator.free(source);
+
+            if (runtime == null) runtime = try plugin_lua.Runtime.initSandboxed(allocator);
+            if (runtime) |*value| {
+                var loaded = try value.loadManifestStrict(source);
+                defer loaded.deinit(allocator);
+                try names.append(allocator, try allocator.dupe(u8, loaded.manifest.name));
+            }
+        }
+
+        return names.toOwnedSlice(allocator);
+    }
+
     pub fn recordFsEvent(self: *Server, path: []const u8, timestamp_ns: u64) void {
         self.fs_watcher.recordEvent(path, timestamp_ns);
     }
@@ -577,6 +688,50 @@ fn versionResponseAlloc(allocator: std.mem.Allocator, request: []const u8) ![]u8
     const escaped_request_id = try json.escapeAlloc(allocator, request_id);
     defer allocator.free(escaped_request_id);
     return std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"daemon\":\"{s}\",\"protocol\":{d}}}", .{ escaped_request_id, daemon_version, protocol_version });
+}
+
+fn defaultConfigPathAlloc(allocator: std.mem.Allocator) ![]u8 {
+    const xdg = std.process.getEnvVarOwned(allocator, "XDG_CONFIG_HOME") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    if (xdg) |xdg_config_home| {
+        defer allocator.free(xdg_config_home);
+        return std.fmt.allocPrint(allocator, "{s}/shisa/shisa.toml", .{xdg_config_home});
+    }
+
+    const home = std.process.getEnvVarOwned(allocator, "HOME") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => return error.MissingHome,
+        else => return err,
+    };
+    defer allocator.free(home);
+    return std.fmt.allocPrint(allocator, "{s}/.config/shisa/shisa.toml", .{home});
+}
+
+fn defaultPluginsDirPathAlloc(allocator: std.mem.Allocator) ![]u8 {
+    const config_path = try defaultConfigPathAlloc(allocator);
+    defer allocator.free(config_path);
+    const dir = std.fs.path.dirname(config_path) orelse return error.MissingConfigDir;
+    return std.fmt.allocPrint(allocator, "{s}/plugins", .{dir});
+}
+
+fn readConfigOrDefaultAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    var file = std.fs.openFileAbsolute(path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return allocator.dupe(u8, default_config_text),
+        else => return err,
+    };
+    defer file.close();
+    return file.readToEndAlloc(allocator, max_config_bytes);
+}
+
+fn freeStringList(allocator: std.mem.Allocator, items: [][]u8) void {
+    for (items) |item| allocator.free(item);
+    allocator.free(items);
+}
+
+fn deinitStringArrayList(allocator: std.mem.Allocator, items: *std.ArrayList([]u8)) void {
+    for (items.items) |item| allocator.free(item);
+    items.deinit(allocator);
 }
 
 fn requestIdAlloc(allocator: std.mem.Allocator, request: []const u8) ![]u8 {
@@ -930,6 +1085,124 @@ test "version op returns daemon and protocol version" {
     try std.testing.expectEqualStrings("version-1", parsed.value.request_id);
     try std.testing.expectEqualStrings(daemon_version, parsed.value.daemon);
     try std.testing.expectEqual(protocol_version, parsed.value.protocol);
+}
+
+test "reload op rereads config and bumps generations" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-reload-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    const config_path = try std.fmt.allocPrint(allocator, "{s}/shisa.toml", .{dir_path});
+    defer allocator.free(config_path);
+    const plugins_dir = try std.fmt.allocPrint(allocator, "{s}/plugins", .{dir_path});
+    defer allocator.free(plugins_dir);
+
+    try std.fs.cwd().writeFile(.{
+        .sub_path = config_path,
+        .data =
+        \\version = 1
+        \\theme = "plain"
+        \\
+        \\[prompt]
+        \\modules = ["cwd"]
+        \\
+        ,
+    });
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+    server.config_path_override = config_path;
+    server.plugins_dir_override = plugins_dir;
+
+    const first = try server.reloadResponseAlloc(allocator, "{\"v\":1,\"op\":\"reload\",\"request_id\":\"reload-1\"}");
+    defer allocator.free(first);
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"reloaded\":true") != null);
+    try std.testing.expectEqual(@as(u64, 1), server.reload_state.config_generation);
+    try std.testing.expectEqual(@as(u64, 1), server.reload_state.plugin_generation);
+    try std.testing.expectEqual(@as(usize, 0), server.reload_state.plugin_names.len);
+    try std.testing.expect(std.mem.indexOf(u8, server.reload_state.config_source, "theme = \"plain\"") != null);
+
+    try std.fs.cwd().writeFile(.{
+        .sub_path = config_path,
+        .data =
+        \\version = 1
+        \\theme = "minimal"
+        \\
+        \\[prompt]
+        \\modules = ["cwd", "time"]
+        \\
+        ,
+    });
+
+    const second = try server.reloadResponseAlloc(allocator, "{\"v\":1,\"op\":\"reload\",\"request_id\":\"reload-2\"}");
+    defer allocator.free(second);
+    try std.testing.expect(std.mem.indexOf(u8, second, "\"config_generation\":2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, server.reload_state.config_source, "theme = \"minimal\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, server.reload_state.config_source, "modules = [\"cwd\", \"time\"]") != null);
+}
+
+test "reload op rereads plugin manifests" {
+    const allocator = std.testing.allocator;
+    var runtime = plugin_lua.Runtime.initSandboxed(allocator) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    runtime.deinit();
+
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-reload-plugin-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    const plugin_path = try std.fmt.allocPrint(allocator, "{s}/plugins/demo-plugin", .{dir_path});
+    defer allocator.free(plugin_path);
+    try std.fs.cwd().makePath(plugin_path);
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    const config_path = try std.fmt.allocPrint(allocator, "{s}/shisa.toml", .{dir_path});
+    defer allocator.free(config_path);
+    const plugins_dir = try std.fmt.allocPrint(allocator, "{s}/plugins", .{dir_path});
+    defer allocator.free(plugins_dir);
+    const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{plugin_path});
+    defer allocator.free(manifest_path);
+
+    try std.fs.cwd().writeFile(.{
+        .sub_path = config_path,
+        .data =
+        \\version = 1
+        \\theme = "plain"
+        \\
+        \\[prompt]
+        \\modules = ["cwd"]
+        \\
+        ,
+    });
+    try std.fs.cwd().writeFile(.{
+        .sub_path = manifest_path,
+        .data =
+        \\return {
+        \\  name = "demo-plugin",
+        \\  version = "0.1.0",
+        \\  api_version = 1,
+        \\  license = "MIT",
+        \\  modules = { "demo" },
+        \\}
+        ,
+    });
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+    server.config_path_override = config_path;
+    server.plugins_dir_override = plugins_dir;
+
+    const response = try server.reloadResponseAlloc(allocator, "{\"v\":1,\"op\":\"reload\",\"request_id\":\"reload-plugin\"}");
+    defer allocator.free(response);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"plugins\":1") != null);
+    try std.testing.expectEqual(@as(usize, 1), server.reload_state.plugin_names.len);
+    try std.testing.expectEqualStrings("demo-plugin", server.reload_state.plugin_names[0]);
 }
 
 test "metrics op returns JSON metrics dump" {

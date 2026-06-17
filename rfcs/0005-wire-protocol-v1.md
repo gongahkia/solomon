@@ -101,7 +101,8 @@ Reload response:
   "request_id": "uuid-v4",
   "reloaded": true,
   "config_generation": 2,
-  "plugin_generation": 2
+  "plugin_generation": 2,
+  "plugins": 4
 }
 ```
 

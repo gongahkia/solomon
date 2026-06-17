@@ -18,6 +18,21 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseFast,
     });
+    const plugin_lua_module = b.createModule(.{
+        .root_source_file = b.path("src/plugin/lua.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const plugin_lua_debug_module = b.createModule(.{
+        .root_source_file = b.path("src/plugin/lua.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    const plugin_lua_release_module = b.createModule(.{
+        .root_source_file = b.path("src/plugin/lua.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
     const proto_types_module = b.createModule(.{
         .root_source_file = b.path("src/proto/types.zig"),
         .target = target,
@@ -43,6 +58,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     daemon.root_module.addImport("vcs_worktree", vcs_worktree_module);
+    daemon.root_module.addImport("plugin_lua", plugin_lua_module);
     b.installArtifact(daemon);
 
     const debug_exe = b.addExecutable(.{
@@ -63,6 +79,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     debug_daemon.root_module.addImport("vcs_worktree", vcs_worktree_debug_module);
+    debug_daemon.root_module.addImport("plugin_lua", plugin_lua_debug_module);
     const debug_daemon_install = b.addInstallArtifact(debug_daemon, .{});
     const debug_step = b.step("debug", "Build debug binary");
     debug_step.dependOn(&debug_install.step);
@@ -86,6 +103,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     release_daemon.root_module.addImport("vcs_worktree", vcs_worktree_release_module);
+    release_daemon.root_module.addImport("plugin_lua", plugin_lua_release_module);
     const release_daemon_install = b.addInstallArtifact(release_daemon, .{});
     const release_step = b.step("release", "Build release binary");
     release_step.dependOn(&release_install.step);
@@ -525,6 +543,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     server_tests.root_module.addImport("vcs_worktree", vcs_worktree_module);
+    server_tests.root_module.addImport("plugin_lua", plugin_lua_module);
     const server_test_run = b.addRunArtifact(server_tests);
     const zsh_integration = b.addSystemCommand(&.{ "bash", "test/integration/zsh_fake_socket.sh" });
     zsh_integration.step.dependOn(&debug_install.step);

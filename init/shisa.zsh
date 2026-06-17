@@ -28,6 +28,9 @@ typeset -g SHISA_TRANSIENT_PROMPT=${SHISA_TRANSIENT_PROMPT:-1}
 typeset -g SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 typeset -g SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
 typeset -g SHISA_NEXTCMD_KEYSEQ=${SHISA_NEXTCMD_KEYSEQ:-'^X^N'}
+typeset -g SHISA_NEXTCMD_ACCEPT_KEYSEQ=${SHISA_NEXTCMD_ACCEPT_KEYSEQ:-'^I'}
+typeset -g SHISA_NEXTCMD_REJECT_KEYSEQ=${SHISA_NEXTCMD_REJECT_KEYSEQ:-'^['}
+typeset -g SHISA_NEXTCMD_NEXT_KEYSEQ=${SHISA_NEXTCMD_NEXT_KEYSEQ:-'^[]'}
 typeset -g SHISA_NEXTCMD_SUGGESTION=
 
 zmodload zsh/datetime 2>/dev/null || true
@@ -123,8 +126,39 @@ shisa_nextcmd_widget() {
   zle redisplay
 }
 
+shisa_nextcmd_accept_widget() {
+  emulate -L zsh
+  if [[ -n ${SHISA_NEXTCMD_SUGGESTION:-} ]]; then
+    LBUFFER+="${SHISA_NEXTCMD_SUGGESTION}"
+    SHISA_NEXTCMD_SUGGESTION=
+    zle -M ''
+    zle redisplay
+  else
+    zle .expand-or-complete
+  fi
+}
+
+shisa_nextcmd_reject_widget() {
+  emulate -L zsh
+  SHISA_NEXTCMD_SUGGESTION=
+  zle -M ''
+  zle redisplay
+}
+
+shisa_nextcmd_next_widget() {
+  emulate -L zsh
+  SHISA_NEXTCMD_SUGGESTION=
+  shisa_nextcmd_widget
+}
+
 zle -N shisa-nextcmd shisa_nextcmd_widget 2>/dev/null || true
+zle -N shisa-nextcmd-accept shisa_nextcmd_accept_widget 2>/dev/null || true
+zle -N shisa-nextcmd-reject shisa_nextcmd_reject_widget 2>/dev/null || true
+zle -N shisa-nextcmd-next shisa_nextcmd_next_widget 2>/dev/null || true
 bindkey "${SHISA_NEXTCMD_KEYSEQ}" shisa-nextcmd 2>/dev/null || true
+bindkey "${SHISA_NEXTCMD_ACCEPT_KEYSEQ}" shisa-nextcmd-accept 2>/dev/null || true
+bindkey "${SHISA_NEXTCMD_REJECT_KEYSEQ}" shisa-nextcmd-reject 2>/dev/null || true
+bindkey "${SHISA_NEXTCMD_NEXT_KEYSEQ}" shisa-nextcmd-next 2>/dev/null || true
 
 shisa_socket_path() {
   emulate -L zsh

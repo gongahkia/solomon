@@ -11,6 +11,9 @@ SHISA_LAST_COMMAND=
 SHISA_ASYNC_REDRAW=${SHISA_ASYNC_REDRAW:-1}
 SHISA_ASYNC_KEYSEQ=${SHISA_ASYNC_KEYSEQ:-'\C-x\C-s'}
 SHISA_NEXTCMD_KEYSEQ=${SHISA_NEXTCMD_KEYSEQ:-'\C-x\C-n'}
+SHISA_NEXTCMD_ACCEPT_KEYSEQ=${SHISA_NEXTCMD_ACCEPT_KEYSEQ:-'\C-i'}
+SHISA_NEXTCMD_REJECT_KEYSEQ=${SHISA_NEXTCMD_REJECT_KEYSEQ:-'\e'}
+SHISA_NEXTCMD_NEXT_KEYSEQ=${SHISA_NEXTCMD_NEXT_KEYSEQ:-'\e]'}
 SHISA_NEXTCMD_SUGGESTION=
 SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
@@ -129,10 +132,31 @@ shisa_nextcmd_widget() {
   printf '\n\033[2mshisa next: %s\033[0m\n' "${suggestion}"
 }
 
+shisa_nextcmd_accept_widget() {
+  [[ -n ${SHISA_NEXTCMD_SUGGESTION:-} ]] || return 0
+  local suggestion=${SHISA_NEXTCMD_SUGGESTION}
+  SHISA_NEXTCMD_SUGGESTION=
+  READLINE_LINE="${READLINE_LINE:0:READLINE_POINT}${suggestion}${READLINE_LINE:READLINE_POINT}"
+  READLINE_POINT=$((READLINE_POINT + ${#suggestion}))
+}
+
+shisa_nextcmd_reject_widget() {
+  SHISA_NEXTCMD_SUGGESTION=
+  printf '\r\033[2K'
+}
+
+shisa_nextcmd_next_widget() {
+  SHISA_NEXTCMD_SUGGESTION=
+  shisa_nextcmd_widget
+}
+
 shisa_install_async_redraw() {
   [[ ${SHISA_ASYNC_REDRAW:-1} == 1 ]] || return 0
   bind -x "\"${SHISA_ASYNC_KEYSEQ}\": shisa_async_redraw" 2>/dev/null || true
   bind -x "\"${SHISA_NEXTCMD_KEYSEQ}\": shisa_nextcmd_widget" 2>/dev/null || true
+  bind -x "\"${SHISA_NEXTCMD_ACCEPT_KEYSEQ}\": shisa_nextcmd_accept_widget" 2>/dev/null || true
+  bind -x "\"${SHISA_NEXTCMD_REJECT_KEYSEQ}\": shisa_nextcmd_reject_widget" 2>/dev/null || true
+  bind -x "\"${SHISA_NEXTCMD_NEXT_KEYSEQ}\": shisa_nextcmd_next_widget" 2>/dev/null || true
 }
 
 shisa_prompt_command() {

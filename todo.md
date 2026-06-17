@@ -373,7 +373,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Context builder: history slice + cwd + last command + last exit code
 - [x] Prompt template + few-shot examples checked into repo
 - [x] Inline preview UX (renders below the prompt line; ghost text)
-- [ ] Accept (tab) / reject (esc) / next (alt-]) controls
+- [x] Accept (tab) / reject (esc) / next (alt-]) controls
 - [ ] Bench: median round-trip < 800ms on a 2020 MacBook Air
 
 ### 12.3 Natural language to command (`nl2cmd`)

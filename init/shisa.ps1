@@ -5,6 +5,9 @@ if (-not $env:SHISA_BIN) { $env:SHISA_BIN = "shisa" }
 if (-not $env:SHISA_SOCKET) { $env:SHISA_SOCKET = "" }
 if (-not $env:SHISA_INSTANT) { $env:SHISA_INSTANT = "0" }
 if (-not $env:SHISA_NEXTCMD_CHORD) { $env:SHISA_NEXTCMD_CHORD = "Ctrl+x,Ctrl+n" }
+if (-not $env:SHISA_NEXTCMD_ACCEPT_CHORD) { $env:SHISA_NEXTCMD_ACCEPT_CHORD = "Tab" }
+if (-not $env:SHISA_NEXTCMD_REJECT_CHORD) { $env:SHISA_NEXTCMD_REJECT_CHORD = "Escape" }
+if (-not $env:SHISA_NEXTCMD_NEXT_CHORD) { $env:SHISA_NEXTCMD_NEXT_CHORD = "Alt+]" }
 $script:SHISA_NEXTCMD_SUGGESTION = ""
 
 function global:shisa_socket_path {
@@ -82,6 +85,22 @@ function global:Invoke-ShisaNextCommand {
     } catch {}
 }
 
+function global:Accept-ShisaNextCommand {
+    if ($script:SHISA_NEXTCMD_SUGGESTION) {
+        [Microsoft.PowerShell.PSConsoleReadLine]::Insert($script:SHISA_NEXTCMD_SUGGESTION)
+        $script:SHISA_NEXTCMD_SUGGESTION = ""
+    } else {
+        try { [Microsoft.PowerShell.PSConsoleReadLine]::MenuComplete() } catch {}
+    }
+}
+
+function global:Reject-ShisaNextCommand {
+    $script:SHISA_NEXTCMD_SUGGESTION = ""
+}
+
 if (Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue) {
     Set-PSReadLineKeyHandler -Chord $env:SHISA_NEXTCMD_CHORD -ScriptBlock { Invoke-ShisaNextCommand } 2>$null
+    Set-PSReadLineKeyHandler -Chord $env:SHISA_NEXTCMD_ACCEPT_CHORD -ScriptBlock { Accept-ShisaNextCommand } 2>$null
+    Set-PSReadLineKeyHandler -Chord $env:SHISA_NEXTCMD_REJECT_CHORD -ScriptBlock { Reject-ShisaNextCommand } 2>$null
+    Set-PSReadLineKeyHandler -Chord $env:SHISA_NEXTCMD_NEXT_CHORD -ScriptBlock { Invoke-ShisaNextCommand } 2>$null
 }

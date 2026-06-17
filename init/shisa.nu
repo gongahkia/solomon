@@ -65,5 +65,18 @@ if not ("__SHISA_NU_INIT" in $env) {
         }
     }
 
+    def shisa-nextcmd-accept [] {
+        let preview = (shisa-nextcmd | str trim)
+        if ($preview | str starts-with "shisa next: ") {
+            $preview | str replace "shisa next: " ""
+        } else {
+            ""
+        }
+    }
+
+    def shisa-nextcmd-reject [] { "" }
+
+    def shisa-nextcmd-next [] { shisa-nextcmd }
+
     $env.PROMPT_COMMAND = {|| shisa-prompt-render }
 }

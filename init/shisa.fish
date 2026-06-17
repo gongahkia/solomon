@@ -13,6 +13,9 @@ set -q SHISA_INSTANT; or set -g SHISA_INSTANT 1
 set -q SHISA_PROD_GUARD; or set -g SHISA_PROD_GUARD 0
 set -q SHISA_PROD_GUARD_FORCE; or set -g SHISA_PROD_GUARD_FORCE 0
 set -q SHISA_NEXTCMD_KEYSEQ; or set -g SHISA_NEXTCMD_KEYSEQ \cx\cn
+set -q SHISA_NEXTCMD_ACCEPT_KEYSEQ; or set -g SHISA_NEXTCMD_ACCEPT_KEYSEQ \t
+set -q SHISA_NEXTCMD_REJECT_KEYSEQ; or set -g SHISA_NEXTCMD_REJECT_KEYSEQ \e
+set -q SHISA_NEXTCMD_NEXT_KEYSEQ; or set -g SHISA_NEXTCMD_NEXT_KEYSEQ \e\]
 set -q SHISA_LAST_COMMAND; or set -g SHISA_LAST_COMMAND ""
 set -q SHISA_NEXTCMD_SUGGESTION; or set -g SHISA_NEXTCMD_SUGGESTION ""
 
@@ -99,5 +102,34 @@ function shisa_nextcmd_widget
     end
 end
 
+function shisa_nextcmd_accept_widget
+    if test -n "$SHISA_NEXTCMD_SUGGESTION"
+        commandline -i -- "$SHISA_NEXTCMD_SUGGESTION"
+        set -g SHISA_NEXTCMD_SUGGESTION ""
+        commandline -f repaint 2>/dev/null
+        or true
+    else
+        commandline -f complete 2>/dev/null
+        or true
+    end
+end
+
+function shisa_nextcmd_reject_widget
+    set -g SHISA_NEXTCMD_SUGGESTION ""
+    commandline -f repaint 2>/dev/null
+    or true
+end
+
+function shisa_nextcmd_next_widget
+    set -g SHISA_NEXTCMD_SUGGESTION ""
+    shisa_nextcmd_widget
+end
+
 bind $SHISA_NEXTCMD_KEYSEQ shisa_nextcmd_widget 2>/dev/null
+or true
+bind $SHISA_NEXTCMD_ACCEPT_KEYSEQ shisa_nextcmd_accept_widget 2>/dev/null
+or true
+bind $SHISA_NEXTCMD_REJECT_KEYSEQ shisa_nextcmd_reject_widget 2>/dev/null
+or true
+bind $SHISA_NEXTCMD_NEXT_KEYSEQ shisa_nextcmd_next_widget 2>/dev/null
 or true

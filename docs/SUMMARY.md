@@ -11,6 +11,7 @@
 - [Stacked-Diff Workflow with Graphite + Shisa](recipes/graphite-stacked-diff-workflow.md)
 - [Custom Theme Inheriting from okiya-night](recipes/custom-theme-okiya-night.md)
 - [Migrating from Powerlevel10k Step-by-Step](recipes/migrate-from-powerlevel10k.md)
+- [Plugin in 30 Lines of Lua](recipes/plugin-in-30-lines.md)
 
 # Core
 

@@ -716,7 +716,7 @@ fn aiRisk(allocator: std.mem.Allocator, config: AiRiskConfig) !void {
     if (config.slm and result.risk == .medium) {
         result = aiRiskSlm(allocator, config, result) catch result;
     }
-    const output = try ai_risk.outputExplanationAlloc(allocator, result);
+    const output = try ai_risk.outputExplanationAlloc(allocator, config.command, result);
     defer allocator.free(output);
     try std.fs.File.stdout().writeAll(output);
 }

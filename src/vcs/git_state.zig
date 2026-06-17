@@ -19,6 +19,12 @@ pub fn detectCherryPickState(git_dir: std.fs.Dir) SequencerState {
     return .none;
 }
 
+pub fn detectRevertState(git_dir: std.fs.Dir) SequencerState {
+    if (entryExists(git_dir, "sequencer/todo")) return .sequence;
+    if (entryExists(git_dir, "REVERT_HEAD")) return .single;
+    return .none;
+}
+
 pub fn detectMergeState(git_dir: std.fs.Dir) bool {
     return entryExists(git_dir, "MERGE_HEAD");
 }
@@ -120,6 +126,33 @@ test "detects sequenced cherry-pick state" {
     try git_dir.makePath("sequencer");
     try git_dir.writeFile(.{ .sub_path = "sequencer/todo", .data = "pick abc123 msg\n" });
     try std.testing.expectEqual(SequencerState.sequence, detectCherryPickState(git_dir));
+}
+
+test "detects absent revert state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var git_dir = try makeGitDir(&tmp);
+    defer git_dir.close();
+    try std.testing.expectEqual(SequencerState.none, detectRevertState(git_dir));
+}
+
+test "detects single revert state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var git_dir = try makeGitDir(&tmp);
+    defer git_dir.close();
+    try git_dir.writeFile(.{ .sub_path = "REVERT_HEAD", .data = "abc123\n" });
+    try std.testing.expectEqual(SequencerState.single, detectRevertState(git_dir));
+}
+
+test "detects sequenced revert state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var git_dir = try makeGitDir(&tmp);
+    defer git_dir.close();
+    try git_dir.makePath("sequencer");
+    try git_dir.writeFile(.{ .sub_path = "sequencer/todo", .data = "revert abc123 msg\n" });
+    try std.testing.expectEqual(SequencerState.sequence, detectRevertState(git_dir));
 }
 
 fn makeGitDir(tmp: *std.testing.TmpDir) !std.fs.Dir {

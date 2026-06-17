@@ -632,7 +632,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Threat model write-up
 - [x] Profiling notes
 - [x] Cache architecture deep-dive
-- [ ] Why we picked Zig
+- [x] Why we picked Zig
 
 ### 19.6 Videos
 - [ ] "Why Shisa" â€” 3-minute project intro

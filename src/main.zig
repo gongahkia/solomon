@@ -1866,6 +1866,214 @@ fn p10kUnsupportedReason(name: []const u8) []const u8 {
     return "No Shisa core mapping; recreate as a plugin or omit.";
 }
 
+const OmpSegment = struct {
+    kind: ?[]u8 = null,
+
+    fn deinit(self: OmpSegment, allocator: std.mem.Allocator) void {
+        if (self.kind) |kind| allocator.free(kind);
+    }
+};
+
+const OmpBlock = struct {
+    block_type: ?[]u8 = null,
+    alignment: ?[]u8 = null,
+    segments: std.ArrayList(OmpSegment) = .empty,
+
+    fn deinit(self: *OmpBlock, allocator: std.mem.Allocator) void {
+        if (self.block_type) |block_type| allocator.free(block_type);
+        if (self.alignment) |alignment| allocator.free(alignment);
+        for (self.segments.items) |segment| segment.deinit(allocator);
+        self.segments.deinit(allocator);
+    }
+};
+
+const OmpTheme = struct {
+    blocks: std.ArrayList(OmpBlock) = .empty,
+
+    fn deinit(self: *OmpTheme, allocator: std.mem.Allocator) void {
+        for (self.blocks.items) |*block| block.deinit(allocator);
+        self.blocks.deinit(allocator);
+    }
+};
+
+fn parseOmpTheme(allocator: std.mem.Allocator, source: []const u8) !OmpTheme {
+    const trimmed = std.mem.trim(u8, source, " \t\r\n");
+    if (trimmed.len == 0) return error.InvalidOmpTheme;
+    if (trimmed[0] == '{') return parseOmpJsonTheme(allocator, source);
+    return parseOmpYamlTheme(allocator, source);
+}
+
+fn parseOmpJsonTheme(allocator: std.mem.Allocator, source: []const u8) !OmpTheme {
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, source, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const root = switch (parsed.value) {
+        .object => |object| object,
+        else => return error.InvalidOmpTheme,
+    };
+    const blocks_value = root.get("blocks") orelse return error.InvalidOmpTheme;
+    const blocks = switch (blocks_value) {
+        .array => |array| array,
+        else => return error.InvalidOmpTheme,
+    };
+
+    var theme = OmpTheme{};
+    errdefer theme.deinit(allocator);
+    for (blocks.items) |block_value| {
+        const block_object = switch (block_value) {
+            .object => |object| object,
+            else => continue,
+        };
+        var block = OmpBlock{};
+        errdefer block.deinit(allocator);
+        if (jsonStringField(block_object, "type")) |value| try setOwned(allocator, &block.block_type, value);
+        if (jsonStringField(block_object, "alignment")) |value| try setOwned(allocator, &block.alignment, value);
+        if (block_object.get("segments")) |segments_value| {
+            const segments = switch (segments_value) {
+                .array => |array| array,
+                else => return error.InvalidOmpTheme,
+            };
+            for (segments.items) |segment_value| {
+                const segment_object = switch (segment_value) {
+                    .object => |object| object,
+                    else => continue,
+                };
+                var segment = OmpSegment{};
+                errdefer segment.deinit(allocator);
+                if (jsonStringField(segment_object, "type")) |value| try setOwned(allocator, &segment.kind, value);
+                try block.segments.append(allocator, segment);
+            }
+        }
+        try theme.blocks.append(allocator, block);
+    }
+    return theme;
+}
+
+fn jsonStringField(object: std.json.ObjectMap, key: []const u8) ?[]const u8 {
+    const value = object.get(key) orelse return null;
+    return switch (value) {
+        .string => |string| string,
+        else => null,
+    };
+}
+
+fn parseOmpYamlTheme(allocator: std.mem.Allocator, source: []const u8) !OmpTheme {
+    var theme = OmpTheme{};
+    errdefer theme.deinit(allocator);
+
+    var in_blocks = false;
+    var in_segments = false;
+    var current_block_index: ?usize = null;
+    var current_segment_index: ?usize = null;
+    var block_item_indent: usize = 0;
+
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |raw_line| {
+        const without_comment = stripYamlComment(std.mem.trimRight(u8, raw_line, "\r"));
+        if (std.mem.trim(u8, without_comment, " \t").len == 0) continue;
+        const indent = leadingSpaces(without_comment);
+        const trimmed = std.mem.trim(u8, without_comment[indent..], " \t");
+
+        if (indent == 0 and std.mem.eql(u8, trimmed, "blocks:")) {
+            in_blocks = true;
+            in_segments = false;
+            continue;
+        }
+        if (!in_blocks) continue;
+
+        if (std.mem.startsWith(u8, trimmed, "-")) {
+            const item = std.mem.trim(u8, trimmed[1..], " \t");
+            if (in_segments and indent > block_item_indent) {
+                const block_index = current_block_index orelse return error.InvalidOmpTheme;
+                try theme.blocks.items[block_index].segments.append(allocator, .{});
+                current_segment_index = theme.blocks.items[block_index].segments.items.len - 1;
+                if (yamlKeyValue(item)) |kv| {
+                    if (std.mem.eql(u8, kv.key, "type")) {
+                        try setOwned(allocator, &theme.blocks.items[block_index].segments.items[current_segment_index.?].kind, yamlScalar(kv.value));
+                    }
+                }
+            } else {
+                try theme.blocks.append(allocator, .{});
+                current_block_index = theme.blocks.items.len - 1;
+                current_segment_index = null;
+                block_item_indent = indent;
+                in_segments = false;
+                if (yamlKeyValue(item)) |kv| try applyOmpYamlBlockField(allocator, &theme.blocks.items[current_block_index.?], kv.key, kv.value);
+            }
+            continue;
+        }
+
+        const block_index = current_block_index orelse continue;
+        if (yamlKeyValue(trimmed)) |kv| {
+            if (std.mem.eql(u8, kv.key, "segments")) {
+                in_segments = true;
+                current_segment_index = null;
+            } else if (in_segments) {
+                if (current_segment_index) |segment_index| {
+                    if (std.mem.eql(u8, kv.key, "type")) {
+                        try setOwned(allocator, &theme.blocks.items[block_index].segments.items[segment_index].kind, yamlScalar(kv.value));
+                    }
+                }
+            } else {
+                try applyOmpYamlBlockField(allocator, &theme.blocks.items[block_index], kv.key, kv.value);
+            }
+        }
+    }
+    return theme;
+}
+
+const YamlKeyValue = struct {
+    key: []const u8,
+    value: []const u8,
+};
+
+fn yamlKeyValue(line: []const u8) ?YamlKeyValue {
+    const colon = std.mem.indexOfScalar(u8, line, ':') orelse return null;
+    const key = std.mem.trim(u8, line[0..colon], " \t");
+    if (key.len == 0) return null;
+    return .{ .key = key, .value = std.mem.trim(u8, line[colon + 1 ..], " \t") };
+}
+
+fn yamlScalar(value: []const u8) []const u8 {
+    if (value.len >= 2 and ((value[0] == '"' and value[value.len - 1] == '"') or (value[0] == '\'' and value[value.len - 1] == '\''))) {
+        return value[1 .. value.len - 1];
+    }
+    return value;
+}
+
+fn applyOmpYamlBlockField(allocator: std.mem.Allocator, block: *OmpBlock, key: []const u8, value: []const u8) !void {
+    if (std.mem.eql(u8, key, "type")) {
+        try setOwned(allocator, &block.block_type, yamlScalar(value));
+    } else if (std.mem.eql(u8, key, "alignment")) {
+        try setOwned(allocator, &block.alignment, yamlScalar(value));
+    }
+}
+
+fn setOwned(allocator: std.mem.Allocator, target: *?[]u8, value: []const u8) !void {
+    if (target.*) |owned| allocator.free(owned);
+    target.* = try allocator.dupe(u8, value);
+}
+
+fn stripYamlComment(line: []const u8) []const u8 {
+    var quote: ?u8 = null;
+    for (line, 0..) |byte, index| {
+        if (quote) |active| {
+            if (byte == active) quote = null;
+        } else if (byte == '"' or byte == '\'') {
+            quote = byte;
+        } else if (byte == '#') {
+            return line[0..index];
+        }
+    }
+    return line;
+}
+
+fn leadingSpaces(line: []const u8) usize {
+    var index: usize = 0;
+    while (index < line.len and line[index] == ' ') : (index += 1) {}
+    return index;
+}
+
 const StarshipImport = struct {
     modules: std.ArrayList(shisa_config.ModuleId) = .empty,
     unsupported: std.ArrayList([]const u8) = .empty,
@@ -2262,6 +2470,58 @@ test "omits p10k migration notes when all elements map" {
     defer result.deinit(std.testing.allocator);
 
     try std.testing.expect(result.notes == null);
+}
+
+test "parses oh-my-posh json theme blocks" {
+    const source =
+        \\{
+        \\  "version": 3,
+        \\  "blocks": [
+        \\    {"type": "prompt", "alignment": "left", "segments": [{"type": "path"}, {"type": "git"}]},
+        \\    {"type": "rprompt", "alignment": "right", "segments": [{"type": "time"}]}
+        \\  ]
+        \\}
+        \\
+    ;
+    var theme = try parseOmpTheme(std.testing.allocator, source);
+    defer theme.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 2), theme.blocks.items.len);
+    try std.testing.expectEqualStrings("prompt", theme.blocks.items[0].block_type.?);
+    try std.testing.expectEqualStrings("left", theme.blocks.items[0].alignment.?);
+    try std.testing.expectEqualStrings("path", theme.blocks.items[0].segments.items[0].kind.?);
+    try std.testing.expectEqualStrings("git", theme.blocks.items[0].segments.items[1].kind.?);
+    try std.testing.expectEqualStrings("rprompt", theme.blocks.items[1].block_type.?);
+    try std.testing.expectEqualStrings("time", theme.blocks.items[1].segments.items[0].kind.?);
+}
+
+test "parses oh-my-posh yaml theme blocks" {
+    const source =
+        \\version: 3
+        \\blocks:
+        \\  - type: prompt
+        \\    alignment: left
+        \\    segments:
+        \\      - type: path
+        \\      - foreground: "#fff"
+        \\        type: git
+        \\  - type: rprompt
+        \\    alignment: right
+        \\    segments:
+        \\      - type: time
+        \\
+    ;
+    var theme = try parseOmpTheme(std.testing.allocator, source);
+    defer theme.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 2), theme.blocks.items.len);
+    try std.testing.expectEqualStrings("prompt", theme.blocks.items[0].block_type.?);
+    try std.testing.expectEqualStrings("left", theme.blocks.items[0].alignment.?);
+    try std.testing.expectEqualStrings("path", theme.blocks.items[0].segments.items[0].kind.?);
+    try std.testing.expectEqualStrings("git", theme.blocks.items[0].segments.items[1].kind.?);
+    try std.testing.expectEqualStrings("rprompt", theme.blocks.items[1].block_type.?);
+    try std.testing.expectEqualStrings("right", theme.blocks.items[1].alignment.?);
+    try std.testing.expectEqualStrings("time", theme.blocks.items[1].segments.items[0].kind.?);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {

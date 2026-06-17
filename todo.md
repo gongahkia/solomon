@@ -749,7 +749,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 22.3 CJK width
 - [ ] Implement UAX-11 East Asian Width handling
 - [ ] Width-aware truncation
-- [ ] Fixture strings for Chinese, Japanese, Korean
+- [x] Fixture strings for Chinese, Japanese, Korean
 - [ ] Snapshot tests
 
 ### 22.4 Translation workflow

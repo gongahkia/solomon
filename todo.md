@@ -862,7 +862,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] `SIGTERM` drains in 5 s, unlinks socket
 - [x] `SIGUSR1` reload
 - [x] `SIGUSR2` stack dump
-- [ ] Tests for each signal handler
+- [x] Tests for each signal handler
 
 ### 26.4 Health + metrics
 - [ ] `shisad --health` exit-0/exit-1

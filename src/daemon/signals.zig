@@ -29,3 +29,25 @@ fn handleSignal(signal: i32) callconv(.c) void {
         else => {},
     }
 }
+
+test "term and int request shutdown" {
+    shutdown_requested.store(false, .seq_cst);
+    handleSignal(std.posix.SIG.TERM);
+    try std.testing.expect(shutdown_requested.load(.seq_cst));
+
+    shutdown_requested.store(false, .seq_cst);
+    handleSignal(std.posix.SIG.INT);
+    try std.testing.expect(shutdown_requested.load(.seq_cst));
+}
+
+test "usr1 requests reload" {
+    reload_requested.store(false, .seq_cst);
+    handleSignal(std.posix.SIG.USR1);
+    try std.testing.expect(reload_requested.load(.seq_cst));
+}
+
+test "usr2 requests stack dump" {
+    stack_dump_requested.store(false, .seq_cst);
+    handleSignal(std.posix.SIG.USR2);
+    try std.testing.expect(stack_dump_requested.load(.seq_cst));
+}

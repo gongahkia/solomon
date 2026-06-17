@@ -392,6 +392,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const log_test_run = b.addRunArtifact(log_tests);
+    const signals_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/daemon/signals.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const signals_test_run = b.addRunArtifact(signals_tests);
     const cache_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/cache.zig"),
@@ -725,6 +733,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&vcs_worktree_test_run.step);
     test_step.dependOn(&lock_test_run.step);
     test_step.dependOn(&log_test_run.step);
+    test_step.dependOn(&signals_test_run.step);
     test_step.dependOn(&cache_test_run.step);
     test_step.dependOn(&warmup_test_run.step);
     test_step.dependOn(&fsnotify_test_run.step);

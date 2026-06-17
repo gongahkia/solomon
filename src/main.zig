@@ -82,6 +82,11 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[1], "import-p10k")) {
+        try importP10k(allocator, args[2..]);
+        return;
+    }
+
     if (std.mem.eql(u8, args[1], "bench")) {
         try bench(allocator, args[2..]);
         return;
@@ -1716,6 +1721,89 @@ test "parses p10k POWERLEVEL9K assignments" {
     try expectP10kValues(imported, "MODE", &.{"nerdfont-complete"});
 }
 
+fn importP10k(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len != 1) return error.UnknownImportP10kArgument;
+
+    const source = try std.fs.cwd().readFileAlloc(allocator, args[0], max_config_bytes);
+    defer allocator.free(source);
+
+    const output = try importP10kAlloc(allocator, source);
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn importP10kAlloc(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
+    var p10k = try parseP10kConfig(allocator, source);
+    defer p10k.deinit(allocator);
+
+    var imported = StarshipImport{};
+    defer imported.deinit(allocator);
+
+    const left = if (p10k.find("LEFT_PROMPT_ELEMENTS")) |setting| setting.values.items else &.{};
+    const right = if (p10k.find("RIGHT_PROMPT_ELEMENTS")) |setting| setting.values.items else &.{};
+
+    for (left) |element| try mapP10kElement(allocator, element, &imported);
+    for (right) |element| try mapP10kElement(allocator, element, &imported);
+
+    if (imported.modules.items.len == 0) {
+        inline for (.{ .cwd, .git_branch, .exit_status, .jobs, .cmd_duration, .user_host }) |module_id| {
+            try appendModule(allocator, &imported, module_id);
+        }
+    }
+
+    return renderP10kImportedConfigAlloc(allocator, imported, left, right);
+}
+
+fn renderP10kImportedConfigAlloc(allocator: std.mem.Allocator, imported: StarshipImport, left: []const []u8, right: []const []u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    try out.appendSlice(allocator, "version = 1\n");
+    try out.appendSlice(allocator, "theme = \"plain\"\n\n");
+    try appendP10kLayoutComment(allocator, &out, "left", left);
+    try appendP10kLayoutComment(allocator, &out, "right", right);
+    try out.appendSlice(allocator, "[prompt]\nmodules = [");
+    for (imported.modules.items, 0..) |module_id, index| {
+        if (index != 0) try out.appendSlice(allocator, ", ");
+        try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+    }
+    try out.appendSlice(allocator, "]\n");
+
+    if (containsModule(imported, .language_versions) and (imported.python or imported.node or imported.rust or imported.go)) {
+        try out.appendSlice(allocator, "\n[modules.language_versions]\ndetect = [");
+        var count: usize = 0;
+        if (imported.python) try appendLanguage(allocator, &out, &count, "python");
+        if (imported.node) try appendLanguage(allocator, &out, &count, "node");
+        if (imported.rust) try appendLanguage(allocator, &out, &count, "rust");
+        if (imported.go) try appendLanguage(allocator, &out, &count, "go");
+        try out.appendSlice(allocator, "]\n");
+    }
+
+    if (containsModule(imported, .time)) {
+        try out.appendSlice(allocator, "\n[modules.time]\nformat = \"24h\"\nutc = true\n");
+    }
+
+    if (imported.unsupported.items.len != 0) {
+        try out.appendSlice(allocator, "\n# Unsupported Powerlevel10k elements: ");
+        for (imported.unsupported.items, 0..) |name, index| {
+            if (index != 0) try out.appendSlice(allocator, ", ");
+            try out.appendSlice(allocator, name);
+        }
+        try out.append(allocator, '\n');
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendP10kLayoutComment(allocator: std.mem.Allocator, out: *std.ArrayList(u8), side: []const u8, elements: []const []u8) !void {
+    try appendFmt(allocator, out, "# Powerlevel10k {s} elements: ", .{side});
+    for (elements, 0..) |element, index| {
+        if (index != 0) try out.appendSlice(allocator, ", ");
+        try out.appendSlice(allocator, element);
+    }
+    try out.append(allocator, '\n');
+}
+
 const StarshipImport = struct {
     modules: std.ArrayList(shisa_config.ModuleId) = .empty,
     unsupported: std.ArrayList([]const u8) = .empty,
@@ -2045,6 +2133,20 @@ test "maps p10k elements to shisa modules" {
     try std.testing.expect(imported.rust);
     try std.testing.expectEqual(@as(usize, 1), imported.unsupported.items.len);
     try std.testing.expectEqualStrings("public_ip", imported.unsupported.items[0]);
+}
+
+test "imports p10k left and right layout" {
+    const source =
+        \\typeset -g POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(dir vcs)
+        \\typeset -g POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(status command_execution_time time)
+        \\
+    ;
+    const output = try importP10kAlloc(std.testing.allocator, source);
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "# Powerlevel10k left elements: dir, vcs") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "# Powerlevel10k right elements: status, command_execution_time, time") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "modules = [\"cwd\", \"git_branch\", \"exit_status\", \"cmd_duration\", \"time\"]") != null);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {
@@ -2856,6 +2958,8 @@ const help_text =
     \\  explain       print resolved module pipeline
     \\  import-starship <path>
     \\                translate starship.toml to shisa.toml
+    \\  import-p10k <path>
+    \\                translate .p10k.zsh to shisa.toml
     \\  init          write default shisa.toml
     \\  pin           mark a path as never-evicted
     \\  plugin        install, list, enable, disable, or trust plugins

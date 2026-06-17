@@ -451,7 +451,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [ ] `shisa plugin install <name>` from marketplace
 - [ ] `shisa plugin search <query>`
 - [ ] `shisa plugin doctor` for plugin self-diagnosis
-- [ ] Community moderation policy (`docs/plugin-policy.md`)
+- [x] Community moderation policy (`docs/plugin-policy.md`)
 - [ ] Plugin author quickstart (`docs/authoring-plugins.md`)
 - [ ] Sample plugin template repo (`shisa-plugin-template`)
 - [ ] Bug bounty for sandbox escapes (small, via GitHub sponsors)

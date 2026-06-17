@@ -51,6 +51,8 @@ Optional fields:
 
 See `docs/plugin-manifest.md` for exact validation rules.
 
+Marketplace review and delisting rules live in [Plugin Policy](plugin-policy.md).
+
 ## Sandbox
 
 The sandbox removes these globals:

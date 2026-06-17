@@ -792,7 +792,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Detect revert (in-progress / sequence)
 - [x] Detect bisect (good / bad / current)
 - [x] Detect `git am` (in-progress)
-- [ ] Detect detached HEAD
+- [x] Detect detached HEAD
 - [ ] Surface each as a distinct glyph + a11y label
 
 ### 24.2 Working tree

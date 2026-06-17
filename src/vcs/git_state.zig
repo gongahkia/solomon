@@ -51,6 +51,15 @@ pub fn detectMergeState(git_dir: std.fs.Dir) bool {
     return entryExists(git_dir, "MERGE_HEAD");
 }
 
+pub fn detectDetachedHead(allocator: std.mem.Allocator, git_dir: std.fs.Dir) !bool {
+    const head = git_dir.readFileAlloc(allocator, "HEAD", 4096) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return err,
+    };
+    defer allocator.free(head);
+    return !std.mem.startsWith(u8, std.mem.trim(u8, head, " \t\r\n"), "ref: refs/");
+}
+
 pub fn detectRebaseState(git_dir: std.fs.Dir) !RebaseState {
     if (entryExists(git_dir, "rebase-merge")) {
         if (entryExists(git_dir, "rebase-merge/interactive") or entryExists(git_dir, "rebase-merge/git-rebase-todo")) {
@@ -220,6 +229,24 @@ test "detects git am state" {
     defer git_dir.close();
     try git_dir.writeFile(.{ .sub_path = "rebase-apply/applying", .data = "" });
     try std.testing.expect(detectAmState(git_dir));
+}
+
+test "detects attached HEAD" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var git_dir = try makeGitDir(&tmp);
+    defer git_dir.close();
+    try git_dir.writeFile(.{ .sub_path = "HEAD", .data = "ref: refs/heads/main\n" });
+    try std.testing.expect(!try detectDetachedHead(std.testing.allocator, git_dir));
+}
+
+test "detects detached HEAD" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var git_dir = try makeGitDir(&tmp);
+    defer git_dir.close();
+    try git_dir.writeFile(.{ .sub_path = "HEAD", .data = "0123456789abcdef0123456789abcdef01234567\n" });
+    try std.testing.expect(try detectDetachedHead(std.testing.allocator, git_dir));
 }
 
 fn makeGitDir(tmp: *std.testing.TmpDir) !std.fs.Dir {

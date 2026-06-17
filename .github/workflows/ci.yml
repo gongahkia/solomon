@@ -63,6 +63,21 @@ jobs:
 
       - run: bash scripts/no-interactive-tui-check.sh
 
+  theme-contrast:
+    name: theme contrast
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.15.2
+          use-cache: true
+          cache-key: shisa-theme-${{ hashFiles('build.zig.zon') }}
+
+      - run: bash scripts/theme-contrast-gate.sh
+
   vcs-fixtures:
     name: vcs fixtures / ${{ matrix.module }}
     runs-on: ubuntu-24.04

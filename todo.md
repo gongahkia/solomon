@@ -699,7 +699,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 ### 21.1 Contrast enforcement
 - [x] Implement Oklab contrast calculator
 - [x] `shisa theme validate` enforces ≥ 4.5:1 (text) and ≥ 3:1 (UI signals)
-- [ ] CI gate: refuse new themes failing contrast
+- [x] CI gate: refuse new themes failing contrast
 
 ### 21.2 Non-color signal layer
 - [ ] Every risk-encoding color also has a glyph

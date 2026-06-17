@@ -6,6 +6,8 @@ pub const aws_ce_target = "AWSInsightsIndexService.GetCostAndUsage";
 pub const aws_ce_service = "ce";
 pub const aws_ce_region = "us-east-1";
 pub const gcp_billing_endpoint = "https://cloudbilling.googleapis.com/v1";
+pub const azure_management_endpoint = "https://management.azure.com";
+pub const azure_cost_management_api_version = "2025-03-01";
 
 pub const Money = struct {
     amount: []u8,
@@ -114,6 +116,43 @@ pub fn gcpBillingAccountsCliArgvAlloc(allocator: std.mem.Allocator) ![][]u8 {
     return args.toOwnedSlice(allocator);
 }
 
+pub fn azureCostManagementQueryUrlAlloc(allocator: std.mem.Allocator, scope: []const u8) ![]u8 {
+    const trimmed = std.mem.trim(u8, scope, " \t\r\n/");
+    if (trimmed.len == 0) return error.InvalidScope;
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}/{s}/providers/Microsoft.CostManagement/query?api-version={s}",
+        .{ azure_management_endpoint, trimmed, azure_cost_management_api_version },
+    );
+}
+
+pub fn azureMonthToDatePayloadAlloc(allocator: std.mem.Allocator) ![]u8 {
+    return allocator.dupe(u8, "{\"type\":\"Usage\",\"timeframe\":\"MonthToDate\",\"dataset\":{\"granularity\":\"None\",\"aggregation\":{\"totalCost\":{\"name\":\"PreTaxCost\",\"function\":\"Sum\"}}}}");
+}
+
+pub fn azureCostManagementCliArgvAlloc(allocator: std.mem.Allocator, scope: []const u8) ![][]u8 {
+    const url = try azureCostManagementQueryUrlAlloc(allocator, scope);
+    errdefer allocator.free(url);
+    const body = try azureMonthToDatePayloadAlloc(allocator);
+    errdefer allocator.free(body);
+    var args: std.ArrayList([]u8) = .empty;
+    errdefer {
+        freePartialArgv(allocator, args.items);
+        args.deinit(allocator);
+    }
+    try appendArg(allocator, &args, "az");
+    try appendArg(allocator, &args, "rest");
+    try appendArg(allocator, &args, "--method");
+    try appendArg(allocator, &args, "post");
+    try appendArg(allocator, &args, "--url");
+    try args.append(allocator, url);
+    try appendArg(allocator, &args, "--body");
+    try args.append(allocator, body);
+    try appendArg(allocator, &args, "--output");
+    try appendArg(allocator, &args, "json");
+    return args.toOwnedSlice(allocator);
+}
+
 pub fn freeArgv(allocator: std.mem.Allocator, argv: [][]u8) void {
     freePartialArgv(allocator, argv);
     allocator.free(argv);
@@ -155,6 +194,24 @@ pub fn readGcpPrimaryBillingAccountWithCliAlloc(allocator: std.mem.Allocator) !?
     return parseGcpPrimaryBillingAccountAlloc(allocator, result.stdout);
 }
 
+pub fn readAzureMonthToDateCostWithCliAlloc(allocator: std.mem.Allocator, scope: []const u8) !?Money {
+    const argv = try azureCostManagementCliArgvAlloc(allocator, scope);
+    defer freeArgv(allocator, argv);
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .max_output_bytes = 1024 * 1024,
+        .expand_arg0 = .expand,
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!switch (result.term) {
+        .Exited => |code| code == 0,
+        else => false,
+    }) return error.AzureCliFailed;
+    return parseAzurePreTaxCostAlloc(allocator, result.stdout);
+}
+
 pub fn parseAwsUnblendedCostAlloc(allocator: std.mem.Allocator, source: []const u8) !?Money {
     var parsed = std.json.parseFromSlice(AwsCostResponse, allocator, source, .{ .ignore_unknown_fields = true }) catch return null;
     defer parsed.deinit();
@@ -168,6 +225,33 @@ pub fn parseAwsUnblendedCostAlloc(allocator: std.mem.Allocator, source: []const 
             .amount = owned_amount,
             .unit = try allocator.dupe(u8, if (unit.len == 0) "USD" else unit),
         };
+    }
+    return null;
+}
+
+pub fn parseAzurePreTaxCostAlloc(allocator: std.mem.Allocator, source: []const u8) !?Money {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, source, .{}) catch return null;
+    defer parsed.deinit();
+    const properties = jsonObjectField(parsed.value, "properties") orelse return null;
+    const columns = jsonArrayField(properties, "columns") orelse return null;
+    const rows = jsonArrayField(properties, "rows") orelse return null;
+    const amount_index = azureColumnIndex(columns, "PreTaxCost") orelse return null;
+    const currency_index = azureColumnIndex(columns, "Currency");
+    for (rows.items) |row_value| {
+        const row = switch (row_value) {
+            .array => |array| array,
+            else => continue,
+        };
+        if (amount_index >= row.items.len) continue;
+        const amount = (try jsonScalarTextAlloc(allocator, row.items[amount_index])) orelse continue;
+        errdefer allocator.free(amount);
+        const unit = if (currency_index) |index| unit: {
+            if (index < row.items.len) {
+                if (try jsonScalarTextAlloc(allocator, row.items[index])) |value| break :unit value;
+            }
+            break :unit try allocator.dupe(u8, "USD");
+        } else try allocator.dupe(u8, "USD");
+        return Money{ .amount = amount, .unit = unit };
     }
     return null;
 }
@@ -205,6 +289,53 @@ fn gcpDisplayName(account: GcpBillingAccountJson) []const u8 {
     const display_name = std.mem.trim(u8, account.displayName, " \t\r\n");
     if (display_name.len != 0) return display_name;
     return std.mem.trim(u8, account.display_name, " \t\r\n");
+}
+
+fn azureColumnIndex(columns: std.json.Array, name: []const u8) ?usize {
+    for (columns.items, 0..) |column, index| {
+        const column_name = jsonObjectStringField(column, "name") orelse continue;
+        if (std.mem.eql(u8, column_name, name)) return index;
+    }
+    return null;
+}
+
+fn jsonObjectField(value: std.json.Value, name: []const u8) ?std.json.Value {
+    return switch (value) {
+        .object => |object| object.get(name),
+        else => null,
+    };
+}
+
+fn jsonArrayField(value: std.json.Value, name: []const u8) ?std.json.Array {
+    const field = jsonObjectField(value, name) orelse return null;
+    return switch (field) {
+        .array => |array| array,
+        else => null,
+    };
+}
+
+fn jsonObjectStringField(value: std.json.Value, name: []const u8) ?[]const u8 {
+    const field = jsonObjectField(value, name) orelse return null;
+    return switch (field) {
+        .string => |text| text,
+        else => null,
+    };
+}
+
+fn jsonScalarTextAlloc(allocator: std.mem.Allocator, value: std.json.Value) !?[]u8 {
+    return switch (value) {
+        .string => |text| try trimmedDupeAlloc(allocator, text),
+        .number_string => |text| try trimmedDupeAlloc(allocator, text),
+        .integer => |number| @as(?[]u8, try std.fmt.allocPrint(allocator, "{d}", .{number})),
+        .float => |number| @as(?[]u8, try std.fmt.allocPrint(allocator, "{d}", .{number})),
+        else => null,
+    };
+}
+
+fn trimmedDupeAlloc(allocator: std.mem.Allocator, value: []const u8) !?[]u8 {
+    const trimmed = std.mem.trim(u8, value, " \t\r\n");
+    if (trimmed.len == 0) return null;
+    return @as(?[]u8, try allocator.dupe(u8, trimmed));
 }
 
 pub fn validIsoDate(value: []const u8) bool {
@@ -263,6 +394,26 @@ test "builds gcp billing accounts REST URL" {
     try std.testing.expectEqualStrings("https://cloudbilling.googleapis.com/v1/billingAccounts", url);
 }
 
+test "builds azure cost management REST URL" {
+    const url = try azureCostManagementQueryUrlAlloc(std.testing.allocator, "/subscriptions/00000000-0000-0000-0000-000000000000/");
+    defer std.testing.allocator.free(url);
+    try std.testing.expectEqualStrings("https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.CostManagement/query?api-version=2025-03-01", url);
+}
+
+test "builds azure cost management payload" {
+    const payload = try azureMonthToDatePayloadAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(payload);
+    try std.testing.expectEqualStrings("{\"type\":\"Usage\",\"timeframe\":\"MonthToDate\",\"dataset\":{\"granularity\":\"None\",\"aggregation\":{\"totalCost\":{\"name\":\"PreTaxCost\",\"function\":\"Sum\"}}}}", payload);
+}
+
+test "builds azure cost management cli argv" {
+    const argv = try azureCostManagementCliArgvAlloc(std.testing.allocator, "subscriptions/sub-1");
+    defer freeArgv(std.testing.allocator, argv);
+    const expected = [_][]const u8{ "az", "rest", "--method", "post", "--url", "https://management.azure.com/subscriptions/sub-1/providers/Microsoft.CostManagement/query?api-version=2025-03-01", "--body", "{\"type\":\"Usage\",\"timeframe\":\"MonthToDate\",\"dataset\":{\"granularity\":\"None\",\"aggregation\":{\"totalCost\":{\"name\":\"PreTaxCost\",\"function\":\"Sum\"}}}}", "--output", "json" };
+    try std.testing.expectEqual(expected.len, argv.len);
+    for (expected, 0..) |value, index| try std.testing.expectEqualStrings(value, argv[index]);
+}
+
 test "parses aws cost explorer response" {
     var money = (try parseAwsUnblendedCostAlloc(std.testing.allocator,
         \\{
@@ -280,6 +431,25 @@ test "parses aws cost explorer response" {
     )).?;
     defer money.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("12.3400000000", money.amount);
+    try std.testing.expectEqualStrings("USD", money.unit);
+}
+
+test "parses azure cost management response" {
+    var money = (try parseAzurePreTaxCostAlloc(std.testing.allocator,
+        \\{
+        \\  "properties": {
+        \\    "columns": [
+        \\      {"name":"PreTaxCost","type":"Number"},
+        \\      {"name":"Currency","type":"String"}
+        \\    ],
+        \\    "rows": [
+        \\      [12.34, "USD"]
+        \\    ]
+        \\  }
+        \\}
+    )).?;
+    defer money.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("12.34", money.amount);
     try std.testing.expectEqualStrings("USD", money.unit);
 }
 
@@ -311,4 +481,8 @@ test "parses gcp billing accounts REST response" {
 
 test "rejects malformed aws date" {
     try std.testing.expectError(error.InvalidDate, awsGetCostAndUsagePayloadAlloc(std.testing.allocator, "20260601", "2026-07-01"));
+}
+
+test "rejects empty azure scope" {
+    try std.testing.expectError(error.InvalidScope, azureCostManagementQueryUrlAlloc(std.testing.allocator, " / "));
 }

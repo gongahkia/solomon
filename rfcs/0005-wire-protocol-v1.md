@@ -106,7 +106,7 @@ Reload response:
 }
 ```
 
-Subscribe request adds `topics: []string`. Duplicate topics increment a per-connection reference count. The first daemon line is a snapshot event whose `data.refs` object maps each distinct topic to its reference count. Later daemon replies use NDJSON events:
+Subscribe request adds `topics: []string`. Duplicate topics increment a per-connection reference count. The first daemon line is a snapshot event whose `data.refs` object maps each distinct topic to its reference count. Later daemon replies use NDJSON delta events, with monotonically increasing `data.sequence` values per connection:
 
 ```json
 { "v": 1, "request_id": "uuid-v4", "topic": "vcs.summary", "kind": "snapshot", "data": {} }

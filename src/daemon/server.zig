@@ -489,6 +489,7 @@ pub const Server = struct {
         defer std.heap.page_allocator.free(snapshot);
         try writeAll(fd, snapshot);
 
+        var sequence: u64 = 0;
         while (true) {
             const line = readNdjsonLineAlloc(std.heap.page_allocator, fd, 64 * 1024) catch |err| switch (err) {
                 error.ConnectionClosed => return,
@@ -496,6 +497,11 @@ pub const Server = struct {
             };
             defer std.heap.page_allocator.free(line);
             if (std.mem.trim(u8, line, " \t\r\n").len == 0) continue;
+            sequence += 1;
+            const delta_topic = if (topic_refs.len == 0) "subscription" else topic_refs[0].topic;
+            const delta = try subscribeDeltaAlloc(std.heap.page_allocator, parsed.value.request_id, delta_topic, sequence);
+            defer std.heap.page_allocator.free(delta);
+            try writeAll(fd, delta);
             const heartbeat = try subscribeHeartbeatAlloc(std.heap.page_allocator, parsed.value.request_id);
             defer std.heap.page_allocator.free(heartbeat);
             try writeAll(fd, heartbeat);
@@ -811,6 +817,18 @@ fn subscribeHeartbeatAlloc(allocator: std.mem.Allocator, request_id: []const u8)
         allocator,
         "{{\"v\":1,\"request_id\":\"{s}\",\"topic\":\"subscription\",\"kind\":\"heartbeat\",\"data\":{{}}}}\n",
         .{escaped_request_id},
+    );
+}
+
+fn subscribeDeltaAlloc(allocator: std.mem.Allocator, request_id: []const u8, topic: []const u8, sequence: u64) ![]u8 {
+    const escaped_request_id = try json.escapeAlloc(allocator, request_id);
+    defer allocator.free(escaped_request_id);
+    const escaped_topic = try json.escapeAlloc(allocator, topic);
+    defer allocator.free(escaped_topic);
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"v\":1,\"request_id\":\"{s}\",\"topic\":\"{s}\",\"kind\":\"delta\",\"data\":{{\"sequence\":{d}}}}}\n",
+        .{ escaped_request_id, escaped_topic, sequence },
     );
 }
 
@@ -1354,6 +1372,13 @@ test "subscribe op switches connection to bidirectional ndjson" {
     try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"refs\":{\"vcs.summary\":2}") != null);
 
     try writeAll(client_stream.handle, "{\"op\":\"ping\"}\n");
+    const delta = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
+    defer allocator.free(delta);
+    try std.testing.expect(std.mem.endsWith(u8, delta, "\n"));
+    try std.testing.expect(std.mem.indexOf(u8, delta, "\"kind\":\"delta\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, delta, "\"topic\":\"vcs.summary\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, delta, "\"sequence\":1") != null);
+
     const heartbeat = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
     defer allocator.free(heartbeat);
     try std.testing.expect(std.mem.endsWith(u8, heartbeat, "\n"));

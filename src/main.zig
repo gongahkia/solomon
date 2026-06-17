@@ -1569,6 +1569,153 @@ test "worktrees output marks active path" {
     try std.testing.expectEqualStrings("  /repo main\n* /repo-linked feature\n", output);
 }
 
+const P10kSetting = struct {
+    name: []u8,
+    values: std.ArrayList([]u8) = .empty,
+
+    fn deinit(self: *P10kSetting, allocator: std.mem.Allocator) void {
+        allocator.free(self.name);
+        for (self.values.items) |value| allocator.free(value);
+        self.values.deinit(allocator);
+    }
+};
+
+const P10kImport = struct {
+    settings: std.ArrayList(P10kSetting) = .empty,
+
+    fn deinit(self: *P10kImport, allocator: std.mem.Allocator) void {
+        for (self.settings.items) |*setting| setting.deinit(allocator);
+        self.settings.deinit(allocator);
+    }
+
+    fn find(self: P10kImport, name: []const u8) ?P10kSetting {
+        for (self.settings.items) |setting| {
+            if (std.mem.eql(u8, setting.name, name)) return setting;
+        }
+        return null;
+    }
+};
+
+fn parseP10kConfig(allocator: std.mem.Allocator, source: []const u8) !P10kImport {
+    var imported = P10kImport{};
+    errdefer imported.deinit(allocator);
+
+    var active_array: ?usize = null;
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |raw_line| {
+        var line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0 or line[0] == '#') continue;
+
+        if (active_array) |setting_index| {
+            if (std.mem.indexOfScalar(u8, line, ')')) |close_index| {
+                try appendP10kWords(allocator, &imported.settings.items[setting_index], line[0..close_index]);
+                active_array = null;
+            } else {
+                try appendP10kWords(allocator, &imported.settings.items[setting_index], line);
+            }
+            continue;
+        }
+
+        const start = std.mem.indexOf(u8, line, "POWERLEVEL9K_") orelse continue;
+        line = line[start..];
+        const eq_index = std.mem.indexOfScalar(u8, line, '=') orelse continue;
+        const key = std.mem.trim(u8, line[0..eq_index], " \t");
+        if (!validP10kKey(key)) continue;
+
+        const name = key["POWERLEVEL9K_".len..];
+        var setting = P10kSetting{ .name = try allocator.dupe(u8, name) };
+        errdefer setting.deinit(allocator);
+
+        var value = std.mem.trim(u8, line[eq_index + 1 ..], " \t");
+        if (std.mem.startsWith(u8, value, "(")) {
+            value = std.mem.trim(u8, value[1..], " \t");
+            if (std.mem.indexOfScalar(u8, value, ')')) |close_index| {
+                try appendP10kWords(allocator, &setting, value[0..close_index]);
+            } else {
+                try appendP10kWords(allocator, &setting, value);
+                try imported.settings.append(allocator, setting);
+                active_array = imported.settings.items.len - 1;
+                continue;
+            }
+        } else {
+            try appendP10kWords(allocator, &setting, value);
+        }
+        try imported.settings.append(allocator, setting);
+    }
+
+    if (active_array != null) return error.UnclosedP10kArray;
+    return imported;
+}
+
+fn validP10kKey(key: []const u8) bool {
+    if (!std.mem.startsWith(u8, key, "POWERLEVEL9K_")) return false;
+    for (key) |byte| {
+        if (!(std.ascii.isUpper(byte) or std.ascii.isDigit(byte) or byte == '_')) return false;
+    }
+    return true;
+}
+
+fn appendP10kWords(allocator: std.mem.Allocator, setting: *P10kSetting, text: []const u8) !void {
+    var index: usize = 0;
+    while (index < text.len) {
+        while (index < text.len and std.ascii.isWhitespace(text[index])) : (index += 1) {}
+        if (index >= text.len or text[index] == '#') break;
+
+        const start = index;
+        if (text[index] == '\'' or text[index] == '"') {
+            const quote = text[index];
+            index += 1;
+            const value_start = index;
+            while (index < text.len and text[index] != quote) : (index += 1) {}
+            if (index >= text.len) return error.UnclosedP10kQuote;
+            const owned = try allocator.dupe(u8, text[value_start..index]);
+            errdefer allocator.free(owned);
+            try setting.values.append(allocator, owned);
+            index += 1;
+            continue;
+        }
+
+        while (index < text.len and !std.ascii.isWhitespace(text[index]) and text[index] != '#') : (index += 1) {}
+        var value = text[start..index];
+        value = std.mem.trimRight(u8, value, ")");
+        if (value.len != 0) {
+            const owned = try allocator.dupe(u8, value);
+            errdefer allocator.free(owned);
+            try setting.values.append(allocator, owned);
+        }
+    }
+}
+
+fn expectP10kValues(imported: P10kImport, name: []const u8, expected: []const []const u8) !void {
+    const setting = imported.find(name) orelse return error.MissingP10kSetting;
+    try std.testing.expectEqual(expected.len, setting.values.items.len);
+    for (expected, 0..) |value, index| {
+        try std.testing.expectEqualStrings(value, setting.values.items[index]);
+    }
+}
+
+test "parses p10k POWERLEVEL9K assignments" {
+    const source =
+        \\typeset -g POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(
+        \\  dir vcs
+        \\  # comment
+        \\)
+        \\typeset -g POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(status command_execution_time)
+        \\typeset -g POWERLEVEL9K_INSTANT_PROMPT=verbose
+        \\typeset -g POWERLEVEL9K_MODE='nerdfont-complete'
+        \\ZSH_THEME=powerlevel10k/powerlevel10k
+        \\
+    ;
+    var imported = try parseP10kConfig(std.testing.allocator, source);
+    defer imported.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 4), imported.settings.items.len);
+    try expectP10kValues(imported, "LEFT_PROMPT_ELEMENTS", &.{ "dir", "vcs" });
+    try expectP10kValues(imported, "RIGHT_PROMPT_ELEMENTS", &.{ "status", "command_execution_time" });
+    try expectP10kValues(imported, "INSTANT_PROMPT", &.{"verbose"});
+    try expectP10kValues(imported, "MODE", &.{"nerdfont-complete"});
+}
+
 const StarshipImport = struct {
     modules: std.ArrayList(shisa_config.ModuleId) = .empty,
     unsupported: std.ArrayList([]const u8) = .empty,

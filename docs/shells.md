@@ -14,6 +14,8 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 
 `shisa prompt` emits OSC-7 cwd metadata before the rendered prompt so terminals that support it can open new tabs in the current directory. The sequence uses `file://<host><cwd>` and percent-encodes path bytes.
 
+Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from the hook.
+
 ## zsh
 
 - Requires zsh 5.0 or newer.

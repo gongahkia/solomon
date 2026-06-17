@@ -26,6 +26,7 @@
 - [Capabilities](capabilities.md)
 - [Shells](shells.md)
 - [Socket Paths](socket-paths.md)
+- [Supervisor](supervisor.md)
 - [Doctor](doctor.md)
 - [Linux](linux.md)
 - [Deprecations](deprecations.md)

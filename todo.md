@@ -755,7 +755,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 22.4 Translation workflow
 - [x] Document the translation contribution flow
 - [ ] Use Weblate or similar (community-hosted) for translations
-- [ ] CI gate: locale catalog diffs flagged for review
+- [x] CI gate: locale catalog diffs flagged for review
 
 ## Phase 23 â€” Brand + visual identity
 

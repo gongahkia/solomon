@@ -324,8 +324,8 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] AWS Cost Explorer client (read-only, IAM least-priv guide)
 - [x] GCP Billing API client
 - [x] Azure Cost Management client
-- [ ] Background hourly refresh in the daemon (off-thread)
-- [ ] Cache to `~/.local/state/shisa/cost.json`
+- [x] Background hourly refresh in the daemon (off-thread)
+- [x] Cache to `~/.local/state/shisa/cost.json`
 - [ ] Render compact MTD spend per cloud
 - [ ] Document the IAM permissions required and the privacy implications (this calls cloud APIs!)
 

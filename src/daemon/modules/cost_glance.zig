@@ -60,6 +60,40 @@ const GcpBillingAccountsResponse = struct {
     billingAccounts: []GcpBillingAccountJson = &.{},
 };
 
+pub const CostRecord = struct {
+    provider: []const u8,
+    amount: []const u8,
+    unit: []const u8,
+    updated: i64,
+};
+
+pub const CachedCostRecord = struct {
+    provider: []u8,
+    amount: []u8,
+    unit: []u8,
+    updated: i64,
+
+    pub fn deinit(self: *CachedCostRecord, allocator: std.mem.Allocator) void {
+        allocator.free(self.provider);
+        allocator.free(self.amount);
+        allocator.free(self.unit);
+        self.* = undefined;
+    }
+};
+
+const CostCacheJson = struct {
+    v: u32 = 0,
+    updated: i64 = 0,
+    providers: []CostRecordJson = &.{},
+};
+
+const CostRecordJson = struct {
+    provider: []const u8 = "",
+    amount: []const u8 = "",
+    unit: []const u8 = "",
+    updated: i64 = 0,
+};
+
 pub fn awsGetCostAndUsagePayloadAlloc(allocator: std.mem.Allocator, start_date: []const u8, end_date: []const u8) ![]u8 {
     if (!validIsoDate(start_date) or !validIsoDate(end_date)) return error.InvalidDate;
     return std.fmt.allocPrint(
@@ -151,6 +185,121 @@ pub fn azureCostManagementCliArgvAlloc(allocator: std.mem.Allocator, scope: []co
     try appendArg(allocator, &args, "--output");
     try appendArg(allocator, &args, "json");
     return args.toOwnedSlice(allocator);
+}
+
+pub fn costCachePathAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
+    const home_path = home orelse return null;
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/cost.json", .{home_path}));
+}
+
+pub fn writeCostCache(allocator: std.mem.Allocator, path: []const u8, records: []const CostRecord, updated: i64) !void {
+    if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
+    const tmp_path = try std.fmt.allocPrint(allocator, "{s}.tmp", .{path});
+    defer allocator.free(tmp_path);
+    errdefer std.fs.deleteFileAbsolute(tmp_path) catch {};
+    {
+        var file = try std.fs.createFileAbsolute(tmp_path, .{ .truncate = true, .mode = 0o600 });
+        errdefer file.close();
+        try file.writeAll("{\"v\":1,\"updated\":");
+        try writeInt(file, updated);
+        try file.writeAll(",\"providers\":[");
+        for (records, 0..) |record, index| {
+            if (index != 0) try file.writeAll(",");
+            try file.writeAll("{\"provider\":");
+            try writeJsonString(file, record.provider);
+            try file.writeAll(",\"amount\":");
+            try writeJsonString(file, record.amount);
+            try file.writeAll(",\"unit\":");
+            try writeJsonString(file, record.unit);
+            try file.writeAll(",\"updated\":");
+            try writeInt(file, record.updated);
+            try file.writeAll("}");
+        }
+        try file.writeAll("]}\n");
+        try file.sync();
+        file.close();
+    }
+    std.fs.renameAbsolute(tmp_path, path) catch |err| switch (err) {
+        error.FileNotFound => return err,
+        else => return err,
+    };
+}
+
+pub fn readCostCacheAlloc(allocator: std.mem.Allocator, path: []const u8) ![]CachedCostRecord {
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return allocator.alloc(CachedCostRecord, 0),
+        else => return err,
+    };
+    defer allocator.free(source);
+    var parsed = std.json.parseFromSlice(CostCacheJson, allocator, source, .{ .ignore_unknown_fields = true }) catch return allocator.alloc(CachedCostRecord, 0);
+    defer parsed.deinit();
+    var out: std.ArrayList(CachedCostRecord) = .empty;
+    errdefer {
+        for (out.items) |*record| record.deinit(allocator);
+        out.deinit(allocator);
+    }
+    for (parsed.value.providers) |record| {
+        const provider = std.mem.trim(u8, record.provider, " \t\r\n");
+        const amount = std.mem.trim(u8, record.amount, " \t\r\n");
+        const unit = std.mem.trim(u8, record.unit, " \t\r\n");
+        if (provider.len == 0 or amount.len == 0 or unit.len == 0) continue;
+        const owned_provider = try allocator.dupe(u8, provider);
+        errdefer allocator.free(owned_provider);
+        const owned_amount = try allocator.dupe(u8, amount);
+        errdefer allocator.free(owned_amount);
+        try out.append(allocator, .{
+            .provider = owned_provider,
+            .amount = owned_amount,
+            .unit = try allocator.dupe(u8, unit),
+            .updated = record.updated,
+        });
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+pub fn freeCachedRecords(allocator: std.mem.Allocator, records: []CachedCostRecord) void {
+    for (records) |*record| record.deinit(allocator);
+    allocator.free(records);
+}
+
+pub fn refreshCacheFromEnvironment(allocator: std.mem.Allocator, home: ?[]const u8, timestamp: i64) !bool {
+    const path = (try costCachePathAlloc(allocator, home)) orelse return false;
+    defer allocator.free(path);
+
+    var records: [2]CostRecord = undefined;
+    var len: usize = 0;
+
+    var aws_money: ?Money = null;
+    defer if (aws_money) |*money| money.deinit(allocator);
+    const aws_start = envOwned(allocator, "SHISA_COST_AWS_START") catch null;
+    defer if (aws_start) |value| allocator.free(value);
+    const aws_end = envOwned(allocator, "SHISA_COST_AWS_END") catch null;
+    defer if (aws_end) |value| allocator.free(value);
+    if (aws_start != null and aws_end != null) {
+        const profile = envOwned(allocator, "AWS_PROFILE") catch null;
+        defer if (profile) |value| allocator.free(value);
+        aws_money = try readAwsMonthlyCostWithCliAlloc(allocator, profile, aws_start.?, aws_end.?);
+        if (aws_money) |money| {
+            records[len] = .{ .provider = "aws", .amount = money.amount, .unit = money.unit, .updated = timestamp };
+            len += 1;
+        }
+    }
+
+    var azure_money: ?Money = null;
+    defer if (azure_money) |*money| money.deinit(allocator);
+    const azure_scope = envOwned(allocator, "SHISA_COST_AZURE_SCOPE") catch null;
+    defer if (azure_scope) |value| allocator.free(value);
+    if (azure_scope) |scope| {
+        azure_money = try readAzureMonthToDateCostWithCliAlloc(allocator, scope);
+        if (azure_money) |money| {
+            records[len] = .{ .provider = "az", .amount = money.amount, .unit = money.unit, .updated = timestamp };
+            len += 1;
+        }
+    }
+
+    if (len == 0) return false;
+    try writeCostCache(allocator, path, records[0..len], timestamp);
+    return true;
 }
 
 pub fn freeArgv(allocator: std.mem.Allocator, argv: [][]u8) void {
@@ -338,6 +487,40 @@ fn trimmedDupeAlloc(allocator: std.mem.Allocator, value: []const u8) !?[]u8 {
     return @as(?[]u8, try allocator.dupe(u8, trimmed));
 }
 
+fn envOwned(allocator: std.mem.Allocator, name: []const u8) !?[]u8 {
+    const value = std.process.getEnvVarOwned(allocator, name) catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => return null,
+        else => return err,
+    };
+    const trimmed = std.mem.trim(u8, value, " \t\r\n");
+    if (trimmed.len == 0) {
+        allocator.free(value);
+        return null;
+    }
+    return value;
+}
+
+fn writeInt(file: std.fs.File, value: i64) !void {
+    var buffer: [32]u8 = undefined;
+    const text = try std.fmt.bufPrint(&buffer, "{d}", .{value});
+    try file.writeAll(text);
+}
+
+fn writeJsonString(file: std.fs.File, value: []const u8) !void {
+    try file.writeAll("\"");
+    for (value) |byte| {
+        switch (byte) {
+            '"' => try file.writeAll("\\\""),
+            '\\' => try file.writeAll("\\\\"),
+            '\n' => try file.writeAll("\\n"),
+            '\r' => try file.writeAll("\\r"),
+            '\t' => try file.writeAll("\\t"),
+            else => try file.writeAll(&.{byte}),
+        }
+    }
+    try file.writeAll("\"");
+}
+
 pub fn validIsoDate(value: []const u8) bool {
     if (value.len != 10) return false;
     for (value, 0..) |byte, index| {
@@ -414,6 +597,12 @@ test "builds azure cost management cli argv" {
     for (expected, 0..) |value, index| try std.testing.expectEqualStrings(value, argv[index]);
 }
 
+test "builds cost cache path" {
+    const path = (try costCachePathAlloc(std.testing.allocator, "/home/me")).?;
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/home/me/.local/state/shisa/cost.json", path);
+}
+
 test "parses aws cost explorer response" {
     var money = (try parseAwsUnblendedCostAlloc(std.testing.allocator,
         \\{
@@ -432,6 +621,28 @@ test "parses aws cost explorer response" {
     defer money.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("12.3400000000", money.amount);
     try std.testing.expectEqualStrings("USD", money.unit);
+}
+
+test "writes and reads cost cache" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-cost-cache-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    const path = try std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/cost.json", .{dir_path});
+    defer allocator.free(path);
+
+    try writeCostCache(allocator, path, &.{
+        .{ .provider = "aws", .amount = "12.34", .unit = "USD", .updated = 10 },
+        .{ .provider = "az", .amount = "5.67", .unit = "USD", .updated = 10 },
+    }, 10);
+
+    const records = try readCostCacheAlloc(allocator, path);
+    defer freeCachedRecords(allocator, records);
+    try std.testing.expectEqual(@as(usize, 2), records.len);
+    try std.testing.expectEqualStrings("aws", records[0].provider);
+    try std.testing.expectEqualStrings("12.34", records[0].amount);
+    try std.testing.expectEqualStrings("USD", records[0].unit);
+    try std.testing.expectEqualStrings("az", records[1].provider);
 }
 
 test "parses azure cost management response" {

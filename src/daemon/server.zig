@@ -1,6 +1,7 @@
 const std = @import("std");
 const cloud_ctx_module = @import("modules/cloud_ctx.zig");
 const dispatcher = @import("dispatcher.zig");
+const cost_glance_module = @import("modules/cost_glance.zig");
 const git_branch_module = @import("modules/git_branch.zig");
 const iac_workspace_module = @import("modules/iac_workspace.zig");
 const language_versions_module = @import("modules/language_versions.zig");
@@ -49,6 +50,9 @@ pub const Server = struct {
     cloud_ctx_cache: cloud_ctx_module.Cache = .{},
     fs_watcher: fsnotify.Watcher,
     prod_guard_audit_home: ?[]const u8 = null,
+    cost_refresh_shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    cost_refresh_thread: ?std.Thread = null,
+    cost_refresh_home: ?[]u8 = null,
 
     pub fn init(socket_path: []const u8) !Server {
         return initWithLogger(socket_path, null);
@@ -80,6 +84,7 @@ pub const Server = struct {
     }
 
     pub fn deinit(self: *Server) void {
+        self.stopCostRefresh();
         self.git_branch_cache.deinit(std.heap.page_allocator);
         self.language_versions_cache.deinit(std.heap.page_allocator);
         self.cloud_ctx_cache.deinit(std.heap.page_allocator);
@@ -91,6 +96,7 @@ pub const Server = struct {
 
     pub fn serve(self: *Server, shutdown_requested: *const std.atomic.Value(bool)) !void {
         try self.warmupCaches(std.heap.page_allocator);
+        try self.startCostRefresh(std.heap.page_allocator);
         while (!shutdown_requested.load(.seq_cst)) {
             var poll_fds = [_]std.posix.pollfd{.{
                 .fd = self.listener.stream.handle,
@@ -104,6 +110,41 @@ pub const Server = struct {
             if ((poll_fds[0].revents & std.posix.POLL.IN) != 0) {
                 try self.acceptOne();
             }
+        }
+    }
+
+    fn startCostRefresh(self: *Server, allocator: std.mem.Allocator) !void {
+        if (self.cost_refresh_thread != null) return;
+        const home = std.process.getEnvVarOwned(allocator, "HOME") catch |err| switch (err) {
+            error.EnvironmentVariableNotFound => null,
+            else => return err,
+        };
+        self.cost_refresh_home = home;
+        self.cost_refresh_shutdown.store(false, .seq_cst);
+        self.cost_refresh_thread = try std.Thread.spawn(.{}, costRefreshThreadMain, .{self});
+    }
+
+    fn stopCostRefresh(self: *Server) void {
+        self.cost_refresh_shutdown.store(true, .seq_cst);
+        if (self.cost_refresh_thread) |thread| {
+            thread.join();
+            self.cost_refresh_thread = null;
+        }
+        if (self.cost_refresh_home) |home| {
+            std.heap.page_allocator.free(home);
+            self.cost_refresh_home = null;
+        }
+    }
+
+    fn costRefreshLoop(self: *Server) void {
+        var next_refresh_ns: u64 = 0;
+        while (!self.cost_refresh_shutdown.load(.seq_cst)) {
+            const now_ns = nowNs();
+            if (now_ns >= next_refresh_ns) {
+                _ = cost_glance_module.refreshCacheFromEnvironment(std.heap.page_allocator, self.cost_refresh_home, std.time.timestamp()) catch {};
+                next_refresh_ns = now_ns + std.time.ns_per_hour;
+            }
+            std.Thread.sleep(250 * std.time.ns_per_ms);
         }
     }
 
@@ -457,6 +498,10 @@ fn prodGuardAuditPathAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8
 
 fn acceptOneThread(server: *Server) !void {
     try server.acceptOne();
+}
+
+fn costRefreshThreadMain(server: *Server) void {
+    server.costRefreshLoop();
 }
 
 test "accepts one unix socket connection" {

@@ -866,7 +866,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 26.4 Health + metrics
 - [x] `shisad --health` exit-0/exit-1
-- [ ] `shisad --metrics` JSON (cache stats, render histogram, plugins)
+- [x] `shisad --metrics` JSON (cache stats, render histogram, plugins)
 - [ ] Optional Prometheus exporter (off by default)
 
 ### 26.5 Self-update

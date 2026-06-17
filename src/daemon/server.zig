@@ -21,6 +21,7 @@ const default_subscribe_backpressure_limit = 16;
 const max_subscribe_backpressure_limit = 1024;
 pub const graceful_shutdown_timeout_ms: i64 = 5000;
 const shutdown_poll_ms: i32 = 100;
+const render_histogram_buckets = 5;
 pub const daemon_version = "0.1.0-dev";
 pub const protocol_version: u32 = 1;
 const default_config_text =
@@ -133,6 +134,10 @@ pub const Server = struct {
     listener: std.net.Server,
     logger: ?*daemon_log.Logger = null,
     connections: u64 = 0,
+    render_count: u64 = 0,
+    render_total_us: u64 = 0,
+    render_max_us: u64 = 0,
+    render_histogram: [render_histogram_buckets]u64 = [_]u64{0} ** render_histogram_buckets,
     git_branch_cache: git_branch_module.Cache = .{},
     language_versions_cache: language_versions_module.Cache = .{},
     cloud_ctx_cache: cloud_ctx_module.Cache = .{},
@@ -415,6 +420,7 @@ pub const Server = struct {
         const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, rendered.prompt);
         defer std.heap.page_allocator.free(escaped_prompt);
         const elapsed_us = (nowNs() - start_ns) / std.time.ns_per_us;
+        self.recordRender(elapsed_us);
 
         if (rendered.redraw_token) |token| {
             const escaped_token = try json.escapeAlloc(std.heap.page_allocator, token);
@@ -504,6 +510,13 @@ pub const Server = struct {
         }
     }
 
+    fn recordRender(self: *Server, elapsed_us: u64) void {
+        self.render_count += 1;
+        self.render_total_us += elapsed_us;
+        self.render_max_us = @max(self.render_max_us, elapsed_us);
+        self.render_histogram[renderHistogramIndex(elapsed_us)] += 1;
+    }
+
     fn metricsResponseAlloc(self: *Server, allocator: std.mem.Allocator, request: []const u8) ![]u8 {
         const request_id = try requestIdAlloc(allocator, request);
         defer allocator.free(request_id);
@@ -530,8 +543,8 @@ pub const Server = struct {
 
         return std.fmt.allocPrint(
             allocator,
-            "{{\"v\":1,\"request_id\":\"{s}\",\"connections\":{d},\"cache\":{{\"git_branch\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"language_versions\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"cloud_ctx\":{{\"gcp_valid\":{},\"azure_valid\":{},\"kube_valid\":{}}}}},\"fsnotify\":{{\"backend\":\"{s}\",\"registrations\":{d}}}}}",
-            .{ escaped_request_id, self.connections, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid, @tagName(self.fs_watcher.backend), self.fs_watcher.registrations.items.len },
+            "{{\"v\":1,\"request_id\":\"{s}\",\"connections\":{d},\"cache\":{{\"git_branch\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"language_versions\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"cloud_ctx\":{{\"gcp_valid\":{},\"azure_valid\":{},\"kube_valid\":{}}}}},\"render\":{{\"count\":{d},\"total_us\":{d},\"max_us\":{d},\"histogram\":{{\"le_100us\":{d},\"le_500us\":{d},\"le_1000us\":{d},\"le_5000us\":{d},\"gt_5000us\":{d}}}}},\"plugins\":{d},\"fsnotify\":{{\"backend\":\"{s}\",\"registrations\":{d}}}}}",
+            .{ escaped_request_id, self.connections, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid, self.render_count, self.render_total_us, self.render_max_us, self.render_histogram[0], self.render_histogram[1], self.render_histogram[2], self.render_histogram[3], self.render_histogram[4], self.reload_state.plugin_names.len, @tagName(self.fs_watcher.backend), self.fs_watcher.registrations.items.len },
         );
     }
 
@@ -851,6 +864,14 @@ fn writeAll(fd: std.posix.fd_t, bytes: []const u8) !void {
 
 fn nowNs() u64 {
     return @intCast(std.time.nanoTimestamp());
+}
+
+fn renderHistogramIndex(elapsed_us: u64) usize {
+    if (elapsed_us <= 100) return 0;
+    if (elapsed_us <= 500) return 1;
+    if (elapsed_us <= 1000) return 2;
+    if (elapsed_us <= 5000) return 3;
+    return 4;
 }
 
 fn stackDumpMessageAlloc(allocator: std.mem.Allocator) ![]u8 {
@@ -1799,12 +1820,20 @@ test "metrics op returns JSON metrics dump" {
     var server = try Server.init(socket_path);
     defer server.deinit();
     server.connections = 3;
+    server.recordRender(50);
+    server.recordRender(6000);
+    server.reload_state.plugin_names = try std.heap.page_allocator.alloc([]u8, 1);
+    server.reload_state.plugin_names[0] = try std.heap.page_allocator.dupe(u8, "demo-plugin");
 
     const response = try server.metricsResponseAlloc(allocator, "{\"v\":1,\"op\":\"metrics\",\"request_id\":\"metrics-1\"}");
     defer allocator.free(response);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"request_id\":\"metrics-1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"connections\":3") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"git_branch\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"render\":{\"count\":2,\"total_us\":6050,\"max_us\":6000") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"le_100us\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"gt_5000us\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"plugins\":1") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"fsnotify\"") != null);
 }
 

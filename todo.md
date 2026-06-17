@@ -806,7 +806,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Ahead/behind upstream counts (async)
 - [x] Last fetch age (warn if > N hours)
 - [x] HEAD signed-commit state (gpg/ssh)
-- [ ] Branch protection hint (read remote rules, cached)
+- [x] Branch protection hint (read remote rules, cached)
 
 ### 24.4 Mirroring for jj / sapling / hg
 - [x] Map each git state to its native concept

@@ -86,6 +86,16 @@ pub const HeadSignature = struct {
     kind: SignatureKind = .none,
 };
 
+pub const BranchProtectionHint = struct {
+    protected: bool = false,
+    rules: u32 = 0,
+    required_status_checks: u32 = 0,
+    required_approving_reviews: u32 = 0,
+    required_signatures: bool = false,
+    force_push_blocked: bool = false,
+    deletion_blocked: bool = false,
+};
+
 pub fn parseAheadBehind(output: []const u8) ?AheadBehind {
     var tokens = std.mem.tokenizeAny(u8, output, " \t\r\n");
     const behind_text = tokens.next() orelse return null;
@@ -93,6 +103,124 @@ pub fn parseAheadBehind(output: []const u8) ?AheadBehind {
     return .{
         .behind = std.fmt.parseInt(u32, behind_text, 10) catch return null,
         .ahead = std.fmt.parseInt(u32, ahead_text, 10) catch return null,
+    };
+}
+
+pub fn readBranchProtectionHint(allocator: std.mem.Allocator, path: []const u8) !?BranchProtectionHint {
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 256 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(source);
+    return parseBranchProtectionHint(allocator, source);
+}
+
+pub fn parseBranchProtectionHint(allocator: std.mem.Allocator, source: []const u8) !?BranchProtectionHint {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, source, .{}) catch return null;
+    defer parsed.deinit();
+    return branchProtectionHintFromJson(parsed.value);
+}
+
+pub fn branchProtectionSignal(hint: BranchProtectionHint) ?PromptSignal {
+    if (!hint.protected) return null;
+    if (hint.required_approving_reviews > 0 and hint.required_status_checks > 0) {
+        return .{ .glyph = "protected:review+ci", .a11y = "branch protected with required reviews and status checks" };
+    }
+    if (hint.required_approving_reviews > 0) return .{ .glyph = "protected:review", .a11y = "branch protected with required reviews" };
+    if (hint.required_status_checks > 0) return .{ .glyph = "protected:ci", .a11y = "branch protected with required status checks" };
+    if (hint.required_signatures) return .{ .glyph = "protected:signed", .a11y = "branch protected with required signatures" };
+    return .{ .glyph = "protected", .a11y = "branch protected" };
+}
+
+fn branchProtectionHintFromJson(value: std.json.Value) ?BranchProtectionHint {
+    var hint = BranchProtectionHint{};
+    switch (value) {
+        .array => |array| {
+            for (array.items) |entry| applyBranchRule(&hint, entry);
+            hint.protected = hint.rules > 0;
+            return hint;
+        },
+        .object => |object| {
+            hint.protected = jsonBool(object.get("protected")) orelse (object.count() > 0);
+            applyClassicBranchProtection(&hint, value);
+            return hint;
+        },
+        else => return null,
+    }
+}
+
+fn applyBranchRule(hint: *BranchProtectionHint, value: std.json.Value) void {
+    const object = switch (value) {
+        .object => |object| object,
+        else => return,
+    };
+    const rule_type = jsonString(object.get("type")) orelse return;
+    hint.rules += 1;
+    if (std.mem.eql(u8, rule_type, "pull_request")) {
+        hint.required_approving_reviews = @max(hint.required_approving_reviews, jsonU32(jsonField(value, "parameters", "required_approving_review_count")) orelse 1);
+    } else if (std.mem.eql(u8, rule_type, "required_status_checks")) {
+        hint.required_status_checks += @max(@as(u32, 1), jsonArrayLen(jsonField(value, "parameters", "required_status_checks")));
+    } else if (std.mem.eql(u8, rule_type, "required_signatures")) {
+        hint.required_signatures = true;
+    } else if (std.mem.eql(u8, rule_type, "non_fast_forward")) {
+        hint.force_push_blocked = true;
+    } else if (std.mem.eql(u8, rule_type, "deletion")) {
+        hint.deletion_blocked = true;
+    }
+}
+
+fn applyClassicBranchProtection(hint: *BranchProtectionHint, value: std.json.Value) void {
+    if (jsonField(value, "required_pull_request_reviews", "required_approving_review_count")) |count| {
+        hint.required_approving_reviews = @max(hint.required_approving_reviews, jsonU32(count) orelse 1);
+    }
+    if (jsonField(value, "required_status_checks", "contexts")) |contexts| {
+        hint.required_status_checks += @max(@as(u32, 1), jsonArrayLen(contexts));
+    }
+    if (jsonBool(jsonField(value, "required_signatures", "enabled")) orelse false) hint.required_signatures = true;
+    if (jsonBool(jsonField(value, "allow_force_pushes", "enabled"))) |enabled| {
+        if (!enabled) hint.force_push_blocked = true;
+    }
+    if (jsonBool(jsonField(value, "allow_deletions", "enabled"))) |enabled| {
+        if (!enabled) hint.deletion_blocked = true;
+    }
+}
+
+fn jsonField(value: std.json.Value, parent: []const u8, child: []const u8) ?std.json.Value {
+    const parent_value = switch (value) {
+        .object => |object| object.get(parent) orelse return null,
+        else => return null,
+    };
+    return switch (parent_value) {
+        .object => |object| object.get(child),
+        else => null,
+    };
+}
+
+fn jsonString(value: ?std.json.Value) ?[]const u8 {
+    return switch (value orelse return null) {
+        .string => |text| text,
+        else => null,
+    };
+}
+
+fn jsonBool(value: ?std.json.Value) ?bool {
+    return switch (value orelse return null) {
+        .bool => |enabled| enabled,
+        else => null,
+    };
+}
+
+fn jsonU32(value: ?std.json.Value) ?u32 {
+    return switch (value orelse return null) {
+        .integer => |number| if (number >= 0 and number <= std.math.maxInt(u32)) @intCast(number) else null,
+        else => null,
+    };
+}
+
+fn jsonArrayLen(value: ?std.json.Value) u32 {
+    return switch (value orelse return 0) {
+        .array => |array| @intCast(@min(array.items.len, std.math.maxInt(u32))),
+        else => 0,
     };
 }
 
@@ -631,6 +759,47 @@ test "parses ahead behind counts" {
     try std.testing.expectEqual(@as(u32, 3), counts.behind);
     try std.testing.expectEqual(@as(u32, 5), counts.ahead);
     try std.testing.expect(parseAheadBehind("bad\n") == null);
+}
+
+test "parses cached branch rules hint" {
+    const hint = (try parseBranchProtectionHint(std.testing.allocator,
+        \\[
+        \\  {"type":"pull_request","parameters":{"required_approving_review_count":2}},
+        \\  {"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"ci"}]}},
+        \\  {"type":"required_signatures"},
+        \\  {"type":"non_fast_forward"},
+        \\  {"type":"deletion"}
+        \\]
+    )).?;
+    try std.testing.expect(hint.protected);
+    try std.testing.expectEqual(@as(u32, 5), hint.rules);
+    try std.testing.expectEqual(@as(u32, 2), hint.required_approving_reviews);
+    try std.testing.expectEqual(@as(u32, 1), hint.required_status_checks);
+    try std.testing.expect(hint.required_signatures);
+    try std.testing.expect(hint.force_push_blocked);
+    try std.testing.expect(hint.deletion_blocked);
+}
+
+test "parses classic branch protection hint" {
+    const hint = (try parseBranchProtectionHint(std.testing.allocator,
+        \\{
+        \\  "protected": true,
+        \\  "required_pull_request_reviews": {"required_approving_review_count": 1},
+        \\  "required_status_checks": {"contexts": ["ci", "lint"]},
+        \\  "allow_force_pushes": {"enabled": false},
+        \\  "allow_deletions": {"enabled": false}
+        \\}
+    )).?;
+    try std.testing.expect(hint.protected);
+    try std.testing.expectEqual(@as(u32, 1), hint.required_approving_reviews);
+    try std.testing.expectEqual(@as(u32, 2), hint.required_status_checks);
+    try std.testing.expect(hint.force_push_blocked);
+    try std.testing.expect(hint.deletion_blocked);
+}
+
+test "formats branch protection signal" {
+    try expectSignal(branchProtectionSignal(.{ .protected = true, .required_approving_reviews = 1, .required_status_checks = 2 }).?, "protected:review+ci", "branch protected with required reviews and status checks");
+    try std.testing.expect(branchProtectionSignal(.{}) == null);
 }
 
 test "parses head signature status" {

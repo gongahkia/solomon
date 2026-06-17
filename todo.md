@@ -555,7 +555,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Migrate existing RFC-000{1..5} into the template format
 - [x] Add RFC index in `rfcs/README.md`
 - [x] CI gate: protocol/security/plugin-API changes require an RFC link in the PR body
-- [ ] 14-day public comment window automation via GitHub label
+- [x] 14-day public comment window automation via GitHub label
 
 ### 17.3 Maintainer onboarding
 - [ ] Write `docs/governance/maintainer-onboarding.md`

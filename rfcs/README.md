@@ -2,6 +2,8 @@
 
 RFCs are required for changes to the wire protocol, plugin API, security model, theme/rendering spec, or governance process.
 
+PRs under public RFC review carry the `rfc-comment-window` label. The label starts a 14-day gate; CI passes after the label has been present for 14 days.
+
 | RFC | Title | Status | Area |
 | --- | --- | --- | --- |
 | [0000](0000-template.md) | Template | Active | core |

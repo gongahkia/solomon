@@ -816,7 +816,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 24.5 Performance
 - [ ] Use libgit2 bindings via Zig FFI (avoid spawning git)
 - [ ] Benchmark all states on a 1M-commit repo
-- [ ] Document fallback to spawning when libgit2 missing
+- [x] Document fallback to spawning when libgit2 missing
 
 ## Phase 25 â€” Feedback + community
 

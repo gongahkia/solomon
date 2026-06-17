@@ -2,6 +2,14 @@
 
 `shisa.vcs` is incubating. Core helpers start with repository detection and fixture-backed parsing, then move to async prompt rendering.
 
+## Git
+
+The planned Git fast path is libgit2 through Zig FFI. When libgit2 bindings, the dynamic library, or a compatible runtime version are unavailable, Shisa falls back to spawned `git` commands from daemon-owned async workers.
+
+Fallback spawning is not part of the shell hook hot path. The prompt renderer may return cached Git state or a pending async marker while the daemon refreshes state. Filesystem invalidation on `.git/HEAD`, `.git/index`, and the repository root controls cache freshness; generation checks prevent stale worker output from replacing newer cwd state.
+
+The fallback must preserve the same parser contract as the libgit2 path: branch/ref state, working-tree counts, operation states, upstream counts, LFS/submodule summaries, signature state, and branch-protection hints are normalized before rendering.
+
 ## Jujutsu
 
 Detection:

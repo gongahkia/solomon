@@ -532,7 +532,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Unit tests via `plenary.nvim` test harness
 
 ### 16.5 Zed bridge
-- [ ] Zed extension scaffold under `contrib/editor-bridges/shisa-zed/`
+- [x] Zed extension scaffold under `contrib/editor-bridges/shisa-zed/`
 - [ ] Submit to Zed extensions marketplace
 - [ ] Document the manifest + signing requirements
 

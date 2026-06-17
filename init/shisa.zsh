@@ -33,6 +33,7 @@ typeset -g SHISA_NEXTCMD_ACCEPT_KEYSEQ=${SHISA_NEXTCMD_ACCEPT_KEYSEQ:-'^I'}
 typeset -g SHISA_NEXTCMD_REJECT_KEYSEQ=${SHISA_NEXTCMD_REJECT_KEYSEQ:-'^['}
 typeset -g SHISA_NEXTCMD_NEXT_KEYSEQ=${SHISA_NEXTCMD_NEXT_KEYSEQ:-'^[]'}
 typeset -g SHISA_NEXTCMD_SUGGESTION=
+typeset -g SHISA_EXPLAIN_KEYSEQ=${SHISA_EXPLAIN_KEYSEQ:-'^X^E'}
 
 zmodload zsh/datetime 2>/dev/null || true
 
@@ -161,14 +162,25 @@ shisa_nextcmd_next_widget() {
   shisa_nextcmd_widget
 }
 
+shisa_explain_widget() {
+  emulate -L zsh
+  local output
+  output=$("${SHISA_BIN}" ai explain --command "${BUFFER}" 2>/dev/null) || return 0
+  [[ -n ${output} ]] || return 0
+  print -r -- $'\n'"${output}"
+  zle redisplay
+}
+
 zle -N shisa-nextcmd shisa_nextcmd_widget 2>/dev/null || true
 zle -N shisa-nextcmd-accept shisa_nextcmd_accept_widget 2>/dev/null || true
 zle -N shisa-nextcmd-reject shisa_nextcmd_reject_widget 2>/dev/null || true
 zle -N shisa-nextcmd-next shisa_nextcmd_next_widget 2>/dev/null || true
+zle -N shisa-explain shisa_explain_widget 2>/dev/null || true
 bindkey "${SHISA_NEXTCMD_KEYSEQ}" shisa-nextcmd 2>/dev/null || true
 bindkey "${SHISA_NEXTCMD_ACCEPT_KEYSEQ}" shisa-nextcmd-accept 2>/dev/null || true
 bindkey "${SHISA_NEXTCMD_REJECT_KEYSEQ}" shisa-nextcmd-reject 2>/dev/null || true
 bindkey "${SHISA_NEXTCMD_NEXT_KEYSEQ}" shisa-nextcmd-next 2>/dev/null || true
+bindkey "${SHISA_EXPLAIN_KEYSEQ}" shisa-explain 2>/dev/null || true
 
 shisa_socket_path() {
   emulate -L zsh

@@ -654,6 +654,14 @@ fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try aiRisk(allocator, config);
         return;
     }
+    if (args.len >= 1 and std.mem.eql(u8, args[0], "explain")) {
+        const config = try parseAiExplainArgs(args[1..]);
+        if (config.command.len == 0) return;
+        const output = try ai_risk.outputAlloc(allocator, config.command);
+        defer allocator.free(output);
+        try std.fs.File.stdout().writeAll(output);
+        return;
+    }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "nextcmd")) {
         const config = try parseAiNextcmdArgs(args[1..]);
         try aiNextcmd(allocator, config);
@@ -689,6 +697,10 @@ const AiRiskConfig = struct {
     preexec: bool = false,
 };
 
+const AiExplainConfig = struct {
+    command: []const u8 = "",
+};
+
 fn parseAiRiskArgs(args: []const []const u8) !AiRiskConfig {
     var config = AiRiskConfig{};
     var i: usize = 0;
@@ -711,6 +723,24 @@ fn parseAiRiskArgs(args: []const []const u8) !AiRiskConfig {
         }
     }
     if (config.command.len == 0) return error.MissingValue;
+    return config;
+}
+
+fn parseAiExplainArgs(args: []const []const u8) !AiExplainConfig {
+    var config = AiExplainConfig{};
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--command")) {
+            config.command = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--")) {
+            config.command = try nextValue(args, &i);
+            if (i + 1 != args.len) return error.UnknownAiArgument;
+        } else if (config.command.len == 0) {
+            config.command = args[i];
+        } else {
+            return error.UnknownAiArgument;
+        }
+    }
     return config;
 }
 
@@ -982,6 +1012,11 @@ test "ai risk args parse" {
     try std.testing.expectEqualStrings("gemma3:1b", config.model);
     try std.testing.expect(config.slm);
     try std.testing.expect(config.preexec);
+}
+
+test "ai explain args parse" {
+    const config = try parseAiExplainArgs(&.{ "--command", "tar -xf app.tar" });
+    try std.testing.expectEqualStrings("tar -xf app.tar", config.command);
 }
 
 test "ai nextcmd args parse" {

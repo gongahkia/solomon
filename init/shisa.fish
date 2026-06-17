@@ -19,6 +19,7 @@ set -q SHISA_NEXTCMD_REJECT_KEYSEQ; or set -g SHISA_NEXTCMD_REJECT_KEYSEQ \e
 set -q SHISA_NEXTCMD_NEXT_KEYSEQ; or set -g SHISA_NEXTCMD_NEXT_KEYSEQ \e\]
 set -q SHISA_LAST_COMMAND; or set -g SHISA_LAST_COMMAND ""
 set -q SHISA_NEXTCMD_SUGGESTION; or set -g SHISA_NEXTCMD_SUGGESTION ""
+set -q SHISA_EXPLAIN_KEYSEQ; or set -g SHISA_EXPLAIN_KEYSEQ \cx\ce
 
 function shisa_socket_path
     if test -n "$SHISA_SOCKET"
@@ -129,6 +130,17 @@ function shisa_nextcmd_next_widget
     shisa_nextcmd_widget
 end
 
+function shisa_explain_widget
+    set -l current (commandline)
+    test -n "$current"; or return 0
+    set -l output (command "$SHISA_BIN" ai explain --command "$current" 2>/dev/null)
+    if test $status -eq 0; and test -n "$output"
+        printf '\n%s\n' "$output"
+        commandline -f repaint 2>/dev/null
+        or true
+    end
+end
+
 bind $SHISA_NEXTCMD_KEYSEQ shisa_nextcmd_widget 2>/dev/null
 or true
 bind $SHISA_NEXTCMD_ACCEPT_KEYSEQ shisa_nextcmd_accept_widget 2>/dev/null
@@ -136,4 +148,6 @@ or true
 bind $SHISA_NEXTCMD_REJECT_KEYSEQ shisa_nextcmd_reject_widget 2>/dev/null
 or true
 bind $SHISA_NEXTCMD_NEXT_KEYSEQ shisa_nextcmd_next_widget 2>/dev/null
+or true
+bind $SHISA_EXPLAIN_KEYSEQ shisa_explain_widget 2>/dev/null
 or true

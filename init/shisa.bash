@@ -15,6 +15,7 @@ SHISA_NEXTCMD_ACCEPT_KEYSEQ=${SHISA_NEXTCMD_ACCEPT_KEYSEQ:-'\C-i'}
 SHISA_NEXTCMD_REJECT_KEYSEQ=${SHISA_NEXTCMD_REJECT_KEYSEQ:-'\e'}
 SHISA_NEXTCMD_NEXT_KEYSEQ=${SHISA_NEXTCMD_NEXT_KEYSEQ:-'\e]'}
 SHISA_NEXTCMD_SUGGESTION=
+SHISA_EXPLAIN_KEYSEQ=${SHISA_EXPLAIN_KEYSEQ:-'\C-x\C-e'}
 SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
 SHISA_AI_RISK_GUARD=${SHISA_AI_RISK_GUARD:-0}
@@ -159,6 +160,13 @@ shisa_nextcmd_next_widget() {
   shisa_nextcmd_widget
 }
 
+shisa_explain_widget() {
+  local output
+  output=$("${SHISA_BIN}" ai explain --command "${READLINE_LINE}" 2>/dev/null) || return 0
+  [[ -n ${output} ]] || return 0
+  printf '\n%s\n' "${output}"
+}
+
 shisa_install_async_redraw() {
   [[ ${SHISA_ASYNC_REDRAW:-1} == 1 ]] || return 0
   bind -x "\"${SHISA_ASYNC_KEYSEQ}\": shisa_async_redraw" 2>/dev/null || true
@@ -166,6 +174,7 @@ shisa_install_async_redraw() {
   bind -x "\"${SHISA_NEXTCMD_ACCEPT_KEYSEQ}\": shisa_nextcmd_accept_widget" 2>/dev/null || true
   bind -x "\"${SHISA_NEXTCMD_REJECT_KEYSEQ}\": shisa_nextcmd_reject_widget" 2>/dev/null || true
   bind -x "\"${SHISA_NEXTCMD_NEXT_KEYSEQ}\": shisa_nextcmd_next_widget" 2>/dev/null || true
+  bind -x "\"${SHISA_EXPLAIN_KEYSEQ}\": shisa_explain_widget" 2>/dev/null || true
 }
 
 shisa_prompt_command() {

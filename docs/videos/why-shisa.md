@@ -60,6 +60,10 @@ Shisa is for people who want a prompt with modern context, but still want the co
 
 Start with the quickstart, then run the benchmark on your own repos.
 
+## Captions
+
+- [SRT captions](why-shisa.srt)
+
 ## Recording Checklist
 
 - Build release binaries: `zig build release`.

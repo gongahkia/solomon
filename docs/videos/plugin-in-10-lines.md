@@ -94,6 +94,10 @@ Current limit: plugin manifests install and validate, but plugin render function
 
 Start minimal, add capabilities only when the plugin needs them, and keep the manifest easy to review.
 
+## Captions
+
+- [SRT captions](plugin-in-10-lines.srt)
+
 ## Recording Checklist
 
 - Show the 10-line plugin first.

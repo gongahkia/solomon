@@ -638,7 +638,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 - [x] "Why Shisa" — 3-minute project intro
 - [x] "5-min Setup" — install walkthrough
 - [x] "Plugin in 10 lines" — Lua plugin tutorial
-- [ ] Captions + transcripts checked into repo
+- [x] Captions + transcripts checked into repo
 - [ ] Publish on YouTube + PeerTube mirror
 
 ### 19.7 Style + linting

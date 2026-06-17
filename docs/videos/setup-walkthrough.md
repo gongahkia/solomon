@@ -113,6 +113,10 @@ If setup behaves differently in another shell, check the shell matrix in `docs/s
 
 After setup works, run the quickstart checks and local benchmarks before changing prompt modules or shell hooks.
 
+## Captions
+
+- [SRT captions](setup-walkthrough.srt)
+
 ## Recording Checklist
 
 - Use a clean shell profile or explicitly show temporary sourcing.

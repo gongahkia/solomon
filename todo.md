@@ -877,7 +877,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ## Phase 27 â€” Cache architecture hardening
 
 ### 27.1 L1 rendered-prompt LRU
-- [ ] Implement bounded LRU keyed by render-input tuple
+- [x] Implement bounded LRU keyed by render-input tuple
 - [ ] Lock-free reads where possible
 - [ ] Hit-rate metric exposed via `--metrics`
 

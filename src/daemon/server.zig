@@ -12,6 +12,7 @@ const daemon_log = @import("log.zig");
 const warmup = @import("warmup.zig");
 const json = @import("json.zig");
 const fsnotify = @import("fsnotify.zig");
+const daemon_cache = @import("cache.zig");
 const plugin_lua = @import("plugin_lua");
 
 const header_bytes = 4;
@@ -22,6 +23,7 @@ const max_subscribe_backpressure_limit = 1024;
 pub const graceful_shutdown_timeout_ms: i64 = 5000;
 const shutdown_poll_ms: i32 = 100;
 const render_histogram_buckets = 5;
+const prompt_cache_module = "render_prompt";
 pub const daemon_version = "0.1.0-dev";
 pub const protocol_version: u32 = 1;
 const default_config_text =
@@ -77,6 +79,39 @@ const SubscribeRequest = struct {
 const SubscribeCommand = struct {
     op: []const u8 = "",
     kind: []const u8 = "",
+};
+
+const RenderCacheSnapshot = struct {
+    git_valid: bool = false,
+    git_in_flight: bool = false,
+    git_generation: u64 = 0,
+    git_cwd: ?[]const u8 = null,
+    language_valid: bool = false,
+    language_in_flight: bool = false,
+    language_generation: u64 = 0,
+    language_cwd: ?[]const u8 = null,
+    gcp_valid: bool = false,
+    azure_valid: bool = false,
+    kube_valid: bool = false,
+};
+
+const RenderCacheContext = struct {
+    timestamp_minute: i64 = 0,
+    home: ?[]const u8 = null,
+    kubeconfig: ?[]const u8 = null,
+    ssh: ?[]const u8 = null,
+    user: []const u8 = "",
+    host: []const u8 = "",
+    aws_profile: ?[]const u8 = null,
+    aws_region: ?[]const u8 = null,
+    aws_default_region: ?[]const u8 = null,
+    cloudsdk_compute_region: ?[]const u8 = null,
+    azure_location: ?[]const u8 = null,
+    arm_location: ?[]const u8 = null,
+    azure_default_location: ?[]const u8 = null,
+    config_generation: u64 = 0,
+    plugin_generation: u64 = 0,
+    snapshot: RenderCacheSnapshot = .{},
 };
 
 const TopicRef = struct {
@@ -145,6 +180,7 @@ pub const Server = struct {
     render_total_us: u64 = 0,
     render_max_us: u64 = 0,
     render_histogram: [render_histogram_buckets]u64 = [_]u64{0} ** render_histogram_buckets,
+    prompt_cache: daemon_cache.Store,
     git_branch_cache: git_branch_module.Cache = .{},
     language_versions_cache: language_versions_module.Cache = .{},
     cloud_ctx_cache: cloud_ctx_module.Cache = .{},
@@ -182,12 +218,14 @@ pub const Server = struct {
             .socket_path = socket_path,
             .listener = listener,
             .logger = logger,
+            .prompt_cache = daemon_cache.Store.initWithOptions(std.heap.page_allocator, .{ .max_entries = 1024, .max_age_ns = 5 * std.time.ns_per_min }),
             .fs_watcher = fsnotify.Watcher.init(std.heap.page_allocator),
         };
     }
 
     pub fn deinit(self: *Server) void {
         self.stopCostRefresh();
+        self.prompt_cache.deinit();
         self.git_branch_cache.deinit(std.heap.page_allocator);
         self.language_versions_cache.deinit(std.heap.page_allocator);
         self.cloud_ctx_cache.deinit(std.heap.page_allocator);
@@ -391,6 +429,37 @@ pub const Server = struct {
         defer std.heap.page_allocator.free(user);
         var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
         const host = std.posix.gethostname(&host_buffer) catch "unknown";
+        const timestamp = std.time.timestamp();
+        const cache_context = RenderCacheContext{
+            .timestamp_minute = if (parsed.value.time and timestamp >= 0) @divTrunc(timestamp, 60) else 0,
+            .home = home,
+            .kubeconfig = kubeconfig,
+            .ssh = ssh,
+            .user = user,
+            .host = host,
+            .aws_profile = aws_profile,
+            .aws_region = aws_region,
+            .aws_default_region = aws_default_region,
+            .cloudsdk_compute_region = cloudsdk_compute_region,
+            .azure_location = azure_location,
+            .arm_location = arm_location,
+            .azure_default_location = azure_default_location,
+            .config_generation = self.reload_state.config_generation,
+            .plugin_generation = self.reload_state.plugin_generation,
+            .snapshot = self.renderCacheSnapshot(),
+        };
+        const cache_key = try renderPromptCacheKeyAlloc(std.heap.page_allocator, parsed.value, cache_context);
+        defer std.heap.page_allocator.free(cache_key);
+
+        if (try self.prompt_cache.get(prompt_cache_module, cache_key)) |cached| {
+            const escaped_request_id = try json.escapeAlloc(std.heap.page_allocator, parsed.value.request_id);
+            defer std.heap.page_allocator.free(escaped_request_id);
+            const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, cached.output);
+            defer std.heap.page_allocator.free(escaped_prompt);
+            const elapsed_us = (nowNs() - start_ns) / std.time.ns_per_us;
+            self.recordRender(elapsed_us);
+            return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, elapsed_us });
+        }
 
         var rendered = try dispatcher.renderDefault(std.heap.page_allocator, .{
             .git_branch = &self.git_branch_cache,
@@ -404,7 +473,7 @@ pub const Server = struct {
             .duration_ms = parsed.value.duration_ms,
             .time = parsed.value.time,
             .no_async = parsed.value.no_async,
-            .timestamp = std.time.timestamp(),
+            .timestamp = timestamp,
             .ssh = ssh,
             .user = user,
             .host = host,
@@ -428,6 +497,13 @@ pub const Server = struct {
         defer std.heap.page_allocator.free(escaped_prompt);
         const elapsed_us = (nowNs() - start_ns) / std.time.ns_per_us;
         self.recordRender(elapsed_us);
+        if (rendered.redraw_token == null) {
+            var store_context = cache_context;
+            store_context.snapshot = self.renderCacheSnapshot();
+            const store_key = try renderPromptCacheKeyAlloc(std.heap.page_allocator, parsed.value, store_context);
+            defer std.heap.page_allocator.free(store_key);
+            try self.prompt_cache.put(prompt_cache_module, store_key, rendered.prompt, 0);
+        }
 
         if (rendered.redraw_token) |token| {
             const escaped_token = try json.escapeAlloc(std.heap.page_allocator, token);
@@ -435,6 +511,32 @@ pub const Server = struct {
             return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"redraw_token\":\"{s}\",\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, escaped_token, elapsed_us });
         }
         return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, elapsed_us });
+    }
+
+    fn renderCacheSnapshot(self: *Server) RenderCacheSnapshot {
+        var snapshot = RenderCacheSnapshot{};
+
+        self.git_branch_cache.mutex.lock();
+        snapshot.git_valid = self.git_branch_cache.valid;
+        snapshot.git_in_flight = self.git_branch_cache.in_flight;
+        snapshot.git_generation = self.git_branch_cache.generation;
+        snapshot.git_cwd = self.git_branch_cache.cwd;
+        self.git_branch_cache.mutex.unlock();
+
+        self.language_versions_cache.mutex.lock();
+        snapshot.language_valid = self.language_versions_cache.valid;
+        snapshot.language_in_flight = self.language_versions_cache.in_flight;
+        snapshot.language_generation = self.language_versions_cache.generation;
+        snapshot.language_cwd = self.language_versions_cache.cwd;
+        self.language_versions_cache.mutex.unlock();
+
+        self.cloud_ctx_cache.mutex.lock();
+        snapshot.gcp_valid = self.cloud_ctx_cache.gcp_valid;
+        snapshot.azure_valid = self.cloud_ctx_cache.azure_valid;
+        snapshot.kube_valid = self.cloud_ctx_cache.kube_valid;
+        self.cloud_ctx_cache.mutex.unlock();
+
+        return snapshot;
     }
 
     fn preexecResponse(self: *Server, request_payload: []const u8) ![]u8 {
@@ -895,6 +997,86 @@ fn renderHistogramIndex(elapsed_us: u64) usize {
     if (elapsed_us <= 1000) return 2;
     if (elapsed_us <= 5000) return 3;
     return 4;
+}
+
+fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderRequest, context: RenderCacheContext) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    try appendKeyInt(allocator, &out, "v", request.v);
+    try appendKeyString(allocator, &out, "cwd", request.cwd);
+    try appendKeyInt(allocator, &out, "exit", request.exit);
+    try appendKeyInt(allocator, &out, "jobs", request.jobs);
+    try appendKeyInt(allocator, &out, "duration_ms", request.duration_ms);
+    try appendKeyBool(allocator, &out, "time", request.time);
+    try appendKeyInt(allocator, &out, "time_min", context.timestamp_minute);
+    try appendKeyBool(allocator, &out, "no_async", request.no_async);
+    try appendKeyString(allocator, &out, "shell", request.shell);
+    try appendKeyInt(allocator, &out, "cols", request.cols);
+    try appendKeyInt(allocator, &out, "rows", request.rows);
+    try appendKeyBool(allocator, &out, "cloud_aws", request.cloud_ctx.aws);
+    try appendKeyBool(allocator, &out, "cloud_gcp", request.cloud_ctx.gcp);
+    try appendKeyBool(allocator, &out, "cloud_azure", request.cloud_ctx.azure);
+    try appendKeyBool(allocator, &out, "cloud_kube", request.cloud_ctx.kubernetes);
+    try appendKeyInt(allocator, &out, "sso_warning", request.sso_expiry.warning_minutes);
+    try appendKeyOptional(allocator, &out, "home", context.home);
+    try appendKeyOptional(allocator, &out, "kubeconfig", context.kubeconfig);
+    try appendKeyOptional(allocator, &out, "ssh", context.ssh);
+    try appendKeyString(allocator, &out, "user", context.user);
+    try appendKeyString(allocator, &out, "host", context.host);
+    try appendKeyOptional(allocator, &out, "aws_profile", context.aws_profile);
+    try appendKeyOptional(allocator, &out, "aws_region", context.aws_region);
+    try appendKeyOptional(allocator, &out, "aws_default_region", context.aws_default_region);
+    try appendKeyOptional(allocator, &out, "cloudsdk_compute_region", context.cloudsdk_compute_region);
+    try appendKeyOptional(allocator, &out, "azure_location", context.azure_location);
+    try appendKeyOptional(allocator, &out, "arm_location", context.arm_location);
+    try appendKeyOptional(allocator, &out, "azure_default_location", context.azure_default_location);
+    try appendKeyInt(allocator, &out, "config_generation", context.config_generation);
+    try appendKeyInt(allocator, &out, "plugin_generation", context.plugin_generation);
+    try appendKeyBool(allocator, &out, "git_valid", context.snapshot.git_valid);
+    try appendKeyBool(allocator, &out, "git_in_flight", context.snapshot.git_in_flight);
+    try appendKeyInt(allocator, &out, "git_generation", context.snapshot.git_generation);
+    try appendKeyOptional(allocator, &out, "git_cwd", context.snapshot.git_cwd);
+    try appendKeyBool(allocator, &out, "language_valid", context.snapshot.language_valid);
+    try appendKeyBool(allocator, &out, "language_in_flight", context.snapshot.language_in_flight);
+    try appendKeyInt(allocator, &out, "language_generation", context.snapshot.language_generation);
+    try appendKeyOptional(allocator, &out, "language_cwd", context.snapshot.language_cwd);
+    try appendKeyBool(allocator, &out, "gcp_valid", context.snapshot.gcp_valid);
+    try appendKeyBool(allocator, &out, "azure_valid", context.snapshot.azure_valid);
+    try appendKeyBool(allocator, &out, "kube_valid", context.snapshot.kube_valid);
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendKeyString(allocator: std.mem.Allocator, out: *std.ArrayList(u8), name: []const u8, value: []const u8) !void {
+    try out.appendSlice(allocator, name);
+    try out.append(allocator, '=');
+    try std.fmt.format(out.writer(allocator), "{d}:", .{value.len});
+    try out.appendSlice(allocator, value);
+    try out.append(allocator, '|');
+}
+
+fn appendKeyOptional(allocator: std.mem.Allocator, out: *std.ArrayList(u8), name: []const u8, value: ?[]const u8) !void {
+    if (value) |present| {
+        try appendKeyString(allocator, out, name, present);
+        return;
+    }
+    try out.appendSlice(allocator, name);
+    try out.appendSlice(allocator, "=-|");
+}
+
+fn appendKeyBool(allocator: std.mem.Allocator, out: *std.ArrayList(u8), name: []const u8, value: bool) !void {
+    try out.appendSlice(allocator, name);
+    try out.append(allocator, '=');
+    try out.append(allocator, if (value) '1' else '0');
+    try out.append(allocator, '|');
+}
+
+fn appendKeyInt(allocator: std.mem.Allocator, out: *std.ArrayList(u8), name: []const u8, value: anytype) !void {
+    try out.appendSlice(allocator, name);
+    try out.append(allocator, '=');
+    try std.fmt.format(out.writer(allocator), "{d}", .{value});
+    try out.append(allocator, '|');
 }
 
 fn stackDumpMessageAlloc(allocator: std.mem.Allocator) ![]u8 {
@@ -1399,6 +1581,93 @@ test "render response carries request id and v1 shape" {
     defer parsed.deinit();
     try std.testing.expectEqualStrings("render-test", parsed.value.request_id);
     try std.testing.expect(parsed.value.prompt.len > 0);
+}
+
+test "render prompt cache key ignores request id and includes tuple fields" {
+    const allocator = std.testing.allocator;
+    const first = try renderPromptCacheKeyAlloc(allocator, .{
+        .cwd = "/tmp/project",
+        .exit = 0,
+        .jobs = 1,
+        .duration_ms = 10,
+        .shell = "zsh",
+        .cols = 80,
+        .rows = 24,
+        .request_id = "first",
+    }, .{
+        .timestamp_minute = 123,
+        .user = "me",
+        .host = "host",
+    });
+    defer allocator.free(first);
+    const second = try renderPromptCacheKeyAlloc(allocator, .{
+        .cwd = "/tmp/project",
+        .exit = 0,
+        .jobs = 1,
+        .duration_ms = 10,
+        .shell = "zsh",
+        .cols = 80,
+        .rows = 24,
+        .request_id = "second",
+    }, .{
+        .timestamp_minute = 123,
+        .user = "me",
+        .host = "host",
+    });
+    defer allocator.free(second);
+    const different_exit = try renderPromptCacheKeyAlloc(allocator, .{
+        .cwd = "/tmp/project",
+        .exit = 2,
+        .jobs = 1,
+        .duration_ms = 10,
+        .shell = "zsh",
+        .cols = 80,
+        .rows = 24,
+        .request_id = "first",
+    }, .{
+        .timestamp_minute = 123,
+        .user = "me",
+        .host = "host",
+    });
+    defer allocator.free(different_exit);
+
+    try std.testing.expectEqualStrings(first, second);
+    try std.testing.expect(!std.mem.eql(u8, first, different_exit));
+}
+
+test "render response stores completed prompts in bounded l1 cache" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-l1-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+    server.prompt_cache.options.max_entries = 1;
+
+    const first_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"first\"}}", .{dir_path});
+    defer allocator.free(first_request);
+    const first = try server.renderResponse(first_request);
+    defer std.heap.page_allocator.free(first);
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"request_id\":\"first\"") != null);
+    try std.testing.expectEqual(@as(usize, 1), server.prompt_cache.count());
+
+    const second_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render_continue\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"second\"}}", .{dir_path});
+    defer allocator.free(second_request);
+    const second = try server.renderResponse(second_request);
+    defer std.heap.page_allocator.free(second);
+    try std.testing.expect(std.mem.indexOf(u8, second, "\"request_id\":\"second\"") != null);
+    try std.testing.expectEqual(@as(usize, 1), server.prompt_cache.count());
+
+    const different_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":2,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"different\"}}", .{dir_path});
+    defer allocator.free(different_request);
+    const different = try server.renderResponse(different_request);
+    defer std.heap.page_allocator.free(different);
+    try std.testing.expect(std.mem.indexOf(u8, different, "exit:2") != null);
+    try std.testing.expectEqual(@as(usize, 1), server.prompt_cache.count());
 }
 
 test "render_continue fills async git segment from cache" {

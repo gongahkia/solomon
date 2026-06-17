@@ -132,6 +132,7 @@ Reference manifests live under `examples/plugins/`:
 - `language_versions`: python/node/rust/go probe capabilities.
 - `kubernetes-context`: kubeconfig/env capabilities.
 - `aws-profile`: AWS config/env capabilities.
+- `a11y-live`: optional accessibility live-announcer template for risk-tier transitions.
 - `fossil`: community Fossil VCS status template.
 - `pijul`: community Pijul VCS status template.
 - `breezy`: community Bazaar/Breezy VCS status template.

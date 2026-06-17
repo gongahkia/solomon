@@ -13,6 +13,7 @@ set -q SHISA_INSTANT; or set -g SHISA_INSTANT 1
 set -q SHISA_PROD_GUARD; or set -g SHISA_PROD_GUARD 0
 set -q SHISA_PROD_GUARD_FORCE; or set -g SHISA_PROD_GUARD_FORCE 0
 set -q SHISA_AI_RISK_GUARD; or set -g SHISA_AI_RISK_GUARD 0
+set -q SHISA_A11Y; or set -g SHISA_A11Y 0
 set -q SHISA_NEXTCMD_KEYSEQ; or set -g SHISA_NEXTCMD_KEYSEQ \cx\cn
 set -q SHISA_NEXTCMD_ACCEPT_KEYSEQ; or set -g SHISA_NEXTCMD_ACCEPT_KEYSEQ \t
 set -q SHISA_NEXTCMD_REJECT_KEYSEQ; or set -g SHISA_NEXTCMD_REJECT_KEYSEQ \e
@@ -57,6 +58,9 @@ function shisa_prompt_render
     else if not test -S "$socket_path"
         shisa_prompt_fallback
         return 0
+    end
+    if test "$SHISA_A11Y" = 1
+        set args $args --a11y
     end
 
     set -l rendered (command "$SHISA_BIN" $args 2>/dev/null)

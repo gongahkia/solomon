@@ -37,6 +37,8 @@ length = header.unpack1("N")
 payload = conn.read(length)
 abort("missing frame payload") unless payload && payload.bytesize == length
 abort("missing pwsh shell") unless payload.include?('"shell":"pwsh"')
+abort("missing a11y color caps") unless payload.include?('"color_caps":"none"')
+abort("missing a11y glyph caps") unless payload.include?('"glyph_caps":"ascii"')
 response = '{"v":1,"prompt":"fake-pwsh> ","redraw_token":null}'
 conn.write([response.bytesize].pack("N"))
 conn.write(response)
@@ -55,6 +57,6 @@ done
   exit 1
 }
 
-SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" pwsh -NoLogo -NoProfile -Command '. ./init/shisa.ps1; prompt' >"$out"
+SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" pwsh -NoLogo -NoProfile -Command '. ./init/shisa.ps1; prompt' >"$out"
 grep -F 'fake-pwsh> ' "$out" >/dev/null
 pwsh -NoLogo -NoProfile -Command '. ./init/shisa.ps1; if (-not (Get-Command Invoke-ShisaRedraw -ErrorAction SilentlyContinue)) { exit 1 }'

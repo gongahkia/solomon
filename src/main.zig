@@ -4838,17 +4838,17 @@ fn normalizePromptGlyphsAlloc(allocator: std.mem.Allocator, value: []const u8) !
 
     var index: usize = 0;
     while (index < value.len) {
-        if (replaceGlyph(&out, allocator, value[index..], "\xe2\x86\x92", "->")) {
+        if (try replaceGlyph(&out, allocator, value[index..], "\xe2\x86\x92", "->")) {
             index += 3;
-        } else if (replaceGlyph(&out, allocator, value[index..], "\xe2\x86\x91", "up")) {
+        } else if (try replaceGlyph(&out, allocator, value[index..], "\xe2\x86\x91", "up")) {
             index += 3;
-        } else if (replaceGlyph(&out, allocator, value[index..], "\xe2\x86\x93", "down")) {
+        } else if (try replaceGlyph(&out, allocator, value[index..], "\xe2\x86\x93", "down")) {
             index += 3;
-        } else if (replaceGlyph(&out, allocator, value[index..], "\xe2\x9c\x93", "ok")) {
+        } else if (try replaceGlyph(&out, allocator, value[index..], "\xe2\x9c\x93", "ok")) {
             index += 3;
-        } else if (replaceGlyph(&out, allocator, value[index..], "\xe2\x9c\x97", "x")) {
+        } else if (try replaceGlyph(&out, allocator, value[index..], "\xe2\x9c\x97", "x")) {
             index += 3;
-        } else if (replaceGlyph(&out, allocator, value[index..], "\xe2\x80\xa6", "...")) {
+        } else if (try replaceGlyph(&out, allocator, value[index..], "\xe2\x80\xa6", "...")) {
             index += 3;
         } else {
             try out.append(allocator, value[index]);
@@ -4859,9 +4859,9 @@ fn normalizePromptGlyphsAlloc(allocator: std.mem.Allocator, value: []const u8) !
     return out.toOwnedSlice(allocator);
 }
 
-fn replaceGlyph(out: *std.ArrayList(u8), allocator: std.mem.Allocator, tail: []const u8, glyph: []const u8, replacement: []const u8) bool {
+fn replaceGlyph(out: *std.ArrayList(u8), allocator: std.mem.Allocator, tail: []const u8, glyph: []const u8, replacement: []const u8) !bool {
     if (!std.mem.startsWith(u8, tail, glyph)) return false;
-    out.appendSlice(allocator, replacement) catch return false;
+    try out.appendSlice(allocator, replacement);
     return true;
 }
 

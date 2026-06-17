@@ -21,6 +21,7 @@ SHISA_EXPLAIN_LAST_OUTPUT=
 SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
 SHISA_AI_RISK_GUARD=${SHISA_AI_RISK_GUARD:-0}
+SHISA_A11Y=${SHISA_A11Y:-0}
 SHISA_COMMAND_STARTED=0
 SHISA_COMMAND_START_US=
 SHISA_IN_PROMPT=0
@@ -128,6 +129,7 @@ shisa_prompt_render() {
 
   local -a args
   args=(prompt --shell bash --cwd "${PWD}" --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
+  [[ ${SHISA_A11Y:-0} == 1 ]] && args+=(--a11y)
   "${SHISA_BIN}" "${args[@]}" || shisa_prompt_fallback
 }
 

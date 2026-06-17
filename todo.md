@@ -846,7 +846,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ## Phase 26 â€” Daemon lifecycle hardening
 
 ### 26.1 Supervisor
-- [ ] Standalone `shisa-supervisor` binary (~200 KiB)
+- [x] Standalone `shisa-supervisor` binary (~200 KiB)
 - [ ] Exponential-backoff restart with cap
 - [ ] Heartbeat protocol (1 s interval)
 - [ ] Auto-disable supervisor if it itself crashes

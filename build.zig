@@ -66,6 +66,16 @@ pub fn build(b: *std.Build) void {
     daemon.root_module.addImport("plugin_lua", plugin_lua_module);
     b.installArtifact(daemon);
 
+    const supervisor_exe = b.addExecutable(.{
+        .name = "shisa-supervisor",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/shisa-supervisor.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(supervisor_exe);
+
     const debug_exe = b.addExecutable(.{
         .name = "shisa",
         .root_module = b.createModule(.{
@@ -86,9 +96,19 @@ pub fn build(b: *std.Build) void {
     debug_daemon.root_module.addImport("vcs_worktree", vcs_worktree_debug_module);
     debug_daemon.root_module.addImport("plugin_lua", plugin_lua_debug_module);
     const debug_daemon_install = b.addInstallArtifact(debug_daemon, .{});
+    const debug_supervisor = b.addExecutable(.{
+        .name = "shisa-supervisor",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/shisa-supervisor.zig"),
+            .target = target,
+            .optimize = .Debug,
+        }),
+    });
+    const debug_supervisor_install = b.addInstallArtifact(debug_supervisor, .{});
     const debug_step = b.step("debug", "Build debug binary");
     debug_step.dependOn(&debug_install.step);
     debug_step.dependOn(&debug_daemon_install.step);
+    debug_step.dependOn(&debug_supervisor_install.step);
 
     const release_exe = b.addExecutable(.{
         .name = "shisa",
@@ -110,9 +130,20 @@ pub fn build(b: *std.Build) void {
     release_daemon.root_module.addImport("vcs_worktree", vcs_worktree_release_module);
     release_daemon.root_module.addImport("plugin_lua", plugin_lua_release_module);
     const release_daemon_install = b.addInstallArtifact(release_daemon, .{});
+    const release_supervisor = b.addExecutable(.{
+        .name = "shisa-supervisor",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/shisa-supervisor.zig"),
+            .target = target,
+            .optimize = .ReleaseSmall,
+            .strip = true,
+        }),
+    });
+    const release_supervisor_install = b.addInstallArtifact(release_supervisor, .{});
     const release_step = b.step("release", "Build release binary");
     release_step.dependOn(&release_install.step);
     release_step.dependOn(&release_daemon_install.step);
+    release_step.dependOn(&release_supervisor_install.step);
 
     const bench_exe = b.addExecutable(.{
         .name = "shisa-bench",

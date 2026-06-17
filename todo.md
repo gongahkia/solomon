@@ -488,7 +488,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 
 ### 15.3 Ops
 - [x] `render` — full request/response path
-- [ ] `render_continue` — async fill-in
+- [x] `render_continue` — async fill-in
 - [ ] `health` — minimal ok/not-ok
 - [ ] `metrics` — JSON metrics dump
 - [ ] `reload` — re-read config + plugins

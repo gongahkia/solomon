@@ -201,12 +201,12 @@ pub const Server = struct {
         const start_ns = nowNs();
         var parsed = try std.json.parseFromSlice(RenderRequest, std.heap.page_allocator, request_payload, .{ .ignore_unknown_fields = true });
         defer parsed.deinit();
-        if (!std.mem.eql(u8, parsed.value.op, "render")) {
+        if (!std.mem.eql(u8, parsed.value.op, "render") and !std.mem.eql(u8, parsed.value.op, "render_continue")) {
             const escaped_request_id = try json.escapeAlloc(std.heap.page_allocator, parsed.value.request_id);
             defer std.heap.page_allocator.free(escaped_request_id);
             return std.fmt.allocPrint(
                 std.heap.page_allocator,
-                "{{\"v\":1,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_MALFORMED\",\"message\":\"unsupported render path op\",\"context\":{{\"field\":\"op\",\"expected\":\"render\"}}}}}}",
+                "{{\"v\":1,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_MALFORMED\",\"message\":\"unsupported render path op\",\"context\":{{\"field\":\"op\",\"expected\":\"render|render_continue\"}}}}}}",
                 .{escaped_request_id},
             );
         }
@@ -781,6 +781,41 @@ test "render response carries request id and v1 shape" {
     defer parsed.deinit();
     try std.testing.expectEqualStrings("render-test", parsed.value.request_id);
     try std.testing.expect(parsed.value.prompt.len > 0);
+}
+
+test "render_continue fills async git segment from cache" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-continue-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    try runGit(allocator, dir_path, &.{ "git", "init", "-b", "main" });
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const initial_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"render-start\"}}", .{dir_path});
+    defer allocator.free(initial_request);
+    const initial_response = try server.renderResponse(initial_request);
+    defer std.heap.page_allocator.free(initial_response);
+    try std.testing.expect(std.mem.indexOf(u8, initial_response, "[pending:git_branch]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, initial_response, "\"redraw_token\":\"pending\"") != null);
+
+    const continue_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render_continue\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"render-continue\"}}", .{dir_path});
+    defer allocator.free(continue_request);
+    for (0..50) |_| {
+        std.Thread.sleep(20 * std.time.ns_per_ms);
+        const response = try server.renderResponse(continue_request);
+        defer std.heap.page_allocator.free(response);
+        if (std.mem.indexOf(u8, response, "git:main") != null) {
+            try std.testing.expect(std.mem.indexOf(u8, response, "\"request_id\":\"render-continue\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, response, "\"redraw_token\":null") != null);
+            return;
+        }
+    }
+    return error.AsyncFillNotReady;
 }
 
 test "logs slow module warning" {

@@ -76,4 +76,4 @@ modules = ["cwd", "git_branch", "exit_status", "jobs", "cmd_duration", "cloud_ct
 
 Current scope: `SHISA_A11Y=1` configures prompt rendering. `shisa init --a11y` and an alt-text dump command are separate accessibility-roadmap items.
 
-See [Shells](../shells.md), [SSH Target](../ssh-target.md), [Risk Tiers](../risk-tiers.md), and [Config Schema](../config-schema.md).
+See [Shells](../shells.md), [OSC Sequences](../protocol/osc.md), [SSH Target](../ssh-target.md), [Risk Tiers](../risk-tiers.md), and [Config Schema](../config-schema.md).

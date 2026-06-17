@@ -86,6 +86,7 @@
 # Protocol
 
 - [Errors](protocol/errors.md)
+- [OSC Sequences](protocol/osc.md)
 
 # Internals
 

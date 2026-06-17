@@ -356,7 +356,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Snapshot tests for each segment
 - [x] prod_guard fuzz suite
 - [x] Benchmark `cloud_ctx` cold path < 30ms, warm < 1ms
-- [ ] Ship a `shisa cloud doctor` for self-diagnosis
+- [x] Ship a `shisa cloud doctor` for self-diagnosis
 
 ## Phase 12 — AI plugin pack (`shisa.ai`)
 

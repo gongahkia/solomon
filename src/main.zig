@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const daemon_cache = @import("daemon/cache.zig");
 const fsnotify = @import("daemon/fsnotify.zig");
 const client = @import("shisa-client.zig");
+const cloud_ctx_module = @import("daemon/modules/cloud_ctx.zig");
 const shisa_config = @import("config.zig");
 const paths = @import("daemon/paths.zig");
 const proto = @import("proto/types.zig");
@@ -346,6 +347,10 @@ fn cloudCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try cloudAudit(allocator);
         return;
     }
+    if (args.len == 1 and std.mem.eql(u8, args[0], "doctor")) {
+        try cloudDoctor(allocator);
+        return;
+    }
     if (args.len != 2 or !std.mem.eql(u8, args[0], "explain")) return error.UnknownCloudArgument;
     const home = std.process.getEnvVarOwned(allocator, "HOME") catch |err| switch (err) {
         error.EnvironmentVariableNotFound => null,
@@ -355,6 +360,71 @@ fn cloudCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const output = try cloudExplainAlloc(allocator, args[1], home);
     defer allocator.free(output);
     try std.fs.File.stdout().writeAll(output);
+}
+
+fn cloudDoctor(allocator: std.mem.Allocator) !void {
+    const home = std.process.getEnvVarOwned(allocator, "HOME") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    defer if (home) |value| allocator.free(value);
+    const aws_profile = std.process.getEnvVarOwned(allocator, "AWS_PROFILE") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    defer if (aws_profile) |value| allocator.free(value);
+    const kubeconfig = std.process.getEnvVarOwned(allocator, "KUBECONFIG") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    defer if (kubeconfig) |value| allocator.free(value);
+
+    const output = try cloudDoctorAlloc(allocator, home, aws_profile, kubeconfig);
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn cloudDoctorAlloc(allocator: std.mem.Allocator, home: ?[]const u8, aws_profile_env: ?[]const u8, kubeconfig_env: ?[]const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    var cache = cloud_ctx_module.Cache{};
+    defer cache.deinit(allocator);
+
+    const aws_profile = try cloud_ctx_module.awsProfileAlloc(allocator, aws_profile_env, home);
+    defer if (aws_profile) |value| allocator.free(value);
+    try appendFmt(allocator, &out, "aws_profile: {s}\n", .{aws_profile orelse "-"});
+
+    const gcp_path = try cloud_ctx_module.gcpConfigPathAlloc(allocator, home);
+    defer if (gcp_path) |value| allocator.free(value);
+    try appendCloudPathLine(allocator, &out, "gcp_config", gcp_path);
+    const gcp_project = try cache.gcpProjectAlloc(allocator, home);
+    defer if (gcp_project) |value| allocator.free(value);
+    try appendFmt(allocator, &out, "gcp_project: {s}\n", .{gcp_project orelse "-"});
+
+    const azure_path = try cloud_ctx_module.azureProfilePathAlloc(allocator, home);
+    defer if (azure_path) |value| allocator.free(value);
+    try appendCloudPathLine(allocator, &out, "azure_profile", azure_path);
+    const azure_subscription = try cache.azureSubscriptionAlloc(allocator, home);
+    defer if (azure_subscription) |value| allocator.free(value);
+    try appendFmt(allocator, &out, "azure_subscription: {s}\n", .{azure_subscription orelse "-"});
+
+    const kube_path = try cloud_ctx_module.kubeConfigPathAlloc(allocator, kubeconfig_env, home);
+    defer if (kube_path) |value| allocator.free(value);
+    try appendCloudPathLine(allocator, &out, "kubeconfig", kube_path);
+    const kube_context = try cache.kubeContextAlloc(allocator, kubeconfig_env, home);
+    defer if (kube_context) |value| allocator.free(value);
+    try appendFmt(allocator, &out, "kube_context: {s}\n", .{kube_context orelse "-"});
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendCloudPathLine(allocator: std.mem.Allocator, out: *std.ArrayList(u8), label: []const u8, path: ?[]const u8) !void {
+    if (path) |value| {
+        try appendFmt(allocator, out, "{s}: {s} {s}\n", .{ label, pathAccessStatus(value), value });
+    } else {
+        try appendFmt(allocator, out, "{s}: missing\n", .{label});
+    }
 }
 
 fn cloudAudit(allocator: std.mem.Allocator) !void {
@@ -530,6 +600,25 @@ test "cloud audit reads prod guard jsonl" {
     try std.testing.expectEqualStrings("{\"tier\":\"prod\"}\n", output);
 }
 
+test "cloud doctor reports config status" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-cloud-doctor-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    try copyFixtureToPath(allocator, "test/fixtures/cloud/aws-config-default", try std.fmt.allocPrint(allocator, "{s}/.aws/config", .{dir_path}));
+    try copyFixtureToPath(allocator, "test/fixtures/cloud/gcloud-config", try std.fmt.allocPrint(allocator, "{s}/.config/gcloud/configurations/config_default", .{dir_path}));
+    try copyFixtureToPath(allocator, "test/fixtures/cloud/azureProfile.json", try std.fmt.allocPrint(allocator, "{s}/.azure/azureProfile.json", .{dir_path}));
+    try copyFixtureToPath(allocator, "test/fixtures/cloud/kubeconfig-with-namespace.yaml", try std.fmt.allocPrint(allocator, "{s}/.kube/config", .{dir_path}));
+
+    const output = try cloudDoctorAlloc(allocator, dir_path, null, null);
+    defer allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "aws_profile: default\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "gcp_project: test-project\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "azure_subscription: prod-sub\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "kube_context: prod/default\n") != null);
+}
+
 test "cloud explain output shows reason" {
     const output = try cloudExplainAlloc(std.testing.allocator, "api-prd-use1", null);
     defer std.testing.allocator.free(output);
@@ -537,6 +626,16 @@ test "cloud explain output shows reason" {
     try std.testing.expect(std.mem.indexOf(u8, output, "tier: prod\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "source: default\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "pattern: *-prd-*\n") != null);
+}
+
+fn copyFixtureToPath(allocator: std.mem.Allocator, source_path: []const u8, dest_path: []u8) !void {
+    defer allocator.free(dest_path);
+    const source = try std.fs.cwd().readFileAlloc(allocator, source_path, max_config_bytes);
+    defer allocator.free(source);
+    if (std.fs.path.dirname(dest_path)) |parent| try std.fs.cwd().makePath(parent);
+    var file = try std.fs.createFileAbsolute(dest_path, .{ .truncate = true });
+    defer file.close();
+    try file.writeAll(source);
 }
 
 const StackConfig = struct {
@@ -1796,7 +1895,7 @@ const help_text =
     \\commands:
     \\  bench         benchmark prompt render via hyperfine
     \\  cache         dump cache stats
-    \\  cloud         cloud helpers: audit, explain, preexec
+    \\  cloud         cloud helpers: audit, doctor, explain, preexec
     \\  doctor        diagnose socket, config, plugins, lua, fsnotify
     \\  explain       print resolved module pipeline
     \\  import-starship <path>

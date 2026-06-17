@@ -501,7 +501,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Each error includes structured context fields for machine consumption
 
 ### 15.5 Versioning + RFC binding
-- [ ] Write RFC-0005: Wire protocol v1 (canonical reference)
+- [x] Write RFC-0005: Wire protocol v1 (canonical reference)
 - [ ] CI gate: protocol changes require RFC update in same PR
 - [ ] Generate a JSON Schema for external consumers (editors, plugins, scripts)
 

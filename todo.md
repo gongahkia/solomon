@@ -830,7 +830,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] Set up Discord (low-friction) + Matrix mirror (privacy-friendly)
 - [ ] GH Discussions for long-form
 - [ ] Monthly office hours (recorded; captioned)
-- [ ] First-response SLA: 7 days
+- [x] First-response SLA: 7 days
 
 ### 25.3 Triage cadence
 - [ ] Weekly triage meeting (15 min, recorded)

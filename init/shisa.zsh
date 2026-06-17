@@ -27,6 +27,7 @@ typeset -g SHISA_ASYNC_SIGNAL=${SHISA_ASYNC_SIGNAL:-USR1}
 typeset -g SHISA_TRANSIENT_PROMPT=${SHISA_TRANSIENT_PROMPT:-1}
 typeset -g SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 typeset -g SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
+typeset -g SHISA_AI_RISK_GUARD=${SHISA_AI_RISK_GUARD:-0}
 typeset -g SHISA_NEXTCMD_KEYSEQ=${SHISA_NEXTCMD_KEYSEQ:-'^X^N'}
 typeset -g SHISA_NEXTCMD_ACCEPT_KEYSEQ=${SHISA_NEXTCMD_ACCEPT_KEYSEQ:-'^I'}
 typeset -g SHISA_NEXTCMD_REJECT_KEYSEQ=${SHISA_NEXTCMD_REJECT_KEYSEQ:-'^['}
@@ -71,6 +72,7 @@ shisa_preexec() {
   local command=${1:-}
   SHISA_LAST_COMMAND=${command}
   SHISA_PREEXEC_REALTIME=${EPOCHREALTIME:-}
+  shisa_ai_risk_preexec "${command}" || return $?
   shisa_preexec_guard zsh "${command}"
 }
 
@@ -88,6 +90,14 @@ shisa_preexec_guard() {
   args=(cloud preexec --socket "${socket_path}" --shell "${shell_name}")
   [[ ${SHISA_PROD_GUARD_FORCE:-0} == 1 ]] && args+=(--force)
   "${SHISA_BIN}" "${args[@]}" -- "${command}"
+}
+
+shisa_ai_risk_preexec() {
+  emulate -L zsh
+  [[ ${SHISA_AI_RISK_GUARD:-0} == 1 ]] || return 0
+  local command=${1:-}
+  [[ -n ${command} ]] || return 0
+  "${SHISA_BIN}" ai risk --preexec -- "${command}"
 }
 
 setopt prompt_subst

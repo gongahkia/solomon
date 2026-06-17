@@ -387,7 +387,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Rules-engine first (fast, deterministic, same blocklist as prod_guard)
 - [x] Optional SLM second pass on borderline commands
 - [x] Render "this will delete N files in /etc" style annotations
-- [ ] Pre-exec gate integration
+- [x] Pre-exec gate integration
 
 ### 12.5 Command explainer (`explain`)
 - [ ] Hotkey to explain current input

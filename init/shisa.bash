@@ -17,6 +17,7 @@ SHISA_NEXTCMD_NEXT_KEYSEQ=${SHISA_NEXTCMD_NEXT_KEYSEQ:-'\e]'}
 SHISA_NEXTCMD_SUGGESTION=
 SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
+SHISA_AI_RISK_GUARD=${SHISA_AI_RISK_GUARD:-0}
 SHISA_COMMAND_STARTED=0
 SHISA_COMMAND_START_US=
 SHISA_IN_PROMPT=0
@@ -86,6 +87,7 @@ shisa_debug_trap() {
   esac
   [[ ${SHISA_COMMAND_STARTED:-0} == 0 ]] || return 0
   SHISA_LAST_COMMAND=${command}
+  shisa_ai_risk_preexec "${command}" || return $?
   shisa_preexec_guard bash "${command}" || return $?
   local now_us
   now_us=$(shisa_epoch_us) || return 0
@@ -104,6 +106,13 @@ shisa_preexec_guard() {
   args=(cloud preexec --socket "${socket_path}" --shell "${shell_name}")
   [[ ${SHISA_PROD_GUARD_FORCE:-0} == 1 ]] && args+=(--force)
   "${SHISA_BIN}" "${args[@]}" -- "${command}"
+}
+
+shisa_ai_risk_preexec() {
+  [[ ${SHISA_AI_RISK_GUARD:-0} == 1 ]] || return 0
+  local command=${1:-}
+  [[ -n ${command} ]] || return 0
+  "${SHISA_BIN}" ai risk --preexec -- "${command}"
 }
 
 shisa_prompt_render() {

@@ -686,6 +686,7 @@ const AiRiskConfig = struct {
     command: []const u8 = "",
     model: []const u8 = ollama.recommended_model,
     slm: bool = false,
+    preexec: bool = false,
 };
 
 fn parseAiRiskArgs(args: []const []const u8) !AiRiskConfig {
@@ -698,6 +699,8 @@ fn parseAiRiskArgs(args: []const []const u8) !AiRiskConfig {
             config.model = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--slm")) {
             config.slm = true;
+        } else if (std.mem.eql(u8, args[i], "--preexec")) {
+            config.preexec = true;
         } else if (std.mem.eql(u8, args[i], "--")) {
             config.command = try nextValue(args, &i);
             if (i + 1 != args.len) return error.UnknownAiArgument;
@@ -718,6 +721,14 @@ fn aiRisk(allocator: std.mem.Allocator, config: AiRiskConfig) !void {
     }
     const output = try ai_risk.outputExplanationAlloc(allocator, config.command, result);
     defer allocator.free(output);
+    if (config.preexec) {
+        if (result.risk == .high) {
+            try std.fs.File.stderr().writeAll(output);
+            std.process.exit(1);
+        }
+        if (result.risk == .medium) try std.fs.File.stderr().writeAll(output);
+        return;
+    }
     try std.fs.File.stdout().writeAll(output);
 }
 
@@ -966,10 +977,11 @@ test "ai bench args parse" {
 }
 
 test "ai risk args parse" {
-    const config = try parseAiRiskArgs(&.{ "--command", "rm -rf /tmp/x", "--model", "gemma3:1b", "--slm" });
+    const config = try parseAiRiskArgs(&.{ "--command", "rm -rf /tmp/x", "--model", "gemma3:1b", "--slm", "--preexec" });
     try std.testing.expectEqualStrings("rm -rf /tmp/x", config.command);
     try std.testing.expectEqualStrings("gemma3:1b", config.model);
     try std.testing.expect(config.slm);
+    try std.testing.expect(config.preexec);
 }
 
 test "ai nextcmd args parse" {

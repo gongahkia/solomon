@@ -12,6 +12,7 @@ set -q SHISA_SOCKET; or set -g SHISA_SOCKET ""
 set -q SHISA_INSTANT; or set -g SHISA_INSTANT 1
 set -q SHISA_PROD_GUARD; or set -g SHISA_PROD_GUARD 0
 set -q SHISA_PROD_GUARD_FORCE; or set -g SHISA_PROD_GUARD_FORCE 0
+set -q SHISA_AI_RISK_GUARD; or set -g SHISA_AI_RISK_GUARD 0
 set -q SHISA_NEXTCMD_KEYSEQ; or set -g SHISA_NEXTCMD_KEYSEQ \cx\cn
 set -q SHISA_NEXTCMD_ACCEPT_KEYSEQ; or set -g SHISA_NEXTCMD_ACCEPT_KEYSEQ \t
 set -q SHISA_NEXTCMD_REJECT_KEYSEQ; or set -g SHISA_NEXTCMD_REJECT_KEYSEQ \e
@@ -69,6 +70,9 @@ end
 
 function shisa_preexec_guard --on-event fish_preexec
     set -g SHISA_LAST_COMMAND (string join ' ' -- $argv)
+    if test "$SHISA_AI_RISK_GUARD" = 1
+        command "$SHISA_BIN" ai risk --preexec -- "$SHISA_LAST_COMMAND"; or return $status
+    end
     test "$SHISA_PROD_GUARD" = 1; or return 0
     set -l command "$SHISA_LAST_COMMAND"
     test -n "$command"; or return 0

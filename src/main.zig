@@ -230,7 +230,7 @@ fn explainAlloc(allocator: std.mem.Allocator, parsed: shisa_config.Config) ![]u8
         );
     }
 
-    return out.toOwnedSlice(allocator);
+    return try out.toOwnedSlice(allocator);
 }
 
 fn appendFmt(allocator: std.mem.Allocator, out: *std.ArrayList(u8), comptime format: []const u8, args: anytype) !void {
@@ -1721,18 +1721,37 @@ test "parses p10k POWERLEVEL9K assignments" {
     try expectP10kValues(imported, "MODE", &.{"nerdfont-complete"});
 }
 
+const P10kImportResult = struct {
+    config: []u8,
+    notes: ?[]u8 = null,
+
+    fn deinit(self: P10kImportResult, allocator: std.mem.Allocator) void {
+        allocator.free(self.config);
+        if (self.notes) |notes| allocator.free(notes);
+    }
+};
+
 fn importP10k(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (args.len != 1) return error.UnknownImportP10kArgument;
 
     const source = try std.fs.cwd().readFileAlloc(allocator, args[0], max_config_bytes);
     defer allocator.free(source);
 
-    const output = try importP10kAlloc(allocator, source);
-    defer allocator.free(output);
-    try std.fs.File.stdout().writeAll(output);
+    const result = try importP10kResultAlloc(allocator, source);
+    defer result.deinit(allocator);
+    try std.fs.File.stdout().writeAll(result.config);
+    if (result.notes) |notes| {
+        try std.fs.cwd().writeFile(.{ .sub_path = "migration-notes.md", .data = notes });
+    }
 }
 
 fn importP10kAlloc(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
+    const result = try importP10kResultAlloc(allocator, source);
+    if (result.notes) |notes| allocator.free(notes);
+    return result.config;
+}
+
+fn importP10kResultAlloc(allocator: std.mem.Allocator, source: []const u8) !P10kImportResult {
     var p10k = try parseP10kConfig(allocator, source);
     defer p10k.deinit(allocator);
 
@@ -1752,7 +1771,11 @@ fn importP10kAlloc(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
         }
     }
 
-    return renderP10kImportedConfigAlloc(allocator, imported, left, right, instant_prompt);
+    const config = try renderP10kImportedConfigAlloc(allocator, imported, left, right, instant_prompt);
+    errdefer allocator.free(config);
+    const notes = try renderP10kMigrationNotesAlloc(allocator, imported);
+    errdefer if (notes) |owned| allocator.free(owned);
+    return .{ .config = config, .notes = notes };
 }
 
 fn p10kInstantPrompt(imported: P10kImport) ?[]const u8 {
@@ -1807,7 +1830,7 @@ fn renderP10kImportedConfigAlloc(allocator: std.mem.Allocator, imported: Starshi
         try out.append(allocator, '\n');
     }
 
-    return out.toOwnedSlice(allocator);
+    return try out.toOwnedSlice(allocator);
 }
 
 fn appendP10kLayoutComment(allocator: std.mem.Allocator, out: *std.ArrayList(u8), side: []const u8, elements: []const []u8) !void {
@@ -1817,6 +1840,30 @@ fn appendP10kLayoutComment(allocator: std.mem.Allocator, out: *std.ArrayList(u8)
         try out.appendSlice(allocator, element);
     }
     try out.append(allocator, '\n');
+}
+
+fn renderP10kMigrationNotesAlloc(allocator: std.mem.Allocator, imported: StarshipImport) !?[]u8 {
+    if (imported.unsupported.items.len == 0) return null;
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    try out.appendSlice(allocator, "# Powerlevel10k Migration Notes\n\n");
+    try out.appendSlice(allocator, "## Unsupported Elements\n\n");
+    for (imported.unsupported.items) |name| {
+        try appendFmt(allocator, &out, "- `{s}`: {s}\n", .{ name, p10kUnsupportedReason(name) });
+    }
+    return try out.toOwnedSlice(allocator);
+}
+
+fn p10kUnsupportedReason(name: []const u8) []const u8 {
+    if (std.mem.eql(u8, name, "public_ip")) return "No core public-IP module; recreate as a plugin or omit.";
+    if (std.mem.eql(u8, name, "ip")) return "No core local-IP module; recreate as a plugin or omit.";
+    if (std.mem.eql(u8, name, "battery")) return "No core battery module; recreate as a plugin or omit.";
+    if (std.mem.eql(u8, name, "ram")) return "No core RAM module; recreate as a plugin or omit.";
+    if (std.mem.eql(u8, name, "load")) return "No core load-average module; recreate as a plugin or omit.";
+    if (std.mem.eql(u8, name, "todo")) return "No core todo module; recreate as a plugin or omit.";
+    return "No Shisa core mapping; recreate as a plugin or omit.";
 }
 
 const StarshipImport = struct {
@@ -2188,6 +2235,33 @@ test "imports disabled p10k instant prompt mapping" {
 
     try std.testing.expect(std.mem.indexOf(u8, output, "# Powerlevel10k instant_prompt: off") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "# Shisa instant prompt: SHISA_INSTANT=0") != null);
+}
+
+test "imports p10k unsupported elements into migration notes" {
+    const source =
+        \\typeset -g POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(dir public_ip battery weird_segment)
+        \\
+    ;
+    const result = try importP10kResultAlloc(std.testing.allocator, source);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(std.mem.indexOf(u8, result.config, "Unsupported Powerlevel10k elements: public_ip, battery, weird_segment") != null);
+    const notes = result.notes orelse return error.MissingP10kNotes;
+    try std.testing.expect(std.mem.indexOf(u8, notes, "# Powerlevel10k Migration Notes") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notes, "- `public_ip`: No core public-IP module") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notes, "- `battery`: No core battery module") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notes, "- `weird_segment`: No Shisa core mapping") != null);
+}
+
+test "omits p10k migration notes when all elements map" {
+    const source =
+        \\typeset -g POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(dir vcs)
+        \\
+    ;
+    const result = try importP10kResultAlloc(std.testing.allocator, source);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(result.notes == null);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {

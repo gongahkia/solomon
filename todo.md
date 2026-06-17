@@ -574,7 +574,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Map elements to Shisa modules with a coverage table
 - [x] Translate left/right prompt layout
 - [x] Handle p10k's "instant_prompt" feature (map to Shisa's instant prompt)
-- [ ] Emit `migration-notes.md` for unsupported elements
+- [x] Emit `migration-notes.md` for unsupported elements
 
 ### 18.2 Oh-my-posh importer
 - [ ] Parse oh-my-posh JSON/YAML themes

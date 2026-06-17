@@ -33,7 +33,7 @@ This table covers the first Powerlevel10k elements Shisa imports from `POWERLEVE
 | `load` | none | unsupported | No core load-average module. |
 | `todo` | none | unsupported | No core todo module. |
 
-Unsupported elements are emitted in migration notes by the importer.
+Unsupported elements are emitted as comments in generated config and written to `migration-notes.md` by `shisa import-p10k`.
 
 ## Instant Prompt
 

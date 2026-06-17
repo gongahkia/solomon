@@ -251,6 +251,30 @@ test "error envelope carries explicit code and structured context" {
     try std.testing.expectEqual(@as(u32, 1048576), parsed.value.@"error".context.max_frame_bytes.?);
 }
 
+test "error code enum exposes canonical protocol codes" {
+    const codes = [_]ErrorCode{
+        .E_VERSION,
+        .E_OVERSIZE,
+        .E_MALFORMED,
+        .E_NOT_READY,
+        .E_PLUGIN_TIMEOUT,
+        .E_CAPABILITY_DENIED,
+        .E_INTERNAL,
+    };
+    const names = [_][]const u8{
+        "E_VERSION",
+        "E_OVERSIZE",
+        "E_MALFORMED",
+        "E_NOT_READY",
+        "E_PLUGIN_TIMEOUT",
+        "E_CAPABILITY_DENIED",
+        "E_INTERNAL",
+    };
+    for (codes, names) |code, name| {
+        try std.testing.expectEqualStrings(name, @tagName(code));
+    }
+}
+
 test "json helpers roundtrip request and response" {
     const allocator = std.testing.allocator;
     const request = Request{

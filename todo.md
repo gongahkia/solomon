@@ -496,7 +496,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] `subscribe` â€” editor stream (Phase 16)
 
 ### 15.4 Error codes
-- [ ] Define enum: `E_VERSION`, `E_OVERSIZE`, `E_MALFORMED`, `E_NOT_READY`, `E_PLUGIN_TIMEOUT`, `E_CAPABILITY_DENIED`, `E_INTERNAL`
+- [x] Define enum: `E_VERSION`, `E_OVERSIZE`, `E_MALFORMED`, `E_NOT_READY`, `E_PLUGIN_TIMEOUT`, `E_CAPABILITY_DENIED`, `E_INTERNAL`
 - [ ] Document each in `docs/protocol/errors.md`
 - [ ] Each error includes structured context fields for machine consumption
 

@@ -84,6 +84,7 @@ pub const ErrorCode = enum {
     E_NOT_READY,
     E_PLUGIN_TIMEOUT,
     E_CAPABILITY_DENIED,
+    E_READONLY,
     E_INTERNAL,
 };
 
@@ -265,6 +266,7 @@ test "error code enum exposes canonical protocol codes" {
         .E_NOT_READY,
         .E_PLUGIN_TIMEOUT,
         .E_CAPABILITY_DENIED,
+        .E_READONLY,
         .E_INTERNAL,
     };
     const names = [_][]const u8{
@@ -274,6 +276,7 @@ test "error code enum exposes canonical protocol codes" {
         "E_NOT_READY",
         "E_PLUGIN_TIMEOUT",
         "E_CAPABILITY_DENIED",
+        "E_READONLY",
         "E_INTERNAL",
     };
     for (codes, names) |code, name| {
@@ -290,6 +293,7 @@ test "error context carries machine fields for each code" {
         .{ .@"error" = .{ .code = .E_NOT_READY, .message = "pending", .context = .{ .op = "render_continue", .retry_after_ms = 25 } } },
         .{ .@"error" = .{ .code = .E_PLUGIN_TIMEOUT, .message = "timeout", .context = .{ .plugin = "git", .timeout_ms = 2 } } },
         .{ .@"error" = .{ .code = .E_CAPABILITY_DENIED, .message = "denied", .context = .{ .capability = "exec", .op = "render" } } },
+        .{ .@"error" = .{ .code = .E_READONLY, .message = "readonly", .context = .{ .op = "reload" } } },
         .{ .@"error" = .{ .code = .E_INTERNAL, .message = "internal", .context = .{ .detail = "cache_state" } } },
     };
 
@@ -306,6 +310,7 @@ test "error context carries machine fields for each code" {
             .E_NOT_READY => try std.testing.expectEqual(@as(u32, 25), parsed.value.@"error".context.retry_after_ms.?),
             .E_PLUGIN_TIMEOUT => try std.testing.expectEqualStrings("git", parsed.value.@"error".context.plugin.?),
             .E_CAPABILITY_DENIED => try std.testing.expectEqualStrings("exec", parsed.value.@"error".context.capability.?),
+            .E_READONLY => try std.testing.expectEqualStrings("reload", parsed.value.@"error".context.op.?),
             .E_INTERNAL => try std.testing.expectEqualStrings("cache_state", parsed.value.@"error".context.detail.?),
         }
     }

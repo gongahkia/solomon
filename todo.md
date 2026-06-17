@@ -515,8 +515,8 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Disconnect cleanly, free state
 
 ### 16.2 Read-only enforcement
-- [ ] Daemon-side allowlist of read-only ops on subscribe connections
-- [ ] Reject any mutation attempt with `E_READONLY`
+- [x] Daemon-side allowlist of read-only ops on subscribe connections
+- [x] Reject any mutation attempt with `E_READONLY`
 - [ ] Tests verifying editor cannot bypass `prod_guard`
 
 ### 16.3 Helix bridge

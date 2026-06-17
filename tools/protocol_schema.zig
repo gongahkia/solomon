@@ -258,7 +258,7 @@ const schema_json =
     \\    },
     \\    "errorCode": {
     \\      "type": "string",
-    \\      "enum": ["E_VERSION", "E_OVERSIZE", "E_MALFORMED", "E_NOT_READY", "E_PLUGIN_TIMEOUT", "E_CAPABILITY_DENIED", "E_INTERNAL"]
+    \\      "enum": ["E_VERSION", "E_OVERSIZE", "E_MALFORMED", "E_NOT_READY", "E_PLUGIN_TIMEOUT", "E_CAPABILITY_DENIED", "E_READONLY", "E_INTERNAL"]
     \\    },
     \\    "errorContext": {
     \\      "type": "object",
@@ -313,6 +313,7 @@ test "schema mentions canonical protocol values" {
         .E_NOT_READY,
         .E_PLUGIN_TIMEOUT,
         .E_CAPABILITY_DENIED,
+        .E_READONLY,
         .E_INTERNAL,
     };
     for (codes) |code| {

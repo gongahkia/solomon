@@ -64,6 +64,10 @@ const SubscribeRequest = struct {
     backpressure_limit: u16 = default_subscribe_backpressure_limit,
 };
 
+const SubscribeCommand = struct {
+    op: []const u8 = "",
+};
+
 const TopicRef = struct {
     topic: []u8,
     count: usize,
@@ -541,6 +545,12 @@ pub const Server = struct {
             };
             defer std.heap.page_allocator.free(line);
             if (std.mem.trim(u8, line, " \t\r\n").len == 0) continue;
+            if (!subscribeCommandAllowed(line)) {
+                const readonly = try subscribeReadonlyErrorAlloc(std.heap.page_allocator, parsed.value.request_id, line);
+                defer std.heap.page_allocator.free(readonly);
+                try writeAll(fd, readonly);
+                continue;
+            }
             sequence += 1;
             const delta_topic = if (topic_refs.len == 0) "subscription" else topic_refs[0].topic;
             const delta = try subscribeDeltaAlloc(std.heap.page_allocator, parsed.value.request_id, delta_topic, sequence);
@@ -827,6 +837,21 @@ fn subscribeBackpressureLimit(value: u16) usize {
     return @min(@as(usize, value), max_subscribe_backpressure_limit);
 }
 
+fn subscribeCommandAllowed(line: []const u8) bool {
+    var parsed = std.json.parseFromSlice(SubscribeCommand, std.heap.page_allocator, line, .{ .ignore_unknown_fields = true }) catch return false;
+    defer parsed.deinit();
+    return isSubscribeReadOnlyOp(parsed.value.op);
+}
+
+fn isSubscribeReadOnlyOp(op: []const u8) bool {
+    return std.mem.eql(u8, op, "ping") or
+        std.mem.eql(u8, op, "subscribe") or
+        std.mem.eql(u8, op, "unsubscribe") or
+        std.mem.eql(u8, op, "health") or
+        std.mem.eql(u8, op, "metrics") or
+        std.mem.eql(u8, op, "version");
+}
+
 fn freeTopicRefs(allocator: std.mem.Allocator, refs: []TopicRef) void {
     for (refs) |ref| allocator.free(ref.topic);
     allocator.free(refs);
@@ -877,6 +902,21 @@ fn subscribeDeltaAlloc(allocator: std.mem.Allocator, request_id: []const u8, top
         allocator,
         "{{\"v\":1,\"request_id\":\"{s}\",\"topic\":\"{s}\",\"kind\":\"delta\",\"data\":{{\"sequence\":{d}}}}}\n",
         .{ escaped_request_id, escaped_topic, sequence },
+    );
+}
+
+fn subscribeReadonlyErrorAlloc(allocator: std.mem.Allocator, request_id: []const u8, line: []const u8) ![]u8 {
+    const escaped_request_id = try json.escapeAlloc(allocator, request_id);
+    defer allocator.free(escaped_request_id);
+    var parsed = std.json.parseFromSlice(SubscribeCommand, allocator, line, .{ .ignore_unknown_fields = true }) catch null;
+    defer if (parsed) |*value| value.deinit();
+    const op = if (parsed) |value| if (value.value.op.len == 0) "unknown" else value.value.op else "unknown";
+    const escaped_op = try json.escapeAlloc(allocator, op);
+    defer allocator.free(escaped_op);
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"v\":1,\"request_id\":\"{s}\",\"topic\":\"subscription\",\"kind\":\"error\",\"data\":{{\"error\":{{\"code\":\"E_READONLY\",\"message\":\"subscribe connection is read-only\",\"context\":{{\"op\":\"{s}\"}}}}}}}}\n",
+        .{ escaped_request_id, escaped_op },
     );
 }
 
@@ -1468,6 +1508,37 @@ test "subscribe op exits cleanly on client disconnect" {
     const snapshot = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
     defer allocator.free(snapshot);
     try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"kind\":\"snapshot\"") != null);
+
+    client_stream.close();
+    thread.join();
+}
+
+test "subscribe rejects mutating commands as readonly" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-subscribe-readonly-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
+
+    var client_stream = try std.net.connectUnixSocket(socket_path);
+    try writeFrame(client_stream.handle, "{\"v\":1,\"op\":\"subscribe\",\"request_id\":\"subscribe-readonly\",\"topics\":[\"vcs.summary\"]}");
+    const snapshot = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
+    defer allocator.free(snapshot);
+    try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"kind\":\"snapshot\"") != null);
+
+    try writeAll(client_stream.handle, "{\"op\":\"reload\"}\n");
+    const readonly = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
+    defer allocator.free(readonly);
+    try std.testing.expect(std.mem.indexOf(u8, readonly, "\"kind\":\"error\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, readonly, "\"code\":\"E_READONLY\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, readonly, "\"op\":\"reload\"") != null);
 
     client_stream.close();
     thread.join();

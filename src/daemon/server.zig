@@ -59,6 +59,13 @@ const PreexecRequest = struct {
     force: bool = false,
 };
 
+const MetricsRequest = struct {
+    v: u32 = 1,
+    op: []const u8 = "metrics",
+    request_id: []const u8 = "",
+    format: []const u8 = "json",
+};
+
 const SubscribeRequest = struct {
     v: u32 = 1,
     op: []const u8 = "subscribe",
@@ -518,6 +525,8 @@ pub const Server = struct {
     }
 
     fn metricsResponseAlloc(self: *Server, allocator: std.mem.Allocator, request: []const u8) ![]u8 {
+        var parsed = std.json.parseFromSlice(MetricsRequest, allocator, request, .{ .ignore_unknown_fields = true }) catch null;
+        defer if (parsed) |*value| value.deinit();
         const request_id = try requestIdAlloc(allocator, request);
         defer allocator.free(request_id);
         const escaped_request_id = try json.escapeAlloc(allocator, request_id);
@@ -541,10 +550,24 @@ pub const Server = struct {
         const kube_valid = self.cloud_ctx_cache.kube_valid;
         self.cloud_ctx_cache.mutex.unlock();
 
+        if (parsed) |value| {
+            if (std.mem.eql(u8, value.value.format, "prometheus")) {
+                return self.metricsPrometheusAlloc(allocator, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid);
+            }
+        }
+
         return std.fmt.allocPrint(
             allocator,
             "{{\"v\":1,\"request_id\":\"{s}\",\"connections\":{d},\"cache\":{{\"git_branch\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"language_versions\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"cloud_ctx\":{{\"gcp_valid\":{},\"azure_valid\":{},\"kube_valid\":{}}}}},\"render\":{{\"count\":{d},\"total_us\":{d},\"max_us\":{d},\"histogram\":{{\"le_100us\":{d},\"le_500us\":{d},\"le_1000us\":{d},\"le_5000us\":{d},\"gt_5000us\":{d}}}}},\"plugins\":{d},\"fsnotify\":{{\"backend\":\"{s}\",\"registrations\":{d}}}}}",
             .{ escaped_request_id, self.connections, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid, self.render_count, self.render_total_us, self.render_max_us, self.render_histogram[0], self.render_histogram[1], self.render_histogram[2], self.render_histogram[3], self.render_histogram[4], self.reload_state.plugin_names.len, @tagName(self.fs_watcher.backend), self.fs_watcher.registrations.items.len },
+        );
+    }
+
+    fn metricsPrometheusAlloc(self: *Server, allocator: std.mem.Allocator, git_valid: bool, git_in_flight: bool, git_generation: u64, language_valid: bool, language_in_flight: bool, language_generation: u64, gcp_valid: bool, azure_valid: bool, kube_valid: bool) ![]u8 {
+        return std.fmt.allocPrint(
+            allocator,
+            "# HELP shisa_connections Active accepted connections.\n# TYPE shisa_connections gauge\nshisa_connections {d}\n# HELP shisa_render_count Render requests served.\n# TYPE shisa_render_count counter\nshisa_render_count {d}\n# HELP shisa_render_total_us Total render latency in microseconds.\n# TYPE shisa_render_total_us counter\nshisa_render_total_us {d}\n# HELP shisa_render_max_us Max observed render latency in microseconds.\n# TYPE shisa_render_max_us gauge\nshisa_render_max_us {d}\n# HELP shisa_render_latency_bucket Render latency buckets.\n# TYPE shisa_render_latency_bucket counter\nshisa_render_latency_bucket{{le=\"100\"}} {d}\nshisa_render_latency_bucket{{le=\"500\"}} {d}\nshisa_render_latency_bucket{{le=\"1000\"}} {d}\nshisa_render_latency_bucket{{le=\"5000\"}} {d}\nshisa_render_latency_bucket{{le=\"+Inf\"}} {d}\n# HELP shisa_plugins Loaded plugins.\n# TYPE shisa_plugins gauge\nshisa_plugins {d}\n# HELP shisa_cache_valid Cache validity by module.\n# TYPE shisa_cache_valid gauge\nshisa_cache_valid{{module=\"git_branch\"}} {d}\nshisa_cache_valid{{module=\"language_versions\"}} {d}\nshisa_cache_valid{{module=\"cloud_ctx_gcp\"}} {d}\nshisa_cache_valid{{module=\"cloud_ctx_azure\"}} {d}\nshisa_cache_valid{{module=\"cloud_ctx_kube\"}} {d}\n# HELP shisa_cache_in_flight Cache worker in-flight by module.\n# TYPE shisa_cache_in_flight gauge\nshisa_cache_in_flight{{module=\"git_branch\"}} {d}\nshisa_cache_in_flight{{module=\"language_versions\"}} {d}\n# HELP shisa_cache_generation Cache generation by module.\n# TYPE shisa_cache_generation counter\nshisa_cache_generation{{module=\"git_branch\"}} {d}\nshisa_cache_generation{{module=\"language_versions\"}} {d}\n",
+            .{ self.connections, self.render_count, self.render_total_us, self.render_max_us, self.render_histogram[0], self.render_histogram[1], self.render_histogram[2], self.render_histogram[3], self.render_histogram[4], self.reload_state.plugin_names.len, @intFromBool(git_valid), @intFromBool(language_valid), @intFromBool(gcp_valid), @intFromBool(azure_valid), @intFromBool(kube_valid), @intFromBool(git_in_flight), @intFromBool(language_in_flight), git_generation, language_generation },
         );
     }
 
@@ -1835,6 +1858,13 @@ test "metrics op returns JSON metrics dump" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"gt_5000us\":1") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"plugins\":1") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"fsnotify\"") != null);
+
+    const prometheus = try server.metricsResponseAlloc(allocator, "{\"v\":1,\"op\":\"metrics\",\"request_id\":\"metrics-prom\",\"format\":\"prometheus\"}");
+    defer allocator.free(prometheus);
+    try std.testing.expect(std.mem.indexOf(u8, prometheus, "# TYPE shisa_connections gauge") != null);
+    try std.testing.expect(std.mem.indexOf(u8, prometheus, "shisa_render_count 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, prometheus, "shisa_render_latency_bucket{le=\"+Inf\"} 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, prometheus, "shisa_plugins 1") != null);
 }
 
 test "logs slow module warning" {

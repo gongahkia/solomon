@@ -5,6 +5,7 @@ pub const Config = struct {
     help: bool = false,
     health: bool = false,
     metrics: bool = false,
+    prometheus: bool = false,
     version: bool = false,
     socket_path: ?[]const u8 = null,
     log_path: ?[]const u8 = null,
@@ -28,6 +29,8 @@ pub fn parse(args: []const []const u8) ParseError!Config {
             config.health = true;
         } else if (std.mem.eql(u8, arg, "--metrics")) {
             config.metrics = true;
+        } else if (std.mem.eql(u8, arg, "--prometheus")) {
+            config.prometheus = true;
         } else if (std.mem.eql(u8, arg, "--version")) {
             config.version = true;
         } else if (std.mem.eql(u8, arg, "--foreground")) {
@@ -62,14 +65,16 @@ test "defaults to daemonizing" {
     try std.testing.expect(!config.help);
     try std.testing.expect(!config.health);
     try std.testing.expect(!config.metrics);
+    try std.testing.expect(!config.prometheus);
     try std.testing.expect(!config.version);
 }
 
 test "parses admin flags" {
-    const args = [_][]const u8{ "--health", "--metrics" };
+    const args = [_][]const u8{ "--health", "--metrics", "--prometheus" };
     const config = try parse(args[0..]);
     try std.testing.expect(config.health);
     try std.testing.expect(config.metrics);
+    try std.testing.expect(config.prometheus);
 }
 
 test "parses foreground and paths" {

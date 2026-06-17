@@ -124,7 +124,12 @@
     "metricsRequest": {
       "allOf": [
         { "$ref": "#/$defs/commonRequest" },
-        { "properties": { "op": { "const": "metrics" } } }
+        {
+          "properties": {
+            "op": { "const": "metrics" },
+            "format": { "enum": ["json", "prometheus"] }
+          }
+        }
       ]
     },
     "reloadRequest": {

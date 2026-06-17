@@ -42,7 +42,7 @@ pub fn main() !void {
     }
 
     if (config.metrics) {
-        try adminRequest(socket_path, "metrics\n");
+        try adminRequest(socket_path, if (config.prometheus) prometheus_metrics_request else json_metrics_request);
         return;
     }
 
@@ -117,6 +117,9 @@ fn adminRequest(socket_path: []const u8, request: []const u8) !void {
     try std.fs.File.stdout().writeAll(response);
 }
 
+const json_metrics_request = "{\"v\":1,\"op\":\"metrics\",\"request_id\":\"cli\"}";
+const prometheus_metrics_request = "{\"v\":1,\"op\":\"metrics\",\"request_id\":\"cli\",\"format\":\"prometheus\"}";
+
 fn adminHealth(socket_path: []const u8) !void {
     var gpa_impl = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -155,6 +158,7 @@ const help_text =
     \\      --version         print version
     \\      --health          query daemon health
     \\      --metrics         query daemon metrics
+    \\      --prometheus      print --metrics as Prometheus text
     \\      --foreground      do not daemonize
     \\      --daemonize       daemonize with fork+setsid (default)
     \\      --socket <path>   override daemon socket path

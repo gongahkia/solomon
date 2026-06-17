@@ -311,6 +311,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const region_drift_test_run = b.addRunArtifact(region_drift_tests);
+    const cost_glance_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/daemon/modules/cost_glance.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const cost_glance_test_run = b.addRunArtifact(cost_glance_tests);
     const prod_guard_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/modules/prod_guard.zig"),
@@ -476,6 +484,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cloud_ctx_test_run.step);
     test_step.dependOn(&risk_tier_test_run.step);
     test_step.dependOn(&region_drift_test_run.step);
+    test_step.dependOn(&cost_glance_test_run.step);
     test_step.dependOn(&prod_guard_test_run.step);
     test_step.dependOn(&iam_whoami_test_run.step);
     test_step.dependOn(&iac_workspace_test_run.step);

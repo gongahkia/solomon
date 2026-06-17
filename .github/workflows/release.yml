@@ -87,6 +87,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --verify-tag \
             --title "$GITHUB_REF_NAME" \
-            --notes "Manual v0 release. Artifacts and SHA-256 checksums are attached." \
+            --notes "Manual v0 release. Artifacts, SHA-256 checksums, and SPDX SBOMs are attached." \
             dist/*.tar.gz \
-            dist/*.tar.gz.sha256
+            dist/*.tar.gz.sha256 \
+            dist/*.spdx.json

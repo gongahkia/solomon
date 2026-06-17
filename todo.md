@@ -656,7 +656,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 20.2 SBOM
 - [x] Generate SPDX SBOM on every tagged release
-- [ ] Publish alongside binary in GitHub Release
+- [x] Publish alongside binary in GitHub Release
 - [ ] CI gate: SBOM diff diff'd against previous release for review
 
 ### 20.3 Signing (Sigstore)

@@ -673,7 +673,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 20.5 Distribution channels
 - [ ] Homebrew formula (tap â†’ core)
 - [ ] AUR `shisa-bin` PKGBUILD
-- [ ] AUR `shisa-git` PKGBUILD
+- [x] AUR `shisa-git` PKGBUILD
 - [ ] Nixpkgs derivation
 - [ ] Scoop manifest (WSL)
 - [ ] AppImage build pipeline

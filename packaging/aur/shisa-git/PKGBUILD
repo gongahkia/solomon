@@ -1,0 +1,46 @@
+# Maintainer: Shisa maintainers <security@shisa.sh>
+# shellcheck shell=bash disable=SC2034,SC2154
+
+pkgname=shisa-git
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc='Daemon-backed async-first cross-shell prompt'
+arch=('x86_64' 'aarch64')
+url='https://github.com/gongahkia/shisa'
+license=('MIT')
+depends=('glibc')
+makedepends=('git' 'zig0.15')
+provides=('shisa')
+conflicts=('shisa' 'shisa-bin')
+source=('git+https://github.com/gongahkia/shisa.git')
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/shisa" || return
+  git describe --long --tags 2>/dev/null | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g' || printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd "$srcdir/shisa" || return
+  zig build release --prefix "$srcdir/install"
+}
+
+check() {
+  cd "$srcdir/shisa" || return
+  zig build test
+}
+
+package() {
+  install -Dm755 "$srcdir/install/bin/shisa" "$pkgdir/usr/bin/shisa"
+  install -Dm755 "$srcdir/install/bin/shisad" "$pkgdir/usr/bin/shisad"
+  install -Dm644 "$srcdir/shisa/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$srcdir/shisa/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 "$srcdir/shisa/init/shisa.zsh" "$pkgdir/usr/share/shisa/init/shisa.zsh"
+  install -Dm644 "$srcdir/shisa/init/shisa.bash" "$pkgdir/usr/share/shisa/init/shisa.bash"
+  install -Dm644 "$srcdir/shisa/init/shisa.fish" "$pkgdir/usr/share/shisa/init/shisa.fish"
+  install -Dm644 "$srcdir/shisa/init/shisa.nu" "$pkgdir/usr/share/shisa/init/shisa.nu"
+  install -Dm644 "$srcdir/shisa/init/shisa.ps1" "$pkgdir/usr/share/shisa/init/shisa.ps1"
+  install -d "$pkgdir/usr/share/shisa"
+  cp -R "$srcdir/shisa/themes" "$pkgdir/usr/share/shisa/themes"
+  cp -R "$srcdir/shisa/examples" "$pkgdir/usr/share/shisa/examples"
+}

@@ -10,6 +10,10 @@ Shisa release artifacts are signed in the tag-driven release workflow with Sigst
 
 The same workflow publishes GitHub artifact attestations for every release asset.
 
+## Attestation Level
+
+GitHub artifact attestations provide SLSA v1.0 Build Level 2 provenance for the release assets. This records the workflow, repository, commit, trigger, and OIDC identity that produced each asset.
+
 ## Verify A Release File
 
 Download the artifact and its matching bundle from the GitHub Release. Use the exact tag in the certificate identity:

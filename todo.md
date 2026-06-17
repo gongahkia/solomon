@@ -666,7 +666,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Document key-distrust + rotation procedure
 
 ### 20.4 SLSA
-- [ ] Achieve SLSA Level 2 attestation
+- [x] Achieve SLSA Level 2 attestation
 - [x] Publish provenance per release
 - [ ] Roadmap to SLSA Level 3 (hermetic builds)
 

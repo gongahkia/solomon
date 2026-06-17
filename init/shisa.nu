@@ -3,6 +3,7 @@ if not ("__SHISA_NU_INIT" in $env) {
     if not ("SHISA_BIN" in $env) { $env.SHISA_BIN = "shisa" }
     if not ("SHISA_SOCKET" in $env) { $env.SHISA_SOCKET = "" }
     if not ("SHISA_INSTANT" in $env) { $env.SHISA_INSTANT = "0" }
+    if not ("SHISA_A11Y" in $env) { $env.SHISA_A11Y = "0" }
 
     def shisa-socket-path [] {
         if (($env.SHISA_SOCKET? | default "") != "") {
@@ -45,6 +46,7 @@ if not ("__SHISA_NU_INIT" in $env) {
             $socket_path
         ]
         let args = if $instant { $args | append "--instant" } else { $args }
+        let args = if (($env.SHISA_A11Y? | default "0") == "1") { $args | append "--a11y" } else { $args }
         let rendered = (try { run-external $env.SHISA_BIN ...$args e> /dev/null | complete } catch { { stdout: "", exit_code: 1 } })
         if $rendered.exit_code == 0 {
             $rendered.stdout

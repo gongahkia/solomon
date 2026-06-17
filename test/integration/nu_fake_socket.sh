@@ -37,6 +37,8 @@ length = header.unpack1("N")
 payload = conn.read(length)
 abort("missing frame payload") unless payload && payload.bytesize == length
 abort("missing nu shell") unless payload.include?('"shell":"nu"')
+abort("missing a11y color caps") unless payload.include?('"color_caps":"none"')
+abort("missing a11y glyph caps") unless payload.include?('"glyph_caps":"ascii"')
 response = '{"v":1,"prompt":"fake-nu> ","redraw_token":null}'
 conn.write([response.bytesize].pack("N"))
 conn.write(response)
@@ -55,6 +57,6 @@ done
   exit 1
 }
 
-SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" nu --no-config-file -c 'source init/shisa.nu; do $env.PROMPT_COMMAND' >"$out"
+SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" nu --no-config-file -c 'source init/shisa.nu; do $env.PROMPT_COMMAND' >"$out"
 grep -F 'fake-nu> ' "$out" >/dev/null
 nu --no-config-file -c 'source init/shisa.nu; if not ("__SHISA_NU_INIT" in $env) { exit 1 }'

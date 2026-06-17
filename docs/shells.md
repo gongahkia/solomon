@@ -10,6 +10,8 @@
 | nushell | `init/shisa.nu` | `$env.PROMPT_COMMAND` | exit/jobs yes; duration 0 | documented limitation | no | CLI supports `--instant`; hook off by default | `test/integration/nu_fake_socket.sh` |
 | powershell | `init/shisa.ps1` | `prompt` | exit/jobs yes; duration 0 | `Invoke-ShisaRedraw`; external repaint limited | no | CLI supports `--instant`; hook off by default | `test/integration/pwsh_fake_socket.sh` |
 
+Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from the hook.
+
 ## zsh
 
 - Requires zsh 5.0 or newer.

@@ -28,6 +28,7 @@ typeset -g SHISA_TRANSIENT_PROMPT=${SHISA_TRANSIENT_PROMPT:-1}
 typeset -g SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 typeset -g SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
 typeset -g SHISA_AI_RISK_GUARD=${SHISA_AI_RISK_GUARD:-0}
+typeset -g SHISA_A11Y=${SHISA_A11Y:-0}
 typeset -g SHISA_NEXTCMD_KEYSEQ=${SHISA_NEXTCMD_KEYSEQ:-'^X^N'}
 typeset -g SHISA_NEXTCMD_ACCEPT_KEYSEQ=${SHISA_NEXTCMD_ACCEPT_KEYSEQ:-'^I'}
 typeset -g SHISA_NEXTCMD_REJECT_KEYSEQ=${SHISA_NEXTCMD_REJECT_KEYSEQ:-'^['}
@@ -219,5 +220,6 @@ shisa_prompt_render() {
 
   local -a args
   args=(prompt --shell zsh --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
+  [[ ${SHISA_A11Y:-0} == 1 ]] && args+=(--a11y)
   "${SHISA_BIN}" "${args[@]}"
 }

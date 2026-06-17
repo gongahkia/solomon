@@ -1449,6 +1449,30 @@ test "subscribe backpressure queue drops over limit" {
     try std.testing.expectEqual(@as(usize, max_subscribe_backpressure_limit), subscribeBackpressureLimit(max_subscribe_backpressure_limit + 1));
 }
 
+test "subscribe op exits cleanly on client disconnect" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-subscribe-close-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
+
+    var client_stream = try std.net.connectUnixSocket(socket_path);
+    try writeFrame(client_stream.handle, "{\"v\":1,\"op\":\"subscribe\",\"request_id\":\"subscribe-close\",\"topics\":[\"vcs.summary\"]}");
+    const snapshot = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
+    defer allocator.free(snapshot);
+    try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"kind\":\"snapshot\"") != null);
+
+    client_stream.close();
+    thread.join();
+}
+
 test "metrics op returns JSON metrics dump" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-metrics-{x}", .{std.crypto.random.int(u64)});

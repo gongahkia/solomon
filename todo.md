@@ -512,7 +512,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Topic subscription with reference-counting per-topic
 - [x] Snapshot then delta updates
 - [x] Backpressure: drop if client slower than producer (configurable)
-- [ ] Disconnect cleanly, free state
+- [x] Disconnect cleanly, free state
 
 ### 16.2 Read-only enforcement
 - [ ] Daemon-side allowlist of read-only ops on subscribe connections

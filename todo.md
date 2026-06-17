@@ -841,7 +841,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] GH Sponsors set up
 - [ ] Open Collective with public ledger
 - [x] `FUNDING.md` explains where money goes
-- [ ] Sponsor recognition policy (no feature demands)
+- [x] Sponsor recognition policy (no feature demands)
 
 ## Phase 26 â€” Daemon lifecycle hardening
 

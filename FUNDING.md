@@ -10,4 +10,4 @@ Shisa funding, if enabled, is used for project maintenance costs only:
 
 Funding does not buy roadmap priority, maintainer access, feature commitments, or security exceptions. Sponsor recognition must stay separate from technical decision-making.
 
-Maintainers should publish material spending summaries before accepting recurring community funds.
+Maintainers should publish material spending summaries before accepting recurring community funds. Recognition rules live in [Sponsor Recognition](docs/governance/sponsor-recognition.md).

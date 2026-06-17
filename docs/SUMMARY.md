@@ -87,6 +87,7 @@
 
 - [Vouch](governance/vouch.md)
 - [Maintainer Onboarding](governance/maintainer-onboarding.md)
+- [Sponsor Recognition](governance/sponsor-recognition.md)
 - [Code of Conduct Enforcement](governance/code-of-conduct-enforcement.md)
 
 # Protocol

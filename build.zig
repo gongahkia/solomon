@@ -52,6 +52,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    exe.root_module.addImport("vcs_worktree", vcs_worktree_module);
     b.installArtifact(exe);
 
     const daemon = b.addExecutable(.{
@@ -84,6 +85,7 @@ pub fn build(b: *std.Build) void {
             .optimize = .Debug,
         }),
     });
+    debug_exe.root_module.addImport("vcs_worktree", vcs_worktree_debug_module);
     const debug_install = b.addInstallArtifact(debug_exe, .{});
     const debug_daemon = b.addExecutable(.{
         .name = "shisad",
@@ -118,6 +120,7 @@ pub fn build(b: *std.Build) void {
             .optimize = .ReleaseFast,
         }),
     });
+    release_exe.root_module.addImport("vcs_worktree", vcs_worktree_release_module);
     const release_install = b.addInstallArtifact(release_exe, .{});
     const release_daemon = b.addExecutable(.{
         .name = "shisad",
@@ -227,6 +230,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    tests.root_module.addImport("vcs_worktree", vcs_worktree_module);
     const test_run = b.addRunArtifact(tests);
     const cli_tests = b.addTest(.{
         .root_module = b.createModule(.{

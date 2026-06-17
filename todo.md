@@ -854,7 +854,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 26.2 Auto-spawn
 - [x] `shisa prompt --auto-spawn` forks `shisad` on missing socket
-- [ ] 100 ms grace period; fallback to sync if not ready
+- [x] 100 ms grace period; fallback to sync if not ready
 - [ ] Single-instance `flock` enforcement
 - [ ] Race-tested
 

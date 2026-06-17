@@ -1,9 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const daemon_cache = @import("daemon/cache.zig");
+const dispatcher = @import("daemon/dispatcher.zig");
 const fsnotify = @import("daemon/fsnotify.zig");
 const client = @import("shisa-client.zig");
 const cloud_ctx_module = @import("daemon/modules/cloud_ctx.zig");
+const git_branch_module = @import("daemon/modules/git_branch.zig");
+const language_versions_module = @import("daemon/modules/language_versions.zig");
 const ai_explain = @import("ai/explain.zig");
 const nextcmd = @import("ai/nextcmd.zig");
 const nl2cmd = @import("ai/nl2cmd.zig");
@@ -19,7 +22,7 @@ const risk_tier_module = @import("daemon/modules/risk_tier.zig");
 const supervisor = @import("supervisor.zig");
 const theme_contrast = @import("theme/contrast.zig");
 const vcs_stack = @import("vcs/stack.zig");
-const vcs_worktree = @import("vcs/worktree.zig");
+const vcs_worktree = @import("vcs_worktree");
 
 const version = "0.1.0-dev";
 const max_config_bytes = 1024 * 1024;
@@ -4709,6 +4712,8 @@ const PromptConfig = struct {
     rows: u16 = 24,
 };
 
+const prompt_auto_spawn_grace_ms: i64 = 100;
+
 fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const config = try parsePrompt(args);
     const socket_path = if (config.socket_path) |path| path else try paths.defaultSocketPath(allocator);
@@ -4727,10 +4732,16 @@ fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
         }
     }
 
-    const response_payload = client.requestAlloc(allocator, socket_path, payload) catch |err| retry: {
+    const response_payload = client.requestAlloc(allocator, socket_path, payload) catch |err| response: {
         if (!config.auto_spawn) return err;
-        try spawnPromptDaemon(allocator, socket_path);
-        break :retry try client.requestAlloc(allocator, socket_path, payload);
+        if (try autoSpawnPromptRequestAlloc(allocator, socket_path, payload)) |retried| break :response retried;
+        const prompt_text = try renderSyncPromptAlloc(allocator, config, cwd);
+        defer allocator.free(prompt_text);
+        if (config.instant) {
+            try writeInstantPrompt(allocator, prompt_text);
+        }
+        try writePromptText(allocator, prompt_text, config.a11y, cwd);
+        return;
     };
     defer allocator.free(response_payload);
 
@@ -4790,6 +4801,82 @@ fn spawnPromptDaemon(allocator: std.mem.Allocator, socket_path: []const u8) !voi
     daemon.stdout_behavior = .Ignore;
     daemon.stderr_behavior = .Ignore;
     try daemon.spawn();
+}
+
+fn autoSpawnPromptRequestAlloc(allocator: std.mem.Allocator, socket_path: []const u8, payload: []const u8) !?[]u8 {
+    spawnPromptDaemon(allocator, socket_path) catch return null;
+    waitForPath(socket_path, prompt_auto_spawn_grace_ms) catch return null;
+    return client.requestAlloc(allocator, socket_path, payload) catch null;
+}
+
+fn renderSyncPromptAlloc(allocator: std.mem.Allocator, config: PromptConfig, cwd: []const u8) ![]u8 {
+    var git_cache = git_branch_module.Cache{};
+    defer git_cache.deinit(allocator);
+    var language_cache = language_versions_module.Cache{};
+    defer language_cache.deinit(allocator);
+    var cloud_cache = cloud_ctx_module.Cache{};
+    defer cloud_cache.deinit(allocator);
+
+    const module_options = try promptModuleOptions(allocator);
+    const home = std.process.getEnvVarOwned(allocator, "HOME") catch null;
+    defer if (home) |value| allocator.free(value);
+    const kubeconfig = std.process.getEnvVarOwned(allocator, "KUBECONFIG") catch null;
+    defer if (kubeconfig) |value| allocator.free(value);
+    const ssh = std.process.getEnvVarOwned(allocator, "SSH_CONNECTION") catch null;
+    defer if (ssh) |value| allocator.free(value);
+    const aws_profile = std.process.getEnvVarOwned(allocator, "AWS_PROFILE") catch null;
+    defer if (aws_profile) |value| allocator.free(value);
+    const aws_region = std.process.getEnvVarOwned(allocator, "AWS_REGION") catch null;
+    defer if (aws_region) |value| allocator.free(value);
+    const aws_default_region = std.process.getEnvVarOwned(allocator, "AWS_DEFAULT_REGION") catch null;
+    defer if (aws_default_region) |value| allocator.free(value);
+    const cloudsdk_compute_region = std.process.getEnvVarOwned(allocator, "CLOUDSDK_COMPUTE_REGION") catch null;
+    defer if (cloudsdk_compute_region) |value| allocator.free(value);
+    const azure_location = std.process.getEnvVarOwned(allocator, "AZURE_LOCATION") catch null;
+    defer if (azure_location) |value| allocator.free(value);
+    const arm_location = std.process.getEnvVarOwned(allocator, "ARM_LOCATION") catch null;
+    defer if (arm_location) |value| allocator.free(value);
+    const azure_default_location = std.process.getEnvVarOwned(allocator, "AZURE_DEFAULT_LOCATION") catch null;
+    defer if (azure_default_location) |value| allocator.free(value);
+    const user = std.process.getEnvVarOwned(allocator, "USER") catch try allocator.dupe(u8, "unknown");
+    defer allocator.free(user);
+    var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
+    const host = std.posix.gethostname(&host_buffer) catch "unknown";
+
+    var rendered = try dispatcher.renderDefault(allocator, .{
+        .git_branch = &git_cache,
+        .language_versions = &language_cache,
+        .cloud_ctx = &cloud_cache,
+    }, .{
+        .cwd = cwd,
+        .home = home,
+        .exit = config.exit,
+        .jobs = config.jobs,
+        .duration_ms = config.duration_ms,
+        .time = config.time,
+        .no_async = true,
+        .timestamp = std.time.timestamp(),
+        .ssh = ssh,
+        .user = user,
+        .host = host,
+        .aws_profile = aws_profile,
+        .aws_region = aws_region,
+        .aws_default_region = aws_default_region,
+        .cloudsdk_compute_region = cloudsdk_compute_region,
+        .azure_location = azure_location,
+        .arm_location = arm_location,
+        .azure_default_location = azure_default_location,
+        .kubeconfig = kubeconfig,
+        .cloud_ctx = .{
+            .aws = module_options.cloud_ctx.aws,
+            .gcp = module_options.cloud_ctx.gcp,
+            .azure = module_options.cloud_ctx.azure,
+            .kubernetes = module_options.cloud_ctx.kubernetes,
+        },
+        .sso_expiry = module_options.sso_expiry,
+    });
+    defer rendered.deinit(allocator);
+    return allocator.dupe(u8, rendered.prompt);
 }
 
 fn writePromptText(allocator: std.mem.Allocator, prompt_text: []const u8, a11y: bool, cwd: []const u8) !void {
@@ -5044,6 +5131,22 @@ test "prompt args parse a11y" {
 test "prompt args parse auto spawn" {
     const config = try parsePrompt(&.{"--auto-spawn"});
     try std.testing.expect(config.auto_spawn);
+}
+
+test "auto spawn uses 100ms grace" {
+    try std.testing.expectEqual(@as(i64, 100), prompt_auto_spawn_grace_ms);
+}
+
+test "sync prompt fallback renders cwd prompt" {
+    const dir_path = try std.fmt.allocPrint(std.testing.allocator, "/tmp/shisa-sync-fallback-{x}", .{std.crypto.random.int(u64)});
+    defer std.testing.allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const output = try renderSyncPromptAlloc(std.testing.allocator, .{}, dir_path);
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, dir_path) != null);
+    try std.testing.expect(std.mem.endsWith(u8, output, "> "));
 }
 
 test "prompt caps switch for a11y" {

@@ -41,7 +41,7 @@ jobs:
 
       - uses: mlugg/setup-zig@v2.2.1
         with:
-          version: 0.16.0
+          version: 0.15.2
           use-cache: true
           cache-key: shisa-${{ hashFiles('build.zig.zon') }}
 
@@ -72,7 +72,7 @@ jobs:
 
       - uses: mlugg/setup-zig@v2.2.1
         with:
-          version: 0.16.0
+          version: 0.15.2
           use-cache: true
           cache-key: shisa-vcs-${{ matrix.module }}-${{ hashFiles('build.zig.zon') }}
 
@@ -97,7 +97,7 @@ jobs:
 
       - uses: mlugg/setup-zig@v2.2.1
         with:
-          version: 0.16.0
+          version: 0.15.2
           use-cache: true
           cache-key: shisa-shell-${{ matrix.shell }}-${{ hashFiles('build.zig.zon') }}
 

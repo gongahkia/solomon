@@ -4,7 +4,7 @@ Shisa is pre-MVP. Keep changes small, benchmark-aware, and tied to the roadmap i
 
 ## Toolchain
 
-- Zig: `0.16.0` from `build.zig.zon`
+- Zig: `0.15.2` from `.zigversion` and `build.zig.zon`
 - Shell: zsh, bash, or fish for integration work
 - OS targets: macOS and Linux
 

@@ -649,7 +649,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ## Phase 20 â€” Release engineering + supply chain
 
 ### 20.1 Reproducible builds
-- [ ] Pin Zig version + lockfile for all deps
+- [x] Pin Zig version + lockfile for all deps
 - [ ] Document the deterministic build invocation
 - [ ] Verify bit-identical artifacts across two CI hosts
 - [ ] Publish reproducibility status badge

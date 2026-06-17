@@ -603,7 +603,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 19.1 Docs site
 - [x] mdBook scaffold under `docs/`
-- [ ] Build pipeline: PR previews via GitHub Actions
+- [x] Build pipeline: PR previews via GitHub Actions
 - [ ] Deploy to shisa.sh/docs
 - [ ] Search: stork-search or pagefind integration
 

@@ -4600,6 +4600,7 @@ const PromptConfig = struct {
     time: bool = false,
     no_async: bool = false,
     instant: bool = false,
+    a11y: bool = false,
     shell: []const u8 = "zsh",
     cols: u16 = 80,
     rows: u16 = 24,
@@ -4618,7 +4619,7 @@ fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (config.instant) {
         if (try readInstantPrompt(allocator)) |cached| {
             defer allocator.free(cached);
-            try std.fs.File.stdout().writeAll(cached);
+            try writePromptText(allocator, cached, config.a11y);
             return;
         }
     }
@@ -4631,7 +4632,7 @@ fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (config.instant) {
         try writeInstantPrompt(allocator, parsed.value.prompt);
     }
-    try std.fs.File.stdout().writeAll(parsed.value.prompt);
+    try writePromptText(allocator, parsed.value.prompt, config.a11y);
 }
 
 fn parsePrompt(args: []const []const u8) !PromptConfig {
@@ -4656,6 +4657,8 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
             config.no_async = true;
         } else if (std.mem.eql(u8, arg, "--instant")) {
             config.instant = true;
+        } else if (std.mem.eql(u8, arg, "--a11y")) {
+            config.a11y = true;
         } else if (std.mem.eql(u8, arg, "--shell")) {
             config.shell = try nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--cols")) {
@@ -4668,6 +4671,16 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
     }
 
     return config;
+}
+
+fn writePromptText(allocator: std.mem.Allocator, prompt_text: []const u8, a11y: bool) !void {
+    if (!a11y) {
+        try std.fs.File.stdout().writeAll(prompt_text);
+        return;
+    }
+    const accessible = try a11yPromptAlloc(allocator, prompt_text);
+    defer allocator.free(accessible);
+    try std.fs.File.stdout().writeAll(accessible);
 }
 
 fn instantPromptPath(allocator: std.mem.Allocator) ![]u8 {
@@ -4737,9 +4750,17 @@ fn buildPromptPayload(allocator: std.mem.Allocator, config: PromptConfig, cwd: [
 
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\",\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
-        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, std.posix.getuid(), request_id, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, module_options.sso_expiry.warning_minutes },
+        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\",\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
+        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), std.posix.getuid(), request_id, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, module_options.sso_expiry.warning_minutes },
     );
+}
+
+fn promptColorCaps(config: PromptConfig) []const u8 {
+    return if (config.a11y) "none" else "truecolor";
+}
+
+fn promptGlyphCaps(config: PromptConfig) []const u8 {
+    return if (config.a11y) "ascii" else "unicode";
 }
 
 fn promptModuleOptions(allocator: std.mem.Allocator) !PromptModuleOptions {
@@ -4782,6 +4803,87 @@ fn jsonEscapeAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
     return out.toOwnedSlice(allocator);
 }
 
+fn a11yPromptAlloc(allocator: std.mem.Allocator, prompt_text: []const u8) ![]u8 {
+    const no_ansi = try stripAnsiAlloc(allocator, prompt_text);
+    defer allocator.free(no_ansi);
+    return normalizePromptGlyphsAlloc(allocator, no_ansi);
+}
+
+fn stripAnsiAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    var index: usize = 0;
+    while (index < value.len) {
+        if (value[index] == 0x1b and index + 1 < value.len and value[index + 1] == '[') {
+            index += 2;
+            while (index < value.len) : (index += 1) {
+                if (value[index] >= 0x40 and value[index] <= 0x7e) {
+                    index += 1;
+                    break;
+                }
+            }
+            continue;
+        }
+        try out.append(allocator, value[index]);
+        index += 1;
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn normalizePromptGlyphsAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    var index: usize = 0;
+    while (index < value.len) {
+        if (replaceGlyph(&out, allocator, value[index..], "\xe2\x86\x92", "->")) {
+            index += 3;
+        } else if (replaceGlyph(&out, allocator, value[index..], "\xe2\x86\x91", "up")) {
+            index += 3;
+        } else if (replaceGlyph(&out, allocator, value[index..], "\xe2\x86\x93", "down")) {
+            index += 3;
+        } else if (replaceGlyph(&out, allocator, value[index..], "\xe2\x9c\x93", "ok")) {
+            index += 3;
+        } else if (replaceGlyph(&out, allocator, value[index..], "\xe2\x9c\x97", "x")) {
+            index += 3;
+        } else if (replaceGlyph(&out, allocator, value[index..], "\xe2\x80\xa6", "...")) {
+            index += 3;
+        } else {
+            try out.append(allocator, value[index]);
+            index += 1;
+        }
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn replaceGlyph(out: *std.ArrayList(u8), allocator: std.mem.Allocator, tail: []const u8, glyph: []const u8, replacement: []const u8) bool {
+    if (!std.mem.startsWith(u8, tail, glyph)) return false;
+    out.appendSlice(allocator, replacement) catch return false;
+    return true;
+}
+
+test "prompt args parse a11y" {
+    const config = try parsePrompt(&.{ "--a11y", "--no-async" });
+    try std.testing.expect(config.a11y);
+    try std.testing.expect(config.no_async);
+}
+
+test "prompt caps switch for a11y" {
+    try std.testing.expectEqualStrings("none", promptColorCaps(.{ .a11y = true }));
+    try std.testing.expectEqualStrings("ascii", promptGlyphCaps(.{ .a11y = true }));
+    try std.testing.expectEqualStrings("truecolor", promptColorCaps(.{}));
+    try std.testing.expectEqualStrings("unicode", promptGlyphCaps(.{}));
+}
+
+test "a11y prompt strips ansi and normalizes glyphs" {
+    const output = try a11yPromptAlloc(std.testing.allocator, "\x1b[31mexit:2\x1b[0m \xe2\x86\x92 prod \xe2\x9c\x93\n");
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("exit:2 -> prod ok\n", output);
+}
+
 const help_text =
     \\usage: shisa <command> [options]
     \\
@@ -4805,7 +4907,7 @@ const help_text =
     \\  init          write default shisa.toml
     \\  pin           mark a path as never-evicted
     \\  plugin        install, list, enable, disable, or trust plugins
-    \\  prompt        render prompt through shisad
+    \\  prompt        render prompt through shisad; --a11y strips ANSI and normalizes glyphs
     \\  stack         dump detected stacked-diff metadata
     \\  supervisor    run shisad under a crash-restart supervisor
     \\  vouch         verify VOUCHES governance file

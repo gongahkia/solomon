@@ -651,9 +651,7 @@ fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "risk")) {
         const config = try parseAiRiskArgs(args[1..]);
-        const output = try ai_risk.outputAlloc(allocator, config.command);
-        defer allocator.free(output);
-        try std.fs.File.stdout().writeAll(output);
+        try aiRisk(allocator, config);
         return;
     }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "nextcmd")) {
@@ -686,6 +684,8 @@ fn parseAiBenchArgs(args: []const []const u8) !AiBenchConfig {
 
 const AiRiskConfig = struct {
     command: []const u8 = "",
+    model: []const u8 = ollama.recommended_model,
+    slm: bool = false,
 };
 
 fn parseAiRiskArgs(args: []const []const u8) !AiRiskConfig {
@@ -694,6 +694,10 @@ fn parseAiRiskArgs(args: []const []const u8) !AiRiskConfig {
     while (i < args.len) : (i += 1) {
         if (std.mem.eql(u8, args[i], "--command")) {
             config.command = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--model")) {
+            config.model = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--slm")) {
+            config.slm = true;
         } else if (std.mem.eql(u8, args[i], "--")) {
             config.command = try nextValue(args, &i);
             if (i + 1 != args.len) return error.UnknownAiArgument;
@@ -705,6 +709,27 @@ fn parseAiRiskArgs(args: []const []const u8) !AiRiskConfig {
     }
     if (config.command.len == 0) return error.MissingValue;
     return config;
+}
+
+fn aiRisk(allocator: std.mem.Allocator, config: AiRiskConfig) !void {
+    var result = ai_risk.explain(config.command);
+    if (config.slm and result.risk == .medium) {
+        result = aiRiskSlm(allocator, config, result) catch result;
+    }
+    const output = try ai_risk.outputExplanationAlloc(allocator, result);
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn aiRiskSlm(allocator: std.mem.Allocator, config: AiRiskConfig, fallback: ai_risk.Explanation) !ai_risk.Explanation {
+    const status = try ollama.detect(allocator);
+    if (!status.installed or !status.daemon_running) return fallback;
+    const prompt_text = try ai_risk.promptWithCommandAlloc(allocator, config.command);
+    defer allocator.free(prompt_text);
+    const raw = try ollama.generateAlloc(allocator, ollama.default_host, ollama.default_port, config.model, prompt_text);
+    defer allocator.free(raw);
+    const risk = ai_risk.parseSlmRisk(raw) orelse return fallback;
+    return .{ .risk = risk, .source = "slm", .pattern = fallback.pattern };
 }
 
 fn aiBench(allocator: std.mem.Allocator, config: AiBenchConfig) !void {
@@ -941,8 +966,10 @@ test "ai bench args parse" {
 }
 
 test "ai risk args parse" {
-    const config = try parseAiRiskArgs(&.{ "--command", "rm -rf /tmp/x" });
+    const config = try parseAiRiskArgs(&.{ "--command", "rm -rf /tmp/x", "--model", "gemma3:1b", "--slm" });
     try std.testing.expectEqualStrings("rm -rf /tmp/x", config.command);
+    try std.testing.expectEqualStrings("gemma3:1b", config.model);
+    try std.testing.expect(config.slm);
 }
 
 test "ai nextcmd args parse" {

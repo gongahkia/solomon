@@ -285,6 +285,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const theme_builtin_test_run = b.addRunArtifact(theme_builtin_tests);
+    const theme_contrast_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/theme/contrast.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const theme_contrast_test_run = b.addRunArtifact(theme_contrast_tests);
     const vcs_jj_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/vcs/jj.zig"),
@@ -665,6 +673,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&plugin_lua_test_run.step);
     test_step.dependOn(&plugin_reference_test_run.step);
     test_step.dependOn(&theme_builtin_test_run.step);
+    test_step.dependOn(&theme_contrast_test_run.step);
     test_step.dependOn(&vcs_jj_test_run.step);
     test_step.dependOn(&vcs_sl_test_run.step);
     test_step.dependOn(&vcs_hg_test_run.step);

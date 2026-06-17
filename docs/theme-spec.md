@@ -131,6 +131,7 @@ Parent cycles are invalid.
 - `name` must match `[a-z0-9][a-z0-9_-]*`.
 - Palette refs must resolve to concrete colors.
 - Palette refs may not form cycles.
+- Contrast checks use Oklab lightness deltas for perceptual diagnostics and WCAG ratios for AA thresholds.
 - Segment color fields must be empty or valid palette refs/concrete colors.
 - `style` may contain only known style tokens.
 - Non-ASCII `glyph` requires `ascii`.

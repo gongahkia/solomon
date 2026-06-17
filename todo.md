@@ -697,7 +697,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 ## Phase 21 — Accessibility (WCAG AA + a11y mode)
 
 ### 21.1 Contrast enforcement
-- [ ] Implement Oklab contrast calculator
+- [x] Implement Oklab contrast calculator
 - [ ] `shisa theme validate` enforces ≥ 4.5:1 (text) and ≥ 3:1 (UI signals)
 - [ ] CI gate: refuse new themes failing contrast
 

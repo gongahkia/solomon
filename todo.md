@@ -477,7 +477,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 - [x] u32 BE length header; validate against 1 MiB cap
 - [x] Property tests: roundtrip arbitrary payloads; corruption detection
 - [ ] Fuzz harness for the deframer (libFuzzer via Zig)
-- [ ] Benchmark: deframe 100k frames in < 1 s on baseline machine
+- [x] Benchmark: deframe 100k frames in < 1 s on baseline machine
 
 ### 15.2 Request/response schemas
 - [ ] Zig structs for `Request`, `Response`, `Error` mirroring §26.2–§26.5

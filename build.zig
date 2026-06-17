@@ -18,6 +18,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseFast,
     });
+    const proto_types_module = b.createModule(.{
+        .root_source_file = b.path("src/proto/types.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
     const exe = b.addExecutable(.{
         .name = "shisa",
@@ -97,6 +102,20 @@ pub fn build(b: *std.Build) void {
     const bench_run = b.addRunArtifact(bench_exe);
     const bench_step = b.step("bench", "Run benchmark skeleton");
     bench_step.dependOn(&bench_run.step);
+
+    const schema_exe = b.addExecutable(.{
+        .name = "shisa-protocol-schema",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/protocol_schema.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    schema_exe.root_module.addImport("proto_types", proto_types_module);
+    const schema_run = b.addRunArtifact(schema_exe);
+    schema_run.addFileArg(b.path("docs/protocol/v1.schema.json"));
+    const schema_step = b.step("schema", "Generate protocol JSON Schema");
+    schema_step.dependOn(&schema_run.step);
 
     const run_cmd = b.addRunArtifact(exe);
     if (b.args) |args| run_cmd.addArgs(args);
@@ -481,6 +500,15 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const proto_frame_test_run = b.addRunArtifact(proto_frame_tests);
+    const protocol_schema_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/protocol_schema.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    protocol_schema_tests.root_module.addImport("proto_types", proto_types_module);
+    const protocol_schema_test_run = b.addRunArtifact(protocol_schema_tests);
     const client_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/shisa-client.zig"),
@@ -561,6 +589,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&supervisor_test_run.step);
     test_step.dependOn(&proto_types_test_run.step);
     test_step.dependOn(&proto_frame_test_run.step);
+    test_step.dependOn(&protocol_schema_test_run.step);
     test_step.dependOn(&client_test_run.step);
     test_step.dependOn(&server_test_run.step);
     test_step.dependOn(&zsh_integration.step);

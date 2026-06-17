@@ -44,7 +44,9 @@ jobs:
           cache-key: shisa-${{ hashFiles('build.zig.zon') }}
 
       - run: zig version
-      - run: zig fmt --check build.zig src
+      - run: zig fmt --check build.zig src tools
+      - run: zig build schema
+      - run: git diff --exit-code docs/protocol/v1.schema.json
       - run: zig build test
       - run: zig build debug
       - run: zig build release

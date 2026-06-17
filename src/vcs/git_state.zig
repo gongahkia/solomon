@@ -53,6 +53,15 @@ pub fn parsePorcelainCounts(output: []const u8) WorktreeCounts {
     return counts;
 }
 
+pub fn parseStashCount(output: []const u8) u32 {
+    var count: u32 = 0;
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.startsWith(u8, line, "stash@{")) count += 1;
+    }
+    return count;
+}
+
 fn isConflictStatus(x: u8, y: u8) bool {
     return (x == 'D' and y == 'D') or
         (x == 'A' and y == 'U') or
@@ -361,6 +370,15 @@ test "parses porcelain working tree counts" {
     try std.testing.expectEqual(@as(u32, 2), counts.unstaged);
     try std.testing.expectEqual(@as(u32, 1), counts.untracked);
     try std.testing.expectEqual(@as(u32, 1), counts.conflicts);
+}
+
+test "parses stash count" {
+    const count = parseStashCount(
+        \\stash@{0}: WIP on main: abc one
+        \\stash@{1}: On feature: msg
+        \\
+    );
+    try std.testing.expectEqual(@as(u32, 2), count);
 }
 
 fn expectSignal(signal: PromptSignal, glyph: []const u8, a11y: []const u8) !void {

@@ -797,7 +797,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 24.2 Working tree
 - [x] Counts: staged / unstaged / untracked / conflict files
-- [ ] Stash count
+- [x] Stash count
 - [ ] Sparse-checkout active flag (cone vs non-cone)
 - [ ] Submodule dirty/behind/ahead aggregation
 - [ ] LFS active + pointer-only files

@@ -38,6 +38,21 @@ pub const SparseCheckoutState = enum {
     cone,
 };
 
+pub const AheadBehind = struct {
+    behind: u32 = 0,
+    ahead: u32 = 0,
+};
+
+pub fn parseAheadBehind(output: []const u8) ?AheadBehind {
+    var tokens = std.mem.tokenizeAny(u8, output, " \t\r\n");
+    const behind_text = tokens.next() orelse return null;
+    const ahead_text = tokens.next() orelse return null;
+    return .{
+        .behind = std.fmt.parseInt(u32, behind_text, 10) catch return null,
+        .ahead = std.fmt.parseInt(u32, ahead_text, 10) catch return null,
+    };
+}
+
 pub fn parsePorcelainCounts(output: []const u8) WorktreeCounts {
     var counts = WorktreeCounts{};
     var lines = std.mem.splitScalar(u8, output, '\n');
@@ -419,6 +434,13 @@ test "parses sparse checkout state" {
     try std.testing.expectEqual(SparseCheckoutState.non_cone, parseSparseCheckoutState("core.sparseCheckout=true\n"));
     try std.testing.expectEqual(SparseCheckoutState.cone, parseSparseCheckoutState("core.sparseCheckout=true\ncore.sparseCheckoutCone=true\n"));
     try std.testing.expectEqual(SparseCheckoutState.cone, parseSparseCheckoutState("index.sparse=true\ncore.sparseCheckoutCone=true\n"));
+}
+
+test "parses ahead behind counts" {
+    const counts = parseAheadBehind("3\t5\n").?;
+    try std.testing.expectEqual(@as(u32, 3), counts.behind);
+    try std.testing.expectEqual(@as(u32, 5), counts.ahead);
+    try std.testing.expect(parseAheadBehind("bad\n") == null);
 }
 
 fn expectSignal(signal: PromptSignal, glyph: []const u8, a11y: []const u8) !void {

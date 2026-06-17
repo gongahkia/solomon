@@ -803,7 +803,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] LFS active + pointer-only files
 
 ### 24.3 Branch state
-- [ ] Ahead/behind upstream counts (async)
+- [x] Ahead/behind upstream counts (async)
 - [ ] Last fetch age (warn if > N hours)
 - [ ] HEAD signed-commit state (gpg/ssh)
 - [ ] Branch protection hint (read remote rules, cached)

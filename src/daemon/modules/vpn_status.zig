@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const module_id = "vpn_status";
 
@@ -154,6 +155,43 @@ pub fn readNetworkManagerStatusAlloc(allocator: std.mem.Allocator) !?VpnStatus {
         return @as(?VpnStatus, try vpnStatusAlloc(allocator, "nm", parseBusctlString(id) orelse "vpn"));
     }
     return null;
+}
+
+pub fn render(allocator: std.mem.Allocator) !?[]u8 {
+    if (try firstActiveStatusAlloc(allocator)) |status_value| {
+        var status = status_value;
+        defer status.deinit(allocator);
+        return renderStatusAlloc(allocator, status);
+    }
+    return null;
+}
+
+pub fn firstActiveStatusAlloc(allocator: std.mem.Allocator) !?VpnStatus {
+    if (readWireGuardStatusAlloc(allocator) catch null) |status| return status;
+    if (readTailscaleStatusAlloc(allocator) catch null) |status| return status;
+    if (readNetBirdStatusAlloc(allocator) catch null) |status| return status;
+    if (readWarpStatusAlloc(allocator) catch null) |status| return status;
+    if (readZeroTierStatusAlloc(allocator) catch null) |status| return status;
+    if (builtin.os.tag == .macos) {
+        if (readScutilNetworkServiceStatusAlloc(allocator) catch null) |status| return status;
+    }
+    if (builtin.os.tag == .linux) {
+        if (readNetworkManagerStatusAlloc(allocator) catch null) |status| return status;
+    }
+    return null;
+}
+
+pub fn renderStatusAlloc(allocator: std.mem.Allocator, status: VpnStatus) !?[]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.appendSlice(allocator, "vpn:");
+    const name = std.mem.trim(u8, status.name, " \t\r\n");
+    if (name.len == 0) {
+        try out.appendSlice(allocator, status.provider);
+    } else {
+        try appendCompactName(allocator, &out, name);
+    }
+    return @as(?[]u8, try out.toOwnedSlice(allocator));
 }
 
 pub fn parseWireGuardShowAlloc(allocator: std.mem.Allocator, source: []const u8) !?VpnStatus {
@@ -329,6 +367,16 @@ fn freeStringList(allocator: std.mem.Allocator, values: [][]u8) void {
     allocator.free(values);
 }
 
+fn appendCompactName(allocator: std.mem.Allocator, out: *std.ArrayList(u8), name: []const u8) !void {
+    for (name) |byte| {
+        if (byte == ' ' or byte == '\t' or byte == '\r' or byte == '\n') {
+            try out.append(allocator, '_');
+        } else {
+            try out.append(allocator, byte);
+        }
+    }
+}
+
 test "parses wireguard interface from wg show" {
     var status = (try parseWireGuardShowAlloc(std.testing.allocator,
         \\interface: wg0
@@ -430,4 +478,15 @@ test "parses busctl property values" {
     try std.testing.expect(parseBusctlBool("b true\n"));
     try std.testing.expect(!parseBusctlBool("b false\n"));
     try std.testing.expectEqualStrings("Work VPN", parseBusctlString("s \"Work VPN\"\n").?);
+}
+
+test "renders compact vpn segment" {
+    var status = VpnStatus{
+        .provider = try std.testing.allocator.dupe(u8, "vpn"),
+        .name = try std.testing.allocator.dupe(u8, "Work VPN"),
+    };
+    defer status.deinit(std.testing.allocator);
+    const segment = (try renderStatusAlloc(std.testing.allocator, status)).?;
+    defer std.testing.allocator.free(segment);
+    try std.testing.expectEqualStrings("vpn:Work_VPN", segment);
 }

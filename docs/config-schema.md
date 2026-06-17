@@ -9,7 +9,7 @@ version = 1
 theme = "plain"
 
 [prompt]
-modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift", "cost_glance"]
+modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status"]
 ```
 
 ## Top-Level Keys
@@ -31,7 +31,7 @@ Default module order:
 
 ```toml
 [prompt]
-modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift", "cost_glance"]
+modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status"]
 ```
 
 Allowed core module ids for schema v1:
@@ -51,6 +51,7 @@ Allowed core module ids for schema v1:
 | `iac_workspace` | sync | Render local Terraform/OpenTofu/Pulumi/CDK workspace metadata. |
 | `region_drift` | sync | Warn when region env vars differ from provider config defaults. |
 | `cost_glance` | sync | Render compact month-to-date cloud spend from the local cost cache. |
+| `vpn_status` | sync | Render active local VPN status from local client commands. |
 | `time` | sync | Optional UTC `HH:MM` clock segment. |
 
 Unknown module ids are invalid.

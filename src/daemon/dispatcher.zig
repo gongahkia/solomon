@@ -12,6 +12,7 @@ const region_drift_module = @import("modules/region_drift.zig");
 const sso_expiry_module = @import("modules/sso_expiry.zig");
 const time_module = @import("modules/time.zig");
 const user_host_module = @import("modules/user_host.zig");
+const vpn_status_module = @import("modules/vpn_status.zig");
 
 pub const ExecutionClass = enum {
     sync,
@@ -31,6 +32,7 @@ pub const ModuleId = enum {
     cloud_ctx,
     region_drift,
     cost_glance,
+    vpn_status,
     sso_expiry,
     iac_workspace,
 };
@@ -112,6 +114,7 @@ const default_pipeline = [_]ModuleSpec{
     .{ .id = .iac_workspace, .execution_class = executionClass(.iac_workspace) },
     .{ .id = .region_drift, .execution_class = executionClass(.region_drift) },
     .{ .id = .cost_glance, .execution_class = executionClass(.cost_glance) },
+    .{ .id = .vpn_status, .execution_class = executionClass(.vpn_status) },
 };
 
 pub fn executionClass(module_id: ModuleId) ExecutionClass {
@@ -193,6 +196,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
         .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.kubeconfig, input.home, caches.cloud_ctx, input.cloud_ctx),
         .region_drift => try region_drift_module.render(allocator, input.home, input.aws_profile, input.aws_region, input.aws_default_region, input.cloudsdk_compute_region, input.azure_location, input.arm_location, input.azure_default_location),
         .cost_glance => try cost_glance_module.render(allocator, input.home),
+        .vpn_status => try vpn_status_module.render(allocator),
         .sso_expiry => try sso_expiry_module.render(allocator, input.home, input.timestamp, input.sso_expiry),
         .iac_workspace => try iac_workspace_module.render(allocator, input.cwd, input.home),
     };
@@ -215,6 +219,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .cloud_ctx => "cloud_ctx",
         .region_drift => "region_drift",
         .cost_glance => "cost_glance",
+        .vpn_status => "vpn_status",
         .sso_expiry => "sso_expiry",
         .iac_workspace => "iac_workspace",
     };

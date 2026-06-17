@@ -834,7 +834,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 25.3 Triage cadence
 - [ ] Weekly triage meeting (15 min, recorded)
-- [ ] Labels: kind (bug/perf/feat), area (core/cloud/ai/vcs/...), priority
+- [x] Labels: kind (bug/perf/feat), area (core/cloud/ai/vcs/...), priority
 - [ ] Public board mirroring labels
 
 ### 25.4 Sponsor channels

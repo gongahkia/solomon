@@ -654,7 +654,7 @@ fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "nl2cmd")) {
         const config = try parseAiNl2cmdArgs(args[1..]);
-        if (nl2cmd.detectInput(config.input)) |value| try std.fs.File.stdout().writeAll(value);
+        try aiNl2cmd(allocator, config);
         return;
     }
     return error.UnknownAiArgument;
@@ -733,6 +733,34 @@ fn aiNextcmdSuggestionAlloc(allocator: std.mem.Allocator, config: AiNextcmdConfi
     return nextcmd.cleanSuggestionAlloc(allocator, raw);
 }
 
+fn aiNl2cmd(allocator: std.mem.Allocator, config: AiNl2cmdConfig) !void {
+    const request = nl2cmd.detectInput(config.input) orelse return;
+    if (request.len == 0) return;
+    if (config.detect_only) {
+        try std.fs.File.stdout().writeAll(request);
+        return;
+    }
+    const status = ollama.detect(allocator) catch return;
+    if (!status.installed or !status.daemon_running) return;
+    const command = aiNl2cmdCommandAlloc(allocator, config, request) catch return;
+    defer allocator.free(command);
+    try std.fs.File.stdout().writeAll(command);
+}
+
+fn aiNl2cmdCommandAlloc(allocator: std.mem.Allocator, config: AiNl2cmdConfig, request: []const u8) ![]u8 {
+    const template = try nl2cmd.readDefaultPromptAlloc(allocator);
+    defer allocator.free(template);
+    const prompt_text = try nl2cmd.promptWithInputAlloc(allocator, template, .{
+        .shell = config.shell,
+        .cwd = config.cwd,
+        .request = request,
+    });
+    defer allocator.free(prompt_text);
+    const raw = try ollama.generateAlloc(allocator, ollama.default_host, ollama.default_port, config.model, prompt_text);
+    defer allocator.free(raw);
+    return nl2cmd.cleanCommandAlloc(allocator, raw);
+}
+
 const AiNextcmdConfig = struct {
     shell: []const u8 = "",
     model: []const u8 = ollama.recommended_model,
@@ -744,7 +772,11 @@ const AiNextcmdConfig = struct {
 };
 
 const AiNl2cmdConfig = struct {
+    shell: []const u8 = "",
+    model: []const u8 = ollama.recommended_model,
+    cwd: []const u8 = "",
     input: []const u8 = "",
+    detect_only: bool = false,
 };
 
 fn parseAiNextcmdArgs(args: []const []const u8) !AiNextcmdConfig {
@@ -776,8 +808,16 @@ fn parseAiNl2cmdArgs(args: []const []const u8) !AiNl2cmdConfig {
     var config = AiNl2cmdConfig{};
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
-        if (std.mem.eql(u8, args[i], "--input")) {
+        if (std.mem.eql(u8, args[i], "--shell")) {
+            config.shell = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--model")) {
+            config.model = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--cwd")) {
+            config.cwd = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--input")) {
             config.input = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--detect-only")) {
+            config.detect_only = true;
         } else {
             return error.UnknownAiArgument;
         }
@@ -803,8 +843,12 @@ test "ai nextcmd args parse" {
 }
 
 test "ai nl2cmd args parse" {
-    const config = try parseAiNl2cmdArgs(&.{ "--input", "?? list files" });
+    const config = try parseAiNl2cmdArgs(&.{ "--shell", "zsh", "--model", "gemma3:1b", "--cwd", "/tmp", "--input", "?? list files", "--detect-only" });
+    try std.testing.expectEqualStrings("zsh", config.shell);
+    try std.testing.expectEqualStrings("gemma3:1b", config.model);
+    try std.testing.expectEqualStrings("/tmp", config.cwd);
     try std.testing.expectEqualStrings("?? list files", config.input);
+    try std.testing.expect(config.detect_only);
 }
 
 test "ai bench output reports metrics" {

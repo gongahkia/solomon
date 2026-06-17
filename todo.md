@@ -564,7 +564,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 17.4 Code of conduct
 - [x] Adopt Contributor Covenant 2.1 verbatim
-- [ ] Document enforcement chain
+- [x] Document enforcement chain
 - [ ] Set up project email alias + private appeals tracking
 
 ## Phase 18 â€” Migration importers (beyond starship)

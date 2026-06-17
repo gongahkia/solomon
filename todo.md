@@ -520,7 +520,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Tests verifying editor cannot bypass `prod_guard`
 
 ### 16.3 Helix bridge
-- [ ] Write `contrib/editor-bridges/helix-shisa.toml`
+- [x] Write `contrib/editor-bridges/helix-shisa.toml`
 - [ ] Document custom statusline syntax + how to plug in
 - [ ] Sample config with `cloud_ctx`, `vcs.summary`, `risk_tier`
 - [ ] Sanity test on Helix nightly

@@ -1879,6 +1879,46 @@ fn mapStarshipModule(allocator: std.mem.Allocator, name: []const u8, imported: *
     }
 }
 
+fn mapP10kElement(allocator: std.mem.Allocator, name: []const u8, imported: *StarshipImport) !void {
+    if (std.mem.eql(u8, name, "dir")) {
+        try appendModule(allocator, imported, .cwd);
+    } else if (std.mem.eql(u8, name, "vcs")) {
+        try appendModule(allocator, imported, .git_branch);
+    } else if (std.mem.eql(u8, name, "status")) {
+        try appendModule(allocator, imported, .exit_status);
+    } else if (std.mem.eql(u8, name, "background_jobs")) {
+        try appendModule(allocator, imported, .jobs);
+    } else if (std.mem.eql(u8, name, "command_execution_time")) {
+        try appendModule(allocator, imported, .cmd_duration);
+    } else if (std.mem.eql(u8, name, "context")) {
+        try appendModule(allocator, imported, .user_host);
+    } else if (std.mem.eql(u8, name, "time")) {
+        try appendModule(allocator, imported, .time);
+    } else if (std.mem.eql(u8, name, "aws") or std.mem.eql(u8, name, "gcloud") or std.mem.eql(u8, name, "azure") or std.mem.eql(u8, name, "kubecontext")) {
+        try appendModule(allocator, imported, .cloud_ctx);
+    } else if (std.mem.eql(u8, name, "virtualenv") or std.mem.eql(u8, name, "pyenv")) {
+        imported.python = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "nodeenv") or std.mem.eql(u8, name, "nodenv") or std.mem.eql(u8, name, "nvm")) {
+        imported.node = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "goenv") or std.mem.eql(u8, name, "go_version")) {
+        imported.go = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "rust_version")) {
+        imported.rust = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (!isIgnoredP10kElement(name)) {
+        try appendUnsupported(allocator, imported, name);
+    }
+}
+
+fn isIgnoredP10kElement(name: []const u8) bool {
+    return std.mem.eql(u8, name, "os_icon") or
+        std.mem.eql(u8, name, "prompt_char") or
+        std.mem.eql(u8, name, "newline");
+}
+
 fn isIgnoredStarshipModule(name: []const u8) bool {
     return std.mem.eql(u8, name, "character") or
         std.mem.eql(u8, name, "line_break") or
@@ -1980,6 +2020,31 @@ test "imports starship table fallback and records unsupported modules" {
 
     try std.testing.expect(std.mem.indexOf(u8, output, "modules = [\"cwd\", \"git_branch\"]") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "Unsupported Starship modules: aws") != null);
+}
+
+test "maps p10k elements to shisa modules" {
+    var imported = StarshipImport{};
+    defer imported.deinit(std.testing.allocator);
+
+    inline for (.{ "os_icon", "dir", "vcs", "virtualenv", "nodeenv", "go_version", "rust_version", "status", "background_jobs", "command_execution_time", "context", "aws", "time", "public_ip" }) |element| {
+        try mapP10kElement(std.testing.allocator, element, &imported);
+    }
+
+    try std.testing.expect(containsModule(imported, .cwd));
+    try std.testing.expect(containsModule(imported, .git_branch));
+    try std.testing.expect(containsModule(imported, .language_versions));
+    try std.testing.expect(containsModule(imported, .exit_status));
+    try std.testing.expect(containsModule(imported, .jobs));
+    try std.testing.expect(containsModule(imported, .cmd_duration));
+    try std.testing.expect(containsModule(imported, .user_host));
+    try std.testing.expect(containsModule(imported, .cloud_ctx));
+    try std.testing.expect(containsModule(imported, .time));
+    try std.testing.expect(imported.python);
+    try std.testing.expect(imported.node);
+    try std.testing.expect(imported.go);
+    try std.testing.expect(imported.rust);
+    try std.testing.expectEqual(@as(usize, 1), imported.unsupported.items.len);
+    try std.testing.expectEqualStrings("public_ip", imported.unsupported.items[0]);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {

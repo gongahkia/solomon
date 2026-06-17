@@ -571,7 +571,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 18.1 Powerlevel10k importer
 - [x] Parse p10k zsh config (extract `POWERLEVEL9K_*` settings)
-- [ ] Map elements to Shisa modules with a coverage table
+- [x] Map elements to Shisa modules with a coverage table
 - [ ] Translate left/right prompt layout
 - [ ] Handle p10k's "instant_prompt" feature (map to Shisa's instant prompt)
 - [ ] Emit `migration-notes.md` for unsupported elements

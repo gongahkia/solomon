@@ -16,3 +16,5 @@ The client supports:
 `shisa ai bench` reports first-token latency, token throughput from Ollama's final `eval_count` / `eval_duration` metrics, and loaded model size from `/api/ps`.
 
 Ollama's local API is documented at <https://docs.ollama.com/api/introduction>. `/api/tags`, `/api/pull`, and `/api/generate` are documented at <https://docs.ollama.com/api/tags>, <https://docs.ollama.com/api/pull>, and <https://docs.ollama.com/api/generate>.
+
+Privacy rules live in [AI Privacy](ai-privacy.md).

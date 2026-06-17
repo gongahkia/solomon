@@ -416,7 +416,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [ ] Per-provider trust (`shisa plugin trust shisa.ai --net=openai`)
 - [ ] Local redaction rules (`shisa ai redact` CLI to edit/test rules)
 - [ ] Audit log of every cloud request (hash-only by default)
-- [ ] Document privacy contract in `docs/ai-privacy.md`
+- [x] Document privacy contract in `docs/ai-privacy.md`
 - [ ] Add a `shisa ai status` showing what's local, what's cloud, what's logged
 
 ### 12.10 Provider abstraction (optional cloud)

@@ -76,6 +76,7 @@
 # AI
 
 - [Ollama](ai-ollama.md)
+- [AI Privacy](ai-privacy.md)
 
 # Videos
 

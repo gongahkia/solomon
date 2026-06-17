@@ -4702,6 +4702,7 @@ const PromptConfig = struct {
     time: bool = false,
     no_async: bool = false,
     instant: bool = false,
+    auto_spawn: bool = false,
     a11y: bool = false,
     shell: []const u8 = "zsh",
     cols: u16 = 80,
@@ -4726,7 +4727,11 @@ fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
         }
     }
 
-    const response_payload = try client.requestAlloc(allocator, socket_path, payload);
+    const response_payload = client.requestAlloc(allocator, socket_path, payload) catch |err| retry: {
+        if (!config.auto_spawn) return err;
+        try spawnPromptDaemon(allocator, socket_path);
+        break :retry try client.requestAlloc(allocator, socket_path, payload);
+    };
     defer allocator.free(response_payload);
 
     var parsed = try std.json.parseFromSlice(proto.Response, allocator, response_payload, .{ .ignore_unknown_fields = true });
@@ -4759,6 +4764,8 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
             config.no_async = true;
         } else if (std.mem.eql(u8, arg, "--instant")) {
             config.instant = true;
+        } else if (std.mem.eql(u8, arg, "--auto-spawn")) {
+            config.auto_spawn = true;
         } else if (std.mem.eql(u8, arg, "--a11y")) {
             config.a11y = true;
         } else if (std.mem.eql(u8, arg, "--shell")) {
@@ -4773,6 +4780,16 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
     }
 
     return config;
+}
+
+fn spawnPromptDaemon(allocator: std.mem.Allocator, socket_path: []const u8) !void {
+    const daemon_path = try siblingExecutablePath(allocator, "shisad");
+    defer allocator.free(daemon_path);
+    var daemon = std.process.Child.init(&.{ daemon_path, "--foreground", "--socket", socket_path }, allocator);
+    daemon.stdin_behavior = .Ignore;
+    daemon.stdout_behavior = .Ignore;
+    daemon.stderr_behavior = .Ignore;
+    try daemon.spawn();
 }
 
 fn writePromptText(allocator: std.mem.Allocator, prompt_text: []const u8, a11y: bool, cwd: []const u8) !void {
@@ -5022,6 +5039,11 @@ test "prompt args parse a11y" {
     const config = try parsePrompt(&.{ "--a11y", "--no-async" });
     try std.testing.expect(config.a11y);
     try std.testing.expect(config.no_async);
+}
+
+test "prompt args parse auto spawn" {
+    const config = try parsePrompt(&.{"--auto-spawn"});
+    try std.testing.expect(config.auto_spawn);
 }
 
 test "prompt caps switch for a11y" {

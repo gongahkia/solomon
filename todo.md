@@ -853,7 +853,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Document install path (launchd plist on macOS, systemd --user unit on Linux)
 
 ### 26.2 Auto-spawn
-- [ ] `shisa prompt --auto-spawn` forks `shisad` on missing socket
+- [x] `shisa prompt --auto-spawn` forks `shisad` on missing socket
 - [ ] 100 ms grace period; fallback to sync if not ready
 - [ ] Single-instance `flock` enforcement
 - [ ] Race-tested

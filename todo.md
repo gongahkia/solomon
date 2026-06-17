@@ -686,7 +686,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 20.6 Release automation
 - [ ] One-button monthly release script
 - [x] Generate changelog from commits + RFCs since last release
-- [ ] Auto-create GitHub Release draft
+- [x] Auto-create GitHub Release draft
 - [ ] Post-release: bump dev version + notify channels
 
 ### 20.7 Deprecation policy

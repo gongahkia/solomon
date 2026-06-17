@@ -521,7 +521,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 16.3 Helix bridge
 - [x] Write `contrib/editor-bridges/helix-shisa.toml`
-- [ ] Document custom statusline syntax + how to plug in
+- [x] Document custom statusline syntax + how to plug in
 - [ ] Sample config with `cloud_ctx`, `vcs.summary`, `risk_tier`
 - [ ] Sanity test on Helix nightly
 

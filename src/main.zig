@@ -17,6 +17,7 @@ const plugin_manifest = @import("plugin/manifest.zig");
 const prod_guard_module = @import("daemon/modules/prod_guard.zig");
 const risk_tier_module = @import("daemon/modules/risk_tier.zig");
 const supervisor = @import("supervisor.zig");
+const theme_contrast = @import("theme/contrast.zig");
 const vcs_stack = @import("vcs/stack.zig");
 const vcs_worktree = @import("vcs/worktree.zig");
 
@@ -122,6 +123,11 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[1], "theme")) {
+        try themeCommand(allocator, args[2..]);
+        return;
+    }
+
     if (std.mem.eql(u8, args[1], "stack")) {
         try stackCommand(allocator, args[2..]);
         return;
@@ -176,6 +182,27 @@ fn defaultConfigPath(allocator: std.mem.Allocator) ![]u8 {
     const home = try std.process.getEnvVarOwned(allocator, "HOME");
     defer allocator.free(home);
     return defaultConfigPathFromEnv(allocator, null, home);
+}
+
+fn themeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len == 0 or std.mem.eql(u8, args[0], "--help") or std.mem.eql(u8, args[0], "-h")) {
+        try std.fs.File.stdout().writeAll("usage: shisa theme validate <path>\n");
+        return;
+    }
+    if (!std.mem.eql(u8, args[0], "validate")) return error.UnknownThemeCommand;
+    if (args.len != 2) return error.MissingThemePath;
+
+    const source = try std.fs.cwd().readFileAlloc(allocator, args[1], max_config_bytes);
+    defer allocator.free(source);
+    const failures = try theme_contrast.validateThemeContrastAlloc(allocator, source);
+    defer allocator.free(failures);
+    if (failures.len > 0) {
+        const report = try theme_contrast.formatContrastFailuresAlloc(allocator, failures);
+        defer allocator.free(report);
+        try std.fs.File.stderr().writeAll(report);
+        return error.ThemeContrastFailed;
+    }
+    try std.fs.File.stdout().writeAll("theme validate: ok\n");
 }
 
 fn defaultConfigPathFromEnv(allocator: std.mem.Allocator, xdg_config_home: ?[]const u8, home: ?[]const u8) ![]u8 {
@@ -5029,6 +5056,7 @@ const help_text =
     \\  prompt        render prompt through shisad; --a11y strips ANSI and normalizes glyphs
     \\  stack         dump detected stacked-diff metadata
     \\  supervisor    run shisad under a crash-restart supervisor
+    \\  theme         validate theme files
     \\  vouch         verify VOUCHES governance file
     \\  worktrees     list Git worktrees and mark active
     \\

@@ -10,9 +10,9 @@ glyphs = "ascii"
 fg = "15"
 muted = "8"
 accent = "14"
-success = "2"
-warning = "3"
-danger = "1"
+success = "10"
+warning = "11"
+danger = "9"
 
 [separators]
 segment = " "

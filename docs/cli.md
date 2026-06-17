@@ -30,6 +30,7 @@ commands:
   prompt        render prompt through shisad; --a11y strips ANSI and normalizes glyphs
   stack         dump detected stacked-diff metadata
   supervisor    run shisad under a crash-restart supervisor
+  theme         validate theme files
   vouch         verify VOUCHES governance file
   worktrees     list Git worktrees and mark active
 
@@ -39,6 +40,12 @@ options:
 ```
 
 ## Command Help
+
+### `shisa theme`
+
+```text
+usage: shisa theme validate <path>
+```
 
 ### `shisa vouch`
 

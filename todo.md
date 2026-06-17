@@ -563,7 +563,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] Publish current state on shisa.sh/governance
 
 ### 17.4 Code of conduct
-- [ ] Adopt Contributor Covenant 2.1 verbatim
+- [x] Adopt Contributor Covenant 2.1 verbatim
 - [ ] Document enforcement chain
 - [ ] Set up project email alias + private appeals tracking
 

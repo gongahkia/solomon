@@ -487,7 +487,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 - [x] Snapshot tests for every (op × shape) combination
 
 ### 15.3 Ops
-- [ ] `render` — full request/response path
+- [x] `render` — full request/response path
 - [ ] `render_continue` — async fill-in
 - [ ] `health` — minimal ok/not-ok
 - [ ] `metrics` — JSON metrics dump

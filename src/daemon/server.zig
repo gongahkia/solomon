@@ -18,6 +18,7 @@ const max_frame_bytes = 1024 * 1024;
 
 const RenderRequest = struct {
     v: u32 = 1,
+    op: []const u8 = "render",
     cwd: []const u8,
     exit: i32 = 0,
     jobs: u32 = 0,
@@ -27,6 +28,7 @@ const RenderRequest = struct {
     shell: []const u8 = "zsh",
     cols: u16 = 80,
     rows: u16 = 24,
+    request_id: []const u8 = "",
     cloud_ctx: cloud_ctx_module.Options = .{},
     sso_expiry: sso_expiry_module.Options = .{},
 };
@@ -196,8 +198,18 @@ pub const Server = struct {
     }
 
     fn renderResponse(self: *Server, request_payload: []const u8) ![]u8 {
+        const start_ns = nowNs();
         var parsed = try std.json.parseFromSlice(RenderRequest, std.heap.page_allocator, request_payload, .{ .ignore_unknown_fields = true });
         defer parsed.deinit();
+        if (!std.mem.eql(u8, parsed.value.op, "render")) {
+            const escaped_request_id = try json.escapeAlloc(std.heap.page_allocator, parsed.value.request_id);
+            defer std.heap.page_allocator.free(escaped_request_id);
+            return std.fmt.allocPrint(
+                std.heap.page_allocator,
+                "{{\"v\":1,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_MALFORMED\",\"message\":\"unsupported render path op\",\"context\":{{\"field\":\"op\",\"expected\":\"render\"}}}}}}",
+                .{escaped_request_id},
+            );
+        }
 
         self.drainFsInvalidations(nowNs());
         try self.registerGitInvalidation(parsed.value.cwd);
@@ -259,15 +271,18 @@ pub const Server = struct {
         defer rendered.deinit(std.heap.page_allocator);
         try self.logSlowWarning(rendered.slow_warning);
 
+        const escaped_request_id = try json.escapeAlloc(std.heap.page_allocator, parsed.value.request_id);
+        defer std.heap.page_allocator.free(escaped_request_id);
         const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, rendered.prompt);
         defer std.heap.page_allocator.free(escaped_prompt);
+        const elapsed_us = (nowNs() - start_ns) / std.time.ns_per_us;
 
         if (rendered.redraw_token) |token| {
             const escaped_token = try json.escapeAlloc(std.heap.page_allocator, token);
             defer std.heap.page_allocator.free(escaped_token);
-            return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"prompt\":\"{s}\",\"redraw_token\":\"{s}\"}}", .{ escaped_prompt, escaped_token });
+            return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"redraw_token\":\"{s}\",\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, escaped_token, elapsed_us });
         }
-        return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"prompt\":\"{s}\",\"redraw_token\":null}}", .{escaped_prompt});
+        return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, elapsed_us });
     }
 
     fn preexecResponse(self: *Server, request_payload: []const u8) ![]u8 {
@@ -737,6 +752,35 @@ test "fs event invalidates git branch cache" {
     const dirty = try server.renderResponse(request);
     defer std.heap.page_allocator.free(dirty);
     try std.testing.expect(std.mem.indexOf(u8, dirty, "git:main*> ") != null);
+}
+
+test "render response carries request id and v1 shape" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-render-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"render-test\"}}", .{dir_path});
+    defer allocator.free(request);
+    const response = try server.renderResponse(request);
+    defer std.heap.page_allocator.free(response);
+
+    const RenderResponseShape = struct {
+        v: u32 = 1,
+        request_id: []const u8 = "",
+        prompt: []const u8,
+        elapsed_us: u64 = 0,
+    };
+    var parsed = try std.json.parseFromSlice(RenderResponseShape, allocator, response, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("render-test", parsed.value.request_id);
+    try std.testing.expect(parsed.value.prompt.len > 0);
 }
 
 test "logs slow module warning" {

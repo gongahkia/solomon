@@ -78,3 +78,7 @@
 # Protocol
 
 - [Errors](protocol/errors.md)
+
+# Internals
+
+- [Threat Model](threat-model.md)

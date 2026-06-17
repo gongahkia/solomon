@@ -629,7 +629,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Auto-publish on every release
 
 ### 19.5 Internals
-- [ ] Threat model write-up
+- [x] Threat model write-up
 - [ ] Profiling notes
 - [ ] Cache architecture deep-dive
 - [ ] Why we picked Zig

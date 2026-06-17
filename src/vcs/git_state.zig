@@ -32,6 +32,12 @@ pub const WorktreeCounts = struct {
     conflicts: u32 = 0,
 };
 
+pub const SparseCheckoutState = enum {
+    none,
+    non_cone,
+    cone,
+};
+
 pub fn parsePorcelainCounts(output: []const u8) WorktreeCounts {
     var counts = WorktreeCounts{};
     var lines = std.mem.splitScalar(u8, output, '\n');
@@ -53,6 +59,20 @@ pub fn parsePorcelainCounts(output: []const u8) WorktreeCounts {
     return counts;
 }
 
+pub fn parseSparseCheckoutState(config: []const u8) SparseCheckoutState {
+    var sparse = false;
+    var cone = false;
+    var lines = std.mem.splitScalar(u8, config, '\n');
+    while (lines.next()) |line| {
+        const kv = keyValue(line) orelse continue;
+        if (std.ascii.eqlIgnoreCase(kv.key, "core.sparsecheckout") and boolValue(kv.value)) sparse = true;
+        if (std.ascii.eqlIgnoreCase(kv.key, "index.sparse") and boolValue(kv.value)) sparse = true;
+        if (std.ascii.eqlIgnoreCase(kv.key, "core.sparsecheckoutcone") and boolValue(kv.value)) cone = true;
+    }
+    if (!sparse) return .none;
+    return if (cone) .cone else .non_cone;
+}
+
 pub fn parseStashCount(output: []const u8) u32 {
     var count: u32 = 0;
     var lines = std.mem.splitScalar(u8, output, '\n');
@@ -60,6 +80,19 @@ pub fn parseStashCount(output: []const u8) u32 {
         if (std.mem.startsWith(u8, line, "stash@{")) count += 1;
     }
     return count;
+}
+
+fn keyValue(line: []const u8) ?struct { key: []const u8, value: []const u8 } {
+    const split = std.mem.indexOfScalar(u8, line, '=') orelse return null;
+    return .{
+        .key = std.mem.trim(u8, line[0..split], " \t\r\n"),
+        .value = std.mem.trim(u8, line[split + 1 ..], " \t\r\n"),
+    };
+}
+
+fn boolValue(value: []const u8) bool {
+    const trimmed = std.mem.trim(u8, value, " \t\r\n");
+    return std.ascii.eqlIgnoreCase(trimmed, "true") or std.mem.eql(u8, trimmed, "1") or std.ascii.eqlIgnoreCase(trimmed, "yes");
 }
 
 fn isConflictStatus(x: u8, y: u8) bool {
@@ -379,6 +412,13 @@ test "parses stash count" {
         \\
     );
     try std.testing.expectEqual(@as(u32, 2), count);
+}
+
+test "parses sparse checkout state" {
+    try std.testing.expectEqual(SparseCheckoutState.none, parseSparseCheckoutState("core.sparseCheckout=false\n"));
+    try std.testing.expectEqual(SparseCheckoutState.non_cone, parseSparseCheckoutState("core.sparseCheckout=true\n"));
+    try std.testing.expectEqual(SparseCheckoutState.cone, parseSparseCheckoutState("core.sparseCheckout=true\ncore.sparseCheckoutCone=true\n"));
+    try std.testing.expectEqual(SparseCheckoutState.cone, parseSparseCheckoutState("index.sparse=true\ncore.sparseCheckoutCone=true\n"));
 }
 
 fn expectSignal(signal: PromptSignal, glyph: []const u8, a11y: []const u8) !void {

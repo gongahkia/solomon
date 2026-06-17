@@ -735,7 +735,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ## Phase 22 â€” Internationalization
 
 ### 22.1 Message catalog
-- [ ] Adopt gettext-compatible format under `i18n/`
+- [x] Adopt gettext-compatible format under `i18n/`
 - [ ] Initial language: en-US
 - [ ] Extract all user-facing strings to catalog
 - [ ] Generated docs include translation status table

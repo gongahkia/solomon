@@ -4,6 +4,7 @@ const daemon_cache = @import("daemon/cache.zig");
 const fsnotify = @import("daemon/fsnotify.zig");
 const client = @import("shisa-client.zig");
 const cloud_ctx_module = @import("daemon/modules/cloud_ctx.zig");
+const ai_explain = @import("ai/explain.zig");
 const nextcmd = @import("ai/nextcmd.zig");
 const nl2cmd = @import("ai/nl2cmd.zig");
 const ollama = @import("ai/ollama.zig");
@@ -656,10 +657,7 @@ fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "explain")) {
         const config = try parseAiExplainArgs(args[1..]);
-        if (config.command.len == 0) return;
-        const output = try ai_risk.outputAlloc(allocator, config.command);
-        defer allocator.free(output);
-        try std.fs.File.stdout().writeAll(output);
+        try aiExplain(allocator, config);
         return;
     }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "nextcmd")) {
@@ -699,6 +697,7 @@ const AiRiskConfig = struct {
 
 const AiExplainConfig = struct {
     command: []const u8 = "",
+    model: []const u8 = ollama.recommended_model,
 };
 
 fn parseAiRiskArgs(args: []const []const u8) !AiRiskConfig {
@@ -732,6 +731,8 @@ fn parseAiExplainArgs(args: []const []const u8) !AiExplainConfig {
     while (i < args.len) : (i += 1) {
         if (std.mem.eql(u8, args[i], "--command")) {
             config.command = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--model")) {
+            config.model = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--")) {
             config.command = try nextValue(args, &i);
             if (i + 1 != args.len) return error.UnknownAiArgument;
@@ -742,6 +743,30 @@ fn parseAiExplainArgs(args: []const []const u8) !AiExplainConfig {
         }
     }
     return config;
+}
+
+fn aiExplain(allocator: std.mem.Allocator, config: AiExplainConfig) !void {
+    if (config.command.len == 0) return;
+    const output = aiExplainModelAlloc(allocator, config) catch try ai_risk.outputAlloc(allocator, config.command);
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn aiExplainModelAlloc(allocator: std.mem.Allocator, config: AiExplainConfig) ![]u8 {
+    const status = try ollama.detect(allocator);
+    if (!status.installed or !status.daemon_running) return error.OllamaUnavailable;
+    const flags = try ai_explain.flagContextAlloc(allocator, config.command);
+    defer allocator.free(flags);
+    const template = try ai_explain.readDefaultPromptAlloc(allocator);
+    defer allocator.free(template);
+    const prompt_text = try ai_explain.promptWithInputAlloc(allocator, template, config.command, flags);
+    defer allocator.free(prompt_text);
+    const raw = try ollama.generateAlloc(allocator, ollama.default_host, ollama.default_port, config.model, prompt_text);
+    defer allocator.free(raw);
+    const cleaned = try ai_explain.cleanExplanationAlloc(allocator, raw);
+    errdefer allocator.free(cleaned);
+    if (cleaned.len == 0) return error.EmptyExplanation;
+    return cleaned;
 }
 
 fn aiRisk(allocator: std.mem.Allocator, config: AiRiskConfig) !void {
@@ -1015,8 +1040,9 @@ test "ai risk args parse" {
 }
 
 test "ai explain args parse" {
-    const config = try parseAiExplainArgs(&.{ "--command", "tar -xf app.tar" });
+    const config = try parseAiExplainArgs(&.{ "--command", "tar -xf app.tar", "--model", "gemma3:1b" });
     try std.testing.expectEqualStrings("tar -xf app.tar", config.command);
+    try std.testing.expectEqualStrings("gemma3:1b", config.model);
 }
 
 test "ai nextcmd args parse" {

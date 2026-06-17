@@ -238,7 +238,7 @@ pub fn generatePayloadAlloc(allocator: std.mem.Allocator, model: []const u8, pro
     defer allocator.free(escaped_model);
     const escaped_prompt = try jsonStringAlloc(allocator, prompt);
     defer allocator.free(escaped_prompt);
-    return std.fmt.allocPrint(allocator, "{{\"model\":{s},\"prompt\":{s},\"stream\":{},\"options\":{{\"temperature\":0,\"num_predict\":64}}}}", .{ escaped_model, escaped_prompt, stream });
+    return std.fmt.allocPrint(allocator, "{{\"model\":{s},\"prompt\":{s},\"stream\":{},\"options\":{{\"temperature\":0,\"num_predict\":128}}}}", .{ escaped_model, escaped_prompt, stream });
 }
 
 const GenerateResponse = struct {
@@ -353,7 +353,7 @@ test "builds pull payload" {
 test "builds generate payload" {
     const payload = try generatePayloadAlloc(std.testing.allocator, "gemma3:1b", "say \"hi\"", false);
     defer std.testing.allocator.free(payload);
-    try std.testing.expectEqualStrings("{\"model\":\"gemma3:1b\",\"prompt\":\"say \\\"hi\\\"\",\"stream\":false,\"options\":{\"temperature\":0,\"num_predict\":64}}", payload);
+    try std.testing.expectEqualStrings("{\"model\":\"gemma3:1b\",\"prompt\":\"say \\\"hi\\\"\",\"stream\":false,\"options\":{\"temperature\":0,\"num_predict\":128}}", payload);
 }
 
 test "parses generate response" {

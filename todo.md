@@ -391,7 +391,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ### 12.5 Command explainer (`explain`)
 - [x] Hotkey to explain current input
-- [ ] Prompt template + flag-aware breakdown
+- [x] Prompt template + flag-aware breakdown
 - [ ] Cache explanations (same command → same explanation) per session
 
 ### 12.6 Error fixer (`errfix`)

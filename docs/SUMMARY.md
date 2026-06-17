@@ -7,6 +7,7 @@
 # Recipes
 
 - [k8s Context Safety in 60 Seconds](recipes/k8s-context-safety.md)
+- [AI Hotkey Suggestion with a Local Model](recipes/ai-hotkey-local-model.md)
 
 # Core
 

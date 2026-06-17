@@ -799,7 +799,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Counts: staged / unstaged / untracked / conflict files
 - [x] Stash count
 - [x] Sparse-checkout active flag (cone vs non-cone)
-- [ ] Submodule dirty/behind/ahead aggregation
+- [x] Submodule dirty/behind/ahead aggregation
 - [ ] LFS active + pointer-only files
 
 ### 24.3 Branch state

@@ -43,6 +43,14 @@ pub const AheadBehind = struct {
     ahead: u32 = 0,
 };
 
+pub const SubmoduleSummary = struct {
+    dirty: u32 = 0,
+    uninitialized: u32 = 0,
+    conflicts: u32 = 0,
+    ahead: u32 = 0,
+    behind: u32 = 0,
+};
+
 pub fn parseAheadBehind(output: []const u8) ?AheadBehind {
     var tokens = std.mem.tokenizeAny(u8, output, " \t\r\n");
     const behind_text = tokens.next() orelse return null;
@@ -51,6 +59,54 @@ pub fn parseAheadBehind(output: []const u8) ?AheadBehind {
         .behind = std.fmt.parseInt(u32, behind_text, 10) catch return null,
         .ahead = std.fmt.parseInt(u32, ahead_text, 10) catch return null,
     };
+}
+
+pub fn parseSubmoduleStatus(output: []const u8) SubmoduleSummary {
+    var summary = SubmoduleSummary{};
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        switch (line[0]) {
+            '-' => summary.uninitialized += 1,
+            '+' => summary.dirty += 1,
+            'U' => summary.conflicts += 1,
+            else => {},
+        }
+        if (parseSubmoduleAheadBehind(line)) |counts| {
+            summary.ahead += counts.ahead;
+            summary.behind += counts.behind;
+        }
+    }
+    return summary;
+}
+
+fn parseSubmoduleAheadBehind(line: []const u8) ?AheadBehind {
+    const marker = std.mem.indexOf(u8, line, "ahead ") orelse return parseSubmoduleBehindOnly(line);
+    const ahead_start = marker + "ahead ".len;
+    const ahead_end = scanDigits(line, ahead_start);
+    if (ahead_end == ahead_start) return null;
+    const ahead = std.fmt.parseInt(u32, line[ahead_start..ahead_end], 10) catch return null;
+    var behind: u32 = 0;
+    if (std.mem.indexOfPos(u8, line, ahead_end, "behind ")) |behind_marker| {
+        const behind_start = behind_marker + "behind ".len;
+        const behind_end = scanDigits(line, behind_start);
+        if (behind_end > behind_start) behind = std.fmt.parseInt(u32, line[behind_start..behind_end], 10) catch return null;
+    }
+    return .{ .ahead = ahead, .behind = behind };
+}
+
+fn parseSubmoduleBehindOnly(line: []const u8) ?AheadBehind {
+    const marker = std.mem.indexOf(u8, line, "behind ") orelse return null;
+    const start = marker + "behind ".len;
+    const end = scanDigits(line, start);
+    if (end == start) return null;
+    return .{ .behind = std.fmt.parseInt(u32, line[start..end], 10) catch return null };
+}
+
+fn scanDigits(line: []const u8, start: usize) usize {
+    var index = start;
+    while (index < line.len and std.ascii.isDigit(line[index])) : (index += 1) {}
+    return index;
 }
 
 pub fn parsePorcelainCounts(output: []const u8) WorktreeCounts {
@@ -441,6 +497,22 @@ test "parses ahead behind counts" {
     try std.testing.expectEqual(@as(u32, 3), counts.behind);
     try std.testing.expectEqual(@as(u32, 5), counts.ahead);
     try std.testing.expect(parseAheadBehind("bad\n") == null);
+}
+
+test "parses submodule summary" {
+    const summary = parseSubmoduleStatus(
+        \\ 1234567 clean (heads/main)
+        \\+abcdef0 dirty (heads/main ahead 2, behind 1)
+        \\-1111111 missing libs/a
+        \\U2222222 conflict libs/b
+        \\ 3333333 old (heads/main behind 3)
+        \\
+    );
+    try std.testing.expectEqual(@as(u32, 1), summary.dirty);
+    try std.testing.expectEqual(@as(u32, 1), summary.uninitialized);
+    try std.testing.expectEqual(@as(u32, 1), summary.conflicts);
+    try std.testing.expectEqual(@as(u32, 2), summary.ahead);
+    try std.testing.expectEqual(@as(u32, 4), summary.behind);
 }
 
 fn expectSignal(signal: PromptSignal, glyph: []const u8, a11y: []const u8) !void {

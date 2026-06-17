@@ -353,7 +353,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ### 11.12 Tests & benches
 - [x] Mock cloud config fixtures under `test/fixtures/cloud/`
-- [ ] Snapshot tests for each segment
+- [x] Snapshot tests for each segment
 - [ ] prod_guard fuzz suite
 - [ ] Benchmark `cloud_ctx` cold path < 30ms, warm < 1ms
 - [ ] Ship a `shisa cloud doctor` for self-diagnosis

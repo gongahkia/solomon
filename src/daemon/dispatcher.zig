@@ -348,6 +348,117 @@ test "no async renders git synchronously" {
     try std.testing.expect(rendered.redraw_token == null);
 }
 
+test "snapshots stable prompt segments" {
+    const allocator = std.testing.allocator;
+    const root_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-segment-snapshot-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(root_path);
+    defer std.fs.cwd().deleteTree(root_path) catch {};
+
+    const cwd_path = try std.fmt.allocPrint(allocator, "{s}/repo", .{root_path});
+    defer allocator.free(cwd_path);
+    const home_path = try std.fmt.allocPrint(allocator, "{s}/home", .{root_path});
+    defer allocator.free(home_path);
+    try std.fs.cwd().makePath(cwd_path);
+    try std.fs.cwd().makePath(home_path);
+    try runGit(allocator, cwd_path, &.{ "git", "init", "-b", "main" });
+
+    const aws_dir = try std.fmt.allocPrint(allocator, "{s}/.aws", .{home_path});
+    defer allocator.free(aws_dir);
+    try std.fs.cwd().makePath(aws_dir);
+    const aws_config = try std.fmt.allocPrint(allocator, "{s}/config", .{aws_dir});
+    defer allocator.free(aws_config);
+    {
+        var file = try std.fs.createFileAbsolute(aws_config, .{});
+        defer file.close();
+        try file.writeAll("[profile prod]\nregion = us-east-1\n");
+    }
+
+    const cost_path = (try cost_glance_module.costCachePathAlloc(allocator, home_path)).?;
+    defer allocator.free(cost_path);
+    try cost_glance_module.writeCostCache(allocator, cost_path, &.{
+        .{ .provider = "aws", .amount = "1.2", .unit = "USD", .updated = 10 },
+    }, 10);
+
+    const sso_dir = try std.fmt.allocPrint(allocator, "{s}/.cache/shisa", .{home_path});
+    defer allocator.free(sso_dir);
+    try std.fs.cwd().makePath(sso_dir);
+    const op_status = try std.fmt.allocPrint(allocator, "{s}/op-signin-status.json", .{sso_dir});
+    defer allocator.free(op_status);
+    {
+        var file = try std.fs.createFileAbsolute(op_status, .{});
+        defer file.close();
+        try file.writeAll("{\"session\":{\"expires_in\":1200}}");
+    }
+
+    const terraform_dir = try std.fmt.allocPrint(allocator, "{s}/.terraform", .{cwd_path});
+    defer allocator.free(terraform_dir);
+    try std.fs.cwd().makePath(terraform_dir);
+    const terraform_env = try std.fmt.allocPrint(allocator, "{s}/environment", .{terraform_dir});
+    defer allocator.free(terraform_env);
+    {
+        var file = try std.fs.createFileAbsolute(terraform_env, .{});
+        defer file.close();
+        try file.writeAll("prod\n");
+    }
+    const terraform_lock = try std.fmt.allocPrint(allocator, "{s}/.terraform.tfstate.lock.info", .{cwd_path});
+    defer allocator.free(terraform_lock);
+    {
+        var file = try std.fs.createFileAbsolute(terraform_lock, .{});
+        defer file.close();
+        try file.writeAll("{}");
+    }
+
+    var git_cache = git_branch_module.Cache{};
+    defer git_cache.deinit(allocator);
+    var language_cache = language_versions_module.Cache{};
+    defer language_cache.deinit(allocator);
+    var cloud_cache = cloud_ctx_module.Cache{ .gcp_valid = true, .azure_valid = true, .kube_valid = true };
+    defer cloud_cache.deinit(allocator);
+    const pipeline = [_]ModuleSpec{
+        .{ .id = .cwd, .execution_class = .sync },
+        .{ .id = .git_branch, .execution_class = .sync },
+        .{ .id = .time, .execution_class = .sync },
+        .{ .id = .exit_status, .execution_class = .sync },
+        .{ .id = .jobs, .execution_class = .sync },
+        .{ .id = .cmd_duration, .execution_class = .sync },
+        .{ .id = .user_host, .execution_class = .sync },
+        .{ .id = .cloud_ctx, .execution_class = .sync },
+        .{ .id = .sso_expiry, .execution_class = .sync },
+        .{ .id = .iac_workspace, .execution_class = .sync },
+        .{ .id = .region_drift, .execution_class = .sync },
+        .{ .id = .cost_glance, .execution_class = .sync },
+        .{ .id = .ssh_target, .execution_class = .sync },
+    };
+    var rendered = try renderPipeline(allocator, .{
+        .git_branch = &git_cache,
+        .language_versions = &language_cache,
+        .cloud_ctx = &cloud_cache,
+    }, .{
+        .cwd = cwd_path,
+        .home = home_path,
+        .exit = 2,
+        .jobs = 2,
+        .duration_ms = 1500,
+        .time = true,
+        .no_async = true,
+        .timestamp = 3660,
+        .ssh = "192.0.2.1 55555 198.51.100.2 22",
+        .user = "u",
+        .host = "prod-bastion",
+        .aws_profile = "prod",
+        .aws_region = "us-west-2",
+    }, pipeline[0..]);
+    defer rendered.deinit(allocator);
+
+    const expected = try std.fmt.allocPrint(
+        allocator,
+        "{s} git:main* time:01:01 \x1b[31mexit:2\x1b[0m jobs:2 took:1.5s u@prod-bastion cloud[aws:prod] sso[op:20m] iac[tf:prod!] region[aws:us-west-2!=us-east-1] cost[aws:$1.20] \xe2\x86\x92 prod-bastion (prod)> ",
+        .{cwd_path},
+    );
+    defer allocator.free(expected);
+    try std.testing.expectEqualStrings(expected, rendered.prompt);
+}
+
 test "module names are public for diagnostics" {
     try std.testing.expectEqualStrings("language_versions", moduleIdName(.language_versions));
 }

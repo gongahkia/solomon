@@ -61,6 +61,11 @@ const SubscribeRequest = struct {
     topics: []const []const u8 = &.{},
 };
 
+const TopicRef = struct {
+    topic: []u8,
+    count: usize,
+};
+
 const ReloadState = struct {
     config_generation: u64 = 0,
     plugin_generation: u64 = 0,
@@ -478,7 +483,9 @@ pub const Server = struct {
         var parsed = try std.json.parseFromSlice(SubscribeRequest, std.heap.page_allocator, request, .{ .ignore_unknown_fields = true });
         defer parsed.deinit();
 
-        const snapshot = try subscribeSnapshotAlloc(std.heap.page_allocator, parsed.value.request_id, parsed.value.topics.len);
+        const topic_refs = try topicRefsAlloc(std.heap.page_allocator, parsed.value.topics);
+        defer freeTopicRefs(std.heap.page_allocator, topic_refs);
+        const snapshot = try subscribeSnapshotAlloc(std.heap.page_allocator, parsed.value.request_id, topic_refs);
         defer std.heap.page_allocator.free(snapshot);
         try writeAll(fd, snapshot);
 
@@ -739,13 +746,61 @@ fn versionResponseAlloc(allocator: std.mem.Allocator, request: []const u8) ![]u8
     return std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"daemon\":\"{s}\",\"protocol\":{d}}}", .{ escaped_request_id, daemon_version, protocol_version });
 }
 
-fn subscribeSnapshotAlloc(allocator: std.mem.Allocator, request_id: []const u8, topic_count: usize) ![]u8 {
+fn topicRefsAlloc(allocator: std.mem.Allocator, topics: []const []const u8) ![]TopicRef {
+    var refs: std.ArrayList(TopicRef) = .empty;
+    errdefer {
+        for (refs.items) |*ref| allocator.free(ref.topic);
+        refs.deinit(allocator);
+    }
+
+    for (topics) |topic| {
+        var found = false;
+        for (refs.items) |*ref| {
+            if (std.mem.eql(u8, ref.topic, topic)) {
+                ref.count += 1;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            try refs.append(allocator, .{
+                .topic = try allocator.dupe(u8, topic),
+                .count = 1,
+            });
+        }
+    }
+
+    return refs.toOwnedSlice(allocator);
+}
+
+fn freeTopicRefs(allocator: std.mem.Allocator, refs: []TopicRef) void {
+    for (refs) |ref| allocator.free(ref.topic);
+    allocator.free(refs);
+}
+
+fn topicRefsJsonAlloc(allocator: std.mem.Allocator, refs: []const TopicRef) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.append(allocator, '{');
+    for (refs, 0..) |ref, index| {
+        if (index != 0) try out.append(allocator, ',');
+        const escaped_topic = try json.escapeAlloc(allocator, ref.topic);
+        defer allocator.free(escaped_topic);
+        try std.fmt.format(out.writer(allocator), "\"{s}\":{d}", .{ escaped_topic, ref.count });
+    }
+    try out.append(allocator, '}');
+    return out.toOwnedSlice(allocator);
+}
+
+fn subscribeSnapshotAlloc(allocator: std.mem.Allocator, request_id: []const u8, refs: []const TopicRef) ![]u8 {
     const escaped_request_id = try json.escapeAlloc(allocator, request_id);
     defer allocator.free(escaped_request_id);
+    const refs_json = try topicRefsJsonAlloc(allocator, refs);
+    defer allocator.free(refs_json);
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"request_id\":\"{s}\",\"topic\":\"subscription\",\"kind\":\"snapshot\",\"data\":{{\"topics\":{d}}}}}\n",
-        .{ escaped_request_id, topic_count },
+        "{{\"v\":1,\"request_id\":\"{s}\",\"topic\":\"subscription\",\"kind\":\"snapshot\",\"data\":{{\"topics\":{d},\"refs\":{s}}}}}\n",
+        .{ escaped_request_id, refs.len, refs_json },
     );
 }
 
@@ -1289,13 +1344,14 @@ test "subscribe op switches connection to bidirectional ndjson" {
     const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
 
     var client_stream = try std.net.connectUnixSocket(socket_path);
-    try writeFrame(client_stream.handle, "{\"v\":1,\"op\":\"subscribe\",\"request_id\":\"subscribe-1\",\"topics\":[\"vcs.summary\"]}");
+    try writeFrame(client_stream.handle, "{\"v\":1,\"op\":\"subscribe\",\"request_id\":\"subscribe-1\",\"topics\":[\"vcs.summary\",\"vcs.summary\"]}");
 
     const snapshot = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
     defer allocator.free(snapshot);
     try std.testing.expect(std.mem.endsWith(u8, snapshot, "\n"));
     try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"kind\":\"snapshot\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"topics\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"refs\":{\"vcs.summary\":2}") != null);
 
     try writeAll(client_stream.handle, "{\"op\":\"ping\"}\n");
     const heartbeat = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);

@@ -97,6 +97,11 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[1], "import-pure")) {
+        try importPure(allocator, args[2..]);
+        return;
+    }
+
     if (std.mem.eql(u8, args[1], "bench")) {
         try bench(allocator, args[2..]);
         return;
@@ -3175,6 +3180,30 @@ fn tideUnsupportedReason(name: []const u8) []const u8 {
     return "No Shisa core mapping; recreate as a plugin or omit.";
 }
 
+fn importPure(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len != 0) return error.UnknownImportPureArgument;
+    const output = try pureConfigAlloc(allocator);
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn pureConfigAlloc(allocator: std.mem.Allocator) ![]u8 {
+    return try allocator.dupe(u8,
+        \\version = 1
+        \\theme = "pure"
+        \\
+        \\[prompt]
+        \\modules = ["cwd", "git_branch", "exit_status", "cmd_duration", "jobs", "user_host"]
+        \\
+        \\[modules.cmd_duration]
+        \\threshold_ms = 5000
+        \\
+        \\[modules.user_host]
+        \\mode = "ssh"
+        \\
+    );
+}
+
 const StarshipImport = struct {
     modules: std.ArrayList(shisa_config.ModuleId) = .empty,
     unsupported: std.ArrayList([]const u8) = .empty,
@@ -3944,6 +3973,16 @@ test "omits tide migration notes for plain left prompt" {
     defer result.deinit(std.testing.allocator);
 
     try std.testing.expect(result.notes == null);
+}
+
+test "imports pure preset config" {
+    const output = try pureConfigAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "theme = \"pure\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "modules = [\"cwd\", \"git_branch\", \"exit_status\", \"cmd_duration\", \"jobs\", \"user_host\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "threshold_ms = 5000") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "mode = \"ssh\"") != null);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {
@@ -4761,6 +4800,8 @@ const help_text =
     \\                translate Oh My Posh JSON/YAML to shisa.toml
     \\  import-tide <path>
     \\                translate Tide fish settings to shisa.toml
+    \\  import-pure
+    \\                print the minimal Pure-compatible preset
     \\  init          write default shisa.toml
     \\  pin           mark a path as never-evicted
     \\  plugin        install, list, enable, disable, or trust plugins

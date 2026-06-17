@@ -1,0 +1,60 @@
+version = 1
+name = "pure"
+extends = ""
+
+[capabilities]
+color = "ansi"
+glyphs = "ascii"
+
+[palette]
+fg = "15"
+muted = "8"
+accent = "14"
+success = "2"
+warning = "3"
+danger = "1"
+
+[separators]
+segment = " "
+left = ""
+right = ""
+
+[segments.cwd]
+fg = "@fg"
+bg = ""
+style = ""
+glyph = ""
+ascii = ""
+suffix = ""
+
+[segments.git_branch]
+fg = "@accent"
+bg = ""
+style = ""
+glyph = ""
+ascii = "git:"
+suffix = ""
+
+[segments.exit_status]
+fg = "@danger"
+bg = ""
+style = ""
+glyph = ""
+ascii = "exit:"
+suffix = ""
+
+[segments.jobs]
+fg = "@warning"
+bg = ""
+style = ""
+glyph = ""
+ascii = "jobs:"
+suffix = ""
+
+[segments.cmd_duration]
+fg = "@muted"
+bg = ""
+style = ""
+glyph = ""
+ascii = "took:"
+suffix = ""

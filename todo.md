@@ -590,7 +590,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 - [x] Emit `migration-notes.md`
 
 ### 18.4 Pure importer
-- [ ] Minimal mapping: pure → Shisa "pure" preset
+- [x] Minimal mapping: pure → Shisa "pure" preset
 - [ ] Document as a smallest-possible config
 - [ ] Smoke test against pure zsh + fish variants
 

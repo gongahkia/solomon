@@ -11,6 +11,7 @@ const themes = [_]ThemeAsset{
     .{ .name = "nord-dark", .path = "themes/nord-dark.toml" },
     .{ .name = "gruvbox-rainbow", .path = "themes/gruvbox-rainbow.toml" },
     .{ .name = "tokyo-night", .path = "themes/tokyo-night.toml" },
+    .{ .name = "pure", .path = "themes/pure.toml" },
 };
 
 test "built-in themes include required schema fields" {

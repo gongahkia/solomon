@@ -738,7 +738,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Adopt gettext-compatible format under `i18n/`
 - [x] Initial language: en-US
 - [ ] Extract all user-facing strings to catalog
-- [ ] Generated docs include translation status table
+- [x] Generated docs include translation status table
 
 ### 22.2 Bidi / RTL
 - [ ] Detect RTL locale at session start

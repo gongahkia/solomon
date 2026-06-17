@@ -28,6 +28,7 @@
 - [Doctor](doctor.md)
 - [Linux](linux.md)
 - [Deprecations](deprecations.md)
+- [Internationalization](i18n.md)
 
 # Modules
 

@@ -1874,10 +1874,14 @@ fn p10kUnsupportedReason(name: []const u8) []const u8 {
 const OmpSegment = struct {
     kind: ?[]u8 = null,
     template: ?[]u8 = null,
+    foreground: ?[]u8 = null,
+    background: ?[]u8 = null,
 
     fn deinit(self: OmpSegment, allocator: std.mem.Allocator) void {
         if (self.kind) |kind| allocator.free(kind);
         if (self.template) |template| allocator.free(template);
+        if (self.foreground) |foreground| allocator.free(foreground);
+        if (self.background) |background| allocator.free(background);
     }
 };
 
@@ -1896,10 +1900,23 @@ const OmpBlock = struct {
 
 const OmpTheme = struct {
     blocks: std.ArrayList(OmpBlock) = .empty,
+    palette: std.ArrayList(OmpPaletteEntry) = .empty,
 
     fn deinit(self: *OmpTheme, allocator: std.mem.Allocator) void {
         for (self.blocks.items) |*block| block.deinit(allocator);
         self.blocks.deinit(allocator);
+        for (self.palette.items) |entry| entry.deinit(allocator);
+        self.palette.deinit(allocator);
+    }
+};
+
+const OmpPaletteEntry = struct {
+    name: []u8,
+    value: []u8,
+
+    fn deinit(self: OmpPaletteEntry, allocator: std.mem.Allocator) void {
+        allocator.free(self.name);
+        allocator.free(self.value);
     }
 };
 
@@ -1926,6 +1943,19 @@ fn parseOmpJsonTheme(allocator: std.mem.Allocator, source: []const u8) !OmpTheme
 
     var theme = OmpTheme{};
     errdefer theme.deinit(allocator);
+    if (root.get("palette")) |palette_value| {
+        const palette = switch (palette_value) {
+            .object => |object| object,
+            else => return error.InvalidOmpTheme,
+        };
+        var iterator = palette.iterator();
+        while (iterator.next()) |entry| {
+            switch (entry.value_ptr.*) {
+                .string => |value| try appendOmpPaletteEntry(allocator, &theme, entry.key_ptr.*, value),
+                else => {},
+            }
+        }
+    }
     for (blocks.items) |block_value| {
         const block_object = switch (block_value) {
             .object => |object| object,
@@ -1949,6 +1979,8 @@ fn parseOmpJsonTheme(allocator: std.mem.Allocator, source: []const u8) !OmpTheme
                 errdefer segment.deinit(allocator);
                 if (jsonStringField(segment_object, "type")) |value| try setOwned(allocator, &segment.kind, value);
                 if (jsonStringField(segment_object, "template")) |value| try setOwned(allocator, &segment.template, value);
+                if (jsonStringField(segment_object, "foreground")) |value| try setOwned(allocator, &segment.foreground, value);
+                if (jsonStringField(segment_object, "background")) |value| try setOwned(allocator, &segment.background, value);
                 try block.segments.append(allocator, segment);
             }
         }
@@ -1970,6 +2002,7 @@ fn parseOmpYamlTheme(allocator: std.mem.Allocator, source: []const u8) !OmpTheme
     errdefer theme.deinit(allocator);
 
     var in_blocks = false;
+    var in_palette = false;
     var in_segments = false;
     var current_block_index: ?usize = null;
     var current_segment_index: ?usize = null;
@@ -1982,8 +2015,24 @@ fn parseOmpYamlTheme(allocator: std.mem.Allocator, source: []const u8) !OmpTheme
         const indent = leadingSpaces(without_comment);
         const trimmed = std.mem.trim(u8, without_comment[indent..], " \t");
 
+        if (indent == 0 and std.mem.eql(u8, trimmed, "palette:")) {
+            in_palette = true;
+            in_blocks = false;
+            in_segments = false;
+            continue;
+        }
+        if (in_palette) {
+            if (indent == 0) {
+                in_palette = false;
+            } else {
+                if (yamlKeyValue(trimmed)) |kv| try appendOmpPaletteEntry(allocator, &theme, kv.key, yamlScalar(kv.value));
+                continue;
+            }
+        }
+
         if (indent == 0 and std.mem.eql(u8, trimmed, "blocks:")) {
             in_blocks = true;
+            in_palette = false;
             in_segments = false;
             continue;
         }
@@ -2058,7 +2107,19 @@ fn applyOmpYamlSegmentField(allocator: std.mem.Allocator, segment: *OmpSegment, 
         try setOwned(allocator, &segment.kind, yamlScalar(value));
     } else if (std.mem.eql(u8, key, "template")) {
         try setOwned(allocator, &segment.template, yamlScalar(value));
+    } else if (std.mem.eql(u8, key, "foreground")) {
+        try setOwned(allocator, &segment.foreground, yamlScalar(value));
+    } else if (std.mem.eql(u8, key, "background")) {
+        try setOwned(allocator, &segment.background, yamlScalar(value));
     }
+}
+
+fn appendOmpPaletteEntry(allocator: std.mem.Allocator, theme: *OmpTheme, name: []const u8, value: []const u8) !void {
+    const owned_name = try allocator.dupe(u8, name);
+    errdefer allocator.free(owned_name);
+    const owned_value = try allocator.dupe(u8, value);
+    errdefer allocator.free(owned_value);
+    try theme.palette.append(allocator, .{ .name = owned_name, .value = owned_value });
 }
 
 fn setOwned(allocator: std.mem.Allocator, target: *?[]u8, value: []const u8) !void {
@@ -2269,29 +2330,45 @@ fn renderOmpImportedThemeAlloc(allocator: std.mem.Allocator, theme: OmpTheme) !?
     var emitted = StarshipImport{};
     defer emitted.deinit(allocator);
 
+    const mapped_palette = mapOmpPalette(theme);
     try out.appendSlice(allocator, "version = 1\nname = \"oh-my-posh-imported\"\nextends = \"plain\"\n");
+    if (mapped_palette.has_source) try appendMappedOmpPalette(allocator, &out, mapped_palette);
     var count: usize = 0;
     for (theme.blocks.items) |block| {
         for (block.segments.items) |segment| {
             const kind = segment.kind orelse continue;
-            const template = segment.template orelse continue;
             const module_id = ompModuleForSegment(kind) orelse continue;
             if (containsModule(emitted, module_id)) continue;
-            const layout = (try translateOmpTemplateLayoutAlloc(allocator, template)) orelse continue;
-            defer layout.deinit(allocator);
-            if (layout.prefix.len == 0 and layout.suffix.len == 0) continue;
+            const layout = if (segment.template) |template| try translateOmpTemplateLayoutAlloc(allocator, template) else null;
+            defer if (layout) |owned| owned.deinit(allocator);
+            const fg_ref = try translateOmpColorRefAlloc(allocator, theme, mapped_palette, segment.foreground);
+            defer if (fg_ref) |owned| allocator.free(owned);
+            const bg_ref = try translateOmpColorRefAlloc(allocator, theme, mapped_palette, segment.background);
+            defer if (bg_ref) |owned| allocator.free(owned);
+            const has_layout = if (layout) |owned| owned.prefix.len != 0 or owned.suffix.len != 0 else false;
+            if (!has_layout and fg_ref == null and bg_ref == null) continue;
             try appendModule(allocator, &emitted, module_id);
             try appendFmt(allocator, &out, "\n[segments.{s}]\n", .{shisa_config.moduleIdName(module_id)});
-            if (layout.prefix.len != 0) {
+            if (fg_ref) |value| {
+                try out.appendSlice(allocator, "fg = ");
+                try appendTomlString(allocator, &out, value);
+                try out.append(allocator, '\n');
+            }
+            if (bg_ref) |value| {
+                try out.appendSlice(allocator, "bg = ");
+                try appendTomlString(allocator, &out, value);
+                try out.append(allocator, '\n');
+            }
+            if (layout) |owned| if (owned.prefix.len != 0) {
                 try out.appendSlice(allocator, "prefix = ");
-                try appendTomlString(allocator, &out, layout.prefix);
+                try appendTomlString(allocator, &out, owned.prefix);
                 try out.append(allocator, '\n');
-            }
-            if (layout.suffix.len != 0) {
+            };
+            if (layout) |owned| if (owned.suffix.len != 0) {
                 try out.appendSlice(allocator, "suffix = ");
-                try appendTomlString(allocator, &out, layout.suffix);
+                try appendTomlString(allocator, &out, owned.suffix);
                 try out.append(allocator, '\n');
-            }
+            };
             count += 1;
         }
     }
@@ -2322,6 +2399,274 @@ fn ompModuleForSegment(name: []const u8) ?shisa_config.ModuleId {
     if (std.mem.eql(u8, name, "terraform") or std.mem.eql(u8, name, "pulumi")) return .iac_workspace;
     if (std.mem.eql(u8, name, "time")) return .time;
     return null;
+}
+
+const Rgb = struct {
+    r: u8,
+    g: u8,
+    b: u8,
+};
+
+const Oklab = struct {
+    l: f64,
+    a: f64,
+    b: f64,
+};
+
+const ShisaPaletteSlot = struct {
+    name: []const u8,
+    target: Rgb,
+    fallback: Rgb,
+};
+
+const shisa_palette_slots = [_]ShisaPaletteSlot{
+    .{ .name = "fg", .target = .{ .r = 255, .g = 255, .b = 255 }, .fallback = .{ .r = 255, .g = 255, .b = 255 } },
+    .{ .name = "muted", .target = .{ .r = 128, .g = 128, .b = 128 }, .fallback = .{ .r = 128, .g = 128, .b = 128 } },
+    .{ .name = "accent", .target = .{ .r = 0, .g = 255, .b = 255 }, .fallback = .{ .r = 0, .g = 255, .b = 255 } },
+    .{ .name = "success", .target = .{ .r = 0, .g = 170, .b = 0 }, .fallback = .{ .r = 0, .g = 170, .b = 0 } },
+    .{ .name = "warning", .target = .{ .r = 255, .g = 170, .b = 0 }, .fallback = .{ .r = 255, .g = 170, .b = 0 } },
+    .{ .name = "danger", .target = .{ .r = 255, .g = 0, .b = 0 }, .fallback = .{ .r = 255, .g = 0, .b = 0 } },
+};
+
+const MappedOmpPalette = struct {
+    has_source: bool = false,
+    colors: [shisa_palette_slots.len]Rgb = defaultShisaPaletteColors(),
+};
+
+fn defaultShisaPaletteColors() [shisa_palette_slots.len]Rgb {
+    var colors: [shisa_palette_slots.len]Rgb = undefined;
+    for (shisa_palette_slots, 0..) |slot, index| colors[index] = slot.fallback;
+    return colors;
+}
+
+fn mapOmpPalette(theme: OmpTheme) MappedOmpPalette {
+    var mapped = MappedOmpPalette{};
+    if (theme.palette.items.len == 0) return mapped;
+    mapped.has_source = true;
+    var filled = [_]bool{false} ** shisa_palette_slots.len;
+    for (shisa_palette_slots, 0..) |slot, index| {
+        if (findOmpPaletteRgb(theme, slot.name)) |rgb| {
+            mapped.colors[index] = rgb;
+            filled[index] = true;
+        }
+    }
+    for (shisa_palette_slots, 0..) |slot, index| {
+        if (filled[index]) continue;
+        if (nearestOmpPaletteRgbAvoiding(theme, slot.target, mapped.colors, filled)) |rgb| {
+            mapped.colors[index] = rgb;
+            filled[index] = true;
+        }
+    }
+    return mapped;
+}
+
+fn appendMappedOmpPalette(allocator: std.mem.Allocator, out: *std.ArrayList(u8), mapped: MappedOmpPalette) !void {
+    try out.appendSlice(allocator, "\n[palette]\n");
+    for (shisa_palette_slots, 0..) |slot, index| {
+        try appendFmt(allocator, out, "{s} = ", .{slot.name});
+        try appendRgbHexString(allocator, out, mapped.colors[index]);
+        try out.append(allocator, '\n');
+    }
+}
+
+fn translateOmpColorRefAlloc(allocator: std.mem.Allocator, theme: OmpTheme, mapped: MappedOmpPalette, value: ?[]const u8) !?[]u8 {
+    const raw = value orelse return null;
+    const rgb = resolveOmpColorRgb(theme, raw, 0) orelse return null;
+    if (mapped.has_source) {
+        const slot = nearestMappedPaletteSlot(mapped, rgb);
+        return try std.fmt.allocPrint(allocator, "@{s}", .{slot});
+    }
+    return try rgbHexAlloc(allocator, rgb);
+}
+
+fn nearestMappedPaletteSlot(mapped: MappedOmpPalette, rgb: Rgb) []const u8 {
+    const target = rgbToOklab(rgb);
+    var best_index: usize = 0;
+    var best_distance = oklabDistanceSquared(target, rgbToOklab(mapped.colors[0]));
+    for (mapped.colors[1..], 1..) |candidate, offset| {
+        const distance = oklabDistanceSquared(target, rgbToOklab(candidate));
+        if (distance < best_distance) {
+            best_distance = distance;
+            best_index = offset;
+        }
+    }
+    return shisa_palette_slots[best_index].name;
+}
+
+fn nearestOmpPaletteRgb(theme: OmpTheme, target: Rgb) ?Rgb {
+    return nearestOmpPaletteRgbAvoiding(theme, target, defaultShisaPaletteColors(), [_]bool{false} ** shisa_palette_slots.len);
+}
+
+fn nearestOmpPaletteRgbAvoiding(theme: OmpTheme, target: Rgb, used_colors: [shisa_palette_slots.len]Rgb, used: [shisa_palette_slots.len]bool) ?Rgb {
+    const target_lab = rgbToOklab(target);
+    var best: ?Rgb = null;
+    var best_distance: f64 = 0;
+    for (theme.palette.items) |entry| {
+        const rgb = resolveOmpColorRgb(theme, entry.value, 0) orelse continue;
+        if (rgbIsUsed(rgb, used_colors, used)) continue;
+        const distance = oklabDistanceSquared(target_lab, rgbToOklab(rgb));
+        if (best == null or distance < best_distance) {
+            best = rgb;
+            best_distance = distance;
+        }
+    }
+    return best;
+}
+
+fn rgbIsUsed(rgb: Rgb, used_colors: [shisa_palette_slots.len]Rgb, used: [shisa_palette_slots.len]bool) bool {
+    for (used, 0..) |is_used, index| {
+        if (is_used and std.meta.eql(rgb, used_colors[index])) return true;
+    }
+    return false;
+}
+
+fn findOmpPaletteRgb(theme: OmpTheme, name: []const u8) ?Rgb {
+    for (theme.palette.items) |entry| {
+        if (std.mem.eql(u8, entry.name, name)) return resolveOmpColorRgb(theme, entry.value, 0);
+    }
+    return null;
+}
+
+fn resolveOmpColorRgb(theme: OmpTheme, value: []const u8, depth: u8) ?Rgb {
+    if (depth > 8) return null;
+    const trimmed = std.mem.trim(u8, value, " \t\r\n");
+    if (std.mem.startsWith(u8, trimmed, "p:")) {
+        const name = trimmed[2..];
+        for (theme.palette.items) |entry| {
+            if (std.mem.eql(u8, entry.name, name)) return resolveOmpColorRgb(theme, entry.value, depth + 1);
+        }
+        return null;
+    }
+    if (parseHexColor(trimmed)) |rgb| return rgb;
+    if (parseAnsiColor(trimmed)) |rgb| return rgb;
+    return namedOmpColor(trimmed);
+}
+
+fn parseHexColor(value: []const u8) ?Rgb {
+    if (value.len == 7 and value[0] == '#') {
+        return .{
+            .r = parseHexByte(value[1], value[2]) orelse return null,
+            .g = parseHexByte(value[3], value[4]) orelse return null,
+            .b = parseHexByte(value[5], value[6]) orelse return null,
+        };
+    }
+    if (value.len == 4 and value[0] == '#') {
+        const r = parseHexDigit(value[1]) orelse return null;
+        const g = parseHexDigit(value[2]) orelse return null;
+        const b = parseHexDigit(value[3]) orelse return null;
+        return .{ .r = r * 17, .g = g * 17, .b = b * 17 };
+    }
+    return null;
+}
+
+fn parseHexByte(high: u8, low: u8) ?u8 {
+    const high_value = parseHexDigit(high) orelse return null;
+    const low_value = parseHexDigit(low) orelse return null;
+    return high_value * 16 + low_value;
+}
+
+fn parseHexDigit(byte: u8) ?u8 {
+    if (byte >= '0' and byte <= '9') return byte - '0';
+    if (byte >= 'a' and byte <= 'f') return byte - 'a' + 10;
+    if (byte >= 'A' and byte <= 'F') return byte - 'A' + 10;
+    return null;
+}
+
+fn parseAnsiColor(value: []const u8) ?Rgb {
+    const index = std.fmt.parseInt(u8, value, 10) catch return null;
+    const base = [_]Rgb{
+        .{ .r = 0, .g = 0, .b = 0 },
+        .{ .r = 128, .g = 0, .b = 0 },
+        .{ .r = 0, .g = 128, .b = 0 },
+        .{ .r = 128, .g = 128, .b = 0 },
+        .{ .r = 0, .g = 0, .b = 128 },
+        .{ .r = 128, .g = 0, .b = 128 },
+        .{ .r = 0, .g = 128, .b = 128 },
+        .{ .r = 192, .g = 192, .b = 192 },
+        .{ .r = 128, .g = 128, .b = 128 },
+        .{ .r = 255, .g = 0, .b = 0 },
+        .{ .r = 0, .g = 255, .b = 0 },
+        .{ .r = 255, .g = 255, .b = 0 },
+        .{ .r = 0, .g = 0, .b = 255 },
+        .{ .r = 255, .g = 0, .b = 255 },
+        .{ .r = 0, .g = 255, .b = 255 },
+        .{ .r = 255, .g = 255, .b = 255 },
+    };
+    if (index < 16) return base[index];
+    if (index <= 231) {
+        const cube = index - 16;
+        const steps = [_]u8{ 0, 95, 135, 175, 215, 255 };
+        return .{
+            .r = steps[cube / 36],
+            .g = steps[(cube / 6) % 6],
+            .b = steps[cube % 6],
+        };
+    }
+    const gray: u8 = 8 + (index - 232) * 10;
+    return .{ .r = gray, .g = gray, .b = gray };
+}
+
+fn namedOmpColor(value: []const u8) ?Rgb {
+    if (std.mem.eql(u8, value, "black")) return .{ .r = 0, .g = 0, .b = 0 };
+    if (std.mem.eql(u8, value, "red")) return .{ .r = 128, .g = 0, .b = 0 };
+    if (std.mem.eql(u8, value, "green")) return .{ .r = 0, .g = 128, .b = 0 };
+    if (std.mem.eql(u8, value, "yellow")) return .{ .r = 128, .g = 128, .b = 0 };
+    if (std.mem.eql(u8, value, "blue")) return .{ .r = 0, .g = 0, .b = 128 };
+    if (std.mem.eql(u8, value, "magenta")) return .{ .r = 128, .g = 0, .b = 128 };
+    if (std.mem.eql(u8, value, "cyan")) return .{ .r = 0, .g = 128, .b = 128 };
+    if (std.mem.eql(u8, value, "white")) return .{ .r = 192, .g = 192, .b = 192 };
+    if (std.mem.eql(u8, value, "darkGray")) return .{ .r = 128, .g = 128, .b = 128 };
+    if (std.mem.eql(u8, value, "lightRed")) return .{ .r = 255, .g = 0, .b = 0 };
+    if (std.mem.eql(u8, value, "lightGreen")) return .{ .r = 0, .g = 255, .b = 0 };
+    if (std.mem.eql(u8, value, "lightYellow")) return .{ .r = 255, .g = 255, .b = 0 };
+    if (std.mem.eql(u8, value, "lightBlue")) return .{ .r = 0, .g = 0, .b = 255 };
+    if (std.mem.eql(u8, value, "lightMagenta")) return .{ .r = 255, .g = 0, .b = 255 };
+    if (std.mem.eql(u8, value, "lightCyan")) return .{ .r = 0, .g = 255, .b = 255 };
+    if (std.mem.eql(u8, value, "lightWhite")) return .{ .r = 255, .g = 255, .b = 255 };
+    if (std.mem.eql(u8, value, "foreground")) return .{ .r = 255, .g = 255, .b = 255 };
+    if (std.mem.eql(u8, value, "background")) return .{ .r = 0, .g = 0, .b = 0 };
+    if (std.mem.eql(u8, value, "accent")) return .{ .r = 0, .g = 255, .b = 255 };
+    return null;
+}
+
+fn rgbToOklab(rgb: Rgb) Oklab {
+    const r = srgbByteToLinear(rgb.r);
+    const g = srgbByteToLinear(rgb.g);
+    const b = srgbByteToLinear(rgb.b);
+    const l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b;
+    const m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b;
+    const s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b;
+    const l_root = std.math.pow(f64, l, 1.0 / 3.0);
+    const m_root = std.math.pow(f64, m, 1.0 / 3.0);
+    const s_root = std.math.pow(f64, s, 1.0 / 3.0);
+    return .{
+        .l = 0.2104542553 * l_root + 0.7936177850 * m_root - 0.0040720468 * s_root,
+        .a = 1.9779984951 * l_root - 2.4285922050 * m_root + 0.4505937099 * s_root,
+        .b = 0.0259040371 * l_root + 0.7827717662 * m_root - 0.8086757660 * s_root,
+    };
+}
+
+fn srgbByteToLinear(byte: u8) f64 {
+    const value: f64 = @as(f64, @floatFromInt(byte)) / 255.0;
+    if (value <= 0.04045) return value / 12.92;
+    return std.math.pow(f64, (value + 0.055) / 1.055, 2.4);
+}
+
+fn oklabDistanceSquared(a: Oklab, b: Oklab) f64 {
+    const dl = a.l - b.l;
+    const da = a.a - b.a;
+    const db = a.b - b.b;
+    return dl * dl + da * da + db * db;
+}
+
+fn rgbHexAlloc(allocator: std.mem.Allocator, rgb: Rgb) ![]u8 {
+    return std.fmt.allocPrint(allocator, "#{X:0>2}{X:0>2}{X:0>2}", .{ rgb.r, rgb.g, rgb.b });
+}
+
+fn appendRgbHexString(allocator: std.mem.Allocator, out: *std.ArrayList(u8), rgb: Rgb) !void {
+    const hex = try rgbHexAlloc(allocator, rgb);
+    defer allocator.free(hex);
+    try appendTomlString(allocator, out, hex);
 }
 
 const OmpTemplateLayout = struct {
@@ -2791,8 +3136,9 @@ test "parses oh-my-posh json theme blocks" {
     const source =
         \\{
         \\  "version": 3,
+        \\  "palette": {"accent": "#3366ff"},
         \\  "blocks": [
-        \\    {"type": "prompt", "alignment": "left", "segments": [{"type": "path", "template": "cwd:{{ .Path }}!"}, {"type": "git"}]},
+        \\    {"type": "prompt", "alignment": "left", "segments": [{"type": "path", "template": "cwd:{{ .Path }}!", "foreground": "p:accent"}, {"type": "git"}]},
         \\    {"type": "rprompt", "alignment": "right", "segments": [{"type": "time"}]}
         \\  ]
         \\}
@@ -2802,10 +3148,14 @@ test "parses oh-my-posh json theme blocks" {
     defer theme.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(@as(usize, 2), theme.blocks.items.len);
+    try std.testing.expectEqual(@as(usize, 1), theme.palette.items.len);
+    try std.testing.expectEqualStrings("accent", theme.palette.items[0].name);
+    try std.testing.expectEqualStrings("#3366ff", theme.palette.items[0].value);
     try std.testing.expectEqualStrings("prompt", theme.blocks.items[0].block_type.?);
     try std.testing.expectEqualStrings("left", theme.blocks.items[0].alignment.?);
     try std.testing.expectEqualStrings("path", theme.blocks.items[0].segments.items[0].kind.?);
     try std.testing.expectEqualStrings("cwd:{{ .Path }}!", theme.blocks.items[0].segments.items[0].template.?);
+    try std.testing.expectEqualStrings("p:accent", theme.blocks.items[0].segments.items[0].foreground.?);
     try std.testing.expectEqualStrings("git", theme.blocks.items[0].segments.items[1].kind.?);
     try std.testing.expectEqualStrings("rprompt", theme.blocks.items[1].block_type.?);
     try std.testing.expectEqualStrings("time", theme.blocks.items[1].segments.items[0].kind.?);
@@ -2814,12 +3164,15 @@ test "parses oh-my-posh json theme blocks" {
 test "parses oh-my-posh yaml theme blocks" {
     const source =
         \\version: 3
+        \\palette:
+        \\  accent: "#3366ff"
         \\blocks:
         \\  - type: prompt
         \\    alignment: left
         \\    segments:
         \\      - type: path
         \\        template: "cwd:{{ .Path }}!"
+        \\        foreground: p:accent
         \\      - foreground: "#fff"
         \\        type: git
         \\  - type: rprompt
@@ -2832,10 +3185,12 @@ test "parses oh-my-posh yaml theme blocks" {
     defer theme.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(@as(usize, 2), theme.blocks.items.len);
+    try std.testing.expectEqual(@as(usize, 1), theme.palette.items.len);
     try std.testing.expectEqualStrings("prompt", theme.blocks.items[0].block_type.?);
     try std.testing.expectEqualStrings("left", theme.blocks.items[0].alignment.?);
     try std.testing.expectEqualStrings("path", theme.blocks.items[0].segments.items[0].kind.?);
     try std.testing.expectEqualStrings("cwd:{{ .Path }}!", theme.blocks.items[0].segments.items[0].template.?);
+    try std.testing.expectEqualStrings("p:accent", theme.blocks.items[0].segments.items[0].foreground.?);
     try std.testing.expectEqualStrings("git", theme.blocks.items[0].segments.items[1].kind.?);
     try std.testing.expectEqualStrings("rprompt", theme.blocks.items[1].block_type.?);
     try std.testing.expectEqualStrings("right", theme.blocks.items[1].alignment.?);
@@ -2944,6 +3299,55 @@ test "imports oh-my-posh layout and template sidecar" {
     try std.testing.expect(std.mem.indexOf(u8, theme, "suffix = \"!\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, theme, "[segments.git_branch]") != null);
     try std.testing.expect(std.mem.indexOf(u8, theme, "prefix = \" on \"") != null);
+}
+
+test "maps oh-my-posh palette through oklab slots" {
+    var theme = OmpTheme{};
+    defer theme.deinit(std.testing.allocator);
+    try appendOmpPaletteEntry(std.testing.allocator, &theme, "accent", "#3366ff");
+    try appendOmpPaletteEntry(std.testing.allocator, &theme, "success", "#00ff66");
+    try appendOmpPaletteEntry(std.testing.allocator, &theme, "danger", "#ff0033");
+
+    const mapped = mapOmpPalette(theme);
+    try std.testing.expect(mapped.has_source);
+    try std.testing.expectEqualStrings("success", nearestMappedPaletteSlot(mapped, .{ .r = 0, .g = 238, .b = 80 }));
+    try std.testing.expectEqualStrings("danger", nearestMappedPaletteSlot(mapped, .{ .r = 238, .g = 0, .b = 40 }));
+}
+
+test "imports oh-my-posh palette and segment colors" {
+    const source =
+        \\{
+        \\  "palette": {
+        \\    "fg": "#f8f8f2",
+        \\    "muted": "#777777",
+        \\    "accent": "#3366ff",
+        \\    "success": "#00ff66",
+        \\    "warning": "#ffaa00",
+        \\    "danger": "#ff0033"
+        \\  },
+        \\  "blocks": [
+        \\    {
+        \\      "type": "prompt",
+        \\      "segments": [
+        \\        {"type": "path", "foreground": "p:accent", "template": "{{ .Path }}"},
+        \\        {"type": "status", "background": "#ff0033", "template": "exit:{{ .Code }}"}
+        \\      ]
+        \\    }
+        \\  ]
+        \\}
+        \\
+    ;
+    const result = try importOhMyPoshResultAlloc(std.testing.allocator, source);
+    defer result.deinit(std.testing.allocator);
+    const theme = result.theme orelse return error.MissingOmpTheme;
+
+    try std.testing.expect(std.mem.indexOf(u8, theme, "[palette]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, theme, "accent = \"#3366FF\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, theme, "danger = \"#FF0033\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, theme, "[segments.cwd]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, theme, "fg = \"@accent\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, theme, "[segments.exit_status]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, theme, "bg = \"@danger\"") != null);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {

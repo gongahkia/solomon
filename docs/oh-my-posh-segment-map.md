@@ -48,3 +48,11 @@ Segments not listed above are unsupported unless a later importer row maps them 
 Templates with one dynamic expression map to Shisa segment `prefix` and `suffix`. Oh My Posh color tags such as `<#ffaa00>` and `</>` are removed during this layout pass.
 
 Templates with conditionals, loops, or multiple dynamic expressions are not translated into theme layout.
+
+## Color Mapping
+
+Oh My Posh `palette` entries and segment `foreground`/`background` fields are resolved from hex, ANSI index, named colors, and `p:<name>` palette refs.
+
+The importer converts resolved sRGB colors to Oklab and maps them to the nearest Shisa semantic palette slot: `fg`, `muted`, `accent`, `success`, `warning`, or `danger`.
+
+Color templates are not translated yet; only static `foreground` and `background` values are imported.

@@ -766,7 +766,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] License logo CC-BY-SA so community can remix
 
 ### 23.2 Visual tokens
-- [ ] Define primary + accent palette
+- [x] Define primary + accent palette
 - [ ] Pick prose + mono fonts
 - [ ] Style tokens published in `brand/tokens.json`
 - [ ] Brand guide page at shisa.sh/brand

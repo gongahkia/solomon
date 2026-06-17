@@ -54,6 +54,15 @@ jobs:
       - run: zig build release
       - run: zig build bench
 
+  tui-policy:
+    name: no interactive TUI without flag
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: bash scripts/no-interactive-tui-check.sh
+
   vcs-fixtures:
     name: vcs fixtures / ${{ matrix.module }}
     runs-on: ubuntu-24.04

@@ -37,3 +37,5 @@ No raw-mode, full-screen, readline, or ncurses UI path is present in the current
 | `worktrees` | args/stdout | no prompt |
 
 Any future full-screen, raw-mode, cursor-addressing, or persistent interactive UI must require an explicit `--interactive` flag.
+
+CI enforces this with `scripts/no-interactive-tui-check.sh` over `src/` and `init/`.

@@ -723,7 +723,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 21.5 Keyboard-only
 - [x] Audit every CLI command for keyboard-only operability
-- [ ] No interactive TUIs without `--interactive` flag
+- [x] No interactive TUIs without `--interactive` flag
 - [ ] Bell + notification preferences settable via CLI args
 - [ ] Documented behavior table
 

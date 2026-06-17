@@ -687,7 +687,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] One-button monthly release script
 - [x] Generate changelog from commits + RFCs since last release
 - [x] Auto-create GitHub Release draft
-- [ ] Post-release: bump dev version + notify channels
+- [x] Post-release: bump dev version + notify channels
 
 ### 20.7 Deprecation policy
 - [x] Document the one-major-overlap rule

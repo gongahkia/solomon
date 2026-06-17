@@ -19,6 +19,8 @@ const max_frame_bytes = 1024 * 1024;
 const max_config_bytes = 1024 * 1024;
 const default_subscribe_backpressure_limit = 16;
 const max_subscribe_backpressure_limit = 1024;
+pub const graceful_shutdown_timeout_ms: i64 = 5000;
+const shutdown_poll_ms: i32 = 100;
 pub const daemon_version = "0.1.0-dev";
 pub const protocol_version: u32 = 1;
 const default_config_text =
@@ -194,11 +196,11 @@ pub const Server = struct {
                 .revents = 0,
             }};
 
-            const ready = try std.posix.poll(&poll_fds, 100);
+            const ready = try std.posix.poll(&poll_fds, shutdown_poll_ms);
             if (ready == 0) continue;
 
             if ((poll_fds[0].revents & std.posix.POLL.IN) != 0) {
-                try self.acceptOne();
+                try self.acceptOneWithShutdown(shutdown_requested);
             }
         }
     }
@@ -257,12 +259,16 @@ pub const Server = struct {
     }
 
     pub fn acceptOne(self: *Server) !void {
-        const connection = try self.listener.accept();
-        self.connections += 1;
-        try self.handleConnection(connection);
+        try self.acceptOneWithShutdown(null);
     }
 
-    fn handleConnection(self: *Server, connection: std.net.Server.Connection) !void {
+    fn acceptOneWithShutdown(self: *Server, shutdown_requested: ?*const std.atomic.Value(bool)) !void {
+        const connection = try self.listener.accept();
+        self.connections += 1;
+        try self.handleConnection(connection, shutdown_requested);
+    }
+
+    fn handleConnection(self: *Server, connection: std.net.Server.Connection, shutdown_requested: ?*const std.atomic.Value(bool)) !void {
         defer connection.stream.close();
 
         const request = try readFrameAlloc(std.heap.page_allocator, connection.stream.handle);
@@ -291,7 +297,7 @@ pub const Server = struct {
             defer std.heap.page_allocator.free(response);
             try writeFrame(connection.stream.handle, response);
         } else if (isOpRequest(request, "subscribe")) {
-            try self.handleSubscribeConnection(connection.stream.handle, request);
+            try self.handleSubscribeConnection(connection.stream.handle, request, shutdown_requested);
         } else if (isPreexecRequest(request)) {
             const response = try self.preexecResponse(request);
             defer std.heap.page_allocator.free(response);
@@ -525,7 +531,7 @@ pub const Server = struct {
         );
     }
 
-    fn handleSubscribeConnection(self: *Server, fd: std.posix.fd_t, request: []const u8) !void {
+    fn handleSubscribeConnection(self: *Server, fd: std.posix.fd_t, request: []const u8, shutdown_requested: ?*const std.atomic.Value(bool)) !void {
         _ = self;
         var parsed = try std.json.parseFromSlice(SubscribeRequest, std.heap.page_allocator, request, .{ .ignore_unknown_fields = true });
         defer parsed.deinit();
@@ -540,10 +546,20 @@ pub const Server = struct {
         defer queue.deinit();
         var sequence: u64 = 0;
         while (true) {
-            const line = readNdjsonLineAlloc(std.heap.page_allocator, fd, 64 * 1024) catch |err| switch (err) {
-                error.ConnectionClosed => return,
-                else => return err,
+            const maybe_line = line: {
+                if (shutdown_requested) |flag| {
+                    break :line readNdjsonLineUntilShutdownAlloc(std.heap.page_allocator, fd, 64 * 1024, flag) catch |err| switch (err) {
+                        error.ConnectionClosed => return,
+                        else => return err,
+                    };
+                }
+                break :line @as(?[]u8, readNdjsonLineAlloc(std.heap.page_allocator, fd, 64 * 1024) catch |err| switch (err) {
+                    error.ConnectionClosed => return,
+                    else => return err,
+                });
             };
+            const line = maybe_line orelse return;
+            errdefer std.heap.page_allocator.free(line);
             defer std.heap.page_allocator.free(line);
             if (std.mem.trim(u8, line, " \t\r\n").len == 0) continue;
             if (!subscribeCommandAllowed(line)) {
@@ -751,6 +767,42 @@ fn readNdjsonLineAlloc(allocator: std.mem.Allocator, fd: std.posix.fd_t, max_lin
         return error.Oversize;
     }
     return out.toOwnedSlice(allocator);
+}
+
+fn readNdjsonLineUntilShutdownAlloc(allocator: std.mem.Allocator, fd: std.posix.fd_t, max_line_bytes: usize, shutdown_requested: *const std.atomic.Value(bool)) !?[]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    while (out.items.len < max_line_bytes) {
+        if (shutdown_requested.load(.seq_cst)) {
+            if (out.items.len == 0) return null;
+            break;
+        }
+        var poll_fds = [_]std.posix.pollfd{.{
+            .fd = fd,
+            .events = std.posix.POLL.IN,
+            .revents = 0,
+        }};
+        const ready = try std.posix.poll(&poll_fds, shutdown_poll_ms);
+        if (ready == 0) continue;
+        if ((poll_fds[0].revents & std.posix.POLL.IN) == 0) {
+            if ((poll_fds[0].revents & (std.posix.POLL.HUP | std.posix.POLL.ERR | std.posix.POLL.NVAL)) != 0) {
+                if (out.items.len == 0) return error.ConnectionClosed;
+                break;
+            }
+            continue;
+        }
+        var byte: [1]u8 = undefined;
+        const n = try std.posix.read(fd, &byte);
+        if (n == 0) {
+            if (out.items.len == 0) return error.ConnectionClosed;
+            break;
+        }
+        try out.append(allocator, byte[0]);
+        if (byte[0] == '\n') break;
+    } else {
+        return error.Oversize;
+    }
+    return try out.toOwnedSlice(allocator);
 }
 
 fn readExact(fd: std.posix.fd_t, buffer: []u8) !void {
@@ -983,6 +1035,10 @@ fn prodGuardAuditPathAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8
 
 fn acceptOneThread(server: *Server) !void {
     try server.acceptOne();
+}
+
+fn serveThread(server: *Server, shutdown_requested: *const std.atomic.Value(bool)) !void {
+    try server.serve(shutdown_requested);
 }
 
 fn costRefreshThreadMain(server: *Server) void {
@@ -1518,6 +1574,36 @@ test "subscribe op exits cleanly on client disconnect" {
 
     client_stream.close();
     thread.join();
+}
+
+test "serve drains subscribe shutdown and unlinks socket" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-shutdown-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+
+    var server = try Server.init(socket_path);
+    var shutdown_requested = std.atomic.Value(bool).init(false);
+    const thread = try std.Thread.spawn(.{}, serveThread, .{ &server, &shutdown_requested });
+
+    var client_stream = try std.net.connectUnixSocket(socket_path);
+    defer client_stream.close();
+    try writeFrame(client_stream.handle, "{\"v\":1,\"op\":\"subscribe\",\"request_id\":\"shutdown\",\"topics\":[\"vcs.summary\"]}");
+    const snapshot = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
+    defer allocator.free(snapshot);
+    try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"kind\":\"snapshot\"") != null);
+
+    const start_ms = std.time.milliTimestamp();
+    shutdown_requested.store(true, .seq_cst);
+    thread.join();
+    const elapsed_ms = std.time.milliTimestamp() - start_ms;
+    try std.testing.expect(elapsed_ms < graceful_shutdown_timeout_ms);
+
+    server.deinit();
+    try std.testing.expectError(error.FileNotFound, std.fs.cwd().access(socket_path, .{}));
 }
 
 test "subscribe rejects mutating commands as readonly" {

@@ -859,7 +859,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Race-tested
 
 ### 26.3 Graceful shutdown
-- [ ] `SIGTERM` drains in 5 s, unlinks socket
+- [x] `SIGTERM` drains in 5 s, unlinks socket
 - [ ] `SIGUSR1` reload
 - [ ] `SIGUSR2` stack dump
 - [ ] Tests for each signal handler

@@ -7,3 +7,5 @@ Docker detection checks for `/.dockerenv`.
 Podman detection inspects cgroup text for `libpod` or `podman` markers.
 
 Devcontainer detection checks for a non-empty `$REMOTE_CONTAINERS`.
+
+Nix shell detection checks for a non-empty `$IN_NIX_SHELL`.

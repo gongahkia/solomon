@@ -346,7 +346,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Detect docker (`/.dockerenv`)
 - [x] Detect podman (cgroups inspection)
 - [x] Detect devcontainer (`$REMOTE_CONTAINERS`)
-- [ ] Detect nix-shell (`$IN_NIX_SHELL`)
+- [x] Detect nix-shell (`$IN_NIX_SHELL`)
 - [ ] Detect distrobox / toolbx (env vars)
 - [ ] Detect Kubernetes pod context (env vars / `/var/run/secrets/kubernetes.io/`)
 - [ ] Render `[docker:web]` style segment

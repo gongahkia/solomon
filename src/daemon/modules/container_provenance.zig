@@ -4,6 +4,7 @@ pub const module_id = "container_provenance";
 pub const docker_marker_path = "/.dockerenv";
 pub const podman_cgroup_path = "/proc/1/cgroup";
 pub const devcontainer_env_var = "REMOTE_CONTAINERS";
+pub const nix_shell_env_var = "IN_NIX_SHELL";
 
 pub const ContainerStatus = struct {
     provider: []u8,
@@ -50,6 +51,21 @@ pub fn detectDevcontainerAlloc(allocator: std.mem.Allocator, remote_containers: 
     const value = remote_containers orelse return null;
     if (std.mem.trim(u8, value, " \t\r\n").len == 0) return null;
     return try containerStatusAlloc(allocator, "devcontainer", "devcontainer");
+}
+
+pub fn detectNixShellEnvAlloc(allocator: std.mem.Allocator) !?ContainerStatus {
+    const value = std.process.getEnvVarOwned(allocator, nix_shell_env_var) catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(value);
+    return detectNixShellAlloc(allocator, value);
+}
+
+pub fn detectNixShellAlloc(allocator: std.mem.Allocator, in_nix_shell: ?[]const u8) !?ContainerStatus {
+    const value = in_nix_shell orelse return null;
+    if (std.mem.trim(u8, value, " \t\r\n").len == 0) return null;
+    return try containerStatusAlloc(allocator, "nix", "shell");
 }
 
 fn containerStatusAlloc(allocator: std.mem.Allocator, provider: []const u8, name: []const u8) !ContainerStatus {
@@ -120,4 +136,16 @@ test "detects devcontainer env" {
 test "ignores empty devcontainer env" {
     try std.testing.expect(try detectDevcontainerAlloc(std.testing.allocator, " \n") == null);
     try std.testing.expect(try detectDevcontainerAlloc(std.testing.allocator, null) == null);
+}
+
+test "detects nix shell env" {
+    var status = (try detectNixShellAlloc(std.testing.allocator, "pure")).?;
+    defer status.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("nix", status.provider);
+    try std.testing.expectEqualStrings("shell", status.name);
+}
+
+test "ignores empty nix shell env" {
+    try std.testing.expect(try detectNixShellAlloc(std.testing.allocator, " \n") == null);
+    try std.testing.expect(try detectNixShellAlloc(std.testing.allocator, null) == null);
 }

@@ -5,6 +5,7 @@ pub const aws_ce_endpoint = "https://ce.us-east-1.amazonaws.com";
 pub const aws_ce_target = "AWSInsightsIndexService.GetCostAndUsage";
 pub const aws_ce_service = "ce";
 pub const aws_ce_region = "us-east-1";
+pub const gcp_billing_endpoint = "https://cloudbilling.googleapis.com/v1";
 
 pub const Money = struct {
     amount: []u8,
@@ -32,6 +33,29 @@ const AwsResultByTime = struct {
 
 const AwsCostResponse = struct {
     ResultsByTime: []AwsResultByTime = &.{},
+};
+
+pub const GcpBillingAccount = struct {
+    name: []u8,
+    display_name: []u8,
+    open: bool,
+
+    pub fn deinit(self: *GcpBillingAccount, allocator: std.mem.Allocator) void {
+        allocator.free(self.name);
+        allocator.free(self.display_name);
+        self.* = undefined;
+    }
+};
+
+const GcpBillingAccountJson = struct {
+    name: []const u8 = "",
+    displayName: []const u8 = "",
+    display_name: []const u8 = "",
+    open: bool = false,
+};
+
+const GcpBillingAccountsResponse = struct {
+    billingAccounts: []GcpBillingAccountJson = &.{},
 };
 
 pub fn awsGetCostAndUsagePayloadAlloc(allocator: std.mem.Allocator, start_date: []const u8, end_date: []const u8) ![]u8 {
@@ -71,6 +95,25 @@ pub fn awsCostExplorerCliArgvAlloc(allocator: std.mem.Allocator, profile: ?[]con
     return args.toOwnedSlice(allocator);
 }
 
+pub fn gcpBillingAccountsListUrlAlloc(allocator: std.mem.Allocator) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/billingAccounts", .{gcp_billing_endpoint});
+}
+
+pub fn gcpBillingAccountsCliArgvAlloc(allocator: std.mem.Allocator) ![][]u8 {
+    var args: std.ArrayList([]u8) = .empty;
+    errdefer {
+        freePartialArgv(allocator, args.items);
+        args.deinit(allocator);
+    }
+    try appendArg(allocator, &args, "gcloud");
+    try appendArg(allocator, &args, "billing");
+    try appendArg(allocator, &args, "accounts");
+    try appendArg(allocator, &args, "list");
+    try appendArg(allocator, &args, "--filter=open=true");
+    try appendArg(allocator, &args, "--format=json");
+    return args.toOwnedSlice(allocator);
+}
+
 pub fn freeArgv(allocator: std.mem.Allocator, argv: [][]u8) void {
     freePartialArgv(allocator, argv);
     allocator.free(argv);
@@ -94,6 +137,24 @@ pub fn readAwsMonthlyCostWithCliAlloc(allocator: std.mem.Allocator, profile: ?[]
     return parseAwsUnblendedCostAlloc(allocator, result.stdout);
 }
 
+pub fn readGcpPrimaryBillingAccountWithCliAlloc(allocator: std.mem.Allocator) !?GcpBillingAccount {
+    const argv = try gcpBillingAccountsCliArgvAlloc(allocator);
+    defer freeArgv(allocator, argv);
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .max_output_bytes = 1024 * 1024,
+        .expand_arg0 = .expand,
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!switch (result.term) {
+        .Exited => |code| code == 0,
+        else => false,
+    }) return error.GcloudCliFailed;
+    return parseGcpPrimaryBillingAccountAlloc(allocator, result.stdout);
+}
+
 pub fn parseAwsUnblendedCostAlloc(allocator: std.mem.Allocator, source: []const u8) !?Money {
     var parsed = std.json.parseFromSlice(AwsCostResponse, allocator, source, .{ .ignore_unknown_fields = true }) catch return null;
     defer parsed.deinit();
@@ -109,6 +170,41 @@ pub fn parseAwsUnblendedCostAlloc(allocator: std.mem.Allocator, source: []const 
         };
     }
     return null;
+}
+
+pub fn parseGcpPrimaryBillingAccountAlloc(allocator: std.mem.Allocator, source: []const u8) !?GcpBillingAccount {
+    if (try parseGcpPrimaryBillingAccountArrayAlloc(allocator, source)) |account| return account;
+    var parsed = std.json.parseFromSlice(GcpBillingAccountsResponse, allocator, source, .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+    return gcpPrimaryBillingAccountFromListAlloc(allocator, parsed.value.billingAccounts);
+}
+
+fn parseGcpPrimaryBillingAccountArrayAlloc(allocator: std.mem.Allocator, source: []const u8) !?GcpBillingAccount {
+    var parsed = std.json.parseFromSlice([]GcpBillingAccountJson, allocator, source, .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+    return gcpPrimaryBillingAccountFromListAlloc(allocator, parsed.value);
+}
+
+fn gcpPrimaryBillingAccountFromListAlloc(allocator: std.mem.Allocator, accounts: []const GcpBillingAccountJson) !?GcpBillingAccount {
+    for (accounts) |account| {
+        const name = std.mem.trim(u8, account.name, " \t\r\n");
+        if (!account.open or name.len == 0) continue;
+        const display_name = gcpDisplayName(account);
+        const owned_name = try allocator.dupe(u8, name);
+        errdefer allocator.free(owned_name);
+        return GcpBillingAccount{
+            .name = owned_name,
+            .display_name = try allocator.dupe(u8, display_name),
+            .open = account.open,
+        };
+    }
+    return null;
+}
+
+fn gcpDisplayName(account: GcpBillingAccountJson) []const u8 {
+    const display_name = std.mem.trim(u8, account.displayName, " \t\r\n");
+    if (display_name.len != 0) return display_name;
+    return std.mem.trim(u8, account.display_name, " \t\r\n");
 }
 
 pub fn validIsoDate(value: []const u8) bool {
@@ -153,6 +249,20 @@ test "builds aws cost explorer cli argv" {
     for (expected, 0..) |value, index| try std.testing.expectEqualStrings(value, argv[index]);
 }
 
+test "builds gcp billing accounts cli argv" {
+    const argv = try gcpBillingAccountsCliArgvAlloc(std.testing.allocator);
+    defer freeArgv(std.testing.allocator, argv);
+    const expected = [_][]const u8{ "gcloud", "billing", "accounts", "list", "--filter=open=true", "--format=json" };
+    try std.testing.expectEqual(expected.len, argv.len);
+    for (expected, 0..) |value, index| try std.testing.expectEqualStrings(value, argv[index]);
+}
+
+test "builds gcp billing accounts REST URL" {
+    const url = try gcpBillingAccountsListUrlAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(url);
+    try std.testing.expectEqualStrings("https://cloudbilling.googleapis.com/v1/billingAccounts", url);
+}
+
 test "parses aws cost explorer response" {
     var money = (try parseAwsUnblendedCostAlloc(std.testing.allocator,
         \\{
@@ -171,6 +281,32 @@ test "parses aws cost explorer response" {
     defer money.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("12.3400000000", money.amount);
     try std.testing.expectEqualStrings("USD", money.unit);
+}
+
+test "parses gcp billing accounts array response" {
+    var account = (try parseGcpPrimaryBillingAccountAlloc(std.testing.allocator,
+        \\[
+        \\  {"name":"billingAccounts/000000-111111-222222","displayName":"Prod Billing","open":true}
+        \\]
+    )).?;
+    defer account.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("billingAccounts/000000-111111-222222", account.name);
+    try std.testing.expectEqualStrings("Prod Billing", account.display_name);
+    try std.testing.expect(account.open);
+}
+
+test "parses gcp billing accounts REST response" {
+    var account = (try parseGcpPrimaryBillingAccountAlloc(std.testing.allocator,
+        \\{
+        \\  "billingAccounts": [
+        \\    {"name":"billingAccounts/closed","displayName":"Closed","open":false},
+        \\    {"name":"billingAccounts/open","displayName":"Open","open":true}
+        \\  ]
+        \\}
+    )).?;
+    defer account.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("billingAccounts/open", account.name);
+    try std.testing.expectEqualStrings("Open", account.display_name);
 }
 
 test "rejects malformed aws date" {

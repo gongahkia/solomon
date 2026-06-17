@@ -322,7 +322,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ### 11.8 Cost glance (`cost_glance`) — optional, heavy
 - [x] AWS Cost Explorer client (read-only, IAM least-priv guide)
-- [ ] GCP Billing API client
+- [x] GCP Billing API client
 - [ ] Azure Cost Management client
 - [ ] Background hourly refresh in the daemon (off-thread)
 - [ ] Cache to `~/.local/state/shisa/cost.json`

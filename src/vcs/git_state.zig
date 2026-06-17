@@ -20,6 +20,11 @@ pub const BisectState = struct {
     bad: bool = false,
 };
 
+pub const PromptSignal = struct {
+    glyph: []const u8,
+    a11y: []const u8,
+};
+
 pub fn detectBisectState(git_dir: std.fs.Dir) BisectState {
     return .{
         .active = entryExists(git_dir, "BISECT_LOG") or entryExists(git_dir, "refs/bisect"),
@@ -33,6 +38,52 @@ pub fn detectAmState(git_dir: std.fs.Dir) bool {
     return entryExists(git_dir, "rebase-apply/applying") or
         entryExists(git_dir, "rebase-apply/patch") or
         entryExists(git_dir, "rebase-apply/msg");
+}
+
+pub fn rebaseSignal(state: RebaseState) ?PromptSignal {
+    return switch (state) {
+        .none => null,
+        .apply => .{ .glyph = "rebase:apply", .a11y = "rebase in progress using apply backend" },
+        .merge => .{ .glyph = "rebase:merge", .a11y = "rebase in progress using merge backend" },
+        .interactive => .{ .glyph = "rebase:i", .a11y = "interactive rebase in progress" },
+    };
+}
+
+pub fn mergeSignal(active: bool) ?PromptSignal {
+    return if (active) .{ .glyph = "merge", .a11y = "merge in progress" } else null;
+}
+
+pub fn cherryPickSignal(state: SequencerState) ?PromptSignal {
+    return switch (state) {
+        .none => null,
+        .single => .{ .glyph = "pick", .a11y = "cherry-pick in progress" },
+        .sequence => .{ .glyph = "pick:seq", .a11y = "cherry-pick sequence in progress" },
+    };
+}
+
+pub fn revertSignal(state: SequencerState) ?PromptSignal {
+    return switch (state) {
+        .none => null,
+        .single => .{ .glyph = "revert", .a11y = "revert in progress" },
+        .sequence => .{ .glyph = "revert:seq", .a11y = "revert sequence in progress" },
+    };
+}
+
+pub fn bisectSignal(state: BisectState) ?PromptSignal {
+    if (!state.active and !state.current) return null;
+    if (state.current) return .{ .glyph = "bisect:current", .a11y = "bisect current commit under test" };
+    if (state.good and state.bad) return .{ .glyph = "bisect:good/bad", .a11y = "bisect has good and bad bounds" };
+    if (state.good) return .{ .glyph = "bisect:good", .a11y = "bisect has known good commit" };
+    if (state.bad) return .{ .glyph = "bisect:bad", .a11y = "bisect has known bad commit" };
+    return .{ .glyph = "bisect", .a11y = "bisect in progress" };
+}
+
+pub fn amSignal(active: bool) ?PromptSignal {
+    return if (active) .{ .glyph = "am", .a11y = "git am patch apply in progress" } else null;
+}
+
+pub fn detachedHeadSignal(active: bool) ?PromptSignal {
+    return if (active) .{ .glyph = "detached", .a11y = "detached HEAD" } else null;
 }
 
 pub fn detectCherryPickState(git_dir: std.fs.Dir) SequencerState {
@@ -247,6 +298,21 @@ test "detects detached HEAD" {
     defer git_dir.close();
     try git_dir.writeFile(.{ .sub_path = "HEAD", .data = "0123456789abcdef0123456789abcdef01234567\n" });
     try std.testing.expect(try detectDetachedHead(std.testing.allocator, git_dir));
+}
+
+test "formats git state signals with glyph and a11y labels" {
+    try expectSignal(rebaseSignal(.interactive).?, "rebase:i", "interactive rebase in progress");
+    try expectSignal(mergeSignal(true).?, "merge", "merge in progress");
+    try expectSignal(cherryPickSignal(.sequence).?, "pick:seq", "cherry-pick sequence in progress");
+    try expectSignal(revertSignal(.sequence).?, "revert:seq", "revert sequence in progress");
+    try expectSignal(bisectSignal(.{ .active = true, .current = true }).?, "bisect:current", "bisect current commit under test");
+    try expectSignal(amSignal(true).?, "am", "git am patch apply in progress");
+    try expectSignal(detachedHeadSignal(true).?, "detached", "detached HEAD");
+}
+
+fn expectSignal(signal: PromptSignal, glyph: []const u8, a11y: []const u8) !void {
+    try std.testing.expectEqualStrings(glyph, signal.glyph);
+    try std.testing.expectEqualStrings(a11y, signal.a11y);
 }
 
 fn makeGitDir(tmp: *std.testing.TmpDir) !std.fs.Dir {

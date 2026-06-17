@@ -361,7 +361,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 ## Phase 12 — AI plugin pack (`shisa.ai`)
 
 ### 12.1 Ollama integration
-- [ ] Detect ollama install + running daemon
+- [x] Detect ollama install + running daemon
 - [ ] Pull recommended small model (final choice TBD after benchmark: `qwen2.5:1.5b` / `gemma3:1b` / `phi3:mini`)
 - [ ] Implement Ollama HTTP client in Zig
 - [ ] Stream tokens with cancellation

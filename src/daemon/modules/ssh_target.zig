@@ -1,4 +1,5 @@
 const std = @import("std");
+const risk_tier = @import("risk_tier.zig");
 
 pub const module_id = "ssh_target";
 
@@ -14,6 +15,16 @@ pub fn targetHostAlloc(allocator: std.mem.Allocator, ssh_connection: ?[]const u8
     return @as(?[]u8, try allocator.dupe(u8, trimmed));
 }
 
+pub fn classifyHost(host: []const u8, rules: ?risk_tier.Rules) risk_tier.Tier {
+    return if (rules) |loaded| risk_tier.classifyWithRules(host, loaded) else risk_tier.classify(host);
+}
+
+pub fn classifyHostWithUserRules(allocator: std.mem.Allocator, home: ?[]const u8, host: []const u8) !risk_tier.Tier {
+    var rules = try risk_tier.loadUserRulesAlloc(allocator, home);
+    defer if (rules) |*loaded| loaded.deinit(allocator);
+    return classifyHost(host, rules);
+}
+
 test "detects ssh connection env" {
     try std.testing.expect(insideSsh("192.0.2.1 55555 198.51.100.2 22"));
     try std.testing.expect(!insideSsh(null));
@@ -25,4 +36,10 @@ test "returns target host only inside ssh" {
     defer std.testing.allocator.free(host);
     try std.testing.expectEqualStrings("prod-bastion", host);
     try std.testing.expect(try targetHostAlloc(std.testing.allocator, null, "prod-bastion") == null);
+}
+
+test "classifies ssh target host" {
+    try std.testing.expectEqual(risk_tier.Tier.prod, classifyHost("prod-bastion", null));
+    try std.testing.expectEqual(risk_tier.Tier.staging, classifyHost("api-staging-1", null));
+    try std.testing.expectEqual(risk_tier.Tier.unknown, classifyHost("host", null));
 }

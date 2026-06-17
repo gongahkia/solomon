@@ -339,7 +339,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ### 11.10 SSH target (`ssh_target`)
 - [x] Detect inside SSH session via `$SSH_CONNECTION`
-- [ ] Classify remote host using risk_tier rules
+- [x] Classify remote host using risk_tier rules
 - [ ] Render `→ host (prod)` segment when remote
 
 ### 11.11 Container provenance (`container_provenance`)

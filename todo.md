@@ -679,7 +679,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] AppImage build pipeline
 - [ ] Flatpak manifest (community)
 - [ ] Snap (community)
-- [ ] DEB packaging script
+- [x] DEB packaging script
 - [ ] RPM packaging script (Fedora, Suse)
 - [ ] `curl shisa.sh/install` script + checksum verify
 

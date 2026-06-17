@@ -15,3 +15,5 @@ Rules:
 - Catalog files stay UTF-8.
 - Message ids are stable English source strings until extraction tooling lands.
 - Generated `.mo` files are build artifacts and should not be committed.
+
+The initial locale is `en-US`, stored at `i18n/en-US/LC_MESSAGES/shisa.po`.

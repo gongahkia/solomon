@@ -703,7 +703,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 21.2 Non-color signal layer
 - [ ] Every risk-encoding color also has a glyph
-- [ ] Every glyph also has an ASCII fallback
+- [x] Every glyph also has an ASCII fallback
 - [ ] Every prompt segment carries an `a11y` string
 - [ ] `shisa render --explain-a11y` dumps the alt-text for the current prompt
 

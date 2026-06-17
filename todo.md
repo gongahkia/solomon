@@ -490,7 +490,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 - [x] `render` — full request/response path
 - [x] `render_continue` — async fill-in
 - [x] `health` — minimal ok/not-ok
-- [ ] `metrics` — JSON metrics dump
+- [x] `metrics` — JSON metrics dump
 - [ ] `reload` — re-read config + plugins
 - [ ] `version` — daemon + protocol version
 - [ ] `subscribe` — editor stream (Phase 16)

@@ -184,6 +184,10 @@ pub const Server = struct {
             var response: [128]u8 = undefined;
             const line = try std.fmt.bufPrint(&response, "{{\"connections\":{d}}}\n", .{self.connections});
             try writeFrame(connection.stream.handle, line);
+        } else if (isOpRequest(request, "metrics")) {
+            const response = try self.metricsResponseAlloc(std.heap.page_allocator, request);
+            defer std.heap.page_allocator.free(response);
+            try writeFrame(connection.stream.handle, response);
         } else if (std.mem.startsWith(u8, request, "health")) {
             try writeFrame(connection.stream.handle, "ok\n");
         } else if (isOpRequest(request, "health")) {
@@ -367,6 +371,37 @@ pub const Server = struct {
             defer std.heap.page_allocator.free(message);
             try logger.warn("slow_module", message);
         }
+    }
+
+    fn metricsResponseAlloc(self: *Server, allocator: std.mem.Allocator, request: []const u8) ![]u8 {
+        const request_id = try requestIdAlloc(allocator, request);
+        defer allocator.free(request_id);
+        const escaped_request_id = try json.escapeAlloc(allocator, request_id);
+        defer allocator.free(escaped_request_id);
+
+        self.git_branch_cache.mutex.lock();
+        const git_valid = self.git_branch_cache.valid;
+        const git_in_flight = self.git_branch_cache.in_flight;
+        const git_generation = self.git_branch_cache.generation;
+        self.git_branch_cache.mutex.unlock();
+
+        self.language_versions_cache.mutex.lock();
+        const language_valid = self.language_versions_cache.valid;
+        const language_in_flight = self.language_versions_cache.in_flight;
+        const language_generation = self.language_versions_cache.generation;
+        self.language_versions_cache.mutex.unlock();
+
+        self.cloud_ctx_cache.mutex.lock();
+        const gcp_valid = self.cloud_ctx_cache.gcp_valid;
+        const azure_valid = self.cloud_ctx_cache.azure_valid;
+        const kube_valid = self.cloud_ctx_cache.kube_valid;
+        self.cloud_ctx_cache.mutex.unlock();
+
+        return std.fmt.allocPrint(
+            allocator,
+            "{{\"v\":1,\"request_id\":\"{s}\",\"connections\":{d},\"cache\":{{\"git_branch\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"language_versions\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"cloud_ctx\":{{\"gcp_valid\":{},\"azure_valid\":{},\"kube_valid\":{}}}}},\"fsnotify\":{{\"backend\":\"{s}\",\"registrations\":{d}}}}}",
+            .{ escaped_request_id, self.connections, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid, @tagName(self.fs_watcher.backend), self.fs_watcher.registrations.items.len },
+        );
     }
 
     pub fn recordFsEvent(self: *Server, path: []const u8, timestamp_ns: u64) void {
@@ -862,6 +897,27 @@ test "health op returns minimal ok response" {
     try std.testing.expectEqual(@as(u32, 1), parsed.value.v);
     try std.testing.expectEqualStrings("health-1", parsed.value.request_id);
     try std.testing.expect(parsed.value.ok);
+}
+
+test "metrics op returns JSON metrics dump" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-metrics-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+    server.connections = 3;
+
+    const response = try server.metricsResponseAlloc(allocator, "{\"v\":1,\"op\":\"metrics\",\"request_id\":\"metrics-1\"}");
+    defer allocator.free(response);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"request_id\":\"metrics-1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"connections\":3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"git_branch\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"fsnotify\"") != null);
 }
 
 test "logs slow module warning" {

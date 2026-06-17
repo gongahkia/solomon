@@ -2,11 +2,11 @@
 
 RFCs are required for changes to the wire protocol, plugin API, security model, theme/rendering spec, or governance process.
 
-| RFC | Title | Status |
-| --- | --- | --- |
-| 0000 | Template | Active |
-| 0001 | Daemon Wire Protocol | Accepted |
-| 0002 | Module Execution Classes | Accepted |
-| 0003 | Lua Plugin Capability Manifest | Accepted |
-| 0004 | Cache Invalidation Rules | Accepted |
-| 0005 | Wire Protocol v1 | Accepted |
+| RFC | Title | Status | Area |
+| --- | --- | --- | --- |
+| [0000](0000-template.md) | Template | Active | core |
+| [0001](0001-daemon-wire-protocol.md) | Daemon Wire Protocol | Accepted | wire protocol |
+| [0002](0002-module-execution-classes.md) | Module Execution Classes | Accepted | renderer |
+| [0003](0003-lua-plugin-capability-manifest.md) | Lua Plugin Capability Manifest | Accepted | plugin API |
+| [0004](0004-cache-invalidation-rules.md) | Cache Invalidation Rules | Accepted | cache |
+| [0005](0005-wire-protocol-v1.md) | Wire Protocol v1 | Accepted | wire protocol |

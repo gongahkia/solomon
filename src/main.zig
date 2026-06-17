@@ -87,6 +87,11 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[1], "import-oh-my-posh")) {
+        try importOhMyPosh(allocator, args[2..]);
+        return;
+    }
+
     if (std.mem.eql(u8, args[1], "bench")) {
         try bench(allocator, args[2..]);
         return;
@@ -1868,9 +1873,11 @@ fn p10kUnsupportedReason(name: []const u8) []const u8 {
 
 const OmpSegment = struct {
     kind: ?[]u8 = null,
+    template: ?[]u8 = null,
 
     fn deinit(self: OmpSegment, allocator: std.mem.Allocator) void {
         if (self.kind) |kind| allocator.free(kind);
+        if (self.template) |template| allocator.free(template);
     }
 };
 
@@ -1941,6 +1948,7 @@ fn parseOmpJsonTheme(allocator: std.mem.Allocator, source: []const u8) !OmpTheme
                 var segment = OmpSegment{};
                 errdefer segment.deinit(allocator);
                 if (jsonStringField(segment_object, "type")) |value| try setOwned(allocator, &segment.kind, value);
+                if (jsonStringField(segment_object, "template")) |value| try setOwned(allocator, &segment.template, value);
                 try block.segments.append(allocator, segment);
             }
         }
@@ -1988,9 +1996,7 @@ fn parseOmpYamlTheme(allocator: std.mem.Allocator, source: []const u8) !OmpTheme
                 try theme.blocks.items[block_index].segments.append(allocator, .{});
                 current_segment_index = theme.blocks.items[block_index].segments.items.len - 1;
                 if (yamlKeyValue(item)) |kv| {
-                    if (std.mem.eql(u8, kv.key, "type")) {
-                        try setOwned(allocator, &theme.blocks.items[block_index].segments.items[current_segment_index.?].kind, yamlScalar(kv.value));
-                    }
+                    try applyOmpYamlSegmentField(allocator, &theme.blocks.items[block_index].segments.items[current_segment_index.?], kv.key, kv.value);
                 }
             } else {
                 try theme.blocks.append(allocator, .{});
@@ -2010,9 +2016,7 @@ fn parseOmpYamlTheme(allocator: std.mem.Allocator, source: []const u8) !OmpTheme
                 current_segment_index = null;
             } else if (in_segments) {
                 if (current_segment_index) |segment_index| {
-                    if (std.mem.eql(u8, kv.key, "type")) {
-                        try setOwned(allocator, &theme.blocks.items[block_index].segments.items[segment_index].kind, yamlScalar(kv.value));
-                    }
+                    try applyOmpYamlSegmentField(allocator, &theme.blocks.items[block_index].segments.items[segment_index], kv.key, kv.value);
                 }
             } else {
                 try applyOmpYamlBlockField(allocator, &theme.blocks.items[block_index], kv.key, kv.value);
@@ -2046,6 +2050,14 @@ fn applyOmpYamlBlockField(allocator: std.mem.Allocator, block: *OmpBlock, key: [
         try setOwned(allocator, &block.block_type, yamlScalar(value));
     } else if (std.mem.eql(u8, key, "alignment")) {
         try setOwned(allocator, &block.alignment, yamlScalar(value));
+    }
+}
+
+fn applyOmpYamlSegmentField(allocator: std.mem.Allocator, segment: *OmpSegment, key: []const u8, value: []const u8) !void {
+    if (std.mem.eql(u8, key, "type")) {
+        try setOwned(allocator, &segment.kind, yamlScalar(value));
+    } else if (std.mem.eql(u8, key, "template")) {
+        try setOwned(allocator, &segment.template, yamlScalar(value));
     }
 }
 
@@ -2132,6 +2144,249 @@ fn isIgnoredOmpSegment(name: []const u8) bool {
         std.mem.eql(u8, name, "shell") or
         std.mem.eql(u8, name, "os") or
         std.mem.eql(u8, name, "upgrade");
+}
+
+const OmpImportResult = struct {
+    config: []u8,
+    theme: ?[]u8 = null,
+
+    fn deinit(self: OmpImportResult, allocator: std.mem.Allocator) void {
+        allocator.free(self.config);
+        if (self.theme) |theme| allocator.free(theme);
+    }
+};
+
+fn importOhMyPosh(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len != 1) return error.UnknownImportOhMyPoshArgument;
+
+    const source = try std.fs.cwd().readFileAlloc(allocator, args[0], max_config_bytes);
+    defer allocator.free(source);
+
+    const result = try importOhMyPoshResultAlloc(allocator, source);
+    defer result.deinit(allocator);
+    try std.fs.File.stdout().writeAll(result.config);
+    if (result.theme) |theme| {
+        try std.fs.cwd().writeFile(.{ .sub_path = "oh-my-posh-theme.toml", .data = theme });
+    }
+}
+
+fn importOhMyPoshResultAlloc(allocator: std.mem.Allocator, source: []const u8) !OmpImportResult {
+    var theme = try parseOmpTheme(allocator, source);
+    defer theme.deinit(allocator);
+
+    var imported = StarshipImport{};
+    defer imported.deinit(allocator);
+    try scanOmpTheme(allocator, theme, &imported);
+
+    if (imported.modules.items.len == 0) {
+        inline for (.{ .cwd, .git_branch, .language_versions, .exit_status, .cmd_duration, .user_host }) |module_id| {
+            try appendModule(allocator, &imported, module_id);
+        }
+    }
+
+    const imported_theme = try renderOmpImportedThemeAlloc(allocator, theme);
+    errdefer if (imported_theme) |owned| allocator.free(owned);
+    const config = try renderOmpImportedConfigAlloc(allocator, imported, theme, if (imported_theme != null) "./oh-my-posh-theme.toml" else null);
+    errdefer allocator.free(config);
+    return .{ .config = config, .theme = imported_theme };
+}
+
+fn renderOmpImportedConfigAlloc(allocator: std.mem.Allocator, imported: StarshipImport, theme: OmpTheme, theme_path: ?[]const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    try out.appendSlice(allocator, "version = 1\ntheme = ");
+    try appendTomlString(allocator, &out, theme_path orelse "plain");
+    try out.appendSlice(allocator, "\n\n");
+    try appendOmpLayoutComments(allocator, &out, theme);
+    try out.appendSlice(allocator, "[prompt]\nmodules = [");
+    for (imported.modules.items, 0..) |module_id, index| {
+        if (index != 0) try out.appendSlice(allocator, ", ");
+        try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+    }
+    try out.appendSlice(allocator, "]\n");
+
+    if (containsModule(imported, .language_versions) and (imported.python or imported.node or imported.rust or imported.go)) {
+        try out.appendSlice(allocator, "\n[modules.language_versions]\ndetect = [");
+        var count: usize = 0;
+        if (imported.python) try appendLanguage(allocator, &out, &count, "python");
+        if (imported.node) try appendLanguage(allocator, &out, &count, "node");
+        if (imported.rust) try appendLanguage(allocator, &out, &count, "rust");
+        if (imported.go) try appendLanguage(allocator, &out, &count, "go");
+        try out.appendSlice(allocator, "]\n");
+    }
+
+    if (containsModule(imported, .time)) {
+        try out.appendSlice(allocator, "\n[modules.time]\nformat = \"24h\"\nutc = true\n");
+    }
+
+    if (imported.unsupported.items.len != 0) {
+        try out.appendSlice(allocator, "\n# Unsupported Oh My Posh segments: ");
+        for (imported.unsupported.items, 0..) |name, index| {
+            if (index != 0) try out.appendSlice(allocator, ", ");
+            try out.appendSlice(allocator, name);
+        }
+        try out.append(allocator, '\n');
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendOmpLayoutComments(allocator: std.mem.Allocator, out: *std.ArrayList(u8), theme: OmpTheme) !void {
+    try appendOmpLayoutComment(allocator, out, theme, false);
+    try appendOmpLayoutComment(allocator, out, theme, true);
+}
+
+fn appendOmpLayoutComment(allocator: std.mem.Allocator, out: *std.ArrayList(u8), theme: OmpTheme, right: bool) !void {
+    try appendFmt(allocator, out, "# Oh My Posh {s} layout: ", .{if (right) "right" else "left"});
+    var count: usize = 0;
+    for (theme.blocks.items) |block| {
+        if (ompBlockIsRight(block) != right) continue;
+        for (block.segments.items) |segment| {
+            const kind = segment.kind orelse continue;
+            if (count != 0) try out.appendSlice(allocator, ", ");
+            count += 1;
+            try out.appendSlice(allocator, kind);
+        }
+    }
+    try out.append(allocator, '\n');
+}
+
+fn ompBlockIsRight(block: OmpBlock) bool {
+    if (block.alignment) |alignment| {
+        if (std.mem.eql(u8, alignment, "right")) return true;
+    }
+    if (block.block_type) |block_type| {
+        if (std.mem.eql(u8, block_type, "rprompt")) return true;
+    }
+    return false;
+}
+
+fn renderOmpImportedThemeAlloc(allocator: std.mem.Allocator, theme: OmpTheme) !?[]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    var emitted = StarshipImport{};
+    defer emitted.deinit(allocator);
+
+    try out.appendSlice(allocator, "version = 1\nname = \"oh-my-posh-imported\"\nextends = \"plain\"\n");
+    var count: usize = 0;
+    for (theme.blocks.items) |block| {
+        for (block.segments.items) |segment| {
+            const kind = segment.kind orelse continue;
+            const template = segment.template orelse continue;
+            const module_id = ompModuleForSegment(kind) orelse continue;
+            if (containsModule(emitted, module_id)) continue;
+            const layout = (try translateOmpTemplateLayoutAlloc(allocator, template)) orelse continue;
+            defer layout.deinit(allocator);
+            if (layout.prefix.len == 0 and layout.suffix.len == 0) continue;
+            try appendModule(allocator, &emitted, module_id);
+            try appendFmt(allocator, &out, "\n[segments.{s}]\n", .{shisa_config.moduleIdName(module_id)});
+            if (layout.prefix.len != 0) {
+                try out.appendSlice(allocator, "prefix = ");
+                try appendTomlString(allocator, &out, layout.prefix);
+                try out.append(allocator, '\n');
+            }
+            if (layout.suffix.len != 0) {
+                try out.appendSlice(allocator, "suffix = ");
+                try appendTomlString(allocator, &out, layout.suffix);
+                try out.append(allocator, '\n');
+            }
+            count += 1;
+        }
+    }
+    if (count == 0) return null;
+    return try out.toOwnedSlice(allocator);
+}
+
+fn ompModuleForSegment(name: []const u8) ?shisa_config.ModuleId {
+    if (std.mem.eql(u8, name, "path")) return .cwd;
+    if (std.mem.eql(u8, name, "git") or
+        std.mem.eql(u8, name, "jujutsu") or
+        std.mem.eql(u8, name, "mercurial") or
+        std.mem.eql(u8, name, "sapling") or
+        std.mem.eql(u8, name, "svn") or
+        std.mem.eql(u8, name, "fossil") or
+        std.mem.eql(u8, name, "plastic")) return .git_branch;
+    if (std.mem.eql(u8, name, "python") or
+        std.mem.eql(u8, name, "node") or
+        std.mem.eql(u8, name, "go") or
+        std.mem.eql(u8, name, "rust")) return .language_versions;
+    if (std.mem.eql(u8, name, "status")) return .exit_status;
+    if (std.mem.eql(u8, name, "executiontime")) return .cmd_duration;
+    if (std.mem.eql(u8, name, "session")) return .user_host;
+    if (std.mem.eql(u8, name, "aws") or
+        std.mem.eql(u8, name, "gcp") or
+        std.mem.eql(u8, name, "az") or
+        std.mem.eql(u8, name, "kubectl")) return .cloud_ctx;
+    if (std.mem.eql(u8, name, "terraform") or std.mem.eql(u8, name, "pulumi")) return .iac_workspace;
+    if (std.mem.eql(u8, name, "time")) return .time;
+    return null;
+}
+
+const OmpTemplateLayout = struct {
+    prefix: []u8,
+    suffix: []u8,
+
+    fn deinit(self: OmpTemplateLayout, allocator: std.mem.Allocator) void {
+        allocator.free(self.prefix);
+        allocator.free(self.suffix);
+    }
+};
+
+fn translateOmpTemplateLayoutAlloc(allocator: std.mem.Allocator, template: []const u8) !?OmpTemplateLayout {
+    const open = std.mem.indexOf(u8, template, "{{") orelse return null;
+    const close_offset = std.mem.indexOf(u8, template[open + 2 ..], "}}") orelse return null;
+    const close = open + 2 + close_offset;
+    if (std.mem.indexOf(u8, template[close + 2 ..], "{{") != null) return null;
+    const expression = std.mem.trim(u8, template[open + 2 .. close], " \t\r\n");
+    if (isOmpTemplateControl(expression)) return null;
+
+    const prefix = try stripOmpTemplateMarkupAlloc(allocator, template[0..open]);
+    errdefer allocator.free(prefix);
+    const suffix = try stripOmpTemplateMarkupAlloc(allocator, template[close + 2 ..]);
+    errdefer allocator.free(suffix);
+    return .{ .prefix = prefix, .suffix = suffix };
+}
+
+fn isOmpTemplateControl(expression: []const u8) bool {
+    return std.mem.startsWith(u8, expression, "if ") or
+        std.mem.startsWith(u8, expression, "range ") or
+        std.mem.startsWith(u8, expression, "with ") or
+        std.mem.eql(u8, expression, "else") or
+        std.mem.eql(u8, expression, "end");
+}
+
+fn stripOmpTemplateMarkupAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    var in_tag = false;
+    for (value) |byte| {
+        if (in_tag) {
+            if (byte == '>') in_tag = false;
+        } else if (byte == '<') {
+            in_tag = true;
+        } else {
+            try out.append(allocator, byte);
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendTomlString(allocator: std.mem.Allocator, out: *std.ArrayList(u8), value: []const u8) !void {
+    try out.append(allocator, '"');
+    for (value) |byte| {
+        switch (byte) {
+            '\\' => try out.appendSlice(allocator, "\\\\"),
+            '"' => try out.appendSlice(allocator, "\\\""),
+            '\n' => try out.appendSlice(allocator, "\\n"),
+            '\r' => try out.appendSlice(allocator, "\\r"),
+            '\t' => try out.appendSlice(allocator, "\\t"),
+            else => try out.append(allocator, byte),
+        }
+    }
+    try out.append(allocator, '"');
 }
 
 const StarshipImport = struct {
@@ -2537,7 +2792,7 @@ test "parses oh-my-posh json theme blocks" {
         \\{
         \\  "version": 3,
         \\  "blocks": [
-        \\    {"type": "prompt", "alignment": "left", "segments": [{"type": "path"}, {"type": "git"}]},
+        \\    {"type": "prompt", "alignment": "left", "segments": [{"type": "path", "template": "cwd:{{ .Path }}!"}, {"type": "git"}]},
         \\    {"type": "rprompt", "alignment": "right", "segments": [{"type": "time"}]}
         \\  ]
         \\}
@@ -2550,6 +2805,7 @@ test "parses oh-my-posh json theme blocks" {
     try std.testing.expectEqualStrings("prompt", theme.blocks.items[0].block_type.?);
     try std.testing.expectEqualStrings("left", theme.blocks.items[0].alignment.?);
     try std.testing.expectEqualStrings("path", theme.blocks.items[0].segments.items[0].kind.?);
+    try std.testing.expectEqualStrings("cwd:{{ .Path }}!", theme.blocks.items[0].segments.items[0].template.?);
     try std.testing.expectEqualStrings("git", theme.blocks.items[0].segments.items[1].kind.?);
     try std.testing.expectEqualStrings("rprompt", theme.blocks.items[1].block_type.?);
     try std.testing.expectEqualStrings("time", theme.blocks.items[1].segments.items[0].kind.?);
@@ -2563,6 +2819,7 @@ test "parses oh-my-posh yaml theme blocks" {
         \\    alignment: left
         \\    segments:
         \\      - type: path
+        \\        template: "cwd:{{ .Path }}!"
         \\      - foreground: "#fff"
         \\        type: git
         \\  - type: rprompt
@@ -2578,6 +2835,7 @@ test "parses oh-my-posh yaml theme blocks" {
     try std.testing.expectEqualStrings("prompt", theme.blocks.items[0].block_type.?);
     try std.testing.expectEqualStrings("left", theme.blocks.items[0].alignment.?);
     try std.testing.expectEqualStrings("path", theme.blocks.items[0].segments.items[0].kind.?);
+    try std.testing.expectEqualStrings("cwd:{{ .Path }}!", theme.blocks.items[0].segments.items[0].template.?);
     try std.testing.expectEqualStrings("git", theme.blocks.items[0].segments.items[1].kind.?);
     try std.testing.expectEqualStrings("rprompt", theme.blocks.items[1].block_type.?);
     try std.testing.expectEqualStrings("right", theme.blocks.items[1].alignment.?);
@@ -2638,6 +2896,54 @@ test "maps oh-my-posh segments to shisa modules" {
     try std.testing.expect(imported.rust);
     try std.testing.expectEqual(@as(usize, 1), imported.unsupported.items.len);
     try std.testing.expectEqualStrings("battery", imported.unsupported.items[0]);
+}
+
+test "translates oh-my-posh simple template wrappers" {
+    const layout = (try translateOmpTemplateLayoutAlloc(std.testing.allocator, "cwd:<blue>{{ .Path }}</>!")).?;
+    defer layout.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("cwd:", layout.prefix);
+    try std.testing.expectEqualStrings("!", layout.suffix);
+    try std.testing.expect(try translateOmpTemplateLayoutAlloc(std.testing.allocator, "{{ .A }}{{ .B }}") == null);
+    try std.testing.expect(try translateOmpTemplateLayoutAlloc(std.testing.allocator, "{{ if .A }}x{{ end }}") == null);
+}
+
+test "imports oh-my-posh layout and template sidecar" {
+    const source =
+        \\{
+        \\  "blocks": [
+        \\    {
+        \\      "type": "prompt",
+        \\      "alignment": "left",
+        \\      "segments": [
+        \\        {"type": "path", "template": "cwd:<blue>{{ .Path }}</>!"},
+        \\        {"type": "git", "template": " on {{ .HEAD }}"}
+        \\      ]
+        \\    },
+        \\    {
+        \\      "type": "rprompt",
+        \\      "alignment": "right",
+        \\      "segments": [
+        \\        {"type": "time", "template": "{{ .CurrentDate }}"}
+        \\      ]
+        \\    }
+        \\  ]
+        \\}
+        \\
+    ;
+    const result = try importOhMyPoshResultAlloc(std.testing.allocator, source);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(std.mem.indexOf(u8, result.config, "theme = \"./oh-my-posh-theme.toml\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.config, "# Oh My Posh left layout: path, git") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.config, "# Oh My Posh right layout: time") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.config, "modules = [\"cwd\", \"git_branch\", \"time\"]") != null);
+    const theme = result.theme orelse return error.MissingOmpTheme;
+    try std.testing.expect(std.mem.indexOf(u8, theme, "[segments.cwd]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, theme, "prefix = \"cwd:\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, theme, "suffix = \"!\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, theme, "[segments.git_branch]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, theme, "prefix = \" on \"") != null);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {
@@ -3451,6 +3757,8 @@ const help_text =
     \\                translate starship.toml to shisa.toml
     \\  import-p10k <path>
     \\                translate .p10k.zsh to shisa.toml
+    \\  import-oh-my-posh <path>
+    \\                translate Oh My Posh JSON/YAML to shisa.toml
     \\  init          write default shisa.toml
     \\  pin           mark a path as never-evicted
     \\  plugin        install, list, enable, disable, or trust plugins

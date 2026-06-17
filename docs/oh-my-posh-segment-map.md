@@ -40,3 +40,11 @@ This table covers the Oh My Posh segment enum used by `shisa import-oh-my-posh` 
 | `wakatime` | none | unsupported | External service calls belong in a plugin. |
 | `taskwarrior` | none | unsupported | Task manager integrations belong in a plugin. |
 Segments not listed above are unsupported unless a later importer row maps them explicitly.
+
+## Template Translation
+
+`shisa import-oh-my-posh` keeps prompt order in generated `shisa.toml` comments and writes simple template wrappers to `oh-my-posh-theme.toml`.
+
+Templates with one dynamic expression map to Shisa segment `prefix` and `suffix`. Oh My Posh color tags such as `<#ffaa00>` and `</>` are removed during this layout pass.
+
+Templates with conditionals, loops, or multiple dynamic expressions are not translated into theme layout.

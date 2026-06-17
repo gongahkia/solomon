@@ -722,7 +722,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] Test with Orca on Linux
 
 ### 21.5 Keyboard-only
-- [ ] Audit every CLI command for keyboard-only operability
+- [x] Audit every CLI command for keyboard-only operability
 - [ ] No interactive TUIs without `--interactive` flag
 - [ ] Bell + notification preferences settable via CLI args
 - [ ] Documented behavior table

@@ -20,6 +20,7 @@
 - [Architecture](architecture.md)
 - [Config Schema](config-schema.md)
 - [CLI Reference](cli.md)
+- [CLI Keyboard Audit](cli-keyboard.md)
 - [Theme Spec](theme-spec.md)
 - [Style Guide](style-guide.md)
 - [Capabilities](capabilities.md)

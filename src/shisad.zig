@@ -81,7 +81,7 @@ fn run(config: cli.Config, socket_path: []const u8, logger: *daemon_log.Logger) 
     }
     try logger.info("listening", "unix socket server listening");
 
-    try daemon_server.serve(&signals.shutdown_requested);
+    try daemon_server.serve(&signals.shutdown_requested, &signals.reload_requested);
 }
 
 fn daemonize() !void {

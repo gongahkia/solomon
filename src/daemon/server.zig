@@ -186,10 +186,11 @@ pub const Server = struct {
         self.* = undefined;
     }
 
-    pub fn serve(self: *Server, shutdown_requested: *const std.atomic.Value(bool)) !void {
+    pub fn serve(self: *Server, shutdown_requested: *const std.atomic.Value(bool), reload_requested: *std.atomic.Value(bool)) !void {
         try self.warmupCaches(std.heap.page_allocator);
         try self.startCostRefresh(std.heap.page_allocator);
         while (!shutdown_requested.load(.seq_cst)) {
+            try self.consumeReloadSignal(reload_requested);
             var poll_fds = [_]std.posix.pollfd{.{
                 .fd = self.listener.stream.handle,
                 .events = std.posix.POLL.IN,
@@ -202,6 +203,19 @@ pub const Server = struct {
             if ((poll_fds[0].revents & std.posix.POLL.IN) != 0) {
                 try self.acceptOneWithShutdown(shutdown_requested);
             }
+        }
+    }
+
+    fn consumeReloadSignal(self: *Server, reload_requested: *std.atomic.Value(bool)) !void {
+        if (!reload_requested.swap(false, .seq_cst)) return;
+        self.reloadConfigAndPlugins(std.heap.page_allocator) catch |err| {
+            if (self.logger) |logger| {
+                try logger.warn("reload_failed", @errorName(err));
+            }
+            return;
+        };
+        if (self.logger) |logger| {
+            try logger.info("reloaded", "config and plugins reloaded");
         }
     }
 
@@ -1037,8 +1051,8 @@ fn acceptOneThread(server: *Server) !void {
     try server.acceptOne();
 }
 
-fn serveThread(server: *Server, shutdown_requested: *const std.atomic.Value(bool)) !void {
-    try server.serve(shutdown_requested);
+fn serveThread(server: *Server, shutdown_requested: *const std.atomic.Value(bool), reload_requested: *std.atomic.Value(bool)) !void {
+    try server.serve(shutdown_requested, reload_requested);
 }
 
 fn costRefreshThreadMain(server: *Server) void {
@@ -1438,6 +1452,44 @@ test "reload op rereads config and bumps generations" {
     try std.testing.expect(std.mem.indexOf(u8, server.reload_state.config_source, "modules = [\"cwd\", \"time\"]") != null);
 }
 
+test "reload signal rereads config and clears flag" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-sigusr1-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    const config_path = try std.fmt.allocPrint(allocator, "{s}/shisa.toml", .{dir_path});
+    defer allocator.free(config_path);
+    const plugins_dir = try std.fmt.allocPrint(allocator, "{s}/plugins", .{dir_path});
+    defer allocator.free(plugins_dir);
+
+    try std.fs.cwd().writeFile(.{
+        .sub_path = config_path,
+        .data =
+        \\version = 1
+        \\theme = "signal"
+        \\
+        \\[prompt]
+        \\modules = ["cwd"]
+        \\
+        ,
+    });
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+    server.config_path_override = config_path;
+    server.plugins_dir_override = plugins_dir;
+
+    var reload_requested = std.atomic.Value(bool).init(true);
+    try server.consumeReloadSignal(&reload_requested);
+    try std.testing.expect(!reload_requested.load(.seq_cst));
+    try std.testing.expectEqual(@as(u64, 1), server.reload_state.config_generation);
+    try std.testing.expect(std.mem.indexOf(u8, server.reload_state.config_source, "theme = \"signal\"") != null);
+}
+
 test "reload op rereads plugin manifests" {
     const allocator = std.testing.allocator;
     var runtime = plugin_lua.Runtime.initSandboxed(allocator) catch |err| switch (err) {
@@ -1587,7 +1639,8 @@ test "serve drains subscribe shutdown and unlinks socket" {
 
     var server = try Server.init(socket_path);
     var shutdown_requested = std.atomic.Value(bool).init(false);
-    const thread = try std.Thread.spawn(.{}, serveThread, .{ &server, &shutdown_requested });
+    var reload_requested = std.atomic.Value(bool).init(false);
+    const thread = try std.Thread.spawn(.{}, serveThread, .{ &server, &shutdown_requested, &reload_requested });
 
     var client_stream = try std.net.connectUnixSocket(socket_path);
     defer client_stream.close();

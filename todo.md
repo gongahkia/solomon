@@ -370,7 +370,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ### 12.2 Next-command suggestion (`nextcmd`)
 - [x] Hotkey integration per shell (zsh widget, bash bind -x, fish key binding, nu / pwsh equivalents)
-- [ ] Context builder: history slice + cwd + last command + last exit code
+- [x] Context builder: history slice + cwd + last command + last exit code
 - [ ] Prompt template + few-shot examples checked into repo
 - [ ] Inline preview UX (renders below the prompt line; ghost text)
 - [ ] Accept (tab) / reject (esc) / next (alt-]) controls

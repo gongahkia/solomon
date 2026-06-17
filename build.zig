@@ -127,6 +127,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const ollama_test_run = b.addRunArtifact(ollama_tests);
+    const nextcmd_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/ai/nextcmd.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const nextcmd_test_run = b.addRunArtifact(nextcmd_tests);
     const config_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/config.zig"),
@@ -493,6 +501,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&test_run.step);
     test_step.dependOn(&cli_test_run.step);
     test_step.dependOn(&ollama_test_run.step);
+    test_step.dependOn(&nextcmd_test_run.step);
     test_step.dependOn(&config_test_run.step);
     test_step.dependOn(&plugin_manifest_test_run.step);
     test_step.dependOn(&plugin_capability_test_run.step);

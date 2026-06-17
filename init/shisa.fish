@@ -13,6 +13,7 @@ set -q SHISA_INSTANT; or set -g SHISA_INSTANT 1
 set -q SHISA_PROD_GUARD; or set -g SHISA_PROD_GUARD 0
 set -q SHISA_PROD_GUARD_FORCE; or set -g SHISA_PROD_GUARD_FORCE 0
 set -q SHISA_NEXTCMD_KEYSEQ; or set -g SHISA_NEXTCMD_KEYSEQ \cx\cn
+set -q SHISA_LAST_COMMAND; or set -g SHISA_LAST_COMMAND ""
 
 function shisa_socket_path
     if test -n "$SHISA_SOCKET"
@@ -63,8 +64,9 @@ function fish_prompt
 end
 
 function shisa_preexec_guard --on-event fish_preexec
+    set -g SHISA_LAST_COMMAND (string join ' ' -- $argv)
     test "$SHISA_PROD_GUARD" = 1; or return 0
-    set -l command (string join ' ' -- $argv)
+    set -l command "$SHISA_LAST_COMMAND"
     test -n "$command"; or return 0
     set -l socket_path (shisa_socket_path)
     set -l args cloud preexec --socket "$socket_path" --shell fish
@@ -80,7 +82,13 @@ function shisa_async_redraw --on-event shisa_async_redraw
 end
 
 function shisa_nextcmd_widget
-    set -l suggestion (command "$SHISA_BIN" ai nextcmd --shell fish --cwd "$PWD" --last-exit "$status" 2>/dev/null)
+    set -l history_path ""
+    if set -q XDG_DATA_HOME
+        set history_path "$XDG_DATA_HOME/fish/fish_history"
+    else if set -q HOME
+        set history_path "$HOME/.local/share/fish/fish_history"
+    end
+    set -l suggestion (command "$SHISA_BIN" ai nextcmd --shell fish --cwd "$PWD" --last-command "$SHISA_LAST_COMMAND" --last-exit "$status" --history-path "$history_path" 2>/dev/null)
     if test $status -eq 0; and test -n "$suggestion"
         commandline -i -- "$suggestion"
     end

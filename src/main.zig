@@ -4,6 +4,7 @@ const daemon_cache = @import("daemon/cache.zig");
 const fsnotify = @import("daemon/fsnotify.zig");
 const client = @import("shisa-client.zig");
 const cloud_ctx_module = @import("daemon/modules/cloud_ctx.zig");
+const nextcmd = @import("ai/nextcmd.zig");
 const ollama = @import("ai/ollama.zig");
 const shisa_config = @import("config.zig");
 const paths = @import("daemon/paths.zig");
@@ -646,7 +647,17 @@ fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "nextcmd")) {
-        _ = try parseAiNextcmdArgs(args[1..]);
+        const config = try parseAiNextcmdArgs(args[1..]);
+        const history_source = if (config.history_path.len == 0) null else std.fs.cwd().readFileAlloc(allocator, config.history_path, 256 * 1024) catch null;
+        defer if (history_source) |value| allocator.free(value);
+        const context = try nextcmd.buildContextAlloc(allocator, .{
+            .cwd = config.cwd,
+            .last_command = config.last_command,
+            .last_exit = config.last_exit,
+            .history_source = history_source orelse "",
+            .history_limit = config.history_limit,
+        });
+        defer allocator.free(context);
         try std.fs.File.stdout().writeAll("");
         return;
     }
@@ -701,7 +712,10 @@ fn aiBenchOutputAlloc(allocator: std.mem.Allocator, model: []const u8, result: o
 const AiNextcmdConfig = struct {
     shell: []const u8 = "",
     cwd: []const u8 = "",
+    last_command: []const u8 = "",
     last_exit: i32 = 0,
+    history_path: []const u8 = "",
+    history_limit: usize = 20,
 };
 
 fn parseAiNextcmdArgs(args: []const []const u8) !AiNextcmdConfig {
@@ -712,8 +726,14 @@ fn parseAiNextcmdArgs(args: []const []const u8) !AiNextcmdConfig {
             config.shell = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--cwd")) {
             config.cwd = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--last-command")) {
+            config.last_command = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--last-exit")) {
             config.last_exit = try std.fmt.parseInt(i32, try nextValue(args, &i), 10);
+        } else if (std.mem.eql(u8, args[i], "--history-path")) {
+            config.history_path = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--history-limit")) {
+            config.history_limit = try std.fmt.parseInt(usize, try nextValue(args, &i), 10);
         } else {
             return error.UnknownAiArgument;
         }
@@ -728,10 +748,13 @@ test "ai bench args parse" {
 }
 
 test "ai nextcmd args parse" {
-    const config = try parseAiNextcmdArgs(&.{ "--shell", "zsh", "--cwd", "/tmp", "--last-exit", "2" });
+    const config = try parseAiNextcmdArgs(&.{ "--shell", "zsh", "--cwd", "/tmp", "--last-command", "zig test", "--last-exit", "2", "--history-path", "/tmp/h", "--history-limit", "3" });
     try std.testing.expectEqualStrings("zsh", config.shell);
     try std.testing.expectEqualStrings("/tmp", config.cwd);
+    try std.testing.expectEqualStrings("zig test", config.last_command);
     try std.testing.expectEqual(@as(i32, 2), config.last_exit);
+    try std.testing.expectEqualStrings("/tmp/h", config.history_path);
+    try std.testing.expectEqual(@as(usize, 3), config.history_limit);
 }
 
 test "ai bench output reports metrics" {

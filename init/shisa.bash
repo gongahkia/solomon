@@ -7,6 +7,7 @@ SHISA_SOCKET=${SHISA_SOCKET:-}
 SHISA_LAST_EXIT=0
 SHISA_LAST_JOBS=0
 SHISA_LAST_DURATION_MS=0
+SHISA_LAST_COMMAND=
 SHISA_ASYNC_REDRAW=${SHISA_ASYNC_REDRAW:-1}
 SHISA_ASYNC_KEYSEQ=${SHISA_ASYNC_KEYSEQ:-'\C-x\C-s'}
 SHISA_NEXTCMD_KEYSEQ=${SHISA_NEXTCMD_KEYSEQ:-'\C-x\C-n'}
@@ -80,6 +81,7 @@ shisa_debug_trap() {
     shisa_*|__SHISA_*|PROMPT_COMMAND=*|PS1=*) return 0 ;;
   esac
   [[ ${SHISA_COMMAND_STARTED:-0} == 0 ]] || return 0
+  SHISA_LAST_COMMAND=${command}
   shisa_preexec_guard bash "${command}" || return $?
   local now_us
   now_us=$(shisa_epoch_us) || return 0
@@ -119,7 +121,7 @@ shisa_async_redraw() {
 
 shisa_nextcmd_widget() {
   local suggestion
-  suggestion=$("${SHISA_BIN}" ai nextcmd --shell bash --cwd "${PWD}" --last-exit "${SHISA_LAST_EXIT:-0}" 2>/dev/null) || return 0
+  suggestion=$("${SHISA_BIN}" ai nextcmd --shell bash --cwd "${PWD}" --last-command "${SHISA_LAST_COMMAND:-}" --last-exit "${SHISA_LAST_EXIT:-0}" --history-path "${HISTFILE:-}" 2>/dev/null) || return 0
   [[ -n ${suggestion} ]] || return 0
   READLINE_LINE="${READLINE_LINE:0:READLINE_POINT}${suggestion}${READLINE_LINE:READLINE_POINT}"
   READLINE_POINT=$((READLINE_POINT + ${#suggestion}))

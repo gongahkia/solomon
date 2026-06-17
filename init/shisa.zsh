@@ -21,6 +21,7 @@ typeset -g SHISA_SOCKET=${SHISA_SOCKET:-}
 typeset -g SHISA_LAST_EXIT=0
 typeset -g SHISA_LAST_JOBS=0
 typeset -g SHISA_LAST_DURATION_MS=0
+typeset -g SHISA_LAST_COMMAND=
 typeset -g SHISA_PREEXEC_REALTIME=
 typeset -g SHISA_ASYNC_SIGNAL=${SHISA_ASYNC_SIGNAL:-USR1}
 typeset -g SHISA_TRANSIENT_PROMPT=${SHISA_TRANSIENT_PROMPT:-1}
@@ -64,6 +65,7 @@ shisa_hook_once precmd shisa_precmd
 shisa_preexec() {
   emulate -L zsh
   local command=${1:-}
+  SHISA_LAST_COMMAND=${command}
   SHISA_PREEXEC_REALTIME=${EPOCHREALTIME:-}
   shisa_preexec_guard zsh "${command}"
 }
@@ -112,7 +114,7 @@ fi
 shisa_nextcmd_widget() {
   emulate -L zsh
   local suggestion
-  suggestion=$("${SHISA_BIN}" ai nextcmd --shell zsh --cwd "${PWD}" --last-exit "${SHISA_LAST_EXIT:-0}" 2>/dev/null) || return 0
+  suggestion=$("${SHISA_BIN}" ai nextcmd --shell zsh --cwd "${PWD}" --last-command "${SHISA_LAST_COMMAND:-}" --last-exit "${SHISA_LAST_EXIT:-0}" --history-path "${HISTFILE:-}" 2>/dev/null) || return 0
   [[ -n ${suggestion} ]] || return 0
   LBUFFER+="${suggestion}"
   zle redisplay

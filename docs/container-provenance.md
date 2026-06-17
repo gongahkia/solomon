@@ -9,3 +9,7 @@ Podman detection inspects cgroup text for `libpod` or `podman` markers.
 Devcontainer detection checks for a non-empty `$REMOTE_CONTAINERS`.
 
 Nix shell detection checks for a non-empty `$IN_NIX_SHELL`.
+
+Distrobox detection checks for a non-empty `$CONTAINER_ID`.
+
+Toolbx detection checks for `/run/.toolbxenv` and `/run/.toolboxenv`.

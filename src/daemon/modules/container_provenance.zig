@@ -5,6 +5,9 @@ pub const docker_marker_path = "/.dockerenv";
 pub const podman_cgroup_path = "/proc/1/cgroup";
 pub const devcontainer_env_var = "REMOTE_CONTAINERS";
 pub const nix_shell_env_var = "IN_NIX_SHELL";
+pub const distrobox_container_id_env_var = "CONTAINER_ID";
+pub const toolbx_marker_path = "/run/.toolbxenv";
+pub const toolbox_marker_path = "/run/.toolboxenv";
 
 pub const ContainerStatus = struct {
     provider: []u8,
@@ -66,6 +69,32 @@ pub fn detectNixShellAlloc(allocator: std.mem.Allocator, in_nix_shell: ?[]const 
     const value = in_nix_shell orelse return null;
     if (std.mem.trim(u8, value, " \t\r\n").len == 0) return null;
     return try containerStatusAlloc(allocator, "nix", "shell");
+}
+
+pub fn detectDistroboxEnvAlloc(allocator: std.mem.Allocator) !?ContainerStatus {
+    const value = std.process.getEnvVarOwned(allocator, distrobox_container_id_env_var) catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(value);
+    return detectDistroboxAlloc(allocator, value);
+}
+
+pub fn detectDistroboxAlloc(allocator: std.mem.Allocator, container_id: ?[]const u8) !?ContainerStatus {
+    const value = container_id orelse return null;
+    const name = std.mem.trim(u8, value, " \t\r\n");
+    if (name.len == 0) return null;
+    return try containerStatusAlloc(allocator, "distrobox", name);
+}
+
+pub fn detectToolbxDefaultAlloc(allocator: std.mem.Allocator) !?ContainerStatus {
+    if (try detectToolbxAlloc(allocator, toolbx_marker_path)) |status| return status;
+    return detectToolbxAlloc(allocator, toolbox_marker_path);
+}
+
+pub fn detectToolbxAlloc(allocator: std.mem.Allocator, marker_path: []const u8) !?ContainerStatus {
+    if (!try pathExists(marker_path)) return null;
+    return try containerStatusAlloc(allocator, "toolbx", "toolbox");
 }
 
 fn containerStatusAlloc(allocator: std.mem.Allocator, provider: []const u8, name: []const u8) !ContainerStatus {
@@ -148,4 +177,39 @@ test "detects nix shell env" {
 test "ignores empty nix shell env" {
     try std.testing.expect(try detectNixShellAlloc(std.testing.allocator, " \n") == null);
     try std.testing.expect(try detectNixShellAlloc(std.testing.allocator, null) == null);
+}
+
+test "detects distrobox env" {
+    var status = (try detectDistroboxAlloc(std.testing.allocator, "dev-fedora")).?;
+    defer status.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("distrobox", status.provider);
+    try std.testing.expectEqualStrings("dev-fedora", status.name);
+}
+
+test "ignores empty distrobox env" {
+    try std.testing.expect(try detectDistroboxAlloc(std.testing.allocator, " \n") == null);
+    try std.testing.expect(try detectDistroboxAlloc(std.testing.allocator, null) == null);
+}
+
+test "detects toolbx marker" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-toolbx-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    const marker = try std.fmt.allocPrint(allocator, "{s}/.toolbxenv", .{dir_path});
+    defer allocator.free(marker);
+    {
+        var file = try std.fs.createFileAbsolute(marker, .{});
+        defer file.close();
+        try file.writeAll("");
+    }
+    var status = (try detectToolbxAlloc(allocator, marker)).?;
+    defer status.deinit(allocator);
+    try std.testing.expectEqualStrings("toolbx", status.provider);
+    try std.testing.expectEqualStrings("toolbox", status.name);
+}
+
+test "ignores missing toolbx marker" {
+    try std.testing.expect(try detectToolbxAlloc(std.testing.allocator, "/tmp/shisa-missing-toolbxenv") == null);
 }

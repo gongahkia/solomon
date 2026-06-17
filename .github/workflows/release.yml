@@ -36,6 +36,7 @@ jobs:
           os=$(printf "%s" "$RUNNER_OS" | tr "[:upper:]" "[:lower:]")
           arch=$(printf "%s" "$RUNNER_ARCH" | tr "[:upper:]" "[:lower:]")
           name="shisa-${GITHUB_REF_NAME}-${os}-${arch}"
+          echo "SHISA_PACKAGE_NAME=$name" >> "$GITHUB_ENV"
           mkdir -p "dist/$name"
           cp zig-out/bin/shisa "dist/$name/"
           cp zig-out/bin/shisad "dist/$name/"
@@ -43,12 +44,27 @@ jobs:
           tar -czf "dist/$name.tar.gz" -C dist "$name"
           shasum -a 256 "dist/$name.tar.gz" > "dist/$name.tar.gz.sha256"
 
+      - name: Install Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@v0.24.0
+        with:
+          syft-version: v1.42.3
+
+      - name: Generate SPDX SBOM
+        run: |
+          set -eu
+          "${{ steps.syft.outputs.cmd }}" "dist/$SHISA_PACKAGE_NAME" \
+            --source-name "$SHISA_PACKAGE_NAME" \
+            --source-version "$GITHUB_REF_NAME" \
+            -o "spdx-json=dist/$SHISA_PACKAGE_NAME.spdx.json"
+
       - uses: actions/upload-artifact@v4
         with:
           name: shisa-${{ github.ref_name }}-${{ runner.os }}-${{ runner.arch }}
           path: |
             dist/*.tar.gz
             dist/*.sha256
+            dist/*.spdx.json
           if-no-files-found: error
 
   publish:
@@ -72,4 +88,5 @@ jobs:
             --verify-tag \
             --title "$GITHUB_REF_NAME" \
             --notes "Manual v0 release. Artifacts and SHA-256 checksums are attached." \
-            dist/*
+            dist/*.tar.gz \
+            dist/*.tar.gz.sha256

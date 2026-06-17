@@ -655,7 +655,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] Publish reproducibility status badge
 
 ### 20.2 SBOM
-- [ ] Generate SPDX SBOM on every tagged release
+- [x] Generate SPDX SBOM on every tagged release
 - [ ] Publish alongside binary in GitHub Release
 - [ ] CI gate: SBOM diff diff'd against previous release for review
 

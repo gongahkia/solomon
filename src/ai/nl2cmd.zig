@@ -36,6 +36,20 @@ pub const PromptInput = struct {
     request: []const u8,
 };
 
+pub const Confidence = enum {
+    low,
+    medium,
+    high,
+
+    pub fn label(self: Confidence) []const u8 {
+        return switch (self) {
+            .low => "low",
+            .medium => "medium",
+            .high => "high",
+        };
+    }
+};
+
 pub fn detectInput(input: []const u8) ?[]const u8 {
     if (!std.mem.startsWith(u8, input, prefix)) return null;
     return std.mem.trim(u8, input[prefix.len..], " \t\r\n");
@@ -74,6 +88,30 @@ pub fn cleanCommandAlloc(allocator: std.mem.Allocator, raw: []const u8) ![]u8 {
         return allocator.dupe(u8, trimmed);
     }
     return allocator.dupe(u8, "");
+}
+
+pub fn commandConfidence(command: []const u8) Confidence {
+    if (hasShellControl(command)) return .low;
+    var tokens = std.mem.tokenizeAny(u8, command, " \t\r\n");
+    const first = tokens.next() orelse return .low;
+    if (isReadOnlyCommand(first)) return .high;
+    return .medium;
+}
+
+pub fn candidateOutputAlloc(allocator: std.mem.Allocator, command: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "candidate: {s}\nconfidence: {s}\n", .{ command, commandConfidence(command).label() });
+}
+
+fn hasShellControl(command: []const u8) bool {
+    return std.mem.indexOfAny(u8, command, "|;&><`") != null or
+        std.mem.indexOf(u8, command, "$(") != null;
+}
+
+fn isReadOnlyCommand(command: []const u8) bool {
+    inline for (.{ "ls", "pwd", "git", "rg", "grep", "find", "du", "df", "cat", "head", "tail", "sed", "awk", "ps", "wc", "sort", "uniq" }) |name| {
+        if (std.mem.eql(u8, command, name)) return true;
+    }
+    return false;
 }
 
 fn replaceMarkerAlloc(allocator: std.mem.Allocator, source: []const u8, marker: []const u8, value: []const u8) ![]u8 {
@@ -117,4 +155,12 @@ test "cleans nl2cmd command" {
     const command = try cleanCommandAlloc(std.testing.allocator, "Suggestion: `ls -lhS`\nextra\n");
     defer std.testing.allocator.free(command);
     try std.testing.expectEqualStrings("ls -lhS", command);
+}
+
+test "scores and renders candidates" {
+    try std.testing.expectEqual(Confidence.high, commandConfidence("ls -lhS"));
+    try std.testing.expectEqual(Confidence.low, commandConfidence("cat file | grep x"));
+    const output = try candidateOutputAlloc(std.testing.allocator, "ls -lhS");
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("candidate: ls -lhS\nconfidence: high\n", output);
 }

@@ -66,6 +66,45 @@ test "fuzz-style random payload roundtrip" {
     }
 }
 
+test "roundtrips boundary payload sizes" {
+    const allocator = std.testing.allocator;
+    const sizes = [_]usize{ 0, 1, header_bytes, 1024, @as(usize, types.max_frame_bytes) };
+
+    for (sizes) |size| {
+        const payload = try allocator.alloc(u8, size);
+        defer allocator.free(payload);
+        @memset(payload, 0xa5);
+
+        const encoded = try encodeAlloc(allocator, payload);
+        defer allocator.free(encoded);
+
+        try std.testing.expectEqual(@as(usize, header_bytes + size), encoded.len);
+        try std.testing.expectEqual(@as(u32, @intCast(size)), std.mem.readInt(u32, encoded[0..header_bytes], .big));
+        try std.testing.expectEqualSlices(u8, payload, try decode(encoded));
+    }
+}
+
+test "detects corrupted length headers" {
+    const allocator = std.testing.allocator;
+    const encoded = try encodeAlloc(allocator, "abcd");
+    defer allocator.free(encoded);
+
+    var short = try allocator.dupe(u8, encoded);
+    defer allocator.free(short);
+    std.mem.writeInt(u32, short[0..header_bytes], 3, .big);
+    try std.testing.expectError(error.LengthMismatch, decode(short));
+
+    var long = try allocator.dupe(u8, encoded);
+    defer allocator.free(long);
+    std.mem.writeInt(u32, long[0..header_bytes], 5, .big);
+    try std.testing.expectError(error.Truncated, decode(long));
+
+    var oversized = try allocator.dupe(u8, encoded);
+    defer allocator.free(oversized);
+    std.mem.writeInt(u32, oversized[0..header_bytes], types.max_frame_bytes + 1, .big);
+    try std.testing.expectError(error.Oversize, decode(oversized));
+}
+
 test "fuzz decoder invariants" {
     return std.testing.fuzz({}, fuzzDecode, .{
         .corpus = &.{

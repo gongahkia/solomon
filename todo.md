@@ -650,7 +650,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 20.1 Reproducible builds
 - [x] Pin Zig version + lockfile for all deps
-- [ ] Document the deterministic build invocation
+- [x] Document the deterministic build invocation
 - [ ] Verify bit-identical artifacts across two CI hosts
 - [ ] Publish reproducibility status badge
 

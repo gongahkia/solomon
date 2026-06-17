@@ -50,13 +50,9 @@ The user-facing `shisa.toml` schema is defined in [config-schema.md](config-sche
 
 ### Cache
 
-Shisa uses three cache layers:
+Shisa's cache contract is described in [RFC-0004](../rfcs/0004-cache-invalidation-rules.md) and the current source-level layout is detailed in [Cache Architecture](cache-architecture.md).
 
-- L1 rendered-prompt LRU keyed by render inputs plus `cache_rev`
-- L2 module-output cache keyed by module and scope
-- L3 external-command cache for off-path subprocess probes
-
-Filesystem events, TTL expiry, env changes, and command-version changes invalidate cache entries. See [RFC-0004](../rfcs/0004-cache-invalidation-rules.md).
+Current daemon code uses module-owned caches for async git/language probes and cached cloud context, plus reusable generic stores for module-output and rendered-prompt cache wrappers. Runtime L1 rendered-prompt lookup and shared external-command caching are design targets, not active server hot-path calls in the current source.
 
 ### Plugins
 
@@ -67,10 +63,10 @@ Core modules are Zig. Third-party plugins are Lua and must declare capabilities 
 1. Shell `preexec` records command start time.
 2. Shell `precmd` captures exit status, jobs, duration, cwd, and terminal capabilities.
 3. Shell hook sends a `render` request to `shisad`.
-4. Daemon checks rendered-prompt L1.
+4. Daemon drains pending cache invalidations and registers current watch scopes.
 5. Renderer reads sync/cached modules and schedules async misses.
 6. Daemon returns prompt and optional `redraw_token`.
-7. Async completions update cache and can trigger shell redraw.
+7. Async completions update module caches and can trigger shell redraw.
 
 ## Failure Model
 

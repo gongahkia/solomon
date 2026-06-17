@@ -83,3 +83,4 @@
 
 - [Threat Model](threat-model.md)
 - [Profiling Notes](profiling.md)
+- [Cache Architecture](cache-architecture.md)

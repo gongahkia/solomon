@@ -878,7 +878,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 27.1 L1 rendered-prompt LRU
 - [x] Implement bounded LRU keyed by render-input tuple
-- [ ] Lock-free reads where possible
+- [x] Lock-free reads where possible
 - [ ] Hit-rate metric exposed via `--metrics`
 
 ### 27.2 L2 module-output cache

@@ -51,6 +51,11 @@ pub const SubmoduleSummary = struct {
     behind: u32 = 0,
 };
 
+pub const LfsSummary = struct {
+    active: bool = false,
+    pointer_only: u32 = 0,
+};
+
 pub fn parseAheadBehind(output: []const u8) ?AheadBehind {
     var tokens = std.mem.tokenizeAny(u8, output, " \t\r\n");
     const behind_text = tokens.next() orelse return null;
@@ -59,6 +64,52 @@ pub fn parseAheadBehind(output: []const u8) ?AheadBehind {
         .behind = std.fmt.parseInt(u32, behind_text, 10) catch return null,
         .ahead = std.fmt.parseInt(u32, ahead_text, 10) catch return null,
     };
+}
+
+pub fn parseLfsSummary(attributes: []const u8, pointer_sources: []const []const u8) LfsSummary {
+    var summary = LfsSummary{ .active = hasLfsFilter(attributes) };
+    for (pointer_sources) |source| {
+        if (isLfsPointer(source)) summary.pointer_only += 1;
+    }
+    if (summary.pointer_only > 0) summary.active = true;
+    return summary;
+}
+
+pub fn isLfsPointer(source: []const u8) bool {
+    var has_version = false;
+    var has_oid = false;
+    var has_size = false;
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r\n");
+        if (std.mem.eql(u8, line, "version https://git-lfs.github.com/spec/v1")) {
+            has_version = true;
+        } else if (std.mem.startsWith(u8, line, "oid sha256:") and line.len == "oid sha256:".len + 64) {
+            has_oid = allLowerHex(line["oid sha256:".len..]);
+        } else if (std.mem.startsWith(u8, line, "size ")) {
+            has_size = parsePositiveU64(line["size ".len..]) != null;
+        }
+    }
+    return has_version and has_oid and has_size;
+}
+
+fn hasLfsFilter(attributes: []const u8) bool {
+    return std.mem.indexOf(u8, attributes, "filter=lfs") != null or
+        std.mem.indexOf(u8, attributes, "filter lfs") != null;
+}
+
+fn allLowerHex(value: []const u8) bool {
+    if (value.len == 0) return false;
+    for (value) |byte| {
+        if (!((byte >= '0' and byte <= '9') or (byte >= 'a' and byte <= 'f'))) return false;
+    }
+    return true;
+}
+
+fn parsePositiveU64(value: []const u8) ?u64 {
+    const trimmed = std.mem.trim(u8, value, " \t\r\n");
+    if (trimmed.len == 0) return null;
+    return std.fmt.parseInt(u64, trimmed, 10) catch null;
 }
 
 pub fn parseSubmoduleStatus(output: []const u8) SubmoduleSummary {
@@ -513,6 +564,29 @@ test "parses submodule summary" {
     try std.testing.expectEqual(@as(u32, 1), summary.conflicts);
     try std.testing.expectEqual(@as(u32, 2), summary.ahead);
     try std.testing.expectEqual(@as(u32, 4), summary.behind);
+}
+
+test "detects lfs pointers" {
+    const pointer =
+        \\version https://git-lfs.github.com/spec/v1
+        \\oid sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+        \\size 42
+        \\
+    ;
+    try std.testing.expect(isLfsPointer(pointer));
+    try std.testing.expect(!isLfsPointer("version https://git-lfs.github.com/spec/v1\nsize 42\n"));
+}
+
+test "parses lfs summary" {
+    const pointer =
+        \\version https://git-lfs.github.com/spec/v1
+        \\oid sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+        \\size 42
+        \\
+    ;
+    const summary = parseLfsSummary("*.bin filter=lfs diff=lfs merge=lfs -text\n", &.{ pointer, "not pointer\n" });
+    try std.testing.expect(summary.active);
+    try std.testing.expectEqual(@as(u32, 1), summary.pointer_only);
 }
 
 fn expectSignal(signal: PromptSignal, glyph: []const u8, a11y: []const u8) !void {

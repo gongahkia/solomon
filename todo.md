@@ -473,7 +473,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ## Phase 15 â€” Wire protocol implementation
 
 ### 15.1 Protocol library
-- [ ] Implement length-prefixed JSON framer/deframer in Zig (`src/proto/frame.zig`)
+- [x] Implement length-prefixed JSON framer/deframer in Zig (`src/proto/frame.zig`)
 - [ ] u32 BE length header; validate against 1 MiB cap
 - [ ] Property tests: roundtrip arbitrary payloads; corruption detection
 - [ ] Fuzz harness for the deframer (libFuzzer via Zig)

@@ -380,7 +380,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Detect `?? ` prefix at start of input line
 - [x] Submit input to model with NL→cmd prompt template
 - [x] Render candidate command(s) with confidence
-- [ ] Confirmation gate before exec (always; never auto-run)
+- [x] Confirmation gate before exec (always; never auto-run)
 - [ ] Log every NL→cmd to `~/.local/state/shisa/nl2cmd.jsonl`
 
 ### 12.4 Risk explainer (`risk`)

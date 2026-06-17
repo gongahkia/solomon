@@ -99,7 +99,7 @@ pub fn commandConfidence(command: []const u8) Confidence {
 }
 
 pub fn candidateOutputAlloc(allocator: std.mem.Allocator, command: []const u8) ![]u8 {
-    return std.fmt.allocPrint(allocator, "candidate: {s}\nconfidence: {s}\n", .{ command, commandConfidence(command).label() });
+    return std.fmt.allocPrint(allocator, "candidate: {s}\nconfidence: {s}\nconfirm: required\n", .{ command, commandConfidence(command).label() });
 }
 
 fn hasShellControl(command: []const u8) bool {
@@ -162,5 +162,5 @@ test "scores and renders candidates" {
     try std.testing.expectEqual(Confidence.low, commandConfidence("cat file | grep x"));
     const output = try candidateOutputAlloc(std.testing.allocator, "ls -lhS");
     defer std.testing.allocator.free(output);
-    try std.testing.expectEqualStrings("candidate: ls -lhS\nconfidence: high\n", output);
+    try std.testing.expectEqualStrings("candidate: ls -lhS\nconfidence: high\nconfirm: required\n", output);
 }

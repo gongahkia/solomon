@@ -735,6 +735,10 @@ fn aiNextcmdSuggestionAlloc(allocator: std.mem.Allocator, config: AiNextcmdConfi
 }
 
 fn aiNl2cmd(allocator: std.mem.Allocator, config: AiNl2cmdConfig) !void {
+    if (config.exec_requested) {
+        try std.fs.File.stderr().writeAll("shisa ai nl2cmd: refusing to execute generated commands; confirm manually\n");
+        std.process.exit(1);
+    }
     const request = nl2cmd.detectInput(config.input) orelse return;
     if (request.len == 0) return;
     if (config.detect_only) {
@@ -786,6 +790,7 @@ const AiNl2cmdConfig = struct {
     input: []const u8 = "",
     detect_only: bool = false,
     plain: bool = false,
+    exec_requested: bool = false,
 };
 
 fn parseAiNextcmdArgs(args: []const []const u8) !AiNextcmdConfig {
@@ -829,6 +834,8 @@ fn parseAiNl2cmdArgs(args: []const []const u8) !AiNl2cmdConfig {
             config.detect_only = true;
         } else if (std.mem.eql(u8, args[i], "--plain")) {
             config.plain = true;
+        } else if (std.mem.eql(u8, args[i], "--exec")) {
+            config.exec_requested = true;
         } else {
             return error.UnknownAiArgument;
         }
@@ -854,13 +861,14 @@ test "ai nextcmd args parse" {
 }
 
 test "ai nl2cmd args parse" {
-    const config = try parseAiNl2cmdArgs(&.{ "--shell", "zsh", "--model", "gemma3:1b", "--cwd", "/tmp", "--input", "?? list files", "--detect-only", "--plain" });
+    const config = try parseAiNl2cmdArgs(&.{ "--shell", "zsh", "--model", "gemma3:1b", "--cwd", "/tmp", "--input", "?? list files", "--detect-only", "--plain", "--exec" });
     try std.testing.expectEqualStrings("zsh", config.shell);
     try std.testing.expectEqualStrings("gemma3:1b", config.model);
     try std.testing.expectEqualStrings("/tmp", config.cwd);
     try std.testing.expectEqualStrings("?? list files", config.input);
     try std.testing.expect(config.detect_only);
     try std.testing.expect(config.plain);
+    try std.testing.expect(config.exec_requested);
 }
 
 test "ai bench output reports metrics" {

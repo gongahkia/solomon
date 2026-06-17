@@ -186,11 +186,12 @@ pub const Server = struct {
         self.* = undefined;
     }
 
-    pub fn serve(self: *Server, shutdown_requested: *const std.atomic.Value(bool), reload_requested: *std.atomic.Value(bool)) !void {
+    pub fn serve(self: *Server, shutdown_requested: *const std.atomic.Value(bool), reload_requested: *std.atomic.Value(bool), stack_dump_requested: *std.atomic.Value(bool)) !void {
         try self.warmupCaches(std.heap.page_allocator);
         try self.startCostRefresh(std.heap.page_allocator);
         while (!shutdown_requested.load(.seq_cst)) {
             try self.consumeReloadSignal(reload_requested);
+            try self.consumeStackDumpSignal(stack_dump_requested);
             var poll_fds = [_]std.posix.pollfd{.{
                 .fd = self.listener.stream.handle,
                 .events = std.posix.POLL.IN,
@@ -203,6 +204,18 @@ pub const Server = struct {
             if ((poll_fds[0].revents & std.posix.POLL.IN) != 0) {
                 try self.acceptOneWithShutdown(shutdown_requested);
             }
+        }
+    }
+
+    fn consumeStackDumpSignal(self: *Server, stack_dump_requested: *std.atomic.Value(bool)) !void {
+        if (!stack_dump_requested.swap(false, .seq_cst)) return;
+        const message = try stackDumpMessageAlloc(std.heap.page_allocator);
+        defer std.heap.page_allocator.free(message);
+        if (self.logger) |logger| {
+            try logger.warn("stack_dump", message);
+        } else {
+            try std.fs.File.stderr().writeAll(message);
+            try std.fs.File.stderr().writeAll("\n");
         }
     }
 
@@ -840,6 +853,27 @@ fn nowNs() u64 {
     return @intCast(std.time.nanoTimestamp());
 }
 
+fn stackDumpMessageAlloc(allocator: std.mem.Allocator) ![]u8 {
+    var addresses: [32]usize = undefined;
+    var stack_trace = std.builtin.StackTrace{
+        .index = 0,
+        .instruction_addresses = addresses[0..],
+    };
+    std.debug.captureStackTrace(@returnAddress(), &stack_trace);
+
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.appendSlice(allocator, "frames=");
+    const count = @min(stack_trace.index, stack_trace.instruction_addresses.len);
+    for (stack_trace.instruction_addresses[0..count], 0..) |address, index| {
+        if (index != 0) try out.append(allocator, ',');
+        const frame = try std.fmt.allocPrint(allocator, "0x{x}", .{address});
+        defer allocator.free(frame);
+        try out.appendSlice(allocator, frame);
+    }
+    return out.toOwnedSlice(allocator);
+}
+
 fn isPreexecRequest(request: []const u8) bool {
     return std.mem.indexOf(u8, request, "\"kind\":\"preexec\"") != null or
         std.mem.indexOf(u8, request, "\"kind\": \"preexec\"") != null;
@@ -1051,8 +1085,8 @@ fn acceptOneThread(server: *Server) !void {
     try server.acceptOne();
 }
 
-fn serveThread(server: *Server, shutdown_requested: *const std.atomic.Value(bool), reload_requested: *std.atomic.Value(bool)) !void {
-    try server.serve(shutdown_requested, reload_requested);
+fn serveThread(server: *Server, shutdown_requested: *const std.atomic.Value(bool), reload_requested: *std.atomic.Value(bool), stack_dump_requested: *std.atomic.Value(bool)) !void {
+    try server.serve(shutdown_requested, reload_requested, stack_dump_requested);
 }
 
 fn costRefreshThreadMain(server: *Server) void {
@@ -1490,6 +1524,33 @@ test "reload signal rereads config and clears flag" {
     try std.testing.expect(std.mem.indexOf(u8, server.reload_state.config_source, "theme = \"signal\"") != null);
 }
 
+test "stack dump signal logs frames and clears flag" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-sigusr2-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    const log_path = try std.fmt.allocPrint(allocator, "{s}/shisad.log", .{dir_path});
+    defer allocator.free(log_path);
+
+    var logger = try daemon_log.Logger.open(allocator, log_path);
+    defer logger.deinit();
+    var server = try Server.initWithLogger(socket_path, &logger);
+    defer server.deinit();
+
+    var stack_dump_requested = std.atomic.Value(bool).init(true);
+    try server.consumeStackDumpSignal(&stack_dump_requested);
+    try std.testing.expect(!stack_dump_requested.load(.seq_cst));
+
+    const contents = try std.fs.cwd().readFileAlloc(allocator, log_path, 4096);
+    defer allocator.free(contents);
+    try std.testing.expect(std.mem.indexOf(u8, contents, "\"event\":\"stack_dump\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, contents, "frames=0x") != null);
+}
+
 test "reload op rereads plugin manifests" {
     const allocator = std.testing.allocator;
     var runtime = plugin_lua.Runtime.initSandboxed(allocator) catch |err| switch (err) {
@@ -1640,7 +1701,8 @@ test "serve drains subscribe shutdown and unlinks socket" {
     var server = try Server.init(socket_path);
     var shutdown_requested = std.atomic.Value(bool).init(false);
     var reload_requested = std.atomic.Value(bool).init(false);
-    const thread = try std.Thread.spawn(.{}, serveThread, .{ &server, &shutdown_requested, &reload_requested });
+    var stack_dump_requested = std.atomic.Value(bool).init(false);
+    const thread = try std.Thread.spawn(.{}, serveThread, .{ &server, &shutdown_requested, &reload_requested, &stack_dump_requested });
 
     var client_stream = try std.net.connectUnixSocket(socket_path);
     defer client_stream.close();

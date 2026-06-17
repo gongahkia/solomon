@@ -1,0 +1,35 @@
+"$schema" = "https://starship.rs/config-schema.json"
+
+format = "$directory$git_branch$git_status$python$nodejs$rust$golang$status$jobs$cmd_duration$username$hostname$time$battery$character"
+
+[directory]
+style = "blue"
+
+[git_branch]
+format = "[$branch]($style)"
+style = "bright-black"
+
+[git_status]
+format = "[$all_status$ahead_behind]($style)"
+style = "cyan"
+
+[python]
+format = "[$virtualenv]($style) "
+
+[nodejs]
+format = "[$version]($style) "
+
+[rust]
+format = "[$version]($style) "
+
+[golang]
+format = "[$version]($style) "
+
+[cmd_duration]
+min_time = 5000
+
+[time]
+disabled = false
+
+[battery]
+disabled = false

@@ -595,7 +595,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Smoke test against pure zsh + fish variants
 
 ### 18.5 Importer test corpus
-- [ ] Vendor representative configs of each tool under `test/fixtures/migration/`
+- [x] Vendor representative configs of each tool under `test/fixtures/migration/`
 - [ ] Snapshot the resulting Shisa configs
 - [ ] CI gate: snapshot drift requires review
 

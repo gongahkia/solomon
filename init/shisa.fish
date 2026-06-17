@@ -14,6 +14,7 @@ set -q SHISA_PROD_GUARD; or set -g SHISA_PROD_GUARD 0
 set -q SHISA_PROD_GUARD_FORCE; or set -g SHISA_PROD_GUARD_FORCE 0
 set -q SHISA_NEXTCMD_KEYSEQ; or set -g SHISA_NEXTCMD_KEYSEQ \cx\cn
 set -q SHISA_LAST_COMMAND; or set -g SHISA_LAST_COMMAND ""
+set -q SHISA_NEXTCMD_SUGGESTION; or set -g SHISA_NEXTCMD_SUGGESTION ""
 
 function shisa_socket_path
     if test -n "$SHISA_SOCKET"
@@ -89,8 +90,12 @@ function shisa_nextcmd_widget
         set history_path "$HOME/.local/share/fish/fish_history"
     end
     set -l suggestion (command "$SHISA_BIN" ai nextcmd --shell fish --cwd "$PWD" --last-command "$SHISA_LAST_COMMAND" --last-exit "$status" --history-path "$history_path" 2>/dev/null)
+    set -g SHISA_NEXTCMD_SUGGESTION ""
     if test $status -eq 0; and test -n "$suggestion"
-        commandline -i -- "$suggestion"
+        set -g SHISA_NEXTCMD_SUGGESTION "$suggestion"
+        printf '\n\e[2mshisa next: %s\e[0m\n' "$suggestion"
+        commandline -f repaint 2>/dev/null
+        or true
     end
 end
 

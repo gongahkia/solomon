@@ -28,6 +28,7 @@ typeset -g SHISA_TRANSIENT_PROMPT=${SHISA_TRANSIENT_PROMPT:-1}
 typeset -g SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 typeset -g SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
 typeset -g SHISA_NEXTCMD_KEYSEQ=${SHISA_NEXTCMD_KEYSEQ:-'^X^N'}
+typeset -g SHISA_NEXTCMD_SUGGESTION=
 
 zmodload zsh/datetime 2>/dev/null || true
 
@@ -115,8 +116,10 @@ shisa_nextcmd_widget() {
   emulate -L zsh
   local suggestion
   suggestion=$("${SHISA_BIN}" ai nextcmd --shell zsh --cwd "${PWD}" --last-command "${SHISA_LAST_COMMAND:-}" --last-exit "${SHISA_LAST_EXIT:-0}" --history-path "${HISTFILE:-}" 2>/dev/null) || return 0
+  SHISA_NEXTCMD_SUGGESTION=
   [[ -n ${suggestion} ]] || return 0
-  LBUFFER+="${suggestion}"
+  SHISA_NEXTCMD_SUGGESTION=${suggestion}
+  zle -M $'\e[2mshisa next: '"${suggestion}"$'\e[0m'
   zle redisplay
 }
 

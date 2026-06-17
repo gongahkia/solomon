@@ -648,17 +648,7 @@ fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "nextcmd")) {
         const config = try parseAiNextcmdArgs(args[1..]);
-        const history_source = if (config.history_path.len == 0) null else std.fs.cwd().readFileAlloc(allocator, config.history_path, 256 * 1024) catch null;
-        defer if (history_source) |value| allocator.free(value);
-        const context = try nextcmd.buildContextAlloc(allocator, .{
-            .cwd = config.cwd,
-            .last_command = config.last_command,
-            .last_exit = config.last_exit,
-            .history_source = history_source orelse "",
-            .history_limit = config.history_limit,
-        });
-        defer allocator.free(context);
-        try std.fs.File.stdout().writeAll("");
+        try aiNextcmd(allocator, config);
         return;
     }
     return error.UnknownAiArgument;
@@ -709,8 +699,37 @@ fn aiBenchOutputAlloc(allocator: std.mem.Allocator, model: []const u8, result: o
     return out.toOwnedSlice(allocator);
 }
 
+fn aiNextcmd(allocator: std.mem.Allocator, config: AiNextcmdConfig) !void {
+    const status = ollama.detect(allocator) catch return;
+    if (!status.installed or !status.daemon_running) return;
+    const history_source = if (config.history_path.len == 0) null else std.fs.cwd().readFileAlloc(allocator, config.history_path, 256 * 1024) catch null;
+    defer if (history_source) |value| allocator.free(value);
+    const suggestion = aiNextcmdSuggestionAlloc(allocator, config, history_source orelse "") catch return;
+    defer allocator.free(suggestion);
+    try std.fs.File.stdout().writeAll(suggestion);
+}
+
+fn aiNextcmdSuggestionAlloc(allocator: std.mem.Allocator, config: AiNextcmdConfig, history_source: []const u8) ![]u8 {
+    const context = try nextcmd.buildContextAlloc(allocator, .{
+        .cwd = config.cwd,
+        .last_command = config.last_command,
+        .last_exit = config.last_exit,
+        .history_source = history_source,
+        .history_limit = config.history_limit,
+    });
+    defer allocator.free(context);
+    const template = try nextcmd.readDefaultPromptAlloc(allocator);
+    defer allocator.free(template);
+    const prompt_text = try nextcmd.promptWithContextAlloc(allocator, template, context);
+    defer allocator.free(prompt_text);
+    const raw = try ollama.generateAlloc(allocator, ollama.default_host, ollama.default_port, config.model, prompt_text);
+    defer allocator.free(raw);
+    return nextcmd.cleanSuggestionAlloc(allocator, raw);
+}
+
 const AiNextcmdConfig = struct {
     shell: []const u8 = "",
+    model: []const u8 = ollama.recommended_model,
     cwd: []const u8 = "",
     last_command: []const u8 = "",
     last_exit: i32 = 0,
@@ -724,6 +743,8 @@ fn parseAiNextcmdArgs(args: []const []const u8) !AiNextcmdConfig {
     while (i < args.len) : (i += 1) {
         if (std.mem.eql(u8, args[i], "--shell")) {
             config.shell = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--model")) {
+            config.model = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--cwd")) {
             config.cwd = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--last-command")) {
@@ -748,8 +769,9 @@ test "ai bench args parse" {
 }
 
 test "ai nextcmd args parse" {
-    const config = try parseAiNextcmdArgs(&.{ "--shell", "zsh", "--cwd", "/tmp", "--last-command", "zig test", "--last-exit", "2", "--history-path", "/tmp/h", "--history-limit", "3" });
+    const config = try parseAiNextcmdArgs(&.{ "--shell", "zsh", "--model", "gemma3:1b", "--cwd", "/tmp", "--last-command", "zig test", "--last-exit", "2", "--history-path", "/tmp/h", "--history-limit", "3" });
     try std.testing.expectEqualStrings("zsh", config.shell);
+    try std.testing.expectEqualStrings("gemma3:1b", config.model);
     try std.testing.expectEqualStrings("/tmp", config.cwd);
     try std.testing.expectEqualStrings("zig test", config.last_command);
     try std.testing.expectEqual(@as(i32, 2), config.last_exit);

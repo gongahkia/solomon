@@ -1,6 +1,46 @@
 const std = @import("std");
 
 pub const default_prompt_path = "prompts/nextcmd.md";
+pub const default_prompt =
+    \\You are shisa nextcmd. Suggest one safe shell command that is likely to be useful next.
+    \\
+    \\Rules:
+    \\- Output only the command.
+    \\- Do not include explanations, markdown, or surrounding quotes.
+    \\- Prefer read-only commands unless the recent context clearly asks for a write.
+    \\- If there is no useful suggestion, output nothing.
+    \\
+    \\Context:
+    \\{{context}}
+    \\
+    \\Examples:
+    \\
+    \\Context:
+    \\cwd: /repo
+    \\last_exit: 1
+    \\last_command: zig build test
+    \\history:
+    \\- git status
+    \\- zig build test
+    \\Suggestion:
+    \\zig build test --summary all
+    \\
+    \\Context:
+    \\cwd: /repo
+    \\last_exit: 0
+    \\last_command: git status
+    \\history:
+    \\- git status
+    \\Suggestion:
+    \\git diff --stat
+    \\
+    \\Context:
+    \\cwd: /repo
+    \\last_exit: 0
+    \\last_command:
+    \\history:
+    \\Suggestion:
+++ "\n\n";
 
 pub const ContextInput = struct {
     cwd: []const u8,
@@ -24,7 +64,32 @@ pub fn promptWithContextAlloc(allocator: std.mem.Allocator, template: []const u8
 }
 
 pub fn readDefaultPromptAlloc(allocator: std.mem.Allocator) ![]u8 {
-    return std.fs.cwd().readFileAlloc(allocator, default_prompt_path, 256 * 1024);
+    if (std.fs.cwd().readFileAlloc(allocator, default_prompt_path, 256 * 1024)) |value| return value else |_| {}
+    return allocator.dupe(u8, default_prompt);
+}
+
+pub fn cleanSuggestionAlloc(allocator: std.mem.Allocator, raw: []const u8) ![]u8 {
+    var lines = std.mem.splitScalar(u8, raw, '\n');
+    while (lines.next()) |line| {
+        var trimmed = std.mem.trim(u8, line, " \t\r\n");
+        if (trimmed.len == 0) continue;
+        if (std.mem.startsWith(u8, trimmed, "```")) continue;
+        trimmed = std.mem.trim(u8, trimmed, "`");
+        if (trimmed.len == 0) continue;
+        if (std.mem.startsWith(u8, trimmed, "Suggestion:")) {
+            trimmed = std.mem.trim(u8, trimmed["Suggestion:".len..], " \t\r\n");
+            if (trimmed.len == 0) continue;
+            trimmed = std.mem.trim(u8, trimmed, "`");
+            if (trimmed.len == 0) continue;
+        }
+        if ((trimmed[0] == '"' and trimmed[trimmed.len - 1] == '"') or
+            (trimmed[0] == '\'' and trimmed[trimmed.len - 1] == '\''))
+        {
+            trimmed = std.mem.trim(u8, trimmed[1 .. trimmed.len - 1], " \t\r\n");
+        }
+        return allocator.dupe(u8, trimmed);
+    }
+    return allocator.dupe(u8, "");
 }
 
 pub fn buildContextAlloc(allocator: std.mem.Allocator, input: ContextInput) ![]u8 {
@@ -133,4 +198,16 @@ test "default nextcmd prompt has context marker" {
     defer std.testing.allocator.free(prompt);
     try std.testing.expect(std.mem.indexOf(u8, prompt, "{{context}}") != null);
     try std.testing.expect(std.mem.indexOf(u8, prompt, "Suggestion:") != null);
+}
+
+test "embedded nextcmd prompt matches checked-in prompt" {
+    const prompt = try std.fs.cwd().readFileAlloc(std.testing.allocator, default_prompt_path, 256 * 1024);
+    defer std.testing.allocator.free(prompt);
+    try std.testing.expectEqualStrings(prompt, default_prompt);
+}
+
+test "cleans model suggestion" {
+    const command = try cleanSuggestionAlloc(std.testing.allocator, "Suggestion: `git diff --stat`\nextra\n");
+    defer std.testing.allocator.free(command);
+    try std.testing.expectEqualStrings("git diff --stat", command);
 }

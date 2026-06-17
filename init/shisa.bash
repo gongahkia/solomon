@@ -11,6 +11,7 @@ SHISA_LAST_COMMAND=
 SHISA_ASYNC_REDRAW=${SHISA_ASYNC_REDRAW:-1}
 SHISA_ASYNC_KEYSEQ=${SHISA_ASYNC_KEYSEQ:-'\C-x\C-s'}
 SHISA_NEXTCMD_KEYSEQ=${SHISA_NEXTCMD_KEYSEQ:-'\C-x\C-n'}
+SHISA_NEXTCMD_SUGGESTION=
 SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
 SHISA_COMMAND_STARTED=0
@@ -122,9 +123,10 @@ shisa_async_redraw() {
 shisa_nextcmd_widget() {
   local suggestion
   suggestion=$("${SHISA_BIN}" ai nextcmd --shell bash --cwd "${PWD}" --last-command "${SHISA_LAST_COMMAND:-}" --last-exit "${SHISA_LAST_EXIT:-0}" --history-path "${HISTFILE:-}" 2>/dev/null) || return 0
+  SHISA_NEXTCMD_SUGGESTION=
   [[ -n ${suggestion} ]] || return 0
-  READLINE_LINE="${READLINE_LINE:0:READLINE_POINT}${suggestion}${READLINE_LINE:READLINE_POINT}"
-  READLINE_POINT=$((READLINE_POINT + ${#suggestion}))
+  SHISA_NEXTCMD_SUGGESTION=${suggestion}
+  printf '\n\033[2mshisa next: %s\033[0m\n' "${suggestion}"
 }
 
 shisa_install_async_redraw() {

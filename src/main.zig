@@ -5,6 +5,7 @@ const fsnotify = @import("daemon/fsnotify.zig");
 const client = @import("shisa-client.zig");
 const cloud_ctx_module = @import("daemon/modules/cloud_ctx.zig");
 const nextcmd = @import("ai/nextcmd.zig");
+const nl2cmd = @import("ai/nl2cmd.zig");
 const ollama = @import("ai/ollama.zig");
 const shisa_config = @import("config.zig");
 const paths = @import("daemon/paths.zig");
@@ -651,6 +652,11 @@ fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try aiNextcmd(allocator, config);
         return;
     }
+    if (args.len >= 1 and std.mem.eql(u8, args[0], "nl2cmd")) {
+        const config = try parseAiNl2cmdArgs(args[1..]);
+        if (nl2cmd.detectInput(config.input)) |value| try std.fs.File.stdout().writeAll(value);
+        return;
+    }
     return error.UnknownAiArgument;
 }
 
@@ -737,6 +743,10 @@ const AiNextcmdConfig = struct {
     history_limit: usize = 20,
 };
 
+const AiNl2cmdConfig = struct {
+    input: []const u8 = "",
+};
+
 fn parseAiNextcmdArgs(args: []const []const u8) !AiNextcmdConfig {
     var config = AiNextcmdConfig{};
     var i: usize = 0;
@@ -762,6 +772,19 @@ fn parseAiNextcmdArgs(args: []const []const u8) !AiNextcmdConfig {
     return config;
 }
 
+fn parseAiNl2cmdArgs(args: []const []const u8) !AiNl2cmdConfig {
+    var config = AiNl2cmdConfig{};
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--input")) {
+            config.input = try nextValue(args, &i);
+        } else {
+            return error.UnknownAiArgument;
+        }
+    }
+    return config;
+}
+
 test "ai bench args parse" {
     const config = try parseAiBenchArgs(&.{ "--model", "gemma3:1b", "--prompt", "hi" });
     try std.testing.expectEqualStrings("gemma3:1b", config.model);
@@ -777,6 +800,11 @@ test "ai nextcmd args parse" {
     try std.testing.expectEqual(@as(i32, 2), config.last_exit);
     try std.testing.expectEqualStrings("/tmp/h", config.history_path);
     try std.testing.expectEqual(@as(usize, 3), config.history_limit);
+}
+
+test "ai nl2cmd args parse" {
+    const config = try parseAiNl2cmdArgs(&.{ "--input", "?? list files" });
+    try std.testing.expectEqualStrings("?? list files", config.input);
 }
 
 test "ai bench output reports metrics" {

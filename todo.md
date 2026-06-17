@@ -377,7 +377,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [ ] Bench: median round-trip < 800ms on a 2020 MacBook Air
 
 ### 12.3 Natural language to command (`nl2cmd`)
-- [ ] Detect `?? ` prefix at start of input line
+- [x] Detect `?? ` prefix at start of input line
 - [ ] Submit input to model with NL→cmd prompt template
 - [ ] Render candidate command(s) with confidence
 - [ ] Confirmation gate before exec (always; never auto-run)

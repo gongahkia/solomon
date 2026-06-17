@@ -129,3 +129,82 @@ test "safe command corpus does not trigger blocklist" {
         try std.testing.expect(destructivePattern(line) == null);
     }
 }
+
+test "fuzzes destructive command templates" {
+    var prng = std.Random.DefaultPrng.init(0x5eed_f00d);
+    const random = prng.random();
+    const cases = [_]struct {
+        tokens: []const []const u8,
+        pattern: []const u8,
+    }{
+        .{ .tokens = &.{ "kubectl", "delete", "pod", "api" }, .pattern = "kubectl delete" },
+        .{ .tokens = &.{ "kubectl", "drain", "node-a" }, .pattern = "kubectl drain" },
+        .{ .tokens = &.{ "terraform", "destroy", "-auto-approve" }, .pattern = "terraform destroy" },
+        .{ .tokens = &.{ "aws", "ec2", "terminate-instances", "--instance-ids", "i-123" }, .pattern = "aws ec2 terminate" },
+        .{ .tokens = &.{ "aws", "s3", "rb", "s3://bucket" }, .pattern = "aws s3 rb" },
+        .{ .tokens = &.{ "gcloud", "compute", "instances", "delete", "vm-a" }, .pattern = "gcloud * delete" },
+        .{ .tokens = &.{ "rm", "-rf", "/tmp/x" }, .pattern = "rm -rf" },
+        .{ .tokens = &.{ "rm", "-fr", "/tmp/x" }, .pattern = "rm -rf" },
+        .{ .tokens = &.{ "dd", "if=a", "of=/dev/disk2" }, .pattern = "dd of=/dev/" },
+        .{ .tokens = &.{ "mkfs.ext4", "/dev/sdb" }, .pattern = "mkfs" },
+        .{ .tokens = &.{ "psql", "-c", "drop", "table", "users" }, .pattern = "DROP TABLE" },
+    };
+    for (0..32) |_| {
+        for (cases) |case| {
+            const command = try fuzzCommandAlloc(std.testing.allocator, random, case.tokens);
+            defer std.testing.allocator.free(command);
+            try std.testing.expectEqualStrings(case.pattern, destructivePattern(command).?);
+        }
+    }
+}
+
+test "fuzzes safe command templates" {
+    var prng = std.Random.DefaultPrng.init(0x51afe);
+    const random = prng.random();
+    const cases = [_][]const []const u8{
+        &.{ "kubectl", "get", "pods" },
+        &.{ "kubectl", "describe", "pod", "api-prod" },
+        &.{ "terraform", "plan" },
+        &.{ "terraform", "show" },
+        &.{ "aws", "ec2", "describe-instances" },
+        &.{ "aws", "s3", "ls", "s3://prod-bucket" },
+        &.{ "gcloud", "compute", "instances", "list" },
+        &.{ "rm", "-ri", "/tmp/shisa-test" },
+        &.{ "dd", "if=/dev/zero", "of=./disk.img" },
+        &.{ "psql", "-c", "select", "from", "users" },
+    };
+    for (0..32) |_| {
+        for (cases) |tokens| {
+            const command = try fuzzCommandAlloc(std.testing.allocator, random, tokens);
+            defer std.testing.allocator.free(command);
+            try std.testing.expect(destructivePattern(command) == null);
+        }
+    }
+}
+
+fn fuzzCommandAlloc(allocator: std.mem.Allocator, random: std.Random, tokens: []const []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    for (tokens, 0..) |token, index| {
+        if (index != 0) {
+            const spaces = random.intRangeAtMost(u8, 1, 4);
+            for (0..spaces) |_| try out.append(allocator, if (random.boolean()) ' ' else '\t');
+        }
+        try appendRandomCase(allocator, &out, random, token);
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendRandomCase(allocator: std.mem.Allocator, out: *std.ArrayList(u8), random: std.Random, token: []const u8) !void {
+    if (token.len != 0 and token[0] == '-') {
+        try out.appendSlice(allocator, token);
+        return;
+    }
+    for (token) |byte| {
+        if (std.ascii.isAlphabetic(byte)) {
+            try out.append(allocator, if (random.boolean()) std.ascii.toUpper(byte) else std.ascii.toLower(byte));
+        } else {
+            try out.append(allocator, byte);
+        }
+    }
+}

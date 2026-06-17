@@ -1,0 +1,10 @@
+extends: existence
+message: "Use inclusive wording instead of '%s'."
+level: warning
+ignorecase: true
+tokens:
+  - sane
+  - crazy
+  - insane
+  - dumb
+  - stupid

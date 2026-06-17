@@ -1,0 +1,9 @@
+extends: existence
+message: "Avoid weak hedging like '%s'; state the condition or remove it."
+level: warning
+ignorecase: true
+tokens:
+  - simply
+  - easily
+  - obviously
+  - just

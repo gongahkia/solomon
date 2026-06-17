@@ -642,7 +642,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] Publish on YouTube + PeerTube mirror
 
 ### 19.7 Style + linting
-- [ ] Adopt `vale` style guide
+- [x] Adopt `vale` style guide
 - [ ] CI gate on docs PRs
 - [ ] Style guide page
 

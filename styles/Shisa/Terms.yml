@@ -1,0 +1,18 @@
+extends: substitution
+message: "Use '%s' instead of '%s'."
+level: warning
+ignorecase: true
+swap:
+  command line: command line
+  command-line: command-line
+  file system: filesystem
+  fs notify: fsnotify
+  hotpath: hot path
+  javascript: JavaScript
+  lua: Lua
+  luajit: LuaJIT
+  mac os: macOS
+  macos: macOS
+  powershell: PowerShell
+  z shell: zsh
+  zig: Zig

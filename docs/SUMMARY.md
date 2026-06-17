@@ -1,6 +1,7 @@
 # Summary
 
 [Overview](index.md)
+- [Search](search.md)
 
 # Core
 

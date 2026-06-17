@@ -605,7 +605,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] mdBook scaffold under `docs/`
 - [x] Build pipeline: PR previews via GitHub Actions
 - [ ] Deploy to shisa.sh/docs
-- [ ] Search: stork-search or pagefind integration
+- [x] Search: stork-search or pagefind integration
 
 ### 19.2 Quickstart
 - [ ] Page: install + 5-min to a working prompt (zsh + bash + fish + nu + pwsh tabs)

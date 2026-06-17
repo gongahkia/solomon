@@ -12,3 +12,5 @@ create-missing = false
 default-theme = "ayu"
 preferred-dark-theme = "ayu"
 no-section-label = true
+additional-css = ["theme/pagefind-search.css"]
+additional-js = ["theme/pagefind-search.js"]

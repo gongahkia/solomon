@@ -840,7 +840,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 25.4 Sponsor channels
 - [ ] GH Sponsors set up
 - [ ] Open Collective with public ledger
-- [ ] `FUNDING.md` explains where money goes
+- [x] `FUNDING.md` explains where money goes
 - [ ] Sponsor recognition policy (no feature demands)
 
 ## Phase 26 â€” Daemon lifecycle hardening

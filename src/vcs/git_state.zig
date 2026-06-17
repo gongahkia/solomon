@@ -7,6 +7,10 @@ pub const RebaseState = enum {
     interactive,
 };
 
+pub fn detectMergeState(git_dir: std.fs.Dir) bool {
+    return entryExists(git_dir, "MERGE_HEAD");
+}
+
 pub fn detectRebaseState(git_dir: std.fs.Dir) !RebaseState {
     if (entryExists(git_dir, "rebase-merge")) {
         if (entryExists(git_dir, "rebase-merge/interactive") or entryExists(git_dir, "rebase-merge/git-rebase-todo")) {
@@ -60,6 +64,23 @@ test "detects interactive rebase state" {
     var git_dir = try openGitDir(&tmp);
     defer git_dir.close();
     try std.testing.expectEqual(RebaseState.interactive, try detectRebaseState(git_dir));
+}
+
+test "detects absent merge state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var git_dir = try makeGitDir(&tmp);
+    defer git_dir.close();
+    try std.testing.expect(!detectMergeState(git_dir));
+}
+
+test "detects merge state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var git_dir = try makeGitDir(&tmp);
+    defer git_dir.close();
+    try git_dir.writeFile(.{ .sub_path = "MERGE_HEAD", .data = "abc123\n" });
+    try std.testing.expect(detectMergeState(git_dir));
 }
 
 fn makeGitDir(tmp: *std.testing.TmpDir) !std.fs.Dir {

@@ -745,11 +745,28 @@ fn aiNl2cmd(allocator: std.mem.Allocator, config: AiNl2cmdConfig) !void {
         try std.fs.File.stdout().writeAll(request);
         return;
     }
-    const status = ollama.detect(allocator) catch return;
-    if (!status.installed or !status.daemon_running) return;
-    const command = aiNl2cmdCommandAlloc(allocator, config, request) catch return;
+    const status = ollama.detect(allocator) catch {
+        appendNl2cmdAudit(allocator, config, request, "", "error") catch {};
+        return;
+    };
+    if (!status.installed or !status.daemon_running) {
+        appendNl2cmdAudit(allocator, config, request, "", "unavailable") catch {};
+        return;
+    }
+    const command = aiNl2cmdCommandAlloc(allocator, config, request) catch {
+        appendNl2cmdAudit(allocator, config, request, "", "error") catch {};
+        return;
+    };
     defer allocator.free(command);
-    if (prod_guard_module.destructivePattern(command) != null) return;
+    if (command.len == 0) {
+        appendNl2cmdAudit(allocator, config, request, "", "empty") catch {};
+        return;
+    }
+    if (prod_guard_module.destructivePattern(command) != null) {
+        appendNl2cmdAudit(allocator, config, request, command, "blocked") catch {};
+        return;
+    }
+    appendNl2cmdAudit(allocator, config, request, command, "candidate") catch {};
     if (config.plain) {
         try std.fs.File.stdout().writeAll(command);
         return;
@@ -771,6 +788,49 @@ fn aiNl2cmdCommandAlloc(allocator: std.mem.Allocator, config: AiNl2cmdConfig, re
     const raw = try ollama.generateAlloc(allocator, ollama.default_host, ollama.default_port, config.model, prompt_text);
     defer allocator.free(raw);
     return nl2cmd.cleanCommandAlloc(allocator, raw);
+}
+
+fn appendNl2cmdAudit(allocator: std.mem.Allocator, config: AiNl2cmdConfig, request: []const u8, candidate: []const u8, status: []const u8) !void {
+    const home = std.process.getEnvVarOwned(allocator, "HOME") catch return;
+    defer allocator.free(home);
+    const path = try nl2cmdAuditPathAlloc(allocator, home);
+    defer allocator.free(path);
+    const line = try nl2cmdAuditLineAlloc(allocator, config, request, candidate, status);
+    defer allocator.free(line);
+    try appendLineToPath(path, line);
+}
+
+fn nl2cmdAuditPathAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/nl2cmd.jsonl", .{home});
+}
+
+fn nl2cmdAuditLineAlloc(allocator: std.mem.Allocator, config: AiNl2cmdConfig, request: []const u8, candidate: []const u8, status: []const u8) ![]u8 {
+    const escaped_shell = try jsonEscapeAlloc(allocator, config.shell);
+    defer allocator.free(escaped_shell);
+    const escaped_cwd = try jsonEscapeAlloc(allocator, config.cwd);
+    defer allocator.free(escaped_cwd);
+    const escaped_request = try jsonEscapeAlloc(allocator, request);
+    defer allocator.free(escaped_request);
+    const escaped_candidate = try jsonEscapeAlloc(allocator, candidate);
+    defer allocator.free(escaped_candidate);
+    const confidence = if (candidate.len == 0) "none" else nl2cmd.commandConfidence(candidate).label();
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"ts\":{d},\"shell\":\"{s}\",\"cwd\":\"{s}\",\"request\":\"{s}\",\"candidate\":\"{s}\",\"confidence\":\"{s}\",\"status\":\"{s}\"}}\n",
+        .{ std.time.timestamp(), escaped_shell, escaped_cwd, escaped_request, escaped_candidate, confidence, status },
+    );
+}
+
+fn appendLineToPath(path: []const u8, line: []const u8) !void {
+    if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
+    var file = try std.fs.createFileAbsolute(path, .{
+        .read = true,
+        .truncate = false,
+        .mode = 0o600,
+    });
+    defer file.close();
+    try file.seekFromEnd(0);
+    try file.writeAll(line);
 }
 
 const AiNextcmdConfig = struct {
@@ -869,6 +929,19 @@ test "ai nl2cmd args parse" {
     try std.testing.expect(config.detect_only);
     try std.testing.expect(config.plain);
     try std.testing.expect(config.exec_requested);
+}
+
+test "ai nl2cmd audit line escapes fields" {
+    const line = try nl2cmdAuditLineAlloc(std.testing.allocator, .{
+        .shell = "zsh",
+        .cwd = "/tmp/repo",
+        .input = "?? list\nfiles",
+    }, "list\nfiles", "ls -lS", "candidate");
+    defer std.testing.allocator.free(line);
+    try std.testing.expect(std.mem.indexOf(u8, line, "\"request\":\"list\\nfiles\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, line, "\"candidate\":\"ls -lS\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, line, "\"confidence\":\"high\"") != null);
+    try std.testing.expect(std.mem.endsWith(u8, line, "\n"));
 }
 
 test "ai bench output reports metrics" {

@@ -381,7 +381,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Submit input to model with NL→cmd prompt template
 - [x] Render candidate command(s) with confidence
 - [x] Confirmation gate before exec (always; never auto-run)
-- [ ] Log every NL→cmd to `~/.local/state/shisa/nl2cmd.jsonl`
+- [x] Log every NL→cmd to `~/.local/state/shisa/nl2cmd.jsonl`
 
 ### 12.4 Risk explainer (`risk`)
 - [ ] Rules-engine first (fast, deterministic, same blocklist as prod_guard)

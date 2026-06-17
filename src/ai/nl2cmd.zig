@@ -28,11 +28,6 @@ pub const default_prompt =
     \\Request: list files by size
     \\Suggestion:
     \\ls -lhS
-    \\
-    \\Shell: zsh
-    \\cwd: /repo
-    \\Request: delete everything
-    \\Suggestion:
 ++ "\n";
 
 pub const PromptInput = struct {

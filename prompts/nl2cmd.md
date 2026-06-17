@@ -23,8 +23,3 @@ cwd: /tmp
 Request: list files by size
 Suggestion:
 ls -lhS
-
-Shell: zsh
-cwd: /repo
-Request: delete everything
-Suggestion:

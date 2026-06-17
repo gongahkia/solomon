@@ -12,6 +12,7 @@ const paths = @import("daemon/paths.zig");
 const proto = @import("proto/types.zig");
 const plugin_lua = @import("plugin/lua.zig");
 const plugin_manifest = @import("plugin/manifest.zig");
+const prod_guard_module = @import("daemon/modules/prod_guard.zig");
 const risk_tier_module = @import("daemon/modules/risk_tier.zig");
 const supervisor = @import("supervisor.zig");
 const vcs_stack = @import("vcs/stack.zig");
@@ -744,6 +745,7 @@ fn aiNl2cmd(allocator: std.mem.Allocator, config: AiNl2cmdConfig) !void {
     if (!status.installed or !status.daemon_running) return;
     const command = aiNl2cmdCommandAlloc(allocator, config, request) catch return;
     defer allocator.free(command);
+    if (prod_guard_module.destructivePattern(command) != null) return;
     try std.fs.File.stdout().writeAll(command);
 }
 

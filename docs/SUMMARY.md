@@ -73,6 +73,7 @@
 
 - [Why Shisa](videos/why-shisa.md)
 - [5-Min Setup](videos/setup-walkthrough.md)
+- [Plugin in 10 Lines](videos/plugin-in-10-lines.md)
 
 # Governance
 

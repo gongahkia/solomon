@@ -537,7 +537,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Document the manifest + signing requirements
 
 ### 16.6 Bridge tests + docs
-- [ ] Documented "writing a Shisa bridge in 50 lines" guide
+- [x] Documented "writing a Shisa bridge in 50 lines" guide
 - [ ] Sample TypeScript bridge for VS Code (community-quality, no commitment)
 - [ ] Integration tests using mock editor harnesses
 

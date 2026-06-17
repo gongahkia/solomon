@@ -111,6 +111,9 @@ jobs:
           path: dist/sbom-diff
           if-no-files-found: error
 
+      - name: Generate Rekor links
+        run: bash .github/scripts/cosign-rekor-links.sh dist
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -119,7 +122,9 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --verify-tag \
             --title "$GITHUB_REF_NAME" \
-            --notes "Manual v0 release. Artifacts, SHA-256 checksums, and SPDX SBOMs are attached." \
+            --notes "Manual v0 release. Artifacts, SHA-256 checksums, SPDX SBOMs, cosign bundles, and Rekor links are attached." \
             dist/*.tar.gz \
             dist/*.tar.gz.sha256 \
-            dist/*.spdx.json
+            dist/*.spdx.json \
+            dist/*.sigstore.json \
+            dist/rekor-links.txt

@@ -661,7 +661,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 20.3 Signing (Sigstore)
 - [x] cosign keyless signing in CI (OIDC via GitHub Actions identity)
-- [ ] Publish signatures + Rekor log links
+- [x] Publish signatures + Rekor log links
 - [ ] `shisa update --verify` validates signature before applying
 - [ ] Document key-distrust + rotation procedure
 

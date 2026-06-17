@@ -1,0 +1,18 @@
+version = 1
+theme = "plain"
+
+# Powerlevel10k left elements: dir, vcs, status, command_execution_time, background_jobs, context, virtualenv, nodeenv, go_version, rust_version
+# Powerlevel10k right elements: aws, kubecontext, terraform, time, battery
+# Powerlevel10k instant_prompt: quiet
+# Shisa instant prompt: SHISA_INSTANT=1
+[prompt]
+modules = ["cwd", "git_branch", "exit_status", "cmd_duration", "jobs", "user_host", "language_versions", "cloud_ctx", "time"]
+
+[modules.language_versions]
+detect = ["python", "node", "rust", "go"]
+
+[modules.time]
+format = "24h"
+utc = true
+
+# Unsupported Powerlevel10k elements: terraform, battery

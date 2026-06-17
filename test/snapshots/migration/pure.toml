@@ -1,0 +1,11 @@
+version = 1
+theme = "pure"
+
+[prompt]
+modules = ["cwd", "git_branch", "exit_status", "cmd_duration", "jobs", "user_host"]
+
+[modules.cmd_duration]
+threshold_ms = 5000
+
+[modules.user_host]
+mode = "ssh"

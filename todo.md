@@ -483,7 +483,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 - [x] Zig structs for `Request`, `Response`, `Error` mirroring §26.2–§26.5
 - [x] JSON encoder/decoder generated via comptime
 - [x] Unknown-field tolerance for forward-compat
-- [ ] Required-field validation with structured error
+- [x] Required-field validation with structured error
 - [ ] Snapshot tests for every (op × shape) combination
 
 ### 15.3 Ops

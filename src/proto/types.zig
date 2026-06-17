@@ -87,10 +87,17 @@ pub const ErrorCode = enum {
     E_INTERNAL,
 };
 
+pub const ErrorContext = struct {
+    field: ?[]const u8 = null,
+    expected: ?[]const u8 = null,
+    highest_supported_version: ?u32 = null,
+    max_frame_bytes: ?u32 = null,
+};
+
 pub const Error = struct {
     code: ErrorCode,
     message: []const u8,
-    context: ?std.json.Value = null,
+    context: ErrorContext = .{},
 };
 
 pub const ErrorEnvelope = struct {
@@ -108,6 +115,67 @@ pub fn encodeAlloc(allocator: std.mem.Allocator, value: anytype) ![]u8 {
 
 pub fn decodeAlloc(comptime T: type, allocator: std.mem.Allocator, source: []const u8) !std.json.Parsed(T) {
     return std.json.parseFromSlice(T, allocator, source, .{ .ignore_unknown_fields = true });
+}
+
+pub fn validateRequestPayload(allocator: std.mem.Allocator, source: []const u8) !?ErrorEnvelope {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, source, .{}) catch {
+        return malformedRequest("request", "valid JSON");
+    };
+    defer parsed.deinit();
+
+    const object = switch (parsed.value) {
+        .object => |object| object,
+        else => return malformedRequest("request", "JSON object"),
+    };
+
+    for (required_request_fields) |field| {
+        if (object.get(field) == null) return malformedRequest(field, "required field");
+    }
+
+    const raw_version = object.get("v").?;
+    const request_version = switch (raw_version) {
+        .integer => |value| value,
+        else => return malformedRequest("v", "integer"),
+    };
+    if (request_version != @as(i64, version)) {
+        return .{
+            .@"error" = .{
+                .code = .E_VERSION,
+                .message = "unsupported protocol version",
+                .context = .{ .field = "v", .highest_supported_version = version },
+            },
+        };
+    }
+
+    return null;
+}
+
+const required_request_fields = [_][]const u8{
+    "v",
+    "op",
+    "shell",
+    "cwd",
+    "exit",
+    "jobs",
+    "duration_ms",
+    "cols",
+    "rows",
+    "tty",
+    "color_caps",
+    "glyph_caps",
+    "user_id",
+    "session",
+    "request_id",
+};
+
+fn malformedRequest(field: []const u8, expected: []const u8) ErrorEnvelope {
+    return .{
+        .@"error" = .{
+            .code = .E_MALFORMED,
+            .message = "malformed request",
+            .context = .{ .field = field, .expected = expected },
+        },
+    };
 }
 
 test "request type carries v1 render inputs" {
@@ -180,12 +248,7 @@ test "error envelope carries explicit code and structured context" {
     try std.testing.expectEqualStrings("request-1", parsed.value.request_id);
     try std.testing.expectEqual(ErrorCode.E_OVERSIZE, parsed.value.@"error".code);
     try std.testing.expectEqualStrings("frame too large", parsed.value.@"error".message);
-    const context = parsed.value.@"error".context.?;
-    const max_frame_value = switch (context) {
-        .object => |object| object.get("max_frame_bytes").?,
-        else => return error.ExpectedObject,
-    };
-    try std.testing.expectEqual(@as(i64, 1048576), max_frame_value.integer);
+    try std.testing.expectEqual(@as(u32, 1048576), parsed.value.@"error".context.max_frame_bytes.?);
 }
 
 test "json helpers roundtrip request and response" {
@@ -259,4 +322,25 @@ test "decode ignores unknown fields for forward compatibility" {
     defer envelope.deinit();
     try std.testing.expectEqual(ErrorCode.E_VERSION, envelope.value.@"error".code);
     try std.testing.expectEqualStrings("bad version", envelope.value.@"error".message);
+}
+
+test "validates required request fields with structured errors" {
+    const allocator = std.testing.allocator;
+    const missing = (try validateRequestPayload(allocator,
+        \\{"v":1,"op":"render","shell":"zsh","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"tty":"/dev/ttys001","color_caps":"truecolor","glyph_caps":"unicode","user_id":501,"session":"s1","request_id":"r1"}
+    )).?;
+    try std.testing.expectEqual(ErrorCode.E_MALFORMED, missing.@"error".code);
+    try std.testing.expectEqualStrings("cwd", missing.@"error".context.field.?);
+    try std.testing.expectEqualStrings("required field", missing.@"error".context.expected.?);
+
+    const bad_version = (try validateRequestPayload(allocator,
+        \\{"v":2,"op":"render","shell":"zsh","cwd":"/tmp","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"tty":"/dev/ttys001","color_caps":"truecolor","glyph_caps":"unicode","user_id":501,"session":"s1","request_id":"r1"}
+    )).?;
+    try std.testing.expectEqual(ErrorCode.E_VERSION, bad_version.@"error".code);
+    try std.testing.expectEqual(@as(u32, version), bad_version.@"error".context.highest_supported_version.?);
+
+    const valid = try validateRequestPayload(allocator,
+        \\{"v":1,"op":"render","shell":"zsh","cwd":"/tmp","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"tty":"/dev/ttys001","color_caps":"truecolor","glyph_caps":"unicode","user_id":501,"session":"s1","request_id":"r1"}
+    );
+    try std.testing.expect(valid == null);
 }

@@ -168,6 +168,22 @@ pub fn build(b: *std.Build) void {
     const cli_docs_step = b.step("cli-docs", "Generate CLI reference docs from shisa --help");
     cli_docs_step.dependOn(&cli_docs_run.step);
 
+    const plugin_api_docs_exe = b.addExecutable(.{
+        .name = "shisa-plugin-api-docs",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/plugin_api_docs.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const plugin_api_docs_run = b.addRunArtifact(plugin_api_docs_exe);
+    plugin_api_docs_run.addFileArg(b.path("docs/plugin-api.md"));
+    plugin_api_docs_run.addFileArg(b.path("src/plugin/manifest.zig"));
+    plugin_api_docs_run.addFileArg(b.path("src/plugin/capability.zig"));
+    plugin_api_docs_run.addFileArg(b.path("src/plugin/lua.zig"));
+    const plugin_api_docs_step = b.step("plugin-api-docs", "Generate plugin API docs from Zig source annotations");
+    plugin_api_docs_step.dependOn(&plugin_api_docs_run.step);
+
     const run_cmd = b.addRunArtifact(exe);
     if (b.args) |args| run_cmd.addArgs(args);
     const run_step = b.step("run", "Run shisa");
@@ -582,6 +598,21 @@ pub fn build(b: *std.Build) void {
     cli_docs_check_run.addArg("zig-out/cli.md");
     const cli_docs_diff = b.addSystemCommand(&.{ "cmp", "docs/cli.md", "zig-out/cli.md" });
     cli_docs_diff.step.dependOn(&cli_docs_check_run.step);
+    const plugin_api_docs_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/plugin_api_docs.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const plugin_api_docs_test_run = b.addRunArtifact(plugin_api_docs_tests);
+    const plugin_api_docs_check_run = b.addRunArtifact(plugin_api_docs_exe);
+    plugin_api_docs_check_run.addArg("zig-out/plugin-api.md");
+    plugin_api_docs_check_run.addFileArg(b.path("src/plugin/manifest.zig"));
+    plugin_api_docs_check_run.addFileArg(b.path("src/plugin/capability.zig"));
+    plugin_api_docs_check_run.addFileArg(b.path("src/plugin/lua.zig"));
+    const plugin_api_docs_diff = b.addSystemCommand(&.{ "cmp", "docs/plugin-api.md", "zig-out/plugin-api.md" });
+    plugin_api_docs_diff.step.dependOn(&plugin_api_docs_check_run.step);
     const client_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/shisa-client.zig"),
@@ -673,6 +704,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&config_schema_docs_test_run.step);
     test_step.dependOn(&cli_docs_test_run.step);
     test_step.dependOn(&cli_docs_diff.step);
+    test_step.dependOn(&plugin_api_docs_test_run.step);
+    test_step.dependOn(&plugin_api_docs_diff.step);
     test_step.dependOn(&client_test_run.step);
     test_step.dependOn(&server_test_run.step);
     test_step.dependOn(&zsh_integration.step);

@@ -3,6 +3,13 @@ const manifest = @import("manifest.zig");
 
 pub const Error = error{CapabilityDenied};
 
+/// plugin-api: gate | fs_read | path | denied by default | `checkFsRead` accepts exact matches, recursive scopes ending in `/**`, `~/`, and relative plugin-dir scopes.
+/// plugin-api: gate | fs_watch | path | denied by default | `checkFsWatch` uses the same path matching rules as `fs_read`.
+/// plugin-api: gate | exec | command name | denied by default | `checkExec` requires an exact command allow-list match.
+/// plugin-api: gate | net | provider or domain id | denied by default | `checkNet` requires an exact allow-list match.
+/// plugin-api: gate | env_read | env var name | denied by default | `checkEnvRead` requires an exact environment variable allow-list match.
+/// plugin-api: gate | secrets | host secret API | denied by default | `checkSecrets` requires `secrets = true`.
+/// plugin-api: gate | pre_exec | pre-exec hook | denied by default | `checkPreExec` requires `pre_exec = true`.
 pub const Context = struct {
     home: ?[]const u8 = null,
     plugin_dir: ?[]const u8 = null,

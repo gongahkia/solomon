@@ -163,6 +163,7 @@ pub const Runtime = struct {
         return is_nil;
     }
 
+    /// plugin-api: sandbox | removed_globals | `os`, `io`, `package`, `require`, `dofile`, `loadfile` | always | sandbox startup removes direct shell, filesystem, loader, and package APIs from Lua globals.
     fn stripDangerousGlobals(self: *Runtime) !void {
         const globals = [_][]const u8{
             "os",

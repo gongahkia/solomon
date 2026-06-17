@@ -2,6 +2,25 @@ const std = @import("std");
 
 pub const supported_api_version: u32 = 1;
 
+/// plugin-api: manifest | name | string | required | lowercase plugin id matching `[a-z0-9][a-z0-9._-]*`.
+/// plugin-api: manifest | version | semver string | required | semantic version; prerelease and build metadata are accepted.
+/// plugin-api: manifest | api_version | integer | required | must equal Shisa supported plugin API major `1`.
+/// plugin-api: manifest | license | string | required | SPDX-like token using letters, digits, `.`, `-`, and `+`.
+/// plugin-api: manifest | capabilities | table | deny all | omitted capability fields deny access.
+/// plugin-api: manifest | modules | string array | required | non-empty exported module id list; module ids are lowercase with digits and `_`.
+/// plugin-api: manifest | description | string | optional | human-readable summary.
+/// plugin-api: manifest | author | string | optional | plugin author or maintainer.
+/// plugin-api: manifest | homepage | string | optional | public project homepage.
+/// plugin-api: manifest | repository | string | optional | public source repository URL.
+/// plugin-api: capability | fs_read | string array | empty | readable paths or scopes; gate supports exact paths, `~/`, relative plugin paths, and recursive `/**`.
+/// plugin-api: capability | fs_watch | string array | empty | watchable paths or scopes; same path rules as `fs_read`.
+/// plugin-api: capability | exec | false or string array | false | exact allow-list of command names.
+/// plugin-api: capability | net | false or string array | false | exact allow-list of provider or domain ids.
+/// plugin-api: capability | secrets | bool | false | enables host secret APIs when those APIs exist.
+/// plugin-api: capability | env_read | string array | empty | exact allow-list of environment variable names.
+/// plugin-api: capability | pre_exec | bool | false | allows pre-exec hook integration.
+/// plugin-api: entrypoint | render | Lua identifier | `render` | synchronous render function name.
+/// plugin-api: entrypoint | update | Lua identifier | optional | async/cache refresh function name.
 pub fn isValidPluginName(value: []const u8) bool {
     return isPluginName(value);
 }

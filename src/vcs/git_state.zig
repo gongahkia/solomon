@@ -7,6 +7,18 @@ pub const RebaseState = enum {
     interactive,
 };
 
+pub const SequencerState = enum {
+    none,
+    single,
+    sequence,
+};
+
+pub fn detectCherryPickState(git_dir: std.fs.Dir) SequencerState {
+    if (entryExists(git_dir, "sequencer/todo")) return .sequence;
+    if (entryExists(git_dir, "CHERRY_PICK_HEAD")) return .single;
+    return .none;
+}
+
 pub fn detectMergeState(git_dir: std.fs.Dir) bool {
     return entryExists(git_dir, "MERGE_HEAD");
 }
@@ -81,6 +93,33 @@ test "detects merge state" {
     defer git_dir.close();
     try git_dir.writeFile(.{ .sub_path = "MERGE_HEAD", .data = "abc123\n" });
     try std.testing.expect(detectMergeState(git_dir));
+}
+
+test "detects absent cherry-pick state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var git_dir = try makeGitDir(&tmp);
+    defer git_dir.close();
+    try std.testing.expectEqual(SequencerState.none, detectCherryPickState(git_dir));
+}
+
+test "detects single cherry-pick state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var git_dir = try makeGitDir(&tmp);
+    defer git_dir.close();
+    try git_dir.writeFile(.{ .sub_path = "CHERRY_PICK_HEAD", .data = "abc123\n" });
+    try std.testing.expectEqual(SequencerState.single, detectCherryPickState(git_dir));
+}
+
+test "detects sequenced cherry-pick state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var git_dir = try makeGitDir(&tmp);
+    defer git_dir.close();
+    try git_dir.makePath("sequencer");
+    try git_dir.writeFile(.{ .sub_path = "sequencer/todo", .data = "pick abc123 msg\n" });
+    try std.testing.expectEqual(SequencerState.sequence, detectCherryPickState(git_dir));
 }
 
 fn makeGitDir(tmp: *std.testing.TmpDir) !std.fs.Dir {

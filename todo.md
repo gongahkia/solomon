@@ -508,7 +508,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ## Phase 16 â€” Editor integration
 
 ### 16.1 `subscribe` op implementation
-- [ ] Bidirectional NDJSON stream over connected socket
+- [x] Bidirectional NDJSON stream over connected socket
 - [ ] Topic subscription with reference-counting per-topic
 - [ ] Snapshot then delta updates
 - [ ] Backpressure: drop if client slower than producer (configurable)

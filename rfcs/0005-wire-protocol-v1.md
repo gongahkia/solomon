@@ -15,7 +15,7 @@ RFC-0001 established the daemon protocol shape. v1 now needs a stable consumer-f
 
 ## Design
 
-Transport is a per-user Unix-domain `SOCK_STREAM` socket. Request/response ops use one request frame and one response frame per connection. `subscribe` keeps the socket open and streams events after an initial request.
+Transport is a per-user Unix-domain `SOCK_STREAM` socket. Request/response ops use one request frame and one response frame per connection. `subscribe` starts with one framed request, then keeps the socket open and switches both directions to newline-delimited JSON.
 
 Each frame is:
 
@@ -106,7 +106,7 @@ Reload response:
 }
 ```
 
-Subscribe request adds `topics: []string`. The daemon replies with framed JSON events:
+Subscribe request adds `topics: []string`. The daemon replies with NDJSON events:
 
 ```json
 { "v": 1, "request_id": "uuid-v4", "topic": "vcs.summary", "kind": "snapshot", "data": {} }

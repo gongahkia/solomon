@@ -54,6 +54,13 @@ const PreexecRequest = struct {
     force: bool = false,
 };
 
+const SubscribeRequest = struct {
+    v: u32 = 1,
+    op: []const u8 = "subscribe",
+    request_id: []const u8 = "",
+    topics: []const []const u8 = &.{},
+};
+
 const ReloadState = struct {
     config_generation: u64 = 0,
     plugin_generation: u64 = 0,
@@ -231,6 +238,8 @@ pub const Server = struct {
             const response = try self.reloadResponseAlloc(std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
             try writeFrame(connection.stream.handle, response);
+        } else if (isOpRequest(request, "subscribe")) {
+            try self.handleSubscribeConnection(connection.stream.handle, request);
         } else if (isPreexecRequest(request)) {
             const response = try self.preexecResponse(request);
             defer std.heap.page_allocator.free(response);
@@ -464,6 +473,28 @@ pub const Server = struct {
         );
     }
 
+    fn handleSubscribeConnection(self: *Server, fd: std.posix.fd_t, request: []const u8) !void {
+        _ = self;
+        var parsed = try std.json.parseFromSlice(SubscribeRequest, std.heap.page_allocator, request, .{ .ignore_unknown_fields = true });
+        defer parsed.deinit();
+
+        const snapshot = try subscribeSnapshotAlloc(std.heap.page_allocator, parsed.value.request_id, parsed.value.topics.len);
+        defer std.heap.page_allocator.free(snapshot);
+        try writeAll(fd, snapshot);
+
+        while (true) {
+            const line = readNdjsonLineAlloc(std.heap.page_allocator, fd, 64 * 1024) catch |err| switch (err) {
+                error.ConnectionClosed => return,
+                else => return err,
+            };
+            defer std.heap.page_allocator.free(line);
+            if (std.mem.trim(u8, line, " \t\r\n").len == 0) continue;
+            const heartbeat = try subscribeHeartbeatAlloc(std.heap.page_allocator, parsed.value.request_id);
+            defer std.heap.page_allocator.free(heartbeat);
+            try writeAll(fd, heartbeat);
+        }
+    }
+
     fn reloadConfigAndPlugins(self: *Server, allocator: std.mem.Allocator) !void {
         const config_source = try self.loadConfigSourceAlloc(allocator);
         errdefer allocator.free(config_source);
@@ -637,6 +668,24 @@ fn readFrameAlloc(allocator: std.mem.Allocator, fd: std.posix.fd_t) ![]u8 {
     return payload;
 }
 
+fn readNdjsonLineAlloc(allocator: std.mem.Allocator, fd: std.posix.fd_t, max_line_bytes: usize) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    while (out.items.len < max_line_bytes) {
+        var byte: [1]u8 = undefined;
+        const n = try std.posix.read(fd, &byte);
+        if (n == 0) {
+            if (out.items.len == 0) return error.ConnectionClosed;
+            break;
+        }
+        try out.append(allocator, byte[0]);
+        if (byte[0] == '\n') break;
+    } else {
+        return error.Oversize;
+    }
+    return out.toOwnedSlice(allocator);
+}
+
 fn readExact(fd: std.posix.fd_t, buffer: []u8) !void {
     var offset: usize = 0;
     while (offset < buffer.len) {
@@ -688,6 +737,26 @@ fn versionResponseAlloc(allocator: std.mem.Allocator, request: []const u8) ![]u8
     const escaped_request_id = try json.escapeAlloc(allocator, request_id);
     defer allocator.free(escaped_request_id);
     return std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"daemon\":\"{s}\",\"protocol\":{d}}}", .{ escaped_request_id, daemon_version, protocol_version });
+}
+
+fn subscribeSnapshotAlloc(allocator: std.mem.Allocator, request_id: []const u8, topic_count: usize) ![]u8 {
+    const escaped_request_id = try json.escapeAlloc(allocator, request_id);
+    defer allocator.free(escaped_request_id);
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"v\":1,\"request_id\":\"{s}\",\"topic\":\"subscription\",\"kind\":\"snapshot\",\"data\":{{\"topics\":{d}}}}}\n",
+        .{ escaped_request_id, topic_count },
+    );
+}
+
+fn subscribeHeartbeatAlloc(allocator: std.mem.Allocator, request_id: []const u8) ![]u8 {
+    const escaped_request_id = try json.escapeAlloc(allocator, request_id);
+    defer allocator.free(escaped_request_id);
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"v\":1,\"request_id\":\"{s}\",\"topic\":\"subscription\",\"kind\":\"heartbeat\",\"data\":{{}}}}\n",
+        .{escaped_request_id},
+    );
 }
 
 fn defaultConfigPathAlloc(allocator: std.mem.Allocator) ![]u8 {
@@ -1203,6 +1272,39 @@ test "reload op rereads plugin manifests" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"plugins\":1") != null);
     try std.testing.expectEqual(@as(usize, 1), server.reload_state.plugin_names.len);
     try std.testing.expectEqualStrings("demo-plugin", server.reload_state.plugin_names[0]);
+}
+
+test "subscribe op switches connection to bidirectional ndjson" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-subscribe-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
+
+    var client_stream = try std.net.connectUnixSocket(socket_path);
+    try writeFrame(client_stream.handle, "{\"v\":1,\"op\":\"subscribe\",\"request_id\":\"subscribe-1\",\"topics\":[\"vcs.summary\"]}");
+
+    const snapshot = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
+    defer allocator.free(snapshot);
+    try std.testing.expect(std.mem.endsWith(u8, snapshot, "\n"));
+    try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"kind\":\"snapshot\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"topics\":1") != null);
+
+    try writeAll(client_stream.handle, "{\"op\":\"ping\"}\n");
+    const heartbeat = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
+    defer allocator.free(heartbeat);
+    try std.testing.expect(std.mem.endsWith(u8, heartbeat, "\n"));
+    try std.testing.expect(std.mem.indexOf(u8, heartbeat, "\"kind\":\"heartbeat\"") != null);
+
+    client_stream.close();
+    thread.join();
 }
 
 test "metrics op returns JSON metrics dump" {

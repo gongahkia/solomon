@@ -186,6 +186,10 @@ pub const Server = struct {
             try writeFrame(connection.stream.handle, line);
         } else if (std.mem.startsWith(u8, request, "health")) {
             try writeFrame(connection.stream.handle, "ok\n");
+        } else if (isOpRequest(request, "health")) {
+            const response = try healthResponseAlloc(std.heap.page_allocator, request, true);
+            defer std.heap.page_allocator.free(response);
+            try writeFrame(connection.stream.handle, response);
         } else if (isPreexecRequest(request)) {
             const response = try self.preexecResponse(request);
             defer std.heap.page_allocator.free(response);
@@ -507,6 +511,31 @@ fn isPreexecRequest(request: []const u8) bool {
         std.mem.indexOf(u8, request, "\"kind\": \"preexec\"") != null;
 }
 
+const OpRequest = struct {
+    op: []const u8 = "",
+    request_id: []const u8 = "",
+};
+
+fn isOpRequest(request: []const u8, op: []const u8) bool {
+    var parsed = std.json.parseFromSlice(OpRequest, std.heap.page_allocator, request, .{ .ignore_unknown_fields = true }) catch return false;
+    defer parsed.deinit();
+    return std.mem.eql(u8, parsed.value.op, op);
+}
+
+fn healthResponseAlloc(allocator: std.mem.Allocator, request: []const u8, ok: bool) ![]u8 {
+    const request_id = try requestIdAlloc(allocator, request);
+    defer allocator.free(request_id);
+    const escaped_request_id = try json.escapeAlloc(allocator, request_id);
+    defer allocator.free(escaped_request_id);
+    return std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"ok\":{}}}", .{ escaped_request_id, ok });
+}
+
+fn requestIdAlloc(allocator: std.mem.Allocator, request: []const u8) ![]u8 {
+    var parsed = std.json.parseFromSlice(OpRequest, allocator, request, .{ .ignore_unknown_fields = true }) catch return allocator.dupe(u8, "");
+    defer parsed.deinit();
+    return allocator.dupe(u8, parsed.value.request_id);
+}
+
 fn prodGuardAuditPathAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8 {
     return std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/prod_guard.jsonl", .{home});
 }
@@ -816,6 +845,23 @@ test "render_continue fills async git segment from cache" {
         }
     }
     return error.AsyncFillNotReady;
+}
+
+test "health op returns minimal ok response" {
+    const allocator = std.testing.allocator;
+    const response = try healthResponseAlloc(allocator, "{\"v\":1,\"op\":\"health\",\"request_id\":\"health-1\"}", true);
+    defer allocator.free(response);
+
+    const HealthResponse = struct {
+        v: u32 = 1,
+        request_id: []const u8 = "",
+        ok: bool,
+    };
+    var parsed = try std.json.parseFromSlice(HealthResponse, allocator, response, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(u32, 1), parsed.value.v);
+    try std.testing.expectEqualStrings("health-1", parsed.value.request_id);
+    try std.testing.expect(parsed.value.ok);
 }
 
 test "logs slow module warning" {

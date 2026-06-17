@@ -56,6 +56,11 @@ pub const LfsSummary = struct {
     pointer_only: u32 = 0,
 };
 
+pub const FetchAge = struct {
+    age_seconds: u64 = 0,
+    warn: bool = false,
+};
+
 pub fn parseAheadBehind(output: []const u8) ?AheadBehind {
     var tokens = std.mem.tokenizeAny(u8, output, " \t\r\n");
     const behind_text = tokens.next() orelse return null;
@@ -63,6 +68,24 @@ pub fn parseAheadBehind(output: []const u8) ?AheadBehind {
     return .{
         .behind = std.fmt.parseInt(u32, behind_text, 10) catch return null,
         .ahead = std.fmt.parseInt(u32, ahead_text, 10) catch return null,
+    };
+}
+
+pub fn detectLastFetchAge(git_dir: std.fs.Dir, now_sec: i64, warn_after_hours: u32) !?FetchAge {
+    const stat = git_dir.statFile("FETCH_HEAD") catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    return fetchAgeFromMtime(stat.mtime, now_sec, warn_after_hours);
+}
+
+pub fn fetchAgeFromMtime(fetch_mtime_ns: i128, now_sec: i64, warn_after_hours: u32) FetchAge {
+    const fetch_sec = @divFloor(fetch_mtime_ns, std.time.ns_per_s);
+    const age_seconds: u64 = if (@as(i128, now_sec) <= fetch_sec) 0 else @intCast(@as(i128, now_sec) - fetch_sec);
+    const warn_after_seconds = @as(u64, warn_after_hours) * std.time.s_per_hour;
+    return .{
+        .age_seconds = age_seconds,
+        .warn = age_seconds > warn_after_seconds,
     };
 }
 
@@ -548,6 +571,27 @@ test "parses ahead behind counts" {
     try std.testing.expectEqual(@as(u32, 3), counts.behind);
     try std.testing.expectEqual(@as(u32, 5), counts.ahead);
     try std.testing.expect(parseAheadBehind("bad\n") == null);
+}
+
+test "detects last fetch age" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var git_dir = try makeGitDir(&tmp);
+    defer git_dir.close();
+    try std.testing.expect(try detectLastFetchAge(git_dir, 0, 1) == null);
+    try git_dir.writeFile(.{ .sub_path = "FETCH_HEAD", .data = "abc refs/heads/main\n" });
+    const age = (try detectLastFetchAge(git_dir, 0, 1)).?;
+    try std.testing.expectEqual(@as(u64, 0), age.age_seconds);
+    try std.testing.expect(!age.warn);
+}
+
+test "computes last fetch age warning" {
+    const mtime_ns = @as(i128, 100) * std.time.ns_per_s;
+    const fresh = fetchAgeFromMtime(mtime_ns, 100 + 2 * std.time.s_per_hour, 3);
+    try std.testing.expectEqual(@as(u64, 2 * std.time.s_per_hour), fresh.age_seconds);
+    try std.testing.expect(!fresh.warn);
+    const stale = fetchAgeFromMtime(mtime_ns, 100 + 3 * std.time.s_per_hour + 1, 3);
+    try std.testing.expect(stale.warn);
 }
 
 test "parses submodule summary" {

@@ -681,7 +681,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] Snap (community)
 - [x] DEB packaging script
 - [x] RPM packaging script (Fedora, Suse)
-- [ ] `curl shisa.sh/install` script + checksum verify
+- [x] `curl shisa.sh/install` script + checksum verify
 
 ### 20.6 Release automation
 - [x] One-button monthly release script

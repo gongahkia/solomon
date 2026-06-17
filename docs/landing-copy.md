@@ -2,7 +2,7 @@
 
 ## One-line pitch
 
-A daemon-backed, async-first, cross-shell prompt that never blocks.
+A daemon-backed, async-first, cross-shell prompt built to keep shell input responsive.
 
 ## Hero copy
 
@@ -22,4 +22,4 @@ Shisa pre-renders your prompt in a background daemon so your shell stays respons
 curl -sSL https://shisa.sh/install | sh
 ```
 
-Do not publish the installer until signed release artifacts and checksum verification exist.
+The installer is served from `packaging/install.sh` and verifies the downloaded release archive against its SHA-256 file before installing binaries.

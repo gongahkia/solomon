@@ -2,6 +2,7 @@
 
 [Overview](index.md)
 - [Search](search.md)
+- [Quickstart](quickstart.md)
 
 # Core
 

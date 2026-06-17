@@ -1,5 +1,7 @@
 # Quickstart
 
+![Quickstart terminal demo](assets/quickstart.gif)
+
 ## 1. Build
 
 ```sh

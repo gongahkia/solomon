@@ -609,7 +609,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 19.2 Quickstart
 - [x] Page: install + 5-min to a working prompt (zsh + bash + fish + nu + pwsh tabs)
-- [ ] Animated terminal gif (asciinema-recorded, no JS dep)
+- [x] Animated terminal gif (asciinema-recorded, no JS dep)
 - [ ] Troubleshooting collapsible block
 
 ### 19.3 Recipes

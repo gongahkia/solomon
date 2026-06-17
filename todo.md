@@ -173,7 +173,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Author the scoop manifest (for WSL users on Windows)
 - [ ] Build install script (`shisa.sh/install`) with checksum verification + signed releases
 - [ ] Set up code signing (macOS notarization, sigstore for Linux)
-- [ ] Author SBOM publication step in CI
+- [x] Author SBOM publication step in CI
 - [ ] Cut v1.0.0
 - [ ] Publish launch blog post: "Why we built Shisa"
 - [ ] Publish benchmark deep-dive: "How Shisa renders prompts in 2ms"

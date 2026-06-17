@@ -13,16 +13,31 @@ pub const Status = struct {
 pub const StreamSink = struct {
     context: *anyopaque,
     onToken: *const fn (context: *anyopaque, token: []const u8) anyerror!void,
+    onDone: ?*const fn (context: *anyopaque, event: StreamEvent) anyerror!void = null,
 };
 
 pub const StreamEvent = struct {
     token: ?[]u8 = null,
     done: bool = false,
+    total_duration: u64 = 0,
+    load_duration: u64 = 0,
+    eval_count: u64 = 0,
+    eval_duration: u64 = 0,
 
     pub fn deinit(self: *StreamEvent, allocator: std.mem.Allocator) void {
         if (self.token) |value| allocator.free(value);
         self.* = undefined;
     }
+};
+
+pub const BenchmarkResult = struct {
+    first_token_ns: u64,
+    tokens_per_second_x100: u64,
+    peak_ram_bytes: u64,
+    total_duration_ns: u64,
+    load_duration_ns: u64,
+    eval_count: u64,
+    eval_duration_ns: u64,
 };
 
 pub fn detect(allocator: std.mem.Allocator) !Status {
@@ -96,12 +111,53 @@ pub fn generateStream(allocator: std.mem.Allocator, host: []const u8, port: u16,
     while (true) {
         if (cancel) |value| if (value.load(.seq_cst)) return error.Cancelled;
         const line = reader.takeDelimiter('\n') catch |err| switch (err) {
-            error.EndOfStream => break,
             error.ReadFailed => return response.bodyErr() orelse err,
             else => return err,
         } orelse break;
         try emitStreamLine(allocator, line, sink);
     }
+}
+
+pub fn benchmarkGenerate(allocator: std.mem.Allocator, host: []const u8, port: u16, model: []const u8, prompt: []const u8) !BenchmarkResult {
+    const Context = struct {
+        start_ns: i128,
+        first_token_ns: u64 = 0,
+        total_duration_ns: u64 = 0,
+        load_duration_ns: u64 = 0,
+        eval_count: u64 = 0,
+        eval_duration_ns: u64 = 0,
+
+        fn onToken(context: *anyopaque, token: []const u8) !void {
+            _ = token;
+            const self: *@This() = @ptrCast(@alignCast(context));
+            if (self.first_token_ns == 0) self.first_token_ns = @intCast(std.time.nanoTimestamp() - self.start_ns);
+        }
+
+        fn onDone(context: *anyopaque, event: StreamEvent) !void {
+            const self: *@This() = @ptrCast(@alignCast(context));
+            self.total_duration_ns = event.total_duration;
+            self.load_duration_ns = event.load_duration;
+            self.eval_count = event.eval_count;
+            self.eval_duration_ns = event.eval_duration;
+        }
+    };
+    var context = Context{ .start_ns = std.time.nanoTimestamp() };
+    try generateStream(allocator, host, port, model, prompt, null, .{
+        .context = &context,
+        .onToken = Context.onToken,
+        .onDone = Context.onDone,
+    });
+    if (context.eval_count == 0 or context.eval_duration_ns == 0) return error.MissingOllamaMetrics;
+    const peak_ram_bytes = runningModelSize(allocator, host, port, model) catch 0;
+    return .{
+        .first_token_ns = context.first_token_ns,
+        .tokens_per_second_x100 = tokensPerSecondX100(context.eval_count, context.eval_duration_ns),
+        .peak_ram_bytes = peak_ram_bytes,
+        .total_duration_ns = context.total_duration_ns,
+        .load_duration_ns = context.load_duration_ns,
+        .eval_count = context.eval_count,
+        .eval_duration_ns = context.eval_duration_ns,
+    };
 }
 
 pub fn consumeGenerateStreamLines(allocator: std.mem.Allocator, source: []const u8, cancel: ?*const std.atomic.Value(bool), sink: StreamSink) !void {
@@ -198,6 +254,10 @@ pub fn parseGenerateResponseAlloc(allocator: std.mem.Allocator, source: []const 
 const GenerateStreamResponse = struct {
     response: []const u8 = "",
     done: bool = false,
+    total_duration: u64 = 0,
+    load_duration: u64 = 0,
+    eval_count: u64 = 0,
+    eval_duration: u64 = 0,
 };
 
 pub fn parseGenerateStreamLineAlloc(allocator: std.mem.Allocator, source: []const u8) !StreamEvent {
@@ -208,6 +268,10 @@ pub fn parseGenerateStreamLineAlloc(allocator: std.mem.Allocator, source: []cons
     return .{
         .token = if (parsed.value.response.len == 0) null else try allocator.dupe(u8, parsed.value.response),
         .done = parsed.value.done,
+        .total_duration = parsed.value.total_duration,
+        .load_duration = parsed.value.load_duration,
+        .eval_count = parsed.value.eval_count,
+        .eval_duration = parsed.value.eval_duration,
     };
 }
 
@@ -215,6 +279,38 @@ fn emitStreamLine(allocator: std.mem.Allocator, line: []const u8, sink: StreamSi
     var event = try parseGenerateStreamLineAlloc(allocator, line);
     defer event.deinit(allocator);
     if (event.token) |token| try sink.onToken(sink.context, token);
+    if (event.done) if (sink.onDone) |onDone| try onDone(sink.context, event);
+}
+
+const RunningModelsResponse = struct {
+    models: []RunningModel = &.{},
+};
+
+const RunningModel = struct {
+    name: []const u8 = "",
+    model: []const u8 = "",
+    size: u64 = 0,
+};
+
+pub fn runningModelSize(allocator: std.mem.Allocator, host: []const u8, port: u16, model: []const u8) !u64 {
+    var response = try httpRequestAlloc(allocator, host, port, "GET", "/api/ps", "");
+    defer response.deinit(allocator);
+    if (response.status < 200 or response.status >= 300) return error.OllamaHttpError;
+    return parseRunningModelSize(allocator, response.body, model);
+}
+
+pub fn parseRunningModelSize(allocator: std.mem.Allocator, source: []const u8, selected_model: []const u8) !u64 {
+    var parsed = try std.json.parseFromSlice(RunningModelsResponse, allocator, source, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    for (parsed.value.models) |model| {
+        if (std.mem.eql(u8, model.model, selected_model) or std.mem.eql(u8, model.name, selected_model)) return model.size;
+    }
+    return 0;
+}
+
+pub fn tokensPerSecondX100(eval_count: u64, eval_duration_ns: u64) u64 {
+    if (eval_count == 0 or eval_duration_ns == 0) return 0;
+    return @divFloor(eval_count * 100 * std.time.ns_per_s, eval_duration_ns);
 }
 
 fn jsonStringAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
@@ -267,10 +363,11 @@ test "parses generate response" {
 }
 
 test "parses generate stream line" {
-    var event = try parseGenerateStreamLineAlloc(std.testing.allocator, "{\"response\":\"hel\",\"done\":false}");
+    var event = try parseGenerateStreamLineAlloc(std.testing.allocator, "{\"response\":\"hel\",\"done\":false,\"eval_count\":2,\"eval_duration\":1000000000}");
     defer event.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("hel", event.token.?);
     try std.testing.expect(!event.done);
+    try std.testing.expectEqual(@as(u64, 2), event.eval_count);
 }
 
 test "consumes stream tokens with cancellation" {
@@ -293,4 +390,14 @@ test "consumes stream tokens with cancellation" {
         .{ .context = &context, .onToken = Context.onToken },
     ));
     try std.testing.expectEqualStrings("a", context.text.items);
+}
+
+test "computes benchmark metrics" {
+    try std.testing.expectEqual(@as(u64, 250), tokensPerSecondX100(5, 2 * std.time.ns_per_s));
+    try std.testing.expectEqual(@as(u64, 0), tokensPerSecondX100(0, 2 * std.time.ns_per_s));
+}
+
+test "parses running model size" {
+    const size = try parseRunningModelSize(std.testing.allocator, "{\"models\":[{\"name\":\"gemma3:1b\",\"model\":\"gemma3:1b\",\"size\":815000000}]}", "gemma3:1b");
+    try std.testing.expectEqual(@as(u64, 815000000), size);
 }

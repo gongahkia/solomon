@@ -365,8 +365,8 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [ ] Pull recommended small model (final choice TBD after benchmark: `qwen2.5:1.5b` / `gemma3:1b` / `phi3:mini`)
 - [x] Implement Ollama HTTP client in Zig
 - [x] Stream tokens with cancellation
-- [ ] Benchmark first-token latency, tokens/sec, peak RAM
-- [ ] Ship a `shisa ai bench` subcommand that reports local model perf
+- [x] Benchmark first-token latency, tokens/sec, peak RAM
+- [x] Ship a `shisa ai bench` subcommand that reports local model perf
 
 ### 12.2 Next-command suggestion (`nextcmd`)
 - [ ] Hotkey integration per shell (zsh widget, bash bind -x, fish key binding, nu / pwsh equivalents)

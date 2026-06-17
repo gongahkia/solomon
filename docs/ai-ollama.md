@@ -13,4 +13,6 @@ The client supports:
 - `POST /api/generate` with `{"stream": false}` for deterministic single-response calls.
 - `POST /api/generate` with `{"stream": true}` for NDJSON token streaming. Cancellation is checked between streamed chunks.
 
+`shisa ai bench` reports first-token latency, token throughput from Ollama's final `eval_count` / `eval_duration` metrics, and loaded model size from `/api/ps`.
+
 Ollama's local API is documented at <https://docs.ollama.com/api/introduction>. `/api/tags`, `/api/pull`, and `/api/generate` are documented at <https://docs.ollama.com/api/tags>, <https://docs.ollama.com/api/pull>, and <https://docs.ollama.com/api/generate>.

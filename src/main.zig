@@ -4,6 +4,7 @@ const daemon_cache = @import("daemon/cache.zig");
 const fsnotify = @import("daemon/fsnotify.zig");
 const client = @import("shisa-client.zig");
 const cloud_ctx_module = @import("daemon/modules/cloud_ctx.zig");
+const ollama = @import("ai/ollama.zig");
 const shisa_config = @import("config.zig");
 const paths = @import("daemon/paths.zig");
 const proto = @import("proto/types.zig");
@@ -57,6 +58,11 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, args[1], "cloud")) {
         try cloudCommand(allocator, args[2..]);
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "ai")) {
+        try aiCommand(allocator, args[2..]);
         return;
     }
 
@@ -626,6 +632,87 @@ test "cloud explain output shows reason" {
     try std.testing.expect(std.mem.indexOf(u8, output, "tier: prod\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "source: default\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "pattern: *-prd-*\n") != null);
+}
+
+const AiBenchConfig = struct {
+    model: []const u8 = ollama.recommended_model,
+    prompt: []const u8 = "Reply with one short sentence.",
+};
+
+fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len >= 1 and std.mem.eql(u8, args[0], "bench")) {
+        const config = try parseAiBenchArgs(args[1..]);
+        try aiBench(allocator, config);
+        return;
+    }
+    return error.UnknownAiArgument;
+}
+
+fn parseAiBenchArgs(args: []const []const u8) !AiBenchConfig {
+    var config = AiBenchConfig{};
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--model")) {
+            config.model = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--prompt")) {
+            config.prompt = try nextValue(args, &i);
+        } else {
+            return error.UnknownAiArgument;
+        }
+    }
+    return config;
+}
+
+fn aiBench(allocator: std.mem.Allocator, config: AiBenchConfig) !void {
+    const status = try ollama.detect(allocator);
+    if (!status.installed) {
+        try std.fs.File.stderr().writeAll("shisa ai bench: ollama not installed\n");
+        return error.OllamaUnavailable;
+    }
+    if (!status.daemon_running) {
+        try std.fs.File.stderr().writeAll("shisa ai bench: ollama daemon not running\n");
+        return error.OllamaUnavailable;
+    }
+    const result = try ollama.benchmarkGenerate(allocator, ollama.default_host, ollama.default_port, config.model, config.prompt);
+    const output = try aiBenchOutputAlloc(allocator, config.model, result);
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn aiBenchOutputAlloc(allocator: std.mem.Allocator, model: []const u8, result: ollama.BenchmarkResult) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try appendFmt(allocator, &out, "model: {s}\n", .{model});
+    try appendFmt(allocator, &out, "first_token_ms: {d}\n", .{@divFloor(result.first_token_ns, std.time.ns_per_ms)});
+    try appendFmt(allocator, &out, "tokens_per_second_x100: {d}\n", .{result.tokens_per_second_x100});
+    try appendFmt(allocator, &out, "peak_ram_bytes: {d}\n", .{result.peak_ram_bytes});
+    try appendFmt(allocator, &out, "total_duration_ms: {d}\n", .{@divFloor(result.total_duration_ns, std.time.ns_per_ms)});
+    try appendFmt(allocator, &out, "load_duration_ms: {d}\n", .{@divFloor(result.load_duration_ns, std.time.ns_per_ms)});
+    try appendFmt(allocator, &out, "eval_count: {d}\n", .{result.eval_count});
+    try appendFmt(allocator, &out, "eval_duration_ms: {d}\n", .{@divFloor(result.eval_duration_ns, std.time.ns_per_ms)});
+    return out.toOwnedSlice(allocator);
+}
+
+test "ai bench args parse" {
+    const config = try parseAiBenchArgs(&.{ "--model", "gemma3:1b", "--prompt", "hi" });
+    try std.testing.expectEqualStrings("gemma3:1b", config.model);
+    try std.testing.expectEqualStrings("hi", config.prompt);
+}
+
+test "ai bench output reports metrics" {
+    const output = try aiBenchOutputAlloc(std.testing.allocator, "gemma3:1b", .{
+        .first_token_ns = 12 * std.time.ns_per_ms,
+        .tokens_per_second_x100 = 1234,
+        .peak_ram_bytes = 815000000,
+        .total_duration_ns = 100 * std.time.ns_per_ms,
+        .load_duration_ns = 20 * std.time.ns_per_ms,
+        .eval_count = 10,
+        .eval_duration_ns = 80 * std.time.ns_per_ms,
+    });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "model: gemma3:1b\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "tokens_per_second_x100: 1234\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "peak_ram_bytes: 815000000\n") != null);
 }
 
 fn copyFixtureToPath(allocator: std.mem.Allocator, source_path: []const u8, dest_path: []u8) !void {
@@ -1893,6 +1980,7 @@ const help_text =
     \\usage: shisa <command> [options]
     \\
     \\commands:
+    \\  ai            local AI helpers: bench
     \\  bench         benchmark prompt render via hyperfine
     \\  cache         dump cache stats
     \\  cloud         cloud helpers: audit, doctor, explain, preexec

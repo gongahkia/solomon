@@ -1741,6 +1741,7 @@ fn importP10kAlloc(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
 
     const left = if (p10k.find("LEFT_PROMPT_ELEMENTS")) |setting| setting.values.items else &.{};
     const right = if (p10k.find("RIGHT_PROMPT_ELEMENTS")) |setting| setting.values.items else &.{};
+    const instant_prompt = p10kInstantPrompt(p10k);
 
     for (left) |element| try mapP10kElement(allocator, element, &imported);
     for (right) |element| try mapP10kElement(allocator, element, &imported);
@@ -1751,10 +1752,20 @@ fn importP10kAlloc(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
         }
     }
 
-    return renderP10kImportedConfigAlloc(allocator, imported, left, right);
+    return renderP10kImportedConfigAlloc(allocator, imported, left, right, instant_prompt);
 }
 
-fn renderP10kImportedConfigAlloc(allocator: std.mem.Allocator, imported: StarshipImport, left: []const []u8, right: []const []u8) ![]u8 {
+fn p10kInstantPrompt(imported: P10kImport) ?[]const u8 {
+    const setting = imported.find("INSTANT_PROMPT") orelse return null;
+    if (setting.values.items.len == 0) return null;
+    return setting.values.items[0];
+}
+
+fn p10kInstantEnabled(value: []const u8) bool {
+    return !(std.mem.eql(u8, value, "off") or std.mem.eql(u8, value, "false") or std.mem.eql(u8, value, "0") or std.mem.eql(u8, value, "no"));
+}
+
+fn renderP10kImportedConfigAlloc(allocator: std.mem.Allocator, imported: StarshipImport, left: []const []u8, right: []const []u8, instant_prompt: ?[]const u8) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
 
@@ -1762,6 +1773,10 @@ fn renderP10kImportedConfigAlloc(allocator: std.mem.Allocator, imported: Starshi
     try out.appendSlice(allocator, "theme = \"plain\"\n\n");
     try appendP10kLayoutComment(allocator, &out, "left", left);
     try appendP10kLayoutComment(allocator, &out, "right", right);
+    if (instant_prompt) |value| {
+        try appendFmt(allocator, &out, "# Powerlevel10k instant_prompt: {s}\n", .{value});
+        try appendFmt(allocator, &out, "# Shisa instant prompt: SHISA_INSTANT={d}\n", .{@intFromBool(p10kInstantEnabled(value))});
+    }
     try out.appendSlice(allocator, "[prompt]\nmodules = [");
     for (imported.modules.items, 0..) |module_id, index| {
         if (index != 0) try out.appendSlice(allocator, ", ");
@@ -2147,6 +2162,32 @@ test "imports p10k left and right layout" {
     try std.testing.expect(std.mem.indexOf(u8, output, "# Powerlevel10k left elements: dir, vcs") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "# Powerlevel10k right elements: status, command_execution_time, time") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "modules = [\"cwd\", \"git_branch\", \"exit_status\", \"cmd_duration\", \"time\"]") != null);
+}
+
+test "imports p10k instant prompt mapping" {
+    const source =
+        \\typeset -g POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(dir)
+        \\typeset -g POWERLEVEL9K_INSTANT_PROMPT=quiet
+        \\
+    ;
+    const output = try importP10kAlloc(std.testing.allocator, source);
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "# Powerlevel10k instant_prompt: quiet") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "# Shisa instant prompt: SHISA_INSTANT=1") != null);
+}
+
+test "imports disabled p10k instant prompt mapping" {
+    const source =
+        \\typeset -g POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(dir)
+        \\typeset -g POWERLEVEL9K_INSTANT_PROMPT=off
+        \\
+    ;
+    const output = try importP10kAlloc(std.testing.allocator, source);
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "# Powerlevel10k instant_prompt: off") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "# Shisa instant prompt: SHISA_INSTANT=0") != null);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {

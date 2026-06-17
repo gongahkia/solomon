@@ -34,3 +34,11 @@ This table covers the first Powerlevel10k elements Shisa imports from `POWERLEVE
 | `todo` | none | unsupported | No core todo module. |
 
 Unsupported elements are emitted in migration notes by the importer.
+
+## Instant Prompt
+
+`POWERLEVEL9K_INSTANT_PROMPT=quiet` and `POWERLEVEL9K_INSTANT_PROMPT=verbose` map to `SHISA_INSTANT=1`.
+
+`POWERLEVEL9K_INSTANT_PROMPT=off` maps to `SHISA_INSTANT=0`.
+
+Shisa controls instant prompt through shell hook environment and `shisa prompt --instant`; schema v1 has no TOML key for it.

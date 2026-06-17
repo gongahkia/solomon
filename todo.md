@@ -355,7 +355,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Mock cloud config fixtures under `test/fixtures/cloud/`
 - [x] Snapshot tests for each segment
 - [x] prod_guard fuzz suite
-- [ ] Benchmark `cloud_ctx` cold path < 30ms, warm < 1ms
+- [x] Benchmark `cloud_ctx` cold path < 30ms, warm < 1ms
 - [ ] Ship a `shisa cloud doctor` for self-diagnosis
 
 ## Phase 12 — AI plugin pack (`shisa.ai`)

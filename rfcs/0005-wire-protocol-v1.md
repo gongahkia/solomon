@@ -106,7 +106,7 @@ Reload response:
 }
 ```
 
-Subscribe request adds `topics: []string` and optional `backpressure_limit`. Duplicate topics increment a per-connection reference count. Subscribe connections are read-only: mutating commands sent over the NDJSON stream return `E_READONLY`. The daemon keeps a bounded per-connection event queue; events produced after that queue reaches `backpressure_limit` are dropped. The first daemon line is a snapshot event whose `data.refs` object maps each distinct topic to its reference count. Later daemon replies use NDJSON delta events, with monotonically increasing `data.sequence` values per connection. Client disconnect releases per-connection refs and pending events:
+Subscribe request adds `topics: []string` and optional `backpressure_limit`. Duplicate topics increment a per-connection reference count. Subscribe connections are read-only: mutating commands and preexec/prod_guard attempts sent over the NDJSON stream return `E_READONLY`. The daemon keeps a bounded per-connection event queue; events produced after that queue reaches `backpressure_limit` are dropped. The first daemon line is a snapshot event whose `data.refs` object maps each distinct topic to its reference count. Later daemon replies use NDJSON delta events, with monotonically increasing `data.sequence` values per connection. Client disconnect releases per-connection refs and pending events:
 
 ```json
 { "v": 1, "request_id": "uuid-v4", "topic": "vcs.summary", "kind": "snapshot", "data": {} }

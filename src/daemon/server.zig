@@ -66,6 +66,7 @@ const SubscribeRequest = struct {
 
 const SubscribeCommand = struct {
     op: []const u8 = "",
+    kind: []const u8 = "",
 };
 
 const TopicRef = struct {
@@ -852,6 +853,12 @@ fn isSubscribeReadOnlyOp(op: []const u8) bool {
         std.mem.eql(u8, op, "version");
 }
 
+fn subscribeCommandName(command: SubscribeCommand) []const u8 {
+    if (command.op.len != 0) return command.op;
+    if (command.kind.len != 0) return command.kind;
+    return "unknown";
+}
+
 fn freeTopicRefs(allocator: std.mem.Allocator, refs: []TopicRef) void {
     for (refs) |ref| allocator.free(ref.topic);
     allocator.free(refs);
@@ -910,7 +917,7 @@ fn subscribeReadonlyErrorAlloc(allocator: std.mem.Allocator, request_id: []const
     defer allocator.free(escaped_request_id);
     var parsed = std.json.parseFromSlice(SubscribeCommand, allocator, line, .{ .ignore_unknown_fields = true }) catch null;
     defer if (parsed) |*value| value.deinit();
-    const op = if (parsed) |value| if (value.value.op.len == 0) "unknown" else value.value.op else "unknown";
+    const op = if (parsed) |value| subscribeCommandName(value.value) else "unknown";
     const escaped_op = try json.escapeAlloc(allocator, op);
     defer allocator.free(escaped_op);
     return std.fmt.allocPrint(
@@ -1539,6 +1546,41 @@ test "subscribe rejects mutating commands as readonly" {
     try std.testing.expect(std.mem.indexOf(u8, readonly, "\"kind\":\"error\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, readonly, "\"code\":\"E_READONLY\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, readonly, "\"op\":\"reload\"") != null);
+
+    client_stream.close();
+    thread.join();
+}
+
+test "subscribe cannot bypass prod guard preexec" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-subscribe-prodguard-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+    server.prod_guard_audit_home = dir_path;
+
+    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
+
+    var client_stream = try std.net.connectUnixSocket(socket_path);
+    try writeFrame(client_stream.handle, "{\"v\":1,\"op\":\"subscribe\",\"request_id\":\"subscribe-prodguard\",\"topics\":[\"risk_tier\"]}");
+    const snapshot = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
+    defer allocator.free(snapshot);
+    try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"kind\":\"snapshot\"") != null);
+
+    try writeAll(client_stream.handle, "{\"v\":1,\"kind\":\"preexec\",\"shell\":\"zsh\",\"command\":\"kubectl delete pod x --context api-prd-use1\"}\n");
+    const readonly = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
+    defer allocator.free(readonly);
+    try std.testing.expect(std.mem.indexOf(u8, readonly, "\"code\":\"E_READONLY\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, readonly, "\"op\":\"preexec\"") != null);
+
+    const audit_path = try prodGuardAuditPathAlloc(allocator, dir_path);
+    defer allocator.free(audit_path);
+    try std.testing.expectError(error.FileNotFound, std.fs.cwd().access(audit_path, .{}));
 
     client_stream.close();
     thread.join();

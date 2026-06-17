@@ -517,7 +517,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 16.2 Read-only enforcement
 - [x] Daemon-side allowlist of read-only ops on subscribe connections
 - [x] Reject any mutation attempt with `E_READONLY`
-- [ ] Tests verifying editor cannot bypass `prod_guard`
+- [x] Tests verifying editor cannot bypass `prod_guard`
 
 ### 16.3 Helix bridge
 - [ ] Write `contrib/editor-bridges/helix-shisa.toml`

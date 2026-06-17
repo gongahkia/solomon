@@ -680,7 +680,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] Flatpak manifest (community)
 - [ ] Snap (community)
 - [x] DEB packaging script
-- [ ] RPM packaging script (Fedora, Suse)
+- [x] RPM packaging script (Fedora, Suse)
 - [ ] `curl shisa.sh/install` script + checksum verify
 
 ### 20.6 Release automation

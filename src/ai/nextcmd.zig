@@ -1,5 +1,7 @@
 const std = @import("std");
 
+pub const default_prompt_path = "prompts/nextcmd.md";
+
 pub const ContextInput = struct {
     cwd: []const u8,
     last_command: []const u8 = "",
@@ -7,6 +9,23 @@ pub const ContextInput = struct {
     history_source: []const u8 = "",
     history_limit: usize = 20,
 };
+
+pub fn promptWithContextAlloc(allocator: std.mem.Allocator, template: []const u8, context: []const u8) ![]u8 {
+    const marker = "{{context}}";
+    if (std.mem.indexOf(u8, template, marker)) |index| {
+        var out: std.ArrayList(u8) = .empty;
+        errdefer out.deinit(allocator);
+        try out.appendSlice(allocator, template[0..index]);
+        try out.appendSlice(allocator, context);
+        try out.appendSlice(allocator, template[index + marker.len ..]);
+        return out.toOwnedSlice(allocator);
+    }
+    return std.fmt.allocPrint(allocator, "{s}\n{s}", .{ template, context });
+}
+
+pub fn readDefaultPromptAlloc(allocator: std.mem.Allocator) ![]u8 {
+    return std.fs.cwd().readFileAlloc(allocator, default_prompt_path, 256 * 1024);
+}
 
 pub fn buildContextAlloc(allocator: std.mem.Allocator, input: ContextInput) ![]u8 {
     const history = try historySliceAlloc(allocator, input.history_source, input.history_limit);
@@ -101,4 +120,17 @@ test "builds nextcmd context" {
     try std.testing.expect(std.mem.indexOf(u8, context, "last_exit: 1\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, context, "- zig build test\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, context, "- git status\n") == null);
+}
+
+test "interpolates prompt context" {
+    const prompt = try promptWithContextAlloc(std.testing.allocator, "A\n{{context}}\nB", "cwd: /repo\n");
+    defer std.testing.allocator.free(prompt);
+    try std.testing.expectEqualStrings("A\ncwd: /repo\n\nB", prompt);
+}
+
+test "default nextcmd prompt has context marker" {
+    const prompt = try readDefaultPromptAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(prompt);
+    try std.testing.expect(std.mem.indexOf(u8, prompt, "{{context}}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, prompt, "Suggestion:") != null);
 }

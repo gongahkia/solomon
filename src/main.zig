@@ -92,6 +92,11 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[1], "import-tide")) {
+        try importTide(allocator, args[2..]);
+        return;
+    }
+
     if (std.mem.eql(u8, args[1], "bench")) {
         try bench(allocator, args[2..]);
         return;
@@ -2980,6 +2985,196 @@ fn isIgnoredTideItem(name: []const u8) bool {
         std.mem.eql(u8, name, "character");
 }
 
+const TideImportResult = struct {
+    config: []u8,
+    notes: ?[]u8 = null,
+
+    fn deinit(self: TideImportResult, allocator: std.mem.Allocator) void {
+        allocator.free(self.config);
+        if (self.notes) |notes| allocator.free(notes);
+    }
+};
+
+fn importTide(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len != 1) return error.UnknownImportTideArgument;
+
+    const source = try std.fs.cwd().readFileAlloc(allocator, args[0], max_config_bytes);
+    defer allocator.free(source);
+
+    const result = try importTideResultAlloc(allocator, source);
+    defer result.deinit(allocator);
+    try std.fs.File.stdout().writeAll(result.config);
+    if (result.notes) |notes| {
+        try std.fs.cwd().writeFile(.{ .sub_path = "migration-notes.md", .data = notes });
+    }
+}
+
+fn importTideResultAlloc(allocator: std.mem.Allocator, source: []const u8) !TideImportResult {
+    var tide = try parseTideConfig(allocator, source);
+    defer tide.deinit(allocator);
+
+    var imported = StarshipImport{};
+    defer imported.deinit(allocator);
+    try scanTideConfig(allocator, tide, &imported);
+
+    if (imported.modules.items.len == 0) {
+        inline for (.{ .cwd, .git_branch, .exit_status, .cmd_duration, .user_host }) |module_id| {
+            try appendModule(allocator, &imported, module_id);
+        }
+    }
+
+    const config = try renderTideImportedConfigAlloc(allocator, imported, tide);
+    errdefer allocator.free(config);
+    const notes = try renderTideMigrationNotesAlloc(allocator, imported, tide);
+    errdefer if (notes) |owned| allocator.free(owned);
+    return .{ .config = config, .notes = notes };
+}
+
+fn renderTideImportedConfigAlloc(allocator: std.mem.Allocator, imported: StarshipImport, tide: TideConfig) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    try out.appendSlice(allocator, "version = 1\ntheme = \"plain\"\n\n");
+    try appendTideItemsComment(allocator, &out, tide, "left", "tide_left_prompt_items");
+    try appendTideItemsComment(allocator, &out, tide, "right", "tide_right_prompt_items");
+    try out.appendSlice(allocator, "[prompt]\nmodules = [");
+    for (imported.modules.items, 0..) |module_id, index| {
+        if (index != 0) try out.appendSlice(allocator, ", ");
+        try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+    }
+    try out.appendSlice(allocator, "]\n");
+
+    if (containsModule(imported, .language_versions) and (imported.python or imported.node or imported.rust or imported.go)) {
+        try out.appendSlice(allocator, "\n[modules.language_versions]\ndetect = [");
+        var count: usize = 0;
+        if (imported.python) try appendLanguage(allocator, &out, &count, "python");
+        if (imported.node) try appendLanguage(allocator, &out, &count, "node");
+        if (imported.rust) try appendLanguage(allocator, &out, &count, "rust");
+        if (imported.go) try appendLanguage(allocator, &out, &count, "go");
+        try out.appendSlice(allocator, "]\n");
+    }
+
+    if (containsModule(imported, .time)) {
+        try out.appendSlice(allocator, "\n[modules.time]\nformat = \"24h\"\nutc = true\n");
+    }
+
+    if (imported.unsupported.items.len != 0) {
+        try out.appendSlice(allocator, "\n# Unsupported Tide items: ");
+        for (imported.unsupported.items, 0..) |name, index| {
+            if (index != 0) try out.appendSlice(allocator, ", ");
+            try out.appendSlice(allocator, name);
+        }
+        try out.append(allocator, '\n');
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendTideItemsComment(allocator: std.mem.Allocator, out: *std.ArrayList(u8), tide: TideConfig, label: []const u8, key: []const u8) !void {
+    try appendFmt(allocator, out, "# Tide {s} items: ", .{label});
+    if (tide.find(key)) |setting| {
+        for (setting.values.items, 0..) |item, index| {
+            if (index != 0) try out.appendSlice(allocator, ", ");
+            try out.appendSlice(allocator, item);
+        }
+    }
+    try out.append(allocator, '\n');
+}
+
+fn renderTideMigrationNotesAlloc(allocator: std.mem.Allocator, imported: StarshipImport, tide: TideConfig) !?[]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    var count: usize = 0;
+    try out.appendSlice(allocator, "# Tide Migration Notes\n\n");
+
+    if (imported.unsupported.items.len != 0) {
+        count += imported.unsupported.items.len;
+        try out.appendSlice(allocator, "## Unsupported Items\n\n");
+        for (imported.unsupported.items) |name| {
+            try appendFmt(allocator, &out, "- `{s}`: {s}\n", .{ name, tideUnsupportedReason(name) });
+        }
+        try out.append(allocator, '\n');
+    }
+
+    var quirk_count: usize = 0;
+    if (settingHasValues(tide, "tide_right_prompt_items")) {
+        if (quirk_count == 0) try out.appendSlice(allocator, "## Fish/Tide Quirks\n\n");
+        quirk_count += 1;
+        count += 1;
+        try out.appendSlice(allocator, "- `tide_right_prompt_items` was collapsed into `[prompt].modules`; schema v1 has no right-prompt target.\n");
+    }
+    if (settingFirstEquals(tide, "tide_prompt_transient_enabled", "true")) {
+        if (quirk_count == 0) try out.appendSlice(allocator, "## Fish/Tide Quirks\n\n");
+        quirk_count += 1;
+        count += 1;
+        try out.appendSlice(allocator, "- `tide_prompt_transient_enabled=true` is not imported for Fish.\n");
+    }
+    if (hasTideLayoutSetting(tide)) {
+        if (quirk_count == 0) try out.appendSlice(allocator, "## Fish/Tide Quirks\n\n");
+        quirk_count += 1;
+        count += 1;
+        try out.appendSlice(allocator, "- Tide frame/separator/prefix/suffix settings require manual theme/layout work.\n");
+    }
+    if (hasFishVariableColor(tide)) {
+        if (quirk_count == 0) try out.appendSlice(allocator, "## Fish/Tide Quirks\n\n");
+        quirk_count += 1;
+        count += 1;
+        try out.appendSlice(allocator, "- Fish variable color refs such as `$_tide_color_*` were not resolved.\n");
+    }
+
+    if (count == 0) return null;
+    return try out.toOwnedSlice(allocator);
+}
+
+fn settingHasValues(tide: TideConfig, name: []const u8) bool {
+    const setting = tide.find(name) orelse return false;
+    return setting.values.items.len != 0;
+}
+
+fn settingFirstEquals(tide: TideConfig, name: []const u8, expected: []const u8) bool {
+    const setting = tide.find(name) orelse return false;
+    return setting.values.items.len != 0 and std.mem.eql(u8, setting.values.items[0], expected);
+}
+
+fn hasTideLayoutSetting(tide: TideConfig) bool {
+    for (tide.settings.items) |setting| {
+        if (std.mem.indexOf(u8, setting.name, "_frame_enabled") != null or
+            std.mem.indexOf(u8, setting.name, "_separator_") != null or
+            std.mem.endsWith(u8, setting.name, "_prompt_prefix") or
+            std.mem.endsWith(u8, setting.name, "_prompt_suffix"))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn hasFishVariableColor(tide: TideConfig) bool {
+    for (tide.settings.items) |setting| {
+        if (std.mem.indexOf(u8, setting.name, "_color") == null) continue;
+        for (setting.values.items) |value| {
+            if (std.mem.startsWith(u8, value, "$")) return true;
+        }
+    }
+    return false;
+}
+
+fn tideUnsupportedReason(name: []const u8) []const u8 {
+    if (std.mem.eql(u8, name, "bun")) return "No core Bun detector.";
+    if (std.mem.eql(u8, name, "java")) return "No core Java detector.";
+    if (std.mem.eql(u8, name, "php")) return "No core PHP detector.";
+    if (std.mem.eql(u8, name, "ruby")) return "No core Ruby detector.";
+    if (std.mem.eql(u8, name, "crystal")) return "No core Crystal detector.";
+    if (std.mem.eql(u8, name, "elixir")) return "No core Elixir detector.";
+    if (std.mem.eql(u8, name, "zig")) return "No core Zig detector.";
+    if (std.mem.eql(u8, name, "direnv")) return "Environment state belongs in a plugin.";
+    if (std.mem.eql(u8, name, "distrobox")) return "Container environment state is not imported yet.";
+    if (std.mem.eql(u8, name, "toolbox")) return "Container environment state is not imported yet.";
+    if (std.mem.eql(u8, name, "nix_shell")) return "Nix shell state is not imported yet.";
+    return "No Shisa core mapping; recreate as a plugin or omit.";
+}
+
 const StarshipImport = struct {
     modules: std.ArrayList(shisa_config.ModuleId) = .empty,
     unsupported: std.ArrayList([]const u8) = .empty,
@@ -3713,6 +3908,42 @@ test "maps tide items to shisa modules" {
     try std.testing.expect(imported.go);
     try std.testing.expectEqual(@as(usize, 1), imported.unsupported.items.len);
     try std.testing.expectEqualStrings("bun", imported.unsupported.items[0]);
+}
+
+test "imports tide config and migration notes" {
+    const source =
+        \\tide_left_prompt_items pwd git newline character
+        \\tide_right_prompt_items status cmd_duration context jobs bun
+        \\tide_prompt_transient_enabled true
+        \\tide_left_prompt_frame_enabled true
+        \\tide_left_prompt_separator_same_color '>'
+        \\tide_git_color_branch $_tide_color_green
+        \\
+    ;
+    const result = try importTideResultAlloc(std.testing.allocator, source);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(std.mem.indexOf(u8, result.config, "# Tide left items: pwd, git, newline, character") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.config, "# Tide right items: status, cmd_duration, context, jobs, bun") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.config, "modules = [\"cwd\", \"git_branch\", \"exit_status\", \"cmd_duration\", \"user_host\", \"jobs\"]") != null);
+    const notes = result.notes orelse return error.MissingTideNotes;
+    try std.testing.expect(std.mem.indexOf(u8, notes, "# Tide Migration Notes") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notes, "- `bun`: No core Bun detector.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notes, "`tide_right_prompt_items` was collapsed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notes, "`tide_prompt_transient_enabled=true` is not imported") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notes, "frame/separator/prefix/suffix") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notes, "$_tide_color_*") != null);
+}
+
+test "omits tide migration notes for plain left prompt" {
+    const source =
+        \\tide_left_prompt_items pwd git
+        \\
+    ;
+    const result = try importTideResultAlloc(std.testing.allocator, source);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(result.notes == null);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {
@@ -4528,6 +4759,8 @@ const help_text =
     \\                translate .p10k.zsh to shisa.toml
     \\  import-oh-my-posh <path>
     \\                translate Oh My Posh JSON/YAML to shisa.toml
+    \\  import-tide <path>
+    \\                translate Tide fish settings to shisa.toml
     \\  init          write default shisa.toml
     \\  pin           mark a path as never-evicted
     \\  plugin        install, list, enable, disable, or trust plugins

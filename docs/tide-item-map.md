@@ -45,3 +45,7 @@ Tide is Fish-only and stores prompt state in `tide_*` Fish variables. The import
 - `tide_prompt_transient_enabled` is not imported because Shisa's Fish hook does not implement transient prompt replacement.
 - Fish-local modes such as `vi_mode`, `private_mode`, and `shlvl` are unsupported unless represented by a mapped item.
 - Tide colors can reference Fish variables such as `$_tide_color_green`; those require migration notes unless a later importer resolves Tide's private color variables.
+
+## Migration Notes
+
+When unsupported items or Fish-specific settings remain, `shisa import-tide` writes `migration-notes.md`.

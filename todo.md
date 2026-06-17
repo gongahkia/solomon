@@ -587,7 +587,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Parse tide fish settings (`tide configure` output)
 - [x] Map tide items to Shisa modules
 - [x] Document fish-specific quirks that don't translate
-- [ ] Emit `migration-notes.md`
+- [x] Emit `migration-notes.md`
 
 ### 18.4 Pure importer
 - [ ] Minimal mapping: pure â†’ Shisa "pure" preset

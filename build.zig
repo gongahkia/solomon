@@ -560,6 +560,8 @@ pub fn build(b: *std.Build) void {
     const prompt_snapshot = b.addSystemCommand(&.{ "bash", "test/integration/prompt_snapshot.sh" });
     prompt_snapshot.step.dependOn(&debug_install.step);
     prompt_snapshot.step.dependOn(&debug_daemon_install.step);
+    const editor_bridge_integration = b.addSystemCommand(&.{ "bash", "test/integration/editor_bridge_mock.sh" });
+    editor_bridge_integration.step.dependOn(&debug_daemon_install.step);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&test_run.step);
     test_step.dependOn(&cli_test_run.step);
@@ -618,4 +620,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&pwsh_integration.step);
     test_step.dependOn(&starship_presets_import.step);
     test_step.dependOn(&prompt_snapshot.step);
+    test_step.dependOn(&editor_bridge_integration.step);
 }

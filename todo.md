@@ -539,7 +539,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 16.6 Bridge tests + docs
 - [x] Documented "writing a Shisa bridge in 50 lines" guide
 - [x] Sample TypeScript bridge for VS Code (community-quality, no commitment)
-- [ ] Integration tests using mock editor harnesses
+- [x] Integration tests using mock editor harnesses
 
 ## Phase 17 â€” Governance + Vouch integration
 

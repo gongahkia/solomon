@@ -1,0 +1,28 @@
+{
+  "locale_fixtures": [
+    {
+      "locale": "ar",
+      "language": "Arabic",
+      "direction": "rtl",
+      "cwd": "مشروع",
+      "risk_tier": "إنتاج",
+      "exit_status": "خروج 1"
+    },
+    {
+      "locale": "he",
+      "language": "Hebrew",
+      "direction": "rtl",
+      "cwd": "פרויקט",
+      "risk_tier": "ייצור",
+      "exit_status": "יציאה 1"
+    },
+    {
+      "locale": "fa",
+      "language": "Persian",
+      "direction": "rtl",
+      "cwd": "پروژه",
+      "risk_tier": "تولید",
+      "exit_status": "خروج 1"
+    }
+  ]
+}

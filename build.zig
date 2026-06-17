@@ -557,6 +557,8 @@ pub fn build(b: *std.Build) void {
     pwsh_integration.step.dependOn(&debug_install.step);
     const starship_presets_import = b.addSystemCommand(&.{ "bash", "test/integration/starship_presets_import.sh" });
     starship_presets_import.step.dependOn(&debug_install.step);
+    const pure_import_smoke = b.addSystemCommand(&.{ "bash", "test/integration/pure_import_smoke.sh" });
+    pure_import_smoke.step.dependOn(&debug_install.step);
     const prompt_snapshot = b.addSystemCommand(&.{ "bash", "test/integration/prompt_snapshot.sh" });
     prompt_snapshot.step.dependOn(&debug_install.step);
     prompt_snapshot.step.dependOn(&debug_daemon_install.step);
@@ -619,6 +621,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&nu_integration.step);
     test_step.dependOn(&pwsh_integration.step);
     test_step.dependOn(&starship_presets_import.step);
+    test_step.dependOn(&pure_import_smoke.step);
     test_step.dependOn(&prompt_snapshot.step);
     test_step.dependOn(&editor_bridge_integration.step);
 }

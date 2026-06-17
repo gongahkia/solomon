@@ -1,5 +1,7 @@
 # `shisa.toml` Schema
 
+Generated from `src/config.zig` with `zig build config-schema-docs`.
+
 Shisa reads user config from `$XDG_CONFIG_HOME/shisa/shisa.toml`, falling back to `~/.config/shisa/shisa.toml`.
 
 ## Minimal File
@@ -9,7 +11,7 @@ version = 1
 theme = "plain"
 
 [prompt]
-modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target"]
+modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
 ```
 
 ## Top-Level Keys
@@ -31,7 +33,7 @@ Default module order:
 
 ```toml
 [prompt]
-modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target"]
+modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
 ```
 
 Allowed core module ids for schema v1:
@@ -45,7 +47,7 @@ Allowed core module ids for schema v1:
 | `jobs` | sync | Background job count. |
 | `cmd_duration` | sync | Last command duration above threshold. |
 | `user_host` | sync | User and host, normally only over SSH. |
-| `cloud_ctx` | sync | Optional cloud account context; AWS profile, cached GCP project, cached Azure subscription, and cached Kubernetes context support are available. |
+| `cloud_ctx` | sync | Optional cloud account context; AWS, GCP, Azure, and Kubernetes support are available. |
 | `risk_tier` | sync | Risk classification and prompt background-bar color mapping. |
 | `sso_expiry` | sync | Warn when cached SSO/session expiry metadata is below the configured threshold. |
 | `iac_workspace` | sync | Render local Terraform/OpenTofu/Pulumi/CDK workspace metadata. |
@@ -53,6 +55,7 @@ Allowed core module ids for schema v1:
 | `cost_glance` | sync | Render compact month-to-date cloud spend from the local cost cache. |
 | `vpn_status` | sync | Render active local VPN status from local client commands. |
 | `ssh_target` | sync | Render remote SSH target host and risk tier. |
+| `container_provenance` | sync | Render detected container/runtime provenance. |
 | `time` | sync | Optional UTC `HH:MM` clock segment. |
 
 Unknown module ids are invalid.

@@ -623,7 +623,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Recipe: "Configuring `--a11y` for screen readers"
 
 ### 19.4 Reference
-- [ ] Generate config-schema docs from `build.zig`
+- [x] Generate config-schema docs from `build.zig`
 - [ ] Generate CLI docs from `shisa --help` tree (cobra-like extraction)
 - [ ] Generate plugin-API docs from Zig source annotations
 - [ ] Auto-publish on every release

@@ -38,6 +38,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const shisa_config_module = b.createModule(.{
+        .root_source_file = b.path("src/config.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
     const exe = b.addExecutable(.{
         .name = "shisa",
@@ -134,6 +139,20 @@ pub fn build(b: *std.Build) void {
     schema_run.addFileArg(b.path("docs/protocol/v1.schema.json"));
     const schema_step = b.step("schema", "Generate protocol JSON Schema");
     schema_step.dependOn(&schema_run.step);
+
+    const config_schema_docs_exe = b.addExecutable(.{
+        .name = "shisa-config-schema-docs",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/config_schema_docs.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    config_schema_docs_exe.root_module.addImport("shisa_config", shisa_config_module);
+    const config_schema_docs_run = b.addRunArtifact(config_schema_docs_exe);
+    config_schema_docs_run.addFileArg(b.path("docs/config-schema.md"));
+    const config_schema_docs_step = b.step("config-schema-docs", "Generate shisa.toml config schema docs");
+    config_schema_docs_step.dependOn(&config_schema_docs_run.step);
 
     const run_cmd = b.addRunArtifact(exe);
     if (b.args) |args| run_cmd.addArgs(args);
@@ -527,6 +546,15 @@ pub fn build(b: *std.Build) void {
     });
     protocol_schema_tests.root_module.addImport("proto_types", proto_types_module);
     const protocol_schema_test_run = b.addRunArtifact(protocol_schema_tests);
+    const config_schema_docs_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/config_schema_docs.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    config_schema_docs_tests.root_module.addImport("shisa_config", shisa_config_module);
+    const config_schema_docs_test_run = b.addRunArtifact(config_schema_docs_tests);
     const client_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/shisa-client.zig"),
@@ -615,6 +643,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&proto_types_test_run.step);
     test_step.dependOn(&proto_frame_test_run.step);
     test_step.dependOn(&protocol_schema_test_run.step);
+    test_step.dependOn(&config_schema_docs_test_run.step);
     test_step.dependOn(&client_test_run.step);
     test_step.dependOn(&server_test_run.step);
     test_step.dependOn(&zsh_integration.step);

@@ -345,7 +345,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 ### 11.11 Container provenance (`container_provenance`)
 - [x] Detect docker (`/.dockerenv`)
 - [x] Detect podman (cgroups inspection)
-- [ ] Detect devcontainer (`$REMOTE_CONTAINERS`)
+- [x] Detect devcontainer (`$REMOTE_CONTAINERS`)
 - [ ] Detect nix-shell (`$IN_NIX_SHELL`)
 - [ ] Detect distrobox / toolbx (env vars)
 - [ ] Detect Kubernetes pod context (env vars / `/var/run/secrets/kubernetes.io/`)

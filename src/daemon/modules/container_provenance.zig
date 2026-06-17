@@ -3,6 +3,7 @@ const std = @import("std");
 pub const module_id = "container_provenance";
 pub const docker_marker_path = "/.dockerenv";
 pub const podman_cgroup_path = "/proc/1/cgroup";
+pub const devcontainer_env_var = "REMOTE_CONTAINERS";
 
 pub const ContainerStatus = struct {
     provider: []u8,
@@ -34,6 +35,21 @@ pub fn detectPodmanAlloc(allocator: std.mem.Allocator, cgroup_path: []const u8) 
 pub fn detectPodmanFromCgroupAlloc(allocator: std.mem.Allocator, cgroup: []const u8) !?ContainerStatus {
     if (std.mem.indexOf(u8, cgroup, "libpod") == null and std.mem.indexOf(u8, cgroup, "podman") == null) return null;
     return try containerStatusAlloc(allocator, "podman", "podman");
+}
+
+pub fn detectDevcontainerEnvAlloc(allocator: std.mem.Allocator) !?ContainerStatus {
+    const value = std.process.getEnvVarOwned(allocator, devcontainer_env_var) catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(value);
+    return detectDevcontainerAlloc(allocator, value);
+}
+
+pub fn detectDevcontainerAlloc(allocator: std.mem.Allocator, remote_containers: ?[]const u8) !?ContainerStatus {
+    const value = remote_containers orelse return null;
+    if (std.mem.trim(u8, value, " \t\r\n").len == 0) return null;
+    return try containerStatusAlloc(allocator, "devcontainer", "devcontainer");
 }
 
 fn containerStatusAlloc(allocator: std.mem.Allocator, provider: []const u8, name: []const u8) !ContainerStatus {
@@ -92,4 +108,16 @@ test "detects podman cgroupfs parent" {
 
 test "ignores unrelated cgroup" {
     try std.testing.expect(try detectPodmanFromCgroupAlloc(std.testing.allocator, "0::/user.slice/user-501.slice/session-1.scope\n") == null);
+}
+
+test "detects devcontainer env" {
+    var status = (try detectDevcontainerAlloc(std.testing.allocator, "true")).?;
+    defer status.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("devcontainer", status.provider);
+    try std.testing.expectEqualStrings("devcontainer", status.name);
+}
+
+test "ignores empty devcontainer env" {
+    try std.testing.expect(try detectDevcontainerAlloc(std.testing.allocator, " \n") == null);
+    try std.testing.expect(try detectDevcontainerAlloc(std.testing.allocator, null) == null);
 }

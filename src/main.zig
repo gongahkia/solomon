@@ -152,7 +152,14 @@ test "smoke" {
 }
 
 fn initConfig(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    if (args.len != 0) return error.UnknownInitArgument;
+    var a11y = false;
+    for (args) |arg| {
+        if (std.mem.eql(u8, arg, "--a11y")) {
+            a11y = true;
+        } else {
+            return error.UnknownInitArgument;
+        }
+    }
 
     const path = try defaultConfigPath(allocator);
     defer allocator.free(path);
@@ -162,7 +169,7 @@ fn initConfig(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     var file = try std.fs.createFileAbsolute(path, .{ .exclusive = true });
     defer file.close();
-    try file.writeAll(shisa_config.default_config_text);
+    try file.writeAll(if (a11y) shisa_config.a11y_config_text else shisa_config.default_config_text);
 
     const message = try std.fmt.allocPrint(allocator, "wrote {s}\n", .{path});
     defer allocator.free(message);
@@ -5050,7 +5057,7 @@ const help_text =
     \\                translate Tide fish settings to shisa.toml
     \\  import-pure
     \\                print the minimal Pure-compatible preset
-    \\  init          write default shisa.toml
+    \\  init          write default shisa.toml; --a11y uses the a11y theme
     \\  pin           mark a path as never-evicted
     \\  plugin        install, list, enable, disable, or trust plugins
     \\  prompt        render prompt through shisad; --a11y strips ANSI and normalizes glyphs

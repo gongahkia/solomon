@@ -24,7 +24,7 @@ commands:
                 translate Tide fish settings to shisa.toml
   import-pure
                 print the minimal Pure-compatible preset
-  init          write default shisa.toml
+  init          write default shisa.toml; --a11y uses the a11y theme
   pin           mark a path as never-evicted
   plugin        install, list, enable, disable, or trust plugins
   prompt        render prompt through shisad; --a11y strips ANSI and normalizes glyphs

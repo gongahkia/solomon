@@ -40,6 +40,44 @@ pub const default_config_text =
     \\
 ;
 
+pub const a11y_config_text =
+    \\version = 1
+    \\theme = "a11y"
+    \\
+    \\[prompt]
+    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+    \\
+    \\[modules.cwd]
+    \\truncate_to = 3
+    \\home_tilde = true
+    \\
+    \\[modules.git_branch]
+    \\show_dirty = true
+    \\cache_ttl_ms = 250
+    \\
+    \\[modules.cmd_duration]
+    \\threshold_ms = 1000
+    \\
+    \\[modules.user_host]
+    \\mode = "ssh"
+    \\
+    \\[modules.cloud_ctx]
+    \\aws = true
+    \\gcp = true
+    \\azure = true
+    \\kubernetes = true
+    \\
+    \\[modules.risk_tier]
+    \\unknown_bg = "muted"
+    \\dev_bg = "success"
+    \\staging_bg = "warning"
+    \\prod_bg = "danger"
+    \\
+    \\[modules.sso_expiry]
+    \\warning_minutes = 30
+    \\
+;
+
 pub const Diagnostic = struct {
     message: []const u8 = "",
     line: usize = 0,
@@ -755,6 +793,15 @@ test "default config parses" {
     defer config.deinit(std.testing.allocator);
 
     try std.testing.expectEqualStrings("plain", config.theme);
+    try std.testing.expectEqualSlices(ModuleId, default_modules[0..], config.prompt_modules);
+}
+
+test "a11y config parses" {
+    var diagnostic: Diagnostic = .{};
+    var config = try parse(std.testing.allocator, a11y_config_text, &diagnostic);
+    defer config.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("a11y", config.theme);
     try std.testing.expectEqualSlices(ModuleId, default_modules[0..], config.prompt_modules);
 }
 

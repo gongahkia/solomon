@@ -2,6 +2,12 @@
 
 Use `SHISA_A11Y=1` for interactive hooks, or `shisa prompt --a11y` for one-shot checks.
 
+To create a new accessibility-first config:
+
+```sh
+./zig-out/bin/shisa init --a11y
+```
+
 ## 1. Start the daemon
 
 ```sh
@@ -82,6 +88,6 @@ modules = ["cwd", "git_branch", "exit_status", "jobs", "cmd_duration", "cloud_ct
 
 For maximum contrast, set `theme = "a11y"`. The built-in `a11y` theme uses ASCII-only labels and white text on the terminal default background.
 
-Current scope: `SHISA_A11Y=1` configures prompt rendering. `shisa init --a11y` and an alt-text dump command are separate accessibility-roadmap items.
+Current scope: `SHISA_A11Y=1` configures prompt rendering. The alt-text dump command is a separate accessibility-roadmap item.
 
 See [Shells](../shells.md), [OSC Sequences](../protocol/osc.md), [SSH Target](../ssh-target.md), [Risk Tiers](../risk-tiers.md), and [Config Schema](../config-schema.md).

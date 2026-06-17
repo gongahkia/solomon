@@ -708,7 +708,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] `shisa render --explain-a11y` dumps the alt-text for the current prompt
 
 ### 21.3 `--a11y` mode
-- [ ] `shisa init --a11y` writes a config with colors stripped + glyphs ASCII
+- [x] `shisa init --a11y` writes a config with colors stripped + glyphs ASCII
 - [x] Built-in `a11y` theme passing AAA on ASCII
 - [ ] `shisa render --a11y` flag for one-shot test
 - [x] Document why a11y mode is opinionated (no override of certain signals)

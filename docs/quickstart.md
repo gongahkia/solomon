@@ -91,3 +91,16 @@ Put the matching block in the shell startup file:
 ./zig-out/bin/shisa doctor
 ./zig-out/bin/shisa explain
 ```
+
+<details>
+<summary>Troubleshooting</summary>
+
+| Symptom | Check |
+| --- | --- |
+| Prompt falls back to the current directory | `shisad --foreground` is running and the socket path matches `shisa doctor`. |
+| Shell startup errors on `source` | `SHISA_BIN` points to an executable `zig-out/bin/shisa`. |
+| Fish prompt shows stale output | Remove `~/.config/shisa/last-prompt` and run `fish_prompt` again. |
+| Async fields do not update | Run the shell integration test listed in [Shells](shells.md) for that shell. |
+| Config changes do not show | Run `shisa explain` and confirm the expected module pipeline. |
+
+</details>

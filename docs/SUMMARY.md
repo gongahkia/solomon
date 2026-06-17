@@ -29,6 +29,7 @@
 - [Linux](linux.md)
 - [Deprecations](deprecations.md)
 - [Internationalization](i18n.md)
+- [Translating Shisa](translating.md)
 
 # Modules
 

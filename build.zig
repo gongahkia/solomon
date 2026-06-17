@@ -154,6 +154,20 @@ pub fn build(b: *std.Build) void {
     const config_schema_docs_step = b.step("config-schema-docs", "Generate shisa.toml config schema docs");
     config_schema_docs_step.dependOn(&config_schema_docs_run.step);
 
+    const cli_docs_exe = b.addExecutable(.{
+        .name = "shisa-cli-docs",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/cli_docs.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const cli_docs_run = b.addRunArtifact(cli_docs_exe);
+    cli_docs_run.addArtifactArg(debug_exe);
+    cli_docs_run.addFileArg(b.path("docs/cli.md"));
+    const cli_docs_step = b.step("cli-docs", "Generate CLI reference docs from shisa --help");
+    cli_docs_step.dependOn(&cli_docs_run.step);
+
     const run_cmd = b.addRunArtifact(exe);
     if (b.args) |args| run_cmd.addArgs(args);
     const run_step = b.step("run", "Run shisa");
@@ -555,6 +569,19 @@ pub fn build(b: *std.Build) void {
     });
     config_schema_docs_tests.root_module.addImport("shisa_config", shisa_config_module);
     const config_schema_docs_test_run = b.addRunArtifact(config_schema_docs_tests);
+    const cli_docs_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/cli_docs.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const cli_docs_test_run = b.addRunArtifact(cli_docs_tests);
+    const cli_docs_check_run = b.addRunArtifact(cli_docs_exe);
+    cli_docs_check_run.addArtifactArg(debug_exe);
+    cli_docs_check_run.addArg("zig-out/cli.md");
+    const cli_docs_diff = b.addSystemCommand(&.{ "cmp", "docs/cli.md", "zig-out/cli.md" });
+    cli_docs_diff.step.dependOn(&cli_docs_check_run.step);
     const client_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/shisa-client.zig"),
@@ -644,6 +671,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&proto_frame_test_run.step);
     test_step.dependOn(&protocol_schema_test_run.step);
     test_step.dependOn(&config_schema_docs_test_run.step);
+    test_step.dependOn(&cli_docs_test_run.step);
+    test_step.dependOn(&cli_docs_diff.step);
     test_step.dependOn(&client_test_run.step);
     test_step.dependOn(&server_test_run.step);
     test_step.dependOn(&zsh_integration.step);

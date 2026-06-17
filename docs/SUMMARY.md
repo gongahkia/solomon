@@ -19,6 +19,7 @@
 
 - [Architecture](architecture.md)
 - [Config Schema](config-schema.md)
+- [CLI Reference](cli.md)
 - [Theme Spec](theme-spec.md)
 - [Capabilities](capabilities.md)
 - [Shells](shells.md)

@@ -27,6 +27,7 @@
 - [Socket Paths](socket-paths.md)
 - [Doctor](doctor.md)
 - [Linux](linux.md)
+- [Deprecations](deprecations.md)
 
 # Modules
 

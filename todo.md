@@ -690,9 +690,9 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] Post-release: bump dev version + notify channels
 
 ### 20.7 Deprecation policy
-- [ ] Document the one-major-overlap rule
+- [x] Document the one-major-overlap rule
 - [ ] Add `shisa doctor` warnings for deprecated APIs in use
-- [ ] Track deprecations in `docs/deprecations.md`
+- [x] Track deprecations in `docs/deprecations.md`
 
 ## Phase 21 â€” Accessibility (WCAG AA + a11y mode)
 

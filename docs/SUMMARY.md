@@ -1,0 +1,65 @@
+# Summary
+
+[Overview](index.md)
+
+# Core
+
+- [Architecture](architecture.md)
+- [Config Schema](config-schema.md)
+- [Theme Spec](theme-spec.md)
+- [Capabilities](capabilities.md)
+- [Shells](shells.md)
+- [Socket Paths](socket-paths.md)
+- [Doctor](doctor.md)
+- [Linux](linux.md)
+
+# Modules
+
+- [VCS](vcs.md)
+- [SSH Target](ssh-target.md)
+- [VPN Status](vpn-status.md)
+- [Prod Guard](prod-guard.md)
+- [Risk Tiers](risk-tiers.md)
+- [Cloud Cost Glance](cost-glance.md)
+- [Region Drift](region-drift.md)
+- [IaC Workspace](iac-workspace.md)
+- [IAM Whoami](iam-whoami.md)
+- [SSO Expiry](sso-expiry.md)
+- [Container Provenance](container-provenance.md)
+
+# Migration
+
+- [Migrate From Starship](migrate-from-starship.md)
+- [Starship Import](starship-import.md)
+- [Starship Module Map](starship-module-map.md)
+- [Powerlevel10k Module Map](powerlevel10k-module-map.md)
+- [Oh My Posh Segment Map](oh-my-posh-segment-map.md)
+- [Tide Item Map](tide-item-map.md)
+- [Pure Import](pure-import.md)
+
+# Plugins
+
+- [Plugins](plugins.md)
+- [Plugin Manifest](plugin-manifest.md)
+- [Plugin Runtime](plugin-runtime.md)
+- [Pack Status](pack-status.md)
+
+# Editor Bridges
+
+- [Writing a Bridge](editor-bridges/writing-a-bridge.md)
+- [Helix](editor-bridges/helix.md)
+- [Zed](editor-bridges/zed.md)
+
+# AI
+
+- [Ollama](ai-ollama.md)
+
+# Governance
+
+- [Vouch](governance/vouch.md)
+- [Maintainer Onboarding](governance/maintainer-onboarding.md)
+- [Code of Conduct Enforcement](governance/code-of-conduct-enforcement.md)
+
+# Protocol
+
+- [Errors](protocol/errors.md)

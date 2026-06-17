@@ -602,7 +602,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ## Phase 19 â€” Documentation site + tutorials
 
 ### 19.1 Docs site
-- [ ] mdBook scaffold under `docs/`
+- [x] mdBook scaffold under `docs/`
 - [ ] Build pipeline: PR previews via GitHub Actions
 - [ ] Deploy to shisa.sh/docs
 - [ ] Search: stork-search or pagefind integration

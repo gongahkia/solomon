@@ -1,0 +1,12 @@
+# Shisa Documentation
+
+Shisa is a daemon-backed, async-first, cross-shell prompt.
+
+Start with:
+
+- [Architecture](architecture.md)
+- [Config Schema](config-schema.md)
+- [Shells](shells.md)
+- [Migrate From Starship](migrate-from-starship.md)
+
+The roadmap lives in [`todo.md`](../todo.md).

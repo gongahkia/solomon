@@ -6,6 +6,10 @@
 
 -
 
+## Vouch
+
+Are you vouched? If not, expect a 2-vouched-reviewer review.
+
 ## Checklist
 
 - [ ] Tests added or updated, or not needed with reason above.

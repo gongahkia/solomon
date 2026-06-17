@@ -547,7 +547,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Add `VOUCHES` text file at repo root (POSIX-parseable)
 - [x] Bootstrap with founder as only vouched entry
 - [x] Document the format in `docs/governance/vouch.md`
-- [ ] Add `shisa vouch verify` CLI subcommand
+- [x] Add `shisa vouch verify` CLI subcommand
 - [ ] PR template asks: "Are you vouched? If not, expect a 2-vouched-reviewer review."
 
 ### 17.2 RFC process

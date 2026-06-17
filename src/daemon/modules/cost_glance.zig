@@ -302,6 +302,29 @@ pub fn refreshCacheFromEnvironment(allocator: std.mem.Allocator, home: ?[]const 
     return true;
 }
 
+pub fn render(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
+    const path = (try costCachePathAlloc(allocator, home)) orelse return null;
+    defer allocator.free(path);
+    const records = try readCostCacheAlloc(allocator, path);
+    defer freeCachedRecords(allocator, records);
+    return renderRecordsAlloc(allocator, records);
+}
+
+pub fn renderRecordsAlloc(allocator: std.mem.Allocator, records: []const CachedCostRecord) !?[]u8 {
+    if (records.len == 0) return null;
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.appendSlice(allocator, "cost[");
+    for (records, 0..) |record, index| {
+        if (index != 0) try out.append(allocator, ' ');
+        try out.appendSlice(allocator, record.provider);
+        try out.append(allocator, ':');
+        try appendCompactMoney(allocator, &out, record.amount, record.unit);
+    }
+    try out.append(allocator, ']');
+    return @as(?[]u8, try out.toOwnedSlice(allocator));
+}
+
 pub fn freeArgv(allocator: std.mem.Allocator, argv: [][]u8) void {
     freePartialArgv(allocator, argv);
     allocator.free(argv);
@@ -521,6 +544,33 @@ fn writeJsonString(file: std.fs.File, value: []const u8) !void {
     try file.writeAll("\"");
 }
 
+fn appendCompactMoney(allocator: std.mem.Allocator, out: *std.ArrayList(u8), amount: []const u8, unit: []const u8) !void {
+    const trimmed_amount = std.mem.trim(u8, amount, " \t\r\n");
+    const trimmed_unit = std.mem.trim(u8, unit, " \t\r\n");
+    const parsed = std.fmt.parseFloat(f64, trimmed_amount) catch null;
+    if (std.ascii.eqlIgnoreCase(trimmed_unit, "USD")) {
+        try out.append(allocator, '$');
+        if (parsed) |value| {
+            try appendFmt(allocator, out, "{d:.2}", .{value});
+        } else {
+            try out.appendSlice(allocator, trimmed_amount);
+        }
+        return;
+    }
+    if (parsed) |value| {
+        try appendFmt(allocator, out, "{d:.2}{s}", .{ value, trimmed_unit });
+    } else {
+        try out.appendSlice(allocator, trimmed_amount);
+        try out.appendSlice(allocator, trimmed_unit);
+    }
+}
+
+fn appendFmt(allocator: std.mem.Allocator, out: *std.ArrayList(u8), comptime format: []const u8, args: anytype) !void {
+    const text = try std.fmt.allocPrint(allocator, format, args);
+    defer allocator.free(text);
+    try out.appendSlice(allocator, text);
+}
+
 pub fn validIsoDate(value: []const u8) bool {
     if (value.len != 10) return false;
     for (value, 0..) |byte, index| {
@@ -643,6 +693,32 @@ test "writes and reads cost cache" {
     try std.testing.expectEqualStrings("12.34", records[0].amount);
     try std.testing.expectEqualStrings("USD", records[0].unit);
     try std.testing.expectEqualStrings("az", records[1].provider);
+}
+
+test "renders cached cost records" {
+    var records = [_]CachedCostRecord{
+        .{ .provider = try std.testing.allocator.dupe(u8, "aws"), .amount = try std.testing.allocator.dupe(u8, "12.3400000000"), .unit = try std.testing.allocator.dupe(u8, "USD"), .updated = 10 },
+        .{ .provider = try std.testing.allocator.dupe(u8, "az"), .amount = try std.testing.allocator.dupe(u8, "5.67"), .unit = try std.testing.allocator.dupe(u8, "USD"), .updated = 10 },
+    };
+    defer for (&records) |*record| record.deinit(std.testing.allocator);
+    const segment = (try renderRecordsAlloc(std.testing.allocator, records[0..])).?;
+    defer std.testing.allocator.free(segment);
+    try std.testing.expectEqualStrings("cost[aws:$12.34 az:$5.67]", segment);
+}
+
+test "renders cost cache from home" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-cost-render-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    const path = (try costCachePathAlloc(allocator, dir_path)).?;
+    defer allocator.free(path);
+    try writeCostCache(allocator, path, &.{
+        .{ .provider = "aws", .amount = "1.2", .unit = "USD", .updated = 10 },
+    }, 10);
+    const segment = (try render(allocator, dir_path)).?;
+    defer allocator.free(segment);
+    try std.testing.expectEqualStrings("cost[aws:$1.20]", segment);
 }
 
 test "parses azure cost management response" {

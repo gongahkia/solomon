@@ -1,6 +1,7 @@
 const std = @import("std");
 const cloud_ctx_module = @import("modules/cloud_ctx.zig");
 const cmd_duration_module = @import("modules/cmd_duration.zig");
+const cost_glance_module = @import("modules/cost_glance.zig");
 const cwd_module = @import("modules/cwd.zig");
 const exit_status_module = @import("modules/exit_status.zig");
 const git_branch_module = @import("modules/git_branch.zig");
@@ -29,6 +30,7 @@ pub const ModuleId = enum {
     user_host,
     cloud_ctx,
     region_drift,
+    cost_glance,
     sso_expiry,
     iac_workspace,
 };
@@ -109,6 +111,7 @@ const default_pipeline = [_]ModuleSpec{
     .{ .id = .sso_expiry, .execution_class = executionClass(.sso_expiry) },
     .{ .id = .iac_workspace, .execution_class = executionClass(.iac_workspace) },
     .{ .id = .region_drift, .execution_class = executionClass(.region_drift) },
+    .{ .id = .cost_glance, .execution_class = executionClass(.cost_glance) },
 };
 
 pub fn executionClass(module_id: ModuleId) ExecutionClass {
@@ -189,6 +192,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
         .user_host => try user_host_module.render(allocator, input.ssh, input.user, input.host),
         .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.kubeconfig, input.home, caches.cloud_ctx, input.cloud_ctx),
         .region_drift => try region_drift_module.render(allocator, input.home, input.aws_profile, input.aws_region, input.aws_default_region, input.cloudsdk_compute_region, input.azure_location, input.arm_location, input.azure_default_location),
+        .cost_glance => try cost_glance_module.render(allocator, input.home),
         .sso_expiry => try sso_expiry_module.render(allocator, input.home, input.timestamp, input.sso_expiry),
         .iac_workspace => try iac_workspace_module.render(allocator, input.cwd, input.home),
     };
@@ -210,6 +214,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .user_host => "user_host",
         .cloud_ctx => "cloud_ctx",
         .region_drift => "region_drift",
+        .cost_glance => "cost_glance",
         .sso_expiry => "sso_expiry",
         .iac_workspace => "iac_workspace",
     };

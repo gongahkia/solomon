@@ -635,7 +635,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 - [x] Why we picked Zig
 
 ### 19.6 Videos
-- [ ] "Why Shisa" — 3-minute project intro
+- [x] "Why Shisa" — 3-minute project intro
 - [ ] "5-min Setup" — install walkthrough
 - [ ] "Plugin in 10 lines" — Lua plugin tutorial
 - [ ] Captions + transcripts checked into repo

@@ -69,6 +69,10 @@
 
 - [Ollama](ai-ollama.md)
 
+# Videos
+
+- [Why Shisa](videos/why-shisa.md)
+
 # Governance
 
 - [Vouch](governance/vouch.md)

@@ -327,7 +327,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Background hourly refresh in the daemon (off-thread)
 - [x] Cache to `~/.local/state/shisa/cost.json`
 - [x] Render compact MTD spend per cloud
-- [ ] Document the IAM permissions required and the privacy implications (this calls cloud APIs!)
+- [x] Document the IAM permissions required and the privacy implications (this calls cloud APIs!)
 
 ### 11.9 VPN status (`vpn_status`)
 - [ ] Detect Wireguard interface up (parse `wg show`)

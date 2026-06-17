@@ -29,6 +29,13 @@ The daemon starts an off-thread hourly refresh loop. It writes `~/.local/state/s
 
 The prompt renders cached values as `cost[provider:$amount]`, for example `cost[aws:$12.34 az:$5.67]`. Rendering reads the local cache only.
 
+## Permissions And Privacy
+
+- AWS: grant `ce:GetCostAndUsage` on `*` to the profile used by the daemon.
+- GCP: grant a Cloud Billing role that can list billing accounts, such as Billing Account Viewer. Spend querying through BigQuery export also needs BigQuery read/query permissions on the export dataset.
+- Azure: grant Cost Management data access for the queried scope. For Azure RBAC scopes, use a read-only role that can view cost data, such as Reader or Cost Management Reader.
+- Privacy: refresh calls cloud billing APIs and stores account spend values in `~/.local/state/shisa/cost.json` with file mode `0600`. Prompt rendering does not call cloud APIs.
+
 Sources: [AWS Cost Explorer API](https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_GetCostAndUsage.html), [AWS CLI `ce get-cost-and-usage`](https://docs.aws.amazon.com/cli/latest/reference/ce/get-cost-and-usage.html), and [AWS IAM Service Authorization Reference for Cost Explorer](https://docs.aws.amazon.com/service-authorization/latest/reference/list_awscostexplorerservice.html).
 
 GCP sources: [Cloud Billing APIs](https://docs.cloud.google.com/billing/docs/apis), [Cloud Billing REST reference](https://docs.cloud.google.com/billing/docs/reference/rest), [gcloud billing accounts list](https://docs.cloud.google.com/sdk/gcloud/reference/billing/accounts/list), and [Cloud Billing export to BigQuery](https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery).

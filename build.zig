@@ -327,6 +327,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const vpn_status_test_run = b.addRunArtifact(vpn_status_tests);
+    const ssh_target_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/daemon/modules/ssh_target.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const ssh_target_test_run = b.addRunArtifact(ssh_target_tests);
     const prod_guard_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/modules/prod_guard.zig"),
@@ -494,6 +502,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&region_drift_test_run.step);
     test_step.dependOn(&cost_glance_test_run.step);
     test_step.dependOn(&vpn_status_test_run.step);
+    test_step.dependOn(&ssh_target_test_run.step);
     test_step.dependOn(&prod_guard_test_run.step);
     test_step.dependOn(&iam_whoami_test_run.step);
     test_step.dependOn(&iac_workspace_test_run.step);

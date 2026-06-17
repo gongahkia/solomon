@@ -338,7 +338,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Render compact "vpn:<name>" segment when active
 
 ### 11.10 SSH target (`ssh_target`)
-- [ ] Detect inside SSH session via `$SSH_CONNECTION`
+- [x] Detect inside SSH session via `$SSH_CONNECTION`
 - [ ] Classify remote host using risk_tier rules
 - [ ] Render `→ host (prod)` segment when remote
 

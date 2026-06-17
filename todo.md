@@ -558,7 +558,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred โ€
 - [x] 14-day public comment window automation via GitHub label
 
 ### 17.3 Maintainer onboarding
-- [ ] Write `docs/governance/maintainer-onboarding.md`
+- [x] Write `docs/governance/maintainer-onboarding.md`
 - [ ] Document the steering-group transition triggers from ยง35.2
 - [ ] Publish current state on shisa.sh/governance
 

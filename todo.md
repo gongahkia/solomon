@@ -615,7 +615,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 19.3 Recipes
 - [x] Recipe: "k8s context safety in 60 seconds"
 - [x] Recipe: "AI hotkey suggestion with local model"
-- [ ] Recipe: "Stacked-diff workflow with Graphite + Shisa"
+- [x] Recipe: "Stacked-diff workflow with Graphite + Shisa"
 - [ ] Recipe: "Custom theme inheriting from okiya-night"
 - [ ] Recipe: "Migrating from Powerlevel10k step-by-step"
 - [ ] Recipe: "Plugin in 30 lines of Lua"

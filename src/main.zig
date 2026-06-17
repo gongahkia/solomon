@@ -271,6 +271,16 @@ const DoctorConfig = struct {
     socket_path: ?[]const u8 = null,
 };
 
+const DeprecationRule = struct {
+    kind: []const u8,
+    pattern: []const u8,
+    replacement: []const u8,
+    since: []const u8,
+    remove_before: []const u8,
+};
+
+const active_deprecation_rules = [_]DeprecationRule{};
+
 fn doctorCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const config = try parseDoctorArgs(args);
     const socket_path = if (config.socket_path) |path| path else try paths.defaultSocketPath(allocator);
@@ -295,6 +305,8 @@ fn parseDoctorArgs(args: []const []const u8) !DoctorConfig {
 }
 
 fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u8 {
+    const config_path = try defaultConfigPath(allocator);
+    defer allocator.free(config_path);
     const config_dir = try configDirPath(allocator);
     defer allocator.free(config_dir);
     const plugins_dir = try pluginsDirPath(allocator);
@@ -309,6 +321,7 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u
     try appendFmt(allocator, &out, "plugins_dir: {s} {s}\n", .{ pathAccessStatus(plugins_dir), plugins_dir });
     try appendFmt(allocator, &out, "lua: {s}\n", .{luaRuntimeStatus(allocator)});
     try appendFmt(allocator, &out, "fsnotify: {s}\n", .{fsnotifyBackendName(fsnotify.selectBackend(builtin.os.tag))});
+    try appendDoctorDeprecations(allocator, &out, config_path);
 
     if (builtin.os.tag == .linux) {
         const limit = fsnotify.readLinuxMaxUserWatches(allocator) catch null;
@@ -319,6 +332,35 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u
         }
     }
 
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendDoctorDeprecations(allocator: std.mem.Allocator, out: *std.ArrayList(u8), config_path: []const u8) !void {
+    const source = readConfigOrDefault(allocator, config_path) catch |err| {
+        try appendFmt(allocator, out, "deprecations: unreadable ({s})\n", .{@errorName(err)});
+        return;
+    };
+    defer allocator.free(source);
+
+    const warnings = try deprecationWarningsAlloc(allocator, source, active_deprecation_rules[0..]);
+    defer allocator.free(warnings);
+    try out.appendSlice(allocator, warnings);
+}
+
+fn deprecationWarningsAlloc(allocator: std.mem.Allocator, source: []const u8, rules: []const DeprecationRule) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    var count: usize = 0;
+    for (rules) |rule| {
+        if (std.mem.indexOf(u8, source, rule.pattern) == null) continue;
+        try appendFmt(
+            allocator,
+            &out,
+            "deprecation: {s} `{s}` deprecated since {s}; use `{s}`; remove before {s}\n",
+            .{ rule.kind, rule.pattern, rule.since, rule.replacement, rule.remove_before },
+        );
+        count += 1;
+    }
+    if (count == 0) try out.appendSlice(allocator, "deprecations: none\n");
     return out.toOwnedSlice(allocator);
 }
 
@@ -372,6 +414,32 @@ test "doctor reports path and backend statuses" {
     try std.testing.expectEqualStrings("missing", pathAccessStatus("/tmp/shisa-doctor-missing"));
     try std.testing.expectEqualStrings("fsevents", fsnotifyBackendName(.fsevents));
     try std.testing.expectEqualStrings("inotify", fsnotifyBackendName(.inotify));
+}
+
+test "doctor deprecation scanner reports matching rules" {
+    const rules = [_]DeprecationRule{.{
+        .kind = "config",
+        .pattern = "old_key",
+        .replacement = "new_key",
+        .since = "1.4.0",
+        .remove_before = "2.0.0",
+    }};
+    const output = try deprecationWarningsAlloc(std.testing.allocator, "old_key = true\n", rules[0..]);
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "deprecation: config `old_key` deprecated since 1.4.0") != null);
+}
+
+test "doctor deprecation scanner reports none" {
+    const rules = [_]DeprecationRule{.{
+        .kind = "config",
+        .pattern = "old_key",
+        .replacement = "new_key",
+        .since = "1.4.0",
+        .remove_before = "2.0.0",
+    }};
+    const output = try deprecationWarningsAlloc(std.testing.allocator, "new_key = true\n", rules[0..]);
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("deprecations: none\n", output);
 }
 
 const VouchEntry = struct {

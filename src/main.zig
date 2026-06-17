@@ -7,6 +7,7 @@ const cloud_ctx_module = @import("daemon/modules/cloud_ctx.zig");
 const nextcmd = @import("ai/nextcmd.zig");
 const nl2cmd = @import("ai/nl2cmd.zig");
 const ollama = @import("ai/ollama.zig");
+const ai_risk = @import("ai/risk.zig");
 const shisa_config = @import("config.zig");
 const paths = @import("daemon/paths.zig");
 const proto = @import("proto/types.zig");
@@ -648,6 +649,13 @@ fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try aiBench(allocator, config);
         return;
     }
+    if (args.len >= 1 and std.mem.eql(u8, args[0], "risk")) {
+        const config = try parseAiRiskArgs(args[1..]);
+        const output = try ai_risk.outputAlloc(allocator, config.command);
+        defer allocator.free(output);
+        try std.fs.File.stdout().writeAll(output);
+        return;
+    }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "nextcmd")) {
         const config = try parseAiNextcmdArgs(args[1..]);
         try aiNextcmd(allocator, config);
@@ -673,6 +681,29 @@ fn parseAiBenchArgs(args: []const []const u8) !AiBenchConfig {
             return error.UnknownAiArgument;
         }
     }
+    return config;
+}
+
+const AiRiskConfig = struct {
+    command: []const u8 = "",
+};
+
+fn parseAiRiskArgs(args: []const []const u8) !AiRiskConfig {
+    var config = AiRiskConfig{};
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--command")) {
+            config.command = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--")) {
+            config.command = try nextValue(args, &i);
+            if (i + 1 != args.len) return error.UnknownAiArgument;
+        } else if (config.command.len == 0) {
+            config.command = args[i];
+        } else {
+            return error.UnknownAiArgument;
+        }
+    }
+    if (config.command.len == 0) return error.MissingValue;
     return config;
 }
 
@@ -907,6 +938,11 @@ test "ai bench args parse" {
     const config = try parseAiBenchArgs(&.{ "--model", "gemma3:1b", "--prompt", "hi" });
     try std.testing.expectEqualStrings("gemma3:1b", config.model);
     try std.testing.expectEqualStrings("hi", config.prompt);
+}
+
+test "ai risk args parse" {
+    const config = try parseAiRiskArgs(&.{ "--command", "rm -rf /tmp/x" });
+    try std.testing.expectEqualStrings("rm -rf /tmp/x", config.command);
 }
 
 test "ai nextcmd args parse" {

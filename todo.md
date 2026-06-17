@@ -384,7 +384,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Log every NL→cmd to `~/.local/state/shisa/nl2cmd.jsonl`
 
 ### 12.4 Risk explainer (`risk`)
-- [ ] Rules-engine first (fast, deterministic, same blocklist as prod_guard)
+- [x] Rules-engine first (fast, deterministic, same blocklist as prod_guard)
 - [ ] Optional SLM second pass on borderline commands
 - [ ] Render "this will delete N files in /etc" style annotations
 - [ ] Pre-exec gate integration

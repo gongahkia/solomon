@@ -1,0 +1,72 @@
+const std = @import("std");
+
+pub const RebaseState = enum {
+    none,
+    apply,
+    merge,
+    interactive,
+};
+
+pub fn detectRebaseState(git_dir: std.fs.Dir) !RebaseState {
+    if (entryExists(git_dir, "rebase-merge")) {
+        if (entryExists(git_dir, "rebase-merge/interactive") or entryExists(git_dir, "rebase-merge/git-rebase-todo")) {
+            return .interactive;
+        }
+        return .merge;
+    }
+    if (entryExists(git_dir, "rebase-apply")) return .apply;
+    return .none;
+}
+
+fn entryExists(dir: std.fs.Dir, sub_path: []const u8) bool {
+    dir.access(sub_path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return false,
+    };
+    return true;
+}
+
+test "detects absent rebase state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var git_dir = try makeGitDir(&tmp);
+    defer git_dir.close();
+    try std.testing.expectEqual(RebaseState.none, try detectRebaseState(git_dir));
+}
+
+test "detects apply rebase state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath(".git/rebase-apply");
+    var git_dir = try openGitDir(&tmp);
+    defer git_dir.close();
+    try std.testing.expectEqual(RebaseState.apply, try detectRebaseState(git_dir));
+}
+
+test "detects merge rebase state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath(".git/rebase-merge");
+    var git_dir = try openGitDir(&tmp);
+    defer git_dir.close();
+    try std.testing.expectEqual(RebaseState.merge, try detectRebaseState(git_dir));
+}
+
+test "detects interactive rebase state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath(".git/rebase-merge");
+    try tmp.dir.writeFile(.{ .sub_path = ".git/rebase-merge/git-rebase-todo", .data = "pick abc123 msg\n" });
+    var git_dir = try openGitDir(&tmp);
+    defer git_dir.close();
+    try std.testing.expectEqual(RebaseState.interactive, try detectRebaseState(git_dir));
+}
+
+fn makeGitDir(tmp: *std.testing.TmpDir) !std.fs.Dir {
+    try tmp.dir.makeDir(".git");
+    return openGitDir(tmp);
+}
+
+fn openGitDir(tmp: *std.testing.TmpDir) !std.fs.Dir {
+    return tmp.dir.openDir(".git", .{});
+}

@@ -786,7 +786,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ## Phase 24 â€” Advanced git states (deep coverage)
 
 ### 24.1 Operation states
-- [ ] Detect rebase (in-progress / interactive / merge variant)
+- [x] Detect rebase (in-progress / interactive / merge variant)
 - [ ] Detect merge (in-progress)
 - [ ] Detect cherry-pick (in-progress / sequence)
 - [ ] Detect revert (in-progress / sequence)

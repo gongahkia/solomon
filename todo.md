@@ -617,7 +617,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Recipe: "AI hotkey suggestion with local model"
 - [x] Recipe: "Stacked-diff workflow with Graphite + Shisa"
 - [x] Recipe: "Custom theme inheriting from okiya-night"
-- [ ] Recipe: "Migrating from Powerlevel10k step-by-step"
+- [x] Recipe: "Migrating from Powerlevel10k step-by-step"
 - [ ] Recipe: "Plugin in 30 lines of Lua"
 - [ ] Recipe: "Running Shisa over SSH without slowing the prompt"
 - [ ] Recipe: "Configuring `--a11y` for screen readers"

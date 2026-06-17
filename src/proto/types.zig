@@ -92,6 +92,12 @@ pub const ErrorContext = struct {
     expected: ?[]const u8 = null,
     highest_supported_version: ?u32 = null,
     max_frame_bytes: ?u32 = null,
+    op: ?[]const u8 = null,
+    retry_after_ms: ?u32 = null,
+    plugin: ?[]const u8 = null,
+    timeout_ms: ?u32 = null,
+    capability: ?[]const u8 = null,
+    detail: ?[]const u8 = null,
 };
 
 pub const Error = struct {
@@ -272,6 +278,36 @@ test "error code enum exposes canonical protocol codes" {
     };
     for (codes, names) |code, name| {
         try std.testing.expectEqualStrings(name, @tagName(code));
+    }
+}
+
+test "error context carries machine fields for each code" {
+    const allocator = std.testing.allocator;
+    const envelopes = [_]ErrorEnvelope{
+        .{ .@"error" = .{ .code = .E_VERSION, .message = "bad version", .context = .{ .field = "v", .highest_supported_version = 1 } } },
+        .{ .@"error" = .{ .code = .E_OVERSIZE, .message = "too large", .context = .{ .max_frame_bytes = max_frame_bytes } } },
+        .{ .@"error" = .{ .code = .E_MALFORMED, .message = "bad request", .context = .{ .field = "op", .expected = "render" } } },
+        .{ .@"error" = .{ .code = .E_NOT_READY, .message = "pending", .context = .{ .op = "render_continue", .retry_after_ms = 25 } } },
+        .{ .@"error" = .{ .code = .E_PLUGIN_TIMEOUT, .message = "timeout", .context = .{ .plugin = "git", .timeout_ms = 2 } } },
+        .{ .@"error" = .{ .code = .E_CAPABILITY_DENIED, .message = "denied", .context = .{ .capability = "exec", .op = "render" } } },
+        .{ .@"error" = .{ .code = .E_INTERNAL, .message = "internal", .context = .{ .detail = "cache_state" } } },
+    };
+
+    for (envelopes) |envelope| {
+        const encoded = try encodeAlloc(allocator, envelope);
+        defer allocator.free(encoded);
+        var parsed = try decodeAlloc(ErrorEnvelope, allocator, encoded);
+        defer parsed.deinit();
+        try std.testing.expectEqual(envelope.@"error".code, parsed.value.@"error".code);
+        switch (envelope.@"error".code) {
+            .E_VERSION => try std.testing.expectEqual(@as(u32, 1), parsed.value.@"error".context.highest_supported_version.?),
+            .E_OVERSIZE => try std.testing.expectEqual(max_frame_bytes, parsed.value.@"error".context.max_frame_bytes.?),
+            .E_MALFORMED => try std.testing.expectEqualStrings("render", parsed.value.@"error".context.expected.?),
+            .E_NOT_READY => try std.testing.expectEqual(@as(u32, 25), parsed.value.@"error".context.retry_after_ms.?),
+            .E_PLUGIN_TIMEOUT => try std.testing.expectEqualStrings("git", parsed.value.@"error".context.plugin.?),
+            .E_CAPABILITY_DENIED => try std.testing.expectEqualStrings("exec", parsed.value.@"error".context.capability.?),
+            .E_INTERNAL => try std.testing.expectEqualStrings("cache_state", parsed.value.@"error".context.detail.?),
+        }
     }
 }
 

@@ -7,7 +7,7 @@ pub const default_config_text =
     \\theme = "plain"
     \\
     \\[prompt]
-    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status"]
+    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target"]
     \\
     \\[modules.cwd]
     \\truncate_to = 3
@@ -61,6 +61,7 @@ pub const ModuleId = enum {
     region_drift,
     cost_glance,
     vpn_status,
+    ssh_target,
     time,
 };
 
@@ -80,6 +81,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .region_drift => "region_drift",
         .cost_glance => "cost_glance",
         .vpn_status => "vpn_status",
+        .ssh_target => "ssh_target",
         .time => "time",
     };
 }
@@ -220,7 +222,7 @@ const Trimmed = struct {
     column: usize,
 };
 
-const default_modules = [_]ModuleId{ .cwd, .git_branch, .language_versions, .exit_status, .jobs, .cmd_duration, .user_host, .sso_expiry, .iac_workspace, .region_drift, .cost_glance, .vpn_status };
+const default_modules = [_]ModuleId{ .cwd, .git_branch, .language_versions, .exit_status, .jobs, .cmd_duration, .user_host, .sso_expiry, .iac_workspace, .region_drift, .cost_glance, .vpn_status, .ssh_target };
 
 pub fn parse(allocator: std.mem.Allocator, source: []const u8, diagnostic: *Diagnostic) !Config {
     diagnostic.* = .{};
@@ -635,6 +637,7 @@ fn parseModuleId(id: []const u8) ?ModuleId {
     if (std.mem.eql(u8, id, "region_drift")) return .region_drift;
     if (std.mem.eql(u8, id, "cost_glance")) return .cost_glance;
     if (std.mem.eql(u8, id, "vpn_status")) return .vpn_status;
+    if (std.mem.eql(u8, id, "ssh_target")) return .ssh_target;
     if (std.mem.eql(u8, id, "time")) return .time;
     return null;
 }
@@ -735,6 +738,8 @@ test "module metadata names execution classes" {
     try std.testing.expectEqualStrings("sync", moduleExecutionClass(.cost_glance));
     try std.testing.expectEqualStrings("vpn_status", moduleIdName(.vpn_status));
     try std.testing.expectEqualStrings("sync", moduleExecutionClass(.vpn_status));
+    try std.testing.expectEqualStrings("ssh_target", moduleIdName(.ssh_target));
+    try std.testing.expectEqualStrings("sync", moduleExecutionClass(.ssh_target));
     try std.testing.expectEqualStrings("async", moduleExecutionClass(.git_branch));
     try std.testing.expectEqualStrings("async", moduleExecutionClass(.language_versions));
 }

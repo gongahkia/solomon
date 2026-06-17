@@ -25,6 +25,13 @@ pub fn classifyHostWithUserRules(allocator: std.mem.Allocator, home: ?[]const u8
     return classifyHost(host, rules);
 }
 
+pub fn render(allocator: std.mem.Allocator, ssh_connection: ?[]const u8, host: []const u8, home: ?[]const u8) !?[]u8 {
+    const target = (try targetHostAlloc(allocator, ssh_connection, host)) orelse return null;
+    defer allocator.free(target);
+    const tier = try classifyHostWithUserRules(allocator, home, target);
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "→ {s} ({s})", .{ target, risk_tier.tierName(tier) }));
+}
+
 test "detects ssh connection env" {
     try std.testing.expect(insideSsh("192.0.2.1 55555 198.51.100.2 22"));
     try std.testing.expect(!insideSsh(null));
@@ -42,4 +49,11 @@ test "classifies ssh target host" {
     try std.testing.expectEqual(risk_tier.Tier.prod, classifyHost("prod-bastion", null));
     try std.testing.expectEqual(risk_tier.Tier.staging, classifyHost("api-staging-1", null));
     try std.testing.expectEqual(risk_tier.Tier.unknown, classifyHost("host", null));
+}
+
+test "renders ssh target segment" {
+    const segment = (try render(std.testing.allocator, "192.0.2.1 55555 198.51.100.2 22", "prod-bastion", null)).?;
+    defer std.testing.allocator.free(segment);
+    try std.testing.expectEqualStrings("→ prod-bastion (prod)", segment);
+    try std.testing.expect(try render(std.testing.allocator, null, "prod-bastion", null) == null);
 }

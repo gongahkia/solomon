@@ -9,6 +9,7 @@ const iac_workspace_module = @import("modules/iac_workspace.zig");
 const jobs_module = @import("modules/jobs.zig");
 const language_versions_module = @import("modules/language_versions.zig");
 const region_drift_module = @import("modules/region_drift.zig");
+const ssh_target_module = @import("modules/ssh_target.zig");
 const sso_expiry_module = @import("modules/sso_expiry.zig");
 const time_module = @import("modules/time.zig");
 const user_host_module = @import("modules/user_host.zig");
@@ -33,6 +34,7 @@ pub const ModuleId = enum {
     region_drift,
     cost_glance,
     vpn_status,
+    ssh_target,
     sso_expiry,
     iac_workspace,
 };
@@ -115,6 +117,7 @@ const default_pipeline = [_]ModuleSpec{
     .{ .id = .region_drift, .execution_class = executionClass(.region_drift) },
     .{ .id = .cost_glance, .execution_class = executionClass(.cost_glance) },
     .{ .id = .vpn_status, .execution_class = executionClass(.vpn_status) },
+    .{ .id = .ssh_target, .execution_class = executionClass(.ssh_target) },
 };
 
 pub fn executionClass(module_id: ModuleId) ExecutionClass {
@@ -197,6 +200,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
         .region_drift => try region_drift_module.render(allocator, input.home, input.aws_profile, input.aws_region, input.aws_default_region, input.cloudsdk_compute_region, input.azure_location, input.arm_location, input.azure_default_location),
         .cost_glance => try cost_glance_module.render(allocator, input.home),
         .vpn_status => try vpn_status_module.render(allocator),
+        .ssh_target => try ssh_target_module.render(allocator, input.ssh, input.host, input.home),
         .sso_expiry => try sso_expiry_module.render(allocator, input.home, input.timestamp, input.sso_expiry),
         .iac_workspace => try iac_workspace_module.render(allocator, input.cwd, input.home),
     };
@@ -220,6 +224,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .region_drift => "region_drift",
         .cost_glance => "cost_glance",
         .vpn_status => "vpn_status",
+        .ssh_target => "ssh_target",
         .sso_expiry => "sso_expiry",
         .iac_workspace => "iac_workspace",
     };

@@ -636,7 +636,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 
 ### 19.6 Videos
 - [x] "Why Shisa" — 3-minute project intro
-- [ ] "5-min Setup" — install walkthrough
+- [x] "5-min Setup" — install walkthrough
 - [ ] "Plugin in 10 lines" — Lua plugin tutorial
 - [ ] Captions + transcripts checked into repo
 - [ ] Publish on YouTube + PeerTube mirror

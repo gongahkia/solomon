@@ -72,6 +72,7 @@
 # Videos
 
 - [Why Shisa](videos/why-shisa.md)
+- [5-Min Setup](videos/setup-walkthrough.md)
 
 # Governance
 

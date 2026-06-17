@@ -534,7 +534,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 16.5 Zed bridge
 - [x] Zed extension scaffold under `contrib/editor-bridges/shisa-zed/`
 - [ ] Submit to Zed extensions marketplace
-- [ ] Document the manifest + signing requirements
+- [x] Document the manifest + signing requirements
 
 ### 16.6 Bridge tests + docs
 - [ ] Documented "writing a Shisa bridge in 50 lines" guide

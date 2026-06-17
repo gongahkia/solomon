@@ -4,6 +4,8 @@ Metadata-only scaffold for a future Shisa bridge extension for Zed.
 
 Zed extensions are Git repositories with an `extension.toml` manifest. This scaffold keeps the manifest in a subdirectory so it can be published from this repo through the Zed registry `path` field later.
 
+Docs: `docs/editor-bridges/zed.md`
+
 Current state:
 
 - No runtime code.

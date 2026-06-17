@@ -330,7 +330,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Document the IAM permissions required and the privacy implications (this calls cloud APIs!)
 
 ### 11.9 VPN status (`vpn_status`)
-- [ ] Detect Wireguard interface up (parse `wg show`)
+- [x] Detect Wireguard interface up (parse `wg show`)
 - [ ] Detect Tailscale (`tailscale status --json`)
 - [ ] Detect NetBird, Cloudflare WARP, Zerotier
 - [ ] macOS: detect OpenVPN / IKEv2 system VPN via `scutil`

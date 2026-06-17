@@ -591,7 +591,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 18.4 Pure importer
 - [x] Minimal mapping: pure â†’ Shisa "pure" preset
-- [ ] Document as a smallest-possible config
+- [x] Document as a smallest-possible config
 - [ ] Smoke test against pure zsh + fish variants
 
 ### 18.5 Importer test corpus

@@ -1,5 +1,6 @@
 const std = @import("std");
 const cloud_ctx_module = @import("modules/cloud_ctx.zig");
+const container_provenance_module = @import("modules/container_provenance.zig");
 const cmd_duration_module = @import("modules/cmd_duration.zig");
 const cost_glance_module = @import("modules/cost_glance.zig");
 const cwd_module = @import("modules/cwd.zig");
@@ -35,6 +36,7 @@ pub const ModuleId = enum {
     cost_glance,
     vpn_status,
     ssh_target,
+    container_provenance,
     sso_expiry,
     iac_workspace,
 };
@@ -118,6 +120,7 @@ const default_pipeline = [_]ModuleSpec{
     .{ .id = .cost_glance, .execution_class = executionClass(.cost_glance) },
     .{ .id = .vpn_status, .execution_class = executionClass(.vpn_status) },
     .{ .id = .ssh_target, .execution_class = executionClass(.ssh_target) },
+    .{ .id = .container_provenance, .execution_class = executionClass(.container_provenance) },
 };
 
 pub fn executionClass(module_id: ModuleId) ExecutionClass {
@@ -201,6 +204,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
         .cost_glance => try cost_glance_module.render(allocator, input.home),
         .vpn_status => try vpn_status_module.render(allocator),
         .ssh_target => try ssh_target_module.render(allocator, input.ssh, input.host, input.home),
+        .container_provenance => try container_provenance_module.render(allocator),
         .sso_expiry => try sso_expiry_module.render(allocator, input.home, input.timestamp, input.sso_expiry),
         .iac_workspace => try iac_workspace_module.render(allocator, input.cwd, input.home),
     };
@@ -225,6 +229,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .cost_glance => "cost_glance",
         .vpn_status => "vpn_status",
         .ssh_target => "ssh_target",
+        .container_provenance => "container_provenance",
         .sso_expiry => "sso_expiry",
         .iac_workspace => "iac_workspace",
     };

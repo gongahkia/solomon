@@ -22,6 +22,26 @@ pub const ContainerStatus = struct {
     }
 };
 
+pub fn render(allocator: std.mem.Allocator) !?[]u8 {
+    var status = (try detectAlloc(allocator)) orelse return null;
+    defer status.deinit(allocator);
+    return try renderStatusAlloc(allocator, status);
+}
+
+pub fn renderStatusAlloc(allocator: std.mem.Allocator, status: ContainerStatus) ![]u8 {
+    return std.fmt.allocPrint(allocator, "[{s}:{s}]", .{ status.provider, status.name });
+}
+
+pub fn detectAlloc(allocator: std.mem.Allocator) !?ContainerStatus {
+    if (try detectKubernetesEnvAlloc(allocator)) |status| return status;
+    if (try detectDevcontainerEnvAlloc(allocator)) |status| return status;
+    if (try detectDistroboxEnvAlloc(allocator)) |status| return status;
+    if (try detectToolbxDefaultAlloc(allocator)) |status| return status;
+    if (try detectNixShellEnvAlloc(allocator)) |status| return status;
+    if (try detectDockerAlloc(allocator, docker_marker_path)) |status| return status;
+    return detectPodmanAlloc(allocator, podman_cgroup_path);
+}
+
 pub fn detectDockerAlloc(allocator: std.mem.Allocator, marker_path: []const u8) !?ContainerStatus {
     if (!try pathExists(marker_path)) return null;
     return try containerStatusAlloc(allocator, "docker", "docker");
@@ -171,6 +191,14 @@ test "detects docker marker" {
     defer status.deinit(allocator);
     try std.testing.expectEqualStrings("docker", status.provider);
     try std.testing.expectEqualStrings("docker", status.name);
+}
+
+test "renders container segment" {
+    var status = try containerStatusAlloc(std.testing.allocator, "docker", "web");
+    defer status.deinit(std.testing.allocator);
+    const segment = try renderStatusAlloc(std.testing.allocator, status);
+    defer std.testing.allocator.free(segment);
+    try std.testing.expectEqualStrings("[docker:web]", segment);
 }
 
 test "ignores missing docker marker" {

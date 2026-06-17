@@ -349,7 +349,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Detect nix-shell (`$IN_NIX_SHELL`)
 - [x] Detect distrobox / toolbx (env vars / marker files)
 - [x] Detect Kubernetes pod context (env vars / `/var/run/secrets/kubernetes.io/`)
-- [ ] Render `[docker:web]` style segment
+- [x] Render `[docker:web]` style segment
 
 ### 11.12 Tests & benches
 - [ ] Mock cloud config fixtures under `test/fixtures/cloud/`

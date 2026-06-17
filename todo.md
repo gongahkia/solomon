@@ -725,7 +725,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Audit every CLI command for keyboard-only operability
 - [x] No interactive TUIs without `--interactive` flag
 - [ ] Bell + notification preferences settable via CLI args
-- [ ] Documented behavior table
+- [x] Documented behavior table
 
 ### 21.6 External audit
 - [ ] Commission a one-time a11y audit before v1.0

@@ -10,6 +10,8 @@ rg -n "termios|raw mode|ncurses|readline|interactive|readUntilDelimiter|readLine
 
 No raw-mode, full-screen, readline, or ncurses UI path is present in the current source tree. The only user confirmation prompt found in core CLI flow is `shisa plugin install` without `--yes`.
 
+## Behavior Table
+
 | Command | Keyboard-only status | Prompting behavior |
 | --- | --- | --- |
 | `ai` | args/stdout/stderr only | no interactive confirmation; generated commands are not executed |

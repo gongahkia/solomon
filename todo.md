@@ -597,7 +597,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 18.5 Importer test corpus
 - [x] Vendor representative configs of each tool under `test/fixtures/migration/`
 - [x] Snapshot the resulting Shisa configs
-- [ ] CI gate: snapshot drift requires review
+- [x] CI gate: snapshot drift requires review
 
 ## Phase 19 â€” Documentation site + tutorials
 

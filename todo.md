@@ -364,7 +364,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Detect ollama install + running daemon
 - [ ] Pull recommended small model (final choice TBD after benchmark: `qwen2.5:1.5b` / `gemma3:1b` / `phi3:mini`)
 - [x] Implement Ollama HTTP client in Zig
-- [ ] Stream tokens with cancellation
+- [x] Stream tokens with cancellation
 - [ ] Benchmark first-token latency, tokens/sec, peak RAM
 - [ ] Ship a `shisa ai bench` subcommand that reports local model perf
 

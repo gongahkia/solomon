@@ -10,6 +10,21 @@ pub const Status = struct {
     daemon_running: bool,
 };
 
+pub const StreamSink = struct {
+    context: *anyopaque,
+    onToken: *const fn (context: *anyopaque, token: []const u8) anyerror!void,
+};
+
+pub const StreamEvent = struct {
+    token: ?[]u8 = null,
+    done: bool = false,
+
+    pub fn deinit(self: *StreamEvent, allocator: std.mem.Allocator) void {
+        if (self.token) |value| allocator.free(value);
+        self.* = undefined;
+    }
+};
+
 pub fn detect(allocator: std.mem.Allocator) !Status {
     return .{
         .installed = isInstalled(allocator),
@@ -51,6 +66,50 @@ pub fn generateAlloc(allocator: std.mem.Allocator, host: []const u8, port: u16, 
     defer response.deinit(allocator);
     if (response.status < 200 or response.status >= 300) return error.OllamaHttpError;
     return parseGenerateResponseAlloc(allocator, response.body);
+}
+
+pub fn generateStream(allocator: std.mem.Allocator, host: []const u8, port: u16, model: []const u8, prompt: []const u8, cancel: ?*const std.atomic.Value(bool), sink: StreamSink) !void {
+    const payload = try generatePayloadAlloc(allocator, model, prompt, true);
+    defer allocator.free(payload);
+    const url = try std.fmt.allocPrint(allocator, "http://{s}:{d}/api/generate", .{ host, port });
+    defer allocator.free(url);
+    const uri = try std.Uri.parse(url);
+
+    var client = std.http.Client{ .allocator = allocator };
+    defer client.deinit();
+    var request = try client.request(.POST, uri, .{
+        .keep_alive = false,
+        .headers = .{ .content_type = .{ .override = "application/json" }, .accept_encoding = .omit },
+    });
+    defer request.deinit();
+    request.transfer_encoding = .{ .content_length = payload.len };
+    var body = try request.sendBodyUnflushed(&.{});
+    try body.writer.writeAll(payload);
+    try body.end();
+    try request.connection.?.flush();
+
+    var response = try request.receiveHead(&.{});
+    const status: u16 = @intFromEnum(response.head.status);
+    if (status < 200 or status >= 300) return error.OllamaHttpError;
+    var transfer_buffer: [4096]u8 = undefined;
+    const reader = response.reader(&transfer_buffer);
+    while (true) {
+        if (cancel) |value| if (value.load(.seq_cst)) return error.Cancelled;
+        const line = reader.takeDelimiter('\n') catch |err| switch (err) {
+            error.EndOfStream => break,
+            error.ReadFailed => return response.bodyErr() orelse err,
+            else => return err,
+        } orelse break;
+        try emitStreamLine(allocator, line, sink);
+    }
+}
+
+pub fn consumeGenerateStreamLines(allocator: std.mem.Allocator, source: []const u8, cancel: ?*const std.atomic.Value(bool), sink: StreamSink) !void {
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |line| {
+        if (cancel) |value| if (value.load(.seq_cst)) return error.Cancelled;
+        try emitStreamLine(allocator, line, sink);
+    }
 }
 
 fn httpGetOk(allocator: std.mem.Allocator, host: []const u8, port: u16, path: []const u8) !bool {
@@ -136,6 +195,28 @@ pub fn parseGenerateResponseAlloc(allocator: std.mem.Allocator, source: []const 
     return allocator.dupe(u8, parsed.value.response);
 }
 
+const GenerateStreamResponse = struct {
+    response: []const u8 = "",
+    done: bool = false,
+};
+
+pub fn parseGenerateStreamLineAlloc(allocator: std.mem.Allocator, source: []const u8) !StreamEvent {
+    const trimmed = std.mem.trim(u8, source, " \t\r\n");
+    if (trimmed.len == 0) return .{};
+    var parsed = try std.json.parseFromSlice(GenerateStreamResponse, allocator, trimmed, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    return .{
+        .token = if (parsed.value.response.len == 0) null else try allocator.dupe(u8, parsed.value.response),
+        .done = parsed.value.done,
+    };
+}
+
+fn emitStreamLine(allocator: std.mem.Allocator, line: []const u8, sink: StreamSink) !void {
+    var event = try parseGenerateStreamLineAlloc(allocator, line);
+    defer event.deinit(allocator);
+    if (event.token) |token| try sink.onToken(sink.context, token);
+}
+
 fn jsonStringAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
@@ -183,4 +264,33 @@ test "parses generate response" {
     const text = try parseGenerateResponseAlloc(std.testing.allocator, "{\"response\":\"ok\",\"done\":true}");
     defer std.testing.allocator.free(text);
     try std.testing.expectEqualStrings("ok", text);
+}
+
+test "parses generate stream line" {
+    var event = try parseGenerateStreamLineAlloc(std.testing.allocator, "{\"response\":\"hel\",\"done\":false}");
+    defer event.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("hel", event.token.?);
+    try std.testing.expect(!event.done);
+}
+
+test "consumes stream tokens with cancellation" {
+    const Context = struct {
+        text: std.ArrayList(u8) = .empty,
+        cancel: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+
+        fn onToken(context: *anyopaque, token: []const u8) !void {
+            const self: *@This() = @ptrCast(@alignCast(context));
+            try self.text.appendSlice(std.testing.allocator, token);
+            self.cancel.store(true, .seq_cst);
+        }
+    };
+    var context = Context{};
+    defer context.text.deinit(std.testing.allocator);
+    try std.testing.expectError(error.Cancelled, consumeGenerateStreamLines(
+        std.testing.allocator,
+        "{\"response\":\"a\",\"done\":false}\n{\"response\":\"b\",\"done\":false}\n",
+        &context.cancel,
+        .{ .context = &context, .onToken = Context.onToken },
+    ));
+    try std.testing.expectEqualStrings("a", context.text.items);
 }

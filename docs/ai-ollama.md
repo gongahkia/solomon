@@ -11,5 +11,6 @@ The client supports:
 - `GET /api/tags` for daemon health.
 - `POST /api/pull` with `{"stream": false}` for non-streaming pulls.
 - `POST /api/generate` with `{"stream": false}` for deterministic single-response calls.
+- `POST /api/generate` with `{"stream": true}` for NDJSON token streaming. Cancellation is checked between streamed chunks.
 
 Ollama's local API is documented at <https://docs.ollama.com/api/introduction>. `/api/tags`, `/api/pull`, and `/api/generate` are documented at <https://docs.ollama.com/api/tags>, <https://docs.ollama.com/api/pull>, and <https://docs.ollama.com/api/generate>.

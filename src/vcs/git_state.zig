@@ -25,6 +25,44 @@ pub const PromptSignal = struct {
     a11y: []const u8,
 };
 
+pub const WorktreeCounts = struct {
+    staged: u32 = 0,
+    unstaged: u32 = 0,
+    untracked: u32 = 0,
+    conflicts: u32 = 0,
+};
+
+pub fn parsePorcelainCounts(output: []const u8) WorktreeCounts {
+    var counts = WorktreeCounts{};
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |line| {
+        if (line.len < 2) continue;
+        const x = line[0];
+        const y = line[1];
+        if (x == '?' and y == '?') {
+            counts.untracked += 1;
+            continue;
+        }
+        if (isConflictStatus(x, y)) {
+            counts.conflicts += 1;
+            continue;
+        }
+        if (x != ' ' and x != '?') counts.staged += 1;
+        if (y != ' ' and y != '?') counts.unstaged += 1;
+    }
+    return counts;
+}
+
+fn isConflictStatus(x: u8, y: u8) bool {
+    return (x == 'D' and y == 'D') or
+        (x == 'A' and y == 'U') or
+        (x == 'U' and y == 'D') or
+        (x == 'U' and y == 'A') or
+        (x == 'D' and y == 'U') or
+        (x == 'A' and y == 'A') or
+        (x == 'U' and y == 'U');
+}
+
 pub fn detectBisectState(git_dir: std.fs.Dir) BisectState {
     return .{
         .active = entryExists(git_dir, "BISECT_LOG") or entryExists(git_dir, "refs/bisect"),
@@ -308,6 +346,21 @@ test "formats git state signals with glyph and a11y labels" {
     try expectSignal(bisectSignal(.{ .active = true, .current = true }).?, "bisect:current", "bisect current commit under test");
     try expectSignal(amSignal(true).?, "am", "git am patch apply in progress");
     try expectSignal(detachedHeadSignal(true).?, "detached", "detached HEAD");
+}
+
+test "parses porcelain working tree counts" {
+    const counts = parsePorcelainCounts(
+        \\M  staged.txt
+        \\ M unstaged.txt
+        \\MM both.txt
+        \\?? new.txt
+        \\UU conflict.txt
+        \\
+    );
+    try std.testing.expectEqual(@as(u32, 2), counts.staged);
+    try std.testing.expectEqual(@as(u32, 2), counts.unstaged);
+    try std.testing.expectEqual(@as(u32, 1), counts.untracked);
+    try std.testing.expectEqual(@as(u32, 1), counts.conflicts);
 }
 
 fn expectSignal(signal: PromptSignal, glyph: []const u8, a11y: []const u8) !void {

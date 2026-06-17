@@ -796,7 +796,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Surface each as a distinct glyph + a11y label
 
 ### 24.2 Working tree
-- [ ] Counts: staged / unstaged / untracked / conflict files
+- [x] Counts: staged / unstaged / untracked / conflict files
 - [ ] Stash count
 - [ ] Sparse-checkout active flag (cone vs non-cone)
 - [ ] Submodule dirty/behind/ahead aggregation

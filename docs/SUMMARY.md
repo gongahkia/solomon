@@ -90,6 +90,7 @@
 
 - [Threat Model](threat-model.md)
 - [Reproducibility](reproducibility.md)
+- [Release Signing](signing.md)
 - [Profiling Notes](profiling.md)
 - [Cache Architecture](cache-architecture.md)
 - [Why Zig](why-zig.md)

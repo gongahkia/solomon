@@ -663,7 +663,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] cosign keyless signing in CI (OIDC via GitHub Actions identity)
 - [x] Publish signatures + Rekor log links
 - [ ] `shisa update --verify` validates signature before applying
-- [ ] Document key-distrust + rotation procedure
+- [x] Document key-distrust + rotation procedure
 
 ### 20.4 SLSA
 - [ ] Achieve SLSA Level 2 attestation

@@ -578,7 +578,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 
 ### 18.2 Oh-my-posh importer
 - [x] Parse oh-my-posh JSON/YAML themes
-- [ ] Map segments to Shisa modules with a coverage table
+- [x] Map segments to Shisa modules with a coverage table
 - [ ] Translate template strings to Shisa's layout syntax
 - [ ] Color mapping: oh-my-posh palette → Oklab → Shisa palette
 - [ ] Emit `migration-notes.md`

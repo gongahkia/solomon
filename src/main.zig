@@ -2074,6 +2074,66 @@ fn leadingSpaces(line: []const u8) usize {
     return index;
 }
 
+fn scanOmpTheme(allocator: std.mem.Allocator, theme: OmpTheme, imported: *StarshipImport) !void {
+    for (theme.blocks.items) |block| {
+        for (block.segments.items) |segment| {
+            if (segment.kind) |kind| try mapOmpSegment(allocator, kind, imported);
+        }
+    }
+}
+
+fn mapOmpSegment(allocator: std.mem.Allocator, name: []const u8, imported: *StarshipImport) !void {
+    if (std.mem.eql(u8, name, "path")) {
+        try appendModule(allocator, imported, .cwd);
+    } else if (std.mem.eql(u8, name, "git") or
+        std.mem.eql(u8, name, "jujutsu") or
+        std.mem.eql(u8, name, "mercurial") or
+        std.mem.eql(u8, name, "sapling") or
+        std.mem.eql(u8, name, "svn") or
+        std.mem.eql(u8, name, "fossil") or
+        std.mem.eql(u8, name, "plastic"))
+    {
+        try appendModule(allocator, imported, .git_branch);
+    } else if (std.mem.eql(u8, name, "python")) {
+        imported.python = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "node")) {
+        imported.node = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "go")) {
+        imported.go = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "rust")) {
+        imported.rust = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "status")) {
+        try appendModule(allocator, imported, .exit_status);
+    } else if (std.mem.eql(u8, name, "executiontime")) {
+        try appendModule(allocator, imported, .cmd_duration);
+    } else if (std.mem.eql(u8, name, "session")) {
+        try appendModule(allocator, imported, .user_host);
+    } else if (std.mem.eql(u8, name, "aws") or
+        std.mem.eql(u8, name, "gcp") or
+        std.mem.eql(u8, name, "az") or
+        std.mem.eql(u8, name, "kubectl"))
+    {
+        try appendModule(allocator, imported, .cloud_ctx);
+    } else if (std.mem.eql(u8, name, "terraform") or std.mem.eql(u8, name, "pulumi")) {
+        try appendModule(allocator, imported, .iac_workspace);
+    } else if (std.mem.eql(u8, name, "time")) {
+        try appendModule(allocator, imported, .time);
+    } else if (!isIgnoredOmpSegment(name)) {
+        try appendUnsupported(allocator, imported, name);
+    }
+}
+
+fn isIgnoredOmpSegment(name: []const u8) bool {
+    return std.mem.eql(u8, name, "text") or
+        std.mem.eql(u8, name, "shell") or
+        std.mem.eql(u8, name, "os") or
+        std.mem.eql(u8, name, "upgrade");
+}
+
 const StarshipImport = struct {
     modules: std.ArrayList(shisa_config.ModuleId) = .empty,
     unsupported: std.ArrayList([]const u8) = .empty,
@@ -2522,6 +2582,62 @@ test "parses oh-my-posh yaml theme blocks" {
     try std.testing.expectEqualStrings("rprompt", theme.blocks.items[1].block_type.?);
     try std.testing.expectEqualStrings("right", theme.blocks.items[1].alignment.?);
     try std.testing.expectEqualStrings("time", theme.blocks.items[1].segments.items[0].kind.?);
+}
+
+test "maps oh-my-posh segments to shisa modules" {
+    const source =
+        \\{
+        \\  "blocks": [
+        \\    {
+        \\      "type": "prompt",
+        \\      "segments": [
+        \\        {"type": "path"},
+        \\        {"type": "git"},
+        \\        {"type": "jujutsu"},
+        \\        {"type": "python"},
+        \\        {"type": "node"},
+        \\        {"type": "go"},
+        \\        {"type": "rust"},
+        \\        {"type": "status"},
+        \\        {"type": "executiontime"},
+        \\        {"type": "session"},
+        \\        {"type": "aws"},
+        \\        {"type": "gcp"},
+        \\        {"type": "az"},
+        \\        {"type": "kubectl"},
+        \\        {"type": "terraform"},
+        \\        {"type": "pulumi"},
+        \\        {"type": "time"},
+        \\        {"type": "text"},
+        \\        {"type": "battery"}
+        \\      ]
+        \\    }
+        \\  ]
+        \\}
+        \\
+    ;
+    var theme = try parseOmpTheme(std.testing.allocator, source);
+    defer theme.deinit(std.testing.allocator);
+    var imported = StarshipImport{};
+    defer imported.deinit(std.testing.allocator);
+
+    try scanOmpTheme(std.testing.allocator, theme, &imported);
+
+    try std.testing.expect(containsModule(imported, .cwd));
+    try std.testing.expect(containsModule(imported, .git_branch));
+    try std.testing.expect(containsModule(imported, .language_versions));
+    try std.testing.expect(containsModule(imported, .exit_status));
+    try std.testing.expect(containsModule(imported, .cmd_duration));
+    try std.testing.expect(containsModule(imported, .user_host));
+    try std.testing.expect(containsModule(imported, .cloud_ctx));
+    try std.testing.expect(containsModule(imported, .iac_workspace));
+    try std.testing.expect(containsModule(imported, .time));
+    try std.testing.expect(imported.python);
+    try std.testing.expect(imported.node);
+    try std.testing.expect(imported.go);
+    try std.testing.expect(imported.rust);
+    try std.testing.expectEqual(@as(usize, 1), imported.unsupported.items.len);
+    try std.testing.expectEqualStrings("battery", imported.unsupported.items[0]);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {

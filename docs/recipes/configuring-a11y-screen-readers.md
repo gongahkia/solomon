@@ -60,6 +60,12 @@ $env:SHISA_BIN = "/path/to/shisa/zig-out/bin/shisa"
 
 `--a11y` requests `color_caps = "none"` and `glyph_caps = "ascii"`, strips ANSI control sequences from the returned prompt, and normalizes known prompt glyphs to ASCII.
 
+## Why a11y mode is opinionated
+
+`--a11y` intentionally removes user-facing overrides that can hide risk signals from assistive tech. In this mode, color-only meaning is dropped, Unicode glyphs are normalized to ASCII, and ANSI styling is stripped after rendering. Risk, exit status, jobs, and duration must remain text-visible because these signals affect command safety.
+
+Themes may still choose module order and wording through normal config, but they must not rely on color, icons, or hidden escape sequences as the only carrier for safety-critical state.
+
 ## 4. Keep risk visible in text
 
 Use modules that already render text labels:

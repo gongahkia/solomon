@@ -333,7 +333,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Detect Wireguard interface up (parse `wg show`)
 - [x] Detect Tailscale (`tailscale status --json`)
 - [x] Detect NetBird, Cloudflare WARP, Zerotier
-- [ ] macOS: detect OpenVPN / IKEv2 system VPN via `scutil`
+- [x] macOS: detect OpenVPN / IKEv2 system VPN via `scutil`
 - [ ] Linux: detect via NetworkManager d-bus
 - [ ] Render compact "vpn:<name>" segment when active
 

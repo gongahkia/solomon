@@ -11,3 +11,5 @@ NetBird detection runs `netbird status --json` and requires `status` to be `Conn
 Cloudflare WARP detection runs `warp-cli status` and requires `Status update: Connected`.
 
 ZeroTier detection runs `zerotier-cli status` and requires an `ONLINE` token.
+
+macOS built-in VPN detection runs `scutil --nc list` and requires a connected `[VPN:<type>]` service.

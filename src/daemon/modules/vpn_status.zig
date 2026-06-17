@@ -109,6 +109,22 @@ pub fn readZeroTierStatusAlloc(allocator: std.mem.Allocator) !?VpnStatus {
     return parseZeroTierStatusAlloc(allocator, result.stdout);
 }
 
+pub fn readScutilNetworkServiceStatusAlloc(allocator: std.mem.Allocator) !?VpnStatus {
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "scutil", "--nc", "list" },
+        .max_output_bytes = 256 * 1024,
+        .expand_arg0 = .expand,
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!switch (result.term) {
+        .Exited => |code| code == 0,
+        else => false,
+    }) return null;
+    return parseScutilNetworkServicesAlloc(allocator, result.stdout);
+}
+
 pub fn parseWireGuardShowAlloc(allocator: std.mem.Allocator, source: []const u8) !?VpnStatus {
     var lines = std.mem.splitScalar(u8, source, '\n');
     while (lines.next()) |raw_line| {
@@ -167,6 +183,17 @@ pub fn parseZeroTierStatusAlloc(allocator: std.mem.Allocator, source: []const u8
     return null;
 }
 
+pub fn parseScutilNetworkServicesAlloc(allocator: std.mem.Allocator, source: []const u8) !?VpnStatus {
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (std.mem.indexOf(u8, line, "(Connected)") == null) continue;
+        if (std.mem.indexOf(u8, line, "[VPN:") == null) continue;
+        return @as(?VpnStatus, try vpnStatusAlloc(allocator, "vpn", scutilServiceName(line)));
+    }
+    return null;
+}
+
 fn tailscaleName(self: TailscaleSelfJson) ?[]const u8 {
     const host = std.mem.trim(u8, self.HostName, " \t\r\n.");
     if (host.len != 0) return host;
@@ -195,6 +222,25 @@ fn vpnStatusAlloc(allocator: std.mem.Allocator, provider: []const u8, name: []co
         .provider = owned_provider,
         .name = try allocator.dupe(u8, name),
     };
+}
+
+fn scutilServiceName(line: []const u8) []const u8 {
+    const marker = "(Connected)";
+    const marker_index = std.mem.indexOf(u8, line, marker) orelse return "vpn";
+    const rest = std.mem.trim(u8, line[marker_index + marker.len ..], " \t\r\n");
+    if (quotedName(rest)) |name| return name;
+    const bracket_index = std.mem.indexOf(u8, rest, "[") orelse rest.len;
+    const name = std.mem.trim(u8, rest[0..bracket_index], " \t\r\n");
+    if (name.len == 0) return "vpn";
+    return name;
+}
+
+fn quotedName(value: []const u8) ?[]const u8 {
+    const start = std.mem.indexOfScalar(u8, value, '"') orelse return null;
+    const rest = value[start + 1 ..];
+    const end = std.mem.indexOfScalar(u8, rest, '"') orelse return null;
+    if (end == 0) return null;
+    return rest[0..end];
 }
 
 test "parses wireguard interface from wg show" {
@@ -268,4 +314,20 @@ test "parses zerotier online status" {
 
 test "zerotier parser ignores offline status" {
     try std.testing.expect(try parseZeroTierStatusAlloc(std.testing.allocator, "200 info abcdef0123 1.14.2 OFFLINE\n") == null);
+}
+
+test "parses connected macos network vpn" {
+    var status = (try parseScutilNetworkServicesAlloc(std.testing.allocator,
+        \\Available network connection services in the current set (*=enabled):
+        \\* (Disconnected) Old VPN "Old VPN" [VPN:L2TP]
+        \\* (Connected) Work IKE "Work IKE" [VPN:IKEv2]
+        \\
+    )).?;
+    defer status.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("vpn", status.provider);
+    try std.testing.expectEqualStrings("Work IKE", status.name);
+}
+
+test "scutil parser ignores disconnected vpn" {
+    try std.testing.expect(try parseScutilNetworkServicesAlloc(std.testing.allocator, "* (Disconnected) Work VPN \"Work VPN\" [VPN:IKEv2]\n") == null);
 }

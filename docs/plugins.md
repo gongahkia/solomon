@@ -51,7 +51,7 @@ Optional fields:
 
 See `docs/plugin-manifest.md` for exact validation rules.
 
-Marketplace review and delisting rules live in [Plugin Policy](plugin-policy.md).
+New plugin authors should start with [Authoring Plugins](authoring-plugins.md). Marketplace review and delisting rules live in [Plugin Policy](plugin-policy.md).
 
 ## Sandbox
 

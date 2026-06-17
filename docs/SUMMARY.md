@@ -56,6 +56,7 @@
 # Plugins
 
 - [Plugins](plugins.md)
+- [Authoring Plugins](authoring-plugins.md)
 - [Plugin API Reference](plugin-api.md)
 - [Plugin Manifest](plugin-manifest.md)
 - [Plugin Runtime](plugin-runtime.md)

@@ -26,6 +26,7 @@ typeset -g SHISA_ASYNC_SIGNAL=${SHISA_ASYNC_SIGNAL:-USR1}
 typeset -g SHISA_TRANSIENT_PROMPT=${SHISA_TRANSIENT_PROMPT:-1}
 typeset -g SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 typeset -g SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
+typeset -g SHISA_NEXTCMD_KEYSEQ=${SHISA_NEXTCMD_KEYSEQ:-'^X^N'}
 
 zmodload zsh/datetime 2>/dev/null || true
 
@@ -107,6 +108,18 @@ shisa_accept_line() {
 if [[ ${SHISA_TRANSIENT_PROMPT} == 1 ]]; then
   zle -N accept-line shisa_accept_line 2>/dev/null || true
 fi
+
+shisa_nextcmd_widget() {
+  emulate -L zsh
+  local suggestion
+  suggestion=$("${SHISA_BIN}" ai nextcmd --shell zsh --cwd "${PWD}" --last-exit "${SHISA_LAST_EXIT:-0}" 2>/dev/null) || return 0
+  [[ -n ${suggestion} ]] || return 0
+  LBUFFER+="${suggestion}"
+  zle redisplay
+}
+
+zle -N shisa-nextcmd shisa_nextcmd_widget 2>/dev/null || true
+bindkey "${SHISA_NEXTCMD_KEYSEQ}" shisa-nextcmd 2>/dev/null || true
 
 shisa_socket_path() {
   emulate -L zsh

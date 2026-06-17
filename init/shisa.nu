@@ -53,5 +53,12 @@ if not ("__SHISA_NU_INIT" in $env) {
         }
     }
 
+    def shisa-nextcmd [] {
+        let last_exit = ($env.LAST_EXIT_CODE? | default 0 | into string)
+        let args = [ai nextcmd --shell nu --cwd (pwd) --last-exit $last_exit]
+        let rendered = (try { run-external $env.SHISA_BIN ...$args e> /dev/null | complete } catch { { stdout: "", exit_code: 1 } })
+        if $rendered.exit_code == 0 { $rendered.stdout } else { "" }
+    }
+
     $env.PROMPT_COMMAND = {|| shisa-prompt-render }
 }

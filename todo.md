@@ -369,7 +369,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Ship a `shisa ai bench` subcommand that reports local model perf
 
 ### 12.2 Next-command suggestion (`nextcmd`)
-- [ ] Hotkey integration per shell (zsh widget, bash bind -x, fish key binding, nu / pwsh equivalents)
+- [x] Hotkey integration per shell (zsh widget, bash bind -x, fish key binding, nu / pwsh equivalents)
 - [ ] Context builder: history slice + cwd + last command + last exit code
 - [ ] Prompt template + few-shot examples checked into repo
 - [ ] Inline preview UX (renders below the prompt line; ghost text)

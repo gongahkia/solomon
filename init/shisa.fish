@@ -12,6 +12,7 @@ set -q SHISA_SOCKET; or set -g SHISA_SOCKET ""
 set -q SHISA_INSTANT; or set -g SHISA_INSTANT 1
 set -q SHISA_PROD_GUARD; or set -g SHISA_PROD_GUARD 0
 set -q SHISA_PROD_GUARD_FORCE; or set -g SHISA_PROD_GUARD_FORCE 0
+set -q SHISA_NEXTCMD_KEYSEQ; or set -g SHISA_NEXTCMD_KEYSEQ \cx\cn
 
 function shisa_socket_path
     if test -n "$SHISA_SOCKET"
@@ -77,3 +78,13 @@ function shisa_async_redraw --on-event shisa_async_redraw
     commandline -f repaint 2>/dev/null
     or true
 end
+
+function shisa_nextcmd_widget
+    set -l suggestion (command "$SHISA_BIN" ai nextcmd --shell fish --cwd "$PWD" --last-exit "$status" 2>/dev/null)
+    if test $status -eq 0; and test -n "$suggestion"
+        commandline -i -- "$suggestion"
+    end
+end
+
+bind $SHISA_NEXTCMD_KEYSEQ shisa_nextcmd_widget 2>/dev/null
+or true

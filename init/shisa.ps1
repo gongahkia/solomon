@@ -4,6 +4,7 @@ $script:__SHISA_PWSH_INIT = $true
 if (-not $env:SHISA_BIN) { $env:SHISA_BIN = "shisa" }
 if (-not $env:SHISA_SOCKET) { $env:SHISA_SOCKET = "" }
 if (-not $env:SHISA_INSTANT) { $env:SHISA_INSTANT = "0" }
+if (-not $env:SHISA_NEXTCMD_CHORD) { $env:SHISA_NEXTCMD_CHORD = "Ctrl+x,Ctrl+n" }
 
 function global:shisa_socket_path {
     if ($env:SHISA_SOCKET) { return $env:SHISA_SOCKET }
@@ -61,4 +62,20 @@ function global:prompt {
 
 function global:Invoke-ShisaRedraw {
     [Console]::Write("`e[2K`r")
+}
+
+function global:Invoke-ShisaNextCommand {
+    $location = Get-Location
+    $cwd = if ($location.ProviderPath) { $location.ProviderPath } else { $location.Path }
+    $lastExit = if ($null -ne $global:LASTEXITCODE) { [int]$global:LASTEXITCODE } else { 0 }
+    try {
+        $suggestion = & $env:SHISA_BIN ai nextcmd --shell pwsh --cwd $cwd --last-exit "$lastExit" 2>$null
+        if ($suggestion) {
+            [Microsoft.PowerShell.PSConsoleReadLine]::Insert(($suggestion -join "`n"))
+        }
+    } catch {}
+}
+
+if (Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue) {
+    Set-PSReadLineKeyHandler -Chord $env:SHISA_NEXTCMD_CHORD -ScriptBlock { Invoke-ShisaNextCommand } 2>$null
 }

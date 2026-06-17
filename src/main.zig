@@ -645,6 +645,11 @@ fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try aiBench(allocator, config);
         return;
     }
+    if (args.len >= 1 and std.mem.eql(u8, args[0], "nextcmd")) {
+        _ = try parseAiNextcmdArgs(args[1..]);
+        try std.fs.File.stdout().writeAll("");
+        return;
+    }
     return error.UnknownAiArgument;
 }
 
@@ -693,10 +698,40 @@ fn aiBenchOutputAlloc(allocator: std.mem.Allocator, model: []const u8, result: o
     return out.toOwnedSlice(allocator);
 }
 
+const AiNextcmdConfig = struct {
+    shell: []const u8 = "",
+    cwd: []const u8 = "",
+    last_exit: i32 = 0,
+};
+
+fn parseAiNextcmdArgs(args: []const []const u8) !AiNextcmdConfig {
+    var config = AiNextcmdConfig{};
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--shell")) {
+            config.shell = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--cwd")) {
+            config.cwd = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--last-exit")) {
+            config.last_exit = try std.fmt.parseInt(i32, try nextValue(args, &i), 10);
+        } else {
+            return error.UnknownAiArgument;
+        }
+    }
+    return config;
+}
+
 test "ai bench args parse" {
     const config = try parseAiBenchArgs(&.{ "--model", "gemma3:1b", "--prompt", "hi" });
     try std.testing.expectEqualStrings("gemma3:1b", config.model);
     try std.testing.expectEqualStrings("hi", config.prompt);
+}
+
+test "ai nextcmd args parse" {
+    const config = try parseAiNextcmdArgs(&.{ "--shell", "zsh", "--cwd", "/tmp", "--last-exit", "2" });
+    try std.testing.expectEqualStrings("zsh", config.shell);
+    try std.testing.expectEqualStrings("/tmp", config.cwd);
+    try std.testing.expectEqual(@as(i32, 2), config.last_exit);
 }
 
 test "ai bench output reports metrics" {

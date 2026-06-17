@@ -1,0 +1,14 @@
+# Shisa bridge sample for Helix-oriented topic subscriptions.
+
+[shisa]
+socket = "auto"
+
+[shisa.subscribe]
+topics = ["cloud_ctx", "vcs.summary", "risk_tier"]
+backpressure_limit = 16
+
+[helix.statusline]
+left = ["mode", "spinner", "version-control"]
+center = ["file-name"]
+right = ["diagnostics", "workspace-diagnostics", "position", "file-type"]
+separator = "|"

@@ -82,3 +82,4 @@
 # Internals
 
 - [Threat Model](threat-model.md)
+- [Profiling Notes](profiling.md)

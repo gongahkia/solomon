@@ -630,7 +630,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 19.5 Internals
 - [x] Threat model write-up
-- [ ] Profiling notes
+- [x] Profiling notes
 - [ ] Cache architecture deep-dive
 - [ ] Why we picked Zig
 

@@ -2927,6 +2927,59 @@ fn freeStringList(allocator: std.mem.Allocator, words: *std.ArrayList([]u8)) voi
     words.deinit(allocator);
 }
 
+fn scanTideConfig(allocator: std.mem.Allocator, config: TideConfig, imported: *StarshipImport) !void {
+    if (config.find("tide_left_prompt_items")) |setting| {
+        for (setting.values.items) |item| try mapTideItem(allocator, item, imported);
+    }
+    if (config.find("tide_right_prompt_items")) |setting| {
+        for (setting.values.items) |item| try mapTideItem(allocator, item, imported);
+    }
+}
+
+fn mapTideItem(allocator: std.mem.Allocator, name: []const u8, imported: *StarshipImport) !void {
+    if (std.mem.eql(u8, name, "pwd")) {
+        try appendModule(allocator, imported, .cwd);
+    } else if (std.mem.eql(u8, name, "git")) {
+        try appendModule(allocator, imported, .git_branch);
+    } else if (std.mem.eql(u8, name, "status")) {
+        try appendModule(allocator, imported, .exit_status);
+    } else if (std.mem.eql(u8, name, "cmd_duration")) {
+        try appendModule(allocator, imported, .cmd_duration);
+    } else if (std.mem.eql(u8, name, "context")) {
+        try appendModule(allocator, imported, .user_host);
+    } else if (std.mem.eql(u8, name, "jobs")) {
+        try appendModule(allocator, imported, .jobs);
+    } else if (std.mem.eql(u8, name, "python")) {
+        imported.python = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "node")) {
+        imported.node = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "rustc")) {
+        imported.rust = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "go")) {
+        imported.go = true;
+        try appendModule(allocator, imported, .language_versions);
+    } else if (std.mem.eql(u8, name, "aws") or
+        std.mem.eql(u8, name, "gcloud") or
+        std.mem.eql(u8, name, "kubectl"))
+    {
+        try appendModule(allocator, imported, .cloud_ctx);
+    } else if (std.mem.eql(u8, name, "terraform") or std.mem.eql(u8, name, "pulumi")) {
+        try appendModule(allocator, imported, .iac_workspace);
+    } else if (std.mem.eql(u8, name, "time")) {
+        try appendModule(allocator, imported, .time);
+    } else if (!isIgnoredTideItem(name)) {
+        try appendUnsupported(allocator, imported, name);
+    }
+}
+
+fn isIgnoredTideItem(name: []const u8) bool {
+    return std.mem.eql(u8, name, "newline") or
+        std.mem.eql(u8, name, "character");
+}
+
 const StarshipImport = struct {
     modules: std.ArrayList(shisa_config.ModuleId) = .empty,
     unsupported: std.ArrayList([]const u8) = .empty,
@@ -3629,6 +3682,37 @@ test "parses tide fish set syntax" {
     try expectTideValues(config, "tide_right_prompt_items", &.{ "status", "cmd_duration" });
     try expectTideValues(config, "tide_prompt_transient_enabled", &.{"true"});
     try std.testing.expect(config.find("not_tide") == null);
+}
+
+test "maps tide items to shisa modules" {
+    const source =
+        \\tide_left_prompt_items pwd git newline character
+        \\tide_right_prompt_items status cmd_duration context jobs node python rustc go aws gcloud kubectl terraform pulumi time bun
+        \\
+    ;
+    var config = try parseTideConfig(std.testing.allocator, source);
+    defer config.deinit(std.testing.allocator);
+    var imported = StarshipImport{};
+    defer imported.deinit(std.testing.allocator);
+
+    try scanTideConfig(std.testing.allocator, config, &imported);
+
+    try std.testing.expect(containsModule(imported, .cwd));
+    try std.testing.expect(containsModule(imported, .git_branch));
+    try std.testing.expect(containsModule(imported, .exit_status));
+    try std.testing.expect(containsModule(imported, .cmd_duration));
+    try std.testing.expect(containsModule(imported, .user_host));
+    try std.testing.expect(containsModule(imported, .jobs));
+    try std.testing.expect(containsModule(imported, .language_versions));
+    try std.testing.expect(containsModule(imported, .cloud_ctx));
+    try std.testing.expect(containsModule(imported, .iac_workspace));
+    try std.testing.expect(containsModule(imported, .time));
+    try std.testing.expect(imported.node);
+    try std.testing.expect(imported.python);
+    try std.testing.expect(imported.rust);
+    try std.testing.expect(imported.go);
+    try std.testing.expectEqual(@as(usize, 1), imported.unsupported.items.len);
+    try std.testing.expectEqualStrings("bun", imported.unsupported.items[0]);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {

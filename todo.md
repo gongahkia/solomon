@@ -585,7 +585,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 18.3 Tide importer
 - [x] Parse tide fish settings (`tide configure` output)
-- [ ] Map tide items to Shisa modules
+- [x] Map tide items to Shisa modules
 - [ ] Document fish-specific quirks that don't translate
 - [ ] Emit `migration-notes.md`
 

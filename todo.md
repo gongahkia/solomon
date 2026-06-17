@@ -809,8 +809,8 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] Branch protection hint (read remote rules, cached)
 
 ### 24.4 Mirroring for jj / sapling / hg
-- [ ] Map each git state to its native concept
-- [ ] Document the mapping in `docs/vcs/state-mapping.md`
+- [x] Map each git state to its native concept
+- [x] Document the mapping in `docs/vcs/state-mapping.md`
 - [ ] Snapshot tests per VCS
 
 ### 24.5 Performance

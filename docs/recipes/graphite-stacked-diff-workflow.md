@@ -102,4 +102,4 @@ Open the current PR:
 gt pr
 ```
 
-See [VCS](../vcs.md), [Graphite Quick Start](https://graphite.com/docs/cli-quick-start), and [Graphite Command Reference](https://graphite.com/docs/command-reference).
+See [VCS](../vcs/index.md), [Graphite Quick Start](https://graphite.com/docs/cli-quick-start), and [Graphite Command Reference](https://graphite.com/docs/command-reference).

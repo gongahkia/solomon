@@ -102,4 +102,4 @@ Attach:
 - JSON output when available
 - the commit range being compared
 
-See [Architecture](architecture.md), [VCS](vcs.md), and [AI Ollama](ai-ollama.md).
+See [Architecture](architecture.md), [VCS](vcs/index.md), and [AI Ollama](ai-ollama.md).

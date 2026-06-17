@@ -34,7 +34,8 @@
 
 # Modules
 
-- [VCS](vcs.md)
+- [VCS](vcs/index.md)
+- [VCS State Mapping](vcs/state-mapping.md)
 - [SSH Target](ssh-target.md)
 - [VPN Status](vpn-status.md)
 - [Prod Guard](prod-guard.md)

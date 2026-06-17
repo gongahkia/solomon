@@ -660,7 +660,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] CI gate: SBOM diff diff'd against previous release for review
 
 ### 20.3 Signing (Sigstore)
-- [ ] cosign keyless signing in CI (OIDC via GitHub Actions identity)
+- [x] cosign keyless signing in CI (OIDC via GitHub Actions identity)
 - [ ] Publish signatures + Rekor log links
 - [ ] `shisa update --verify` validates signature before applying
 - [ ] Document key-distrust + rotation procedure

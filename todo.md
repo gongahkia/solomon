@@ -551,7 +551,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] PR template asks: "Are you vouched? If not, expect a 2-vouched-reviewer review."
 
 ### 17.2 RFC process
-- [ ] Create `rfcs/` directory + template
+- [x] Create `rfcs/` directory + template
 - [ ] Migrate existing RFC-000{1..5} into the template format
 - [ ] Add RFC index in `rfcs/README.md`
 - [ ] CI gate: protocol/security/plugin-API changes require an RFC link in the PR body

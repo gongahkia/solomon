@@ -34,6 +34,8 @@ typeset -g SHISA_NEXTCMD_REJECT_KEYSEQ=${SHISA_NEXTCMD_REJECT_KEYSEQ:-'^['}
 typeset -g SHISA_NEXTCMD_NEXT_KEYSEQ=${SHISA_NEXTCMD_NEXT_KEYSEQ:-'^[]'}
 typeset -g SHISA_NEXTCMD_SUGGESTION=
 typeset -g SHISA_EXPLAIN_KEYSEQ=${SHISA_EXPLAIN_KEYSEQ:-'^X^E'}
+typeset -g SHISA_EXPLAIN_LAST_COMMAND=
+typeset -g SHISA_EXPLAIN_LAST_OUTPUT=
 
 zmodload zsh/datetime 2>/dev/null || true
 
@@ -165,7 +167,13 @@ shisa_nextcmd_next_widget() {
 shisa_explain_widget() {
   emulate -L zsh
   local output
-  output=$("${SHISA_BIN}" ai explain --command "${BUFFER}" 2>/dev/null) || return 0
+  if [[ ${BUFFER} == "${SHISA_EXPLAIN_LAST_COMMAND}" && -n ${SHISA_EXPLAIN_LAST_OUTPUT} ]]; then
+    output=${SHISA_EXPLAIN_LAST_OUTPUT}
+  else
+    output=$("${SHISA_BIN}" ai explain --command "${BUFFER}" 2>/dev/null) || return 0
+    SHISA_EXPLAIN_LAST_COMMAND=${BUFFER}
+    SHISA_EXPLAIN_LAST_OUTPUT=${output}
+  fi
   [[ -n ${output} ]] || return 0
   print -r -- $'\n'"${output}"
   zle redisplay

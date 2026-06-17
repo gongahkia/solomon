@@ -10,6 +10,8 @@ if (-not $env:SHISA_NEXTCMD_REJECT_CHORD) { $env:SHISA_NEXTCMD_REJECT_CHORD = "E
 if (-not $env:SHISA_NEXTCMD_NEXT_CHORD) { $env:SHISA_NEXTCMD_NEXT_CHORD = "Alt+]" }
 if (-not $env:SHISA_EXPLAIN_CHORD) { $env:SHISA_EXPLAIN_CHORD = "Ctrl+x,Ctrl+e" }
 $script:SHISA_NEXTCMD_SUGGESTION = ""
+$script:SHISA_EXPLAIN_LAST_COMMAND = ""
+$script:SHISA_EXPLAIN_LAST_OUTPUT = ""
 
 function global:shisa_socket_path {
     if ($env:SHISA_SOCKET) { return $env:SHISA_SOCKET }
@@ -105,7 +107,13 @@ function global:Invoke-ShisaExplain {
         $cursor = 0
         [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
         if ($line) {
-            $output = & $env:SHISA_BIN ai explain --command $line 2>$null
+            if ($line -eq $script:SHISA_EXPLAIN_LAST_COMMAND -and $script:SHISA_EXPLAIN_LAST_OUTPUT) {
+                $output = $script:SHISA_EXPLAIN_LAST_OUTPUT
+            } else {
+                $output = & $env:SHISA_BIN ai explain --command $line 2>$null
+                $script:SHISA_EXPLAIN_LAST_COMMAND = $line
+                $script:SHISA_EXPLAIN_LAST_OUTPUT = ($output -join "`n")
+            }
             if ($output) {
                 [Console]::WriteLine("")
                 [Console]::WriteLine(($output -join "`n"))

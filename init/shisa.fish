@@ -20,6 +20,8 @@ set -q SHISA_NEXTCMD_NEXT_KEYSEQ; or set -g SHISA_NEXTCMD_NEXT_KEYSEQ \e\]
 set -q SHISA_LAST_COMMAND; or set -g SHISA_LAST_COMMAND ""
 set -q SHISA_NEXTCMD_SUGGESTION; or set -g SHISA_NEXTCMD_SUGGESTION ""
 set -q SHISA_EXPLAIN_KEYSEQ; or set -g SHISA_EXPLAIN_KEYSEQ \cx\ce
+set -q SHISA_EXPLAIN_LAST_COMMAND; or set -g SHISA_EXPLAIN_LAST_COMMAND ""
+set -q SHISA_EXPLAIN_LAST_OUTPUT; or set -g SHISA_EXPLAIN_LAST_OUTPUT ""
 
 function shisa_socket_path
     if test -n "$SHISA_SOCKET"
@@ -133,8 +135,16 @@ end
 function shisa_explain_widget
     set -l current (commandline)
     test -n "$current"; or return 0
-    set -l output (command "$SHISA_BIN" ai explain --command "$current" 2>/dev/null)
-    if test $status -eq 0; and test -n "$output"
+    set -l output ""
+    if test "$current" = "$SHISA_EXPLAIN_LAST_COMMAND"; and test -n "$SHISA_EXPLAIN_LAST_OUTPUT"
+        set output "$SHISA_EXPLAIN_LAST_OUTPUT"
+    else
+        set output (command "$SHISA_BIN" ai explain --command "$current" 2>/dev/null)
+        test $status -eq 0; or return 0
+        set -g SHISA_EXPLAIN_LAST_COMMAND "$current"
+        set -g SHISA_EXPLAIN_LAST_OUTPUT "$output"
+    end
+    if test -n "$output"
         printf '\n%s\n' "$output"
         commandline -f repaint 2>/dev/null
         or true

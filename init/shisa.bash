@@ -16,6 +16,8 @@ SHISA_NEXTCMD_REJECT_KEYSEQ=${SHISA_NEXTCMD_REJECT_KEYSEQ:-'\e'}
 SHISA_NEXTCMD_NEXT_KEYSEQ=${SHISA_NEXTCMD_NEXT_KEYSEQ:-'\e]'}
 SHISA_NEXTCMD_SUGGESTION=
 SHISA_EXPLAIN_KEYSEQ=${SHISA_EXPLAIN_KEYSEQ:-'\C-x\C-e'}
+SHISA_EXPLAIN_LAST_COMMAND=
+SHISA_EXPLAIN_LAST_OUTPUT=
 SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
 SHISA_AI_RISK_GUARD=${SHISA_AI_RISK_GUARD:-0}
@@ -162,7 +164,13 @@ shisa_nextcmd_next_widget() {
 
 shisa_explain_widget() {
   local output
-  output=$("${SHISA_BIN}" ai explain --command "${READLINE_LINE}" 2>/dev/null) || return 0
+  if [[ ${READLINE_LINE} == "${SHISA_EXPLAIN_LAST_COMMAND}" && -n ${SHISA_EXPLAIN_LAST_OUTPUT} ]]; then
+    output=${SHISA_EXPLAIN_LAST_OUTPUT}
+  else
+    output=$("${SHISA_BIN}" ai explain --command "${READLINE_LINE}" 2>/dev/null) || return 0
+    SHISA_EXPLAIN_LAST_COMMAND=${READLINE_LINE}
+    SHISA_EXPLAIN_LAST_OUTPUT=${output}
+  fi
   [[ -n ${output} ]] || return 0
   printf '\n%s\n' "${output}"
 }

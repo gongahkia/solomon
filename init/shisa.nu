@@ -79,9 +79,18 @@ if not ("__SHISA_NU_INIT" in $env) {
     def shisa-nextcmd-next [] { shisa-nextcmd }
 
     def shisa-explain [command: string] {
+        if (($env.SHISA_EXPLAIN_LAST_COMMAND? | default "") == $command) and (($env.SHISA_EXPLAIN_LAST_OUTPUT? | default "") != "") {
+            return $env.SHISA_EXPLAIN_LAST_OUTPUT
+        }
         let args = [ai explain --command $command]
         let rendered = (try { run-external $env.SHISA_BIN ...$args e> /dev/null | complete } catch { { stdout: "", exit_code: 1 } })
-        if $rendered.exit_code == 0 { $rendered.stdout } else { "" }
+        if $rendered.exit_code == 0 {
+            $env.SHISA_EXPLAIN_LAST_COMMAND = $command
+            $env.SHISA_EXPLAIN_LAST_OUTPUT = $rendered.stdout
+            $rendered.stdout
+        } else {
+            ""
+        }
     }
 
     $env.PROMPT_COMMAND = {|| shisa-prompt-render }

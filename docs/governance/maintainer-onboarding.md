@@ -40,6 +40,18 @@ Maintainers are expected to:
 
 Write access can be removed for inactivity, repeated review-quality issues, security negligence, or conduct violations. Removal should be recorded publicly unless doing so would expose private safety or conduct details.
 
+## Steering Transition Triggers
+
+Shisa starts with BDFL governance. The transition triggers are:
+
+| Trigger | Action |
+| --- | --- |
+| 5 active contributors with at least 10 merged PRs each over 12 months | form a 3-person Steering Group by PEP-13-style vote |
+| 1,000 GitHub stars and 100 plugin authors | create a marketplace stewardship sub-team |
+| either trigger above is reached | bring on a co-maintainer with full commit rights |
+
+The trigger state should be reviewed during maintainer onboarding, release planning, and governance RFC review.
+
 ## References
 
 - `docs/governance/vouch.md`

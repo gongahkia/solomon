@@ -559,7 +559,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 
 ### 17.3 Maintainer onboarding
 - [x] Write `docs/governance/maintainer-onboarding.md`
-- [ ] Document the steering-group transition triggers from §35.2
+- [x] Document the steering-group transition triggers from §35.2
 - [ ] Publish current state on shisa.sh/governance
 
 ### 17.4 Code of conduct

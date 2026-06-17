@@ -61,6 +61,31 @@ pub const FetchAge = struct {
     warn: bool = false,
 };
 
+pub const SignatureStatus = enum {
+    none,
+    valid,
+    bad,
+    valid_unknown,
+    valid_expired,
+    expired_key,
+    revoked_key,
+    cannot_check,
+    unknown,
+};
+
+pub const SignatureKind = enum {
+    none,
+    gpg,
+    ssh,
+    x509,
+    unknown,
+};
+
+pub const HeadSignature = struct {
+    status: SignatureStatus = .none,
+    kind: SignatureKind = .none,
+};
+
 pub fn parseAheadBehind(output: []const u8) ?AheadBehind {
     var tokens = std.mem.tokenizeAny(u8, output, " \t\r\n");
     const behind_text = tokens.next() orelse return null;
@@ -69,6 +94,41 @@ pub fn parseAheadBehind(output: []const u8) ?AheadBehind {
         .behind = std.fmt.parseInt(u32, behind_text, 10) catch return null,
         .ahead = std.fmt.parseInt(u32, ahead_text, 10) catch return null,
     };
+}
+
+pub fn parseHeadSignature(status_output: []const u8, commit_object: []const u8) HeadSignature {
+    const status = parseSignatureStatus(status_output);
+    return .{
+        .status = status,
+        .kind = if (status == .none) .none else signatureKindFromCommit(commit_object),
+    };
+}
+
+pub fn parseSignatureStatus(output: []const u8) SignatureStatus {
+    const trimmed = std.mem.trim(u8, output, " \t\r\n\x00");
+    if (trimmed.len == 0) return .unknown;
+    return switch (trimmed[0]) {
+        'N' => .none,
+        'G' => .valid,
+        'B' => .bad,
+        'U' => .valid_unknown,
+        'X' => .valid_expired,
+        'Y' => .expired_key,
+        'R' => .revoked_key,
+        'E' => .cannot_check,
+        else => .unknown,
+    };
+}
+
+pub fn signatureKindFromCommit(commit_object: []const u8) SignatureKind {
+    const header_end = std.mem.indexOf(u8, commit_object, "\n\n") orelse commit_object.len;
+    const headers = commit_object[0..header_end];
+    if (std.mem.indexOf(u8, headers, "-----BEGIN SSH SIGNATURE-----") != null) return .ssh;
+    if (std.mem.indexOf(u8, headers, "-----BEGIN PGP SIGNATURE-----") != null or
+        std.mem.indexOf(u8, headers, "-----BEGIN PGP MESSAGE-----") != null) return .gpg;
+    if (std.mem.indexOf(u8, headers, "-----BEGIN SIGNED MESSAGE-----") != null) return .x509;
+    if (std.mem.indexOf(u8, headers, "\ngpgsig ") != null or std.mem.startsWith(u8, headers, "gpgsig ")) return .unknown;
+    return .none;
 }
 
 pub fn detectLastFetchAge(git_dir: std.fs.Dir, now_sec: i64, warn_after_hours: u32) !?FetchAge {
@@ -571,6 +631,55 @@ test "parses ahead behind counts" {
     try std.testing.expectEqual(@as(u32, 3), counts.behind);
     try std.testing.expectEqual(@as(u32, 5), counts.ahead);
     try std.testing.expect(parseAheadBehind("bad\n") == null);
+}
+
+test "parses head signature status" {
+    try std.testing.expectEqual(SignatureStatus.none, parseSignatureStatus("N\n"));
+    try std.testing.expectEqual(SignatureStatus.valid, parseSignatureStatus("G\x00"));
+    try std.testing.expectEqual(SignatureStatus.bad, parseSignatureStatus("B"));
+    try std.testing.expectEqual(SignatureStatus.valid_unknown, parseSignatureStatus("U"));
+    try std.testing.expectEqual(SignatureStatus.valid_expired, parseSignatureStatus("X"));
+    try std.testing.expectEqual(SignatureStatus.expired_key, parseSignatureStatus("Y"));
+    try std.testing.expectEqual(SignatureStatus.revoked_key, parseSignatureStatus("R"));
+    try std.testing.expectEqual(SignatureStatus.cannot_check, parseSignatureStatus("E"));
+    try std.testing.expectEqual(SignatureStatus.unknown, parseSignatureStatus("?"));
+}
+
+test "parses head signature kind" {
+    const gpg_commit =
+        \\tree abc
+        \\gpgsig -----BEGIN PGP SIGNATURE-----
+        \\ Version: GnuPG
+        \\ -----END PGP SIGNATURE-----
+        \\
+        \\body
+    ;
+    const ssh_commit =
+        \\tree abc
+        \\gpgsig -----BEGIN SSH SIGNATURE-----
+        \\ data
+        \\ -----END SSH SIGNATURE-----
+        \\
+        \\body
+    ;
+    try std.testing.expectEqual(SignatureKind.gpg, signatureKindFromCommit(gpg_commit));
+    try std.testing.expectEqual(SignatureKind.ssh, signatureKindFromCommit(ssh_commit));
+    try std.testing.expectEqual(SignatureKind.none, signatureKindFromCommit("tree abc\n\n-----BEGIN SSH SIGNATURE-----\n"));
+}
+
+test "parses head signature state" {
+    const commit =
+        \\tree abc
+        \\gpgsig -----BEGIN SSH SIGNATURE-----
+        \\ data
+        \\ -----END SSH SIGNATURE-----
+        \\
+        \\body
+    ;
+    const signature = parseHeadSignature("G", commit);
+    try std.testing.expectEqual(SignatureStatus.valid, signature.status);
+    try std.testing.expectEqual(SignatureKind.ssh, signature.kind);
+    try std.testing.expectEqual(SignatureKind.none, parseHeadSignature("N", commit).kind);
 }
 
 test "detects last fetch age" {

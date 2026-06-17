@@ -2815,6 +2815,118 @@ fn appendTomlString(allocator: std.mem.Allocator, out: *std.ArrayList(u8), value
     try out.append(allocator, '"');
 }
 
+const TideSetting = struct {
+    name: []u8,
+    values: std.ArrayList([]u8) = .empty,
+
+    fn deinit(self: *TideSetting, allocator: std.mem.Allocator) void {
+        allocator.free(self.name);
+        for (self.values.items) |value| allocator.free(value);
+        self.values.deinit(allocator);
+    }
+};
+
+const TideConfig = struct {
+    settings: std.ArrayList(TideSetting) = .empty,
+
+    fn deinit(self: *TideConfig, allocator: std.mem.Allocator) void {
+        for (self.settings.items) |*setting| setting.deinit(allocator);
+        self.settings.deinit(allocator);
+    }
+
+    fn find(self: TideConfig, name: []const u8) ?TideSetting {
+        for (self.settings.items) |setting| {
+            if (std.mem.eql(u8, setting.name, name)) return setting;
+        }
+        return null;
+    }
+};
+
+fn parseTideConfig(allocator: std.mem.Allocator, source: []const u8) !TideConfig {
+    var config = TideConfig{};
+    errdefer config.deinit(allocator);
+
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0 or line[0] == '#') continue;
+
+        var words: std.ArrayList([]u8) = .empty;
+        defer freeStringList(allocator, &words);
+        try appendFishWords(allocator, &words, line);
+        if (words.items.len == 0) continue;
+
+        const name_index = tideNameIndex(words.items) orelse continue;
+        const name = words.items[name_index];
+        if (!validTideKey(name)) continue;
+
+        var setting = TideSetting{ .name = try allocator.dupe(u8, name) };
+        errdefer setting.deinit(allocator);
+        for (words.items[name_index + 1 ..]) |value| {
+            const owned = try allocator.dupe(u8, value);
+            errdefer allocator.free(owned);
+            try setting.values.append(allocator, owned);
+        }
+        try config.settings.append(allocator, setting);
+    }
+
+    return config;
+}
+
+fn tideNameIndex(words: []const []u8) ?usize {
+    if (words.len == 0) return null;
+    if (std.mem.eql(u8, words[0], "set")) {
+        for (words[1..], 1..) |word, index| {
+            if (std.mem.startsWith(u8, word, "tide_")) return index;
+        }
+        return null;
+    }
+    return if (std.mem.startsWith(u8, words[0], "tide_")) 0 else null;
+}
+
+fn validTideKey(key: []const u8) bool {
+    if (!std.mem.startsWith(u8, key, "tide_")) return false;
+    for (key) |byte| {
+        if (!(std.ascii.isLower(byte) or std.ascii.isDigit(byte) or byte == '_')) return false;
+    }
+    return true;
+}
+
+fn appendFishWords(allocator: std.mem.Allocator, words: *std.ArrayList([]u8), text: []const u8) !void {
+    var index: usize = 0;
+    while (index < text.len) {
+        while (index < text.len and std.ascii.isWhitespace(text[index])) : (index += 1) {}
+        if (index >= text.len or text[index] == '#') break;
+
+        if (text[index] == '\'' or text[index] == '"') {
+            const quote = text[index];
+            index += 1;
+            const start = index;
+            while (index < text.len and text[index] != quote) : (index += 1) {}
+            if (index >= text.len) return error.UnclosedFishQuote;
+            const owned = try allocator.dupe(u8, text[start..index]);
+            errdefer allocator.free(owned);
+            try words.append(allocator, owned);
+            index += 1;
+            continue;
+        }
+
+        const start = index;
+        while (index < text.len and !std.ascii.isWhitespace(text[index]) and text[index] != '#') : (index += 1) {}
+        const value = text[start..index];
+        if (value.len != 0) {
+            const owned = try allocator.dupe(u8, value);
+            errdefer allocator.free(owned);
+            try words.append(allocator, owned);
+        }
+    }
+}
+
+fn freeStringList(allocator: std.mem.Allocator, words: *std.ArrayList([]u8)) void {
+    for (words.items) |word| allocator.free(word);
+    words.deinit(allocator);
+}
+
 const StarshipImport = struct {
     modules: std.ArrayList(shisa_config.ModuleId) = .empty,
     unsupported: std.ArrayList([]const u8) = .empty,
@@ -3473,6 +3585,50 @@ test "omits oh-my-posh migration notes when import is complete" {
     defer result.deinit(std.testing.allocator);
 
     try std.testing.expect(result.notes == null);
+}
+
+fn expectTideValues(config: TideConfig, name: []const u8, expected: []const []const u8) !void {
+    const setting = config.find(name) orelse return error.MissingTideSetting;
+    try std.testing.expectEqual(expected.len, setting.values.items.len);
+    for (expected, 0..) |value, index| {
+        try std.testing.expectEqualStrings(value, setting.values.items[index]);
+    }
+}
+
+test "parses tide configure output" {
+    const source =
+        \\tide_left_prompt_items pwd git newline character
+        \\tide_right_prompt_items status cmd_duration time
+        \\tide_left_prompt_prefix ''
+        \\tide_prompt_transient_enabled false
+        \\tide_git_color_branch $_tide_color_green
+        \\
+    ;
+    var config = try parseTideConfig(std.testing.allocator, source);
+    defer config.deinit(std.testing.allocator);
+
+    try expectTideValues(config, "tide_left_prompt_items", &.{ "pwd", "git", "newline", "character" });
+    try expectTideValues(config, "tide_right_prompt_items", &.{ "status", "cmd_duration", "time" });
+    try expectTideValues(config, "tide_left_prompt_prefix", &.{""});
+    try expectTideValues(config, "tide_prompt_transient_enabled", &.{"false"});
+    try expectTideValues(config, "tide_git_color_branch", &.{"$_tide_color_green"});
+}
+
+test "parses tide fish set syntax" {
+    const source =
+        \\set -g tide_left_prompt_items pwd git
+        \\set --global tide_right_prompt_items status cmd_duration
+        \\set -gx tide_prompt_transient_enabled true
+        \\set -g not_tide ignored
+        \\
+    ;
+    var config = try parseTideConfig(std.testing.allocator, source);
+    defer config.deinit(std.testing.allocator);
+
+    try expectTideValues(config, "tide_left_prompt_items", &.{ "pwd", "git" });
+    try expectTideValues(config, "tide_right_prompt_items", &.{ "status", "cmd_duration" });
+    try expectTideValues(config, "tide_prompt_transient_enabled", &.{"true"});
+    try std.testing.expect(config.find("not_tide") == null);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {

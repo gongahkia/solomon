@@ -4,6 +4,7 @@ local defaults = {
   socket = nil,
   topics = { "cloud_ctx", "vcs.summary", "risk_tier" },
   backpressure_limit = 16,
+  dirchanged_refresh = true,
 }
 
 M.config = vim.deepcopy(defaults)
@@ -106,8 +107,29 @@ function M.disconnect()
   M.state.channel = nil
 end
 
+function M.refresh()
+  if not M.state.channel and not M.connect() then
+    return false
+  end
+  local payload = json_encode({
+    op = "ping",
+    reason = "DirChanged",
+  })
+  vim.fn.chansend(M.state.channel, payload .. "\n")
+  return true
+end
+
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
+  if M.config.dirchanged_refresh then
+    local group = vim.api.nvim_create_augroup("shisa_nvim", { clear = true })
+    vim.api.nvim_create_autocmd("DirChanged", {
+      group = group,
+      callback = function()
+        M.refresh()
+      end,
+    })
+  end
   if M.config.auto_connect then
     M.connect()
   end

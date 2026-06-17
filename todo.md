@@ -528,7 +528,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 16.4 Neovim bridge (`shisa.nvim`)
 - [x] Small Lua plugin under `contrib/editor-bridges/shisa.nvim/`
 - [x] Lualine + heirline integration examples
-- [ ] Autocmd to refresh on `DirChanged`
+- [x] Autocmd to refresh on `DirChanged`
 - [ ] Unit tests via `plenary.nvim` test harness
 
 ### 16.5 Zed bridge

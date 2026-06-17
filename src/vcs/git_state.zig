@@ -29,6 +29,12 @@ pub fn detectBisectState(git_dir: std.fs.Dir) BisectState {
     };
 }
 
+pub fn detectAmState(git_dir: std.fs.Dir) bool {
+    return entryExists(git_dir, "rebase-apply/applying") or
+        entryExists(git_dir, "rebase-apply/patch") or
+        entryExists(git_dir, "rebase-apply/msg");
+}
+
 pub fn detectCherryPickState(git_dir: std.fs.Dir) SequencerState {
     if (entryExists(git_dir, "sequencer/todo")) return .sequence;
     if (entryExists(git_dir, "CHERRY_PICK_HEAD")) return .single;
@@ -195,6 +201,25 @@ test "detects bisect good bad and current state" {
     try std.testing.expect(state.current);
     try std.testing.expect(state.good);
     try std.testing.expect(state.bad);
+}
+
+test "detects absent git am state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath(".git/rebase-apply");
+    var git_dir = try openGitDir(&tmp);
+    defer git_dir.close();
+    try std.testing.expect(!detectAmState(git_dir));
+}
+
+test "detects git am state" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath(".git/rebase-apply");
+    var git_dir = try openGitDir(&tmp);
+    defer git_dir.close();
+    try git_dir.writeFile(.{ .sub_path = "rebase-apply/applying", .data = "" });
+    try std.testing.expect(detectAmState(git_dir));
 }
 
 fn makeGitDir(tmp: *std.testing.TmpDir) !std.fs.Dir {

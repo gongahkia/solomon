@@ -8,6 +8,8 @@ Shisa release artifacts are signed in the tag-driven release workflow with Sigst
 - cosign bundle files
 - `rekor-links.txt`
 
+The same workflow publishes GitHub artifact attestations for every release asset.
+
 ## Verify A Release File
 
 Download the artifact and its matching bundle from the GitHub Release. Use the exact tag in the certificate identity:
@@ -22,6 +24,12 @@ cosign verify-blob "$artifact" \
 ```
 
 Check `rekor-links.txt` for the transparency log URL tied to each bundle.
+
+Verify GitHub provenance with:
+
+```sh
+gh attestation verify "$artifact" -R gongahkia/shisa
+```
 
 ## Distrust Triggers
 

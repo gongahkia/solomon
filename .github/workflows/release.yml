@@ -15,6 +15,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      attestations: write
+      artifact-metadata: write
     strategy:
       fail-fast: false
       matrix:
@@ -74,6 +76,17 @@ jobs:
           do
             cosign sign-blob --yes "$artifact" --bundle "$artifact.sigstore.json"
           done
+
+      - name: Generate provenance attestations
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/${{ env.SHISA_PACKAGE_NAME }}.tar.gz
+            dist/${{ env.SHISA_PACKAGE_NAME }}.tar.gz.sha256
+            dist/${{ env.SHISA_PACKAGE_NAME }}.spdx.json
+            dist/${{ env.SHISA_PACKAGE_NAME }}.tar.gz.sigstore.json
+            dist/${{ env.SHISA_PACKAGE_NAME }}.tar.gz.sha256.sigstore.json
+            dist/${{ env.SHISA_PACKAGE_NAME }}.spdx.json.sigstore.json
 
       - uses: actions/upload-artifact@v4
         with:

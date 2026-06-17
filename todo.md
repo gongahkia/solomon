@@ -668,7 +668,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 20.4 SLSA
 - [x] Achieve SLSA Level 2 attestation
 - [x] Publish provenance per release
-- [ ] Roadmap to SLSA Level 3 (hermetic builds)
+- [x] Roadmap to SLSA Level 3 (hermetic builds)
 
 ### 20.5 Distribution channels
 - [ ] Homebrew formula (tap â†’ core)

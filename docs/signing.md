@@ -68,3 +68,25 @@ There is no long-lived Shisa signing key. Rotation means changing the GitHub OID
 ## Distrusted Releases
 
 No releases are currently distrusted.
+
+## SLSA Level 3 Roadmap
+
+The next target is SLSA v1.0 Build Level 3 with hermetic release builds.
+
+Required changes:
+
+1. Move release building into a reusable workflow owned by the repo.
+2. Pin the reusable workflow by commit SHA from the tag workflow.
+3. Build inside a pinned container image that contains Zig, Syft, cosign, and GitHub CLI.
+4. Vendor or prefetch release dependencies before the hermetic build step.
+5. Deny network access during the compile/package/sign input stage.
+6. Use explicit `-Dtarget`, `-Dcpu`, cache paths, seed, and build ID settings for every target.
+7. Compare artifacts from two independent runners before publishing.
+8. Document the verification policy that release consumers should enforce with `gh attestation verify`.
+
+Exit criteria:
+
+- release artifacts are produced by the reusable workflow
+- artifact attestations point to the reusable workflow identity
+- the release job fails when the two-run artifact comparison fails
+- the verification command is documented for each supported artifact type

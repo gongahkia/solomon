@@ -99,6 +99,17 @@ pub const ErrorEnvelope = struct {
     @"error": Error,
 };
 
+pub fn encodeAlloc(allocator: std.mem.Allocator, value: anytype) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+    try std.json.Stringify.value(value, .{ .emit_null_optional_fields = false }, &out.writer);
+    return out.toOwnedSlice();
+}
+
+pub fn decodeAlloc(comptime T: type, allocator: std.mem.Allocator, source: []const u8) !std.json.Parsed(T) {
+    return std.json.parseFromSlice(T, allocator, source, .{ .ignore_unknown_fields = true });
+}
+
 test "request type carries v1 render inputs" {
     const request = Request{
         .op = .render,
@@ -175,4 +186,53 @@ test "error envelope carries explicit code and structured context" {
         else => return error.ExpectedObject,
     };
     try std.testing.expectEqual(@as(i64, 1048576), max_frame_value.integer);
+}
+
+test "json helpers roundtrip request and response" {
+    const allocator = std.testing.allocator;
+    const request = Request{
+        .cwd = "/tmp/project",
+        .exit = 0,
+        .jobs = 1,
+        .duration_ms = 42,
+        .shell = .fish,
+        .cols = 100,
+        .rows = 30,
+        .tty = "/dev/ttys002",
+        .color_caps = .truecolor,
+        .glyph_caps = .ascii,
+        .user_id = 501,
+        .session = "session-2",
+        .request_id = "request-2",
+    };
+
+    const request_json = try encodeAlloc(allocator, request);
+    defer allocator.free(request_json);
+    var parsed_request = try decodeAlloc(Request, allocator, request_json);
+    defer parsed_request.deinit();
+
+    try std.testing.expectEqual(Op.render, parsed_request.value.op);
+    try std.testing.expectEqual(Shell.fish, parsed_request.value.shell);
+    try std.testing.expectEqual(ColorCaps.truecolor, parsed_request.value.color_caps);
+    try std.testing.expectEqual(GlyphCaps.ascii, parsed_request.value.glyph_caps);
+    try std.testing.expectEqualStrings("request-2", parsed_request.value.request_id);
+
+    const diagnostics = [_]Diagnostic{.{ .code = "async_pending", .message = "git still running" }};
+    const response = Response{
+        .request_id = "request-2",
+        .prompt = "shisa> ",
+        .redraw_token = "token-1",
+        .diagnostics = &diagnostics,
+        .elapsed_us = 321,
+    };
+    const response_json = try encodeAlloc(allocator, response);
+    defer allocator.free(response_json);
+    var parsed_response = try decodeAlloc(Response, allocator, response_json);
+    defer parsed_response.deinit();
+
+    try std.testing.expectEqualStrings("request-2", parsed_response.value.request_id);
+    try std.testing.expectEqualStrings("shisa> ", parsed_response.value.prompt);
+    try std.testing.expectEqualStrings("token-1", parsed_response.value.redraw_token.?);
+    try std.testing.expectEqualStrings("async_pending", parsed_response.value.diagnostics[0].code);
+    try std.testing.expectEqual(@as(u64, 321), parsed_response.value.elapsed_us);
 }

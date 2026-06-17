@@ -511,7 +511,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Bidirectional NDJSON stream over connected socket
 - [x] Topic subscription with reference-counting per-topic
 - [x] Snapshot then delta updates
-- [ ] Backpressure: drop if client slower than producer (configurable)
+- [x] Backpressure: drop if client slower than producer (configurable)
 - [ ] Disconnect cleanly, free state
 
 ### 16.2 Read-only enforcement

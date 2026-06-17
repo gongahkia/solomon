@@ -165,6 +165,7 @@ const schema_json =
     \\        "v": { "const": 1 },
     \\        "op": { "const": "subscribe" },
     \\        "request_id": { "type": "string" },
+    \\        "backpressure_limit": { "type": "integer", "minimum": 1, "maximum": 1024 },
     \\        "topics": {
     \\          "type": "array",
     \\          "items": { "type": "string" }

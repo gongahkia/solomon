@@ -17,6 +17,8 @@ const plugin_lua = @import("plugin_lua");
 const header_bytes = 4;
 const max_frame_bytes = 1024 * 1024;
 const max_config_bytes = 1024 * 1024;
+const default_subscribe_backpressure_limit = 16;
+const max_subscribe_backpressure_limit = 1024;
 pub const daemon_version = "0.1.0-dev";
 pub const protocol_version: u32 = 1;
 const default_config_text =
@@ -59,11 +61,51 @@ const SubscribeRequest = struct {
     op: []const u8 = "subscribe",
     request_id: []const u8 = "",
     topics: []const []const u8 = &.{},
+    backpressure_limit: u16 = default_subscribe_backpressure_limit,
 };
 
 const TopicRef = struct {
     topic: []u8,
     count: usize,
+};
+
+const SubscriptionQueue = struct {
+    allocator: std.mem.Allocator,
+    max_events: usize,
+    events: std.ArrayList([]u8) = .empty,
+    dropped: u64 = 0,
+
+    fn init(allocator: std.mem.Allocator, max_events: usize) SubscriptionQueue {
+        return .{
+            .allocator = allocator,
+            .max_events = @max(max_events, 1),
+        };
+    }
+
+    fn deinit(self: *SubscriptionQueue) void {
+        for (self.events.items) |event| self.allocator.free(event);
+        self.events.deinit(self.allocator);
+        self.* = undefined;
+    }
+
+    fn pushOwned(self: *SubscriptionQueue, event: []u8) !bool {
+        if (self.events.items.len >= self.max_events) {
+            self.allocator.free(event);
+            self.dropped += 1;
+            return false;
+        }
+        errdefer self.allocator.free(event);
+        try self.events.append(self.allocator, event);
+        return true;
+    }
+
+    fn flush(self: *SubscriptionQueue, fd: std.posix.fd_t) !void {
+        for (self.events.items) |event| {
+            try writeAll(fd, event);
+            self.allocator.free(event);
+        }
+        self.events.clearRetainingCapacity();
+    }
 };
 
 const ReloadState = struct {
@@ -489,6 +531,8 @@ pub const Server = struct {
         defer std.heap.page_allocator.free(snapshot);
         try writeAll(fd, snapshot);
 
+        var queue = SubscriptionQueue.init(std.heap.page_allocator, subscribeBackpressureLimit(parsed.value.backpressure_limit));
+        defer queue.deinit();
         var sequence: u64 = 0;
         while (true) {
             const line = readNdjsonLineAlloc(std.heap.page_allocator, fd, 64 * 1024) catch |err| switch (err) {
@@ -500,11 +544,10 @@ pub const Server = struct {
             sequence += 1;
             const delta_topic = if (topic_refs.len == 0) "subscription" else topic_refs[0].topic;
             const delta = try subscribeDeltaAlloc(std.heap.page_allocator, parsed.value.request_id, delta_topic, sequence);
-            defer std.heap.page_allocator.free(delta);
-            try writeAll(fd, delta);
+            _ = try queue.pushOwned(delta);
             const heartbeat = try subscribeHeartbeatAlloc(std.heap.page_allocator, parsed.value.request_id);
-            defer std.heap.page_allocator.free(heartbeat);
-            try writeAll(fd, heartbeat);
+            _ = try queue.pushOwned(heartbeat);
+            try queue.flush(fd);
         }
     }
 
@@ -777,6 +820,11 @@ fn topicRefsAlloc(allocator: std.mem.Allocator, topics: []const []const u8) ![]T
     }
 
     return refs.toOwnedSlice(allocator);
+}
+
+fn subscribeBackpressureLimit(value: u16) usize {
+    if (value == 0) return default_subscribe_backpressure_limit;
+    return @min(@as(usize, value), max_subscribe_backpressure_limit);
 }
 
 fn freeTopicRefs(allocator: std.mem.Allocator, refs: []TopicRef) void {
@@ -1386,6 +1434,19 @@ test "subscribe op switches connection to bidirectional ndjson" {
 
     client_stream.close();
     thread.join();
+}
+
+test "subscribe backpressure queue drops over limit" {
+    const allocator = std.testing.allocator;
+    var queue = SubscriptionQueue.init(allocator, 1);
+    defer queue.deinit();
+
+    try std.testing.expect(try queue.pushOwned(try allocator.dupe(u8, "first\n")));
+    try std.testing.expect(!(try queue.pushOwned(try allocator.dupe(u8, "second\n"))));
+    try std.testing.expectEqual(@as(u64, 1), queue.dropped);
+    try std.testing.expectEqual(@as(usize, 1), queue.events.items.len);
+    try std.testing.expectEqual(@as(usize, default_subscribe_backpressure_limit), subscribeBackpressureLimit(0));
+    try std.testing.expectEqual(@as(usize, max_subscribe_backpressure_limit), subscribeBackpressureLimit(max_subscribe_backpressure_limit + 1));
 }
 
 test "metrics op returns JSON metrics dump" {

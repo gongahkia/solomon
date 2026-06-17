@@ -497,7 +497,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 15.4 Error codes
 - [x] Define enum: `E_VERSION`, `E_OVERSIZE`, `E_MALFORMED`, `E_NOT_READY`, `E_PLUGIN_TIMEOUT`, `E_CAPABILITY_DENIED`, `E_INTERNAL`
-- [ ] Document each in `docs/protocol/errors.md`
+- [x] Document each in `docs/protocol/errors.md`
 - [ ] Each error includes structured context fields for machine consumption
 
 ### 15.5 Versioning + RFC binding

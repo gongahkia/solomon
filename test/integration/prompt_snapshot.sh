@@ -27,8 +27,8 @@ done
   exit 1
 }
 
-actual="$(SSH_CONNECTION= "$root/zig-out/bin/shisa" prompt --socket "$sock" --cwd /tmp/shisa-snapshot --exit 7 --jobs 2 --duration-ms 1500 --shell zsh --cols 80 --rows 24)"
-expected=$'/tmp/shisa-snapshot \e[31mexit:7\e[0m jobs:2 took:1.5s> '
+actual="$(env HOSTNAME=localhost SSH_CONNECTION= "$root/zig-out/bin/shisa" prompt --socket "$sock" --cwd /tmp/shisa-snapshot --exit 7 --jobs 2 --duration-ms 1500 --shell zsh --cols 80 --rows 24)"
+expected=$'\e]7;file://localhost/tmp/shisa-snapshot\a/tmp/shisa-snapshot \e[31mexit:7\e[0m jobs:2 took:1.5s> '
 
 if [[ "$actual" != "$expected" ]]; then
   printf 'snapshot mismatch\nexpected: %q\nactual:   %q\n' "$expected" "$actual" >&2

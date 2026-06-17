@@ -4687,7 +4687,7 @@ fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (config.instant) {
         if (try readInstantPrompt(allocator)) |cached| {
             defer allocator.free(cached);
-            try writePromptText(allocator, cached, config.a11y);
+            try writePromptText(allocator, cached, config.a11y, cwd);
             return;
         }
     }
@@ -4700,7 +4700,7 @@ fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (config.instant) {
         try writeInstantPrompt(allocator, parsed.value.prompt);
     }
-    try writePromptText(allocator, parsed.value.prompt, config.a11y);
+    try writePromptText(allocator, parsed.value.prompt, config.a11y, cwd);
 }
 
 fn parsePrompt(args: []const []const u8) !PromptConfig {
@@ -4741,7 +4741,10 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
     return config;
 }
 
-fn writePromptText(allocator: std.mem.Allocator, prompt_text: []const u8, a11y: bool) !void {
+fn writePromptText(allocator: std.mem.Allocator, prompt_text: []const u8, a11y: bool, cwd: []const u8) !void {
+    const osc7 = try osc7SequenceAlloc(allocator, cwd);
+    defer allocator.free(osc7);
+    try std.fs.File.stdout().writeAll(osc7);
     if (!a11y) {
         try std.fs.File.stdout().writeAll(prompt_text);
         return;
@@ -4749,6 +4752,48 @@ fn writePromptText(allocator: std.mem.Allocator, prompt_text: []const u8, a11y: 
     const accessible = try a11yPromptAlloc(allocator, prompt_text);
     defer allocator.free(accessible);
     try std.fs.File.stdout().writeAll(accessible);
+}
+
+fn osc7SequenceAlloc(allocator: std.mem.Allocator, cwd: []const u8) ![]u8 {
+    const host = std.process.getEnvVarOwned(allocator, "HOSTNAME") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => try allocator.dupe(u8, "localhost"),
+        else => return err,
+    };
+    defer allocator.free(host);
+    return osc7SequenceForHostAlloc(allocator, host, cwd);
+}
+
+fn osc7SequenceForHostAlloc(allocator: std.mem.Allocator, host: []const u8, cwd: []const u8) ![]u8 {
+    const encoded_host = try percentEncodeUriComponentAlloc(allocator, host, false);
+    defer allocator.free(encoded_host);
+    const encoded_path = try percentEncodeUriComponentAlloc(allocator, cwd, true);
+    defer allocator.free(encoded_path);
+    return std.fmt.allocPrint(allocator, "\x1b]7;file://{s}{s}\x07", .{ encoded_host, encoded_path });
+}
+
+fn percentEncodeUriComponentAlloc(allocator: std.mem.Allocator, value: []const u8, keep_slash: bool) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    for (value) |byte| {
+        if (isUriUnreserved(byte) or (keep_slash and byte == '/')) {
+            try out.append(allocator, byte);
+        } else {
+            try out.append(allocator, '%');
+            try out.append(allocator, hexDigit(byte >> 4));
+            try out.append(allocator, hexDigit(byte & 0x0f));
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn isUriUnreserved(byte: u8) bool {
+    return (byte >= 'A' and byte <= 'Z') or
+        (byte >= 'a' and byte <= 'z') or
+        (byte >= '0' and byte <= '9') or
+        byte == '-' or byte == '.' or byte == '_' or byte == '~';
+}
+
+fn hexDigit(value: u8) u8 {
+    return "0123456789ABCDEF"[value & 0x0f];
 }
 
 fn instantPromptPath(allocator: std.mem.Allocator) ![]u8 {
@@ -4794,6 +4839,12 @@ test "instant prompt read write roundtrip" {
     const cached = try std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024);
     defer allocator.free(cached);
     try std.testing.expectEqualStrings("cached> ", cached);
+}
+
+test "osc7 sequence percent-encodes cwd" {
+    const sequence = try osc7SequenceForHostAlloc(std.testing.allocator, "local host", "/tmp/a b/%");
+    defer std.testing.allocator.free(sequence);
+    try std.testing.expectEqualStrings("\x1b]7;file://local%20host/tmp/a%20b/%25\x07", sequence);
 }
 
 fn nextValue(args: []const []const u8, index: *usize) ![]const u8 {

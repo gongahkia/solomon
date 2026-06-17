@@ -8,9 +8,11 @@
 | bash | `init/shisa.bash` | `PROMPT_COMMAND` + `DEBUG` trap | yes | `bind -x` on `\C-x\C-s` | no | CLI supports `--instant`; hook does not enable by default | `test/integration/bash_fake_socket.sh` |
 | fish | `init/shisa.fish` | `fish_prompt` + `fish_preexec` | yes | `emit shisa_async_redraw` + `commandline -f repaint` | no | enabled by default via `--instant` | `test/integration/fish_fake_socket.sh` |
 | nushell | `init/shisa.nu` | `$env.PROMPT_COMMAND` | exit/jobs yes; duration 0 | documented limitation | no | CLI supports `--instant`; hook off by default | `test/integration/nu_fake_socket.sh` |
-| powershell | `init/shisa.ps1` | `prompt` | exit/jobs yes; duration 0 | `Invoke-ShisaRedraw`; external repaint limited | no | CLI supports `--instant`; hook off by default | `test/integration/pwsh_fake_socket.sh` |
+| PowerShell | `init/shisa.ps1` | `prompt` | exit/jobs yes; duration 0 | `Invoke-ShisaRedraw`; external repaint limited | no | CLI supports `--instant`; hook off by default | `test/integration/pwsh_fake_socket.sh` |
 
 Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from the hook.
+
+`shisa prompt` emits OSC-7 cwd metadata before the rendered prompt so terminals that support it can open new tabs in the current directory. The sequence uses `file://<host><cwd>` and percent-encodes path bytes.
 
 ## zsh
 

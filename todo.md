@@ -714,7 +714,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] Document why a11y mode is opinionated (no override of certain signals)
 
 ### 21.4 Screen-reader plumbing
-- [ ] Emit OSC-7 (cwd) per prompt
+- [x] Emit OSC-7 (cwd) per prompt
 - [ ] Custom OSC sequence for a11y summary (documented + reserved)
 - [ ] Optional `shisa.a11y.live` plugin: announce risk-tier transitions
 - [ ] Test on macOS VoiceOver

@@ -56,3 +56,7 @@ Oh My Posh `palette` entries and segment `foreground`/`background` fields are re
 The importer converts resolved sRGB colors to Oklab and maps them to the nearest Shisa semantic palette slot: `fg`, `muted`, `accent`, `success`, `warning`, or `danger`.
 
 Color templates are not translated yet; only static `foreground` and `background` values are imported.
+
+## Migration Notes
+
+When unsupported segments, unresolved colors, or untranslatable templates remain, `shisa import-oh-my-posh` writes `migration-notes.md`.

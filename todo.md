@@ -581,7 +581,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 - [x] Map segments to Shisa modules with a coverage table
 - [x] Translate template strings to Shisa's layout syntax
 - [x] Color mapping: oh-my-posh palette → Oklab → Shisa palette
-- [ ] Emit `migration-notes.md`
+- [x] Emit `migration-notes.md`
 
 ### 18.3 Tide importer
 - [ ] Parse tide fish settings (`tide configure` output)

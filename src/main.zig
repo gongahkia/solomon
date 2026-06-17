@@ -2210,10 +2210,12 @@ fn isIgnoredOmpSegment(name: []const u8) bool {
 const OmpImportResult = struct {
     config: []u8,
     theme: ?[]u8 = null,
+    notes: ?[]u8 = null,
 
     fn deinit(self: OmpImportResult, allocator: std.mem.Allocator) void {
         allocator.free(self.config);
         if (self.theme) |theme| allocator.free(theme);
+        if (self.notes) |notes| allocator.free(notes);
     }
 };
 
@@ -2228,6 +2230,9 @@ fn importOhMyPosh(allocator: std.mem.Allocator, args: []const []const u8) !void 
     try std.fs.File.stdout().writeAll(result.config);
     if (result.theme) |theme| {
         try std.fs.cwd().writeFile(.{ .sub_path = "oh-my-posh-theme.toml", .data = theme });
+    }
+    if (result.notes) |notes| {
+        try std.fs.cwd().writeFile(.{ .sub_path = "migration-notes.md", .data = notes });
     }
 }
 
@@ -2249,7 +2254,9 @@ fn importOhMyPoshResultAlloc(allocator: std.mem.Allocator, source: []const u8) !
     errdefer if (imported_theme) |owned| allocator.free(owned);
     const config = try renderOmpImportedConfigAlloc(allocator, imported, theme, if (imported_theme != null) "./oh-my-posh-theme.toml" else null);
     errdefer allocator.free(config);
-    return .{ .config = config, .theme = imported_theme };
+    const notes = try renderOmpMigrationNotesAlloc(allocator, theme, imported);
+    errdefer if (notes) |owned| allocator.free(owned);
+    return .{ .config = config, .theme = imported_theme, .notes = notes };
 }
 
 fn renderOmpImportedConfigAlloc(allocator: std.mem.Allocator, imported: StarshipImport, theme: OmpTheme, theme_path: ?[]const u8) ![]u8 {
@@ -2291,6 +2298,80 @@ fn renderOmpImportedConfigAlloc(allocator: std.mem.Allocator, imported: Starship
     }
 
     return out.toOwnedSlice(allocator);
+}
+
+fn renderOmpMigrationNotesAlloc(allocator: std.mem.Allocator, theme: OmpTheme, imported: StarshipImport) !?[]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    var count: usize = 0;
+    try out.appendSlice(allocator, "# Oh My Posh Migration Notes\n\n");
+
+    if (imported.unsupported.items.len != 0) {
+        count += imported.unsupported.items.len;
+        try out.appendSlice(allocator, "## Unsupported Segments\n\n");
+        for (imported.unsupported.items) |name| {
+            try appendFmt(allocator, &out, "- `{s}`: {s}\n", .{ name, ompUnsupportedReason(name) });
+        }
+        try out.append(allocator, '\n');
+    }
+
+    var template_count: usize = 0;
+    for (theme.blocks.items) |block| {
+        for (block.segments.items) |segment| {
+            const kind = segment.kind orelse continue;
+            if (ompModuleForSegment(kind) == null) continue;
+            const template = segment.template orelse continue;
+            const layout = try translateOmpTemplateLayoutAlloc(allocator, template);
+            defer if (layout) |owned| owned.deinit(allocator);
+            if (layout == null) {
+                if (template_count == 0) try out.appendSlice(allocator, "## Untranslated Templates\n\n");
+                template_count += 1;
+                count += 1;
+                try appendFmt(allocator, &out, "- `{s}`: template requires manual port.\n", .{kind});
+            }
+        }
+    }
+    if (template_count != 0) try out.append(allocator, '\n');
+
+    var color_count: usize = 0;
+    for (theme.blocks.items) |block| {
+        for (block.segments.items) |segment| {
+            const kind = segment.kind orelse continue;
+            if (segment.foreground) |foreground| {
+                if (resolveOmpColorRgb(theme, foreground, 0) == null) {
+                    if (color_count == 0) try out.appendSlice(allocator, "## Unresolved Colors\n\n");
+                    color_count += 1;
+                    count += 1;
+                    try appendFmt(allocator, &out, "- `{s}` foreground `{s}` could not be resolved.\n", .{ kind, foreground });
+                }
+            }
+            if (segment.background) |background| {
+                if (resolveOmpColorRgb(theme, background, 0) == null) {
+                    if (color_count == 0) try out.appendSlice(allocator, "## Unresolved Colors\n\n");
+                    color_count += 1;
+                    count += 1;
+                    try appendFmt(allocator, &out, "- `{s}` background `{s}` could not be resolved.\n", .{ kind, background });
+                }
+            }
+        }
+    }
+
+    if (count == 0) return null;
+    return try out.toOwnedSlice(allocator);
+}
+
+fn ompUnsupportedReason(name: []const u8) []const u8 {
+    if (std.mem.eql(u8, name, "battery")) return "No core battery module.";
+    if (std.mem.eql(u8, name, "docker")) return "Docker context differs from Shisa container provenance.";
+    if (std.mem.eql(u8, name, "ipify")) return "No core public-IP module.";
+    if (std.mem.eql(u8, name, "sysinfo")) return "No core CPU/RAM module.";
+    if (std.mem.eql(u8, name, "project")) return "No package/project metadata core module yet.";
+    if (std.mem.eql(u8, name, "http")) return "Network calls are not imported into prompt hot path.";
+    if (std.mem.eql(u8, name, "spotify")) return "Media status belongs in a plugin.";
+    if (std.mem.eql(u8, name, "wakatime")) return "External service calls belong in a plugin.";
+    if (std.mem.eql(u8, name, "taskwarrior")) return "Task manager integrations belong in a plugin.";
+    return "No Shisa core mapping; recreate as a plugin or omit.";
 }
 
 fn appendOmpLayoutComments(allocator: std.mem.Allocator, out: *std.ArrayList(u8), theme: OmpTheme) !void {
@@ -3348,6 +3429,50 @@ test "imports oh-my-posh palette and segment colors" {
     try std.testing.expect(std.mem.indexOf(u8, theme, "fg = \"@accent\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, theme, "[segments.exit_status]") != null);
     try std.testing.expect(std.mem.indexOf(u8, theme, "bg = \"@danger\"") != null);
+}
+
+test "imports oh-my-posh migration notes" {
+    const source =
+        \\{
+        \\  "blocks": [
+        \\    {
+        \\      "type": "prompt",
+        \\      "segments": [
+        \\        {"type": "battery"},
+        \\        {"type": "path", "template": "{{ if .Writable }}{{ .Path }}{{ end }}"},
+        \\        {"type": "git", "foreground": "p:missing"}
+        \\      ]
+        \\    }
+        \\  ]
+        \\}
+        \\
+    ;
+    const result = try importOhMyPoshResultAlloc(std.testing.allocator, source);
+    defer result.deinit(std.testing.allocator);
+    const notes = result.notes orelse return error.MissingOmpNotes;
+
+    try std.testing.expect(std.mem.indexOf(u8, notes, "# Oh My Posh Migration Notes") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notes, "## Unsupported Segments") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notes, "- `battery`: No core battery module.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notes, "## Untranslated Templates") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notes, "- `path`: template requires manual port.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notes, "## Unresolved Colors") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notes, "- `git` foreground `p:missing` could not be resolved.") != null);
+}
+
+test "omits oh-my-posh migration notes when import is complete" {
+    const source =
+        \\{
+        \\  "blocks": [
+        \\    {"type": "prompt", "segments": [{"type": "path", "template": "cwd:{{ .Path }}"}]}
+        \\  ]
+        \\}
+        \\
+    ;
+    const result = try importOhMyPoshResultAlloc(std.testing.allocator, source);
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(result.notes == null);
 }
 
 fn bench(allocator: std.mem.Allocator, args: []const []const u8) !void {

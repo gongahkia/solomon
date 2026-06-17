@@ -12,6 +12,23 @@ permissions:
   contents: read
 
 jobs:
+  vale:
+    name: Vale / docs PR
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint changed docs prose
+        uses: vale-cli/vale-action@v2.1.1
+        with:
+          version: 3.14.0
+          files: '["README.md","docs","rfcs"]'
+          filter_mode: added
+          fail_on_error: true
+          level: warning
+
   mdbook:
     name: mdBook / ubuntu-24.04
     runs-on: ubuntu-24.04

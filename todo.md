@@ -643,7 +643,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 19.7 Style + linting
 - [x] Adopt `vale` style guide
-- [ ] CI gate on docs PRs
+- [x] CI gate on docs PRs
 - [ ] Style guide page
 
 ## Phase 20 â€” Release engineering + supply chain

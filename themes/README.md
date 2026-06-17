@@ -9,5 +9,6 @@ Built-ins:
 - `gruvbox-rainbow`
 - `tokyo-night`
 - `pure`
+- `a11y`
 
 These files follow `docs/theme-spec.md` and are intended to be copied as starter external themes.

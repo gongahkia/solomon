@@ -1,0 +1,60 @@
+version = 1
+name = "a11y"
+extends = ""
+
+[capabilities]
+color = "none"
+glyphs = "ascii"
+
+[palette]
+fg = "15"
+muted = "15"
+accent = "15"
+success = "15"
+warning = "15"
+danger = "15"
+
+[separators]
+segment = " "
+left = ""
+right = ""
+
+[segments.cwd]
+fg = "@fg"
+bg = ""
+style = ""
+glyph = ""
+ascii = ""
+suffix = ""
+
+[segments.git_branch]
+fg = "@fg"
+bg = ""
+style = ""
+glyph = ""
+ascii = "git:"
+suffix = ""
+
+[segments.exit_status]
+fg = "@fg"
+bg = ""
+style = ""
+glyph = ""
+ascii = "exit:"
+suffix = ""
+
+[segments.jobs]
+fg = "@fg"
+bg = ""
+style = ""
+glyph = ""
+ascii = "jobs:"
+suffix = ""
+
+[segments.cmd_duration]
+fg = "@fg"
+bg = ""
+style = ""
+glyph = ""
+ascii = "took:"
+suffix = ""

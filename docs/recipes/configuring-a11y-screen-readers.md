@@ -80,6 +80,8 @@ modules = ["cwd", "git_branch", "exit_status", "jobs", "cmd_duration", "cloud_ct
 
 `exit_status` renders `exit:<code>`. `ssh_target` renders the host and tier text, for example `-> prod-bastion (prod)`. `cloud_ctx` renders provider labels such as `aws`, `gcp`, `az`, and `k8s`.
 
+For maximum contrast, set `theme = "a11y"`. The built-in `a11y` theme uses ASCII-only labels and white text on the terminal default background.
+
 Current scope: `SHISA_A11Y=1` configures prompt rendering. `shisa init --a11y` and an alt-text dump command are separate accessibility-roadmap items.
 
 See [Shells](../shells.md), [OSC Sequences](../protocol/osc.md), [SSH Target](../ssh-target.md), [Risk Tiers](../risk-tiers.md), and [Config Schema](../config-schema.md).

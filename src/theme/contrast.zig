@@ -37,6 +37,10 @@ pub fn parseColor(value: []const u8) ?Rgb {
 }
 
 pub fn validateThemeContrastAlloc(allocator: std.mem.Allocator, source: []const u8) ![]ContrastFailure {
+    return validateThemeContrastWithThresholdsAlloc(allocator, source, 4.5, 3.0);
+}
+
+pub fn validateThemeContrastWithThresholdsAlloc(allocator: std.mem.Allocator, source: []const u8, text_required: f64, ui_required: f64) ![]ContrastFailure {
     var palette: std.ArrayList(PaletteEntry) = .empty;
     defer palette.deinit(allocator);
     var segments: std.ArrayList(SegmentStyle) = .empty;
@@ -52,16 +56,16 @@ pub fn validateThemeContrastAlloc(allocator: std.mem.Allocator, source: []const 
         const fg = if (segment.fg.len > 0) resolveThemeColor(palette.items, segment.fg, 0) orelse default_fg else default_fg;
         const bg = if (segment.bg.len > 0) resolveThemeColor(palette.items, segment.bg, 0) orelse default_bg else default_bg;
         const ratio = wcagContrastRatio(fg, bg);
-        if (ratio < 4.5) {
-            try failures.append(allocator, .{ .target = segment.id, .role = "text", .ratio = ratio, .required = 4.5 });
+        if (ratio < text_required) {
+            try failures.append(allocator, .{ .target = segment.id, .role = "text", .ratio = ratio, .required = text_required });
         }
     }
 
     inline for (.{ "accent", "success", "warning", "danger" }) |slot| {
         if (resolveThemeColor(palette.items, "@" ++ slot, 0)) |rgb| {
             const ratio = wcagContrastRatio(rgb, default_bg);
-            if (ratio < 3.0) {
-                try failures.append(allocator, .{ .target = slot, .role = "ui", .ratio = ratio, .required = 3.0 });
+            if (ratio < ui_required) {
+                try failures.append(allocator, .{ .target = slot, .role = "ui", .ratio = ratio, .required = ui_required });
             }
         }
     }

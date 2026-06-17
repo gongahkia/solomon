@@ -1,0 +1,6 @@
+tree abc
+gpgsig -----BEGIN SSH SIGNATURE-----
+ data
+ -----END SSH SIGNATURE-----
+
+body

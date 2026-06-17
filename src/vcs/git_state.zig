@@ -911,6 +911,85 @@ test "parses lfs summary" {
     try std.testing.expectEqual(@as(u32, 1), summary.pointer_only);
 }
 
+test "snapshots git state fixture corpus" {
+    const allocator = std.testing.allocator;
+    const root = "test/fixtures/vcs/git/state";
+
+    const porcelain = try readFixture(allocator, root ++ "/porcelain.txt");
+    defer allocator.free(porcelain);
+    const counts = parsePorcelainCounts(porcelain);
+
+    const sparse_config = try readFixture(allocator, root ++ "/sparse-config.txt");
+    defer allocator.free(sparse_config);
+    const sparse = parseSparseCheckoutState(sparse_config);
+
+    const submodules_output = try readFixture(allocator, root ++ "/submodules.txt");
+    defer allocator.free(submodules_output);
+    const submodules = parseSubmoduleStatus(submodules_output);
+
+    const attributes = try readFixture(allocator, root ++ "/attributes.txt");
+    defer allocator.free(attributes);
+    const pointer = try readFixture(allocator, root ++ "/lfs-pointer.txt");
+    defer allocator.free(pointer);
+    const lfs = parseLfsSummary(attributes, &.{pointer});
+
+    const rules = try readFixture(allocator, root ++ "/branch-rules.json");
+    defer allocator.free(rules);
+    const protection = (try parseBranchProtectionHint(allocator, rules)).?;
+    const protection_signal = branchProtectionSignal(protection).?;
+
+    const signature_commit = try readFixture(allocator, root ++ "/signed-commit.txt");
+    defer allocator.free(signature_commit);
+    const signature = parseHeadSignature("G", signature_commit);
+
+    const ahead_behind = parseAheadBehind("2 5\n").?;
+    const fetch_age = fetchAgeFromMtime(@as(i128, 100) * std.time.ns_per_s, 100 + 2 * std.time.s_per_hour, 3);
+    const stash_count = parseStashCount("stash@{0}: WIP\nstash@{1}: WIP\n");
+
+    const actual = try std.fmt.allocPrint(
+        allocator,
+        "worktree=staged:{d} unstaged:{d} untracked:{d} conflicts:{d}\n" ++
+            "stash={d}\n" ++
+            "sparse={s}\n" ++
+            "ahead_behind=behind:{d} ahead:{d}\n" ++
+            "submodules=dirty:{d} uninit:{d} conflicts:{d} ahead:{d} behind:{d}\n" ++
+            "lfs=active:{} pointers:{d}\n" ++
+            "signature={s}:{s}\n" ++
+            "protection=rules:{d} reviews:{d} checks:{d} signal:{s}\n" ++
+            "fetch_age={d} warn:{}\n",
+        .{
+            counts.staged,
+            counts.unstaged,
+            counts.untracked,
+            counts.conflicts,
+            stash_count,
+            @tagName(sparse),
+            ahead_behind.behind,
+            ahead_behind.ahead,
+            submodules.dirty,
+            submodules.uninitialized,
+            submodules.conflicts,
+            submodules.ahead,
+            submodules.behind,
+            lfs.active,
+            lfs.pointer_only,
+            @tagName(signature.status),
+            @tagName(signature.kind),
+            protection.rules,
+            protection.required_approving_reviews,
+            protection.required_status_checks,
+            protection_signal.glyph,
+            fetch_age.age_seconds,
+            fetch_age.warn,
+        },
+    );
+    defer allocator.free(actual);
+
+    const expected = try readFixture(allocator, root ++ "/expected.txt");
+    defer allocator.free(expected);
+    try std.testing.expectEqualStrings(expected, actual);
+}
+
 fn expectSignal(signal: PromptSignal, glyph: []const u8, a11y: []const u8) !void {
     try std.testing.expectEqualStrings(glyph, signal.glyph);
     try std.testing.expectEqualStrings(a11y, signal.a11y);
@@ -923,4 +1002,8 @@ fn makeGitDir(tmp: *std.testing.TmpDir) !std.fs.Dir {
 
 fn openGitDir(tmp: *std.testing.TmpDir) !std.fs.Dir {
     return tmp.dir.openDir(".git", .{});
+}
+
+fn readFixture(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    return try std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024);
 }

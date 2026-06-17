@@ -811,7 +811,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 24.4 Mirroring for jj / sapling / hg
 - [x] Map each git state to its native concept
 - [x] Document the mapping in `docs/vcs/state-mapping.md`
-- [ ] Snapshot tests per VCS
+- [x] Snapshot tests per VCS
 
 ### 24.5 Performance
 - [ ] Use libgit2 bindings via Zig FFI (avoid spawning git)

@@ -1,0 +1,5 @@
+M  staged.txt
+ M unstaged.txt
+MM both.txt
+?? new.txt
+UU conflict.txt

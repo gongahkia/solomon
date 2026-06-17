@@ -1,0 +1,60 @@
+version = 1
+name = "okiya-night"
+extends = "plain"
+
+[capabilities]
+color = "ansi256"
+glyphs = "ascii"
+
+[palette]
+fg = "252"
+muted = "244"
+accent = "209"
+success = "114"
+warning = "222"
+danger = "203"
+
+[separators]
+segment = " "
+left = ""
+right = ""
+
+[segments.cwd]
+fg = "@accent"
+bg = ""
+style = "bold"
+glyph = ""
+ascii = ""
+suffix = ""
+
+[segments.git_branch]
+fg = "@success"
+bg = ""
+style = ""
+glyph = ""
+ascii = "git:"
+suffix = ""
+
+[segments.exit_status]
+fg = "@danger"
+bg = ""
+style = "bold"
+glyph = ""
+ascii = "exit:"
+suffix = ""
+
+[segments.jobs]
+fg = "@warning"
+bg = ""
+style = ""
+glyph = ""
+ascii = "jobs:"
+suffix = ""
+
+[segments.cmd_duration]
+fg = "@muted"
+bg = ""
+style = "dim"
+glyph = ""
+ascii = "took:"
+suffix = ""

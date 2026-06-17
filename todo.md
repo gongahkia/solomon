@@ -985,7 +985,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] Generate preview screenshots in CI
 
 ### 30.3 Built-in themes
-- [ ] okiya-night (signature dark)
+- [x] okiya-night (signature dark)
 - [ ] okiya-day (matching light)
 - [ ] gruvbox-rainbow (familiar)
 - [ ] tokyo-night (familiar)

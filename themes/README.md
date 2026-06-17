@@ -4,6 +4,7 @@ Built-ins:
 
 - `plain`
 - `minimal-monochrome`
+- `okiya-night`
 - `nord-dark`
 - `gruvbox-rainbow`
 - `tokyo-night`

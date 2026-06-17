@@ -2,7 +2,7 @@
 
 Theme files are TOML documents. Built-in theme ids use the same schema as external theme files.
 
-Built-in ids: `plain`, `minimal-monochrome`, `nord-dark`, `gruvbox-rainbow`, `tokyo-night`, `pure`.
+Built-in ids: `plain`, `minimal-monochrome`, `okiya-night`, `nord-dark`, `gruvbox-rainbow`, `tokyo-night`, `pure`.
 
 ## File Shape
 

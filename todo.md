@@ -484,7 +484,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 - [x] JSON encoder/decoder generated via comptime
 - [x] Unknown-field tolerance for forward-compat
 - [x] Required-field validation with structured error
-- [ ] Snapshot tests for every (op × shape) combination
+- [x] Snapshot tests for every (op × shape) combination
 
 ### 15.3 Ops
 - [ ] `render` — full request/response path

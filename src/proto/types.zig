@@ -344,3 +344,65 @@ test "validates required request fields with structured errors" {
     );
     try std.testing.expect(valid == null);
 }
+
+test "snapshots every op and protocol shape" {
+    const allocator = std.testing.allocator;
+    const ops = [_]Op{ .render, .render_continue, .health, .metrics, .reload, .version, .subscribe };
+
+    for (ops) |op| {
+        const op_name = @tagName(op);
+        const request_id = try std.fmt.allocPrint(allocator, "{s}-request", .{op_name});
+        defer allocator.free(request_id);
+
+        const request = Request{
+            .op = op,
+            .cwd = "/tmp",
+            .exit = 0,
+            .jobs = 0,
+            .duration_ms = 1,
+            .shell = .zsh,
+            .cols = 80,
+            .rows = 24,
+            .tty = "/dev/ttys001",
+            .color_caps = .truecolor,
+            .glyph_caps = .unicode,
+            .user_id = 501,
+            .session = "session-1",
+            .request_id = request_id,
+        };
+        const request_json = try encodeAlloc(allocator, request);
+        defer allocator.free(request_json);
+        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"cloud_ctx\":{{\"aws\":true,\"gcp\":true,\"azure\":true,\"kubernetes\":true}}}}", .{ op_name, request_id });
+        defer allocator.free(expected_request);
+        try std.testing.expectEqualStrings(expected_request, request_json);
+
+        const diagnostics = [_]Diagnostic{.{ .code = "snapshot", .message = "ok" }};
+        const response = Response{
+            .request_id = request_id,
+            .prompt = "shisa> ",
+            .redraw_token = "token",
+            .trailer = "right",
+            .diagnostics = &diagnostics,
+            .elapsed_us = 7,
+        };
+        const response_json = try encodeAlloc(allocator, response);
+        defer allocator.free(response_json);
+        const expected_response = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"shisa> \",\"redraw_token\":\"token\",\"trailer\":\"right\",\"diagnostics\":[{{\"code\":\"snapshot\",\"message\":\"ok\"}}],\"elapsed_us\":7}}", .{request_id});
+        defer allocator.free(expected_response);
+        try std.testing.expectEqualStrings(expected_response, response_json);
+
+        const envelope = ErrorEnvelope{
+            .request_id = request_id,
+            .@"error" = .{
+                .code = .E_INTERNAL,
+                .message = "snapshot error",
+                .context = .{ .field = "op" },
+            },
+        };
+        const error_json = try encodeAlloc(allocator, envelope);
+        defer allocator.free(error_json);
+        const expected_error = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_INTERNAL\",\"message\":\"snapshot error\",\"context\":{{\"field\":\"op\"}}}}}}", .{request_id});
+        defer allocator.free(expected_error);
+        try std.testing.expectEqualStrings(expected_error, error_json);
+    }
+}

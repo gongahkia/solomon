@@ -544,7 +544,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ## Phase 17 â€” Governance + Vouch integration
 
 ### 17.1 Vouch adoption
-- [ ] Add `VOUCHES` text file at repo root (POSIX-parseable)
+- [x] Add `VOUCHES` text file at repo root (POSIX-parseable)
 - [ ] Bootstrap with founder as only vouched entry
 - [ ] Document the format in `docs/governance/vouch.md`
 - [ ] Add `shisa vouch verify` CLI subcommand

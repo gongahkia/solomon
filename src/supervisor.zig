@@ -37,8 +37,14 @@ fn supervise(allocator: std.mem.Allocator, daemon_path: []const u8, config: Conf
         restarts += 1;
 
         std.Thread.sleep(backoff_ms * std.time.ns_per_ms);
-        backoff_ms = @min(backoff_ms * 2, config.max_backoff_ms);
+        backoff_ms = nextBackoffMs(backoff_ms, config.max_backoff_ms);
     }
+}
+
+fn nextBackoffMs(current: u64, cap: u64) u64 {
+    if (current >= cap) return cap;
+    if (current > std.math.maxInt(u64) / 2) return cap;
+    return @min(current * 2, cap);
 }
 
 fn spawnDaemon(allocator: std.mem.Allocator, daemon_path: []const u8, socket_path: ?[]const u8) !std.process.Child.Term {
@@ -132,4 +138,10 @@ test "parses supervisor options" {
 test "rejects malformed restart count" {
     const args = [_][]const u8{ "--max-restarts", "x" };
     try std.testing.expectError(error.InvalidNumber, parse(args[0..]));
+}
+
+test "backoff doubles up to cap" {
+    try std.testing.expectEqual(@as(u64, 200), nextBackoffMs(100, 5000));
+    try std.testing.expectEqual(@as(u64, 5000), nextBackoffMs(4000, 5000));
+    try std.testing.expectEqual(@as(u64, 5000), nextBackoffMs(std.math.maxInt(u64), 5000));
 }

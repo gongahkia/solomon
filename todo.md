@@ -847,7 +847,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 26.1 Supervisor
 - [x] Standalone `shisa-supervisor` binary (~200 KiB)
-- [ ] Exponential-backoff restart with cap
+- [x] Exponential-backoff restart with cap
 - [ ] Heartbeat protocol (1 s interval)
 - [ ] Auto-disable supervisor if it itself crashes
 - [ ] Document install path (launchd plist on macOS, systemd --user unit on Linux)

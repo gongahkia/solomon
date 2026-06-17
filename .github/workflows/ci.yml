@@ -10,6 +10,19 @@ permissions:
   contents: read
 
 jobs:
+  protocol-rfc:
+    name: protocol RFC gate
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - run: bash .github/scripts/protocol-rfc-gate.sh
+        env:
+          SHISA_BASE_REF: ${{ github.event.pull_request.base.sha }}
+
   zig:
     name: zig / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

@@ -502,7 +502,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 15.5 Versioning + RFC binding
 - [x] Write RFC-0005: Wire protocol v1 (canonical reference)
-- [ ] CI gate: protocol changes require RFC update in same PR
+- [x] CI gate: protocol changes require RFC update in same PR
 - [ ] Generate a JSON Schema for external consumers (editors, plugins, scripts)
 
 ## Phase 16 â€” Editor integration

@@ -334,7 +334,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Detect Tailscale (`tailscale status --json`)
 - [x] Detect NetBird, Cloudflare WARP, Zerotier
 - [x] macOS: detect OpenVPN / IKEv2 system VPN via `scutil`
-- [ ] Linux: detect via NetworkManager d-bus
+- [x] Linux: detect via NetworkManager d-bus
 - [ ] Render compact "vpn:<name>" segment when active
 
 ### 11.10 SSH target (`ssh_target`)

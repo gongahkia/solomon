@@ -125,6 +125,37 @@ pub fn readScutilNetworkServiceStatusAlloc(allocator: std.mem.Allocator) !?VpnSt
     return parseScutilNetworkServicesAlloc(allocator, result.stdout);
 }
 
+pub fn readNetworkManagerStatusAlloc(allocator: std.mem.Allocator) !?VpnStatus {
+    const active = try busctlGetPropertyAlloc(
+        allocator,
+        "/org/freedesktop/NetworkManager",
+        "org.freedesktop.NetworkManager",
+        "ActiveConnections",
+    );
+    defer allocator.free(active);
+    const paths = try parseNetworkManagerActiveConnectionsAlloc(allocator, active);
+    defer freeStringList(allocator, paths);
+    for (paths) |path| {
+        const vpn = try busctlGetPropertyAlloc(
+            allocator,
+            path,
+            "org.freedesktop.NetworkManager.Connection.Active",
+            "Vpn",
+        );
+        defer allocator.free(vpn);
+        if (!parseBusctlBool(vpn)) continue;
+        const id = try busctlGetPropertyAlloc(
+            allocator,
+            path,
+            "org.freedesktop.NetworkManager.Connection.Active",
+            "Id",
+        );
+        defer allocator.free(id);
+        return @as(?VpnStatus, try vpnStatusAlloc(allocator, "nm", parseBusctlString(id) orelse "vpn"));
+    }
+    return null;
+}
+
 pub fn parseWireGuardShowAlloc(allocator: std.mem.Allocator, source: []const u8) !?VpnStatus {
     var lines = std.mem.splitScalar(u8, source, '\n');
     while (lines.next()) |raw_line| {
@@ -194,6 +225,25 @@ pub fn parseScutilNetworkServicesAlloc(allocator: std.mem.Allocator, source: []c
     return null;
 }
 
+pub fn parseNetworkManagerActiveConnectionsAlloc(allocator: std.mem.Allocator, source: []const u8) ![][]u8 {
+    var out: std.ArrayList([]u8) = .empty;
+    errdefer {
+        for (out.items) |path| allocator.free(path);
+        out.deinit(allocator);
+    }
+    var index: usize = 0;
+    while (index < source.len) {
+        const start_quote = std.mem.indexOfScalarPos(u8, source, index, '"') orelse break;
+        const rest = source[start_quote + 1 ..];
+        const end_quote = std.mem.indexOfScalar(u8, rest, '"') orelse break;
+        const value = rest[0..end_quote];
+        index = start_quote + 1 + end_quote + 1;
+        if (!std.mem.startsWith(u8, value, "/org/freedesktop/NetworkManager/ActiveConnection/")) continue;
+        try out.append(allocator, try allocator.dupe(u8, value));
+    }
+    return out.toOwnedSlice(allocator);
+}
+
 fn tailscaleName(self: TailscaleSelfJson) ?[]const u8 {
     const host = std.mem.trim(u8, self.HostName, " \t\r\n.");
     if (host.len != 0) return host;
@@ -241,6 +291,42 @@ fn quotedName(value: []const u8) ?[]const u8 {
     const end = std.mem.indexOfScalar(u8, rest, '"') orelse return null;
     if (end == 0) return null;
     return rest[0..end];
+}
+
+fn busctlGetPropertyAlloc(allocator: std.mem.Allocator, path: []const u8, interface: []const u8, property: []const u8) ![]u8 {
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "busctl", "get-property", "org.freedesktop.NetworkManager", path, interface, property },
+        .max_output_bytes = 256 * 1024,
+        .expand_arg0 = .expand,
+    });
+    defer allocator.free(result.stderr);
+    if (!switch (result.term) {
+        .Exited => |code| code == 0,
+        else => false,
+    }) {
+        allocator.free(result.stdout);
+        return error.BusctlFailed;
+    }
+    return result.stdout;
+}
+
+fn parseBusctlBool(source: []const u8) bool {
+    var tokens = std.mem.tokenizeAny(u8, source, " \t\r\n");
+    while (tokens.next()) |token| {
+        if (std.ascii.eqlIgnoreCase(token, "true")) return true;
+        if (std.ascii.eqlIgnoreCase(token, "false")) return false;
+    }
+    return false;
+}
+
+fn parseBusctlString(source: []const u8) ?[]const u8 {
+    return quotedName(source);
+}
+
+fn freeStringList(allocator: std.mem.Allocator, values: [][]u8) void {
+    for (values) |value| allocator.free(value);
+    allocator.free(values);
 }
 
 test "parses wireguard interface from wg show" {
@@ -330,4 +416,18 @@ test "parses connected macos network vpn" {
 
 test "scutil parser ignores disconnected vpn" {
     try std.testing.expect(try parseScutilNetworkServicesAlloc(std.testing.allocator, "* (Disconnected) Work VPN \"Work VPN\" [VPN:IKEv2]\n") == null);
+}
+
+test "parses networkmanager active connection paths" {
+    const paths = try parseNetworkManagerActiveConnectionsAlloc(std.testing.allocator, "ao 2 \"/org/freedesktop/NetworkManager/ActiveConnection/1\" \"/org/freedesktop/NetworkManager/ActiveConnection/2\"\n");
+    defer freeStringList(std.testing.allocator, paths);
+    try std.testing.expectEqual(@as(usize, 2), paths.len);
+    try std.testing.expectEqualStrings("/org/freedesktop/NetworkManager/ActiveConnection/1", paths[0]);
+    try std.testing.expectEqualStrings("/org/freedesktop/NetworkManager/ActiveConnection/2", paths[1]);
+}
+
+test "parses busctl property values" {
+    try std.testing.expect(parseBusctlBool("b true\n"));
+    try std.testing.expect(!parseBusctlBool("b false\n"));
+    try std.testing.expectEqualStrings("Work VPN", parseBusctlString("s \"Work VPN\"\n").?);
 }

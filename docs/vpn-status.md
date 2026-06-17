@@ -13,3 +13,5 @@ Cloudflare WARP detection runs `warp-cli status` and requires `Status update: Co
 ZeroTier detection runs `zerotier-cli status` and requires an `ONLINE` token.
 
 macOS built-in VPN detection runs `scutil --nc list` and requires a connected `[VPN:<type>]` service.
+
+Linux NetworkManager detection reads D-Bus properties with `busctl`, checks active connection `Vpn=true`, and uses the connection `Id` as the VPN name.

@@ -529,7 +529,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Small Lua plugin under `contrib/editor-bridges/shisa.nvim/`
 - [x] Lualine + heirline integration examples
 - [x] Autocmd to refresh on `DirChanged`
-- [ ] Unit tests via `plenary.nvim` test harness
+- [x] Unit tests via `plenary.nvim` test harness
 
 ### 16.5 Zed bridge
 - [ ] Zed extension scaffold under `contrib/editor-bridges/shisa-zed/`

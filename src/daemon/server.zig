@@ -15,6 +15,8 @@ const fsnotify = @import("fsnotify.zig");
 
 const header_bytes = 4;
 const max_frame_bytes = 1024 * 1024;
+pub const daemon_version = "0.1.0-dev";
+pub const protocol_version: u32 = 1;
 
 const RenderRequest = struct {
     v: u32 = 1,
@@ -192,6 +194,10 @@ pub const Server = struct {
             try writeFrame(connection.stream.handle, "ok\n");
         } else if (isOpRequest(request, "health")) {
             const response = try healthResponseAlloc(std.heap.page_allocator, request, true);
+            defer std.heap.page_allocator.free(response);
+            try writeFrame(connection.stream.handle, response);
+        } else if (isOpRequest(request, "version")) {
+            const response = try versionResponseAlloc(std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
             try writeFrame(connection.stream.handle, response);
         } else if (isPreexecRequest(request)) {
@@ -565,6 +571,14 @@ fn healthResponseAlloc(allocator: std.mem.Allocator, request: []const u8, ok: bo
     return std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"ok\":{}}}", .{ escaped_request_id, ok });
 }
 
+fn versionResponseAlloc(allocator: std.mem.Allocator, request: []const u8) ![]u8 {
+    const request_id = try requestIdAlloc(allocator, request);
+    defer allocator.free(request_id);
+    const escaped_request_id = try json.escapeAlloc(allocator, request_id);
+    defer allocator.free(escaped_request_id);
+    return std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"daemon\":\"{s}\",\"protocol\":{d}}}", .{ escaped_request_id, daemon_version, protocol_version });
+}
+
 fn requestIdAlloc(allocator: std.mem.Allocator, request: []const u8) ![]u8 {
     var parsed = std.json.parseFromSlice(OpRequest, allocator, request, .{ .ignore_unknown_fields = true }) catch return allocator.dupe(u8, "");
     defer parsed.deinit();
@@ -897,6 +911,25 @@ test "health op returns minimal ok response" {
     try std.testing.expectEqual(@as(u32, 1), parsed.value.v);
     try std.testing.expectEqualStrings("health-1", parsed.value.request_id);
     try std.testing.expect(parsed.value.ok);
+}
+
+test "version op returns daemon and protocol version" {
+    const allocator = std.testing.allocator;
+    const response = try versionResponseAlloc(allocator, "{\"v\":1,\"op\":\"version\",\"request_id\":\"version-1\"}");
+    defer allocator.free(response);
+
+    const VersionResponse = struct {
+        v: u32 = 1,
+        request_id: []const u8 = "",
+        daemon: []const u8,
+        protocol: u32,
+    };
+    var parsed = try std.json.parseFromSlice(VersionResponse, allocator, response, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(u32, 1), parsed.value.v);
+    try std.testing.expectEqualStrings("version-1", parsed.value.request_id);
+    try std.testing.expectEqualStrings(daemon_version, parsed.value.daemon);
+    try std.testing.expectEqual(protocol_version, parsed.value.protocol);
 }
 
 test "metrics op returns JSON metrics dump" {

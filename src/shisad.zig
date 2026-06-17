@@ -8,7 +8,7 @@ const paths = @import("daemon/paths.zig");
 const server = @import("daemon/server.zig");
 const signals = @import("daemon/signals.zig");
 
-const version = "0.1.0-dev";
+const version = server.daemon_version;
 
 pub fn main() !void {
     var gpa_impl = std.heap.GeneralPurposeAllocator(.{}){};

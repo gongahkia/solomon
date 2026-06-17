@@ -492,7 +492,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 - [x] `health` — minimal ok/not-ok
 - [x] `metrics` — JSON metrics dump
 - [ ] `reload` — re-read config + plugins
-- [ ] `version` — daemon + protocol version
+- [x] `version` — daemon + protocol version
 - [ ] `subscribe` — editor stream (Phase 16)
 
 ### 15.4 Error codes

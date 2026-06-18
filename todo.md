@@ -941,7 +941,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 29.2 Stripped stdlib
 - [x] Remove `os.execute`, `os.exit`, `os.remove`, `os.rename`, `io.popen`, `io.open`, `loadfile`, `dofile`, `package.loadlib`, most of `debug.*`
 - [x] Whitelist `require` to project-local files only
-- [ ] Snapshot tests asserting removed globals are nil
+- [x] Snapshot tests asserting removed globals are nil
 
 ### 29.3 Capability gate
 - [ ] Implement manifest parsing + validation

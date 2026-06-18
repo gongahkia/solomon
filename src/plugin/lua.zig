@@ -18,6 +18,15 @@ pub const Vm = enum {
 
 pub const selected_vm: Vm = .luajit;
 
+const always_removed_globals = [_][]const u8{
+    "debug",
+    "dofile",
+    "io",
+    "loadfile",
+    "os",
+    "package",
+};
+
 const LuaLNewState = *const fn () callconv(.c) ?*LuaState;
 const LuaClose = *const fn (?*LuaState) callconv(.c) void;
 const LuaLOpenLibs = *const fn (?*LuaState) callconv(.c) void;
@@ -181,15 +190,7 @@ pub const Runtime = struct {
     /// plugin-api: sandbox | removed_globals | `os`, `io`, `package`, `debug`, `dofile`, `loadfile` | always | sandbox startup removes direct shell, filesystem, loader, debug, and package APIs from Lua globals.
     /// plugin-api: sandbox | require | project-local module name | opt-in | `initSandboxedWithOptions(.require_root)` allows `require` only through `<root>/?.lua` and `<root>/?/init.lua`.
     fn stripDangerousGlobals(self: *Runtime, keep_require: bool) !void {
-        const globals = [_][]const u8{
-            "os",
-            "io",
-            "package",
-            "debug",
-            "dofile",
-            "loadfile",
-        };
-        for (globals) |name| try self.stripGlobal(name);
+        for (always_removed_globals) |name| try self.stripGlobal(name);
         if (!keep_require) try self.stripGlobal("require");
     }
 
@@ -524,6 +525,17 @@ fn stringListContains(items: []const []const u8, value: []const u8) bool {
     return false;
 }
 
+fn removedGlobalsSnapshotAlloc(allocator: std.mem.Allocator, keep_require: bool) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    for (always_removed_globals) |name| {
+        try out.appendSlice(allocator, name);
+        try out.append(allocator, '\n');
+    }
+    if (!keep_require) try out.appendSlice(allocator, "require\n");
+    return out.toOwnedSlice(allocator);
+}
+
 fn openSelectedVm() !std.DynLib {
     return switch (selected_vm) {
         .luajit => openLuaJit(),
@@ -591,13 +603,15 @@ test "sandbox strips dangerous globals" {
     };
     defer runtime.deinit();
 
-    try std.testing.expect(try runtime.globalIsNil("os"));
-    try std.testing.expect(try runtime.globalIsNil("io"));
-    try std.testing.expect(try runtime.globalIsNil("package"));
-    try std.testing.expect(try runtime.globalIsNil("debug"));
-    try std.testing.expect(try runtime.globalIsNil("require"));
-    try std.testing.expect(try runtime.globalIsNil("dofile"));
-    try std.testing.expect(try runtime.globalIsNil("loadfile"));
+    const expected = try std.fs.cwd().readFileAlloc(std.testing.allocator, "test/snapshots/lua-sandbox/removed-globals.txt", 4096);
+    defer std.testing.allocator.free(expected);
+    const actual = try removedGlobalsSnapshotAlloc(std.testing.allocator, false);
+    defer std.testing.allocator.free(actual);
+    try std.testing.expectEqualStrings(expected, actual);
+
+    var lines = std.mem.tokenizeScalar(u8, actual, '\n');
+    while (lines.next()) |name| try std.testing.expect(try runtime.globalIsNil(name));
+
     try std.testing.expectError(error.LuaRuntimeError, runtime.doString("return require('x')"));
     try runtime.doString("shisa_safe_value = tostring(42)");
     try std.testing.expect(!(try runtime.globalIsNil("shisa_safe_value")));

@@ -24,6 +24,13 @@ Command:
 | `render_concat` | 1136.5 | 589.8 | 1.93x |
 | `capability_gate` | 968.5 | 172.5 | 5.61x |
 
+Decision:
+
+- `src/plugin/lua.zig` selects LuaJIT for the v1 plugin runtime.
+- Performance rationale: LuaJIT is faster on every measured plugin hot path above.
+- Sandbox rationale: Shisa treats Lua as untrusted extension code under both VMs. The sandbox posture comes from stripped globals plus host-side capability checks, not from the VM choice alone.
+- Lua 5.4 remains the comparison baseline for future reruns.
+
 Raw sequential samples:
 
 ```text

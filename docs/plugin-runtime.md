@@ -4,8 +4,9 @@ Shisa embeds Lua through a dynamically loaded LuaJIT runtime.
 
 Runtime choice:
 
-- LuaJIT is used for the first plugin runtime because it is available on the local Homebrew toolchain and has a small C API surface for dynamic loading.
-- Lua 5.4 remains compatible with the manifest model, but local verification found Lua 5.5 rather than Lua 5.4.
+- LuaJIT is selected in `src/plugin/lua.zig`.
+- The local [Lua VM benchmark](lua-vm-benchmark.md) measured LuaJIT faster than Lua 5.4 on manifest validation, render string assembly, and capability path checks.
+- Lua 5.4 remains a comparison baseline for future benchmark reruns.
 - The daemon treats Lua as an untrusted extension runtime. Capabilities are enforced by Shisa host APIs, not by Lua conventions.
 
 Loading:

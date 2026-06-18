@@ -52,7 +52,7 @@ usage: shisa ai <command> [args]
 commands:
   status        show local model, cloud provider, and audit status
   redact        test or edit local redaction literal rules
-  bench         benchmark local Ollama generation
+  bench         benchmark local Ollama cold/warm/memory
   risk          classify command risk
   explain       explain a command
   nextcmd       suggest a next command from local context

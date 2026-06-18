@@ -13,7 +13,15 @@ The client supports:
 - `POST /api/generate` with `{"stream": false}` for deterministic single-response calls.
 - `POST /api/generate` with `{"stream": true}` for NDJSON token streaming. Cancellation is checked between streamed chunks.
 
-`shisa ai bench` reports first-token latency, token throughput from Ollama's final `eval_count` / `eval_duration` metrics, and loaded model size from `/api/ps`.
+`shisa ai bench` reports cold first-token latency after unloading the selected model, warm first-token latency after preloading it, token throughput from Ollama's final `eval_count` / `eval_duration` metrics, and a memory ceiling from `/api/ps`.
+
+```sh
+shisa ai bench --model gemma3:1b --prompt "Reply with ok."
+shisa ai bench --cold
+shisa ai bench --warm
+shisa ai bench --memory
+shisa ai bench --all-supported --memory
+```
 
 `shisa ai status` reports local Ollama install/running state, the recommended local model, configured cloud-provider state, and local audit-log paths.
 

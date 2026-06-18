@@ -430,9 +430,9 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 ### 12.11 Tests & benches
 - [x] Mock-model harness for deterministic tests
 - [x] Prompt-regression suite (snapshot of model outputs against curated examples; tolerate drift)
-- [ ] Cold-model latency benchmark
-- [ ] Warm-model latency benchmark
-- [ ] Memory ceiling benchmark per supported model
+- [x] Cold-model latency benchmark
+- [x] Warm-model latency benchmark
+- [x] Memory ceiling benchmark per supported model
 
 ## Phase 13 — Activity & focus pack (`shisa.activity`)
 

@@ -10,7 +10,7 @@ Use this page before changing prompt rendering, cache invalidation, VCS probing,
 | Prompt comparison | `bench/compare-prompts.sh` | `bench-results/comparison.json` and `.md` from `hyperfine`. |
 | VCS prompt comparison | `bench/vcs-starship-git.sh` | Shisa vs Starship on clean, dirty, and linked-worktree repos. |
 | jj scale probe | `bench/jj-10k.sh` | jj command timings on a generated large history. |
-| AI local model | `shisa ai bench --model gemma3:1b --prompt "Reply with ok."` | first-token latency, token throughput, and model size. |
+| AI local model | `shisa ai bench --model gemma3:1b --prompt "Reply with ok."` | cold/warm first-token latency, token throughput, and memory ceiling. |
 
 ## Fast-Path Budget
 

@@ -1701,6 +1701,26 @@ test "cloud explain output shows reason" {
 const AiBenchConfig = struct {
     model: []const u8 = ollama.recommended_model,
     prompt: []const u8 = "Reply with one short sentence.",
+    cold: bool = false,
+    warm: bool = false,
+    memory: bool = false,
+    all_supported: bool = false,
+
+    fn hasExplicitMode(self: AiBenchConfig) bool {
+        return self.cold or self.warm or self.memory;
+    }
+
+    fn runCold(self: AiBenchConfig) bool {
+        return self.cold or !self.hasExplicitMode();
+    }
+
+    fn runWarm(self: AiBenchConfig) bool {
+        return self.warm or !self.hasExplicitMode();
+    }
+
+    fn runMemory(self: AiBenchConfig) bool {
+        return self.memory or !self.hasExplicitMode();
+    }
 };
 
 fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
@@ -1908,6 +1928,14 @@ fn parseAiBenchArgs(args: []const []const u8) !AiBenchConfig {
             config.model = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--prompt")) {
             config.prompt = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--cold")) {
+            config.cold = true;
+        } else if (std.mem.eql(u8, args[i], "--warm")) {
+            config.warm = true;
+        } else if (std.mem.eql(u8, args[i], "--memory")) {
+            config.memory = true;
+        } else if (std.mem.eql(u8, args[i], "--all-supported")) {
+            config.all_supported = true;
         } else {
             return error.UnknownAiArgument;
         }
@@ -2035,24 +2063,64 @@ fn aiBench(allocator: std.mem.Allocator, config: AiBenchConfig) !void {
         try std.fs.File.stderr().writeAll("shisa ai bench: ollama daemon not running\n");
         return error.OllamaUnavailable;
     }
-    const result = try ollama.benchmarkGenerate(allocator, ollama.default_host, ollama.default_port, config.model, config.prompt);
-    const output = try aiBenchOutputAlloc(allocator, config.model, result);
-    defer allocator.free(output);
-    try std.fs.File.stdout().writeAll(output);
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    const single_model = [_][]const u8{config.model};
+    const models = if (config.all_supported) ollama.supported_models[0..] else single_model[0..];
+    for (models, 0..) |model, index| {
+        if (index != 0) try out.append(allocator, '\n');
+        const output = try aiBenchModelOutputAlloc(allocator, config, model);
+        defer allocator.free(output);
+        try out.appendSlice(allocator, output);
+    }
+    try std.fs.File.stdout().writeAll(out.items);
 }
 
-fn aiBenchOutputAlloc(allocator: std.mem.Allocator, model: []const u8, result: ollama.BenchmarkResult) ![]u8 {
+const AiBenchResults = struct {
+    cold: ?ollama.BenchmarkResult = null,
+    warm: ?ollama.BenchmarkResult = null,
+    memory_ceiling_bytes: ?u64 = null,
+};
+
+fn aiBenchModelOutputAlloc(allocator: std.mem.Allocator, config: AiBenchConfig, model: []const u8) ![]u8 {
+    var results = AiBenchResults{};
+    if (config.runCold()) {
+        try ollama.unloadModel(allocator, ollama.default_host, ollama.default_port, model);
+        results.cold = try ollama.benchmarkGenerate(allocator, ollama.default_host, ollama.default_port, model, config.prompt);
+    }
+    if (config.runWarm()) {
+        try ollama.loadModel(allocator, ollama.default_host, ollama.default_port, model);
+        results.warm = try ollama.benchmarkGenerate(allocator, ollama.default_host, ollama.default_port, model, config.prompt);
+    }
+    if (config.runMemory()) {
+        try ollama.loadModel(allocator, ollama.default_host, ollama.default_port, model);
+        results.memory_ceiling_bytes = try ollama.runningModelSize(allocator, ollama.default_host, ollama.default_port, model);
+    }
+    return aiBenchOutputAlloc(allocator, model, results);
+}
+
+fn aiBenchOutputAlloc(allocator: std.mem.Allocator, model: []const u8, results: AiBenchResults) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
     try appendFmt(allocator, &out, "model: {s}\n", .{model});
-    try appendFmt(allocator, &out, "first_token_ms: {d}\n", .{@divFloor(result.first_token_ns, std.time.ns_per_ms)});
-    try appendFmt(allocator, &out, "tokens_per_second_x100: {d}\n", .{result.tokens_per_second_x100});
-    try appendFmt(allocator, &out, "peak_ram_bytes: {d}\n", .{result.peak_ram_bytes});
-    try appendFmt(allocator, &out, "total_duration_ms: {d}\n", .{@divFloor(result.total_duration_ns, std.time.ns_per_ms)});
-    try appendFmt(allocator, &out, "load_duration_ms: {d}\n", .{@divFloor(result.load_duration_ns, std.time.ns_per_ms)});
-    try appendFmt(allocator, &out, "eval_count: {d}\n", .{result.eval_count});
-    try appendFmt(allocator, &out, "eval_duration_ms: {d}\n", .{@divFloor(result.eval_duration_ns, std.time.ns_per_ms)});
+    if (results.cold) |result| try appendAiBenchResult(allocator, &out, "cold", result);
+    if (results.warm) |result| try appendAiBenchResult(allocator, &out, "warm", result);
+    if (results.memory_ceiling_bytes) |bytes| {
+        try out.appendSlice(allocator, "memory:\n");
+        try appendFmt(allocator, &out, "  ceiling_bytes: {d}\n", .{bytes});
+    }
     return out.toOwnedSlice(allocator);
+}
+
+fn appendAiBenchResult(allocator: std.mem.Allocator, out: *std.ArrayList(u8), label: []const u8, result: ollama.BenchmarkResult) !void {
+    try appendFmt(allocator, out, "{s}:\n", .{label});
+    try appendFmt(allocator, out, "  first_token_ms: {d}\n", .{@divFloor(result.first_token_ns, std.time.ns_per_ms)});
+    try appendFmt(allocator, out, "  tokens_per_second_x100: {d}\n", .{result.tokens_per_second_x100});
+    try appendFmt(allocator, out, "  peak_ram_bytes: {d}\n", .{result.peak_ram_bytes});
+    try appendFmt(allocator, out, "  total_duration_ms: {d}\n", .{@divFloor(result.total_duration_ns, std.time.ns_per_ms)});
+    try appendFmt(allocator, out, "  load_duration_ms: {d}\n", .{@divFloor(result.load_duration_ns, std.time.ns_per_ms)});
+    try appendFmt(allocator, out, "  eval_count: {d}\n", .{result.eval_count});
+    try appendFmt(allocator, out, "  eval_duration_ms: {d}\n", .{@divFloor(result.eval_duration_ns, std.time.ns_per_ms)});
 }
 
 fn aiNextcmd(allocator: std.mem.Allocator, config: AiNextcmdConfig) !void {
@@ -2253,9 +2321,13 @@ fn parseAiNl2cmdArgs(args: []const []const u8) !AiNl2cmdConfig {
 }
 
 test "ai bench args parse" {
-    const config = try parseAiBenchArgs(&.{ "--model", "gemma3:1b", "--prompt", "hi" });
+    const config = try parseAiBenchArgs(&.{ "--model", "gemma3:1b", "--prompt", "hi", "--cold", "--warm", "--memory", "--all-supported" });
     try std.testing.expectEqualStrings("gemma3:1b", config.model);
     try std.testing.expectEqualStrings("hi", config.prompt);
+    try std.testing.expect(config.cold);
+    try std.testing.expect(config.warm);
+    try std.testing.expect(config.memory);
+    try std.testing.expect(config.all_supported);
 }
 
 test "ai status output reports local cloud and logging state" {
@@ -2344,7 +2416,7 @@ test "ai nl2cmd audit line escapes fields" {
 }
 
 test "ai bench output reports metrics" {
-    const output = try aiBenchOutputAlloc(std.testing.allocator, "gemma3:1b", .{
+    const result = ollama.BenchmarkResult{
         .first_token_ns = 12 * std.time.ns_per_ms,
         .tokens_per_second_x100 = 1234,
         .peak_ram_bytes = 815000000,
@@ -2352,11 +2424,18 @@ test "ai bench output reports metrics" {
         .load_duration_ns = 20 * std.time.ns_per_ms,
         .eval_count = 10,
         .eval_duration_ns = 80 * std.time.ns_per_ms,
+    };
+    const output = try aiBenchOutputAlloc(std.testing.allocator, "gemma3:1b", .{
+        .cold = result,
+        .warm = result,
+        .memory_ceiling_bytes = 815000000,
     });
     defer std.testing.allocator.free(output);
     try std.testing.expect(std.mem.indexOf(u8, output, "model: gemma3:1b\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "tokens_per_second_x100: 1234\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "peak_ram_bytes: 815000000\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "cold:\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "warm:\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "  tokens_per_second_x100: 1234\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "memory:\n  ceiling_bytes: 815000000\n") != null);
 }
 
 fn copyFixtureToPath(allocator: std.mem.Allocator, source_path: []const u8, dest_path: []u8) !void {
@@ -7451,7 +7530,7 @@ const ai_help_text =
     \\commands:
     \\  status        show local model, cloud provider, and audit status
     \\  redact        test or edit local redaction literal rules
-    \\  bench         benchmark local Ollama generation
+    \\  bench         benchmark local Ollama cold/warm/memory
     \\  risk          classify command risk
     \\  explain       explain a command
     \\  nextcmd       suggest a next command from local context

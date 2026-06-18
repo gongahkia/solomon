@@ -3,6 +3,7 @@ const std = @import("std");
 pub const default_host = "127.0.0.1";
 pub const default_port: u16 = 11434;
 pub const recommended_model = "gemma3:1b";
+pub const supported_models = [_][]const u8{recommended_model};
 const max_http_response_bytes = 16 * 1024 * 1024;
 
 pub const Status = struct {
@@ -70,6 +71,22 @@ pub fn pullModel(allocator: std.mem.Allocator, host: []const u8, port: u16, mode
     const payload = try pullPayloadAlloc(allocator, model);
     defer allocator.free(payload);
     var response = try httpRequestAlloc(allocator, host, port, "POST", "/api/pull", payload);
+    defer response.deinit(allocator);
+    if (response.status < 200 or response.status >= 300) return error.OllamaHttpError;
+}
+
+pub fn loadModel(allocator: std.mem.Allocator, host: []const u8, port: u16, model: []const u8) !void {
+    const payload = try loadPayloadAlloc(allocator, model);
+    defer allocator.free(payload);
+    var response = try httpRequestAlloc(allocator, host, port, "POST", "/api/generate", payload);
+    defer response.deinit(allocator);
+    if (response.status < 200 or response.status >= 300) return error.OllamaHttpError;
+}
+
+pub fn unloadModel(allocator: std.mem.Allocator, host: []const u8, port: u16, model: []const u8) !void {
+    const payload = try unloadPayloadAlloc(allocator, model);
+    defer allocator.free(payload);
+    var response = try httpRequestAlloc(allocator, host, port, "POST", "/api/generate", payload);
     defer response.deinit(allocator);
     if (response.status < 200 or response.status >= 300) return error.OllamaHttpError;
 }
@@ -259,6 +276,18 @@ pub fn pullPayloadAlloc(allocator: std.mem.Allocator, model: []const u8) ![]u8 {
     return std.fmt.allocPrint(allocator, "{{\"model\":{s},\"stream\":false}}", .{escaped_model});
 }
 
+pub fn loadPayloadAlloc(allocator: std.mem.Allocator, model: []const u8) ![]u8 {
+    const escaped_model = try jsonStringAlloc(allocator, model);
+    defer allocator.free(escaped_model);
+    return std.fmt.allocPrint(allocator, "{{\"model\":{s},\"prompt\":\"\",\"stream\":false,\"keep_alive\":-1}}", .{escaped_model});
+}
+
+pub fn unloadPayloadAlloc(allocator: std.mem.Allocator, model: []const u8) ![]u8 {
+    const escaped_model = try jsonStringAlloc(allocator, model);
+    defer allocator.free(escaped_model);
+    return std.fmt.allocPrint(allocator, "{{\"model\":{s},\"prompt\":\"\",\"stream\":false,\"keep_alive\":0}}", .{escaped_model});
+}
+
 pub fn generatePayloadAlloc(allocator: std.mem.Allocator, model: []const u8, prompt: []const u8, stream: bool) ![]u8 {
     const escaped_model = try jsonStringAlloc(allocator, model);
     defer allocator.free(escaped_model);
@@ -380,6 +409,15 @@ test "builds generate payload" {
     const payload = try generatePayloadAlloc(std.testing.allocator, "gemma3:1b", "say \"hi\"", false);
     defer std.testing.allocator.free(payload);
     try std.testing.expectEqualStrings("{\"model\":\"gemma3:1b\",\"prompt\":\"say \\\"hi\\\"\",\"stream\":false,\"options\":{\"temperature\":0,\"num_predict\":128}}", payload);
+}
+
+test "builds load and unload payloads" {
+    const load = try loadPayloadAlloc(std.testing.allocator, recommended_model);
+    defer std.testing.allocator.free(load);
+    try std.testing.expectEqualStrings("{\"model\":\"gemma3:1b\",\"prompt\":\"\",\"stream\":false,\"keep_alive\":-1}", load);
+    const unload = try unloadPayloadAlloc(std.testing.allocator, recommended_model);
+    defer std.testing.allocator.free(unload);
+    try std.testing.expectEqualStrings("{\"model\":\"gemma3:1b\",\"prompt\":\"\",\"stream\":false,\"keep_alive\":0}", unload);
 }
 
 test "parses generate response" {

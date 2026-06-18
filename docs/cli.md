@@ -10,7 +10,7 @@ usage: shisa <command> [options]
 commands:
   ai            local AI helpers: bench
   bench         benchmark prompt render via hyperfine
-  cache         dump cache stats
+  cache         dump or clear cache state
   cloud         cloud helpers: audit, doctor, explain, preexec
   doctor        diagnose socket, config, plugins, lua, fsnotify
   explain       print resolved module pipeline

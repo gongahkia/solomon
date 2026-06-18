@@ -895,7 +895,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] fsnotify integration with declared watch paths
 - [x] Debounce events (configurable, default 50 ms)
 - [x] Monotonic `cache_rev` propagated to L1 keys
-- [ ] Manual: `shisa cache clear [--module=foo]`
+- [x] Manual: `shisa cache clear [--module=foo]`
 
 ### 27.5 Stress tests
 - [ ] 10k cd loops with cache hit-rate measured

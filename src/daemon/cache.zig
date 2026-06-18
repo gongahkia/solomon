@@ -112,6 +112,23 @@ pub const Store = struct {
         self.allocator.free(removed.value.output);
     }
 
+    pub fn invalidateModule(self: *Store, module_id: []const u8) !void {
+        var remove_keys: std.ArrayList([]u8) = .empty;
+        defer {
+            for (remove_keys.items) |key| self.allocator.free(key);
+            remove_keys.deinit(self.allocator);
+        }
+
+        var it = self.entries.iterator();
+        while (it.next()) |entry| {
+            if (keyMatchesModule(entry.key_ptr.*, module_id)) {
+                try remove_keys.append(self.allocator, try self.allocator.dupe(u8, entry.key_ptr.*));
+            }
+        }
+
+        for (remove_keys.items) |key| self.removeBorrowedKey(key);
+    }
+
     pub fn count(self: *Store) usize {
         return self.entries.count();
     }
@@ -262,7 +279,7 @@ pub const Store = struct {
         }
     }
 
-    fn clear(self: *Store) void {
+    pub fn clear(self: *Store) void {
         var it = self.entries.iterator();
         while (it.next()) |entry| {
             self.allocator.free(entry.value_ptr.key);
@@ -326,6 +343,10 @@ fn keyAlloc(allocator: std.mem.Allocator, module_id: []const u8, cwd: []const u8
     key[module_id.len] = 0;
     @memcpy(key[module_id.len + 1 ..], cwd);
     return key;
+}
+
+fn keyMatchesModule(key: []const u8, module_id: []const u8) bool {
+    return key.len > module_id.len and std.mem.startsWith(u8, key, module_id) and key[module_id.len] == 0;
 }
 
 fn checkedU32(value: usize) !u32 {
@@ -410,6 +431,21 @@ test "replaces and invalidates entries" {
     try store.invalidate("git_branch", "/repo");
     try std.testing.expect(try store.get("git_branch", "/repo") == null);
     try std.testing.expectEqual(@as(usize, 0), store.count());
+}
+
+test "invalidates all entries for one module" {
+    var store = Store.init(std.testing.allocator);
+    defer store.deinit();
+
+    try store.put("git_branch", "/repo/a", "git:main", 1);
+    try store.put("git_branch", "/repo/b", "git:dev", 2);
+    try store.put("language_versions", "/repo/a", "py:3.14", 3);
+
+    try store.invalidateModule("git_branch");
+    try std.testing.expect(try store.get("git_branch", "/repo/a") == null);
+    try std.testing.expect(try store.get("git_branch", "/repo/b") == null);
+    try std.testing.expect((try store.get("language_versions", "/repo/a")) != null);
+    try std.testing.expectEqual(@as(usize, 1), store.count());
 }
 
 test "evicts least recently used entry above max entries" {

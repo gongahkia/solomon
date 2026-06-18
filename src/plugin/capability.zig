@@ -15,12 +15,34 @@ pub const Context = struct {
     plugin_dir: ?[]const u8 = null,
 };
 
+pub const HostApiCall = union(enum) {
+    fs_read: []const u8,
+    fs_watch: []const u8,
+    exec: []const u8,
+    net: []const u8,
+    env_read: []const u8,
+    secrets,
+    pre_exec,
+};
+
 pub const Gate = struct {
     capabilities: manifest.Capabilities,
     context: Context = .{},
 
     pub fn init(capabilities: manifest.Capabilities, context: Context) Gate {
         return .{ .capabilities = capabilities, .context = context };
+    }
+
+    pub fn checkCall(self: Gate, call: HostApiCall) Error!void {
+        return switch (call) {
+            .fs_read => |path| self.checkFsRead(path),
+            .fs_watch => |path| self.checkFsWatch(path),
+            .exec => |command| self.checkExec(command),
+            .net => |provider_or_domain| self.checkNet(provider_or_domain),
+            .env_read => |name| self.checkEnvRead(name),
+            .secrets => self.checkSecrets(),
+            .pre_exec => self.checkPreExec(),
+        };
     }
 
     pub fn checkFsRead(self: Gate, path: []const u8) Error!void {

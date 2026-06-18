@@ -14,6 +14,8 @@ const json = @import("json.zig");
 const fsnotify = @import("fsnotify.zig");
 const daemon_cache = @import("cache.zig");
 const plugin_lua = @import("plugin_lua");
+const plugin_capability = plugin_lua.capability;
+const plugin_manifest = plugin_lua.manifest;
 
 const header_bytes = 4;
 const max_frame_bytes = 1024 * 1024;
@@ -805,6 +807,10 @@ pub const Server = struct {
         }
 
         return names.toOwnedSlice(allocator);
+    }
+
+    fn checkPluginHostApiCall(capabilities: plugin_manifest.Capabilities, context: plugin_capability.Context, call: plugin_capability.HostApiCall) plugin_capability.Error!void {
+        try plugin_capability.Gate.init(capabilities, context).checkCall(call);
     }
 
     pub fn recordFsEvent(self: *Server, path: []const u8, timestamp_ns: u64) void {
@@ -2011,6 +2017,28 @@ test "reload op rereads plugin manifests" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"plugins\":1") != null);
     try std.testing.expectEqual(@as(usize, 1), server.reload_state.plugin_names.len);
     try std.testing.expectEqualStrings("demo-plugin", server.reload_state.plugin_names[0]);
+}
+
+test "daemon checks plugin host api calls through capability gate" {
+    const capabilities = plugin_manifest.Capabilities{
+        .fs_read = &.{"/repo/**"},
+        .fs_watch = &.{"/repo/.git/**"},
+        .exec = .{ .allow = &.{"git"} },
+        .net = .{ .allow = &.{"api.example.com"} },
+        .env_read = &.{"AWS_PROFILE"},
+        .secrets = true,
+        .pre_exec = true,
+    };
+    const context = plugin_capability.Context{};
+
+    try Server.checkPluginHostApiCall(capabilities, context, .{ .fs_read = "/repo/config.toml" });
+    try Server.checkPluginHostApiCall(capabilities, context, .{ .fs_watch = "/repo/.git/HEAD" });
+    try Server.checkPluginHostApiCall(capabilities, context, .{ .exec = "git" });
+    try Server.checkPluginHostApiCall(capabilities, context, .{ .net = "api.example.com" });
+    try Server.checkPluginHostApiCall(capabilities, context, .{ .env_read = "AWS_PROFILE" });
+    try Server.checkPluginHostApiCall(capabilities, context, .secrets);
+    try Server.checkPluginHostApiCall(capabilities, context, .pre_exec);
+    try std.testing.expectError(error.CapabilityDenied, Server.checkPluginHostApiCall(capabilities, context, .{ .exec = "sh" }));
 }
 
 test "subscribe op switches connection to bidirectional ndjson" {

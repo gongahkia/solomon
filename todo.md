@@ -1013,7 +1013,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 ## Phase 31 — Security threat model + audits
 
 ### 31.1 Threat model doc
-- [ ] Maintain `docs/threat-model.md` per §32
+- [x] Maintain `docs/threat-model.md` per §32
 - [ ] Annual review (calendar entry)
 - [ ] Update with each new pack
 

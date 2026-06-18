@@ -1018,7 +1018,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Update with each new pack
 
 ### 31.2 Fuzz nightly
-- [ ] Frame deframer
+- [x] Frame deframer
 - [ ] JSON request decoder
 - [ ] Lua bridge surface
 - [ ] Redaction rules

@@ -73,6 +73,7 @@ Per-module config lives under `[modules.<id>]`. Option tables may exist only for
 | --- | --- | --- | --- |
 | `truncate_to` | integer | `3` | `0..16`; `0` disables truncation. |
 | `home_tilde` | bool | `true` | Replace `$HOME` prefix with `~`. |
+| `max_width` | integer | `0` | `0..512`; `0` disables display-width truncation. |
 
 ### `[modules.git_branch]`
 

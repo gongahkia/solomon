@@ -34,6 +34,12 @@ pub const GlyphCaps = enum {
     ascii,
 };
 
+pub const CwdOptions = struct {
+    truncate_to: u8 = 3,
+    home_tilde: bool = true,
+    max_width: u16 = 0,
+};
+
 pub const CloudCtxOptions = struct {
     aws: bool = true,
     gcp: bool = true,
@@ -77,6 +83,7 @@ pub const Request = struct {
     request_id: []const u8 = "",
     rtl: bool = false,
     rtl_reverse: bool = false,
+    cwd_options: CwdOptions = .{},
     cloud_ctx: CloudCtxOptions = .{},
     risk_tier: RiskTierOptions = .{},
 };
@@ -482,7 +489,7 @@ test "snapshots every op and protocol shape" {
         };
         const request_json = try encodeAlloc(allocator, request);
         defer allocator.free(request_json);
-        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"rtl\":false,\"rtl_reverse\":false,\"cloud_ctx\":{{\"aws\":true,\"gcp\":true,\"azure\":true,\"kubernetes\":true}},\"risk_tier\":{{\"unknown_bg\":\"muted\",\"dev_bg\":\"success\",\"staging_bg\":\"warning\",\"prod_bg\":\"danger\"}}}}", .{ op_name, request_id });
+        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"rtl\":false,\"rtl_reverse\":false,\"cwd_options\":{{\"truncate_to\":3,\"home_tilde\":true,\"max_width\":0}},\"cloud_ctx\":{{\"aws\":true,\"gcp\":true,\"azure\":true,\"kubernetes\":true}},\"risk_tier\":{{\"unknown_bg\":\"muted\",\"dev_bg\":\"success\",\"staging_bg\":\"warning\",\"prod_bg\":\"danger\"}}}}", .{ op_name, request_id });
         defer allocator.free(expected_request);
         try std.testing.expectEqualStrings(expected_request, request_json);
 

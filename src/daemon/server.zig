@@ -2,6 +2,7 @@ const std = @import("std");
 const cloud_ctx_module = @import("modules/cloud_ctx.zig");
 const dispatcher = @import("dispatcher.zig");
 const cost_glance_module = @import("modules/cost_glance.zig");
+const cwd_module = @import("modules/cwd.zig");
 const git_branch_module = @import("modules/git_branch.zig");
 const iac_workspace_module = @import("modules/iac_workspace.zig");
 const language_versions_module = @import("modules/language_versions.zig");
@@ -52,6 +53,7 @@ const RenderRequest = struct {
     rows: u16 = 24,
     request_id: []const u8 = "",
     cloud_ctx: cloud_ctx_module.Options = .{},
+    cwd_options: cwd_module.Options = .{},
     risk_tier: risk_tier_module.BarColors = .{},
     sso_expiry: sso_expiry_module.Options = .{},
     rtl: bool = false,
@@ -490,6 +492,7 @@ pub const Server = struct {
             .ssh = ssh,
             .user = user,
             .host = host,
+            .cwd_options = parsed.value.cwd_options,
             .aws_profile = aws_profile,
             .aws_region = aws_region,
             .aws_default_region = aws_default_region,
@@ -1059,6 +1062,9 @@ fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderReques
     try appendKeyBool(allocator, &out, "cloud_gcp", request.cloud_ctx.gcp);
     try appendKeyBool(allocator, &out, "cloud_azure", request.cloud_ctx.azure);
     try appendKeyBool(allocator, &out, "cloud_kube", request.cloud_ctx.kubernetes);
+    try appendKeyInt(allocator, &out, "cwd_truncate_to", request.cwd_options.truncate_to);
+    try appendKeyBool(allocator, &out, "cwd_home_tilde", request.cwd_options.home_tilde);
+    try appendKeyInt(allocator, &out, "cwd_max_width", request.cwd_options.max_width);
     try appendKeyString(allocator, &out, "risk_unknown_bg", risk_tier_module.colorSlotName(request.risk_tier.unknown_bg));
     try appendKeyString(allocator, &out, "risk_dev_bg", risk_tier_module.colorSlotName(request.risk_tier.dev_bg));
     try appendKeyString(allocator, &out, "risk_staging_bg", risk_tier_module.colorSlotName(request.risk_tier.staging_bg));

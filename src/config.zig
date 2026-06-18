@@ -13,6 +13,7 @@ pub const default_config_text =
     \\[modules.cwd]
     \\truncate_to = 3
     \\home_tilde = true
+    \\max_width = 0
     \\
     \\[modules.git_branch]
     \\show_dirty = true
@@ -52,6 +53,7 @@ pub const a11y_config_text =
     \\[modules.cwd]
     \\truncate_to = 3
     \\home_tilde = true
+    \\max_width = 0
     \\
     \\[modules.git_branch]
     \\show_dirty = true
@@ -162,6 +164,7 @@ pub const PromptOptions = struct {
 pub const CwdOptions = struct {
     truncate_to: u8 = 3,
     home_tilde: bool = true,
+    max_width: u16 = 0,
 };
 
 pub const GitBranchOptions = struct {
@@ -245,6 +248,7 @@ const Seen = struct {
     prompt_rtl_reverse: bool = false,
     cwd_truncate_to: bool = false,
     cwd_home_tilde: bool = false,
+    cwd_max_width: bool = false,
     git_branch_show_dirty: bool = false,
     git_branch_cache_ttl_ms: bool = false,
     language_versions_detect: bool = false,
@@ -410,6 +414,9 @@ const Parser = struct {
         } else if (std.mem.eql(u8, key.text, "home_tilde")) {
             try self.markUnseen(&self.seen.cwd_home_tilde, line_no, key.column);
             self.modules.cwd.home_tilde = try self.parseBool(value, line_no);
+        } else if (std.mem.eql(u8, key.text, "max_width")) {
+            try self.markUnseen(&self.seen.cwd_max_width, line_no, key.column);
+            self.modules.cwd.max_width = @intCast(try self.parseIntRange(value, line_no, 0, 512));
         } else {
             return self.fail(line_no, key.column, "unknown key");
         }
@@ -833,6 +840,7 @@ test "parses per-module options" {
         \\[modules.cwd]
         \\truncate_to = 2
         \\home_tilde = false
+        \\max_width = 24
         \\
         \\[modules.git_branch]
         \\show_dirty = false
@@ -877,6 +885,7 @@ test "parses per-module options" {
     try std.testing.expect(config.prompt.rtl_reverse);
     try std.testing.expectEqual(@as(u8, 2), config.modules.cwd.truncate_to);
     try std.testing.expect(!config.modules.cwd.home_tilde);
+    try std.testing.expectEqual(@as(u16, 24), config.modules.cwd.max_width);
     try std.testing.expect(!config.modules.git_branch.show_dirty);
     try std.testing.expectEqual(@as(u32, 0), config.modules.git_branch.cache_ttl_ms);
     try std.testing.expect(config.modules.language_versions.python);

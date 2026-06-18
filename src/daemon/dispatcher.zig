@@ -14,7 +14,7 @@ const risk_tier_module = @import("modules/risk_tier.zig");
 const ssh_target_module = @import("modules/ssh_target.zig");
 const sso_expiry_module = @import("modules/sso_expiry.zig");
 const time_module = @import("modules/time.zig");
-const unicode_width = @import("unicode_width.zig");
+const unicode_width = @import("modules/unicode_width.zig");
 const user_host_module = @import("modules/user_host.zig");
 const vpn_status_module = @import("modules/vpn_status.zig");
 
@@ -85,6 +85,7 @@ pub const RenderInput = struct {
     ssh: ?[]const u8,
     user: []const u8,
     host: []const u8,
+    cwd_options: cwd_module.Options = .{},
     aws_profile: ?[]const u8 = null,
     aws_region: ?[]const u8 = null,
     aws_default_region: ?[]const u8 = null,
@@ -300,7 +301,7 @@ fn fromLanguageVersions(rendered: language_versions_module.Cache.AsyncRender) As
 
 fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId, input: RenderInput) !?[]u8 {
     return switch (module_id) {
-        .cwd => try cwd_module.render(allocator, input.cwd, input.home, 3),
+        .cwd => try cwd_module.render(allocator, input.cwd, input.home, input.cwd_options),
         .git_branch => try caches.git_branch.render(allocator, input.cwd),
         .language_versions => try language_versions_module.probe(allocator, input.cwd),
         .time => try time_module.render(allocator, input.time, input.timestamp),

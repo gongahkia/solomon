@@ -54,6 +54,15 @@ const schema_json =
     \\      "type": "string",
     \\      "enum": ["nerdfont", "unicode", "ascii"]
     \\    },
+    \\    "cwdOptions": {
+    \\      "type": "object",
+    \\      "additionalProperties": true,
+    \\      "properties": {
+    \\        "truncate_to": { "type": "integer", "minimum": 0, "maximum": 16 },
+    \\        "home_tilde": { "type": "boolean" },
+    \\        "max_width": { "type": "integer", "minimum": 0, "maximum": 512 }
+    \\      }
+    \\    },
     \\    "cloudCtx": {
     \\      "type": "object",
     \\      "additionalProperties": true,
@@ -119,6 +128,7 @@ const schema_json =
     \\        "session": { "type": "string" },
     \\        "rtl": { "type": "boolean" },
     \\        "rtl_reverse": { "type": "boolean" },
+    \\        "cwd_options": { "$ref": "#/$defs/cwdOptions" },
     \\        "cloud_ctx": { "$ref": "#/$defs/cloudCtx" },
     \\        "risk_tier": { "$ref": "#/$defs/riskTier" },
     \\        "sso_expiry": { "$ref": "#/$defs/ssoExpiry" }
@@ -148,6 +158,7 @@ const schema_json =
     \\        "session": { "type": "string" },
     \\        "rtl": { "type": "boolean" },
     \\        "rtl_reverse": { "type": "boolean" },
+    \\        "cwd_options": { "$ref": "#/$defs/cwdOptions" },
     \\        "cloud_ctx": { "$ref": "#/$defs/cloudCtx" },
     \\        "risk_tier": { "$ref": "#/$defs/riskTier" },
     \\        "sso_expiry": { "$ref": "#/$defs/ssoExpiry" }

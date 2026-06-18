@@ -99,6 +99,7 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
     try writeOptionsSection(allocator, &out, "cwd", &.{
         .{ .key = "truncate_to", .type = "integer", .default_value = "`3`", .constraints = "`0..16`; `0` disables truncation." },
         .{ .key = "home_tilde", .type = "bool", .default_value = "`true`", .constraints = "Replace `$HOME` prefix with `~`." },
+        .{ .key = "max_width", .type = "integer", .default_value = "`0`", .constraints = "`0..512`; `0` disables display-width truncation." },
     }, "");
     try writeOptionsSection(allocator, &out, "git_branch", &.{
         .{ .key = "show_dirty", .type = "bool", .default_value = "`true`", .constraints = "Append `*` when worktree is dirty." },

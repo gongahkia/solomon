@@ -14,6 +14,7 @@ const risk_tier_module = @import("modules/risk_tier.zig");
 const ssh_target_module = @import("modules/ssh_target.zig");
 const sso_expiry_module = @import("modules/sso_expiry.zig");
 const time_module = @import("modules/time.zig");
+const unicode_width = @import("unicode_width.zig");
 const user_host_module = @import("modules/user_host.zig");
 const vpn_status_module = @import("modules/vpn_status.zig");
 
@@ -248,7 +249,17 @@ pub fn visibleWidth(value: []const u8) usize {
             }
         }
         const len = std.unicode.utf8ByteSequenceLength(value[index]) catch 1;
-        width += 1;
+        if (index + len > value.len) {
+            width += 1;
+            index += 1;
+            continue;
+        }
+        const codepoint = std.unicode.utf8Decode(value[index .. index + len]) catch {
+            width += 1;
+            index += 1;
+            continue;
+        };
+        width += unicode_width.codepointWidth(codepoint);
         index += @min(len, value.len - index);
     }
     return width;
@@ -669,6 +680,12 @@ test "snapshots layout shapes" {
 
 test "counts unicode glyphs as one visible cell for layout filler" {
     try std.testing.expectEqual(@as(usize, 3), visibleWidth("a→b"));
+}
+
+test "counts East Asian wide cells for layout filler" {
+    try std.testing.expectEqual(@as(usize, 3), visibleWidth("\xe7\x95\x8ca"));
+    try std.testing.expectEqual(@as(usize, 4), fillerWidth("\xe7\x95\x8c", "\xef\xbd\x81", 8));
+    try std.testing.expectEqual(@as(usize, 3), visibleWidth("a\xc2\xb7b"));
 }
 
 fn expectLayoutSnapshot(name: []const u8, lines: []const LayoutLineInput, cols: u16) !void {

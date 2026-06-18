@@ -747,7 +747,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Snapshot tests for RTL rendering
 
 ### 22.3 CJK width
-- [ ] Implement UAX-11 East Asian Width handling
+- [x] Implement UAX-11 East Asian Width handling
 - [ ] Width-aware truncation
 - [x] Fixture strings for Chinese, Japanese, Korean
 - [ ] Snapshot tests

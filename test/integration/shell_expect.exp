@@ -55,6 +55,24 @@ proc run_zsh {root} {
     finish zsh
 }
 
+proc run_zsh_transient_history {root} {
+    global spawn_id
+    if {[auto_execok zsh] eq ""} {
+        puts stderr "skip expect zsh transient: zsh not found"
+        return
+    }
+    set init [shell_quote [file join $root init shisa.zsh]]
+    spawn -noecho zsh -f
+    send -- "cd /tmp\r"
+    send -- "source $init\r"
+    send -- "echo SHISA_TRANSIENT_OK\r"
+    set transient_pattern [format {%c\[2K/tmp> } 27]
+    require_output zsh $transient_pattern
+    require_output zsh {SHISA_TRANSIENT_OK}
+    send -- "exit\r"
+    finish zsh
+}
+
 proc run_bash {root} {
     global spawn_id
     if {[auto_execok bash] eq ""} {
@@ -110,6 +128,7 @@ proc run_pwsh {root} {
 }
 
 run_zsh $root
+run_zsh_transient_history $root
 run_bash $root
 run_fish $root
 run_nu $root

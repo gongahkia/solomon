@@ -4,6 +4,8 @@
 
 It sends a `health` heartbeat to the daemon socket every 1s by default. Three missed heartbeats terminate and restart the daemon through the same backoff path.
 
+The supervisor also leaves an active marker while running. If a service manager restarts the supervisor after three unclean supervisor exits within 60s, the next start writes a disabled marker and exits cleanly instead of looping.
+
 ## Binary Install
 
 `zig build` installs:
@@ -23,6 +25,18 @@ Heartbeat interval override:
 
 ```sh
 shisa-supervisor --heartbeat-ms 1000
+```
+
+Self-disable state reset:
+
+```sh
+shisa-supervisor --reset-disable
+```
+
+State defaults to `~/Library/Application Support/shisa/supervisor.state` on macOS and `$XDG_STATE_HOME/shisa/supervisor.state` or `~/.local/state/shisa/supervisor.state` on Linux. Override it for tests or custom service layouts:
+
+```sh
+shisa-supervisor --self-disable-state /path/to/supervisor.state
 ```
 
 ## macOS LaunchAgent

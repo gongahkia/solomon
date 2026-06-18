@@ -6,10 +6,13 @@ const paths = @import("daemon/paths.zig");
 const Config = struct {
     daemon_path: ?[]const u8 = null,
     socket_path: ?[]const u8 = null,
+    self_disable_state_path: ?[]const u8 = null,
     max_restarts: ?u32 = null,
     backoff_ms: u64 = 100,
     max_backoff_ms: u64 = 5000,
     heartbeat_ms: u64 = 1000,
+    self_disable: bool = true,
+    reset_disable: bool = false,
 };
 
 const ParseError = error{
@@ -20,11 +23,33 @@ const ParseError = error{
 
 const heartbeat_miss_limit = 3;
 const heartbeat_request = "{\"v\":1,\"op\":\"health\",\"request_id\":\"supervisor-heartbeat\"}";
+const self_disable_window_seconds: i64 = 60;
+const self_disable_crash_limit: u32 = 3;
 
 pub fn run(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const config = try parse(args);
     const default_daemon_path = if (config.daemon_path == null) try siblingDaemonPath(allocator) else null;
     defer if (default_daemon_path) |path| allocator.free(path);
+
+    const default_state_path = if (config.self_disable and config.self_disable_state_path == null) try defaultSelfDisableStatePath(allocator) else null;
+    defer if (default_state_path) |path| allocator.free(path);
+    const self_disable_state_path = config.self_disable_state_path orelse default_state_path;
+
+    if (config.reset_disable) {
+        if (self_disable_state_path) |path| try clearSelfDisableState(allocator, path);
+        return;
+    }
+
+    var active_path: ?[]u8 = null;
+    defer if (active_path) |path| allocator.free(path);
+    if (self_disable_state_path) |path| {
+        active_path = try selfDisableActivePathAlloc(allocator, path);
+        if (try enterSelfDisableGuard(allocator, path, active_path.?)) {
+            try std.fs.File.stderr().writeAll("shisa-supervisor: disabled after repeated supervisor crashes; run with --reset-disable to re-enable\n");
+            return;
+        }
+    }
+    defer if (active_path) |path| std.fs.cwd().deleteFile(path) catch {};
 
     const daemon_path = config.daemon_path orelse default_daemon_path.?;
     try supervise(allocator, daemon_path, config);
@@ -136,6 +161,123 @@ fn statusToTerm(status: u32) std.process.Child.Term {
         std.process.Child.Term{ .Unknown = status };
 }
 
+fn enterSelfDisableGuard(allocator: std.mem.Allocator, state_path: []const u8, active_path: []const u8) !bool {
+    const disabled_path = try selfDisableDisabledPathAlloc(allocator, state_path);
+    defer allocator.free(disabled_path);
+
+    if (pathExists(disabled_path)) return true;
+    const now = std.time.timestamp();
+    if (pathExists(active_path)) {
+        var state = try readSelfDisableState(allocator, state_path);
+        if (state.first_crash_ts == 0 or now - state.first_crash_ts > self_disable_window_seconds) {
+            state.first_crash_ts = now;
+            state.crashes = 1;
+        } else {
+            state.crashes += 1;
+        }
+        try writeSelfDisableState(allocator, state_path, state);
+        if (state.crashes >= self_disable_crash_limit) {
+            try writeTextFile(disabled_path, "disabled after repeated supervisor crashes\n");
+            return true;
+        }
+    }
+    try writeTextFile(active_path, "active\n");
+    return false;
+}
+
+const SelfDisableState = struct {
+    first_crash_ts: i64 = 0,
+    crashes: u32 = 0,
+};
+
+fn readSelfDisableState(allocator: std.mem.Allocator, state_path: []const u8) !SelfDisableState {
+    const data = std.fs.cwd().readFileAlloc(allocator, state_path, 4096) catch |err| switch (err) {
+        error.FileNotFound => return .{},
+        else => return err,
+    };
+    defer allocator.free(data);
+    var it = std.mem.tokenizeAny(u8, data, " \t\r\n");
+    const first_raw = it.next() orelse return .{};
+    const count_raw = it.next() orelse return .{};
+    return .{
+        .first_crash_ts = std.fmt.parseInt(i64, first_raw, 10) catch 0,
+        .crashes = std.fmt.parseInt(u32, count_raw, 10) catch 0,
+    };
+}
+
+fn writeSelfDisableState(allocator: std.mem.Allocator, state_path: []const u8, state: SelfDisableState) !void {
+    const data = try std.fmt.allocPrint(allocator, "{d} {d}\n", .{ state.first_crash_ts, state.crashes });
+    defer allocator.free(data);
+    try writeTextFile(state_path, data);
+}
+
+fn clearSelfDisableState(allocator: std.mem.Allocator, state_path: []const u8) !void {
+    const active_path = try selfDisableActivePathAlloc(allocator, state_path);
+    defer allocator.free(active_path);
+    const disabled_path = try selfDisableDisabledPathAlloc(allocator, state_path);
+    defer allocator.free(disabled_path);
+    std.fs.cwd().deleteFile(state_path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    };
+    std.fs.cwd().deleteFile(active_path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    };
+    std.fs.cwd().deleteFile(disabled_path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    };
+}
+
+fn defaultSelfDisableStatePath(allocator: std.mem.Allocator) ![]u8 {
+    return switch (builtin.os.tag) {
+        .macos => macosSelfDisableStatePath(allocator),
+        .linux => linuxSelfDisableStatePath(allocator),
+        else => linuxSelfDisableStatePath(allocator),
+    };
+}
+
+fn macosSelfDisableStatePath(allocator: std.mem.Allocator) ![]u8 {
+    const home = try std.process.getEnvVarOwned(allocator, "HOME");
+    defer allocator.free(home);
+    return std.fmt.allocPrint(allocator, "{s}/Library/Application Support/shisa/supervisor.state", .{home});
+}
+
+fn linuxSelfDisableStatePath(allocator: std.mem.Allocator) ![]u8 {
+    const state_home = std.process.getEnvVarOwned(allocator, "XDG_STATE_HOME") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    if (state_home) |path| {
+        defer allocator.free(path);
+        return std.fmt.allocPrint(allocator, "{s}/shisa/supervisor.state", .{path});
+    }
+    const home = try std.process.getEnvVarOwned(allocator, "HOME");
+    defer allocator.free(home);
+    return std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/supervisor.state", .{home});
+}
+
+fn selfDisableActivePathAlloc(allocator: std.mem.Allocator, state_path: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}.active", .{state_path});
+}
+
+fn selfDisableDisabledPathAlloc(allocator: std.mem.Allocator, state_path: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}.disabled", .{state_path});
+}
+
+fn pathExists(path: []const u8) bool {
+    std.fs.cwd().access(path, .{}) catch return false;
+    return true;
+}
+
+fn writeTextFile(path: []const u8, data: []const u8) !void {
+    if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
+    var file = try std.fs.cwd().createFile(path, .{ .truncate = true });
+    defer file.close();
+    try file.writeAll(data);
+}
+
 fn cleanExit(term: std.process.Child.Term) bool {
     return switch (term) {
         .Exited => |code| code == 0,
@@ -160,6 +302,8 @@ fn parse(args: []const []const u8) ParseError!Config {
             config.daemon_path = try nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--socket")) {
             config.socket_path = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, arg, "--self-disable-state")) {
+            config.self_disable_state_path = try nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--max-restarts")) {
             config.max_restarts = try parseU32(try nextValue(args, &i));
         } else if (std.mem.eql(u8, arg, "--backoff-ms")) {
@@ -168,6 +312,10 @@ fn parse(args: []const []const u8) ParseError!Config {
             config.max_backoff_ms = try parseU64(try nextValue(args, &i));
         } else if (std.mem.eql(u8, arg, "--heartbeat-ms")) {
             config.heartbeat_ms = try parseU64(try nextValue(args, &i));
+        } else if (std.mem.eql(u8, arg, "--no-self-disable")) {
+            config.self_disable = false;
+        } else if (std.mem.eql(u8, arg, "--reset-disable")) {
+            config.reset_disable = true;
         } else {
             return error.UnknownArgument;
         }
@@ -205,6 +353,9 @@ test "parses supervisor options" {
         "100",
         "--heartbeat-ms",
         "50",
+        "--self-disable-state",
+        "/tmp/supervisor.state",
+        "--reset-disable",
     };
     const config = try parse(args[0..]);
     try std.testing.expectEqualStrings("/tmp/shisad", config.daemon_path.?);
@@ -213,6 +364,8 @@ test "parses supervisor options" {
     try std.testing.expectEqual(@as(u64, 25), config.backoff_ms);
     try std.testing.expectEqual(@as(u64, 100), config.max_backoff_ms);
     try std.testing.expectEqual(@as(u64, 50), config.heartbeat_ms);
+    try std.testing.expectEqualStrings("/tmp/supervisor.state", config.self_disable_state_path.?);
+    try std.testing.expect(config.reset_disable);
 }
 
 test "rejects malformed restart count" {
@@ -236,4 +389,26 @@ test "heartbeat response accepts legacy and JSON health" {
     try std.testing.expect(try heartbeatResponseOk(std.testing.allocator, "{\"v\":1,\"ok\":true}"));
     try std.testing.expect(!(try heartbeatResponseOk(std.testing.allocator, "{\"v\":1,\"ok\":false}")));
     try std.testing.expect(!(try heartbeatResponseOk(std.testing.allocator, "bad\n")));
+}
+
+test "self-disable trips after repeated unclean supervisor exits" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-supervisor-self-disable-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    const state_path = try std.fmt.allocPrint(allocator, "{s}/supervisor.state", .{dir_path});
+    defer allocator.free(state_path);
+    const active_path = try selfDisableActivePathAlloc(allocator, state_path);
+    defer allocator.free(active_path);
+    const disabled_path = try selfDisableDisabledPathAlloc(allocator, state_path);
+    defer allocator.free(disabled_path);
+
+    try writeTextFile(active_path, "active\n");
+    try std.testing.expect(!try enterSelfDisableGuard(allocator, state_path, active_path));
+    try std.testing.expect(!try enterSelfDisableGuard(allocator, state_path, active_path));
+    try std.testing.expect(try enterSelfDisableGuard(allocator, state_path, active_path));
+    try std.testing.expect(pathExists(disabled_path));
+
+    try clearSelfDisableState(allocator, state_path);
+    try std.testing.expect(!pathExists(disabled_path));
 }

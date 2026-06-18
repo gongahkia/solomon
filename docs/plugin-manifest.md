@@ -68,14 +68,14 @@ Capability checks:
 - Relative filesystem scopes resolve under the plugin directory.
 - `exec`, `net`, and `env_read` are exact allow-lists.
 
-Lifecycle contracts:
+Lifecycle contracts and wall-time limits:
 
-| Hook | Contract |
-| --- | --- |
-| `on_load(ctx)` | Initialize plugin-local state after trust/load. Return value is ignored. |
-| `render(ctx)` | Return a prompt segment string, `nil`, or an empty string. It must be bounded and side-effect-light. |
-| `update(ctx)` | Refresh plugin cache/state outside the prompt hot path. Return value is plugin-defined. |
-| `pre_exec(ctx)` | Inspect a pending command and return `nil` or a decision table such as `{ allow = false, message = "..." }`. Requires `capabilities.pre_exec = true`. |
-| `on_unload(ctx)` | Release transient resources before reload, disable, or daemon shutdown. Return value is ignored. |
+| Hook | Max wall time | Contract |
+| --- | --- | --- |
+| `on_load(ctx)` | 1 ms | Initialize plugin-local state after trust/load. Return value is ignored. |
+| `render(ctx)` | 1 ms | Return a prompt segment string, `nil`, or an empty string. It must be bounded and side-effect-light. |
+| `update(ctx)` | 1 ms | Refresh plugin cache/state outside the prompt hot path. Return value is plugin-defined. |
+| `pre_exec(ctx)` | 1 ms | Inspect a pending command and return `nil` or a decision table such as `{ allow = false, message = "..." }`. Requires `capabilities.pre_exec = true`. |
+| `on_unload(ctx)` | 1 ms | Release transient resources before reload, disable, or daemon shutdown. Return value is ignored. |
 
-Current runtime validation stores these hook names in the manifest. Daemon hook invocation is tracked separately from manifest validation.
+All lifecycle hooks share the current Lua runtime budget: 1 ms per call. Debug builds use a 5 ms hard-stop window for diagnostics; non-debug builds fail at the 1 ms budget. Current runtime validation stores these hook names in the manifest. Daemon hook invocation is tracked separately from manifest validation.

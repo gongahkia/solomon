@@ -55,6 +55,7 @@ Optional fields:
 - `description`, `author`, `homepage`, `repository`.
 
 See `docs/plugin-manifest.md` for exact validation rules.
+Lifecycle hook wall-time limits are documented in [Plugin Manifest](plugin-manifest.md).
 
 New plugin authors should start with [Authoring Plugins](authoring-plugins.md). Marketplace review and delisting rules live in [Plugin Policy](plugin-policy.md).
 

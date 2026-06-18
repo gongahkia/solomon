@@ -20,3 +20,15 @@ Sandbox:
 - `Runtime.initSandboxedWithOptions(.require_root)` keeps a wrapped `require` that accepts module names only and resolves through `<root>/?.lua` and `<root>/?/init.lua`.
 - Host APIs must still enforce the manifest capability gate for filesystem, exec, network, env, secrets, and pre-exec access.
 - `Runtime.loadManifestStrict` rejects unknown top-level manifest fields and unknown capability fields.
+
+Lifecycle budget:
+
+| Hook | Max wall time |
+| --- | --- |
+| `on_load` | 1 ms |
+| `render` | 1 ms |
+| `update` | 1 ms |
+| `pre_exec` | 1 ms |
+| `on_unload` | 1 ms |
+
+The default runtime budget is 1 ms per Lua call. Debug builds use a 5 ms hard-stop window; non-debug builds fail at the 1 ms budget.

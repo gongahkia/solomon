@@ -677,6 +677,11 @@ test "snapshots layout shapes" {
         .{ .left = "cwd", .right = "time" },
         .{ .left = "exit:2", .right = "jobs:1" },
     }, 16);
+    try expectLayoutSnapshot("cjk-width", &.{
+        .{ .left = "\xe9\xa1\xb9\xe7\x9b\xae", .right = "\xe9\x80\x80\xe5\x87\xba 1" },
+        .{ .left = "\xe3\x83\x97\xe3\x83\xad\xe3\x82\xb8\xe3\x82\xa7\xe3\x82\xaf\xe3\x83\x88", .right = "\xe7\xb5\x82\xe4\xba\x86 1" },
+        .{ .left = "\xed\x94\x84\xeb\xa1\x9c\xec\xa0\x9d\xed\x8a\xb8", .right = "\xec\xa2\x85\xeb\xa3\x8c 1" },
+    }, 20);
 }
 
 test "counts unicode glyphs as one visible cell for layout filler" {

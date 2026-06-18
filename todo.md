@@ -750,7 +750,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Implement UAX-11 East Asian Width handling
 - [x] Width-aware truncation
 - [x] Fixture strings for Chinese, Japanese, Korean
-- [ ] Snapshot tests
+- [x] Snapshot tests
 
 ### 22.4 Translation workflow
 - [x] Document the translation contribution flow

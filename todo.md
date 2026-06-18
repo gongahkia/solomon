@@ -892,7 +892,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Configurable per-module TTL
 
 ### 27.4 Invalidation
-- [ ] fsnotify integration with declared watch paths
+- [x] fsnotify integration with declared watch paths
 - [ ] Debounce events (configurable, default 50 ms)
 - [ ] Monotonic `cache_rev` propagated to L1 keys
 - [ ] Manual: `shisa cache clear [--module=foo]`

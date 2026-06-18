@@ -1,4 +1,5 @@
 const std = @import("std");
+const fsnotify = @import("fsnotify.zig");
 
 pub const WatchedMtime = struct {
     path: []const u8,
@@ -35,6 +36,8 @@ const StoredKind = enum {
 
 const StoredEntry = struct {
     key: []u8,
+    module_id: []u8,
+    cwd: []u8,
     value: []u8,
     kind: StoredKind,
     created_ns: u64,
@@ -102,21 +105,53 @@ pub const Store = struct {
         return self.entries.count();
     }
 
+    pub fn invalidateModuleCwd(self: *Store, module_id: []const u8, cwd: []const u8) !void {
+        var remove_keys: std.ArrayList([]u8) = .empty;
+        defer {
+            for (remove_keys.items) |key| self.allocator.free(key);
+            remove_keys.deinit(self.allocator);
+        }
+
+        var it = self.entries.iterator();
+        while (it.next()) |entry| {
+            if (std.mem.eql(u8, entry.value_ptr.module_id, module_id) and std.mem.eql(u8, entry.value_ptr.cwd, cwd)) {
+                try remove_keys.append(self.allocator, try self.allocator.dupe(u8, entry.key_ptr.*));
+            }
+        }
+
+        for (remove_keys.items) |key| self.removeBorrowedKey(key);
+    }
+
     fn putAt(self: *Store, input: KeyInput, kind: StoredKind, value_source: []const u8, timestamp_ns: u64) !void {
         const key = try keyAlloc(self.allocator, input);
         errdefer self.allocator.free(key);
+        const module_id = try self.allocator.dupe(u8, input.module_id);
+        errdefer self.allocator.free(module_id);
+        const cwd = try self.allocator.dupe(u8, input.cwd);
+        errdefer self.allocator.free(cwd);
         const value = try self.allocator.dupe(u8, value_source);
         errdefer self.allocator.free(value);
 
         const entry = try self.entries.getOrPut(key);
         if (entry.found_existing) {
             self.allocator.free(key);
+            self.allocator.free(entry.value_ptr.module_id);
+            self.allocator.free(entry.value_ptr.cwd);
             self.allocator.free(entry.value_ptr.value);
+            entry.value_ptr.module_id = module_id;
+            entry.value_ptr.cwd = cwd;
             entry.value_ptr.value = value;
             entry.value_ptr.kind = kind;
             entry.value_ptr.created_ns = timestamp_ns;
         } else {
-            entry.value_ptr.* = .{ .key = key, .value = value, .kind = kind, .created_ns = timestamp_ns };
+            entry.value_ptr.* = .{
+                .key = key,
+                .module_id = module_id,
+                .cwd = cwd,
+                .value = value,
+                .kind = kind,
+                .created_ns = timestamp_ns,
+            };
         }
     }
 
@@ -150,6 +185,7 @@ pub fn keyAlloc(allocator: std.mem.Allocator, input: KeyInput) ![]u8 {
     defer allocator.free(sorted_mtimes);
     std.mem.sort(WatchedMtime, sorted_mtimes, {}, lessThanWatchedMtime);
 
+    try appendString(allocator, &out, "module", input.module_id);
     try appendString(allocator, &out, "cmd", input.cmd);
     try appendInt(allocator, &out, "argc", input.args.len);
     for (input.args) |arg| try appendString(allocator, &out, "arg", arg);
@@ -161,6 +197,15 @@ pub fn keyAlloc(allocator: std.mem.Allocator, input: KeyInput) ![]u8 {
     }
 
     return out.toOwnedSlice(allocator);
+}
+
+pub fn registerDeclaredWatches(watcher: *fsnotify.Watcher, module_id: []const u8, cwd: []const u8, paths: []const fsnotify.WatchPath, debounce_ms: u64) !void {
+    try watcher.watch(.{
+        .module_id = module_id,
+        .cwd = cwd,
+        .paths = paths,
+        .debounce_ms = debounce_ms,
+    });
 }
 
 fn lessThanWatchedMtime(_: void, a: WatchedMtime, b: WatchedMtime) bool {
@@ -185,6 +230,8 @@ fn appendInt(allocator: std.mem.Allocator, out: *std.ArrayList(u8), name: []cons
 
 fn freeStored(allocator: std.mem.Allocator, entry: StoredEntry) void {
     allocator.free(entry.key);
+    allocator.free(entry.module_id);
+    allocator.free(entry.cwd);
     allocator.free(entry.value);
 }
 
@@ -312,4 +359,28 @@ test "zero ttl disables command cache expiry" {
     const input = KeyInput{ .module_id = "tools", .cmd = "tool", .cwd = "/repo" };
     try store.putMissingToolAt(input, "tool", 1);
     try std.testing.expect((try store.getAt(input, 1_000_000)) != null);
+}
+
+test "fsnotify declared watch invalidates module cwd entries" {
+    var watcher = fsnotify.Watcher.init(std.testing.allocator);
+    defer watcher.deinit();
+    const paths = [_]fsnotify.WatchPath{.{ .path = "/repo/package.json" }};
+    try registerDeclaredWatches(&watcher, "language_versions", "/repo", paths[0..], 50);
+
+    var store = Store.initWithOptions(std.testing.allocator, .{ .default_ttl_ns = 0 });
+    defer store.deinit();
+    const input = KeyInput{
+        .module_id = "language_versions",
+        .cmd = "node",
+        .args = &.{"--version"},
+        .cwd = "/repo",
+        .mtimes = &.{.{ .path = "/repo/package.json", .mtime_ns = 1 }},
+    };
+    try store.putOutputAt(input, "v24.0.0", 1);
+    try std.testing.expect((try store.getAt(input, 2)) != null);
+
+    watcher.recordEvent("/repo/package.json", 1 * std.time.ns_per_ms);
+    const invalidation = watcher.nextInvalidation(51 * std.time.ns_per_ms).?;
+    try store.invalidateModuleCwd(invalidation.module_id, invalidation.cwd);
+    try std.testing.expect(try store.getAt(input, 52 * std.time.ns_per_ms) == null);
 }

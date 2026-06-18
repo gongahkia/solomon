@@ -47,6 +47,7 @@
 - [Region Drift](region-drift.md)
 - [IaC Workspace](iac-workspace.md)
 - [cd hint](cdhint.md)
+- [tmux pane](tmux-pane.md)
 - [IAM Whoami](iam-whoami.md)
 - [SSO Expiry](sso-expiry.md)
 - [Container Provenance](container-provenance.md)

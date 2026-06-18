@@ -80,6 +80,13 @@ const schema_json =
     \\        "enabled": { "type": "boolean" }
     \\      }
     \\    },
+    \\    "tmuxPaneOptions": {
+    \\      "type": "object",
+    \\      "additionalProperties": true,
+    \\      "properties": {
+    \\        "enabled": { "type": "boolean" }
+    \\      }
+    \\    },
     \\    "riskTierColor": {
     \\      "type": "string",
     \\      "enum": ["fg", "muted", "accent", "success", "warning", "danger"]
@@ -137,11 +144,13 @@ const schema_json =
     \\          "type": "array",
     \\          "items": { "type": "string" }
     \\        },
+    \\        "tmux_pane": { "type": ["string", "null"] },
     \\        "rtl": { "type": "boolean" },
     \\        "rtl_reverse": { "type": "boolean" },
     \\        "cwd_options": { "$ref": "#/$defs/cwdOptions" },
     \\        "cloud_ctx": { "$ref": "#/$defs/cloudCtx" },
     \\        "cdhint": { "$ref": "#/$defs/cdhint" },
+    \\        "tmux_pane_options": { "$ref": "#/$defs/tmuxPaneOptions" },
     \\        "risk_tier": { "$ref": "#/$defs/riskTier" },
     \\        "sso_expiry": { "$ref": "#/$defs/ssoExpiry" }
     \\      }
@@ -172,11 +181,13 @@ const schema_json =
     \\          "type": "array",
     \\          "items": { "type": "string" }
     \\        },
+    \\        "tmux_pane": { "type": ["string", "null"] },
     \\        "rtl": { "type": "boolean" },
     \\        "rtl_reverse": { "type": "boolean" },
     \\        "cwd_options": { "$ref": "#/$defs/cwdOptions" },
     \\        "cloud_ctx": { "$ref": "#/$defs/cloudCtx" },
     \\        "cdhint": { "$ref": "#/$defs/cdhint" },
+    \\        "tmux_pane_options": { "$ref": "#/$defs/tmuxPaneOptions" },
     \\        "risk_tier": { "$ref": "#/$defs/riskTier" },
     \\        "sso_expiry": { "$ref": "#/$defs/ssoExpiry" }
     \\      }

@@ -15,6 +15,7 @@ const risk_tier_module = @import("modules/risk_tier.zig");
 const ssh_target_module = @import("modules/ssh_target.zig");
 const sso_expiry_module = @import("modules/sso_expiry.zig");
 const time_module = @import("modules/time.zig");
+const tmux_pane_module = @import("modules/tmux_pane.zig");
 const unicode_width = @import("modules/unicode_width.zig");
 const user_host_module = @import("modules/user_host.zig");
 const vpn_status_module = @import("modules/vpn_status.zig");
@@ -36,6 +37,7 @@ pub const ModuleId = enum {
     user_host,
     cloud_ctx,
     cdhint,
+    tmux_pane,
     risk_tier,
     region_drift,
     cost_glance,
@@ -98,6 +100,8 @@ pub const RenderInput = struct {
     kubeconfig: ?[]const u8 = null,
     cloud_ctx: cloud_ctx_module.Options = .{},
     cdhint: cdhint_module.Options = .{},
+    tmux_pane: ?[]const u8 = null,
+    tmux_pane_options: tmux_pane_module.Options = .{},
     risk_tier: risk_tier_module.BarColors = .{},
     sso_expiry: sso_expiry_module.Options = .{},
     rtl: bool = false,
@@ -314,6 +318,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
         .user_host => try user_host_module.render(allocator, input.ssh, input.user, input.host),
         .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.kubeconfig, input.home, caches.cloud_ctx, input.cloud_ctx),
         .cdhint => try cdhint_module.render(allocator, input.cwd, input.cdhint),
+        .tmux_pane => try tmux_pane_module.render(allocator, input.tmux_pane, input.tmux_pane_options),
         .risk_tier => try risk_tier_module.render(allocator, .{ .aws = input.aws_profile }, if (input.ssh == null) null else input.host, null, input.risk_tier),
         .region_drift => try region_drift_module.render(allocator, input.home, input.aws_profile, input.aws_region, input.aws_default_region, input.cloudsdk_compute_region, input.azure_location, input.arm_location, input.azure_default_location),
         .cost_glance => try cost_glance_module.render(allocator, input.home),
@@ -341,6 +346,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .user_host => "user_host",
         .cloud_ctx => "cloud_ctx",
         .cdhint => "cdhint",
+        .tmux_pane => "tmux_pane",
         .risk_tier => "risk_tier",
         .region_drift => "region_drift",
         .cost_glance => "cost_glance",
@@ -363,6 +369,7 @@ pub fn moduleIdFromName(name: []const u8) ?ModuleId {
     if (std.mem.eql(u8, name, "user_host")) return .user_host;
     if (std.mem.eql(u8, name, "cloud_ctx")) return .cloud_ctx;
     if (std.mem.eql(u8, name, "cdhint")) return .cdhint;
+    if (std.mem.eql(u8, name, "tmux_pane")) return .tmux_pane;
     if (std.mem.eql(u8, name, "risk_tier")) return .risk_tier;
     if (std.mem.eql(u8, name, "region_drift")) return .region_drift;
     if (std.mem.eql(u8, name, "cost_glance")) return .cost_glance;
@@ -377,6 +384,7 @@ pub fn moduleIdFromName(name: []const u8) ?ModuleId {
 test "classifies module execution" {
     try std.testing.expectEqual(ExecutionClass.sync, executionClass(.cwd));
     try std.testing.expectEqual(ExecutionClass.sync, executionClass(.cdhint));
+    try std.testing.expectEqual(ExecutionClass.sync, executionClass(.tmux_pane));
     try std.testing.expectEqual(ExecutionClass.async, executionClass(.git_branch));
     try std.testing.expectEqual(ExecutionClass.async, executionClass(.language_versions));
 }
@@ -487,6 +495,38 @@ test "renders opt-in cdhint module" {
     }, pipeline[0..]);
     defer rendered.deinit(allocator);
     try std.testing.expectEqualStrings("cd:node> ", rendered.prompt);
+}
+
+test "renders opt-in tmux pane module" {
+    var git_cache = git_branch_module.Cache{};
+    defer git_cache.deinit(std.testing.allocator);
+    var language_cache = language_versions_module.Cache{};
+    defer language_cache.deinit(std.testing.allocator);
+    var cloud_cache = cloud_ctx_module.Cache{};
+    defer cloud_cache.deinit(std.testing.allocator);
+    const pipeline = [_]ModuleSpec{
+        .{ .id = .tmux_pane, .execution_class = .sync },
+    };
+    var rendered = try renderPipeline(std.testing.allocator, .{
+        .git_branch = &git_cache,
+        .language_versions = &language_cache,
+        .cloud_ctx = &cloud_cache,
+    }, .{
+        .cwd = "/tmp/project",
+        .home = null,
+        .exit = 0,
+        .jobs = 0,
+        .duration_ms = 0,
+        .time = false,
+        .no_async = true,
+        .timestamp = 0,
+        .ssh = null,
+        .user = "u",
+        .host = "h",
+        .tmux_pane = "%7",
+    }, pipeline[0..]);
+    defer rendered.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("tmux:%7> ", rendered.prompt);
 }
 
 test "renders async placeholder and redraw token" {
@@ -720,6 +760,7 @@ test "snapshots prompt fixture corpus" {
 test "module names are public for diagnostics" {
     try std.testing.expectEqualStrings("language_versions", moduleIdName(.language_versions));
     try std.testing.expectEqual(ModuleId.cdhint, moduleIdFromName("cdhint").?);
+    try std.testing.expectEqual(ModuleId.tmux_pane, moduleIdFromName("tmux_pane").?);
     try std.testing.expect(moduleIdFromName("missing") == null);
 }
 

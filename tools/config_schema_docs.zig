@@ -135,6 +135,9 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\Place `.shisa-no-cdhint` in the current directory or detected project tree to suppress local cd hints for that tree.
         \\
     );
+    try writeOptionsSection(allocator, &out, "tmux_pane", &.{
+        .{ .key = "enabled", .type = "bool", .default_value = "`true`", .constraints = "Disable tmux pane rendering when false." },
+    }, "");
     try writeOptionsSection(allocator, &out, "risk_tier", &.{
         .{ .key = "unknown_bg", .type = "string", .default_value = "`\"muted\"`", .constraints = "One of `\"fg\"`, `\"muted\"`, `\"accent\"`, `\"success\"`, `\"warning\"`, `\"danger\"`." },
         .{ .key = "dev_bg", .type = "string", .default_value = "`\"success\"`", .constraints = "Same as `unknown_bg`." },
@@ -185,6 +188,7 @@ const module_docs = [_]ModuleDoc{
     .{ .id = .user_host, .summary = "User and host, normally only over SSH." },
     .{ .id = .cloud_ctx, .summary = "Optional cloud account context; AWS, GCP, Azure, and Kubernetes support are available." },
     .{ .id = .cdhint, .summary = "Compact local project kind hint from marker files." },
+    .{ .id = .tmux_pane, .summary = "Render the current tmux pane id from `TMUX_PANE`." },
     .{ .id = .risk_tier, .summary = "Risk classification and prompt background-bar color mapping." },
     .{ .id = .sso_expiry, .summary = "Warn when cached SSO/session expiry metadata is below the configured threshold." },
     .{ .id = .iac_workspace, .summary = "Render local Terraform/OpenTofu/Pulumi/CDK workspace metadata." },

@@ -6962,6 +6962,7 @@ fn coreA11yLabel(module_id: shisa_config.ModuleId) []const u8 {
         .user_host => "user and host",
         .cloud_ctx => "cloud context",
         .cdhint => "cd hint",
+        .tmux_pane => "tmux pane",
         .risk_tier => "risk tier",
         .sso_expiry => "SSO expiry",
         .iac_workspace => "infrastructure workspace",
@@ -7022,6 +7023,8 @@ fn renderSyncPromptAlloc(allocator: std.mem.Allocator, config: PromptConfig, cwd
     defer if (arm_location) |value| allocator.free(value);
     const azure_default_location = std.process.getEnvVarOwned(allocator, "AZURE_DEFAULT_LOCATION") catch null;
     defer if (azure_default_location) |value| allocator.free(value);
+    const tmux_pane = std.process.getEnvVarOwned(allocator, "TMUX_PANE") catch null;
+    defer if (tmux_pane) |value| allocator.free(value);
     const user = std.process.getEnvVarOwned(allocator, "USER") catch try allocator.dupe(u8, "unknown");
     defer allocator.free(user);
     var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
@@ -7058,6 +7061,8 @@ fn renderSyncPromptAlloc(allocator: std.mem.Allocator, config: PromptConfig, cwd
             .kubernetes = module_options.cloud_ctx.kubernetes,
         },
         .cdhint = module_options.cdhint,
+        .tmux_pane = tmux_pane,
+        .tmux_pane_options = module_options.tmux_pane,
         .risk_tier = module_options.risk_tier,
         .sso_expiry = module_options.sso_expiry,
     }, pipeline);
@@ -7090,6 +7095,7 @@ fn dispatcherModuleId(module_id: shisa_config.ModuleId) dispatcher.ModuleId {
         .user_host => .user_host,
         .cloud_ctx => .cloud_ctx,
         .cdhint => .cdhint,
+        .tmux_pane => .tmux_pane,
         .risk_tier => .risk_tier,
         .sso_expiry => .sso_expiry,
         .iac_workspace => .iac_workspace,
@@ -7220,6 +7226,7 @@ const PromptModuleOptions = struct {
     cwd: shisa_config.CwdOptions,
     cloud_ctx: shisa_config.CloudCtxOptions,
     cdhint: shisa_config.CdhintOptions,
+    tmux_pane: shisa_config.TmuxPaneOptions,
     risk_tier: shisa_config.RiskTierOptions,
     sso_expiry: shisa_config.SsoExpiryOptions,
 
@@ -7260,14 +7267,18 @@ fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config: Pro
     defer allocator.free(escaped_shell);
     const modules_json = try promptModulesJsonAlloc(allocator, module_options.modules);
     defer allocator.free(modules_json);
+    const tmux_pane = std.process.getEnvVarOwned(allocator, "TMUX_PANE") catch null;
+    defer if (tmux_pane) |value| allocator.free(value);
+    const escaped_tmux_pane = try jsonEscapeAlloc(allocator, tmux_pane orelse "");
+    defer allocator.free(escaped_tmux_pane);
     const request_id = try std.fmt.allocPrint(allocator, "cli-{x}", .{std.crypto.random.int(u64)});
     defer allocator.free(request_id);
     const rtl_reverse = config.rtl_reverse or module_options.rtl_reverse;
 
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\",\"modules\":[{s}],\"rtl\":{},\"rtl_reverse\":{},\"cwd_options\":{{\"truncate_to\":{d},\"home_tilde\":{},\"max_width\":{d}}},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"cdhint\":{{\"enabled\":{}}},\"risk_tier\":{{\"unknown_bg\":\"{s}\",\"dev_bg\":\"{s}\",\"staging_bg\":\"{s}\",\"prod_bg\":\"{s}\"}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
-        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), std.posix.getuid(), request_id, modules_json, config.rtl, rtl_reverse, module_options.cwd.truncate_to, module_options.cwd.home_tilde, module_options.cwd.max_width, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, module_options.cdhint.enabled, risk_tier_module.colorSlotName(module_options.risk_tier.unknown_bg), risk_tier_module.colorSlotName(module_options.risk_tier.dev_bg), risk_tier_module.colorSlotName(module_options.risk_tier.staging_bg), risk_tier_module.colorSlotName(module_options.risk_tier.prod_bg), module_options.sso_expiry.warning_minutes },
+        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\",\"modules\":[{s}],\"tmux_pane\":\"{s}\",\"rtl\":{},\"rtl_reverse\":{},\"cwd_options\":{{\"truncate_to\":{d},\"home_tilde\":{},\"max_width\":{d}}},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"cdhint\":{{\"enabled\":{}}},\"tmux_pane_options\":{{\"enabled\":{}}},\"risk_tier\":{{\"unknown_bg\":\"{s}\",\"dev_bg\":\"{s}\",\"staging_bg\":\"{s}\",\"prod_bg\":\"{s}\"}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
+        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), std.posix.getuid(), request_id, modules_json, escaped_tmux_pane, config.rtl, rtl_reverse, module_options.cwd.truncate_to, module_options.cwd.home_tilde, module_options.cwd.max_width, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, module_options.cdhint.enabled, module_options.tmux_pane.enabled, risk_tier_module.colorSlotName(module_options.risk_tier.unknown_bg), risk_tier_module.colorSlotName(module_options.risk_tier.dev_bg), risk_tier_module.colorSlotName(module_options.risk_tier.staging_bg), risk_tier_module.colorSlotName(module_options.risk_tier.prod_bg), module_options.sso_expiry.warning_minutes },
     );
 }
 
@@ -7296,6 +7307,7 @@ fn defaultPromptModuleOptions() PromptModuleOptions {
         .cwd = .{},
         .cloud_ctx = .{},
         .cdhint = .{},
+        .tmux_pane = .{},
         .risk_tier = .{},
         .sso_expiry = .{},
     };
@@ -7326,6 +7338,7 @@ fn promptModuleOptions(allocator: std.mem.Allocator) !PromptModuleOptions {
         .cwd = parsed.modules.cwd,
         .cloud_ctx = parsed.modules.cloud_ctx,
         .cdhint = parsed.modules.cdhint,
+        .tmux_pane = parsed.modules.tmux_pane,
         .risk_tier = parsed.modules.risk_tier,
         .sso_expiry = parsed.modules.sso_expiry,
     };

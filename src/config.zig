@@ -2,6 +2,7 @@ const std = @import("std");
 const cdhint_module = @import("daemon/modules/cdhint.zig");
 const risk_tier_module = @import("daemon/modules/risk_tier.zig");
 const sso_expiry_module = @import("daemon/modules/sso_expiry.zig");
+const tmux_pane_module = @import("daemon/modules/tmux_pane.zig");
 
 pub const default_config_text =
     \\version = 1
@@ -33,6 +34,9 @@ pub const default_config_text =
     \\kubernetes = true
     \\
     \\[modules.cdhint]
+    \\enabled = true
+    \\
+    \\[modules.tmux_pane]
     \\enabled = true
     \\
     \\[modules.risk_tier]
@@ -78,6 +82,9 @@ pub const a11y_config_text =
     \\[modules.cdhint]
     \\enabled = true
     \\
+    \\[modules.tmux_pane]
+    \\enabled = true
+    \\
     \\[modules.risk_tier]
     \\unknown_bg = "muted"
     \\dev_bg = "success"
@@ -105,6 +112,7 @@ pub const ModuleId = enum {
     user_host,
     cloud_ctx,
     cdhint,
+    tmux_pane,
     risk_tier,
     sso_expiry,
     iac_workspace,
@@ -127,6 +135,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .user_host => "user_host",
         .cloud_ctx => "cloud_ctx",
         .cdhint => "cdhint",
+        .tmux_pane => "tmux_pane",
         .risk_tier => "risk_tier",
         .sso_expiry => "sso_expiry",
         .iac_workspace => "iac_workspace",
@@ -162,6 +171,7 @@ pub const ModuleOptions = struct {
     user_host: UserHostOptions = .{},
     cloud_ctx: CloudCtxOptions = .{},
     cdhint: CdhintOptions = .{},
+    tmux_pane: TmuxPaneOptions = .{},
     risk_tier: RiskTierOptions = .{},
     sso_expiry: SsoExpiryOptions = .{},
     time: TimeOptions = .{},
@@ -213,6 +223,7 @@ pub const CloudCtxOptions = struct {
 };
 
 pub const CdhintOptions = cdhint_module.Options;
+pub const TmuxPaneOptions = tmux_pane_module.Options;
 pub const RiskTierOptions = risk_tier_module.BarColors;
 pub const RiskTierColor = risk_tier_module.ColorSlot;
 pub const SsoExpiryOptions = sso_expiry_module.Options;
@@ -248,6 +259,7 @@ const Table = enum {
     user_host,
     cloud_ctx,
     cdhint,
+    tmux_pane,
     risk_tier,
     sso_expiry,
     time,
@@ -273,6 +285,7 @@ const Seen = struct {
     cloud_ctx_azure: bool = false,
     cloud_ctx_kubernetes: bool = false,
     cdhint_enabled: bool = false,
+    tmux_pane_enabled: bool = false,
     risk_tier_unknown_bg: bool = false,
     risk_tier_dev_bg: bool = false,
     risk_tier_staging_bg: bool = false,
@@ -390,6 +403,7 @@ const Parser = struct {
             .user_host => try self.parseUserHostKey(line_no, key, value),
             .cloud_ctx => try self.parseCloudCtxKey(line_no, key, value),
             .cdhint => try self.parseCdhintKey(line_no, key, value),
+            .tmux_pane => try self.parseTmuxPaneKey(line_no, key, value),
             .risk_tier => try self.parseRiskTierKey(line_no, key, value),
             .sso_expiry => try self.parseSsoExpiryKey(line_no, key, value),
             .time => try self.parseTimeKey(line_no, key, value),
@@ -509,6 +523,12 @@ const Parser = struct {
         if (!std.mem.eql(u8, key.text, "enabled")) return self.fail(line_no, key.column, "unknown key");
         try self.markUnseen(&self.seen.cdhint_enabled, line_no, key.column);
         self.modules.cdhint.enabled = try self.parseBool(value, line_no);
+    }
+
+    fn parseTmuxPaneKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
+        if (!std.mem.eql(u8, key.text, "enabled")) return self.fail(line_no, key.column, "unknown key");
+        try self.markUnseen(&self.seen.tmux_pane_enabled, line_no, key.column);
+        self.modules.tmux_pane.enabled = try self.parseBool(value, line_no);
     }
 
     fn parseRiskTierKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
@@ -700,6 +720,7 @@ fn parseTableName(name: []const u8) ?Table {
     if (std.mem.eql(u8, name, "modules.user_host")) return .user_host;
     if (std.mem.eql(u8, name, "modules.cloud_ctx")) return .cloud_ctx;
     if (std.mem.eql(u8, name, "modules.cdhint")) return .cdhint;
+    if (std.mem.eql(u8, name, "modules.tmux_pane")) return .tmux_pane;
     if (std.mem.eql(u8, name, "modules.risk_tier")) return .risk_tier;
     if (std.mem.eql(u8, name, "modules.sso_expiry")) return .sso_expiry;
     if (std.mem.eql(u8, name, "modules.time")) return .time;
@@ -716,6 +737,7 @@ fn parseModuleId(id: []const u8) ?ModuleId {
     if (std.mem.eql(u8, id, "user_host")) return .user_host;
     if (std.mem.eql(u8, id, "cloud_ctx")) return .cloud_ctx;
     if (std.mem.eql(u8, id, "cdhint")) return .cdhint;
+    if (std.mem.eql(u8, id, "tmux_pane")) return .tmux_pane;
     if (std.mem.eql(u8, id, "risk_tier")) return .risk_tier;
     if (std.mem.eql(u8, id, "sso_expiry")) return .sso_expiry;
     if (std.mem.eql(u8, id, "iac_workspace")) return .iac_workspace;
@@ -818,6 +840,8 @@ test "module metadata names execution classes" {
     try std.testing.expectEqualStrings("sync", moduleExecutionClass(.sso_expiry));
     try std.testing.expectEqualStrings("cdhint", moduleIdName(.cdhint));
     try std.testing.expectEqualStrings("sync", moduleExecutionClass(.cdhint));
+    try std.testing.expectEqualStrings("tmux_pane", moduleIdName(.tmux_pane));
+    try std.testing.expectEqualStrings("sync", moduleExecutionClass(.tmux_pane));
     try std.testing.expectEqualStrings("iac_workspace", moduleIdName(.iac_workspace));
     try std.testing.expectEqualStrings("sync", moduleExecutionClass(.iac_workspace));
     try std.testing.expectEqualStrings("region_drift", moduleIdName(.region_drift));
@@ -888,6 +912,9 @@ test "parses per-module options" {
         \\[modules.cdhint]
         \\enabled = false
         \\
+        \\[modules.tmux_pane]
+        \\enabled = false
+        \\
         \\[modules.risk_tier]
         \\unknown_bg = "muted"
         \\dev_bg = "accent"
@@ -926,6 +953,7 @@ test "parses per-module options" {
     try std.testing.expect(!config.modules.cloud_ctx.azure);
     try std.testing.expect(config.modules.cloud_ctx.kubernetes);
     try std.testing.expect(!config.modules.cdhint.enabled);
+    try std.testing.expect(!config.modules.tmux_pane.enabled);
     try std.testing.expectEqual(RiskTierColor.muted, config.modules.risk_tier.unknown_bg);
     try std.testing.expectEqual(RiskTierColor.accent, config.modules.risk_tier.dev_bg);
     try std.testing.expectEqual(RiskTierColor.warning, config.modules.risk_tier.staging_bg);

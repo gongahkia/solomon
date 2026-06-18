@@ -52,6 +52,7 @@ Allowed core module ids for schema v1:
 | `user_host` | sync | User and host, normally only over SSH. |
 | `cloud_ctx` | sync | Optional cloud account context; AWS, GCP, Azure, and Kubernetes support are available. |
 | `cdhint` | sync | Compact local project kind hint from marker files. |
+| `tmux_pane` | sync | Render the current tmux pane id from `TMUX_PANE`. |
 | `risk_tier` | sync | Risk classification and prompt background-bar color mapping. |
 | `sso_expiry` | sync | Warn when cached SSO/session expiry metadata is below the configured threshold. |
 | `iac_workspace` | sync | Render local Terraform/OpenTofu/Pulumi/CDK workspace metadata. |
@@ -131,6 +132,12 @@ AWS profile is resolved from `AWS_PROFILE`; when unset, Shisa reads `~/.aws/conf
 | `enabled` | bool | `true` | Disable cdhint rendering when false. |
 
 Place `.shisa-no-cdhint` in the current directory or detected project tree to suppress local cd hints for that tree.
+
+### `[modules.tmux_pane]`
+
+| Key | Type | Default | Constraints |
+| --- | --- | --- | --- |
+| `enabled` | bool | `true` | Disable tmux pane rendering when false. |
 
 ### `[modules.risk_tier]`
 

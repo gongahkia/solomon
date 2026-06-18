@@ -10,6 +10,7 @@ const language_versions_module = @import("modules/language_versions.zig");
 const prod_guard_module = @import("modules/prod_guard.zig");
 const risk_tier_module = @import("modules/risk_tier.zig");
 const sso_expiry_module = @import("modules/sso_expiry.zig");
+const tmux_pane_module = @import("modules/tmux_pane.zig");
 const daemon_log = @import("log.zig");
 const warmup = @import("warmup.zig");
 const json = @import("json.zig");
@@ -54,9 +55,11 @@ const RenderRequest = struct {
     rows: u16 = 24,
     request_id: []const u8 = "",
     modules: []const []const u8 = &.{},
+    tmux_pane: ?[]const u8 = null,
     cloud_ctx: cloud_ctx_module.Options = .{},
     cwd_options: cwd_module.Options = .{},
     cdhint: cdhint_module.Options = .{},
+    tmux_pane_options: tmux_pane_module.Options = .{},
     risk_tier: risk_tier_module.BarColors = .{},
     sso_expiry: sso_expiry_module.Options = .{},
     rtl: bool = false,
@@ -507,6 +510,8 @@ pub const Server = struct {
             .kubeconfig = kubeconfig,
             .cloud_ctx = parsed.value.cloud_ctx,
             .cdhint = parsed.value.cdhint,
+            .tmux_pane = parsed.value.tmux_pane,
+            .tmux_pane_options = parsed.value.tmux_pane_options,
             .risk_tier = parsed.value.risk_tier,
             .sso_expiry = parsed.value.sso_expiry,
             .rtl = parsed.value.rtl,
@@ -1083,6 +1088,7 @@ fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderReques
     try appendKeyString(allocator, &out, "shell", request.shell);
     try appendKeyInt(allocator, &out, "cols", request.cols);
     try appendKeyInt(allocator, &out, "rows", request.rows);
+    try appendKeyOptional(allocator, &out, "tmux_pane", request.tmux_pane);
     try appendKeyInt(allocator, &out, "modules_len", request.modules.len);
     for (request.modules, 0..) |module_name, index| {
         const key = try std.fmt.allocPrint(allocator, "module_{d}", .{index});
@@ -1097,6 +1103,7 @@ fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderReques
     try appendKeyBool(allocator, &out, "cwd_home_tilde", request.cwd_options.home_tilde);
     try appendKeyInt(allocator, &out, "cwd_max_width", request.cwd_options.max_width);
     try appendKeyBool(allocator, &out, "cdhint_enabled", request.cdhint.enabled);
+    try appendKeyBool(allocator, &out, "tmux_pane_enabled", request.tmux_pane_options.enabled);
     try appendKeyString(allocator, &out, "risk_unknown_bg", risk_tier_module.colorSlotName(request.risk_tier.unknown_bg));
     try appendKeyString(allocator, &out, "risk_dev_bg", risk_tier_module.colorSlotName(request.risk_tier.dev_bg));
     try appendKeyString(allocator, &out, "risk_staging_bg", risk_tier_module.colorSlotName(request.risk_tier.staging_bg));
@@ -1855,6 +1862,25 @@ test "render request modules select cdhint" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"prompt\":\"cd:node> \"") != null);
 }
 
+test "render request modules select tmux pane" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-tmux-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"tmux-test\",\"modules\":[\"tmux_pane\"],\"tmux_pane\":\"%4\"}}", .{dir_path});
+    defer allocator.free(request);
+    const response = try server.renderResponse(request);
+    defer std.heap.page_allocator.free(response);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"prompt\":\"tmux:%4> \"") != null);
+}
+
 test "render prompt cache key ignores request id and includes tuple fields" {
     const allocator = std.testing.allocator;
     const first = try renderPromptCacheKeyAlloc(allocator, .{
@@ -1950,12 +1976,29 @@ test "render prompt cache key ignores request id and includes tuple fields" {
         .host = "host",
     });
     defer allocator.free(different_cdhint);
+    const different_tmux = try renderPromptCacheKeyAlloc(allocator, .{
+        .cwd = "/tmp/project",
+        .exit = 0,
+        .jobs = 1,
+        .duration_ms = 10,
+        .shell = "zsh",
+        .cols = 80,
+        .rows = 24,
+        .request_id = "first",
+        .tmux_pane = "%1",
+    }, .{
+        .timestamp_minute = 123,
+        .user = "me",
+        .host = "host",
+    });
+    defer allocator.free(different_tmux);
 
     try std.testing.expectEqualStrings(first, second);
     try std.testing.expect(!std.mem.eql(u8, first, different_exit));
     try std.testing.expect(!std.mem.eql(u8, first, different_rev));
     try std.testing.expect(!std.mem.eql(u8, first, different_modules));
     try std.testing.expect(!std.mem.eql(u8, first, different_cdhint));
+    try std.testing.expect(!std.mem.eql(u8, first, different_tmux));
 }
 
 test "prompt cache hit rate uses ppm" {

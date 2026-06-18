@@ -51,6 +51,10 @@ pub const CdhintOptions = struct {
     enabled: bool = true,
 };
 
+pub const TmuxPaneOptions = struct {
+    enabled: bool = true,
+};
+
 pub const RiskTierColor = enum {
     fg,
     muted,
@@ -86,11 +90,13 @@ pub const Request = struct {
     session: ?[]const u8 = null,
     request_id: []const u8 = "",
     modules: []const []const u8 = &.{},
+    tmux_pane: ?[]const u8 = null,
     rtl: bool = false,
     rtl_reverse: bool = false,
     cwd_options: CwdOptions = .{},
     cloud_ctx: CloudCtxOptions = .{},
     cdhint: CdhintOptions = .{},
+    tmux_pane_options: TmuxPaneOptions = .{},
     risk_tier: RiskTierOptions = .{},
 };
 
@@ -236,8 +242,10 @@ test "request type carries v1 render inputs" {
         .session = "session-1",
         .request_id = "request-1",
         .modules = &.{ "cwd", "cdhint" },
+        .tmux_pane = "%1",
         .cloud_ctx = .{ .azure = false },
         .cdhint = .{ .enabled = false },
+        .tmux_pane_options = .{ .enabled = false },
         .risk_tier = .{ .prod_bg = .accent },
     };
 
@@ -258,8 +266,10 @@ test "request type carries v1 render inputs" {
     try std.testing.expectEqualStrings("request-1", request.request_id);
     try std.testing.expectEqualStrings("cwd", request.modules[0]);
     try std.testing.expectEqualStrings("cdhint", request.modules[1]);
+    try std.testing.expectEqualStrings("%1", request.tmux_pane.?);
     try std.testing.expect(!request.cloud_ctx.azure);
     try std.testing.expect(!request.cdhint.enabled);
+    try std.testing.expect(!request.tmux_pane_options.enabled);
     try std.testing.expectEqual(RiskTierColor.accent, request.risk_tier.prod_bg);
 }
 
@@ -500,7 +510,7 @@ test "snapshots every op and protocol shape" {
         };
         const request_json = try encodeAlloc(allocator, request);
         defer allocator.free(request_json);
-        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"modules\":[],\"rtl\":false,\"rtl_reverse\":false,\"cwd_options\":{{\"truncate_to\":3,\"home_tilde\":true,\"max_width\":0}},\"cloud_ctx\":{{\"aws\":true,\"gcp\":true,\"azure\":true,\"kubernetes\":true}},\"cdhint\":{{\"enabled\":true}},\"risk_tier\":{{\"unknown_bg\":\"muted\",\"dev_bg\":\"success\",\"staging_bg\":\"warning\",\"prod_bg\":\"danger\"}}}}", .{ op_name, request_id });
+        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"modules\":[],\"rtl\":false,\"rtl_reverse\":false,\"cwd_options\":{{\"truncate_to\":3,\"home_tilde\":true,\"max_width\":0}},\"cloud_ctx\":{{\"aws\":true,\"gcp\":true,\"azure\":true,\"kubernetes\":true}},\"cdhint\":{{\"enabled\":true}},\"tmux_pane_options\":{{\"enabled\":true}},\"risk_tier\":{{\"unknown_bg\":\"muted\",\"dev_bg\":\"success\",\"staging_bg\":\"warning\",\"prod_bg\":\"danger\"}}}}", .{ op_name, request_id });
         defer allocator.free(expected_request);
         try std.testing.expectEqualStrings(expected_request, request_json);
 

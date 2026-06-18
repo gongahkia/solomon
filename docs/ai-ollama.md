@@ -19,6 +19,8 @@ The client supports:
 
 Deterministic tests use `ollama.mockModelListener` and `ollama.serveOneMockGenerate` to serve a local one-request `/api/generate` response without requiring Ollama or a downloaded model.
 
+Prompt regression snapshots live in `test/fixtures/ai/prompt-regression.json` and are exercised by `src/ai/regression.zig` during `zig build test`.
+
 Ollama's local API is documented at <https://docs.ollama.com/api/introduction>. `/api/tags`, `/api/pull`, and `/api/generate` are documented at <https://docs.ollama.com/api/tags>, <https://docs.ollama.com/api/pull>, and <https://docs.ollama.com/api/generate>.
 
 Privacy rules live in [AI Privacy](ai-privacy.md).

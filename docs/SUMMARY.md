@@ -91,6 +91,7 @@
 - [Vouch](governance/vouch.md)
 - [Maintainer Onboarding](governance/maintainer-onboarding.md)
 - [Triage](governance/triage.md)
+- [Bug Bounty](governance/bug-bounty.md)
 - [Sponsor Recognition](governance/sponsor-recognition.md)
 - [Code of Conduct Enforcement](governance/code-of-conduct-enforcement.md)
 

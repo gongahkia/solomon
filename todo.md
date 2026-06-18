@@ -939,7 +939,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Document decision
 
 ### 29.2 Stripped stdlib
-- [ ] Remove `os.execute`, `os.exit`, `os.remove`, `os.rename`, `io.popen`, `io.open`, `loadfile`, `dofile`, `package.loadlib`, most of `debug.*`
+- [x] Remove `os.execute`, `os.exit`, `os.remove`, `os.rename`, `io.popen`, `io.open`, `loadfile`, `dofile`, `package.loadlib`, most of `debug.*`
 - [ ] Whitelist `require` to project-local files only
 - [ ] Snapshot tests asserting removed globals are nil
 

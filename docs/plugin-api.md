@@ -52,4 +52,4 @@ Generated from `/// plugin-api:` annotations in `src/plugin/*.zig` with `zig bui
 
 | Name | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `removed_globals` | `os`, `io`, `package`, `require`, `dofile`, `loadfile` | always | sandbox startup removes direct shell, filesystem, loader, and package APIs from Lua globals. |
+| `removed_globals` | `os`, `io`, `package`, `debug`, `require`, `dofile`, `loadfile` | always | sandbox startup removes direct shell, filesystem, loader, debug, and package APIs from Lua globals. |

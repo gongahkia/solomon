@@ -169,12 +169,13 @@ pub const Runtime = struct {
         return is_nil;
     }
 
-    /// plugin-api: sandbox | removed_globals | `os`, `io`, `package`, `require`, `dofile`, `loadfile` | always | sandbox startup removes direct shell, filesystem, loader, and package APIs from Lua globals.
+    /// plugin-api: sandbox | removed_globals | `os`, `io`, `package`, `debug`, `require`, `dofile`, `loadfile` | always | sandbox startup removes direct shell, filesystem, loader, debug, and package APIs from Lua globals.
     fn stripDangerousGlobals(self: *Runtime) !void {
         const globals = [_][]const u8{
             "os",
             "io",
             "package",
+            "debug",
             "require",
             "dofile",
             "loadfile",
@@ -558,6 +559,7 @@ test "sandbox strips dangerous globals" {
     try std.testing.expect(try runtime.globalIsNil("os"));
     try std.testing.expect(try runtime.globalIsNil("io"));
     try std.testing.expect(try runtime.globalIsNil("package"));
+    try std.testing.expect(try runtime.globalIsNil("debug"));
     try std.testing.expect(try runtime.globalIsNil("require"));
     try std.testing.expect(try runtime.globalIsNil("dofile"));
     try std.testing.expect(try runtime.globalIsNil("loadfile"));

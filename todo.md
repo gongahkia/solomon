@@ -920,7 +920,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 28.4 Nushell
 - [x] Custom event hook for re-prompt
-- [ ] Document supported nu versions
+- [x] Document supported nu versions
 
 ### 28.5 PowerShell
 - [ ] `Register-EngineEvent` async-fill where supported

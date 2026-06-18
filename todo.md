@@ -1026,7 +1026,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 31.3 Bug bounty
 - [x] Define scope (sandbox escapes, IPC spoofing, supply chain)
-- [ ] Pool funded by Open Collective (publicly tracked)
+- [x] Pool funded by Open Collective (publicly tracked)
 - [ ] Public hall of fame for valid reports
 
 ### 31.4 Pre-1.0 audit

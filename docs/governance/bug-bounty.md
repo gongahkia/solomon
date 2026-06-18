@@ -10,11 +10,10 @@ The pool is active for valid private reports when restricted bounty funds exist.
 
 Accepted funding sources:
 
-- GitHub Sponsors funds marked for `sandbox-bounty`
 - Open Collective funds marked for `sandbox-bounty`
 - maintainer-approved security grants marked for `sandbox-bounty`
 
-Restricted bounty funds are reserved for bounty awards, payment fees, and tax/accounting costs tied to awards. General sponsorship funds do not become bounty funds unless the published spending summary labels the transfer.
+Restricted bounty funds are reserved for bounty awards, payment fees, and tax/accounting costs tied to awards. General sponsorship funds do not become bounty funds unless the published spending summary labels the transfer. Public tracking rules live in [Bounty Ledger](bounty-ledger.md).
 
 ## Scope
 

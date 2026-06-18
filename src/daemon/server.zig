@@ -26,6 +26,7 @@ pub const graceful_shutdown_timeout_ms: i64 = 5000;
 const shutdown_poll_ms: i32 = 100;
 const render_histogram_buckets = 5;
 const prompt_cache_module = "render_prompt";
+const plugin_slow_strike_limit: u8 = 3;
 pub const daemon_version = "0.1.0-dev";
 pub const protocol_version: u32 = 1;
 const default_config_text =
@@ -777,6 +778,10 @@ pub const Server = struct {
     fn loadPluginNamesAlloc(self: *Server, allocator: std.mem.Allocator) ![][]u8 {
         const plugins_dir = if (self.plugins_dir_override) |override| try allocator.dupe(u8, override) else try defaultPluginsDirPathAlloc(allocator);
         defer allocator.free(plugins_dir);
+        const disabled_path = try pluginStatePathForPluginsDirAlloc(allocator, plugins_dir, "plugins.disabled");
+        defer allocator.free(disabled_path);
+        const strikes_path = try pluginStatePathForPluginsDirAlloc(allocator, plugins_dir, "plugins.slow-strikes");
+        defer allocator.free(strikes_path);
 
         var dir = std.fs.openDirAbsolute(plugins_dir, .{ .iterate = true }) catch |err| switch (err) {
             error.FileNotFound => return allocator.alloc([]u8, 0),
@@ -789,6 +794,8 @@ pub const Server = struct {
         var it = dir.iterate();
         while (try it.next()) |entry| {
             if (entry.kind != .directory) continue;
+            if (!plugin_manifest.isValidPluginName(entry.name)) continue;
+            if (try pluginNameListed(allocator, disabled_path, entry.name)) continue;
             const plugin_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ plugins_dir, entry.name });
             defer allocator.free(plugin_dir);
             const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{plugin_dir});
@@ -801,8 +808,16 @@ pub const Server = struct {
 
             var runtime = try plugin_lua.Runtime.initSandboxedWithOptions(allocator, .{ .require_root = plugin_dir });
             defer runtime.deinit();
-            var loaded = try runtime.loadManifestStrict(source);
+            var loaded = runtime.loadManifestStrict(source) catch |err| switch (err) {
+                error.LuaCpuBudgetExceeded => {
+                    try recordPluginSlowStrike(allocator, strikes_path, disabled_path, entry.name);
+                    continue;
+                },
+                else => return err,
+            };
             defer loaded.deinit(allocator);
+            try clearPluginSlowStrike(allocator, strikes_path, loaded.manifest.name);
+            if (try pluginNameListed(allocator, disabled_path, loaded.manifest.name)) continue;
             try names.append(allocator, try allocator.dupe(u8, loaded.manifest.name));
         }
 
@@ -1297,6 +1312,164 @@ fn defaultPluginsDirPathAlloc(allocator: std.mem.Allocator) ![]u8 {
     defer allocator.free(config_path);
     const dir = std.fs.path.dirname(config_path) orelse return error.MissingConfigDir;
     return std.fmt.allocPrint(allocator, "{s}/plugins", .{dir});
+}
+
+fn pluginStatePathForPluginsDirAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, basename: []const u8) ![]u8 {
+    const dir = std.fs.path.dirname(plugins_dir) orelse return error.MissingConfigDir;
+    return std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir, basename });
+}
+
+fn recordPluginSlowStrike(allocator: std.mem.Allocator, strikes_path: []const u8, disabled_path: []const u8, name: []const u8) !void {
+    const count = try incrementPluginSlowStrike(allocator, strikes_path, name);
+    if (count >= plugin_slow_strike_limit) try setPluginNameListed(allocator, disabled_path, name, true);
+}
+
+fn clearPluginSlowStrike(allocator: std.mem.Allocator, strikes_path: []const u8, name: []const u8) !void {
+    try setPluginSlowStrikeCount(allocator, strikes_path, name, 0);
+}
+
+fn incrementPluginSlowStrike(allocator: std.mem.Allocator, strikes_path: []const u8, name: []const u8) !u8 {
+    var strikes = try readPluginSlowStrikes(allocator, strikes_path);
+    defer deinitPluginSlowStrikes(allocator, &strikes);
+    const index = indexOfPluginSlowStrike(strikes.items, name);
+    const count = if (index) |i| @min(strikes.items[i].count +| 1, plugin_slow_strike_limit) else 1;
+    try setPluginSlowStrikeCountLoaded(allocator, strikes_path, &strikes, name, count);
+    return count;
+}
+
+fn setPluginSlowStrikeCount(allocator: std.mem.Allocator, strikes_path: []const u8, name: []const u8, count: u8) !void {
+    var strikes = try readPluginSlowStrikes(allocator, strikes_path);
+    defer deinitPluginSlowStrikes(allocator, &strikes);
+    try setPluginSlowStrikeCountLoaded(allocator, strikes_path, &strikes, name, count);
+}
+
+fn setPluginSlowStrikeCountLoaded(allocator: std.mem.Allocator, strikes_path: []const u8, strikes: *std.ArrayList(PluginSlowStrike), name: []const u8, count: u8) !void {
+    if (!plugin_manifest.isValidPluginName(name)) return error.InvalidPluginName;
+    if (indexOfPluginSlowStrike(strikes.items, name)) |index| {
+        if (count == 0) {
+            const removed = strikes.orderedRemove(index);
+            allocator.free(removed.name);
+        } else {
+            strikes.items[index].count = count;
+        }
+    } else if (count != 0) {
+        try strikes.append(allocator, .{ .name = try allocator.dupe(u8, name), .count = count });
+    }
+    std.mem.sort(PluginSlowStrike, strikes.items, {}, lessThanPluginSlowStrike);
+    try writePluginSlowStrikes(allocator, strikes_path, strikes.items);
+}
+
+const PluginSlowStrike = struct {
+    name: []u8,
+    count: u8,
+};
+
+fn readPluginSlowStrikes(allocator: std.mem.Allocator, path: []const u8) !std.ArrayList(PluginSlowStrike) {
+    var strikes: std.ArrayList(PluginSlowStrike) = .empty;
+    const contents = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return strikes,
+        else => return err,
+    };
+    defer allocator.free(contents);
+
+    var lines = std.mem.tokenizeScalar(u8, contents, '\n');
+    while (lines.next()) |line| {
+        var fields = std.mem.tokenizeAny(u8, std.mem.trim(u8, line, " \t\r"), " \t\r");
+        const name = fields.next() orelse continue;
+        const count_text = fields.next() orelse continue;
+        if (fields.next() != null or !plugin_manifest.isValidPluginName(name)) continue;
+        const count = std.fmt.parseInt(u8, count_text, 10) catch continue;
+        if (count == 0 or indexOfPluginSlowStrike(strikes.items, name) != null) continue;
+        try strikes.append(allocator, .{ .name = try allocator.dupe(u8, name), .count = @min(count, plugin_slow_strike_limit) });
+    }
+    return strikes;
+}
+
+fn writePluginSlowStrikes(allocator: std.mem.Allocator, path: []const u8, strikes: []const PluginSlowStrike) !void {
+    if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
+    var file = try std.fs.createFileAbsolute(path, .{ .truncate = true, .mode = 0o600 });
+    defer file.close();
+    for (strikes) |strike| {
+        const line = try std.fmt.allocPrint(allocator, "{s} {d}\n", .{ strike.name, strike.count });
+        defer allocator.free(line);
+        try file.writeAll(line);
+    }
+}
+
+fn deinitPluginSlowStrikes(allocator: std.mem.Allocator, strikes: *std.ArrayList(PluginSlowStrike)) void {
+    for (strikes.items) |strike| allocator.free(strike.name);
+    strikes.deinit(allocator);
+}
+
+fn indexOfPluginSlowStrike(strikes: []const PluginSlowStrike, name: []const u8) ?usize {
+    for (strikes, 0..) |strike, index| {
+        if (std.mem.eql(u8, strike.name, name)) return index;
+    }
+    return null;
+}
+
+fn lessThanPluginSlowStrike(_: void, lhs: PluginSlowStrike, rhs: PluginSlowStrike) bool {
+    return std.mem.lessThan(u8, lhs.name, rhs.name);
+}
+
+fn pluginNameListed(allocator: std.mem.Allocator, path: []const u8, name: []const u8) !bool {
+    var names = try readPluginNames(allocator, path);
+    defer deinitStringArrayList(allocator, &names);
+    return indexOfString(names.items, name) != null;
+}
+
+fn setPluginNameListed(allocator: std.mem.Allocator, path: []const u8, name: []const u8, listed: bool) !void {
+    if (!plugin_manifest.isValidPluginName(name)) return error.InvalidPluginName;
+    var names = try readPluginNames(allocator, path);
+    defer deinitStringArrayList(allocator, &names);
+
+    const index = indexOfString(names.items, name);
+    if (listed and index == null) {
+        try names.append(allocator, try allocator.dupe(u8, name));
+    } else if (!listed and index != null) {
+        const removed = names.orderedRemove(index.?);
+        allocator.free(removed);
+    }
+    std.mem.sort([]u8, names.items, {}, lessThanString);
+    try writePluginNames(path, names.items);
+}
+
+fn readPluginNames(allocator: std.mem.Allocator, path: []const u8) !std.ArrayList([]u8) {
+    var names: std.ArrayList([]u8) = .empty;
+    const contents = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return names,
+        else => return err,
+    };
+    defer allocator.free(contents);
+
+    var lines = std.mem.tokenizeScalar(u8, contents, '\n');
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len == 0 or !plugin_manifest.isValidPluginName(trimmed)) continue;
+        if (indexOfString(names.items, trimmed) == null) try names.append(allocator, try allocator.dupe(u8, trimmed));
+    }
+    return names;
+}
+
+fn writePluginNames(path: []const u8, names: []const []const u8) !void {
+    if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
+    var file = try std.fs.createFileAbsolute(path, .{ .truncate = true, .mode = 0o600 });
+    defer file.close();
+    for (names) |name| {
+        try file.writeAll(name);
+        try file.writeAll("\n");
+    }
+}
+
+fn indexOfString(items: []const []const u8, name: []const u8) ?usize {
+    for (items, 0..) |item, index| {
+        if (std.mem.eql(u8, item, name)) return index;
+    }
+    return null;
+}
+
+fn lessThanString(_: void, lhs: []const u8, rhs: []const u8) bool {
+    return std.mem.lessThan(u8, lhs, rhs);
 }
 
 fn readConfigOrDefaultAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
@@ -2017,6 +2190,89 @@ test "reload op rereads plugin manifests" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"plugins\":1") != null);
     try std.testing.expectEqual(@as(usize, 1), server.reload_state.plugin_names.len);
     try std.testing.expectEqualStrings("demo-plugin", server.reload_state.plugin_names[0]);
+}
+
+test "slow plugin strikes disable after third strike" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-strikes-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const plugins_dir = try std.fmt.allocPrint(allocator, "{s}/plugins", .{dir_path});
+    defer allocator.free(plugins_dir);
+    const strikes_path = try pluginStatePathForPluginsDirAlloc(allocator, plugins_dir, "plugins.slow-strikes");
+    defer allocator.free(strikes_path);
+    const disabled_path = try pluginStatePathForPluginsDirAlloc(allocator, plugins_dir, "plugins.disabled");
+    defer allocator.free(disabled_path);
+
+    try recordPluginSlowStrike(allocator, strikes_path, disabled_path, "slow-plugin");
+    try std.testing.expect(!(try pluginNameListed(allocator, disabled_path, "slow-plugin")));
+    try recordPluginSlowStrike(allocator, strikes_path, disabled_path, "slow-plugin");
+    try std.testing.expect(!(try pluginNameListed(allocator, disabled_path, "slow-plugin")));
+    try recordPluginSlowStrike(allocator, strikes_path, disabled_path, "slow-plugin");
+    try std.testing.expect(try pluginNameListed(allocator, disabled_path, "slow-plugin"));
+
+    const strikes = try std.fs.cwd().readFileAlloc(allocator, strikes_path, 4096);
+    defer allocator.free(strikes);
+    try std.testing.expectEqualStrings("slow-plugin 3\n", strikes);
+}
+
+test "reload disables slow plugin after three cpu strikes" {
+    const allocator = std.testing.allocator;
+    var runtime = plugin_lua.Runtime.initSandboxed(allocator) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    runtime.deinit();
+
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-slow-plugin-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    const plugin_path = try std.fmt.allocPrint(allocator, "{s}/plugins/slow-plugin", .{dir_path});
+    defer allocator.free(plugin_path);
+    try std.fs.cwd().makePath(plugin_path);
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    const config_path = try std.fmt.allocPrint(allocator, "{s}/shisa.toml", .{dir_path});
+    defer allocator.free(config_path);
+    const plugins_dir = try std.fmt.allocPrint(allocator, "{s}/plugins", .{dir_path});
+    defer allocator.free(plugins_dir);
+    const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{plugin_path});
+    defer allocator.free(manifest_path);
+    const disabled_path = try pluginStatePathForPluginsDirAlloc(allocator, plugins_dir, "plugins.disabled");
+    defer allocator.free(disabled_path);
+
+    try std.fs.cwd().writeFile(.{
+        .sub_path = config_path,
+        .data =
+        \\version = 1
+        \\theme = "plain"
+        \\
+        \\[prompt]
+        \\modules = ["cwd"]
+        \\
+        ,
+    });
+    try std.fs.cwd().writeFile(.{
+        .sub_path = manifest_path,
+        .data = "while true do end\n",
+    });
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+    server.config_path_override = config_path;
+    server.plugins_dir_override = plugins_dir;
+
+    for (0..3) |index| {
+        const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"reload\",\"request_id\":\"reload-slow-{d}\"}}", .{index});
+        defer allocator.free(request);
+        const response = try server.reloadResponseAlloc(allocator, request);
+        defer allocator.free(response);
+        try std.testing.expect(std.mem.indexOf(u8, response, "\"plugins\":0") != null);
+    }
+    try std.testing.expect(try pluginNameListed(allocator, disabled_path, "slow-plugin"));
 }
 
 test "daemon checks plugin host api calls through capability gate" {

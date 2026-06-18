@@ -779,13 +779,13 @@ test "runtime enforces configured lua memory limit" {
 }
 
 test "runtime reports lua cpu budget overrun" {
-    var runtime = Runtime.initWithOptions(std.testing.allocator, .{ .cpu_budget_ns = 0 }) catch |err| switch (err) {
+    var runtime = Runtime.initWithOptions(std.testing.allocator, .{ .cpu_budget_ns = 1 }) catch |err| switch (err) {
         error.LuaUnavailable => return error.SkipZigTest,
         else => return err,
     };
     defer runtime.deinit();
 
-    try std.testing.expectError(error.LuaCpuBudgetExceeded, runtime.doString("shisa_cpu_value = 1"));
+    try std.testing.expectError(error.LuaCpuBudgetExceeded, runtime.doString("local x = 0; for i = 1, 100000 do x = x + i end"));
 }
 
 test "runtime hard-stops runaway lua" {

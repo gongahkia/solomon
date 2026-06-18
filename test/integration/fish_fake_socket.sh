@@ -40,6 +40,7 @@ abort("missing frame payload") unless payload && payload.bytesize == length
 abort("missing fish shell") unless payload.include?('"shell":"fish"')
 abort("missing a11y color caps") unless payload.include?('"color_caps":"none"')
 abort("missing a11y glyph caps") unless payload.include?('"glyph_caps":"ascii"')
+abort("missing tmux pane") unless payload.include?('"tmux_pane":"%42"')
 response = '{"v":1,"prompt":"fake-fish> ","redraw_token":null}'
 conn.write([response.bytesize].pack("N"))
 conn.write(response)
@@ -59,7 +60,7 @@ done
 }
 
 mkdir -p "$xdg"
-SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" XDG_CONFIG_HOME="$xdg" fish -c 'source init/shisa.fish; false; fish_prompt' >"$out"
+SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" TMUX_PANE="%42" XDG_CONFIG_HOME="$xdg" fish -c 'source init/shisa.fish; false; fish_prompt' >"$out"
 grep -F 'fake-fish> ' "$out" >/dev/null
 
 mkdir -p "$xdg/shisa"

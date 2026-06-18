@@ -757,6 +757,9 @@ pub fn build(b: *std.Build) void {
     preexec_expect_integration.step.dependOn(&debug_install.step);
     const shell_expect_integration = b.addSystemCommand(&.{ "expect", "test/integration/shell_expect.exp" });
     shell_expect_integration.step.dependOn(&debug_install.step);
+    const tmux_expect_integration = b.addSystemCommand(&.{ "expect", "test/integration/tmux_expect.exp" });
+    tmux_expect_integration.step.dependOn(&debug_install.step);
+    tmux_expect_integration.step.dependOn(&debug_daemon_install.step);
     const starship_presets_import = b.addSystemCommand(&.{ "bash", "test/integration/starship_presets_import.sh" });
     starship_presets_import.step.dependOn(&debug_install.step);
     const pure_import_smoke = b.addSystemCommand(&.{ "bash", "test/integration/pure_import_smoke.sh" });
@@ -842,6 +845,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&rtl_locale_integration.step);
     test_step.dependOn(&preexec_expect_integration.step);
     test_step.dependOn(&shell_expect_integration.step);
+    test_step.dependOn(&tmux_expect_integration.step);
     test_step.dependOn(&starship_presets_import.step);
     test_step.dependOn(&pure_import_smoke.step);
     test_step.dependOn(&migration_snapshot_gate.step);

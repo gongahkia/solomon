@@ -1,0 +1,90 @@
+#!/usr/bin/env expect -f
+set timeout 8
+log_user 0
+
+set root [file normalize [file join [file dirname [info script]] ../..]]
+set shisa [file join $root zig-out bin shisa]
+set shisad [file join $root zig-out bin shisad]
+set tmp "/tmp/shisa-tmux-expect-[pid]"
+set socket "$tmp/shisa.sock"
+set config_dir "$tmp/config/shisa"
+
+proc shell_quote {value} {
+    regsub -all {'} $value {'"'"'} value
+    return "'$value'"
+}
+
+proc wait_for_socket {path} {
+    for {set i 0} {$i < 100} {incr i} {
+        if {[file exists $path]} {
+            return 0
+        }
+        after 50
+    }
+    puts stderr "expect tmux: daemon socket not ready"
+    cleanup
+    exit 1
+}
+
+proc cleanup {} {
+    global daemon_pid tmp
+    if {[info exists daemon_pid]} {
+        catch {exec kill $daemon_pid}
+        after 100
+        catch {exec kill -KILL $daemon_pid}
+    }
+    catch {file delete -force $tmp}
+}
+
+proc require_output {pattern} {
+    expect {
+        -re $pattern {}
+        timeout {
+            puts stderr "expect tmux: missing $pattern"
+            cleanup
+            exit 1
+        }
+        eof {
+            puts stderr "expect tmux: eof before $pattern"
+            cleanup
+            exit 1
+        }
+    }
+}
+
+if {[auto_execok zsh] eq ""} {
+    puts stderr "skip tmux expect: zsh not found"
+    exit 0
+}
+
+file mkdir $config_dir
+set config [open [file join $config_dir shisa.toml] w]
+puts $config {version = 1
+theme = "plain"
+
+[prompt]
+modules = ["tmux_pane"]
+
+[modules.tmux_pane]
+enabled = true
+}
+close $config
+
+set env(XDG_CONFIG_HOME) "$tmp/config"
+set env(SHISA_SOCKET) $socket
+set env(SHISA_BIN) $shisa
+set env(TMUX_PANE) "%42"
+set env(TERM) "xterm-256color"
+
+set daemon_pid [exec $shisad --foreground --socket $socket > /dev/null 2> /dev/null &]
+wait_for_socket $socket
+
+set init [shell_quote [file join $root init shisa.zsh]]
+spawn -noecho zsh -f
+send -- "cd /tmp\r"
+send -- "source $init\r"
+send -- "printf 'SHISA_TMUX:%s\\n' \"\$(shisa_prompt_render)\"\r"
+send -- "exit\r"
+require_output {SHISA_TMUX:.*tmux:%42> }
+expect eof
+cleanup

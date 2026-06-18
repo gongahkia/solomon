@@ -441,7 +441,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] `tmux_pane` segment (pane/window when inside tmux)
 - [ ] `right_prompt` (right-aligned secondary segment, RPS in zsh / fish_right_prompt in fish)
 - [ ] Per-shell ergonomic shims for right_prompt where shell support is partial
-- [ ] Tests for tmux integration via expect/pexpect scripts
+- [x] Tests for tmux integration via expect/pexpect scripts
 
 ## Phase 14 — Plugin marketplace polish
 

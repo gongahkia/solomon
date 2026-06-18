@@ -38,6 +38,7 @@ payload = conn.read(length)
 abort("missing frame payload") unless payload && payload.bytesize == length
 abort("missing a11y color caps") unless payload.include?('"color_caps":"none"')
 abort("missing a11y glyph caps") unless payload.include?('"glyph_caps":"ascii"')
+abort("missing tmux pane") unless payload.include?('"tmux_pane":"%42"')
 response = '{"v":1,"prompt":"fake> ","redraw_token":null}'
 conn.write([response.bytesize].pack("N"))
 conn.write(response)
@@ -56,6 +57,6 @@ done
   exit 1
 }
 
-SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" zsh -fc 'source init/shisa.zsh; print -P "$PROMPT"' >"$out"
+SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" TMUX_PANE="%42" zsh -fc 'source init/shisa.zsh; print -P "$PROMPT"' >"$out"
 grep -F 'fake> ' "$out" >/dev/null
 zsh -fc 'source init/shisa.zsh; whence shisa_async_self_pipe_setup >/dev/null; whence shisa_async_self_pipe_readable >/dev/null; whence shisa_async_self_pipe_notify >/dev/null'

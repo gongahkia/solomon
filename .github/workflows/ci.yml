@@ -78,6 +78,27 @@ jobs:
 
       - run: bash scripts/theme-contrast-gate.sh
 
+  theme-previews:
+    name: theme previews
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.15.2
+          use-cache: true
+          cache-key: shisa-theme-preview-${{ hashFiles('build.zig.zon') }}
+
+      - run: bash scripts/theme-preview-screenshots.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: theme-previews
+          path: zig-out/theme-previews
+          if-no-files-found: error
+
   vcs-fixtures:
     name: vcs fixtures / ${{ matrix.module }}
     runs-on: ubuntu-24.04

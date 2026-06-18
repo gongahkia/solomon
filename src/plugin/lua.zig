@@ -12,6 +12,12 @@ const lua_tstring = 4;
 const lua_ttable = 5;
 const lua_globalsindex = -10002;
 
+pub const Vm = enum {
+    luajit,
+};
+
+pub const selected_vm: Vm = .luajit;
+
 const LuaLNewState = *const fn () callconv(.c) ?*LuaState;
 const LuaClose = *const fn (?*LuaState) callconv(.c) void;
 const LuaLOpenLibs = *const fn (?*LuaState) callconv(.c) void;
@@ -95,7 +101,7 @@ pub const Runtime = struct {
     state: *LuaState,
 
     pub fn init(allocator: std.mem.Allocator) !Runtime {
-        var lib = try openLuaJit();
+        var lib = try openSelectedVm();
         errdefer lib.close();
         const api = try loadApi(&lib);
         const state = api.luaL_newstate() orelse return error.LuaOutOfMemory;
@@ -482,6 +488,12 @@ fn stringListContains(items: []const []const u8, value: []const u8) bool {
     return false;
 }
 
+fn openSelectedVm() !std.DynLib {
+    return switch (selected_vm) {
+        .luajit => openLuaJit(),
+    };
+}
+
 fn openLuaJit() !std.DynLib {
     const candidates = [_][]const u8{
         "/opt/homebrew/lib/libluajit-5.1.dylib",
@@ -530,6 +542,10 @@ test "loads luajit and runs code" {
 
     try runtime.doString("shisa_test_value = 40 + 2");
     try std.testing.expect(!(try runtime.globalIsNil("shisa_test_value")));
+}
+
+test "selected plugin Lua VM is LuaJIT" {
+    try std.testing.expectEqual(Vm.luajit, selected_vm);
 }
 
 test "sandbox strips dangerous globals" {

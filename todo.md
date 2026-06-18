@@ -935,7 +935,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 29.1 Lua VM selection
 - [x] Benchmark Lua 5.4 vs LuaJIT on plugin hot paths
-- [ ] Pick winner based on sandbox safety + perf
+- [x] Pick winner based on sandbox safety + perf
 - [ ] Document decision
 
 ### 29.2 Stripped stdlib

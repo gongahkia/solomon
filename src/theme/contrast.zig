@@ -480,6 +480,29 @@ test "parses theme color values" {
     try expectRgbApprox(Rgb{ .r = 255, .g = 0, .b = 0 }, parseColor("oklch(62.796% 0.25768 29.23deg)").?, 1);
 }
 
+test "matches established Oklab reference values" {
+    try expectOklabApprox(.{ .l = 1.000000, .a = 0.000000, .b = 0.000000 }, rgbToOklab(.{ .r = 255, .g = 255, .b = 255 }), 0.000002);
+    try expectOklabApprox(.{ .l = 0.627955, .a = 0.224863, .b = 0.125846 }, rgbToOklab(.{ .r = 255, .g = 0, .b = 0 }), 0.000002);
+    try expectOklabApprox(.{ .l = 0.866440, .a = -0.233888, .b = 0.179498 }, rgbToOklab(.{ .r = 0, .g = 255, .b = 0 }), 0.000002);
+    try expectOklabApprox(.{ .l = 0.452014, .a = -0.032457, .b = -0.311528 }, rgbToOklab(.{ .r = 0, .g = 0, .b = 255 }), 0.000002);
+    try expectOklabApprox(.{ .l = 0.905399, .a = -0.149444, .b = -0.039398 }, rgbToOklab(.{ .r = 0, .g = 255, .b = 255 }), 0.000002);
+    try expectOklabApprox(.{ .l = 0.701674, .a = 0.274566, .b = -0.169156 }, rgbToOklab(.{ .r = 255, .g = 0, .b = 255 }), 0.000002);
+    try expectOklabApprox(.{ .l = 0.967983, .a = -0.071369, .b = 0.198570 }, rgbToOklab(.{ .r = 255, .g = 255, .b = 0 }), 0.000002);
+    try expectOklabApprox(.{ .l = 0.000000, .a = 0.000000, .b = 0.000000 }, rgbToOklab(.{ .r = 0, .g = 0, .b = 0 }), 0.000002);
+}
+
+test "matches established Oklch reference values" {
+    try expectRgbApprox(Rgb{ .r = 255, .g = 0, .b = 0 }, parseColor("oklch(0.627954 0.257627 29.2271)").?, 1);
+    try expectRgbApprox(Rgb{ .r = 0, .g = 255, .b = 0 }, parseColor("oklch(0.866439 0.294803 142.5112)").?, 1);
+    try expectRgbApprox(Rgb{ .r = 0, .g = 0, .b = 255 }, parseColor("oklch(0.452013 0.313319 264.058541)").?, 1);
+}
+
+fn expectOklabApprox(expected: Oklab, actual: Oklab, tolerance: f64) !void {
+    try std.testing.expectApproxEqAbs(expected.l, actual.l, tolerance);
+    try std.testing.expectApproxEqAbs(expected.a, actual.a, tolerance);
+    try std.testing.expectApproxEqAbs(expected.b, actual.b, tolerance);
+}
+
 fn expectRgbApprox(expected: Rgb, actual: Rgb, tolerance: u8) !void {
     try std.testing.expect(absByteDiff(expected.r, actual.r) <= tolerance);
     try std.testing.expect(absByteDiff(expected.g, actual.g) <= tolerance);

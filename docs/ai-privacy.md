@@ -34,6 +34,10 @@ Cloud provider support is not part of the default prompt path. A cloud provider 
 - audit-log fields
 - retention assumptions
 
+## Default Redaction Rules
+
+Default redaction replaces matched values with `[redacted]`. The built-in rules cover key/value fields named `password`, `token`, `secret`, `api_key`, AWS credential names, kubeconfig key data, and SSH `IdentityFile`; bearer tokens; AWS access keys; GitHub `gh*_` tokens; `sk-` provider keys; PEM private-key blocks; and 12-digit cloud account ids.
+
 ## Audit Fields
 
 Cloud request audit entries should include:

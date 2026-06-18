@@ -1021,7 +1021,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Frame deframer
 - [x] JSON request decoder
 - [x] Lua bridge surface
-- [ ] Redaction rules
+- [x] Redaction rules
 - [ ] Failure crashes uploaded to private bucket
 
 ### 31.3 Bug bounty

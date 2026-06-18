@@ -1,5 +1,10 @@
 const std = @import("std");
 
+const persist_magic = "SHISA-CACHE\n";
+const max_persisted_entries = 1_000_000;
+const max_persisted_bytes = 64 * 1024 * 1024;
+const max_persisted_slice = 16 * 1024 * 1024;
+
 pub const Entry = struct {
     output: []const u8,
     cache_rev: u64,
@@ -108,6 +113,70 @@ pub const Store = struct {
         return self.entries.count();
     }
 
+    pub fn saveToFile(self: *Store, path: []const u8) !void {
+        var bytes: std.ArrayList(u8) = .empty;
+        defer bytes.deinit(self.allocator);
+        try bytes.appendSlice(self.allocator, persist_magic);
+        try appendU32(self.allocator, &bytes, try checkedU32(self.entries.count()));
+
+        var it = self.entries.iterator();
+        while (it.next()) |entry| {
+            try appendU32(self.allocator, &bytes, try checkedU32(entry.key_ptr.*.len));
+            try appendU32(self.allocator, &bytes, try checkedU32(entry.value_ptr.output.len));
+            try appendU64(self.allocator, &bytes, entry.value_ptr.cache_rev);
+            try appendU64(self.allocator, &bytes, entry.value_ptr.created_ns);
+            try appendU64(self.allocator, &bytes, entry.value_ptr.last_access_ns);
+            try bytes.appendSlice(self.allocator, entry.key_ptr.*);
+            try bytes.appendSlice(self.allocator, entry.value_ptr.output);
+        }
+
+        if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
+        var file = if (std.fs.path.isAbsolute(path))
+            try std.fs.createFileAbsolute(path, .{ .truncate = true })
+        else
+            try std.fs.cwd().createFile(path, .{ .truncate = true });
+        defer file.close();
+        try file.writeAll(bytes.items);
+    }
+
+    pub fn loadFromFile(self: *Store, path: []const u8) !void {
+        const contents = std.fs.cwd().readFileAlloc(self.allocator, path, max_persisted_bytes) catch |err| switch (err) {
+            error.FileNotFound => return,
+            else => return err,
+        };
+        defer self.allocator.free(contents);
+        try self.loadFromBytes(contents);
+    }
+
+    fn loadFromBytes(self: *Store, contents: []const u8) !void {
+        var input = contents;
+        if (!consumePrefix(&input, persist_magic)) return error.InvalidCacheFile;
+        const entry_count = try readU32(&input);
+        if (entry_count > max_persisted_entries) return error.InvalidCacheFile;
+
+        var loaded = Store.initWithOptions(self.allocator, self.options);
+        errdefer loaded.deinit();
+        for (0..entry_count) |_| {
+            const key_len = try readU32(&input);
+            const output_len = try readU32(&input);
+            if (key_len > max_persisted_slice or output_len > max_persisted_slice) return error.InvalidCacheFile;
+            const cache_rev = try readU64(&input);
+            const created_ns = try readU64(&input);
+            const last_access_ns = try readU64(&input);
+            const key = try readSlice(&input, key_len);
+            const output = try readSlice(&input, output_len);
+            try loaded.putEncodedAt(key, output, cache_rev, created_ns, last_access_ns);
+        }
+        if (input.len != 0) return error.InvalidCacheFile;
+        try loaded.evictExpired(nowNs());
+        loaded.evictLru();
+
+        self.clear();
+        self.entries.deinit();
+        self.entries = loaded.entries;
+        loaded.entries = std.StringHashMap(StoredEntry).init(self.allocator);
+    }
+
     fn evictExpired(self: *Store, timestamp_ns: u64) !void {
         if (self.options.max_age_ns == 0) return;
 
@@ -164,6 +233,31 @@ pub const Store = struct {
         self.entries.clearRetainingCapacity();
     }
 
+    fn putEncodedAt(self: *Store, key_source: []const u8, output_source: []const u8, cache_rev: u64, created_ns: u64, last_access_ns: u64) !void {
+        const key = try self.allocator.dupe(u8, key_source);
+        errdefer self.allocator.free(key);
+        const output = try self.allocator.dupe(u8, output_source);
+        errdefer self.allocator.free(output);
+
+        const entry = try self.entries.getOrPut(key);
+        if (entry.found_existing) {
+            self.allocator.free(key);
+            self.allocator.free(entry.value_ptr.output);
+            entry.value_ptr.output = output;
+            entry.value_ptr.cache_rev = cache_rev;
+            entry.value_ptr.created_ns = created_ns;
+            entry.value_ptr.last_access_ns = last_access_ns;
+        } else {
+            entry.value_ptr.* = .{
+                .key = key,
+                .output = output,
+                .cache_rev = cache_rev,
+                .created_ns = created_ns,
+                .last_access_ns = last_access_ns,
+            };
+        }
+    }
+
     fn removeOwnedKey(self: *Store, key: []const u8) void {
         self.removeBorrowedKey(key);
     }
@@ -183,12 +277,60 @@ fn nowNs() u64 {
     return @intCast(std.time.nanoTimestamp());
 }
 
+pub fn defaultPersistPathAlloc(allocator: std.mem.Allocator, home: ?[]const u8) !?[]u8 {
+    const home_path = home orelse return null;
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "{s}/.cache/shisa/cache.bin", .{home_path}));
+}
+
 fn keyAlloc(allocator: std.mem.Allocator, module_id: []const u8, cwd: []const u8) ![]u8 {
     var key = try allocator.alloc(u8, module_id.len + 1 + cwd.len);
     @memcpy(key[0..module_id.len], module_id);
     key[module_id.len] = 0;
     @memcpy(key[module_id.len + 1 ..], cwd);
     return key;
+}
+
+fn checkedU32(value: usize) !u32 {
+    return std.math.cast(u32, value) orelse error.CacheFileTooLarge;
+}
+
+fn appendU32(allocator: std.mem.Allocator, out: *std.ArrayList(u8), value: u32) !void {
+    var buffer: [4]u8 = undefined;
+    std.mem.writeInt(u32, buffer[0..], value, .big);
+    try out.appendSlice(allocator, buffer[0..]);
+}
+
+fn appendU64(allocator: std.mem.Allocator, out: *std.ArrayList(u8), value: u64) !void {
+    var buffer: [8]u8 = undefined;
+    std.mem.writeInt(u64, buffer[0..], value, .big);
+    try out.appendSlice(allocator, buffer[0..]);
+}
+
+fn consumePrefix(input: *[]const u8, prefix: []const u8) bool {
+    if (!std.mem.startsWith(u8, input.*, prefix)) return false;
+    input.* = input.*[prefix.len..];
+    return true;
+}
+
+fn readU32(input: *[]const u8) !u32 {
+    if (input.*.len < 4) return error.InvalidCacheFile;
+    const value = std.mem.readInt(u32, input.*[0..4], .big);
+    input.* = input.*[4..];
+    return value;
+}
+
+fn readU64(input: *[]const u8) !u64 {
+    if (input.*.len < 8) return error.InvalidCacheFile;
+    const value = std.mem.readInt(u64, input.*[0..8], .big);
+    input.* = input.*[8..];
+    return value;
+}
+
+fn readSlice(input: *[]const u8, len: usize) ![]const u8 {
+    if (input.*.len < len) return error.InvalidCacheFile;
+    const value = input.*[0..len];
+    input.* = input.*[len..];
+    return value;
 }
 
 test "stores entries by module and cwd" {
@@ -252,4 +394,47 @@ test "evicts entries older than max age" {
 
     try std.testing.expect((try store.getAt("m", "/fresh", 109)) != null);
     try std.testing.expect(try store.getAt("m", "/old", 112) == null);
+}
+
+test "builds default persistent cache path" {
+    const path = (try defaultPersistPathAlloc(std.testing.allocator, "/home/me")).?;
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/home/me/.cache/shisa/cache.bin", path);
+    try std.testing.expect(try defaultPersistPathAlloc(std.testing.allocator, null) == null);
+}
+
+test "persists optional module cache to cache bin" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-cache-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    const path = try std.fmt.allocPrint(allocator, "{s}/cache.bin", .{dir_path});
+    defer allocator.free(path);
+
+    var store = Store.initWithOptions(allocator, .{ .max_entries = 16, .max_age_ns = 0 });
+    defer store.deinit();
+    try store.putAt("git_branch", "/repo", "git:main", 7, 100);
+    try store.putAt("language_versions", "/repo", "py:3.14", 8, 110);
+    try store.saveToFile(path);
+
+    var loaded = Store.initWithOptions(allocator, .{ .max_entries = 16, .max_age_ns = 0 });
+    defer loaded.deinit();
+    try loaded.loadFromFile(path);
+
+    const git = (try loaded.getAt("git_branch", "/repo", 120)).?;
+    try std.testing.expectEqualStrings("git:main", git.output);
+    try std.testing.expectEqual(@as(u64, 7), git.cache_rev);
+    const lang = (try loaded.getAt("language_versions", "/repo", 120)).?;
+    try std.testing.expectEqualStrings("py:3.14", lang.output);
+    try std.testing.expectEqual(@as(usize, 2), loaded.count());
+}
+
+test "missing persistent cache file is optional" {
+    const missing = try std.fmt.allocPrint(std.testing.allocator, "/tmp/shisa-missing-cache-{x}.bin", .{std.crypto.random.int(u64)});
+    defer std.testing.allocator.free(missing);
+    var store = Store.init(std.testing.allocator);
+    defer store.deinit();
+    try store.loadFromFile(missing);
+    try std.testing.expectEqual(@as(usize, 0), store.count());
 }

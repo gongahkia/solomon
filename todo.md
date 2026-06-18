@@ -882,7 +882,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Hit-rate metric exposed via `--metrics`
 
 ### 27.2 L2 module-output cache
-- [ ] Persist optionally to `~/.cache/shisa/cache.bin`
+- [x] Persist optionally to `~/.cache/shisa/cache.bin`
 - [ ] Versioned schema with migration
 - [ ] Cold-start hydration with checksum verification
 

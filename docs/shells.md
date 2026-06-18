@@ -31,6 +31,7 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 ## bash
 
 - Requires Bash 4 or newer for the supported hook/redraw path.
+- Bash 3.x falls back to a synchronous `PS1` command substitution that calls `shisa prompt --no-async`.
 - Uses `PROMPT_COMMAND=shisa_prompt_command`.
 - Preserves any existing `PROMPT_COMMAND` by evaluating it inside Shisa's prompt command.
 - Captures duration with a `DEBUG` trap and `$EPOCHREALTIME`; Bash builds without `$EPOCHREALTIME` report `0ms`.

@@ -4,6 +4,54 @@
 __SHISA_BASH_INIT=1
 SHISA_BIN=${SHISA_BIN:-shisa}
 SHISA_SOCKET=${SHISA_SOCKET:-}
+
+shisa_bash_version_at_least_4() {
+  local major=${1:-${BASH_VERSINFO[0]:-0}}
+  [[ ${major} =~ ^[0-9]+$ ]] || return 1
+  ((major >= 4))
+}
+
+if ! shisa_bash_version_at_least_4; then
+  shisa_bash_legacy_socket_path() {
+    if [[ -n ${SHISA_SOCKET:-} ]]; then
+      printf '%s' "${SHISA_SOCKET}"
+    elif [[ ${OSTYPE:-} == darwin* ]]; then
+      printf '%s' "${HOME}/Library/Caches/shisa/shisa.sock"
+    elif [[ -n ${XDG_RUNTIME_DIR:-} ]]; then
+      printf '%s' "${XDG_RUNTIME_DIR}/shisa.sock"
+    else
+      printf '%s' "/run/user/${UID}/shisa.sock"
+    fi
+  }
+
+  shisa_bash_legacy_fallback() {
+    local cwd=${PWD}
+    if [[ -n ${HOME:-} && ${cwd} == "${HOME}"* ]]; then
+      cwd="~${cwd#"${HOME}"}"
+    fi
+    printf '%s> ' "${cwd}"
+  }
+
+  shisa_bash_legacy_prompt() {
+    local last_status=$?
+    local socket_path
+    socket_path=$(shisa_bash_legacy_socket_path)
+    local jobs_count
+    jobs_count=$(jobs -p 2>/dev/null | wc -l | tr -d ' ')
+    if [[ -S ${socket_path} ]]; then
+      if [[ ${SHISA_A11Y:-0} == 1 ]]; then
+        "${SHISA_BIN}" prompt --shell bash --cwd "${PWD}" --exit "${last_status}" --jobs "${jobs_count:-0}" --duration-ms 0 --no-async --socket "${socket_path}" --a11y 2>/dev/null && return 0
+      else
+        "${SHISA_BIN}" prompt --shell bash --cwd "${PWD}" --exit "${last_status}" --jobs "${jobs_count:-0}" --duration-ms 0 --no-async --socket "${socket_path}" 2>/dev/null && return 0
+      fi
+    fi
+    shisa_bash_legacy_fallback
+  }
+
+  PS1='$(shisa_bash_legacy_prompt)'
+  return 0 2>/dev/null || exit 0
+fi
+
 SHISA_LAST_EXIT=0
 SHISA_LAST_JOBS=0
 SHISA_LAST_DURATION_MS=0

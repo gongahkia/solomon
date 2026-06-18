@@ -912,7 +912,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 28.2 Bash
 - [x] `bind -x` + escape sequence redraw trick
 - [x] Document Bash 4+ requirement
-- [ ] Graceful sync fallback on older bash
+- [x] Graceful sync fallback on older bash
 
 ### 28.3 Fish
 - [ ] `commandline -f repaint` after async fill

@@ -52,6 +52,7 @@ const RenderRequest = struct {
     rows: u16 = 24,
     request_id: []const u8 = "",
     cloud_ctx: cloud_ctx_module.Options = .{},
+    risk_tier: risk_tier_module.BarColors = .{},
     sso_expiry: sso_expiry_module.Options = .{},
 };
 
@@ -496,6 +497,7 @@ pub const Server = struct {
             .azure_default_location = azure_default_location,
             .kubeconfig = kubeconfig,
             .cloud_ctx = parsed.value.cloud_ctx,
+            .risk_tier = parsed.value.risk_tier,
             .sso_expiry = parsed.value.sso_expiry,
         });
         defer rendered.deinit(std.heap.page_allocator);
@@ -1053,6 +1055,10 @@ fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderReques
     try appendKeyBool(allocator, &out, "cloud_gcp", request.cloud_ctx.gcp);
     try appendKeyBool(allocator, &out, "cloud_azure", request.cloud_ctx.azure);
     try appendKeyBool(allocator, &out, "cloud_kube", request.cloud_ctx.kubernetes);
+    try appendKeyString(allocator, &out, "risk_unknown_bg", risk_tier_module.colorSlotName(request.risk_tier.unknown_bg));
+    try appendKeyString(allocator, &out, "risk_dev_bg", risk_tier_module.colorSlotName(request.risk_tier.dev_bg));
+    try appendKeyString(allocator, &out, "risk_staging_bg", risk_tier_module.colorSlotName(request.risk_tier.staging_bg));
+    try appendKeyString(allocator, &out, "risk_prod_bg", risk_tier_module.colorSlotName(request.risk_tier.prod_bg));
     try appendKeyInt(allocator, &out, "sso_warning", request.sso_expiry.warning_minutes);
     try appendKeyOptional(allocator, &out, "home", context.home);
     try appendKeyOptional(allocator, &out, "kubeconfig", context.kubeconfig);

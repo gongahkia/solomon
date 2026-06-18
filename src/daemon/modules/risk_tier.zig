@@ -44,6 +44,12 @@ pub const Explanation = struct {
     pattern: []const u8 = "",
 };
 
+pub const Signal = struct {
+    tier: Tier,
+    glyph: []const u8,
+    color: ColorSlot,
+};
+
 pub const Rules = struct {
     dev: [][]u8 = &.{},
     staging: [][]u8 = &.{},
@@ -169,6 +175,31 @@ pub fn backgroundSlot(tier: Tier, colors: BarColors) ColorSlot {
         .staging => colors.staging_bg,
         .prod => colors.prod_bg,
     };
+}
+
+pub fn tierGlyph(tier: Tier) []const u8 {
+    return switch (tier) {
+        .unknown => "?",
+        .dev => "D",
+        .staging => "S",
+        .prod => "!",
+    };
+}
+
+pub fn signal(tier: Tier, colors: BarColors) ?Signal {
+    if (tier == .unknown) return null;
+    return .{
+        .tier = tier,
+        .glyph = tierGlyph(tier),
+        .color = backgroundSlot(tier, colors),
+    };
+}
+
+pub fn render(allocator: std.mem.Allocator, context: CloudContext, ssh_host: ?[]const u8, rules: ?Rules, colors: BarColors) !?[]u8 {
+    var tier = classifyCloud(context, rules);
+    if (ssh_host) |host| tier = maxTier(tier, classifyMaybeRules(host, rules));
+    const visible = signal(tier, colors) orelse return null;
+    return @as(?[]u8, try std.fmt.allocPrint(allocator, "risk:{s}{s}", .{ visible.glyph, tierName(visible.tier) }));
 }
 
 fn classifyToken(token: []const u8) Tier {
@@ -456,6 +487,29 @@ test "maps tiers to background slots" {
     try std.testing.expectEqual(ColorSlot.muted, backgroundSlot(.unknown, colors));
     try std.testing.expectEqualStrings("danger", colorSlotName(.danger));
     try std.testing.expectEqual(ColorSlot.accent, parseColorSlot("accent").?);
+}
+
+test "risk signals pair color slots with glyphs" {
+    const colors = BarColors{ .prod_bg = .danger, .staging_bg = .warning, .dev_bg = .success, .unknown_bg = .muted };
+    const prod = signal(.prod, colors).?;
+    const staging = signal(.staging, colors).?;
+    const dev = signal(.dev, colors).?;
+    try std.testing.expectEqual(ColorSlot.danger, prod.color);
+    try std.testing.expectEqualStrings("!", prod.glyph);
+    try std.testing.expectEqual(ColorSlot.warning, staging.color);
+    try std.testing.expectEqualStrings("S", staging.glyph);
+    try std.testing.expectEqual(ColorSlot.success, dev.color);
+    try std.testing.expectEqualStrings("D", dev.glyph);
+    try std.testing.expect(signal(.unknown, colors) == null);
+}
+
+test "renders visible risk glyph with tier text" {
+    const rendered = (try render(std.testing.allocator, .{ .aws = "prod", .kubernetes = "dev" }, null, null, .{})).?;
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("risk:!prod", rendered);
+
+    const none = try render(std.testing.allocator, .{}, "localhost", null, .{});
+    try std.testing.expect(none == null);
 }
 
 test "parses user rules" {

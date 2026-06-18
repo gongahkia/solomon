@@ -41,6 +41,22 @@ pub const CloudCtxOptions = struct {
     kubernetes: bool = true,
 };
 
+pub const RiskTierColor = enum {
+    fg,
+    muted,
+    accent,
+    success,
+    warning,
+    danger,
+};
+
+pub const RiskTierOptions = struct {
+    unknown_bg: RiskTierColor = .muted,
+    dev_bg: RiskTierColor = .success,
+    staging_bg: RiskTierColor = .warning,
+    prod_bg: RiskTierColor = .danger,
+};
+
 pub const Request = struct {
     v: u32 = version,
     op: Op = .render,
@@ -60,6 +76,7 @@ pub const Request = struct {
     session: ?[]const u8 = null,
     request_id: []const u8 = "",
     cloud_ctx: CloudCtxOptions = .{},
+    risk_tier: RiskTierOptions = .{},
 };
 
 pub const Diagnostic = struct {
@@ -204,6 +221,7 @@ test "request type carries v1 render inputs" {
         .session = "session-1",
         .request_id = "request-1",
         .cloud_ctx = .{ .azure = false },
+        .risk_tier = .{ .prod_bg = .accent },
     };
 
     try std.testing.expectEqual(@as(u32, 1), request.v);
@@ -222,6 +240,7 @@ test "request type carries v1 render inputs" {
     try std.testing.expectEqualStrings("session-1", request.session.?);
     try std.testing.expectEqualStrings("request-1", request.request_id);
     try std.testing.expect(!request.cloud_ctx.azure);
+    try std.testing.expectEqual(RiskTierColor.accent, request.risk_tier.prod_bg);
 }
 
 test "response type carries prompt metadata and optional redraw token" {
@@ -461,7 +480,7 @@ test "snapshots every op and protocol shape" {
         };
         const request_json = try encodeAlloc(allocator, request);
         defer allocator.free(request_json);
-        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"cloud_ctx\":{{\"aws\":true,\"gcp\":true,\"azure\":true,\"kubernetes\":true}}}}", .{ op_name, request_id });
+        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"cloud_ctx\":{{\"aws\":true,\"gcp\":true,\"azure\":true,\"kubernetes\":true}},\"risk_tier\":{{\"unknown_bg\":\"muted\",\"dev_bg\":\"success\",\"staging_bg\":\"warning\",\"prod_bg\":\"danger\"}}}}", .{ op_name, request_id });
         defer allocator.free(expected_request);
         try std.testing.expectEqualStrings(expected_request, request_json);
 

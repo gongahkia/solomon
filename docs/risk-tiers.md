@@ -30,6 +30,8 @@ staging_bg = "warning"
 prod_bg = "danger"
 ```
 
+When `risk_tier` is included in the prompt module list, the rendered segment also carries an ASCII glyph: `D` for dev, `S` for staging, and `!` for prod. The glyph and tier text remain visible when color is disabled.
+
 Explain a value:
 
 ```sh

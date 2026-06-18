@@ -64,6 +64,20 @@ const schema_json =
     \\        "kubernetes": { "type": "boolean" }
     \\      }
     \\    },
+    \\    "riskTierColor": {
+    \\      "type": "string",
+    \\      "enum": ["fg", "muted", "accent", "success", "warning", "danger"]
+    \\    },
+    \\    "riskTier": {
+    \\      "type": "object",
+    \\      "additionalProperties": true,
+    \\      "properties": {
+    \\        "unknown_bg": { "$ref": "#/$defs/riskTierColor" },
+    \\        "dev_bg": { "$ref": "#/$defs/riskTierColor" },
+    \\        "staging_bg": { "$ref": "#/$defs/riskTierColor" },
+    \\        "prod_bg": { "$ref": "#/$defs/riskTierColor" }
+    \\      }
+    \\    },
     \\    "ssoExpiry": {
     \\      "type": "object",
     \\      "additionalProperties": true,
@@ -104,6 +118,7 @@ const schema_json =
     \\        "user_id": { "type": "integer", "minimum": 0 },
     \\        "session": { "type": "string" },
     \\        "cloud_ctx": { "$ref": "#/$defs/cloudCtx" },
+    \\        "risk_tier": { "$ref": "#/$defs/riskTier" },
     \\        "sso_expiry": { "$ref": "#/$defs/ssoExpiry" }
     \\      }
     \\    },
@@ -130,6 +145,7 @@ const schema_json =
     \\        "user_id": { "type": "integer", "minimum": 0 },
     \\        "session": { "type": "string" },
     \\        "cloud_ctx": { "$ref": "#/$defs/cloudCtx" },
+    \\        "risk_tier": { "$ref": "#/$defs/riskTier" },
     \\        "sso_expiry": { "$ref": "#/$defs/ssoExpiry" }
     \\      }
     \\    },
@@ -142,7 +158,12 @@ const schema_json =
     \\    "metricsRequest": {
     \\      "allOf": [
     \\        { "$ref": "#/$defs/commonRequest" },
-    \\        { "properties": { "op": { "const": "metrics" } } }
+    \\        {
+    \\          "properties": {
+    \\            "op": { "const": "metrics" },
+    \\            "format": { "enum": ["json", "prometheus"] }
+    \\          }
+    \\        }
     \\      ]
     \\    },
     \\    "reloadRequest": {

@@ -7,7 +7,7 @@ pub const default_config_text =
     \\theme = "plain"
     \\
     \\[prompt]
-    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
     \\
     \\[modules.cwd]
     \\truncate_to = 3
@@ -45,7 +45,7 @@ pub const a11y_config_text =
     \\theme = "a11y"
     \\
     \\[prompt]
-    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
     \\
     \\[modules.cwd]
     \\truncate_to = 3
@@ -262,7 +262,7 @@ const Trimmed = struct {
     column: usize,
 };
 
-const default_modules = [_]ModuleId{ .cwd, .git_branch, .language_versions, .exit_status, .jobs, .cmd_duration, .user_host, .sso_expiry, .iac_workspace, .region_drift, .cost_glance, .vpn_status, .ssh_target, .container_provenance };
+const default_modules = [_]ModuleId{ .cwd, .git_branch, .language_versions, .exit_status, .jobs, .cmd_duration, .user_host, .risk_tier, .sso_expiry, .iac_workspace, .region_drift, .cost_glance, .vpn_status, .ssh_target, .container_provenance };
 
 pub fn parse(allocator: std.mem.Allocator, source: []const u8, diagnostic: *Diagnostic) !Config {
     diagnostic.* = .{};

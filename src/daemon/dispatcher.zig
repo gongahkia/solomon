@@ -10,6 +10,7 @@ const iac_workspace_module = @import("modules/iac_workspace.zig");
 const jobs_module = @import("modules/jobs.zig");
 const language_versions_module = @import("modules/language_versions.zig");
 const region_drift_module = @import("modules/region_drift.zig");
+const risk_tier_module = @import("modules/risk_tier.zig");
 const ssh_target_module = @import("modules/ssh_target.zig");
 const sso_expiry_module = @import("modules/sso_expiry.zig");
 const time_module = @import("modules/time.zig");
@@ -32,6 +33,7 @@ pub const ModuleId = enum {
     cmd_duration,
     user_host,
     cloud_ctx,
+    risk_tier,
     region_drift,
     cost_glance,
     vpn_status,
@@ -91,6 +93,7 @@ pub const RenderInput = struct {
     azure_default_location: ?[]const u8 = null,
     kubeconfig: ?[]const u8 = null,
     cloud_ctx: cloud_ctx_module.Options = .{},
+    risk_tier: risk_tier_module.BarColors = .{},
     sso_expiry: sso_expiry_module.Options = .{},
 };
 
@@ -119,6 +122,7 @@ const default_pipeline = [_]ModuleSpec{
     .{ .id = .jobs, .execution_class = executionClass(.jobs) },
     .{ .id = .cmd_duration, .execution_class = executionClass(.cmd_duration) },
     .{ .id = .user_host, .execution_class = executionClass(.user_host) },
+    .{ .id = .risk_tier, .execution_class = executionClass(.risk_tier) },
     .{ .id = .sso_expiry, .execution_class = executionClass(.sso_expiry) },
     .{ .id = .iac_workspace, .execution_class = executionClass(.iac_workspace) },
     .{ .id = .region_drift, .execution_class = executionClass(.region_drift) },
@@ -271,6 +275,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
         .cmd_duration => try cmd_duration_module.render(allocator, input.duration_ms, 1000),
         .user_host => try user_host_module.render(allocator, input.ssh, input.user, input.host),
         .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.kubeconfig, input.home, caches.cloud_ctx, input.cloud_ctx),
+        .risk_tier => try risk_tier_module.render(allocator, .{ .aws = input.aws_profile }, if (input.ssh == null) null else input.host, null, input.risk_tier),
         .region_drift => try region_drift_module.render(allocator, input.home, input.aws_profile, input.aws_region, input.aws_default_region, input.cloudsdk_compute_region, input.azure_location, input.arm_location, input.azure_default_location),
         .cost_glance => try cost_glance_module.render(allocator, input.home),
         .vpn_status => try vpn_status_module.render(allocator),
@@ -296,6 +301,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .cmd_duration => "cmd_duration",
         .user_host => "user_host",
         .cloud_ctx => "cloud_ctx",
+        .risk_tier => "risk_tier",
         .region_drift => "region_drift",
         .cost_glance => "cost_glance",
         .vpn_status => "vpn_status",
@@ -494,6 +500,7 @@ test "snapshots stable prompt segments" {
         .{ .id = .cmd_duration, .execution_class = .sync },
         .{ .id = .user_host, .execution_class = .sync },
         .{ .id = .cloud_ctx, .execution_class = .sync },
+        .{ .id = .risk_tier, .execution_class = .sync },
         .{ .id = .sso_expiry, .execution_class = .sync },
         .{ .id = .iac_workspace, .execution_class = .sync },
         .{ .id = .region_drift, .execution_class = .sync },
@@ -523,7 +530,7 @@ test "snapshots stable prompt segments" {
 
     const expected = try std.fmt.allocPrint(
         allocator,
-        "{s} git:main* time:01:01 \x1b[31mexit:2\x1b[0m jobs:2 took:1.5s u@prod-bastion cloud[aws:prod] sso[op:20m] iac[tf:prod!] region[aws:us-west-2!=us-east-1] cost[aws:$1.20] \xe2\x86\x92 prod-bastion (prod)> ",
+        "{s} git:main* time:01:01 \x1b[31mexit:2\x1b[0m jobs:2 took:1.5s u@prod-bastion cloud[aws:prod] risk:!prod sso[op:20m] iac[tf:prod!] region[aws:us-west-2!=us-east-1] cost[aws:$1.20] \xe2\x86\x92 prod-bastion (prod)> ",
         .{cwd_path},
     );
     defer allocator.free(expected);
@@ -644,6 +651,7 @@ fn renderPromptFixtureAlloc(allocator: std.mem.Allocator, root_path: []const u8,
         .{ .id = .cmd_duration, .execution_class = .sync },
         .{ .id = .user_host, .execution_class = .sync },
         .{ .id = .cloud_ctx, .execution_class = .sync },
+        .{ .id = .risk_tier, .execution_class = .sync },
         .{ .id = .sso_expiry, .execution_class = .sync },
         .{ .id = .iac_workspace, .execution_class = .sync },
         .{ .id = .region_drift, .execution_class = .sync },

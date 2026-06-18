@@ -1,1 +1,1 @@
-<root>/prod git:main* time:01:01 \x1b[31mexit:2\x1b[0m jobs:2 took:1.5s u@prod-bastion cloud[aws:prod] sso[op:20m] iac[tf:prod!] region[aws:us-west-2!=us-east-1] cost[aws:$1.20] \xe2\x86\x92 prod-bastion (prod)> 
+<root>/prod git:main* time:01:01 \x1b[31mexit:2\x1b[0m jobs:2 took:1.5s u@prod-bastion cloud[aws:prod] risk:!prod sso[op:20m] iac[tf:prod!] region[aws:us-west-2!=us-east-1] cost[aws:$1.20] \xe2\x86\x92 prod-bastion (prod)> 

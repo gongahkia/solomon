@@ -1704,6 +1704,15 @@ const AiBenchConfig = struct {
 };
 
 fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len == 0 or (args.len == 1 and (std.mem.eql(u8, args[0], "--help") or std.mem.eql(u8, args[0], "-h")))) {
+        try std.fs.File.stdout().writeAll(ai_help_text);
+        return;
+    }
+    if (std.mem.eql(u8, args[0], "status")) {
+        if (args.len != 1) return error.UnknownAiArgument;
+        try aiStatus(allocator);
+        return;
+    }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "bench")) {
         const config = try parseAiBenchArgs(args[1..]);
         try aiBench(allocator, config);
@@ -1730,6 +1739,35 @@ fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
     return error.UnknownAiArgument;
+}
+
+fn aiStatus(allocator: std.mem.Allocator) !void {
+    const status = ollama.detect(allocator) catch ollama.Status{ .installed = false, .daemon_running = false };
+    const home = std.process.getEnvVarOwned(allocator, "HOME") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    defer if (home) |value| allocator.free(value);
+    const output = try aiStatusOutputAlloc(allocator, status, home);
+    defer allocator.free(output);
+    try std.fs.File.stdout().writeAll(output);
+}
+
+fn aiStatusOutputAlloc(allocator: std.mem.Allocator, status: ollama.Status, home: ?[]const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try appendFmt(allocator, &out, "local:\n  ollama_installed: {}\n  ollama_running: {}\n  recommended_model: {s}\n", .{ status.installed, status.daemon_running, ollama.recommended_model });
+    try out.appendSlice(allocator, "cloud:\n  providers: none\n  enabled: false\n");
+    try out.appendSlice(allocator, "logging:\n");
+    if (home) |home_path| {
+        const audit_path = try prodGuardAuditPathAlloc(allocator, home_path);
+        defer allocator.free(audit_path);
+        try appendFmt(allocator, &out, "  prod_guard_audit: {s} {s}\n", .{ pathAccessStatus(audit_path), audit_path });
+    } else {
+        try out.appendSlice(allocator, "  prod_guard_audit: missing HOME\n");
+    }
+    try out.appendSlice(allocator, "  ai_cloud_audit: not_configured\n");
+    return out.toOwnedSlice(allocator);
 }
 
 fn parseAiBenchArgs(args: []const []const u8) !AiBenchConfig {
@@ -2088,6 +2126,17 @@ test "ai bench args parse" {
     const config = try parseAiBenchArgs(&.{ "--model", "gemma3:1b", "--prompt", "hi" });
     try std.testing.expectEqualStrings("gemma3:1b", config.model);
     try std.testing.expectEqualStrings("hi", config.prompt);
+}
+
+test "ai status output reports local cloud and logging state" {
+    const output = try aiStatusOutputAlloc(std.testing.allocator, .{ .installed = true, .daemon_running = false }, "/tmp/shisa-ai-status-home");
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "local:\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "ollama_installed: true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "cloud:\n  providers: none\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "logging:\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "prod_guard_audit: missing /tmp/shisa-ai-status-home/.local/state/shisa/prod_guard.jsonl") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "ai_cloud_audit: not_configured") != null);
 }
 
 test "ai risk args parse" {
@@ -6866,7 +6915,7 @@ const help_text =
     \\usage: shisa <command> [options]
     \\
     \\commands:
-    \\  ai            local AI helpers: bench
+    \\  ai            local AI helpers: status, bench, risk, explain, nextcmd, nl2cmd
     \\  bench         benchmark prompt render via hyperfine
     \\  cache         dump or clear cache state
     \\  cloud         cloud helpers: audit, doctor, explain, preexec
@@ -6898,6 +6947,19 @@ const help_text =
     \\options:
     \\  -h, --help    print help
     \\      --version print version
+    \\
+;
+
+const ai_help_text =
+    \\usage: shisa ai <command> [args]
+    \\
+    \\commands:
+    \\  status        show local model, cloud provider, and audit status
+    \\  bench         benchmark local Ollama generation
+    \\  risk          classify command risk
+    \\  explain       explain a command
+    \\  nextcmd       suggest a next command from local context
+    \\  nl2cmd        convert ?? input to a command suggestion
     \\
 ;
 

@@ -54,7 +54,11 @@ commands:
 ### `shisa theme`
 
 ```text
-usage: shisa theme validate <path>
+usage: shisa theme <command> [args]
+
+commands:
+  validate <path>   validate a theme file
+  preview <theme>   render a stub prompt from a built-in id or theme file
 ```
 
 ### `shisa vouch`

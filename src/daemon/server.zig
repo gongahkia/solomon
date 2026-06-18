@@ -111,6 +111,7 @@ const RenderCacheContext = struct {
     azure_default_location: ?[]const u8 = null,
     config_generation: u64 = 0,
     plugin_generation: u64 = 0,
+    cache_rev: u64 = 0,
     snapshot: RenderCacheSnapshot = .{},
 };
 
@@ -183,6 +184,7 @@ pub const Server = struct {
     prompt_cache: daemon_cache.Store,
     prompt_cache_hits: u64 = 0,
     prompt_cache_misses: u64 = 0,
+    cache_rev: u64 = 0,
     git_branch_cache: git_branch_module.Cache = .{},
     language_versions_cache: language_versions_module.Cache = .{},
     cloud_ctx_cache: cloud_ctx_module.Cache = .{},
@@ -448,6 +450,7 @@ pub const Server = struct {
             .azure_default_location = azure_default_location,
             .config_generation = self.reload_state.config_generation,
             .plugin_generation = self.reload_state.plugin_generation,
+            .cache_rev = self.cache_rev,
             .snapshot = self.renderCacheSnapshot(),
         };
         const cache_key = try renderPromptCacheKeyAlloc(std.heap.page_allocator, parsed.value, cache_context);
@@ -812,6 +815,7 @@ pub const Server = struct {
 
     fn drainFsInvalidations(self: *Server, timestamp_ns: u64) void {
         while (self.fs_watcher.nextInvalidation(timestamp_ns)) |invalidation| {
+            self.cache_rev +%= 1;
             if (std.mem.eql(u8, invalidation.module_id, git_branch_module.module_id)) {
                 self.git_branch_cache.invalidate(std.heap.page_allocator, invalidation.cwd);
             } else if (std.mem.eql(u8, invalidation.module_id, cloud_ctx_module.module_id)) {
@@ -1045,6 +1049,7 @@ fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderReques
     try appendKeyOptional(allocator, &out, "azure_default_location", context.azure_default_location);
     try appendKeyInt(allocator, &out, "config_generation", context.config_generation);
     try appendKeyInt(allocator, &out, "plugin_generation", context.plugin_generation);
+    try appendKeyInt(allocator, &out, "cache_rev", context.cache_rev);
     try appendKeyBool(allocator, &out, "git_valid", context.snapshot.git_valid);
     try appendKeyBool(allocator, &out, "git_in_flight", context.snapshot.git_in_flight);
     try appendKeyInt(allocator, &out, "git_generation", context.snapshot.git_generation);
@@ -1553,6 +1558,7 @@ test "fs event invalidates git branch cache" {
     defer std.heap.page_allocator.free(clean);
     try std.testing.expect(std.mem.indexOf(u8, clean, "git:main> ") != null);
     try std.testing.expect(server.fs_watcher.hasScope(git_branch_module.module_id, dir_path));
+    try std.testing.expectEqual(@as(u64, 0), server.cache_rev);
 
     const dirty_file = try std.fmt.allocPrint(allocator, "{s}/dirty.txt", .{dir_path});
     defer allocator.free(dirty_file);
@@ -1564,6 +1570,7 @@ test "fs event invalidates git branch cache" {
     const dirty = try server.renderResponse(request);
     defer std.heap.page_allocator.free(dirty);
     try std.testing.expect(std.mem.indexOf(u8, dirty, "git:main*> ") != null);
+    try std.testing.expectEqual(@as(u64, 1), server.cache_rev);
 }
 
 test "render response carries request id and v1 shape" {
@@ -1642,9 +1649,26 @@ test "render prompt cache key ignores request id and includes tuple fields" {
         .host = "host",
     });
     defer allocator.free(different_exit);
+    const different_rev = try renderPromptCacheKeyAlloc(allocator, .{
+        .cwd = "/tmp/project",
+        .exit = 0,
+        .jobs = 1,
+        .duration_ms = 10,
+        .shell = "zsh",
+        .cols = 80,
+        .rows = 24,
+        .request_id = "first",
+    }, .{
+        .timestamp_minute = 123,
+        .user = "me",
+        .host = "host",
+        .cache_rev = 1,
+    });
+    defer allocator.free(different_rev);
 
     try std.testing.expectEqualStrings(first, second);
     try std.testing.expect(!std.mem.eql(u8, first, different_exit));
+    try std.testing.expect(!std.mem.eql(u8, first, different_rev));
 }
 
 test "prompt cache hit rate uses ppm" {

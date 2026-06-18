@@ -1003,7 +1003,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 - [x] Glyph tier resolver (nerdfont → unicode → ascii)
 - [x] Validator enforces fallback declarations
 - [x] `shisa font check` rendering probe
-- [ ] Documented NerdFont version requirements per theme
+- [x] Documented NerdFont version requirements per theme
 
 ### 30.6 Live preview
 - [ ] `shisa theme preview <theme>` renders a sample prompt with stub state

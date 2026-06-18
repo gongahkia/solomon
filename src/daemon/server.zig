@@ -1718,6 +1718,44 @@ test "render response stores completed prompts in bounded l1 cache" {
     try std.testing.expectEqual(@as(u64, 2), server.prompt_cache_misses);
 }
 
+test "stress 10k cd loop records prompt cache hit rate" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-cd-loop-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+    const context = RenderCacheContext{ .user = "me", .host = "host" };
+
+    for (0..10) |index| {
+        var cwd_buffer: [64]u8 = undefined;
+        const cwd = try std.fmt.bufPrint(&cwd_buffer, "/repo/{d}", .{index});
+        const key = try renderPromptCacheKeyAlloc(allocator, .{ .cwd = cwd, .shell = "zsh", .cols = 80, .rows = 24 }, context);
+        defer allocator.free(key);
+        try server.prompt_cache.put(prompt_cache_module, key, "cached> ", 0);
+    }
+
+    for (0..10_000) |index| {
+        var cwd_buffer: [64]u8 = undefined;
+        const cwd = try std.fmt.bufPrint(&cwd_buffer, "/repo/{d}", .{index % 10});
+        const key = try renderPromptCacheKeyAlloc(allocator, .{ .cwd = cwd, .shell = "zsh", .cols = 80, .rows = 24 }, context);
+        defer allocator.free(key);
+        if ((try server.prompt_cache.get(prompt_cache_module, key)) != null) {
+            server.prompt_cache_hits += 1;
+        } else {
+            server.prompt_cache_misses += 1;
+        }
+    }
+
+    try std.testing.expectEqual(@as(u64, 10_000), server.prompt_cache_hits);
+    try std.testing.expectEqual(@as(u64, 0), server.prompt_cache_misses);
+    try std.testing.expectEqual(@as(u64, 1_000_000), promptCacheHitRatePpm(server.prompt_cache_hits, server.prompt_cache_misses));
+}
+
 test "render_continue fills async git segment from cache" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-continue-{x}", .{std.crypto.random.int(u64)});

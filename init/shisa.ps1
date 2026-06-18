@@ -5,6 +5,7 @@ if (-not $env:SHISA_BIN) { $env:SHISA_BIN = "shisa" }
 if (-not $env:SHISA_SOCKET) { $env:SHISA_SOCKET = "" }
 if (-not $env:SHISA_INSTANT) { $env:SHISA_INSTANT = "0" }
 if (-not $env:SHISA_A11Y) { $env:SHISA_A11Y = "0" }
+if (-not $env:SHISA_PWSH_ASYNC_EVENT) { $env:SHISA_PWSH_ASYNC_EVENT = "1" }
 if (-not $env:SHISA_NEXTCMD_CHORD) { $env:SHISA_NEXTCMD_CHORD = "Ctrl+x,Ctrl+n" }
 if (-not $env:SHISA_NEXTCMD_ACCEPT_CHORD) { $env:SHISA_NEXTCMD_ACCEPT_CHORD = "Tab" }
 if (-not $env:SHISA_NEXTCMD_REJECT_CHORD) { $env:SHISA_NEXTCMD_REJECT_CHORD = "Escape" }
@@ -13,6 +14,8 @@ if (-not $env:SHISA_EXPLAIN_CHORD) { $env:SHISA_EXPLAIN_CHORD = "Ctrl+x,Ctrl+e" 
 $script:SHISA_NEXTCMD_SUGGESTION = ""
 $script:SHISA_EXPLAIN_LAST_COMMAND = ""
 $script:SHISA_EXPLAIN_LAST_OUTPUT = ""
+$script:SHISA_PWSH_ASYNC_SOURCE = "Shisa.AsyncFill"
+$script:SHISA_PWSH_ASYNC_SUBSCRIBER = $null
 
 function global:shisa_socket_path {
     if ($env:SHISA_SOCKET) { return $env:SHISA_SOCKET }
@@ -73,6 +76,30 @@ function global:Invoke-ShisaRedraw {
     [Console]::Write("`e[2K`r")
 }
 
+function global:Register-ShisaAsyncFillEvent {
+    if ($env:SHISA_PWSH_ASYNC_EVENT -ne "1") { return $false }
+    if (-not (Get-Command Register-EngineEvent -ErrorAction SilentlyContinue)) { return $false }
+    if (Get-EventSubscriber -SourceIdentifier $script:SHISA_PWSH_ASYNC_SOURCE -ErrorAction SilentlyContinue) { return $true }
+    try {
+        $script:SHISA_PWSH_ASYNC_SUBSCRIBER = Register-EngineEvent -SourceIdentifier $script:SHISA_PWSH_ASYNC_SOURCE -Action { Invoke-ShisaRedraw } -ErrorAction Stop
+        return $true
+    } catch {
+        $script:SHISA_PWSH_ASYNC_SUBSCRIBER = $null
+        return $false
+    }
+}
+
+function global:Invoke-ShisaAsyncFill {
+    if (Get-Command New-Event -ErrorAction SilentlyContinue) {
+        try {
+            New-Event -SourceIdentifier $script:SHISA_PWSH_ASYNC_SOURCE | Out-Null
+            return $true
+        } catch {}
+    }
+    Invoke-ShisaRedraw
+    return $false
+}
+
 function global:Invoke-ShisaNextCommand {
     $location = Get-Location
     $cwd = if ($location.ProviderPath) { $location.ProviderPath } else { $location.Path }
@@ -131,3 +158,5 @@ if (Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue) {
     Set-PSReadLineKeyHandler -Chord $env:SHISA_NEXTCMD_NEXT_CHORD -ScriptBlock { Invoke-ShisaNextCommand } 2>$null
     Set-PSReadLineKeyHandler -Chord $env:SHISA_EXPLAIN_CHORD -ScriptBlock { Invoke-ShisaExplain } 2>$null
 }
+
+Register-ShisaAsyncFillEvent | Out-Null

@@ -763,7 +763,11 @@ test "lua memory limiter enforces hard cap" {
 }
 
 test "runtime enforces configured lua memory limit" {
-    var runtime = Runtime.initWithMemoryLimit(std.testing.allocator, 1024 * 1024) catch |err| switch (err) {
+    var runtime = Runtime.initWithOptions(std.testing.allocator, .{
+        .memory_limit_bytes = 1024 * 1024,
+        .cpu_budget_ns = std.math.maxInt(u64),
+        .cpu_hard_limit_ns = std.math.maxInt(u64),
+    }) catch |err| switch (err) {
         error.LuaUnavailable => return error.SkipZigTest,
         else => return err,
     };

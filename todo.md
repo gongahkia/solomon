@@ -953,7 +953,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Memory: 16 MiB hard cap per plugin (instrumented allocator)
 - [x] CPU: 1 ms wall budget, 5 ms hard kill in debug
 - [x] Three-strikes-disabled rule for slow plugins
-- [ ] Plugin status visible via `shisa plugin list`
+- [x] Plugin status visible via `shisa plugin list`
 
 ### 29.5 Bridge fuzz
 - [ ] Fuzz every `ctx:*` function for input handling

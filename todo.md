@@ -944,7 +944,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Snapshot tests asserting removed globals are nil
 
 ### 29.3 Capability gate
-- [ ] Implement manifest parsing + validation
+- [x] Implement manifest parsing + validation
 - [ ] Daemon-side check on every API call
 - [ ] Reject runtime calls without declared capability
 - [ ] Re-prompt on capability upgrade

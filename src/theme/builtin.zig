@@ -58,6 +58,14 @@ test "built-in theme glyphs include ascii fallbacks" {
     }
 }
 
+test "built-in theme segments include a11y labels" {
+    for (themes) |theme| {
+        const source = try std.fs.cwd().readFileAlloc(std.testing.allocator, theme.path, 1024 * 1024);
+        defer std.testing.allocator.free(source);
+        try expectA11yLabels(source);
+    }
+}
+
 test "built-in themes render under glyph and color cap matrix" {
     const color_caps = [_]contrast.ColorCaps{ .none, .@"16", .@"256", .truecolor };
     const glyph_tiers = [_]loader.GlyphTier{ .ascii, .unicode, .nerdfont };
@@ -116,6 +124,28 @@ fn expectGlyphFallbacks(source: []const u8) !void {
         }
     }
     if (in_segment and glyph.len > 0) try std.testing.expect(ascii.len > 0);
+}
+
+fn expectA11yLabels(source: []const u8) !void {
+    var in_segment = false;
+    var a11y: []const u8 = "";
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r\n");
+        if (line.len == 0) continue;
+        if (line[0] == '[') {
+            if (in_segment) try std.testing.expect(a11y.len > 0);
+            in_segment = std.mem.startsWith(u8, line, "[segments.");
+            a11y = "";
+            continue;
+        }
+        if (!in_segment) continue;
+        const split = std.mem.indexOfScalar(u8, line, '=') orelse continue;
+        const key = std.mem.trim(u8, line[0..split], " \t\r\n");
+        const value = unquote(std.mem.trim(u8, line[split + 1 ..], " \t\r\n"));
+        if (std.mem.eql(u8, key, "a11y")) a11y = value;
+    }
+    if (in_segment) try std.testing.expect(a11y.len > 0);
 }
 
 fn unquote(value: []const u8) []const u8 {

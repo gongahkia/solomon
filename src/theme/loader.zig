@@ -72,6 +72,7 @@ pub const Segment = struct {
     glyph: []u8 = "",
     unicode: []u8 = "",
     ascii: []u8 = "",
+    a11y: []u8 = "",
     prefix: []u8 = "",
     suffix: []u8 = "",
 };
@@ -257,6 +258,9 @@ pub fn validateAlloc(allocator: std.mem.Allocator, theme: Theme) ![]ValidationFa
         }
         if (!validStyleList(item.style)) {
             try failures.append(allocator, .{ .section = item.id, .key = "style", .message = "invalid style" });
+        }
+        if (item.a11y.len == 0) {
+            try failures.append(allocator, .{ .section = item.id, .key = "a11y", .message = "missing a11y label" });
         }
         if ((item.glyph.len > 0 or item.unicode.len > 0) and item.ascii.len == 0) {
             try failures.append(allocator, .{ .section = item.id, .key = "ascii", .message = "missing ASCII fallback" });
@@ -482,6 +486,8 @@ const Parser = struct {
             try self.setSegmentString(&current_segment.unicode, line_no, value);
         } else if (std.mem.eql(u8, key.text, "ascii")) {
             try self.setSegmentString(&current_segment.ascii, line_no, value);
+        } else if (std.mem.eql(u8, key.text, "a11y")) {
+            try self.setSegmentString(&current_segment.a11y, line_no, value);
         } else if (std.mem.eql(u8, key.text, "prefix")) {
             try self.setSegmentString(&current_segment.prefix, line_no, value);
         } else if (std.mem.eql(u8, key.text, "suffix")) {
@@ -533,6 +539,8 @@ const Parser = struct {
         errdefer self.allocator.free(unicode);
         const ascii = try self.allocator.dupe(u8, "");
         errdefer self.allocator.free(ascii);
+        const a11y = try self.allocator.dupe(u8, "");
+        errdefer self.allocator.free(a11y);
         const prefix = try self.allocator.dupe(u8, "");
         errdefer self.allocator.free(prefix);
         const suffix = try self.allocator.dupe(u8, "");
@@ -545,6 +553,7 @@ const Parser = struct {
             .glyph = glyph,
             .unicode = unicode,
             .ascii = ascii,
+            .a11y = a11y,
             .prefix = prefix,
             .suffix = suffix,
         };
@@ -908,6 +917,7 @@ fn freeSegment(allocator: std.mem.Allocator, item: Segment) void {
     allocator.free(item.glyph);
     allocator.free(item.unicode);
     allocator.free(item.ascii);
+    allocator.free(item.a11y);
     allocator.free(item.prefix);
     allocator.free(item.suffix);
 }
@@ -1169,18 +1179,23 @@ test "validates theme schema" {
         \\[segments.cwd]
         \\fg = "@accent"
         \\style = "bold"
+        \\a11y = "current directory"
         \\
         \\[segments.git_branch]
         \\fg = "@success"
+        \\a11y = "git branch"
         \\
         \\[segments.exit_status]
         \\fg = "@danger"
+        \\a11y = "exit status"
         \\
         \\[segments.jobs]
         \\fg = "@warning"
+        \\a11y = "background jobs"
         \\
         \\[segments.cmd_duration]
         \\fg = "@muted"
+        \\a11y = "command duration"
         \\
     ;
 
@@ -1245,19 +1260,24 @@ test "requires declared glyph fallbacks" {
         \\fg = "@accent"
         \\glyph = ""
         \\ascii = "git:"
+        \\a11y = "current directory"
         \\
         \\[segments.git_branch]
         \\fg = "@success"
         \\unicode = "git"
+        \\a11y = "git branch"
         \\
         \\[segments.exit_status]
         \\fg = "@danger"
+        \\a11y = "exit status"
         \\
         \\[segments.jobs]
         \\fg = "@warning"
+        \\a11y = "background jobs"
         \\
         \\[segments.cmd_duration]
         \\fg = "@muted"
+        \\a11y = "command duration"
         \\
     ;
 

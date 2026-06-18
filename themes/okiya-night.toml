@@ -25,6 +25,7 @@ bg = ""
 style = "bold"
 glyph = ""
 ascii = ""
+a11y = "current directory"
 suffix = ""
 
 [segments.git_branch]
@@ -33,6 +34,7 @@ bg = ""
 style = ""
 glyph = ""
 ascii = "git:"
+a11y = "git branch"
 suffix = ""
 
 [segments.exit_status]
@@ -41,6 +43,7 @@ bg = ""
 style = "bold"
 glyph = ""
 ascii = "exit:"
+a11y = "exit status"
 suffix = ""
 
 [segments.jobs]
@@ -49,6 +52,7 @@ bg = ""
 style = ""
 glyph = ""
 ascii = "jobs:"
+a11y = "background jobs"
 suffix = ""
 
 [segments.cmd_duration]
@@ -57,4 +61,5 @@ bg = ""
 style = "dim"
 glyph = ""
 ascii = "took:"
+a11y = "command duration"
 suffix = ""

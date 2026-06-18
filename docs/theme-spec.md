@@ -35,6 +35,7 @@ bg = ""
 style = "bold"
 glyph = ""
 ascii = ""
+a11y = "current directory"
 suffix = ""
 
 [segments.git_branch]
@@ -43,6 +44,7 @@ bg = ""
 style = ""
 glyph = ""
 ascii = "git:"
+a11y = "git branch"
 suffix = ""
 ```
 
@@ -143,6 +145,7 @@ Segment ids are core module ids or plugin module ids.
 | `glyph` | string | no | Preferred glyph for rich terminals. |
 | `unicode` | string | no | Unicode fallback. Required when `glyph` uses Nerd Font/private-use codepoints. |
 | `ascii` | string | no | ASCII fallback. Required when `glyph` or `unicode` is non-empty. |
+| `a11y` | string | yes | Screen-reader label for the segment. |
 | `prefix` | string | no | Text before segment content. |
 | `suffix` | string | no | Text after segment content. |
 

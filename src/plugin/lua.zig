@@ -2,9 +2,11 @@ const std = @import("std");
 const builtin = @import("builtin");
 const manifest_schema = @import("manifest.zig");
 const capability_schema = @import("capability.zig");
+const context_schema = @import("context.zig");
 
 pub const manifest = manifest_schema;
 pub const capability = capability_schema;
+pub const context = context_schema;
 
 const LuaState = opaque {};
 const CInt = c_int;

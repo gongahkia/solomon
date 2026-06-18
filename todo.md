@@ -956,7 +956,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Plugin status visible via `shisa plugin list`
 
 ### 29.5 Bridge fuzz
-- [ ] Fuzz every `ctx:*` function for input handling
+- [x] Fuzz every `ctx:*` function for input handling
 - [ ] OSS-Fuzz integration
 - [ ] Bug-bounty pool for sandbox escapes
 

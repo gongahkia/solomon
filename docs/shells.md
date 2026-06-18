@@ -8,7 +8,7 @@
 | bash | `init/shisa.bash` | `PROMPT_COMMAND` + `DEBUG` trap | yes | `bind -x` on `\C-x\C-s` | no | CLI supports `--instant`; hook does not enable by default | `test/integration/bash_fake_socket.sh` |
 | fish | `init/shisa.fish` | `fish_prompt` + `fish_preexec` | yes | `emit shisa_async_redraw` + `commandline -f repaint` | no | enabled by default via `--instant` | `test/integration/fish_fake_socket.sh` |
 | nushell | `init/shisa.nu` | `$env.PROMPT_COMMAND` | exit/jobs yes; duration 0 | documented limitation | no | CLI supports `--instant`; hook off by default | `test/integration/nu_fake_socket.sh` |
-| PowerShell | `init/shisa.ps1` | `prompt` | exit/jobs yes; duration 0 | `Invoke-ShisaRedraw`; external repaint limited | no | CLI supports `--instant`; hook off by default | `test/integration/pwsh_fake_socket.sh` |
+| PowerShell | `init/shisa.ps1` | `prompt` | exit/jobs yes; duration 0 | `Register-EngineEvent` via `Shisa.AsyncFill`; host-limited | no | CLI supports `--instant`; hook off by default | `test/integration/pwsh_fake_socket.sh` |
 
 Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from the hook.
 
@@ -60,6 +60,7 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 
 - Uses a global `prompt` function and a cwd fallback.
 - Captures native exit status and running PowerShell jobs; generic command duration is reported as `0ms`.
-- Provides `Invoke-ShisaRedraw` to clear the current line, but external repaint is limited by host support.
+- Registers `Shisa.AsyncFill` with `Register-EngineEvent` when available; the action calls `Invoke-ShisaRedraw`.
+- Set `SHISA_PWSH_ASYNC_EVENT=0` before sourcing `init/shisa.ps1` to disable the event hook.
 
 ## Pending Shells

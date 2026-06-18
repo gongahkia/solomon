@@ -923,7 +923,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Document supported nu versions
 
 ### 28.5 PowerShell
-- [ ] `Register-EngineEvent` async-fill where supported
+- [x] `Register-EngineEvent` async-fill where supported
 - [ ] Graceful degradation matrix in docs
 
 ### 28.6 Integration tests

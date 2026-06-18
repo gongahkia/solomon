@@ -981,7 +981,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 30.2 Theme loader
 - [x] Parse TOML themes (`okiya-night.toml`)
 - [x] Resolve palette references (`@accent`)
-- [ ] Validate (`shisa theme validate`)
+- [x] Validate (`shisa theme validate`)
 - [ ] Generate preview screenshots in CI
 
 ### 30.3 Built-in themes

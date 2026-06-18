@@ -75,6 +75,12 @@ pub const Theme = struct {
     }
 };
 
+pub const ValidationFailure = struct {
+    section: []const u8,
+    key: []const u8,
+    message: []const u8,
+};
+
 const Table = union(enum) {
     root,
     capabilities,
@@ -141,6 +147,61 @@ pub fn resolvePaletteSlot(theme: Theme, name: []const u8) ?Rgb {
 
 pub fn resolvePaletteColor(theme: Theme, value: []const u8) ?Rgb {
     return resolvePaletteColorDepth(theme, value, 0);
+}
+
+pub fn validateAlloc(allocator: std.mem.Allocator, theme: Theme) ![]ValidationFailure {
+    var failures: std.ArrayList(ValidationFailure) = .empty;
+    errdefer failures.deinit(allocator);
+
+    if (!validThemeName(theme.name)) {
+        try failures.append(allocator, .{ .section = "theme", .key = "name", .message = "invalid theme name" });
+    }
+
+    inline for (.{ "fg", "muted", "accent", "success", "warning", "danger" }) |slot| {
+        if (resolvePaletteSlot(theme, slot) == null) {
+            try failures.append(allocator, .{ .section = "palette", .key = slot, .message = "missing or invalid required slot" });
+        }
+    }
+
+    for (theme.palette) |entry| {
+        if (resolvePaletteColor(theme, entry.value) == null) {
+            try failures.append(allocator, .{ .section = "palette", .key = entry.name, .message = "invalid color" });
+        }
+        if (!isRequiredPaletteSlot(entry.name) and !paletteSlotReferenced(theme, entry.name)) {
+            try failures.append(allocator, .{ .section = "palette", .key = entry.name, .message = "unused custom slot" });
+        }
+    }
+
+    inline for (.{ "cwd", "git_branch", "exit_status", "jobs", "cmd_duration" }) |id| {
+        if (findSegment(theme, id) == null) {
+            try failures.append(allocator, .{ .section = "segments", .key = id, .message = "missing required segment" });
+        }
+    }
+
+    for (theme.segments) |item| {
+        if (item.fg.len > 0 and resolvePaletteColor(theme, item.fg) == null) {
+            try failures.append(allocator, .{ .section = item.id, .key = "fg", .message = "invalid color" });
+        }
+        if (item.bg.len > 0 and resolvePaletteColor(theme, item.bg) == null) {
+            try failures.append(allocator, .{ .section = item.id, .key = "bg", .message = "invalid color" });
+        }
+        if (!validStyleList(item.style)) {
+            try failures.append(allocator, .{ .section = item.id, .key = "style", .message = "invalid style" });
+        }
+        if (!isAscii(item.glyph) and item.ascii.len == 0) {
+            try failures.append(allocator, .{ .section = item.id, .key = "ascii", .message = "missing ASCII fallback" });
+        }
+    }
+
+    return failures.toOwnedSlice(allocator);
+}
+
+pub fn formatValidationFailuresAlloc(allocator: std.mem.Allocator, failures: []const ValidationFailure) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    for (failures) |failure| {
+        try std.fmt.format(out.writer(allocator), "theme validate: {s}.{s}: {s}\n", .{ failure.section, failure.key, failure.message });
+    }
+    return out.toOwnedSlice(allocator);
 }
 
 const Parser = struct {
@@ -472,6 +533,63 @@ fn resolvePaletteColorDepth(theme: Theme, value: []const u8, depth: u8) ?Rgb {
     return contrast.parseColor(trimmed);
 }
 
+fn validThemeName(name: []const u8) bool {
+    if (name.len == 0) return false;
+    if (!isLowerAlnum(name[0])) return false;
+    for (name[1..]) |byte| {
+        if (!isLowerAlnum(byte) and byte != '_' and byte != '-') return false;
+    }
+    return true;
+}
+
+fn isLowerAlnum(byte: u8) bool {
+    return (byte >= 'a' and byte <= 'z') or (byte >= '0' and byte <= '9');
+}
+
+fn isRequiredPaletteSlot(name: []const u8) bool {
+    inline for (.{ "fg", "muted", "accent", "success", "warning", "danger" }) |slot| {
+        if (std.mem.eql(u8, name, slot)) return true;
+    }
+    return false;
+}
+
+fn paletteSlotReferenced(theme: Theme, name: []const u8) bool {
+    for (theme.palette) |entry| {
+        if (referencesPaletteSlot(entry.value, name)) return true;
+    }
+    for (theme.segments) |item| {
+        if (referencesPaletteSlot(item.fg, name) or referencesPaletteSlot(item.bg, name)) return true;
+    }
+    return false;
+}
+
+fn referencesPaletteSlot(value: []const u8, name: []const u8) bool {
+    if (value.len < 2 or value[0] != '@') return false;
+    return std.mem.eql(u8, value[1..], name);
+}
+
+fn validStyleList(value: []const u8) bool {
+    var parts = std.mem.tokenizeAny(u8, value, " \t\r\n");
+    while (parts.next()) |part| {
+        if (!validStyle(part)) return false;
+    }
+    return true;
+}
+
+fn validStyle(value: []const u8) bool {
+    return std.mem.eql(u8, value, "bold") or
+        std.mem.eql(u8, value, "dim") or
+        std.mem.eql(u8, value, "italic") or
+        std.mem.eql(u8, value, "underline");
+}
+
+fn isAscii(value: []const u8) bool {
+    for (value) |byte| {
+        if (byte > 0x7f) return false;
+    }
+    return true;
+}
+
 fn stripComment(line: []const u8) []const u8 {
     var in_string = false;
     var escaped = false;
@@ -650,6 +768,81 @@ test "rejects palette reference cycles" {
     defer theme.deinit(std.testing.allocator);
 
     try std.testing.expect(resolvePaletteSlot(theme, "a") == null);
+}
+
+test "validates theme schema" {
+    const source =
+        \\version = 1
+        \\name = "valid"
+        \\
+        \\[palette]
+        \\fg = "15"
+        \\muted = "8"
+        \\accent = "@fg"
+        \\success = "10"
+        \\warning = "11"
+        \\danger = "#ff0000"
+        \\
+        \\[segments.cwd]
+        \\fg = "@accent"
+        \\style = "bold"
+        \\
+        \\[segments.git_branch]
+        \\fg = "@success"
+        \\
+        \\[segments.exit_status]
+        \\fg = "@danger"
+        \\
+        \\[segments.jobs]
+        \\fg = "@warning"
+        \\
+        \\[segments.cmd_duration]
+        \\fg = "@muted"
+        \\
+    ;
+
+    var diagnostic: Diagnostic = .{};
+    var theme = try parse(std.testing.allocator, source, &diagnostic);
+    defer theme.deinit(std.testing.allocator);
+
+    const failures = try validateAlloc(std.testing.allocator, theme);
+    defer std.testing.allocator.free(failures);
+    try std.testing.expectEqual(@as(usize, 0), failures.len);
+}
+
+test "reports theme validation failures" {
+    const source =
+        \\version = 1
+        \\name = "Bad"
+        \\
+        \\[palette]
+        \\fg = "@missing"
+        \\muted = "8"
+        \\accent = "15"
+        \\success = "10"
+        \\warning = "11"
+        \\danger = "9"
+        \\custom = "14"
+        \\
+        \\[segments.cwd]
+        \\fg = "@custom"
+        \\style = "sparkle"
+        \\glyph = "→"
+        \\
+    ;
+
+    var diagnostic: Diagnostic = .{};
+    var theme = try parse(std.testing.allocator, source, &diagnostic);
+    defer theme.deinit(std.testing.allocator);
+
+    const failures = try validateAlloc(std.testing.allocator, theme);
+    defer std.testing.allocator.free(failures);
+    try std.testing.expect(failures.len >= 6);
+    const report = try formatValidationFailuresAlloc(std.testing.allocator, failures);
+    defer std.testing.allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "theme.name: invalid theme name") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "cwd.style: invalid style") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "cwd.ascii: missing ASCII fallback") != null);
 }
 
 test "reports theme parse spans" {

@@ -21,6 +21,7 @@ const prod_guard_module = @import("daemon/modules/prod_guard.zig");
 const risk_tier_module = @import("daemon/modules/risk_tier.zig");
 const supervisor = @import("supervisor.zig");
 const theme_contrast = @import("theme/contrast.zig");
+const theme_loader = @import("theme/loader.zig");
 const vcs_stack = @import("vcs/stack.zig");
 const vcs_worktree = @import("vcs_worktree");
 
@@ -205,6 +206,25 @@ fn themeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     const source = try std.fs.cwd().readFileAlloc(allocator, args[1], max_config_bytes);
     defer allocator.free(source);
+    var diagnostic: theme_loader.Diagnostic = .{};
+    var theme = theme_loader.parse(allocator, source, &diagnostic) catch |err| switch (err) {
+        error.InvalidTheme => {
+            const message = try std.fmt.allocPrint(allocator, "{s}:{d}:{d}: {s}\n", .{ args[1], diagnostic.line, diagnostic.column, diagnostic.message });
+            defer allocator.free(message);
+            try std.fs.File.stderr().writeAll(message);
+            return err;
+        },
+        else => return err,
+    };
+    defer theme.deinit(allocator);
+    const validation_failures = try theme_loader.validateAlloc(allocator, theme);
+    defer allocator.free(validation_failures);
+    if (validation_failures.len > 0) {
+        const report = try theme_loader.formatValidationFailuresAlloc(allocator, validation_failures);
+        defer allocator.free(report);
+        try std.fs.File.stderr().writeAll(report);
+        return error.InvalidTheme;
+    }
     const failures = try theme_contrast.validateThemeContrastAlloc(allocator, source);
     defer allocator.free(failures);
     if (failures.len > 0) {

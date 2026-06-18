@@ -1049,7 +1049,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 32.2 Property tests
 - [x] Wire protocol roundtrip
 - [x] Theme renders survive arbitrary state
-- [ ] Cache eviction invariants
+- [x] Cache eviction invariants
 
 ### 32.3 Integration tests via expect/pexpect
 - [ ] Per-shell session scripts

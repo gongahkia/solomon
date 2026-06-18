@@ -474,6 +474,47 @@ test "evicts entries older than max age" {
     try std.testing.expect(try store.getAt("m", "/old", 112) == null);
 }
 
+test "property cache eviction invariants" {
+    const allocator = std.testing.allocator;
+    var prng = std.Random.DefaultPrng.init(0x434143484549);
+    const random = prng.random();
+
+    for (0..64) |_| {
+        const max_entries = random.intRangeAtMost(usize, 0, 8);
+        const max_age_ns = random.intRangeAtMost(u64, 0, 40);
+        var store = Store.initWithOptions(allocator, .{ .max_entries = max_entries, .max_age_ns = max_age_ns });
+        defer store.deinit();
+
+        var now: u64 = 0;
+        for (0..64) |step| {
+            now += random.intRangeAtMost(u64, 1, 5);
+            const module_id = try std.fmt.allocPrint(allocator, "m{d}", .{random.intRangeAtMost(u8, 0, 3)});
+            defer allocator.free(module_id);
+            const cwd = try std.fmt.allocPrint(allocator, "/repo/{d}", .{random.intRangeAtMost(u8, 0, 12)});
+            defer allocator.free(cwd);
+            const output = try std.fmt.allocPrint(allocator, "out-{d}", .{step});
+            defer allocator.free(output);
+
+            try store.putAt(module_id, cwd, output, step, now);
+            try expectEvictionInvariants(&store, now);
+
+            if (random.boolean()) {
+                _ = try store.getAt(module_id, cwd, now);
+                try std.testing.expect(store.count() <= store.options.max_entries);
+            }
+        }
+    }
+}
+
+fn expectEvictionInvariants(store: *Store, timestamp_ns: u64) !void {
+    try std.testing.expect(store.count() <= store.options.max_entries);
+    if (store.options.max_age_ns == 0) return;
+    var it = store.entries.iterator();
+    while (it.next()) |entry| {
+        try std.testing.expect(!store.isExpired(entry.value_ptr.*, timestamp_ns));
+    }
+}
+
 test "builds default persistent cache path" {
     const path = (try defaultPersistPathAlloc(std.testing.allocator, "/home/me")).?;
     defer std.testing.allocator.free(path);

@@ -66,4 +66,4 @@ Award amounts depend on the public pool balance at triage time. Maintainers shou
 
 ## Recognition
 
-Reporters can opt in to public credit. Hall-of-fame entries list reporter name, award class, affected area, and fixed version or commit.
+Reporters can opt in to public credit. [Security Hall of Fame](security-hall-of-fame.md) entries list reporter name, award class, affected area, and fixed version or commit.

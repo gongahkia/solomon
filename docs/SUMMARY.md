@@ -93,6 +93,7 @@
 - [Triage](governance/triage.md)
 - [Bug Bounty](governance/bug-bounty.md)
 - [Bounty Ledger](governance/bounty-ledger.md)
+- [Security Hall of Fame](governance/security-hall-of-fame.md)
 - [Sponsor Recognition](governance/sponsor-recognition.md)
 - [Code of Conduct Enforcement](governance/code-of-conduct-enforcement.md)
 

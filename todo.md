@@ -1082,7 +1082,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] Fall through to en-US for missing translations
 
 ### 33.3 RTL rendering
-- [ ] Bidi detection
+- [x] Bidi detection
 - [x] Optional segment reversal
 - [x] Tested with Arabic, Hebrew, Persian fixture strings
 

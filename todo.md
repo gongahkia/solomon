@@ -412,7 +412,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [ ] No model required; pure rules
 
 ### 12.9 Privacy & audit
-- [ ] Enforce `net` capability gate (no network unless explicitly granted)
+- [x] Enforce `net` capability gate (no network unless explicitly granted)
 - [ ] Per-provider trust (`shisa plugin trust shisa.ai --net=openai`)
 - [ ] Local redaction rules (`shisa ai redact` CLI to edit/test rules)
 - [ ] Audit log of every cloud request (hash-only by default)

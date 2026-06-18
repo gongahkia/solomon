@@ -966,7 +966,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Document max-allowed wall time per hook
 
 ### 29.7 Plugin tooling
-- [ ] `shisa plugin new <name>` scaffolds a starter plugin
+- [x] `shisa plugin new <name>` scaffolds a starter plugin
 - [ ] `shisa plugin lint <path>` validates manifest + best practices
 - [ ] `shisa plugin pack <path>` produces a signed `.shisa-plugin` bundle
 - [ ] Sample plugin template repo

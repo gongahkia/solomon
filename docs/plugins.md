@@ -117,9 +117,10 @@ shisa plugin install ./demo-plugin --yes --plugin-sandbox-strict
 
 Strict mode rejects unknown top-level manifest fields and unknown capability fields.
 
-Inspect state:
+Common commands:
 
 ```sh
+shisa plugin new demo-plugin
 shisa plugin list
 shisa plugin disable demo-plugin
 shisa plugin enable demo-plugin

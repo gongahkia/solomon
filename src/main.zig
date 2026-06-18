@@ -4453,6 +4453,15 @@ test "appends pin once" {
 fn pluginCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (args.len == 0) return error.UnknownPluginArgument;
 
+    if (std.mem.eql(u8, args[0], "new")) {
+        if (args.len != 2) return error.UnknownPluginArgument;
+        try pluginNew(allocator, ".", args[1]);
+        const message = try std.fmt.allocPrint(allocator, "created {s}\n", .{args[1]});
+        defer allocator.free(message);
+        try std.fs.File.stdout().writeAll(message);
+        return;
+    }
+
     const plugins_dir = try pluginsDirPath(allocator);
     defer allocator.free(plugins_dir);
     const disabled_path = try disabledPluginsPath(allocator);
@@ -4491,6 +4500,96 @@ fn pluginCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
     } else {
         return error.UnknownPluginArgument;
     }
+}
+
+fn pluginNew(allocator: std.mem.Allocator, parent_dir: []const u8, name: []const u8) !void {
+    if (!plugin_manifest.isValidPluginName(name)) return error.InvalidPluginName;
+
+    const target_path = try std.fs.path.join(allocator, &.{ parent_dir, name });
+    defer allocator.free(target_path);
+    try std.fs.cwd().makeDir(target_path);
+    errdefer std.fs.cwd().deleteTree(target_path) catch {};
+
+    const module_id = try pluginModuleNameAlloc(allocator, name);
+    defer allocator.free(module_id);
+
+    const plugin_source = try renderPluginScaffoldAlloc(allocator, name, module_id);
+    defer allocator.free(plugin_source);
+    const plugin_path = try std.fs.path.join(allocator, &.{ target_path, "plugin.lua" });
+    defer allocator.free(plugin_path);
+    try std.fs.cwd().writeFile(.{ .sub_path = plugin_path, .data = plugin_source });
+
+    const readme_source = try renderPluginReadmeAlloc(allocator, name);
+    defer allocator.free(readme_source);
+    const readme_path = try std.fs.path.join(allocator, &.{ target_path, "README.md" });
+    defer allocator.free(readme_path);
+    try std.fs.cwd().writeFile(.{ .sub_path = readme_path, .data = readme_source });
+}
+
+fn pluginModuleNameAlloc(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
+    const module_id = try allocator.dupe(u8, name);
+    for (module_id) |*byte| {
+        if (byte.* == '-' or byte.* == '.') byte.* = '_';
+    }
+    return module_id;
+}
+
+fn renderPluginScaffoldAlloc(allocator: std.mem.Allocator, name: []const u8, module_id: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator,
+        \\function on_load(ctx)
+        \\  return nil
+        \\end
+        \\
+        \\function render(ctx)
+        \\  return nil
+        \\end
+        \\
+        \\function update(ctx)
+        \\  return nil
+        \\end
+        \\
+        \\function on_unload(ctx)
+        \\  return nil
+        \\end
+        \\
+        \\return {{
+        \\  name = "{s}",
+        \\  version = "0.1.0",
+        \\  api_version = 1,
+        \\  license = "MIT",
+        \\  description = "{s} plugin",
+        \\  capabilities = {{
+        \\    fs_read = {{}},
+        \\    fs_watch = {{}},
+        \\    exec = false,
+        \\    net = false,
+        \\    secrets = false,
+        \\    env_read = {{}},
+        \\    pre_exec = false,
+        \\  }},
+        \\  modules = {{ "{s}" }},
+        \\  on_load = "on_load",
+        \\  render = "render",
+        \\  update = "update",
+        \\  on_unload = "on_unload",
+        \\}}
+        \\
+    , .{ name, name, module_id });
+}
+
+fn renderPluginReadmeAlloc(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator,
+        \\# {s}
+        \\
+        \\Shisa plugin scaffold.
+        \\
+        \\Install locally:
+        \\
+        \\```sh
+        \\shisa plugin install . --plugin-sandbox-strict
+        \\```
+        \\
+    , .{name});
 }
 
 const PluginInstallConfig = struct {
@@ -4953,6 +5052,45 @@ test "parses plugin install args" {
     try std.testing.expect(config.yes);
     try std.testing.expect(config.strict);
     try std.testing.expectError(error.UnknownPluginArgument, parsePluginInstallArgs(&.{"--yes"}));
+}
+
+test "plugin new scaffolds valid strict manifest" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-new-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    try pluginNew(allocator, dir_path, "demo-plugin");
+
+    const plugin_path = try std.fmt.allocPrint(allocator, "{s}/demo-plugin/plugin.lua", .{dir_path});
+    defer allocator.free(plugin_path);
+    const source = try std.fs.cwd().readFileAlloc(allocator, plugin_path, 16 * 1024);
+    defer allocator.free(source);
+    try std.testing.expect(std.mem.indexOf(u8, source, "name = \"demo-plugin\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "modules = { \"demo_plugin\" }") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "on_load = \"on_load\"") != null);
+
+    const readme_path = try std.fmt.allocPrint(allocator, "{s}/demo-plugin/README.md", .{dir_path});
+    defer allocator.free(readme_path);
+    const readme = try std.fs.cwd().readFileAlloc(allocator, readme_path, 16 * 1024);
+    defer allocator.free(readme);
+    try std.testing.expect(std.mem.indexOf(u8, readme, "# demo-plugin") != null);
+
+    var runtime = plugin_lua.Runtime.initSandboxedWithOptions(allocator, .{ .require_root = dir_path }) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    defer runtime.deinit();
+
+    var loaded = try runtime.loadManifestStrict(source);
+    defer loaded.deinit(allocator);
+    try std.testing.expectEqualStrings("demo-plugin", loaded.manifest.name);
+    try std.testing.expectEqualStrings("demo_plugin", loaded.manifest.modules[0]);
+}
+
+test "plugin new rejects invalid names" {
+    try std.testing.expectError(error.InvalidPluginName, pluginNew(std.testing.allocator, "/tmp", "Bad"));
 }
 
 test "plugin enable disable is duplicate safe" {
@@ -5560,7 +5698,7 @@ const help_text =
     \\                print the minimal Pure-compatible preset
     \\  init          write default shisa.toml; --a11y uses the a11y theme
     \\  pin           mark a path as never-evicted
-    \\  plugin        install, list, enable, disable, or trust plugins
+    \\  plugin        new, install, list, enable, disable, or trust plugins
     \\  prompt        render prompt through shisad; --a11y strips ANSI and normalizes glyphs
     \\  stack         dump detected stacked-diff metadata
     \\  supervisor    run shisad under a crash-restart supervisor

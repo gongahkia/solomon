@@ -472,6 +472,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const cwd_test_run = b.addRunArtifact(cwd_tests);
+    const cdhint_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/daemon/modules/cdhint.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const cdhint_test_run = b.addRunArtifact(cdhint_tests);
     const exit_status_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/daemon/modules/exit_status.zig"),
@@ -792,6 +800,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&fsnotify_test_run.step);
     test_step.dependOn(&prompt_cache_test_run.step);
     test_step.dependOn(&cwd_test_run.step);
+    test_step.dependOn(&cdhint_test_run.step);
     test_step.dependOn(&exit_status_test_run.step);
     test_step.dependOn(&jobs_test_run.step);
     test_step.dependOn(&user_host_test_run.step);

@@ -407,7 +407,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [ ] Optional atuin adapter (read atuin's sqlite DB if present)
 
 ### 12.8 cd hint (`cdhint`)
-- [ ] Rule-based project detector (package.json → node; Cargo.toml → rust; etc.)
+- [x] Rule-based project detector (package.json → node; Cargo.toml → rust; etc.)
 - [ ] Compact one-line hint after cd into a recognized project (configurable / disable per dir)
 - [ ] No model required; pure rules
 

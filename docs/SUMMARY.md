@@ -45,6 +45,7 @@
 - [Cloud Cost Glance](cost-glance.md)
 - [Region Drift](region-drift.md)
 - [IaC Workspace](iac-workspace.md)
+- [cd hint](cdhint.md)
 - [IAM Whoami](iam-whoami.md)
 - [SSO Expiry](sso-expiry.md)
 - [Container Provenance](container-provenance.md)

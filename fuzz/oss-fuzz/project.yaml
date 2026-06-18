@@ -1,0 +1,9 @@
+homepage: "https://github.com/gongahkia/shisa"
+main_repo: "https://github.com/gongahkia/shisa.git"
+primary_contact: "angryapplegravy@gmail.com"
+language: c++
+fuzzing_engines:
+  - libfuzzer
+sanitizers:
+  - address
+  - undefined

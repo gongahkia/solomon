@@ -957,7 +957,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 29.5 Bridge fuzz
 - [x] Fuzz every `ctx:*` function for input handling
-- [ ] OSS-Fuzz integration
+- [x] OSS-Fuzz integration
 - [ ] Bug-bounty pool for sandbox escapes
 
 ### 29.6 Plugin lifecycle

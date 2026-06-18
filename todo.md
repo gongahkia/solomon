@@ -994,7 +994,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] a11y (WCAG AAA, ASCII)
 
 ### 30.4 Multi-line layout
-- [ ] Implement `[layout]` parser
+- [x] Implement `[layout]` parser
 - [ ] Filler segment width calc
 - [ ] Right-aligned segments per line
 - [ ] Snapshot tests for each layout shape

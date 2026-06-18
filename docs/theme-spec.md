@@ -104,6 +104,29 @@ Themes may add custom palette slots, but custom slots must be referenced at leas
 
 Separators are plain strings. Color is inherited from the segment unless a later schema adds separator-specific style.
 
+## `[layout]`
+
+Single-line layouts use module id arrays:
+
+```toml
+[layout]
+left = ["cwd", "git_branch"]
+right = ["time"]
+```
+
+Multi-line layouts use indexed tables. Lines render in ascending numeric order.
+
+```toml
+[layout.line.0]
+left = ["cwd", "git_branch"]
+
+[layout.line.1]
+left = ["exit_status", "jobs"]
+right = ["cmd_duration"]
+```
+
+`left` and `right` are optional arrays of segment ids. A theme may use either `[layout]` or `[layout.line.N]`, but not both.
+
 ## `[segments.<id>]`
 
 Segment ids are core module ids or plugin module ids.

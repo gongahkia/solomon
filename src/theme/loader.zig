@@ -44,6 +44,20 @@ pub const Separators = struct {
     }
 };
 
+pub const LayoutLine = struct {
+    left: [][]u8,
+    right: [][]u8,
+};
+
+pub const Layout = struct {
+    lines: []LayoutLine,
+
+    pub fn deinit(self: *Layout, allocator: std.mem.Allocator) void {
+        freeLayoutLines(allocator, self.lines);
+        self.* = undefined;
+    }
+};
+
 pub const Segment = struct {
     id: []u8,
     fg: []u8 = "",
@@ -62,6 +76,7 @@ pub const Theme = struct {
     capabilities: Capabilities = .{},
     palette: []PaletteEntry,
     separators: Separators,
+    layout: Layout,
     segments: []Segment,
 
     pub fn deinit(self: *Theme, allocator: std.mem.Allocator) void {
@@ -70,6 +85,8 @@ pub const Theme = struct {
         freePalette(allocator, self.palette);
         var separators = self.separators;
         separators.deinit(allocator);
+        var layout = self.layout;
+        layout.deinit(allocator);
         freeSegments(allocator, self.segments);
         self.* = undefined;
     }
@@ -86,6 +103,8 @@ const Table = union(enum) {
     capabilities,
     palette,
     separators,
+    layout,
+    layout_line: usize,
     segment: []const u8,
 };
 
@@ -123,6 +142,37 @@ const SeparatorBuilder = struct {
         self.right = null;
         return .{ .segment = segment_separator, .left = left, .right = right };
     }
+};
+
+const LayoutLineBuilder = struct {
+    left: ?[][]u8 = null,
+    right: ?[][]u8 = null,
+    seen_left: bool = false,
+    seen_right: bool = false,
+
+    fn hasKeys(self: LayoutLineBuilder) bool {
+        return self.seen_left or self.seen_right;
+    }
+
+    fn deinit(self: *LayoutLineBuilder, allocator: std.mem.Allocator) void {
+        if (self.left) |value| freeStringArray(allocator, value);
+        if (self.right) |value| freeStringArray(allocator, value);
+        self.* = .{};
+    }
+
+    fn finish(self: *LayoutLineBuilder, allocator: std.mem.Allocator) !LayoutLine {
+        const left = if (self.left) |value| value else try allocator.alloc([]u8, 0);
+        self.left = null;
+        errdefer freeStringArray(allocator, left);
+        const right = if (self.right) |value| value else try allocator.alloc([]u8, 0);
+        self.right = null;
+        return .{ .left = left, .right = right };
+    }
+};
+
+const LayoutLineSlot = struct {
+    index: usize,
+    line: LayoutLineBuilder = .{},
 };
 
 const Trimmed = struct {
@@ -214,6 +264,8 @@ const Parser = struct {
     extends: ?[]u8 = null,
     capabilities: Capabilities = .{},
     separators: SeparatorBuilder = .{},
+    layout_root: LayoutLineBuilder = .{},
+    layout_lines: std.ArrayList(LayoutLineSlot) = .empty,
     palette: std.ArrayList(PaletteEntry) = .empty,
     segments: std.ArrayList(Segment) = .empty,
 
@@ -244,6 +296,11 @@ const Parser = struct {
             var cleanup = separators;
             cleanup.deinit(self.allocator);
         }
+        const layout = try self.finishLayout();
+        errdefer {
+            var cleanup = layout;
+            cleanup.deinit(self.allocator);
+        }
         const palette = try self.palette.toOwnedSlice(self.allocator);
         errdefer freePalette(self.allocator, palette);
         const segments = try self.segments.toOwnedSlice(self.allocator);
@@ -256,6 +313,7 @@ const Parser = struct {
             .capabilities = self.capabilities,
             .palette = palette,
             .separators = separators,
+            .layout = layout,
             .segments = segments,
         };
     }
@@ -264,6 +322,11 @@ const Parser = struct {
         if (self.name) |value| self.allocator.free(value);
         if (self.extends) |value| self.allocator.free(value);
         self.separators.deinit(self.allocator);
+        self.layout_root.deinit(self.allocator);
+        for (self.layout_lines.items) |*slot| {
+            slot.line.deinit(self.allocator);
+        }
+        self.layout_lines.deinit(self.allocator);
         for (self.palette.items) |entry| {
             self.allocator.free(entry.name);
             self.allocator.free(entry.value);
@@ -310,6 +373,11 @@ const Parser = struct {
             .capabilities => try self.parseCapabilitiesKey(line_no, key, value),
             .palette => try self.parsePaletteKey(line_no, key, value),
             .separators => try self.parseSeparatorsKey(line_no, key, value),
+            .layout => try self.parseLayoutKey(line_no, &self.layout_root, key, value),
+            .layout_line => |line_index| {
+                var line = try self.layoutLineForIndex(line_index);
+                try self.parseLayoutKey(line_no, &line.line, key, value);
+            },
             .segment => |segment_id| try self.parseSegmentKey(line_no, segment_id, key, value),
         }
     }
@@ -367,6 +435,16 @@ const Parser = struct {
         }
     }
 
+    fn parseLayoutKey(self: *Parser, line_no: usize, line: *LayoutLineBuilder, key: Trimmed, value: Trimmed) !void {
+        if (std.mem.eql(u8, key.text, "left")) {
+            try self.setLayoutModules(&line.left, &line.seen_left, line_no, key.column, value);
+        } else if (std.mem.eql(u8, key.text, "right")) {
+            try self.setLayoutModules(&line.right, &line.seen_right, line_no, key.column, value);
+        } else {
+            return self.fail(line_no, key.column, "unknown key");
+        }
+    }
+
     fn parseSegmentKey(self: *Parser, line_no: usize, segment_id: []const u8, key: Trimmed, value: Trimmed) !void {
         var current_segment = try self.segmentForId(segment_id);
         if (std.mem.eql(u8, key.text, "fg")) {
@@ -391,6 +469,11 @@ const Parser = struct {
     fn setSeparator(self: *Parser, target: *?[]u8, seen: *bool, line_no: usize, column: usize, value: Trimmed) !void {
         try self.markUnseen(seen, line_no, column);
         target.* = try self.parseStringAlloc(value, line_no);
+    }
+
+    fn setLayoutModules(self: *Parser, target: *?[][]u8, seen: *bool, line_no: usize, column: usize, value: Trimmed) !void {
+        try self.markUnseen(seen, line_no, column);
+        target.* = try self.parseStringArrayAlloc(value, line_no);
     }
 
     fn setSegmentString(self: *Parser, target: *[]u8, line_no: usize, value: Trimmed) !void {
@@ -439,6 +522,48 @@ const Parser = struct {
         };
     }
 
+    fn layoutLineForIndex(self: *Parser, index: usize) !*LayoutLineSlot {
+        for (self.layout_lines.items) |*slot| {
+            if (slot.index == index) return slot;
+        }
+        const insert_at = for (self.layout_lines.items, 0..) |slot, slot_index| {
+            if (index < slot.index) break slot_index;
+        } else self.layout_lines.items.len;
+        try self.layout_lines.insert(self.allocator, insert_at, .{ .index = index });
+        return &self.layout_lines.items[insert_at];
+    }
+
+    fn finishLayout(self: *Parser) !Layout {
+        if (self.layout_root.hasKeys() and self.layout_lines.items.len > 0) {
+            return self.fail(1, 1, "mixed layout tables");
+        }
+        if (self.layout_lines.items.len > 0) {
+            var lines = try self.allocator.alloc(LayoutLine, self.layout_lines.items.len);
+            var initialized: usize = 0;
+            errdefer {
+                for (lines[0..initialized]) |*line| {
+                    freeStringArray(self.allocator, line.left);
+                    freeStringArray(self.allocator, line.right);
+                }
+                self.allocator.free(lines);
+            }
+            for (self.layout_lines.items, 0..) |*slot, index| {
+                lines[index] = try slot.line.finish(self.allocator);
+                initialized += 1;
+            }
+            self.layout_lines.deinit(self.allocator);
+            self.layout_lines = .empty;
+            return .{ .lines = lines };
+        }
+        if (self.layout_root.hasKeys()) {
+            const lines = try self.allocator.alloc(LayoutLine, 1);
+            errdefer self.allocator.free(lines);
+            lines[0] = try self.layout_root.finish(self.allocator);
+            return .{ .lines = lines };
+        }
+        return .{ .lines = try self.allocator.alloc(LayoutLine, 0) };
+    }
+
     fn parseStringAlloc(self: *Parser, value: Trimmed, line_no: usize) ![]u8 {
         if (value.text.len < 2 or value.text[0] != '"' or value.text[value.text.len - 1] != '"') {
             return self.fail(line_no, value.column, "expected string");
@@ -469,6 +594,50 @@ const Parser = struct {
         return out.toOwnedSlice(self.allocator);
     }
 
+    fn parseStringArrayAlloc(self: *Parser, value: Trimmed, line_no: usize) ![][]u8 {
+        if (value.text.len < 2 or value.text[0] != '[' or value.text[value.text.len - 1] != ']') {
+            return self.fail(line_no, value.column, "expected array");
+        }
+
+        var items: std.ArrayList([]u8) = .empty;
+        errdefer {
+            for (items.items) |item| self.allocator.free(item);
+            items.deinit(self.allocator);
+        }
+
+        var index: usize = 1;
+        while (index < value.text.len - 1) {
+            skipSpaces(value.text, &index);
+            if (index >= value.text.len - 1) break;
+            if (value.text[index] != '"') return self.fail(line_no, value.column + index, "expected string");
+            const start = index;
+            index += 1;
+            var escaped = false;
+            while (index < value.text.len - 1) : (index += 1) {
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if (value.text[index] == '\\') {
+                    escaped = true;
+                    continue;
+                }
+                if (value.text[index] == '"') break;
+            }
+            if (index >= value.text.len - 1) return self.fail(line_no, value.column + start, "unterminated string");
+            const item = try self.parseStringAlloc(.{ .text = value.text[start .. index + 1], .column = value.column + start }, line_no);
+            errdefer self.allocator.free(item);
+            try items.append(self.allocator, item);
+            index += 1;
+            skipSpaces(value.text, &index);
+            if (index >= value.text.len - 1) break;
+            if (value.text[index] != ',') return self.fail(line_no, value.column + index, "expected comma");
+            index += 1;
+        }
+
+        return items.toOwnedSlice(self.allocator);
+    }
+
     fn parseIntRange(self: *Parser, value: Trimmed, line_no: usize, min: i64, max: i64) !i64 {
         const parsed = std.fmt.parseInt(i64, value.text, 10) catch return self.fail(line_no, value.column, "expected integer");
         if (parsed < min or parsed > max) return self.fail(line_no, value.column, "integer out of range");
@@ -494,6 +663,13 @@ fn parseTableName(name: []const u8) ?Table {
     if (std.mem.eql(u8, name, "capabilities")) return .capabilities;
     if (std.mem.eql(u8, name, "palette")) return .palette;
     if (std.mem.eql(u8, name, "separators")) return .separators;
+    if (std.mem.eql(u8, name, "layout")) return .layout;
+    if (std.mem.startsWith(u8, name, "layout.line.")) {
+        const raw_index = name["layout.line.".len..];
+        if (raw_index.len == 0) return null;
+        const index = std.fmt.parseInt(usize, raw_index, 10) catch return null;
+        return .{ .layout_line = index };
+    }
     if (std.mem.startsWith(u8, name, "segments.")) {
         const segment_id = name["segments.".len..];
         if (segment_id.len == 0) return null;
@@ -643,8 +819,25 @@ fn findEquals(value: []const u8) ?usize {
     return null;
 }
 
+fn skipSpaces(value: []const u8, index: *usize) void {
+    while (index.* < value.len and isSpace(value[index.*])) : (index.* += 1) {}
+}
+
 fn isSpace(byte: u8) bool {
     return byte == ' ' or byte == '\t' or byte == '\r' or byte == '\n';
+}
+
+fn freeStringArray(allocator: std.mem.Allocator, values: [][]u8) void {
+    for (values) |value| allocator.free(value);
+    allocator.free(values);
+}
+
+fn freeLayoutLines(allocator: std.mem.Allocator, lines: []LayoutLine) void {
+    for (lines) |line| {
+        freeStringArray(allocator, line.left);
+        freeStringArray(allocator, line.right);
+    }
+    allocator.free(lines);
 }
 
 fn freePalette(allocator: std.mem.Allocator, palette: []PaletteEntry) void {
@@ -730,6 +923,53 @@ test "parses all built-in theme files" {
         try std.testing.expect(theme.palette.len >= 6);
         try std.testing.expect(findSegment(theme, "cwd") != null);
     }
+}
+
+test "parses single-line layout" {
+    const source =
+        \\version = 1
+        \\name = "layout"
+        \\
+        \\[layout]
+        \\left = ["cwd", "git_branch"]
+        \\right = ["time"]
+        \\
+    ;
+
+    var diagnostic: Diagnostic = .{};
+    var theme = try parse(std.testing.allocator, source, &diagnostic);
+    defer theme.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 1), theme.layout.lines.len);
+    try std.testing.expectEqual(@as(usize, 2), theme.layout.lines[0].left.len);
+    try std.testing.expectEqualStrings("cwd", theme.layout.lines[0].left[0]);
+    try std.testing.expectEqualStrings("git_branch", theme.layout.lines[0].left[1]);
+    try std.testing.expectEqualStrings("time", theme.layout.lines[0].right[0]);
+}
+
+test "parses indexed multi-line layout" {
+    const source =
+        \\version = 1
+        \\name = "layout-lines"
+        \\
+        \\[layout.line.1]
+        \\left = ["exit_status"]
+        \\right = ["cmd_duration"]
+        \\
+        \\[layout.line.0]
+        \\left = ["cwd", "git_branch"]
+        \\
+    ;
+
+    var diagnostic: Diagnostic = .{};
+    var theme = try parse(std.testing.allocator, source, &diagnostic);
+    defer theme.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 2), theme.layout.lines.len);
+    try std.testing.expectEqualStrings("cwd", theme.layout.lines[0].left[0]);
+    try std.testing.expectEqualStrings("git_branch", theme.layout.lines[0].left[1]);
+    try std.testing.expectEqualStrings("exit_status", theme.layout.lines[1].left[0]);
+    try std.testing.expectEqualStrings("cmd_duration", theme.layout.lines[1].right[0]);
 }
 
 test "resolves palette references" {

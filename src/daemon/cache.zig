@@ -1,6 +1,8 @@
 const std = @import("std");
 
-const persist_magic = "SHISA-CACHE\n";
+const legacy_persist_magic = "SHISA-CACHE\n";
+const persist_magic = "SHISA-CACHE\x00";
+const persist_schema_version: u32 = 1;
 const max_persisted_entries = 1_000_000;
 const max_persisted_bytes = 64 * 1024 * 1024;
 const max_persisted_slice = 16 * 1024 * 1024;
@@ -117,6 +119,7 @@ pub const Store = struct {
         var bytes: std.ArrayList(u8) = .empty;
         defer bytes.deinit(self.allocator);
         try bytes.appendSlice(self.allocator, persist_magic);
+        try appendU32(self.allocator, &bytes, persist_schema_version);
         try appendU32(self.allocator, &bytes, try checkedU32(self.entries.count()));
 
         var it = self.entries.iterator();
@@ -150,7 +153,21 @@ pub const Store = struct {
 
     fn loadFromBytes(self: *Store, contents: []const u8) !void {
         var input = contents;
-        if (!consumePrefix(&input, persist_magic)) return error.InvalidCacheFile;
+        if (consumePrefix(&input, persist_magic)) {
+            const schema_version = try readU32(&input);
+            if (schema_version != persist_schema_version) return error.UnsupportedCacheSchema;
+            try self.loadEntriesFromBytes(input);
+            return;
+        }
+        if (consumePrefix(&input, legacy_persist_magic)) {
+            try self.loadEntriesFromBytes(input);
+            return;
+        }
+        return error.InvalidCacheFile;
+    }
+
+    fn loadEntriesFromBytes(self: *Store, source: []const u8) !void {
+        var input = source;
         const entry_count = try readU32(&input);
         if (entry_count > max_persisted_entries) return error.InvalidCacheFile;
 
@@ -428,6 +445,45 @@ test "persists optional module cache to cache bin" {
     const lang = (try loaded.getAt("language_versions", "/repo", 120)).?;
     try std.testing.expectEqualStrings("py:3.14", lang.output);
     try std.testing.expectEqual(@as(usize, 2), loaded.count());
+}
+
+test "loads legacy unversioned persistent cache as migration" {
+    const allocator = std.testing.allocator;
+    const key = try keyAlloc(allocator, "git_branch", "/repo");
+    defer allocator.free(key);
+
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+    try bytes.appendSlice(allocator, legacy_persist_magic);
+    try appendU32(allocator, &bytes, 1);
+    try appendU32(allocator, &bytes, try checkedU32(key.len));
+    try appendU32(allocator, &bytes, 8);
+    try appendU64(allocator, &bytes, 9);
+    try appendU64(allocator, &bytes, 100);
+    try appendU64(allocator, &bytes, 100);
+    try bytes.appendSlice(allocator, key);
+    try bytes.appendSlice(allocator, "git:main");
+
+    var store = Store.initWithOptions(allocator, .{ .max_entries = 16, .max_age_ns = 0 });
+    defer store.deinit();
+    try store.loadFromBytes(bytes.items);
+
+    const git = (try store.getAt("git_branch", "/repo", 120)).?;
+    try std.testing.expectEqualStrings("git:main", git.output);
+    try std.testing.expectEqual(@as(u64, 9), git.cache_rev);
+}
+
+test "rejects unsupported persistent cache schema" {
+    const allocator = std.testing.allocator;
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+    try bytes.appendSlice(allocator, persist_magic);
+    try appendU32(allocator, &bytes, 999);
+    try appendU32(allocator, &bytes, 0);
+
+    var store = Store.init(allocator);
+    defer store.deinit();
+    try std.testing.expectError(error.UnsupportedCacheSchema, store.loadFromBytes(bytes.items));
 }
 
 test "missing persistent cache file is optional" {

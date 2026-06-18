@@ -19,3 +19,5 @@ Current packs:
 | community templates | incubation | community | Template repos planned before marketplace verification. |
 
 Status changes require a changelog entry and capability review when capabilities change.
+
+Adding a new official pack, graduating a pack, or expanding pack capabilities must update `docs/threat-model.md` in the same change. The update should cover new trust boundaries, declared capabilities, filesystem/env/exec/network access, audit output, and the Phase 32 evidence that exercises the pack.

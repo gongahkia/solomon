@@ -1015,7 +1015,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred โ€
 ### 31.1 Threat model doc
 - [x] Maintain `docs/threat-model.md` per ยง32
 - [x] Annual review (calendar entry)
-- [ ] Update with each new pack
+- [x] Update with each new pack
 
 ### 31.2 Fuzz nightly
 - [ ] Frame deframer

@@ -17,3 +17,4 @@ Are you vouched? If not, expect a 2-vouched-reviewer review.
 - [ ] RFC referenced for protocol, plugin API, security, or theme changes.
 - [ ] User-facing docs updated for flags, config, modules, or behavior changes.
 - [ ] Performance impact considered against warm-render p99 < 2ms.
+- [ ] New/changed official packs update `docs/threat-model.md`, or not applicable.

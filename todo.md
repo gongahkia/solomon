@@ -493,7 +493,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 - [x] `metrics` — JSON metrics dump
 - [x] `reload` — re-read config + plugins
 - [x] `version` — daemon + protocol version
-- [ ] `subscribe` — editor stream (Phase 16)
+- [x] `subscribe` — editor stream (Phase 16)
 
 ### 15.4 Error codes
 - [x] Define enum: `E_VERSION`, `E_OVERSIZE`, `E_MALFORMED`, `E_NOT_READY`, `E_PLUGIN_TIMEOUT`, `E_CAPABILITY_DENIED`, `E_INTERNAL`

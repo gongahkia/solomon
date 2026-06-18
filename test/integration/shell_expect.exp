@@ -1,0 +1,116 @@
+#!/usr/bin/env expect -f
+set timeout 8
+log_user 0
+set root [file normalize [file join [file dirname [info script]] ../..]]
+set env(SHISA_SOCKET) "/tmp/shisa-expect-missing-[pid].sock"
+set env(SHISA_INSTANT) "0"
+set env(SHISA_A11Y) "0"
+set env(SHISA_BIN) [file join $root zig-out bin shisa]
+set env(TERM) "xterm-256color"
+
+proc shell_quote {value} {
+    regsub -all {'} $value {'"'"'} value
+    return "'$value'"
+}
+
+proc require_output {name pattern} {
+    global spawn_id
+    expect {
+        -re $pattern {}
+        timeout {
+            puts stderr "expect $name: missing $pattern"
+            exit 1
+        }
+        eof {
+            puts stderr "expect $name: eof before $pattern"
+            exit 1
+        }
+    }
+}
+
+proc finish {name} {
+    global spawn_id
+    expect {
+        eof {}
+        timeout {
+            puts stderr "expect $name: did not exit"
+            exit 1
+        }
+    }
+}
+
+proc run_zsh {root} {
+    global spawn_id
+    if {[auto_execok zsh] eq ""} {
+        puts stderr "skip expect zsh: zsh not found"
+        return
+    }
+    set init [shell_quote [file join $root init shisa.zsh]]
+    spawn -noecho zsh -f
+    send -- "cd /tmp\r"
+    send -- "source $init\r"
+    send -- "printf 'SHISA_EXPECT:%s\\n' \"\$(shisa_prompt_render)\"\r"
+    send -- "exit\r"
+    require_output zsh {SHISA_EXPECT:/tmp> }
+    finish zsh
+}
+
+proc run_bash {root} {
+    global spawn_id
+    if {[auto_execok bash] eq ""} {
+        puts stderr "skip expect bash: bash not found"
+        return
+    }
+    set init [shell_quote [file join $root init shisa.bash]]
+    spawn -noecho bash --noprofile --norc -i
+    send -- "cd /tmp\r"
+    send -- "source $init\r"
+    require_output bash {/tmp> }
+    send -- "exit\r"
+    finish bash
+}
+
+proc run_fish {root} {
+    global spawn_id
+    if {[auto_execok fish] eq ""} {
+        puts stderr "skip expect fish: fish not found"
+        return
+    }
+    set init [shell_quote [file join $root init shisa.fish]]
+    set cmd "cd /tmp; source $init; printf 'SHISA_EXPECT:%s\\n' (shisa_prompt_render)"
+    spawn -noecho fish --no-config -c $cmd
+    require_output fish {SHISA_EXPECT:/tmp> }
+    finish fish
+}
+
+proc run_nu {root} {
+    global spawn_id
+    if {[auto_execok nu] eq ""} {
+        puts stderr "skip expect nu: nu not found"
+        return
+    }
+    set init [shell_quote [file join $root init shisa.nu]]
+    set cmd "cd /tmp; source $init; print ('SHISA_EXPECT:' + (do \$env.PROMPT_COMMAND))"
+    spawn -noecho nu --no-config-file -c $cmd
+    require_output nu {SHISA_EXPECT:/tmp> }
+    finish nu
+}
+
+proc run_pwsh {root} {
+    global spawn_id
+    if {[auto_execok pwsh] eq ""} {
+        puts stderr "skip expect pwsh: pwsh not found"
+        return
+    }
+    set init [shell_quote [file join $root init shisa.ps1]]
+    set cmd "Set-Location /tmp; . $init; Write-Output (\"SHISA_EXPECT:\" + (shisa_prompt_render))"
+    spawn -noecho pwsh -NoLogo -NoProfile -Command $cmd
+    require_output pwsh {SHISA_EXPECT:/tmp> }
+    finish pwsh
+}
+
+run_zsh $root
+run_bash $root
+run_fish $root
+run_nu $root
+run_pwsh $root

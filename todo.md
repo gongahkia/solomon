@@ -927,7 +927,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Graceful degradation matrix in docs
 
 ### 28.6 Integration tests
-- [ ] expect/pexpect scenarios per shell
+- [x] expect/pexpect scenarios per shell
 - [ ] Verify async fill arrives within N ms
 - [ ] Verify transient prompt shrinks history
 

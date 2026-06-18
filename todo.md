@@ -907,7 +907,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 28.1 Zsh
 - [x] Self-pipe FD wired to `zle reset-prompt`
 - [ ] Test in tmux + plain zsh + alacritty + iTerm
-- [ ] Document `RPS1` interaction
+- [x] Document `RPS1` interaction
 
 ### 28.2 Bash
 - [ ] `bind -x` + escape sequence redraw trick

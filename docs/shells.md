@@ -4,7 +4,7 @@
 
 | Shell | Init file | Prompt hook | Exit/jobs/duration | Async redraw | Transient prompt | Instant prompt | Integration test |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| zsh | `init/shisa.zsh` | `precmd` + `preexec` | yes | `TRAPUSR1` + `zle reset-prompt` | yes | CLI supports `--instant`; hook does not enable by default | `test/integration/zsh_fake_socket.sh` |
+| zsh | `init/shisa.zsh` | `precmd` + `preexec` | yes | self-pipe `zle -F` + `zle reset-prompt` | yes | CLI supports `--instant`; hook does not enable by default | `test/integration/zsh_fake_socket.sh` |
 | bash | `init/shisa.bash` | `PROMPT_COMMAND` + `DEBUG` trap | yes | `bind -x` on `\C-x\C-s` | no | CLI supports `--instant`; hook does not enable by default | `test/integration/bash_fake_socket.sh` |
 | fish | `init/shisa.fish` | `fish_prompt` + `fish_preexec` | yes | `emit shisa_async_redraw` + `commandline -f repaint` | no | enabled by default via `--instant` | `test/integration/fish_fake_socket.sh` |
 | nushell | `init/shisa.nu` | `$env.PROMPT_COMMAND` | exit/jobs yes; duration 0 | documented limitation | no | CLI supports `--instant`; hook off by default | `test/integration/nu_fake_socket.sh` |
@@ -21,8 +21,11 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 - Requires zsh 5.0 or newer.
 - Captures duration with `zsh/datetime` and `$EPOCHREALTIME`.
 - Uses `%~> ` as fallback when the daemon socket is missing.
-- Redraw path is signal-driven: `TRAPUSR1` calls `zle reset-prompt`.
+- Redraw path is signal-driven: `TRAPUSR1` writes to a self-pipe when available; `zle -F` drains it and calls `zle reset-prompt`.
 - Transient prompt replaces accepted lines with `%~> `.
+- Shisa sets `PROMPT` only. It does not assign `RPS1`/`RPROMPT`; existing right prompts keep working after the init file is sourced.
+- Async redraw calls `zle reset-prompt`, so zsh recalculates both `PROMPT` and `RPS1`/`RPROMPT` when those prompts contain substitutions.
+- If another plugin owns `RPS1`, source that plugin before or after Shisa based on which plugin should define the right prompt; Shisa will not overwrite it.
 - When `SHISA_PROD_GUARD=1`, `preexec` sends `shisa cloud preexec --socket <socket> --shell zsh -- <command>` to the daemon.
 
 ## bash

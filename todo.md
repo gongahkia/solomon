@@ -744,7 +744,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Detect RTL locale at session start
 - [x] Segment-order reversal opt-in
 - [x] Fixture strings for Arabic, Hebrew, Persian
-- [ ] Snapshot tests for RTL rendering
+- [x] Snapshot tests for RTL rendering
 
 ### 22.3 CJK width
 - [ ] Implement UAX-11 East Asian Width handling

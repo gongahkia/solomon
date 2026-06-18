@@ -600,6 +600,7 @@ const PromptFixtureKind = enum {
     dirty,
     conflict,
     prod,
+    rtl,
 };
 
 const PromptFixture = struct {
@@ -618,6 +619,7 @@ test "snapshots prompt fixture corpus" {
         .{ .name = "dirty", .kind = .dirty },
         .{ .name = "conflict", .kind = .conflict },
         .{ .name = "prod", .kind = .prod },
+        .{ .name = "rtl", .kind = .rtl },
     };
 
     for (fixtures) |fixture| {
@@ -718,6 +720,7 @@ fn renderPromptFixtureAlloc(allocator: std.mem.Allocator, root_path: []const u8,
     };
 
     const is_prod = fixture.kind == .prod;
+    const is_rtl = fixture.kind == .rtl;
     var rendered = try renderPipeline(allocator, .{
         .git_branch = &git_cache,
         .language_versions = &language_cache,
@@ -725,9 +728,9 @@ fn renderPromptFixtureAlloc(allocator: std.mem.Allocator, root_path: []const u8,
     }, .{
         .cwd = cwd_path,
         .home = home_path,
-        .exit = if (fixture.kind == .conflict or is_prod) 2 else 0,
-        .jobs = if (is_prod) 2 else 0,
-        .duration_ms = if (is_prod) 1500 else 0,
+        .exit = if (fixture.kind == .conflict or is_prod or is_rtl) 2 else 0,
+        .jobs = if (is_prod) 2 else if (is_rtl) 1 else 0,
+        .duration_ms = if (is_prod or is_rtl) 1500 else 0,
         .time = is_prod,
         .no_async = true,
         .timestamp = 3660,
@@ -736,6 +739,8 @@ fn renderPromptFixtureAlloc(allocator: std.mem.Allocator, root_path: []const u8,
         .host = if (is_prod) "prod-bastion" else "h",
         .aws_profile = if (is_prod) "prod" else null,
         .aws_region = if (is_prod) "us-west-2" else null,
+        .rtl = is_rtl,
+        .rtl_reverse = is_rtl,
     }, if (is_prod) prod_pipeline[0..] else base_pipeline[0..]);
     defer rendered.deinit(allocator);
     return allocator.dupe(u8, rendered.prompt);
@@ -750,6 +755,7 @@ fn setupPromptFixture(allocator: std.mem.Allocator, cwd_path: []const u8, home_p
         .dirty => try writeFileAbsoluteAlloc(allocator, cwd_path, "dirty.txt", "dirty\n"),
         .conflict => try setupConflictFixture(allocator, cwd_path),
         .prod => try setupProdFixture(allocator, cwd_path, home_path),
+        .rtl => {},
     }
 }
 

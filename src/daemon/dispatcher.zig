@@ -63,6 +63,11 @@ pub const SlowWarning = struct {
     elapsed_ns: u64,
 };
 
+pub const LayoutLineInput = struct {
+    left: []const u8,
+    right: []const u8 = "",
+};
+
 const slow_warning_ns = 5 * std.time.ns_per_ms;
 
 pub const RenderInput = struct {
@@ -186,6 +191,18 @@ pub fn renderAlignedLineAlloc(allocator: std.mem.Allocator, left: []const u8, ri
     try out.appendSlice(allocator, left);
     try out.appendNTimes(allocator, ' ', fillerWidth(left, right, cols));
     try out.appendSlice(allocator, right);
+    return out.toOwnedSlice(allocator);
+}
+
+pub fn renderLayoutLinesAlloc(allocator: std.mem.Allocator, lines: []const LayoutLineInput, cols: u16) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    for (lines) |line| {
+        const rendered = try renderAlignedLineAlloc(allocator, line.left, line.right, cols);
+        defer allocator.free(rendered);
+        try out.appendSlice(allocator, rendered);
+        try out.append(allocator, '\n');
+    }
     return out.toOwnedSlice(allocator);
 }
 
@@ -538,8 +555,27 @@ test "right-aligns through control sequences" {
     try std.testing.expectEqual(@as(usize, 8), visibleWidth(line));
 }
 
+test "snapshots layout shapes" {
+    try expectLayoutSnapshot("left-only", &.{.{ .left = "cwd git" }}, 16);
+    try expectLayoutSnapshot("right-aligned", &.{.{ .left = "cwd", .right = "time" }}, 12);
+    try expectLayoutSnapshot("multi-line", &.{
+        .{ .left = "cwd", .right = "time" },
+        .{ .left = "exit:2", .right = "jobs:1" },
+    }, 16);
+}
+
 test "counts unicode glyphs as one visible cell for layout filler" {
     try std.testing.expectEqual(@as(usize, 3), visibleWidth("a→b"));
+}
+
+fn expectLayoutSnapshot(name: []const u8, lines: []const LayoutLineInput, cols: u16) !void {
+    const actual = try renderLayoutLinesAlloc(std.testing.allocator, lines, cols);
+    defer std.testing.allocator.free(actual);
+    const path = try std.fmt.allocPrint(std.testing.allocator, "test/snapshots/layout/{s}.txt", .{name});
+    defer std.testing.allocator.free(path);
+    const expected = try std.fs.cwd().readFileAlloc(std.testing.allocator, path, 4096);
+    defer std.testing.allocator.free(expected);
+    try std.testing.expectEqualStrings(expected, actual);
 }
 
 fn runGit(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !void {

@@ -1,0 +1,2 @@
+cwd         time
+exit:2    jobs:1

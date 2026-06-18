@@ -997,7 +997,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 - [x] Implement `[layout]` parser
 - [x] Filler segment width calc
 - [x] Right-aligned segments per line
-- [ ] Snapshot tests for each layout shape
+- [x] Snapshot tests for each layout shape
 
 ### 30.5 Glyph fallback
 - [ ] Glyph tier resolver (nerdfont → unicode → ascii)

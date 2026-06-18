@@ -8,6 +8,7 @@
 
 - [k8s Context Safety in 60 Seconds](recipes/k8s-context-safety.md)
 - [AI Hotkey Suggestion with a Local Model](recipes/ai-hotkey-local-model.md)
+- [Local Semantic History Search with Ollama Embeddings](recipes/histsearch-local-embeddings.md)
 - [Stacked-Diff Workflow with Graphite + Shisa](recipes/graphite-stacked-diff-workflow.md)
 - [Custom Theme Inheriting from okiya-night](recipes/custom-theme-okiya-night.md)
 - [Migrating from Powerlevel10k Step-by-Step](recipes/migrate-from-powerlevel10k.md)

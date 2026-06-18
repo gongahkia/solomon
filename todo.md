@@ -401,7 +401,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [ ] Maintain a curated set of common error → fix patterns (rules-first, SLM-second)
 
 ### 12.7 Semantic history search (`histsearch`)
-- [ ] Local embedding model recipe (`nomic-embed-text` via Ollama, or candle/llama.cpp embedding)
+- [x] Local embedding model recipe (`nomic-embed-text` via Ollama, or candle/llama.cpp embedding)
 - [ ] Index history into a local vector store (sqlite-vss / lancedb in-process)
 - [ ] Hotkey to fuzzy-semantic-search history
 - [ ] Optional atuin adapter (read atuin's sqlite DB if present)

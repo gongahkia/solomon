@@ -1054,6 +1054,66 @@ test "resolves glyph tiers" {
     try std.testing.expectEqualStrings("\xe2\x86\x92", resolveSegmentGlyph(segment_with_unicode_glyph, .unicode));
 }
 
+test "fuzz theme render state invariants" {
+    return std.testing.fuzz({}, fuzzThemeRenderState, .{
+        .corpus = &.{
+            "",
+            "version = 1\nname = \"minimal\"\n",
+            \\version = 1
+            \\name = "fuzz"
+            \\
+            \\[capabilities]
+            \\color = "ansi256"
+            \\glyphs = "ascii"
+            \\
+            \\[palette]
+            \\fg = "#ffffff"
+            \\muted = "8"
+            \\accent = "39"
+            \\success = "34"
+            \\warning = "220"
+            \\danger = "196"
+            \\
+            \\[segments.cwd]
+            \\fg = "@accent"
+            \\glyph = ">"
+            \\ascii = "cwd:"
+            \\
+        },
+    });
+}
+
+fn fuzzThemeRenderState(_: void, input: []const u8) !void {
+    if (input.len > 4096) return;
+    var diagnostic: Diagnostic = .{};
+    var theme = parse(std.testing.allocator, input, &diagnostic) catch return;
+    defer theme.deinit(std.testing.allocator);
+
+    const failures = try validateAlloc(std.testing.allocator, theme);
+    defer std.testing.allocator.free(failures);
+    if (failures.len != 0) return;
+
+    const color_caps = [_]contrast.ColorCaps{ .none, .@"16", .@"256", .truecolor };
+    const glyph_tiers = [_]GlyphTier{ .ascii, .unicode, .nerdfont };
+
+    for (theme.segments) |segment| {
+        for (color_caps) |cap| {
+            try formatSegmentColorRef(segment.fg, theme, cap, .foreground);
+            try formatSegmentColorRef(segment.bg, theme, cap, .background);
+        }
+        for (glyph_tiers) |tier| {
+            _ = resolveSegmentGlyph(segment, tier);
+        }
+    }
+}
+
+fn formatSegmentColorRef(ref: []const u8, theme: Theme, cap: contrast.ColorCaps, role: contrast.ColorRole) !void {
+    if (ref.len == 0) return;
+    const rgb = resolvePaletteColor(theme, ref) orelse return;
+    const sgr = try contrast.formatSgrColorAlloc(std.testing.allocator, role, rgb, cap);
+    std.testing.allocator.free(sgr);
+}
+
 test "resolves palette references" {
     const source =
         \\version = 1

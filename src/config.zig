@@ -10,6 +10,7 @@ pub const default_config_text =
     \\
     \\[prompt]
     \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+    \\right_modules = []
     \\rtl_reverse = false
     \\
     \\[modules.cwd]
@@ -56,6 +57,7 @@ pub const a11y_config_text =
     \\
     \\[prompt]
     \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+    \\right_modules = []
     \\rtl_reverse = false
     \\
     \\[modules.cwd]
@@ -237,12 +239,14 @@ pub const Config = struct {
     version: u32,
     theme: []u8,
     prompt_modules: []ModuleId,
+    right_prompt_modules: []ModuleId,
     prompt: PromptOptions = .{},
     modules: ModuleOptions = .{},
 
     pub fn deinit(self: *Config, allocator: std.mem.Allocator) void {
         allocator.free(self.theme);
         allocator.free(self.prompt_modules);
+        allocator.free(self.right_prompt_modules);
         self.* = undefined;
     }
 };
@@ -269,6 +273,7 @@ const Seen = struct {
     version: bool = false,
     theme: bool = false,
     prompt_modules: bool = false,
+    prompt_right_modules: bool = false,
     prompt_rtl_reverse: bool = false,
     cwd_truncate_to: bool = false,
     cwd_home_tilde: bool = false,
@@ -321,6 +326,7 @@ const Parser = struct {
     seen: Seen = .{},
     theme: ?[]u8 = null,
     prompt_modules: std.ArrayList(ModuleId) = .empty,
+    right_prompt_modules: std.ArrayList(ModuleId) = .empty,
     prompt: PromptOptions = .{},
     modules: ModuleOptions = .{},
 
@@ -345,11 +351,17 @@ const Parser = struct {
             try self.prompt_modules.toOwnedSlice(self.allocator)
         else
             try self.allocator.dupe(ModuleId, default_modules[0..]);
+        errdefer self.allocator.free(modules);
+        const right_modules = if (self.seen.prompt_right_modules)
+            try self.right_prompt_modules.toOwnedSlice(self.allocator)
+        else
+            try self.allocator.dupe(ModuleId, &.{});
 
         return .{
             .version = 1,
             .theme = theme,
             .prompt_modules = modules,
+            .right_prompt_modules = right_modules,
             .prompt = self.prompt,
             .modules = self.modules,
         };
@@ -358,6 +370,7 @@ const Parser = struct {
     fn deinitWorking(self: *Parser) void {
         if (self.theme) |value| self.allocator.free(value);
         self.prompt_modules.deinit(self.allocator);
+        self.right_prompt_modules.deinit(self.allocator);
     }
 
     fn parseLine(self: *Parser, line_no: usize, line: []const u8) !void {
@@ -426,7 +439,10 @@ const Parser = struct {
     fn parsePromptKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
         if (std.mem.eql(u8, key.text, "modules")) {
             try self.markUnseen(&self.seen.prompt_modules, line_no, key.column);
-            try self.parseModuleArray(value, line_no);
+            try self.parseModuleArray(&self.prompt_modules, value, line_no);
+        } else if (std.mem.eql(u8, key.text, "right_modules")) {
+            try self.markUnseen(&self.seen.prompt_right_modules, line_no, key.column);
+            try self.parseModuleArray(&self.right_prompt_modules, value, line_no);
         } else if (std.mem.eql(u8, key.text, "rtl_reverse")) {
             try self.markUnseen(&self.seen.prompt_rtl_reverse, line_no, key.column);
             self.prompt.rtl_reverse = try self.parseBool(value, line_no);
@@ -578,7 +594,7 @@ const Parser = struct {
         }
     }
 
-    fn parseModuleArray(self: *Parser, value: Trimmed, line_no: usize) !void {
+    fn parseModuleArray(self: *Parser, modules: *std.ArrayList(ModuleId), value: Trimmed, line_no: usize) !void {
         if (value.text.len < 2 or value.text[0] != '[' or value.text[value.text.len - 1] != ']') {
             return self.fail(line_no, value.column, "expected array");
         }
@@ -596,10 +612,10 @@ const Parser = struct {
             const raw_id = value.text[start..index];
             if (std.mem.indexOfScalar(u8, raw_id, '\\') != null) return self.fail(line_no, value.column + start, "invalid module id");
             const module_id = parseModuleId(raw_id) orelse return self.fail(line_no, value.column + start, "unknown module id");
-            for (self.prompt_modules.items) |existing| {
+            for (modules.items) |existing| {
                 if (existing == module_id) return self.fail(line_no, value.column + start, "duplicate module id");
             }
-            try self.prompt_modules.append(self.allocator, module_id);
+            try modules.append(self.allocator, module_id);
 
             index += 1;
             skipSpaces(value.text, &index);
@@ -828,6 +844,7 @@ test "parses minimal config with defaults" {
     try std.testing.expectEqual(@as(u32, 1), config.version);
     try std.testing.expectEqualStrings("plain", config.theme);
     try std.testing.expectEqualSlices(ModuleId, &.{ .cwd, .git_branch, .exit_status }, config.prompt_modules);
+    try std.testing.expectEqual(@as(usize, 0), config.right_prompt_modules.len);
     try std.testing.expectEqual(@as(u8, 3), config.modules.cwd.truncate_to);
 }
 
@@ -865,6 +882,7 @@ test "default config parses" {
 
     try std.testing.expectEqualStrings("plain", config.theme);
     try std.testing.expectEqualSlices(ModuleId, default_modules[0..], config.prompt_modules);
+    try std.testing.expectEqual(@as(usize, 0), config.right_prompt_modules.len);
 }
 
 test "a11y config parses" {
@@ -874,6 +892,7 @@ test "a11y config parses" {
 
     try std.testing.expectEqualStrings("a11y", config.theme);
     try std.testing.expectEqualSlices(ModuleId, default_modules[0..], config.prompt_modules);
+    try std.testing.expectEqual(@as(usize, 0), config.right_prompt_modules.len);
 }
 
 test "parses per-module options" {
@@ -883,6 +902,7 @@ test "parses per-module options" {
         \\
         \\[prompt]
         \\modules = ["cwd", "time"]
+        \\right_modules = ["cmd_duration"]
         \\rtl_reverse = true
         \\
         \\[modules.cwd]
@@ -936,6 +956,7 @@ test "parses per-module options" {
 
     try std.testing.expectEqualStrings("minimal", config.theme);
     try std.testing.expectEqualSlices(ModuleId, &.{ .cwd, .time }, config.prompt_modules);
+    try std.testing.expectEqualSlices(ModuleId, &.{.cmd_duration}, config.right_prompt_modules);
     try std.testing.expect(config.prompt.rtl_reverse);
     try std.testing.expectEqual(@as(u8, 2), config.modules.cwd.truncate_to);
     try std.testing.expect(!config.modules.cwd.home_tilde);

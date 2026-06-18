@@ -90,6 +90,7 @@ pub const Request = struct {
     session: ?[]const u8 = null,
     request_id: []const u8 = "",
     modules: []const []const u8 = &.{},
+    right_modules: []const []const u8 = &.{},
     tmux_pane: ?[]const u8 = null,
     rtl: bool = false,
     rtl_reverse: bool = false,
@@ -109,6 +110,7 @@ pub const Response = struct {
     v: u32 = version,
     request_id: []const u8 = "",
     prompt: []const u8,
+    right_prompt: ?[]const u8 = null,
     redraw_token: ?[]const u8 = null,
     trailer: ?[]const u8 = null,
     diagnostics: []const Diagnostic = &.{},
@@ -242,6 +244,7 @@ test "request type carries v1 render inputs" {
         .session = "session-1",
         .request_id = "request-1",
         .modules = &.{ "cwd", "cdhint" },
+        .right_modules = &.{"time"},
         .tmux_pane = "%1",
         .cloud_ctx = .{ .azure = false },
         .cdhint = .{ .enabled = false },
@@ -266,6 +269,7 @@ test "request type carries v1 render inputs" {
     try std.testing.expectEqualStrings("request-1", request.request_id);
     try std.testing.expectEqualStrings("cwd", request.modules[0]);
     try std.testing.expectEqualStrings("cdhint", request.modules[1]);
+    try std.testing.expectEqualStrings("time", request.right_modules[0]);
     try std.testing.expectEqualStrings("%1", request.tmux_pane.?);
     try std.testing.expect(!request.cloud_ctx.azure);
     try std.testing.expect(!request.cdhint.enabled);
@@ -278,6 +282,7 @@ test "response type carries prompt metadata and optional redraw token" {
     const response = Response{
         .request_id = "request-1",
         .prompt = "shisa> ",
+        .right_prompt = "time:01:01",
         .redraw_token = "abc",
         .trailer = "right prompt",
         .diagnostics = &diagnostics,
@@ -287,6 +292,7 @@ test "response type carries prompt metadata and optional redraw token" {
     try std.testing.expectEqual(@as(u32, 1), response.v);
     try std.testing.expectEqualStrings("request-1", response.request_id);
     try std.testing.expectEqualStrings("shisa> ", response.prompt);
+    try std.testing.expectEqualStrings("time:01:01", response.right_prompt.?);
     try std.testing.expectEqualStrings("abc", response.redraw_token.?);
     try std.testing.expectEqualStrings("right prompt", response.trailer.?);
     try std.testing.expectEqualStrings("slow_module", response.diagnostics[0].code);
@@ -510,7 +516,7 @@ test "snapshots every op and protocol shape" {
         };
         const request_json = try encodeAlloc(allocator, request);
         defer allocator.free(request_json);
-        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"modules\":[],\"rtl\":false,\"rtl_reverse\":false,\"cwd_options\":{{\"truncate_to\":3,\"home_tilde\":true,\"max_width\":0}},\"cloud_ctx\":{{\"aws\":true,\"gcp\":true,\"azure\":true,\"kubernetes\":true}},\"cdhint\":{{\"enabled\":true}},\"tmux_pane_options\":{{\"enabled\":true}},\"risk_tier\":{{\"unknown_bg\":\"muted\",\"dev_bg\":\"success\",\"staging_bg\":\"warning\",\"prod_bg\":\"danger\"}}}}", .{ op_name, request_id });
+        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"modules\":[],\"right_modules\":[],\"rtl\":false,\"rtl_reverse\":false,\"cwd_options\":{{\"truncate_to\":3,\"home_tilde\":true,\"max_width\":0}},\"cloud_ctx\":{{\"aws\":true,\"gcp\":true,\"azure\":true,\"kubernetes\":true}},\"cdhint\":{{\"enabled\":true}},\"tmux_pane_options\":{{\"enabled\":true}},\"risk_tier\":{{\"unknown_bg\":\"muted\",\"dev_bg\":\"success\",\"staging_bg\":\"warning\",\"prod_bg\":\"danger\"}}}}", .{ op_name, request_id });
         defer allocator.free(expected_request);
         try std.testing.expectEqualStrings(expected_request, request_json);
 

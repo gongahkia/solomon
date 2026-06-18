@@ -40,7 +40,7 @@ Items not listed above are unsupported unless a later importer row maps them exp
 
 Tide is Fish-only and stores prompt state in `tide_*` Fish variables. The importer reads exported `tide_*` settings, not Tide functions or generated prompt functions.
 
-- `tide_right_prompt_items` has no exact schema-v1 target while Shisa right prompt work is open, so items are mapped into the same module pipeline.
+- `tide_right_prompt_items` maps to `[prompt].right_modules` for zsh `RPROMPT` and Fish `fish_right_prompt`.
 - `tide_left_prompt_frame_enabled`, `tide_right_prompt_frame_enabled`, separators, prefixes, and suffixes are layout/theme details; schema v1 does not preserve Tide's Powerline frame exactly.
 - `tide_prompt_transient_enabled` is not imported because Shisa's Fish hook does not implement transient prompt replacement.
 - Fish-local modes such as `vi_mode`, `private_mode`, and `shlvl` are unsupported unless represented by a mapped item.

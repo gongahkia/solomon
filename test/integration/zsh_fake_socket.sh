@@ -14,13 +14,14 @@ fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 sock="/tmp/shisa-zsh-fake-$$.sock"
 out="/tmp/shisa-zsh-fake-$$.out"
+xdg="/tmp/shisa-zsh-xdg-$$"
 
 cleanup() {
   if [[ -n "${server_pid:-}" ]]; then
     kill "$server_pid" >/dev/null 2>&1 || true
     wait "$server_pid" >/dev/null 2>&1 || true
   fi
-  rm -f "$sock" "$out"
+  rm -rf "$sock" "$out" "$xdg"
 }
 trap cleanup EXIT
 
@@ -30,19 +31,24 @@ require "socket"
 sock = ARGV.fetch(0)
 File.unlink(sock) if File.exist?(sock)
 server = UNIXServer.new(sock)
-conn = server.accept
-header = conn.read(4)
-abort("missing frame header") unless header && header.bytesize == 4
-length = header.unpack1("N")
-payload = conn.read(length)
-abort("missing frame payload") unless payload && payload.bytesize == length
-abort("missing a11y color caps") unless payload.include?('"color_caps":"none"')
-abort("missing a11y glyph caps") unless payload.include?('"glyph_caps":"ascii"')
-abort("missing tmux pane") unless payload.include?('"tmux_pane":"%42"')
-response = '{"v":1,"prompt":"fake> ","redraw_token":null}'
-conn.write([response.bytesize].pack("N"))
-conn.write(response)
-conn.close
+2.times do |index|
+  conn = server.accept
+  header = conn.read(4)
+  abort("missing frame header") unless header && header.bytesize == 4
+  length = header.unpack1("N")
+  payload = conn.read(length)
+  abort("missing frame payload") unless payload && payload.bytesize == length
+  abort("missing right modules") unless payload.include?('"right_modules":["time"]')
+  abort("missing tmux pane") unless payload.include?('"tmux_pane":"%42"')
+  if index == 0
+    abort("missing a11y color caps") unless payload.include?('"color_caps":"none"')
+    abort("missing a11y glyph caps") unless payload.include?('"glyph_caps":"ascii"')
+  end
+  response = '{"v":1,"prompt":"fake> ","right_prompt":"right-zsh","redraw_token":null}'
+  conn.write([response.bytesize].pack("N"))
+  conn.write(response)
+  conn.close
+end
 server.close
 RUBY
 server_pid=$!
@@ -57,6 +63,17 @@ done
   exit 1
 }
 
-SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" TMUX_PANE="%42" zsh -fc 'source init/shisa.zsh; print -P "$PROMPT"' >"$out"
+mkdir -p "$xdg/shisa"
+cat >"$xdg/shisa/shisa.toml" <<'EOF'
+version = 1
+theme = "plain"
+
+[prompt]
+modules = ["cwd"]
+right_modules = ["time"]
+EOF
+
+SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" TMUX_PANE="%42" XDG_CONFIG_HOME="$xdg" zsh -fc 'source init/shisa.zsh; print -P "$PROMPT"; shisa_right_prompt_render' >"$out"
 grep -F 'fake> ' "$out" >/dev/null
+grep -F 'right-zsh' "$out" >/dev/null
 zsh -fc 'source init/shisa.zsh; whence shisa_async_self_pipe_setup >/dev/null; whence shisa_async_self_pipe_readable >/dev/null; whence shisa_async_self_pipe_notify >/dev/null'

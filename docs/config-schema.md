@@ -12,6 +12,7 @@ theme = "plain"
 
 [prompt]
 modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+right_modules = []
 rtl_reverse = false
 ```
 
@@ -29,6 +30,7 @@ Unknown top-level keys are invalid.
 | Key | Type | Required | Default | Notes |
 | --- | --- | --- | --- | --- |
 | `modules` | array of strings | no | see below | Ordered left-prompt module pipeline. Values must be unique. |
+| `right_modules` | array of strings | no | `[]` | Ordered right-prompt module pipeline for shells with native right prompt support. Values must be unique. |
 | `rtl_reverse` | bool | no | `false` | Reverse rendered segment order only when the session is detected as RTL. |
 
 Default module order:
@@ -36,6 +38,7 @@ Default module order:
 ```toml
 [prompt]
 modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+right_modules = []
 rtl_reverse = false
 ```
 
@@ -169,7 +172,8 @@ Reads cached token expiry metadata only. Sources are documented in `docs/sso-exp
 
 - `version` must be present and equal to `1`.
 - `[prompt].modules` must be an array of unique strings.
-- Each module in `[prompt].modules` must be a known core module id or a loaded plugin module id.
+- `[prompt].right_modules` must be an array of unique strings.
+- Each module in `[prompt].modules` and `[prompt].right_modules` must be a known core module id or a loaded plugin module id.
 - `[modules.<id>]` must reference a known module id.
 - Unknown keys in known tables are invalid.
 - Type mismatch, range violation, duplicate module id, and unknown module id errors must include file, line, and column.

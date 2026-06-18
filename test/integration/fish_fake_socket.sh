@@ -31,20 +31,25 @@ require "socket"
 sock = ARGV.fetch(0)
 File.unlink(sock) if File.exist?(sock)
 server = UNIXServer.new(sock)
-conn = server.accept
-header = conn.read(4)
-abort("missing frame header") unless header && header.bytesize == 4
-length = header.unpack1("N")
-payload = conn.read(length)
-abort("missing frame payload") unless payload && payload.bytesize == length
-abort("missing fish shell") unless payload.include?('"shell":"fish"')
-abort("missing a11y color caps") unless payload.include?('"color_caps":"none"')
-abort("missing a11y glyph caps") unless payload.include?('"glyph_caps":"ascii"')
-abort("missing tmux pane") unless payload.include?('"tmux_pane":"%42"')
-response = '{"v":1,"prompt":"fake-fish> ","redraw_token":null}'
-conn.write([response.bytesize].pack("N"))
-conn.write(response)
-conn.close
+2.times do |index|
+  conn = server.accept
+  header = conn.read(4)
+  abort("missing frame header") unless header && header.bytesize == 4
+  length = header.unpack1("N")
+  payload = conn.read(length)
+  abort("missing frame payload") unless payload && payload.bytesize == length
+  abort("missing fish shell") unless payload.include?('"shell":"fish"')
+  abort("missing right modules") unless payload.include?('"right_modules":["time"]')
+  abort("missing tmux pane") unless payload.include?('"tmux_pane":"%42"')
+  if index == 0
+    abort("missing a11y color caps") unless payload.include?('"color_caps":"none"')
+    abort("missing a11y glyph caps") unless payload.include?('"glyph_caps":"ascii"')
+  end
+  response = '{"v":1,"prompt":"fake-fish> ","right_prompt":"right-fish","redraw_token":null}'
+  conn.write([response.bytesize].pack("N"))
+  conn.write(response)
+  conn.close
+end
 server.close
 RUBY
 server_pid=$!
@@ -59,14 +64,24 @@ done
   exit 1
 }
 
-mkdir -p "$xdg"
-SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" TMUX_PANE="%42" XDG_CONFIG_HOME="$xdg" fish -c 'source init/shisa.fish; false; fish_prompt' >"$out"
+mkdir -p "$xdg/shisa"
+cat >"$xdg/shisa/shisa.toml" <<'EOF'
+version = 1
+theme = "plain"
+
+[prompt]
+modules = ["cwd"]
+right_modules = ["time"]
+EOF
+
+SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" TMUX_PANE="%42" XDG_CONFIG_HOME="$xdg" fish -c 'source init/shisa.fish; false; fish_prompt; fish_right_prompt' >"$out"
 grep -F 'fake-fish> ' "$out" >/dev/null
+grep -F 'right-fish' "$out" >/dev/null
 
 mkdir -p "$xdg/shisa"
 printf 'cached-fish> ' >"$xdg/shisa/last-prompt"
 SHISA_SOCKET="/tmp/shisa-fish-missing-$$.sock" SHISA_BIN="$root/zig-out/bin/shisa" XDG_CONFIG_HOME="$xdg" fish -c 'source init/shisa.fish; fish_prompt' >"$out"
 grep -F 'cached-fish> ' "$out" >/dev/null
 
-fish -c 'source init/shisa.fish; functions -q fish_prompt; functions -q shisa_async_redraw; emit shisa_async_redraw'
+fish -c 'source init/shisa.fish; functions -q fish_prompt; functions -q fish_right_prompt; functions -q shisa_async_redraw; emit shisa_async_redraw'
 fish -c 'source init/shisa.fish; functions -q shisa_async_redraw; not functions -q fish_async_prompt'

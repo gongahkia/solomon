@@ -43,6 +43,7 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\
         \\[prompt]
         \\modules = [{s}]
+        \\right_modules = []
         \\rtl_reverse = false
         \\```
         \\
@@ -60,6 +61,7 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\| Key | Type | Required | Default | Notes |
         \\| --- | --- | --- | --- | --- |
         \\| `modules` | array of strings | no | see below | Ordered left-prompt module pipeline. Values must be unique. |
+        \\| `right_modules` | array of strings | no | `[]` | Ordered right-prompt module pipeline for shells with native right prompt support. Values must be unique. |
         \\| `rtl_reverse` | bool | no | `false` | Reverse rendered segment order only when the session is detected as RTL. |
         \\
         \\Default module order:
@@ -67,6 +69,7 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\```toml
         \\[prompt]
         \\modules = [{s}]
+        \\right_modules = []
         \\rtl_reverse = false
         \\```
         \\
@@ -163,7 +166,8 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\
         \\- `version` must be present and equal to `1`.
         \\- `[prompt].modules` must be an array of unique strings.
-        \\- Each module in `[prompt].modules` must be a known core module id or a loaded plugin module id.
+        \\- `[prompt].right_modules` must be an array of unique strings.
+        \\- Each module in `[prompt].modules` and `[prompt].right_modules` must be a known core module id or a loaded plugin module id.
         \\- `[modules.<id>]` must reference a known module id.
         \\- Unknown keys in known tables are invalid.
         \\- Type mismatch, range violation, duplicate module id, and unknown module id errors must include file, line, and column.

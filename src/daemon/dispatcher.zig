@@ -155,6 +155,14 @@ pub fn renderDefault(allocator: std.mem.Allocator, caches: CacheSet, input: Rend
 }
 
 pub fn renderPipeline(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec) !RenderedPrompt {
+    return renderPipelineWithTerminator(allocator, caches, input, pipeline, "> ");
+}
+
+pub fn renderSegments(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec) !RenderedPrompt {
+    return renderPipelineWithTerminator(allocator, caches, input, pipeline, "");
+}
+
+fn renderPipelineWithTerminator(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec, terminator: []const u8) !RenderedPrompt {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
     var wrote_segment = false;
@@ -173,7 +181,7 @@ pub fn renderPipeline(allocator: std.mem.Allocator, caches: CacheSet, input: Ren
         }
     }
 
-    try out.appendSlice(allocator, "> ");
+    try out.appendSlice(allocator, terminator);
     return .{
         .prompt = try out.toOwnedSlice(allocator),
         .redraw_token = if (has_async) try allocator.dupe(u8, "pending") else null,
@@ -527,6 +535,38 @@ test "renders opt-in tmux pane module" {
     }, pipeline[0..]);
     defer rendered.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("tmux:%7> ", rendered.prompt);
+}
+
+test "renders segment pipeline without prompt terminator" {
+    var git_cache = git_branch_module.Cache{};
+    defer git_cache.deinit(std.testing.allocator);
+    var language_cache = language_versions_module.Cache{};
+    defer language_cache.deinit(std.testing.allocator);
+    var cloud_cache = cloud_ctx_module.Cache{};
+    defer cloud_cache.deinit(std.testing.allocator);
+    const pipeline = [_]ModuleSpec{
+        .{ .id = .time, .execution_class = .sync },
+        .{ .id = .cmd_duration, .execution_class = .sync },
+    };
+    var rendered = try renderSegments(std.testing.allocator, .{
+        .git_branch = &git_cache,
+        .language_versions = &language_cache,
+        .cloud_ctx = &cloud_cache,
+    }, .{
+        .cwd = "/tmp/project",
+        .home = null,
+        .exit = 0,
+        .jobs = 0,
+        .duration_ms = 1500,
+        .time = true,
+        .no_async = true,
+        .timestamp = 3660,
+        .ssh = null,
+        .user = "u",
+        .host = "h",
+    }, pipeline[0..]);
+    defer rendered.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("time:01:01 took:1.5s", rendered.prompt);
 }
 
 test "renders async placeholder and redraw token" {

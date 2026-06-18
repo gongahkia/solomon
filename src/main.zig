@@ -2870,8 +2870,16 @@ fn renderP10kImportedConfigAlloc(allocator: std.mem.Allocator, imported: Starshi
         try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
     }
     try out.appendSlice(allocator, "]\n");
+    if (imported.right_modules.items.len != 0) {
+        try out.appendSlice(allocator, "right_modules = [");
+        for (imported.right_modules.items, 0..) |module_id, index| {
+            if (index != 0) try out.appendSlice(allocator, ", ");
+            try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+        }
+        try out.appendSlice(allocator, "]\n");
+    }
 
-    if (containsModule(imported, .language_versions) and (imported.python or imported.node or imported.rust or imported.go)) {
+    if (containsAnyModule(imported, .language_versions) and (imported.python or imported.node or imported.rust or imported.go)) {
         try out.appendSlice(allocator, "\n[modules.language_versions]\ndetect = [");
         var count: usize = 0;
         if (imported.python) try appendLanguage(allocator, &out, &count, "python");
@@ -2881,7 +2889,7 @@ fn renderP10kImportedConfigAlloc(allocator: std.mem.Allocator, imported: Starshi
         try out.appendSlice(allocator, "]\n");
     }
 
-    if (containsModule(imported, .time)) {
+    if (containsAnyModule(imported, .time)) {
         try out.appendSlice(allocator, "\n[modules.time]\nformat = \"24h\"\nutc = true\n");
     }
 
@@ -3332,8 +3340,16 @@ fn renderOmpImportedConfigAlloc(allocator: std.mem.Allocator, imported: Starship
         try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
     }
     try out.appendSlice(allocator, "]\n");
+    if (imported.right_modules.items.len != 0) {
+        try out.appendSlice(allocator, "right_modules = [");
+        for (imported.right_modules.items, 0..) |module_id, index| {
+            if (index != 0) try out.appendSlice(allocator, ", ");
+            try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+        }
+        try out.appendSlice(allocator, "]\n");
+    }
 
-    if (containsModule(imported, .language_versions) and (imported.python or imported.node or imported.rust or imported.go)) {
+    if (containsAnyModule(imported, .language_versions) and (imported.python or imported.node or imported.rust or imported.go)) {
         try out.appendSlice(allocator, "\n[modules.language_versions]\ndetect = [");
         var count: usize = 0;
         if (imported.python) try appendLanguage(allocator, &out, &count, "python");
@@ -3343,7 +3359,7 @@ fn renderOmpImportedConfigAlloc(allocator: std.mem.Allocator, imported: Starship
         try out.appendSlice(allocator, "]\n");
     }
 
-    if (containsModule(imported, .time)) {
+    if (containsAnyModule(imported, .time)) {
         try out.appendSlice(allocator, "\n[modules.time]\nformat = \"24h\"\nutc = true\n");
     }
 
@@ -3988,47 +4004,47 @@ fn freeStringList(allocator: std.mem.Allocator, words: *std.ArrayList([]u8)) voi
 
 fn scanTideConfig(allocator: std.mem.Allocator, config: TideConfig, imported: *StarshipImport) !void {
     if (config.find("tide_left_prompt_items")) |setting| {
-        for (setting.values.items) |item| try mapTideItem(allocator, item, imported);
+        for (setting.values.items) |item| try mapTideItem(allocator, item, imported, false);
     }
     if (config.find("tide_right_prompt_items")) |setting| {
-        for (setting.values.items) |item| try mapTideItem(allocator, item, imported);
+        for (setting.values.items) |item| try mapTideItem(allocator, item, imported, true);
     }
 }
 
-fn mapTideItem(allocator: std.mem.Allocator, name: []const u8, imported: *StarshipImport) !void {
+fn mapTideItem(allocator: std.mem.Allocator, name: []const u8, imported: *StarshipImport, right: bool) !void {
     if (std.mem.eql(u8, name, "pwd")) {
-        try appendModule(allocator, imported, .cwd);
+        try appendTideModule(allocator, imported, .cwd, right);
     } else if (std.mem.eql(u8, name, "git")) {
-        try appendModule(allocator, imported, .git_branch);
+        try appendTideModule(allocator, imported, .git_branch, right);
     } else if (std.mem.eql(u8, name, "status")) {
-        try appendModule(allocator, imported, .exit_status);
+        try appendTideModule(allocator, imported, .exit_status, right);
     } else if (std.mem.eql(u8, name, "cmd_duration")) {
-        try appendModule(allocator, imported, .cmd_duration);
+        try appendTideModule(allocator, imported, .cmd_duration, right);
     } else if (std.mem.eql(u8, name, "context")) {
-        try appendModule(allocator, imported, .user_host);
+        try appendTideModule(allocator, imported, .user_host, right);
     } else if (std.mem.eql(u8, name, "jobs")) {
-        try appendModule(allocator, imported, .jobs);
+        try appendTideModule(allocator, imported, .jobs, right);
     } else if (std.mem.eql(u8, name, "python")) {
         imported.python = true;
-        try appendModule(allocator, imported, .language_versions);
+        try appendTideModule(allocator, imported, .language_versions, right);
     } else if (std.mem.eql(u8, name, "node")) {
         imported.node = true;
-        try appendModule(allocator, imported, .language_versions);
+        try appendTideModule(allocator, imported, .language_versions, right);
     } else if (std.mem.eql(u8, name, "rustc")) {
         imported.rust = true;
-        try appendModule(allocator, imported, .language_versions);
+        try appendTideModule(allocator, imported, .language_versions, right);
     } else if (std.mem.eql(u8, name, "go")) {
         imported.go = true;
-        try appendModule(allocator, imported, .language_versions);
+        try appendTideModule(allocator, imported, .language_versions, right);
     } else if (std.mem.eql(u8, name, "aws") or
         std.mem.eql(u8, name, "gcloud") or
         std.mem.eql(u8, name, "kubectl"))
     {
-        try appendModule(allocator, imported, .cloud_ctx);
+        try appendTideModule(allocator, imported, .cloud_ctx, right);
     } else if (std.mem.eql(u8, name, "terraform") or std.mem.eql(u8, name, "pulumi")) {
-        try appendModule(allocator, imported, .iac_workspace);
+        try appendTideModule(allocator, imported, .iac_workspace, right);
     } else if (std.mem.eql(u8, name, "time")) {
-        try appendModule(allocator, imported, .time);
+        try appendTideModule(allocator, imported, .time, right);
     } else if (!isIgnoredTideItem(name)) {
         try appendUnsupported(allocator, imported, name);
     }
@@ -4097,8 +4113,16 @@ fn renderTideImportedConfigAlloc(allocator: std.mem.Allocator, imported: Starshi
         try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
     }
     try out.appendSlice(allocator, "]\n");
+    if (imported.right_modules.items.len != 0) {
+        try out.appendSlice(allocator, "right_modules = [");
+        for (imported.right_modules.items, 0..) |module_id, index| {
+            if (index != 0) try out.appendSlice(allocator, ", ");
+            try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+        }
+        try out.appendSlice(allocator, "]\n");
+    }
 
-    if (containsModule(imported, .language_versions) and (imported.python or imported.node or imported.rust or imported.go)) {
+    if (containsAnyModule(imported, .language_versions) and (imported.python or imported.node or imported.rust or imported.go)) {
         try out.appendSlice(allocator, "\n[modules.language_versions]\ndetect = [");
         var count: usize = 0;
         if (imported.python) try appendLanguage(allocator, &out, &count, "python");
@@ -4108,7 +4132,7 @@ fn renderTideImportedConfigAlloc(allocator: std.mem.Allocator, imported: Starshi
         try out.appendSlice(allocator, "]\n");
     }
 
-    if (containsModule(imported, .time)) {
+    if (containsAnyModule(imported, .time)) {
         try out.appendSlice(allocator, "\n[modules.time]\nformat = \"24h\"\nutc = true\n");
     }
 
@@ -4152,12 +4176,6 @@ fn renderTideMigrationNotesAlloc(allocator: std.mem.Allocator, imported: Starshi
     }
 
     var quirk_count: usize = 0;
-    if (settingHasValues(tide, "tide_right_prompt_items")) {
-        if (quirk_count == 0) try out.appendSlice(allocator, "## Fish/Tide Quirks\n\n");
-        quirk_count += 1;
-        count += 1;
-        try out.appendSlice(allocator, "- `tide_right_prompt_items` was collapsed into `[prompt].modules`; schema v1 has no right-prompt target.\n");
-    }
     if (settingFirstEquals(tide, "tide_prompt_transient_enabled", "true")) {
         if (quirk_count == 0) try out.appendSlice(allocator, "## Fish/Tide Quirks\n\n");
         quirk_count += 1;
@@ -4255,6 +4273,7 @@ fn pureConfigAlloc(allocator: std.mem.Allocator) ![]u8 {
 
 const StarshipImport = struct {
     modules: std.ArrayList(shisa_config.ModuleId) = .empty,
+    right_modules: std.ArrayList(shisa_config.ModuleId) = .empty,
     unsupported: std.ArrayList([]const u8) = .empty,
     python: bool = false,
     node: bool = false,
@@ -4263,6 +4282,7 @@ const StarshipImport = struct {
 
     fn deinit(self: *StarshipImport, allocator: std.mem.Allocator) void {
         self.modules.deinit(allocator);
+        self.right_modules.deinit(allocator);
         for (self.unsupported.items) |name| allocator.free(name);
         self.unsupported.deinit(allocator);
     }
@@ -4465,10 +4485,22 @@ fn isIgnoredStarshipModule(name: []const u8) bool {
 }
 
 fn appendModule(allocator: std.mem.Allocator, imported: *StarshipImport, module_id: shisa_config.ModuleId) !void {
-    for (imported.modules.items) |existing| {
+    try appendModuleTo(allocator, &imported.modules, module_id);
+}
+
+fn appendRightModule(allocator: std.mem.Allocator, imported: *StarshipImport, module_id: shisa_config.ModuleId) !void {
+    try appendModuleTo(allocator, &imported.right_modules, module_id);
+}
+
+fn appendTideModule(allocator: std.mem.Allocator, imported: *StarshipImport, module_id: shisa_config.ModuleId, right: bool) !void {
+    if (right) try appendRightModule(allocator, imported, module_id) else try appendModule(allocator, imported, module_id);
+}
+
+fn appendModuleTo(allocator: std.mem.Allocator, modules: *std.ArrayList(shisa_config.ModuleId), module_id: shisa_config.ModuleId) !void {
+    for (modules.items) |existing| {
         if (existing == module_id) return;
     }
-    try imported.modules.append(allocator, module_id);
+    try modules.append(allocator, module_id);
 }
 
 fn appendUnsupported(allocator: std.mem.Allocator, imported: *StarshipImport, name: []const u8) !void {
@@ -4524,6 +4556,17 @@ fn containsModule(imported: StarshipImport, module_id: shisa_config.ModuleId) bo
         if (existing == module_id) return true;
     }
     return false;
+}
+
+fn containsRightModule(imported: StarshipImport, module_id: shisa_config.ModuleId) bool {
+    for (imported.right_modules.items) |existing| {
+        if (existing == module_id) return true;
+    }
+    return false;
+}
+
+fn containsAnyModule(imported: StarshipImport, module_id: shisa_config.ModuleId) bool {
+    return containsModule(imported, module_id) or containsRightModule(imported, module_id);
 }
 
 fn appendLanguage(allocator: std.mem.Allocator, out: *std.ArrayList(u8), count: *usize, name: []const u8) !void {
@@ -4972,14 +5015,14 @@ test "maps tide items to shisa modules" {
 
     try std.testing.expect(containsModule(imported, .cwd));
     try std.testing.expect(containsModule(imported, .git_branch));
-    try std.testing.expect(containsModule(imported, .exit_status));
-    try std.testing.expect(containsModule(imported, .cmd_duration));
-    try std.testing.expect(containsModule(imported, .user_host));
-    try std.testing.expect(containsModule(imported, .jobs));
-    try std.testing.expect(containsModule(imported, .language_versions));
-    try std.testing.expect(containsModule(imported, .cloud_ctx));
-    try std.testing.expect(containsModule(imported, .iac_workspace));
-    try std.testing.expect(containsModule(imported, .time));
+    try std.testing.expect(containsRightModule(imported, .exit_status));
+    try std.testing.expect(containsRightModule(imported, .cmd_duration));
+    try std.testing.expect(containsRightModule(imported, .user_host));
+    try std.testing.expect(containsRightModule(imported, .jobs));
+    try std.testing.expect(containsRightModule(imported, .language_versions));
+    try std.testing.expect(containsRightModule(imported, .cloud_ctx));
+    try std.testing.expect(containsRightModule(imported, .iac_workspace));
+    try std.testing.expect(containsRightModule(imported, .time));
     try std.testing.expect(imported.node);
     try std.testing.expect(imported.python);
     try std.testing.expect(imported.rust);
@@ -5003,11 +5046,11 @@ test "imports tide config and migration notes" {
 
     try std.testing.expect(std.mem.indexOf(u8, result.config, "# Tide left items: pwd, git, newline, character") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.config, "# Tide right items: status, cmd_duration, context, jobs, bun") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.config, "modules = [\"cwd\", \"git_branch\", \"exit_status\", \"cmd_duration\", \"user_host\", \"jobs\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.config, "modules = [\"cwd\", \"git_branch\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.config, "right_modules = [\"exit_status\", \"cmd_duration\", \"user_host\", \"jobs\"]") != null);
     const notes = result.notes orelse return error.MissingTideNotes;
     try std.testing.expect(std.mem.indexOf(u8, notes, "# Tide Migration Notes") != null);
     try std.testing.expect(std.mem.indexOf(u8, notes, "- `bun`: No core Bun detector.") != null);
-    try std.testing.expect(std.mem.indexOf(u8, notes, "`tide_right_prompt_items` was collapsed") != null);
     try std.testing.expect(std.mem.indexOf(u8, notes, "`tide_prompt_transient_enabled=true` is not imported") != null);
     try std.testing.expect(std.mem.indexOf(u8, notes, "frame/separator/prefix/suffix") != null);
     try std.testing.expect(std.mem.indexOf(u8, notes, "$_tide_color_*") != null);
@@ -6802,6 +6845,7 @@ const PromptConfig = struct {
     explain_a11y: bool = false,
     rtl: bool = false,
     rtl_reverse: bool = false,
+    right: bool = false,
     shell: []const u8 = "zsh",
     cols: u16 = 80,
     rows: u16 = 24,
@@ -6836,6 +6880,7 @@ fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const response_payload = client.requestAlloc(allocator, socket_path, payload) catch |err| response: {
         if (!config.auto_spawn) return err;
         if (try autoSpawnPromptRequestAlloc(allocator, socket_path, payload)) |retried| break :response retried;
+        if (config.right) return;
         const prompt_text = try renderSyncPromptAlloc(allocator, config, cwd);
         defer allocator.free(prompt_text);
         if (config.instant) {
@@ -6850,6 +6895,10 @@ fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
     defer parsed.deinit();
     if (config.instant) {
         try writeInstantPrompt(allocator, parsed.value.prompt);
+    }
+    if (config.right) {
+        if (parsed.value.right_prompt) |right_prompt| try std.fs.File.stdout().writeAll(right_prompt);
+        return;
     }
     try writePromptText(allocator, parsed.value.prompt, config.a11y, cwd);
 }
@@ -6886,6 +6935,8 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
             config.rtl = true;
         } else if (std.mem.eql(u8, arg, "--rtl-reverse")) {
             config.rtl_reverse = true;
+        } else if (std.mem.eql(u8, arg, "--right")) {
+            config.right = true;
         } else if (std.mem.eql(u8, arg, "--shell")) {
             config.shell = try nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--cols")) {
@@ -7222,6 +7273,7 @@ fn nextValue(args: []const []const u8, index: *usize) ![]const u8 {
 const PromptModuleOptions = struct {
     rtl_reverse: bool = false,
     modules: []const shisa_config.ModuleId,
+    right_modules: []const shisa_config.ModuleId,
     owns_modules: bool = false,
     cwd: shisa_config.CwdOptions,
     cloud_ctx: shisa_config.CloudCtxOptions,
@@ -7231,7 +7283,10 @@ const PromptModuleOptions = struct {
     sso_expiry: shisa_config.SsoExpiryOptions,
 
     fn deinit(self: *PromptModuleOptions, allocator: std.mem.Allocator) void {
-        if (self.owns_modules) allocator.free(self.modules);
+        if (self.owns_modules) {
+            allocator.free(self.modules);
+            allocator.free(self.right_modules);
+        }
         self.* = undefined;
     }
 };
@@ -7267,6 +7322,8 @@ fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config: Pro
     defer allocator.free(escaped_shell);
     const modules_json = try promptModulesJsonAlloc(allocator, module_options.modules);
     defer allocator.free(modules_json);
+    const right_modules_json = try promptModulesJsonAlloc(allocator, module_options.right_modules);
+    defer allocator.free(right_modules_json);
     const tmux_pane = std.process.getEnvVarOwned(allocator, "TMUX_PANE") catch null;
     defer if (tmux_pane) |value| allocator.free(value);
     const escaped_tmux_pane = try jsonEscapeAlloc(allocator, tmux_pane orelse "");
@@ -7277,8 +7334,8 @@ fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config: Pro
 
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\",\"modules\":[{s}],\"tmux_pane\":\"{s}\",\"rtl\":{},\"rtl_reverse\":{},\"cwd_options\":{{\"truncate_to\":{d},\"home_tilde\":{},\"max_width\":{d}}},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"cdhint\":{{\"enabled\":{}}},\"tmux_pane_options\":{{\"enabled\":{}}},\"risk_tier\":{{\"unknown_bg\":\"{s}\",\"dev_bg\":\"{s}\",\"staging_bg\":\"{s}\",\"prod_bg\":\"{s}\"}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
-        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), std.posix.getuid(), request_id, modules_json, escaped_tmux_pane, config.rtl, rtl_reverse, module_options.cwd.truncate_to, module_options.cwd.home_tilde, module_options.cwd.max_width, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, module_options.cdhint.enabled, module_options.tmux_pane.enabled, risk_tier_module.colorSlotName(module_options.risk_tier.unknown_bg), risk_tier_module.colorSlotName(module_options.risk_tier.dev_bg), risk_tier_module.colorSlotName(module_options.risk_tier.staging_bg), risk_tier_module.colorSlotName(module_options.risk_tier.prod_bg), module_options.sso_expiry.warning_minutes },
+        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\",\"modules\":[{s}],\"right_modules\":[{s}],\"tmux_pane\":\"{s}\",\"rtl\":{},\"rtl_reverse\":{},\"cwd_options\":{{\"truncate_to\":{d},\"home_tilde\":{},\"max_width\":{d}}},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"cdhint\":{{\"enabled\":{}}},\"tmux_pane_options\":{{\"enabled\":{}}},\"risk_tier\":{{\"unknown_bg\":\"{s}\",\"dev_bg\":\"{s}\",\"staging_bg\":\"{s}\",\"prod_bg\":\"{s}\"}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
+        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), std.posix.getuid(), request_id, modules_json, right_modules_json, escaped_tmux_pane, config.rtl, rtl_reverse, module_options.cwd.truncate_to, module_options.cwd.home_tilde, module_options.cwd.max_width, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, module_options.cdhint.enabled, module_options.tmux_pane.enabled, risk_tier_module.colorSlotName(module_options.risk_tier.unknown_bg), risk_tier_module.colorSlotName(module_options.risk_tier.dev_bg), risk_tier_module.colorSlotName(module_options.risk_tier.staging_bg), risk_tier_module.colorSlotName(module_options.risk_tier.prod_bg), module_options.sso_expiry.warning_minutes },
     );
 }
 
@@ -7304,6 +7361,7 @@ fn defaultPromptModuleOptions() PromptModuleOptions {
     return .{
         .rtl_reverse = false,
         .modules = default_prompt_modules[0..],
+        .right_modules = &.{},
         .cwd = .{},
         .cloud_ctx = .{},
         .cdhint = .{},
@@ -7331,9 +7389,12 @@ fn promptModuleOptions(allocator: std.mem.Allocator) !PromptModuleOptions {
     defer parsed.deinit(allocator);
     const modules = try allocator.dupe(shisa_config.ModuleId, parsed.prompt_modules);
     errdefer allocator.free(modules);
+    const right_modules = try allocator.dupe(shisa_config.ModuleId, parsed.right_prompt_modules);
+    errdefer allocator.free(right_modules);
     return .{
         .rtl_reverse = parsed.prompt.rtl_reverse,
         .modules = modules,
+        .right_modules = right_modules,
         .owns_modules = true,
         .cwd = parsed.modules.cwd,
         .cloud_ctx = parsed.modules.cloud_ctx,
@@ -7441,11 +7502,24 @@ test "prompt args parse rtl flags" {
     try std.testing.expect(config.rtl_reverse);
 }
 
+test "prompt args parse right flag" {
+    const config = try parsePrompt(&.{"--right"});
+    try std.testing.expect(config.right);
+}
+
 test "prompt payload carries rtl flags" {
     const payload = try buildPromptPayload(std.testing.allocator, .{ .rtl = true, .rtl_reverse = true }, "/tmp");
     defer std.testing.allocator.free(payload);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"rtl\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"rtl_reverse\":true") != null);
+}
+
+test "prompt payload carries right modules" {
+    var options = defaultPromptModuleOptions();
+    options.right_modules = &.{.time};
+    const payload = try buildPromptPayloadWithModuleOptions(std.testing.allocator, .{}, "/tmp", options);
+    defer std.testing.allocator.free(payload);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"right_modules\":[\"time\"]") != null);
 }
 
 test "prompt args parse auto spawn" {
@@ -7522,7 +7596,7 @@ const help_text =
     \\  init          write default shisa.toml; --a11y uses the a11y theme
     \\  pin           mark a path as never-evicted
     \\  plugin        new, lint, pack, install, list, enable, disable, or trust plugins
-    \\  prompt        render prompt through shisad; --a11y strips ANSI and normalizes glyphs
+    \\  prompt        render prompt through shisad; --right prints configured right prompt
     \\  render        alias for prompt; --explain-a11y dumps segment labels
     \\  report        write a redacted support bundle .tar.gz
     \\  stack         dump detected stacked-diff metadata

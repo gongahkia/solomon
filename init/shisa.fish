@@ -47,6 +47,9 @@ set -q SHISA_NEXTCMD_SUGGESTION; or set -g SHISA_NEXTCMD_SUGGESTION ""
 set -q SHISA_EXPLAIN_KEYSEQ; or set -g SHISA_EXPLAIN_KEYSEQ \cx\ce
 set -q SHISA_EXPLAIN_LAST_COMMAND; or set -g SHISA_EXPLAIN_LAST_COMMAND ""
 set -q SHISA_EXPLAIN_LAST_OUTPUT; or set -g SHISA_EXPLAIN_LAST_OUTPUT ""
+set -q SHISA_LAST_STATUS; or set -g SHISA_LAST_STATUS 0
+set -q SHISA_LAST_JOBS; or set -g SHISA_LAST_JOBS 0
+set -q SHISA_LAST_DURATION_MS; or set -g SHISA_LAST_DURATION_MS 0
 
 function shisa_socket_path
     if test -n "$SHISA_SOCKET"
@@ -75,6 +78,9 @@ function shisa_prompt_render
     if set -q CMD_DURATION
         set duration_ms $CMD_DURATION
     end
+    set -g SHISA_LAST_STATUS $last_status
+    set -g SHISA_LAST_JOBS $jobs_count
+    set -g SHISA_LAST_DURATION_MS $duration_ms
 
     set -l args prompt --shell fish --cwd "$PWD" --exit "$last_status" --jobs "$jobs_count" --duration-ms "$duration_ms" --socket "$socket_path"
     if test "$SHISA_INSTANT" = 1
@@ -100,6 +106,21 @@ end
 
 function fish_prompt
     shisa_prompt_render
+end
+
+function shisa_right_prompt_render
+    set -l socket_path (shisa_socket_path)
+    test -S "$socket_path"; or return 0
+    set -l args prompt --right --shell fish --cwd "$PWD" --exit "$SHISA_LAST_STATUS" --jobs "$SHISA_LAST_JOBS" --duration-ms "$SHISA_LAST_DURATION_MS" --socket "$socket_path"
+    if test "$SHISA_RTL" = 1
+        set args $args --rtl
+    end
+    command "$SHISA_BIN" $args 2>/dev/null
+    or true
+end
+
+function fish_right_prompt
+    shisa_right_prompt_render
 end
 
 function shisa_preexec_guard --on-event fish_preexec

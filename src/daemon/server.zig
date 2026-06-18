@@ -55,6 +55,7 @@ const RenderRequest = struct {
     rows: u16 = 24,
     request_id: []const u8 = "",
     modules: []const []const u8 = &.{},
+    right_modules: []const []const u8 = &.{},
     tmux_pane: ?[]const u8 = null,
     cloud_ctx: cloud_ctx_module.Options = .{},
     cwd_options: cwd_module.Options = .{},
@@ -470,17 +471,22 @@ pub const Server = struct {
         const cache_key = try renderPromptCacheKeyAlloc(std.heap.page_allocator, parsed.value, cache_context);
         defer std.heap.page_allocator.free(cache_key);
 
-        if (try self.prompt_cache.get(prompt_cache_module, cache_key)) |cached| {
-            self.prompt_cache_hits += 1;
-            const escaped_request_id = try json.escapeAlloc(std.heap.page_allocator, parsed.value.request_id);
-            defer std.heap.page_allocator.free(escaped_request_id);
-            const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, cached.output);
-            defer std.heap.page_allocator.free(escaped_prompt);
-            const elapsed_us = (nowNs() - start_ns) / std.time.ns_per_us;
-            self.recordRender(elapsed_us);
-            return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, elapsed_us });
+        const use_prompt_cache = parsed.value.right_modules.len == 0;
+        if (use_prompt_cache) {
+            if (try self.prompt_cache.get(prompt_cache_module, cache_key)) |cached| {
+                self.prompt_cache_hits += 1;
+                const escaped_request_id = try json.escapeAlloc(std.heap.page_allocator, parsed.value.request_id);
+                defer std.heap.page_allocator.free(escaped_request_id);
+                const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, cached.output);
+                defer std.heap.page_allocator.free(escaped_prompt);
+                const elapsed_us = (nowNs() - start_ns) / std.time.ns_per_us;
+                self.recordRender(elapsed_us);
+                return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"right_prompt\":null,\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, elapsed_us });
+            }
         }
-        self.prompt_cache_misses += 1;
+        if (use_prompt_cache) {
+            self.prompt_cache_misses += 1;
+        }
 
         const cache_set = dispatcher.CacheSet{
             .git_branch = &self.git_branch_cache,
@@ -525,14 +531,24 @@ pub const Server = struct {
             try dispatcher.renderDefault(std.heap.page_allocator, cache_set, render_input);
         defer rendered.deinit(std.heap.page_allocator);
         try self.logSlowWarning(rendered.slow_warning);
+        const right_pipeline = try renderPipelineFromModuleNamesAlloc(std.heap.page_allocator, parsed.value.right_modules);
+        defer if (right_pipeline) |pipeline| std.heap.page_allocator.free(pipeline);
+        var rendered_right = if (right_pipeline) |pipeline|
+            try dispatcher.renderSegments(std.heap.page_allocator, cache_set, render_input, pipeline)
+        else
+            dispatcher.RenderedPrompt{ .prompt = try std.heap.page_allocator.dupe(u8, "") };
+        defer rendered_right.deinit(std.heap.page_allocator);
+        try self.logSlowWarning(rendered_right.slow_warning);
 
         const escaped_request_id = try json.escapeAlloc(std.heap.page_allocator, parsed.value.request_id);
         defer std.heap.page_allocator.free(escaped_request_id);
         const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, rendered.prompt);
         defer std.heap.page_allocator.free(escaped_prompt);
+        const escaped_right_prompt = try json.escapeAlloc(std.heap.page_allocator, rendered_right.prompt);
+        defer std.heap.page_allocator.free(escaped_right_prompt);
         const elapsed_us = (nowNs() - start_ns) / std.time.ns_per_us;
         self.recordRender(elapsed_us);
-        if (rendered.redraw_token == null) {
+        if (use_prompt_cache and rendered.redraw_token == null and rendered_right.redraw_token == null) {
             var store_context = cache_context;
             store_context.snapshot = self.renderCacheSnapshot();
             const store_key = try renderPromptCacheKeyAlloc(std.heap.page_allocator, parsed.value, store_context);
@@ -540,12 +556,13 @@ pub const Server = struct {
             try self.prompt_cache.put(prompt_cache_module, store_key, rendered.prompt, 0);
         }
 
-        if (rendered.redraw_token) |token| {
+        const redraw_token = rendered.redraw_token orelse rendered_right.redraw_token;
+        if (redraw_token) |token| {
             const escaped_token = try json.escapeAlloc(std.heap.page_allocator, token);
             defer std.heap.page_allocator.free(escaped_token);
-            return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"redraw_token\":\"{s}\",\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, escaped_token, elapsed_us });
+            return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"right_prompt\":\"{s}\",\"redraw_token\":\"{s}\",\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, escaped_right_prompt, escaped_token, elapsed_us });
         }
-        return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, elapsed_us });
+        return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"right_prompt\":\"{s}\",\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, escaped_right_prompt, elapsed_us });
     }
 
     fn renderCacheSnapshot(self: *Server) RenderCacheSnapshot {
@@ -1879,6 +1896,28 @@ test "render request modules select tmux pane" {
     const response = try server.renderResponse(request);
     defer std.heap.page_allocator.free(response);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"prompt\":\"tmux:%4> \"") != null);
+}
+
+test "render request right modules return right prompt" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-right-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":1500,\"time\":true,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"right-test\",\"modules\":[\"cwd\"],\"right_modules\":[\"time\",\"cmd_duration\"]}}", .{dir_path});
+    defer allocator.free(request);
+    const response = try server.renderResponse(request);
+    defer std.heap.page_allocator.free(response);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"prompt\":\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"right_prompt\":\"time:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "took:1.5s") != null);
+    try std.testing.expectEqual(@as(usize, 0), server.prompt_cache.count());
 }
 
 test "render prompt cache key ignores request id and includes tuple fields" {

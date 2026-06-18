@@ -129,6 +129,7 @@ shisa_ai_risk_preexec() {
 
 setopt prompt_subst
 PROMPT='$(shisa_prompt_render)'
+RPROMPT='$(shisa_right_prompt_render)'
 
 shisa_async_redraw() {
   emulate -L zsh
@@ -294,4 +295,16 @@ shisa_prompt_render() {
   [[ ${SHISA_A11Y:-0} == 1 ]] && args+=(--a11y)
   [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)
   "${SHISA_BIN}" "${args[@]}"
+}
+
+shisa_right_prompt_render() {
+  emulate -L zsh
+  local socket_path
+  socket_path=$(shisa_socket_path)
+  [[ -S ${socket_path} ]] || return 0
+
+  local -a args
+  args=(prompt --right --shell zsh --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
+  [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)
+  "${SHISA_BIN}" "${args[@]}" 2>/dev/null || true
 }

@@ -31,9 +31,9 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 - Uses `%~> ` as fallback when the daemon socket is missing.
 - Redraw path is signal-driven: `TRAPUSR1` writes to a self-pipe when available; `zle -F` drains it and calls `zle reset-prompt`.
 - Transient prompt replaces accepted lines with `%~> `.
-- Shisa sets `PROMPT` only. It does not assign `RPS1`/`RPROMPT`; existing right prompts keep working after the init file is sourced.
-- Async redraw calls `zle reset-prompt`, so zsh recalculates both `PROMPT` and `RPS1`/`RPROMPT` when those prompts contain substitutions.
-- If another plugin owns `RPS1`, source that plugin before or after Shisa based on which plugin should define the right prompt; Shisa will not overwrite it.
+- Shisa sets `PROMPT` and `RPROMPT`; `RPROMPT` calls `shisa prompt --right` and renders `[prompt].right_modules`.
+- Async redraw calls `zle reset-prompt`, so zsh recalculates both `PROMPT` and `RPROMPT`.
+- If another plugin owns `RPROMPT`, source that plugin after Shisa if it should win.
 - When `SHISA_PROD_GUARD=1`, `preexec` sends `shisa cloud preexec --socket <socket> --shell zsh -- <command>` to the daemon.
 
 ## bash
@@ -52,6 +52,7 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 - Uses `fish_prompt` and `prompt_pwd` fallback.
 - Captures exit via `$status`, jobs via `jobs -p`, and duration via `$CMD_DURATION`.
 - Enables `SHISA_INSTANT=1` by default, so cached prompts render before a daemon request.
+- Defines `fish_right_prompt`, which calls `shisa prompt --right` and renders `[prompt].right_modules`.
 - Redraw path is fish-native: handlers can `emit shisa_async_redraw`, which calls `commandline -f repaint`.
 - Shisa does not source or require `fish-async-prompt`. If that plugin is installed, keep its scheduling separate and emit `shisa_async_redraw` after Shisa async state changes.
 - When `SHISA_PROD_GUARD=1`, `fish_preexec` sends `shisa cloud preexec --socket <socket> --shell fish -- <command>` to the daemon.

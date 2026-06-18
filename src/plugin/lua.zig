@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const manifest_schema = @import("manifest.zig");
 const capability_schema = @import("capability.zig");
 
@@ -15,6 +16,9 @@ const lua_tnumber = 3;
 const lua_tstring = 4;
 const lua_ttable = 5;
 const lua_globalsindex = -10002;
+const lua_maskline = 1 << 2;
+const lua_maskcount = 1 << 3;
+const lua_hook_count = 1;
 
 pub const Vm = enum {
     luajit,
@@ -22,6 +26,8 @@ pub const Vm = enum {
 
 pub const selected_vm: Vm = .luajit;
 pub const default_memory_limit_bytes: usize = 16 * 1024 * 1024;
+pub const default_cpu_budget_ns: u64 = std.time.ns_per_ms;
+pub const default_cpu_hard_limit_ns: u64 = if (builtin.mode == .Debug) 5 * std.time.ns_per_ms else default_cpu_budget_ns;
 
 const always_removed_globals = [_][]const u8{
     "debug",
@@ -34,6 +40,8 @@ const always_removed_globals = [_][]const u8{
 
 const LuaAlloc = *const fn (?*anyopaque, ?*anyopaque, usize, usize) callconv(.c) ?*anyopaque;
 const LuaNewState = *const fn (LuaAlloc, ?*anyopaque) callconv(.c) ?*LuaState;
+const LuaDebug = opaque {};
+const LuaHook = *const fn (?*LuaState, ?*LuaDebug) callconv(.c) void;
 const LuaClose = *const fn (?*LuaState) callconv(.c) void;
 const LuaLOpenLibs = *const fn (?*LuaState) callconv(.c) void;
 const LuaLLoadBuffer = *const fn (?*LuaState, [*]const u8, usize, [*:0]const u8) callconv(.c) CInt;
@@ -50,6 +58,9 @@ const LuaType = *const fn (?*LuaState, CInt) callconv(.c) CInt;
 const LuaGetTop = *const fn (?*LuaState) callconv(.c) CInt;
 const LuaNext = *const fn (?*LuaState, CInt) callconv(.c) CInt;
 const LuaSetTop = *const fn (?*LuaState, CInt) callconv(.c) void;
+const LuaSetHook = *const fn (?*LuaState, ?LuaHook, CInt, CInt) callconv(.c) CInt;
+const LuaPushString = *const fn (?*LuaState, [*:0]const u8) callconv(.c) ?[*:0]const u8;
+const LuaError = *const fn (?*LuaState) callconv(.c) CInt;
 
 const Api = struct {
     lua_newstate: LuaNewState,
@@ -69,6 +80,9 @@ const Api = struct {
     lua_gettop: LuaGetTop,
     lua_next: LuaNext,
     lua_settop: LuaSetTop,
+    lua_sethook: LuaSetHook,
+    lua_pushstring: LuaPushString,
+    lua_error: LuaError,
 };
 
 pub const OwnedManifest = struct {
@@ -112,6 +126,14 @@ pub const OwnedManifest = struct {
 pub const SandboxOptions = struct {
     require_root: ?[]const u8 = null,
     memory_limit_bytes: usize = default_memory_limit_bytes,
+    cpu_budget_ns: u64 = default_cpu_budget_ns,
+    cpu_hard_limit_ns: u64 = default_cpu_hard_limit_ns,
+};
+
+pub const RuntimeOptions = struct {
+    memory_limit_bytes: usize = default_memory_limit_bytes,
+    cpu_budget_ns: u64 = default_cpu_budget_ns,
+    cpu_hard_limit_ns: u64 = default_cpu_hard_limit_ns,
 };
 
 pub const Runtime = struct {
@@ -120,28 +142,39 @@ pub const Runtime = struct {
     api: Api,
     state: *LuaState,
     memory_limiter: *LuaMemoryLimiter,
+    cpu_budget_ns: u64,
+    cpu_hard_limit_ns: u64,
+    last_cpu_elapsed_ns: u64 = 0,
 
     pub fn init(allocator: std.mem.Allocator) !Runtime {
-        return initWithMemoryLimit(allocator, default_memory_limit_bytes);
+        return initWithOptions(allocator, .{});
     }
 
     pub fn initWithMemoryLimit(allocator: std.mem.Allocator, memory_limit_bytes: usize) !Runtime {
+        return initWithOptions(allocator, .{ .memory_limit_bytes = memory_limit_bytes });
+    }
+
+    pub fn initWithOptions(allocator: std.mem.Allocator, options: RuntimeOptions) !Runtime {
         var lib = try openSelectedVm();
         errdefer lib.close();
         const api = try loadApi(&lib);
         const limiter = try allocator.create(LuaMemoryLimiter);
         errdefer allocator.destroy(limiter);
-        limiter.* = .{ .limit = memory_limit_bytes };
+        limiter.* = .{ .limit = options.memory_limit_bytes };
         const state = api.lua_newstate(luaMemoryAlloc, limiter) orelse return error.LuaOutOfMemory;
-        errdefer api.lua_close(state);
         api.luaL_openlibs(state);
-        return .{
+        var runtime = Runtime{
             .allocator = allocator,
             .lib = lib,
             .api = api,
             .state = state,
             .memory_limiter = limiter,
+            .cpu_budget_ns = options.cpu_budget_ns,
+            .cpu_hard_limit_ns = options.cpu_hard_limit_ns,
         };
+        errdefer runtime.deinit();
+        try runtime.disableJit();
+        return runtime;
     }
 
     pub fn initSandboxed(allocator: std.mem.Allocator) !Runtime {
@@ -149,7 +182,11 @@ pub const Runtime = struct {
     }
 
     pub fn initSandboxedWithOptions(allocator: std.mem.Allocator, options: SandboxOptions) !Runtime {
-        var runtime = try initWithMemoryLimit(allocator, options.memory_limit_bytes);
+        var runtime = try initWithOptions(allocator, .{
+            .memory_limit_bytes = options.memory_limit_bytes,
+            .cpu_budget_ns = options.cpu_budget_ns,
+            .cpu_hard_limit_ns = options.cpu_hard_limit_ns,
+        });
         errdefer runtime.deinit();
         if (options.require_root) |root| try runtime.configureLocalRequire(root);
         try runtime.stripDangerousGlobals(options.require_root != null);
@@ -165,10 +202,7 @@ pub const Runtime = struct {
 
     pub fn doString(self: *Runtime, source: []const u8) !void {
         try self.loadBuffer(source, "shisa-string");
-        if (self.api.lua_pcall(self.state, 0, 0, 0) != lua_ok) {
-            self.clearStack();
-            return error.LuaRuntimeError;
-        }
+        try self.protectedCall(0, 0);
         self.clearStack();
     }
 
@@ -182,10 +216,7 @@ pub const Runtime = struct {
 
     fn loadManifestWithMode(self: *Runtime, source: []const u8, strict: bool) !OwnedManifest {
         try self.loadBuffer(source, "plugin.lua");
-        if (self.api.lua_pcall(self.state, 0, 1, 0) != lua_ok) {
-            self.clearStack();
-            return error.LuaRuntimeError;
-        }
+        try self.protectedCall(0, 1);
         defer self.clearStack();
         if (self.api.lua_type(self.state, 1) != lua_ttable) return error.InvalidManifest;
         if (strict) try self.rejectUnknownFields(1, &top_level_manifest_fields);
@@ -249,6 +280,45 @@ pub const Runtime = struct {
         if (self.api.luaL_loadbuffer(self.state, source.ptr, source.len, name_z.ptr) != lua_ok) {
             self.clearStack();
             return error.LuaLoadError;
+        }
+    }
+
+    fn disableJit(self: *Runtime) !void {
+        try self.loadBuffer("if jit then jit.off(true, true) end", "shisa-jit-off");
+        if (self.api.lua_pcall(self.state, 0, 0, 0) != lua_ok) {
+            self.clearStack();
+            return error.LuaRuntimeError;
+        }
+        self.clearStack();
+    }
+
+    fn protectedCall(self: *Runtime, nargs: CInt, nresults: CInt) !void {
+        var budget = LuaExecutionBudget{
+            .start_ns = std.time.nanoTimestamp(),
+            .hard_limit_ns = self.cpu_hard_limit_ns,
+        };
+        const previous_budget = active_lua_budget;
+        const previous_api = active_lua_api;
+        active_lua_budget = &budget;
+        active_lua_api = &self.api;
+        defer {
+            active_lua_budget = previous_budget;
+            active_lua_api = previous_api;
+        }
+
+        _ = self.api.lua_sethook(self.state, luaBudgetHook, lua_maskline | lua_maskcount, lua_hook_count);
+        defer _ = self.api.lua_sethook(self.state, null, 0, 0);
+
+        const status = self.api.lua_pcall(self.state, nargs, nresults, 0);
+        self.last_cpu_elapsed_ns = elapsedNsSince(budget.start_ns);
+        if (status != lua_ok) {
+            self.clearStack();
+            if (budget.hit_hard_limit) return error.LuaCpuBudgetExceeded;
+            return error.LuaRuntimeError;
+        }
+        if (self.last_cpu_elapsed_ns > self.cpu_budget_ns) {
+            self.clearStack();
+            return error.LuaCpuBudgetExceeded;
         }
     }
 
@@ -546,6 +616,31 @@ const LuaMemoryLimiter = struct {
     }
 };
 
+const LuaExecutionBudget = struct {
+    start_ns: i128,
+    hard_limit_ns: u64,
+    hit_hard_limit: bool = false,
+};
+
+threadlocal var active_lua_budget: ?*LuaExecutionBudget = null;
+threadlocal var active_lua_api: ?*const Api = null;
+
+fn luaBudgetHook(state: ?*LuaState, debug: ?*LuaDebug) callconv(.c) void {
+    _ = debug;
+    const budget = active_lua_budget orelse return;
+    if (elapsedNsSince(budget.start_ns) <= budget.hard_limit_ns) return;
+    budget.hit_hard_limit = true;
+    const api = active_lua_api orelse return;
+    _ = api.lua_pushstring(state, "shisa plugin cpu budget exceeded");
+    _ = api.lua_error(state);
+}
+
+fn elapsedNsSince(start_ns: i128) u64 {
+    const elapsed = std.time.nanoTimestamp() - start_ns;
+    if (elapsed <= 0) return 0;
+    return @intCast(@min(elapsed, std.math.maxInt(u64)));
+}
+
 fn luaMemoryAlloc(ud: ?*anyopaque, ptr: ?*anyopaque, osize: usize, nsize: usize) callconv(.c) ?*anyopaque {
     const limiter: *LuaMemoryLimiter = @ptrCast(@alignCast(ud.?));
     const old_size: usize = if (ptr == null) 0 else osize;
@@ -633,6 +728,9 @@ fn loadApi(lib: *std.DynLib) !Api {
         .lua_gettop = lib.lookup(LuaGetTop, "lua_gettop") orelse return error.LuaSymbolMissing,
         .lua_next = lib.lookup(LuaNext, "lua_next") orelse return error.LuaSymbolMissing,
         .lua_settop = lib.lookup(LuaSetTop, "lua_settop") orelse return error.LuaSymbolMissing,
+        .lua_sethook = lib.lookup(LuaSetHook, "lua_sethook") orelse return error.LuaSymbolMissing,
+        .lua_pushstring = lib.lookup(LuaPushString, "lua_pushstring") orelse return error.LuaSymbolMissing,
+        .lua_error = lib.lookup(LuaError, "lua_error") orelse return error.LuaSymbolMissing,
     };
 }
 
@@ -678,6 +776,30 @@ test "runtime enforces configured lua memory limit" {
         \\end
     ));
     try std.testing.expect(runtime.memory_limiter.high_water <= runtime.memory_limiter.limit);
+}
+
+test "runtime reports lua cpu budget overrun" {
+    var runtime = Runtime.initWithOptions(std.testing.allocator, .{ .cpu_budget_ns = 0 }) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    defer runtime.deinit();
+
+    try std.testing.expectError(error.LuaCpuBudgetExceeded, runtime.doString("shisa_cpu_value = 1"));
+}
+
+test "runtime hard-stops runaway lua" {
+    var runtime = Runtime.initWithOptions(std.testing.allocator, .{
+        .cpu_budget_ns = 0,
+        .cpu_hard_limit_ns = std.time.ns_per_ms,
+    }) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    defer runtime.deinit();
+
+    try std.testing.expectError(error.LuaCpuBudgetExceeded, runtime.doString("while true do end"));
+    try std.testing.expect(runtime.last_cpu_elapsed_ns > 0);
 }
 
 test "sandbox strips dangerous globals" {

@@ -95,6 +95,8 @@ pub const RenderInput = struct {
     cloud_ctx: cloud_ctx_module.Options = .{},
     risk_tier: risk_tier_module.BarColors = .{},
     sso_expiry: sso_expiry_module.Options = .{},
+    rtl: bool = false,
+    rtl_reverse: bool = false,
 };
 
 pub const CacheSet = struct {
@@ -150,27 +152,15 @@ pub fn renderPipeline(allocator: std.mem.Allocator, caches: CacheSet, input: Ren
     var has_async = false;
     var slow_warning: ?SlowWarning = null;
 
-    for (pipeline) |spec| {
-        var async_result: ?AsyncRender = null;
-        defer if (async_result) |*value| value.deinit(allocator);
-
-        const start_ns = std.time.nanoTimestamp();
-        const segment = if (spec.execution_class == .async and !input.no_async) async: {
-            async_result = try dispatchAsync(allocator, caches, spec.id, input);
-            if (async_result.?.pending) has_async = true;
-            if (async_result.?.segment) |value| break :async try allocator.dupe(u8, value);
-            if (async_result.?.pending) break :async try placeholderAlloc(allocator, spec.id);
-            break :async null;
-        } else try dispatch(allocator, caches, spec.id, input);
-        const elapsed_ns = @as(u64, @intCast(std.time.nanoTimestamp() - start_ns));
-        if (slow_warning == null and elapsed_ns > slow_warning_ns) {
-            slow_warning = .{ .module_id = spec.id, .elapsed_ns = elapsed_ns };
+    if (input.rtl and input.rtl_reverse) {
+        var index = pipeline.len;
+        while (index > 0) {
+            index -= 1;
+            try appendPipelineSegment(allocator, caches, input, pipeline[index], &out, &wrote_segment, &has_async, &slow_warning);
         }
-        defer if (segment) |value| allocator.free(value);
-        if (segment) |value| {
-            if (wrote_segment) try out.append(allocator, ' ');
-            try out.appendSlice(allocator, value);
-            wrote_segment = true;
+    } else {
+        for (pipeline) |spec| {
+            try appendPipelineSegment(allocator, caches, input, spec, &out, &wrote_segment, &has_async, &slow_warning);
         }
     }
 
@@ -180,6 +170,39 @@ pub fn renderPipeline(allocator: std.mem.Allocator, caches: CacheSet, input: Ren
         .redraw_token = if (has_async) try allocator.dupe(u8, "pending") else null,
         .slow_warning = slow_warning,
     };
+}
+
+fn appendPipelineSegment(
+    allocator: std.mem.Allocator,
+    caches: CacheSet,
+    input: RenderInput,
+    spec: ModuleSpec,
+    out: *std.ArrayList(u8),
+    wrote_segment: *bool,
+    has_async: *bool,
+    slow_warning: *?SlowWarning,
+) !void {
+    var async_result: ?AsyncRender = null;
+    defer if (async_result) |*value| value.deinit(allocator);
+
+    const start_ns = std.time.nanoTimestamp();
+    const segment = if (spec.execution_class == .async and !input.no_async) async: {
+        async_result = try dispatchAsync(allocator, caches, spec.id, input);
+        if (async_result.?.pending) has_async.* = true;
+        if (async_result.?.segment) |value| break :async try allocator.dupe(u8, value);
+        if (async_result.?.pending) break :async try placeholderAlloc(allocator, spec.id);
+        break :async null;
+    } else try dispatch(allocator, caches, spec.id, input);
+    const elapsed_ns = @as(u64, @intCast(std.time.nanoTimestamp() - start_ns));
+    if (slow_warning.* == null and elapsed_ns > slow_warning_ns) {
+        slow_warning.* = .{ .module_id = spec.id, .elapsed_ns = elapsed_ns };
+    }
+    defer if (segment) |value| allocator.free(value);
+    if (segment) |value| {
+        if (wrote_segment.*) try out.append(allocator, ' ');
+        try out.appendSlice(allocator, value);
+        wrote_segment.* = true;
+    }
 }
 
 pub fn fillerWidth(left: []const u8, right: []const u8, cols: u16) usize {
@@ -345,6 +368,41 @@ test "renders default pipeline" {
     defer rendered.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("/tmp/project time:01:01 \x1b[31mexit:2\x1b[0m jobs:1 took:1.2s> ", rendered.prompt);
     try std.testing.expect(rendered.redraw_token == null);
+}
+
+test "renders rtl opt-in reversed segment order" {
+    var git_cache = git_branch_module.Cache{};
+    defer git_cache.deinit(std.testing.allocator);
+    var language_cache = language_versions_module.Cache{};
+    defer language_cache.deinit(std.testing.allocator);
+    var cloud_cache = cloud_ctx_module.Cache{};
+    defer cloud_cache.deinit(std.testing.allocator);
+    const pipeline = [_]ModuleSpec{
+        .{ .id = .cwd, .execution_class = .sync },
+        .{ .id = .exit_status, .execution_class = .sync },
+        .{ .id = .jobs, .execution_class = .sync },
+    };
+    var rendered = try renderPipeline(std.testing.allocator, .{
+        .git_branch = &git_cache,
+        .language_versions = &language_cache,
+        .cloud_ctx = &cloud_cache,
+    }, .{
+        .cwd = "/tmp/project",
+        .home = null,
+        .exit = 2,
+        .jobs = 1,
+        .duration_ms = 0,
+        .time = false,
+        .no_async = true,
+        .timestamp = 0,
+        .ssh = null,
+        .user = "u",
+        .host = "h",
+        .rtl = true,
+        .rtl_reverse = true,
+    }, pipeline[0..]);
+    defer rendered.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("jobs:1 \x1b[31mexit:2\x1b[0m /tmp/project> ", rendered.prompt);
 }
 
 test "renders async placeholder and redraw token" {

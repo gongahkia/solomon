@@ -75,6 +75,8 @@ pub const Request = struct {
     user_id: ?u32 = null,
     session: ?[]const u8 = null,
     request_id: []const u8 = "",
+    rtl: bool = false,
+    rtl_reverse: bool = false,
     cloud_ctx: CloudCtxOptions = .{},
     risk_tier: RiskTierOptions = .{},
 };
@@ -480,7 +482,7 @@ test "snapshots every op and protocol shape" {
         };
         const request_json = try encodeAlloc(allocator, request);
         defer allocator.free(request_json);
-        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"cloud_ctx\":{{\"aws\":true,\"gcp\":true,\"azure\":true,\"kubernetes\":true}},\"risk_tier\":{{\"unknown_bg\":\"muted\",\"dev_bg\":\"success\",\"staging_bg\":\"warning\",\"prod_bg\":\"danger\"}}}}", .{ op_name, request_id });
+        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"rtl\":false,\"rtl_reverse\":false,\"cloud_ctx\":{{\"aws\":true,\"gcp\":true,\"azure\":true,\"kubernetes\":true}},\"risk_tier\":{{\"unknown_bg\":\"muted\",\"dev_bg\":\"success\",\"staging_bg\":\"warning\",\"prod_bg\":\"danger\"}}}}", .{ op_name, request_id });
         defer allocator.free(expected_request);
         try std.testing.expectEqualStrings(expected_request, request_json);
 

@@ -43,6 +43,7 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\
         \\[prompt]
         \\modules = [{s}]
+        \\rtl_reverse = false
         \\```
         \\
         \\## Top-Level Keys
@@ -59,12 +60,14 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\| Key | Type | Required | Default | Notes |
         \\| --- | --- | --- | --- | --- |
         \\| `modules` | array of strings | no | see below | Ordered left-prompt module pipeline. Values must be unique. |
+        \\| `rtl_reverse` | bool | no | `false` | Reverse rendered segment order only when the session is detected as RTL. |
         \\
         \\Default module order:
         \\
         \\```toml
         \\[prompt]
         \\modules = [{s}]
+        \\rtl_reverse = false
         \\```
         \\
         \\Allowed core module ids for schema v1:

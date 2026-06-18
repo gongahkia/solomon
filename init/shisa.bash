@@ -53,11 +53,13 @@ if ! shisa_bash_version_at_least_4; then
     socket_path=$(shisa_bash_legacy_socket_path)
     local jobs_count
     jobs_count=$(jobs -p 2>/dev/null | wc -l | tr -d ' ')
+    local -a rtl_args=()
+    [[ ${SHISA_RTL:-0} == 1 ]] && rtl_args+=(--rtl)
     if [[ -S ${socket_path} ]]; then
       if [[ ${SHISA_A11Y:-0} == 1 ]]; then
-        "${SHISA_BIN}" prompt --shell bash --cwd "${PWD}" --exit "${last_status}" --jobs "${jobs_count:-0}" --duration-ms 0 --no-async --socket "${socket_path}" --a11y 2>/dev/null && return 0
+        "${SHISA_BIN}" prompt --shell bash --cwd "${PWD}" --exit "${last_status}" --jobs "${jobs_count:-0}" --duration-ms 0 --no-async --socket "${socket_path}" --a11y "${rtl_args[@]}" 2>/dev/null && return 0
       else
-        "${SHISA_BIN}" prompt --shell bash --cwd "${PWD}" --exit "${last_status}" --jobs "${jobs_count:-0}" --duration-ms 0 --no-async --socket "${socket_path}" 2>/dev/null && return 0
+        "${SHISA_BIN}" prompt --shell bash --cwd "${PWD}" --exit "${last_status}" --jobs "${jobs_count:-0}" --duration-ms 0 --no-async --socket "${socket_path}" "${rtl_args[@]}" 2>/dev/null && return 0
       fi
     fi
     shisa_bash_legacy_fallback
@@ -193,6 +195,7 @@ shisa_prompt_render() {
   local -a args
   args=(prompt --shell bash --cwd "${PWD}" --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
   [[ ${SHISA_A11Y:-0} == 1 ]] && args+=(--a11y)
+  [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)
   "${SHISA_BIN}" "${args[@]}" || shisa_prompt_fallback
 }
 

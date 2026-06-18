@@ -63,6 +63,7 @@ function global:shisa_prompt_render {
     )
     if ($instant) { $args += "--instant" }
     if ($env:SHISA_A11Y -eq "1") { $args += "--a11y" }
+    if ($env:SHISA_RTL -eq "1") { $args += "--rtl" }
 
     try {
         $rendered = & $env:SHISA_BIN @args 2>$null

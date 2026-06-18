@@ -6037,6 +6037,8 @@ const PromptConfig = struct {
     auto_spawn: bool = false,
     a11y: bool = false,
     explain_a11y: bool = false,
+    rtl: bool = false,
+    rtl_reverse: bool = false,
     shell: []const u8 = "zsh",
     cols: u16 = 80,
     rows: u16 = 24,
@@ -6117,6 +6119,10 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
             config.a11y = true;
         } else if (std.mem.eql(u8, arg, "--explain-a11y")) {
             config.explain_a11y = true;
+        } else if (std.mem.eql(u8, arg, "--rtl")) {
+            config.rtl = true;
+        } else if (std.mem.eql(u8, arg, "--rtl-reverse")) {
+            config.rtl_reverse = true;
         } else if (std.mem.eql(u8, arg, "--shell")) {
             config.shell = try nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--cols")) {
@@ -6403,6 +6409,7 @@ fn nextValue(args: []const []const u8, index: *usize) ![]const u8 {
 }
 
 const PromptModuleOptions = struct {
+    rtl_reverse: bool = false,
     cloud_ctx: shisa_config.CloudCtxOptions,
     risk_tier: shisa_config.RiskTierOptions,
     sso_expiry: shisa_config.SsoExpiryOptions,
@@ -6416,11 +6423,12 @@ fn buildPromptPayload(allocator: std.mem.Allocator, config: PromptConfig, cwd: [
     const request_id = try std.fmt.allocPrint(allocator, "cli-{x}", .{std.crypto.random.int(u64)});
     defer allocator.free(request_id);
     const module_options = try promptModuleOptions(allocator);
+    const rtl_reverse = config.rtl_reverse or module_options.rtl_reverse;
 
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\",\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"risk_tier\":{{\"unknown_bg\":\"{s}\",\"dev_bg\":\"{s}\",\"staging_bg\":\"{s}\",\"prod_bg\":\"{s}\"}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
-        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), std.posix.getuid(), request_id, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, risk_tier_module.colorSlotName(module_options.risk_tier.unknown_bg), risk_tier_module.colorSlotName(module_options.risk_tier.dev_bg), risk_tier_module.colorSlotName(module_options.risk_tier.staging_bg), risk_tier_module.colorSlotName(module_options.risk_tier.prod_bg), module_options.sso_expiry.warning_minutes },
+        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\",\"rtl\":{},\"rtl_reverse\":{},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"risk_tier\":{{\"unknown_bg\":\"{s}\",\"dev_bg\":\"{s}\",\"staging_bg\":\"{s}\",\"prod_bg\":\"{s}\"}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
+        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), std.posix.getuid(), request_id, config.rtl, rtl_reverse, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, risk_tier_module.colorSlotName(module_options.risk_tier.unknown_bg), risk_tier_module.colorSlotName(module_options.risk_tier.dev_bg), risk_tier_module.colorSlotName(module_options.risk_tier.staging_bg), risk_tier_module.colorSlotName(module_options.risk_tier.prod_bg), module_options.sso_expiry.warning_minutes },
     );
 }
 
@@ -6449,6 +6457,7 @@ fn promptModuleOptions(allocator: std.mem.Allocator) !PromptModuleOptions {
     };
     defer parsed.deinit(allocator);
     return .{
+        .rtl_reverse = parsed.prompt.rtl_reverse,
         .cloud_ctx = parsed.modules.cloud_ctx,
         .risk_tier = parsed.modules.risk_tier,
         .sso_expiry = parsed.modules.sso_expiry,
@@ -6544,6 +6553,19 @@ test "prompt args parse a11y" {
 test "prompt args parse explain a11y" {
     const config = try parsePrompt(&.{"--explain-a11y"});
     try std.testing.expect(config.explain_a11y);
+}
+
+test "prompt args parse rtl flags" {
+    const config = try parsePrompt(&.{ "--rtl", "--rtl-reverse" });
+    try std.testing.expect(config.rtl);
+    try std.testing.expect(config.rtl_reverse);
+}
+
+test "prompt payload carries rtl flags" {
+    const payload = try buildPromptPayload(std.testing.allocator, .{ .rtl = true, .rtl_reverse = true }, "/tmp");
+    defer std.testing.allocator.free(payload);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"rtl\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"rtl_reverse\":true") != null);
 }
 
 test "prompt args parse auto spawn" {

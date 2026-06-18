@@ -12,6 +12,7 @@ theme = "plain"
 
 [prompt]
 modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+rtl_reverse = false
 ```
 
 ## Top-Level Keys
@@ -28,12 +29,14 @@ Unknown top-level keys are invalid.
 | Key | Type | Required | Default | Notes |
 | --- | --- | --- | --- | --- |
 | `modules` | array of strings | no | see below | Ordered left-prompt module pipeline. Values must be unique. |
+| `rtl_reverse` | bool | no | `false` | Reverse rendered segment order only when the session is detected as RTL. |
 
 Default module order:
 
 ```toml
 [prompt]
 modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+rtl_reverse = false
 ```
 
 Allowed core module ids for schema v1:

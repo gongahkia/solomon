@@ -61,6 +61,7 @@ if not ("__SHISA_NU_INIT" in $env) {
         ]
         let args = if $instant { $args | append "--instant" } else { $args }
         let args = if (($env.SHISA_A11Y? | default "0") == "1") { $args | append "--a11y" } else { $args }
+        let args = if (($env.SHISA_RTL? | default "0") == "1") { $args | append "--rtl" } else { $args }
         let rendered = (try { run-external $env.SHISA_BIN ...$args e> /dev/null | complete } catch { { stdout: "", exit_code: 1 } })
         if $rendered.exit_code == 0 {
             $rendered.stdout

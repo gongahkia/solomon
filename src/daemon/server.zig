@@ -54,6 +54,8 @@ const RenderRequest = struct {
     cloud_ctx: cloud_ctx_module.Options = .{},
     risk_tier: risk_tier_module.BarColors = .{},
     sso_expiry: sso_expiry_module.Options = .{},
+    rtl: bool = false,
+    rtl_reverse: bool = false,
 };
 
 const PreexecRequest = struct {
@@ -499,6 +501,8 @@ pub const Server = struct {
             .cloud_ctx = parsed.value.cloud_ctx,
             .risk_tier = parsed.value.risk_tier,
             .sso_expiry = parsed.value.sso_expiry,
+            .rtl = parsed.value.rtl,
+            .rtl_reverse = parsed.value.rtl_reverse,
         });
         defer rendered.deinit(std.heap.page_allocator);
         try self.logSlowWarning(rendered.slow_warning);
@@ -1060,6 +1064,8 @@ fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderReques
     try appendKeyString(allocator, &out, "risk_staging_bg", risk_tier_module.colorSlotName(request.risk_tier.staging_bg));
     try appendKeyString(allocator, &out, "risk_prod_bg", risk_tier_module.colorSlotName(request.risk_tier.prod_bg));
     try appendKeyInt(allocator, &out, "sso_warning", request.sso_expiry.warning_minutes);
+    try appendKeyBool(allocator, &out, "rtl", request.rtl);
+    try appendKeyBool(allocator, &out, "rtl_reverse", request.rtl_reverse);
     try appendKeyOptional(allocator, &out, "home", context.home);
     try appendKeyOptional(allocator, &out, "kubeconfig", context.kubeconfig);
     try appendKeyOptional(allocator, &out, "ssh", context.ssh);

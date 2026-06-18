@@ -86,6 +86,9 @@ function shisa_prompt_render
     if test "$SHISA_A11Y" = 1
         set args $args --a11y
     end
+    if test "$SHISA_RTL" = 1
+        set args $args --rtl
+    end
 
     set -l rendered (command "$SHISA_BIN" $args 2>/dev/null)
     if test $status -eq 0

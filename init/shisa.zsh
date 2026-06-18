@@ -292,5 +292,6 @@ shisa_prompt_render() {
   local -a args
   args=(prompt --shell zsh --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
   [[ ${SHISA_A11Y:-0} == 1 ]] && args+=(--a11y)
+  [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)
   "${SHISA_BIN}" "${args[@]}"
 }

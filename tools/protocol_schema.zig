@@ -117,6 +117,8 @@ const schema_json =
     \\        "glyph_caps": { "$ref": "#/$defs/glyphCaps" },
     \\        "user_id": { "type": "integer", "minimum": 0 },
     \\        "session": { "type": "string" },
+    \\        "rtl": { "type": "boolean" },
+    \\        "rtl_reverse": { "type": "boolean" },
     \\        "cloud_ctx": { "$ref": "#/$defs/cloudCtx" },
     \\        "risk_tier": { "$ref": "#/$defs/riskTier" },
     \\        "sso_expiry": { "$ref": "#/$defs/ssoExpiry" }
@@ -144,6 +146,8 @@ const schema_json =
     \\        "glyph_caps": { "$ref": "#/$defs/glyphCaps" },
     \\        "user_id": { "type": "integer", "minimum": 0 },
     \\        "session": { "type": "string" },
+    \\        "rtl": { "type": "boolean" },
+    \\        "rtl_reverse": { "type": "boolean" },
     \\        "cloud_ctx": { "$ref": "#/$defs/cloudCtx" },
     \\        "risk_tier": { "$ref": "#/$defs/riskTier" },
     \\        "sso_expiry": { "$ref": "#/$defs/ssoExpiry" }

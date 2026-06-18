@@ -8,6 +8,7 @@ pub const default_config_text =
     \\
     \\[prompt]
     \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+    \\rtl_reverse = false
     \\
     \\[modules.cwd]
     \\truncate_to = 3
@@ -46,6 +47,7 @@ pub const a11y_config_text =
     \\
     \\[prompt]
     \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+    \\rtl_reverse = false
     \\
     \\[modules.cwd]
     \\truncate_to = 3
@@ -153,6 +155,10 @@ pub const ModuleOptions = struct {
     time: TimeOptions = .{},
 };
 
+pub const PromptOptions = struct {
+    rtl_reverse: bool = false,
+};
+
 pub const CwdOptions = struct {
     truncate_to: u8 = 3,
     home_tilde: bool = true,
@@ -206,6 +212,7 @@ pub const Config = struct {
     version: u32,
     theme: []u8,
     prompt_modules: []ModuleId,
+    prompt: PromptOptions = .{},
     modules: ModuleOptions = .{},
 
     pub fn deinit(self: *Config, allocator: std.mem.Allocator) void {
@@ -235,6 +242,7 @@ const Seen = struct {
     version: bool = false,
     theme: bool = false,
     prompt_modules: bool = false,
+    prompt_rtl_reverse: bool = false,
     cwd_truncate_to: bool = false,
     cwd_home_tilde: bool = false,
     git_branch_show_dirty: bool = false,
@@ -283,6 +291,7 @@ const Parser = struct {
     seen: Seen = .{},
     theme: ?[]u8 = null,
     prompt_modules: std.ArrayList(ModuleId) = .empty,
+    prompt: PromptOptions = .{},
     modules: ModuleOptions = .{},
 
     fn parse(self: *Parser) !Config {
@@ -311,6 +320,7 @@ const Parser = struct {
             .version = 1,
             .theme = theme,
             .prompt_modules = modules,
+            .prompt = self.prompt,
             .modules = self.modules,
         };
     }
@@ -382,9 +392,15 @@ const Parser = struct {
     }
 
     fn parsePromptKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
-        if (!std.mem.eql(u8, key.text, "modules")) return self.fail(line_no, key.column, "unknown key");
-        try self.markUnseen(&self.seen.prompt_modules, line_no, key.column);
-        try self.parseModuleArray(value, line_no);
+        if (std.mem.eql(u8, key.text, "modules")) {
+            try self.markUnseen(&self.seen.prompt_modules, line_no, key.column);
+            try self.parseModuleArray(value, line_no);
+        } else if (std.mem.eql(u8, key.text, "rtl_reverse")) {
+            try self.markUnseen(&self.seen.prompt_rtl_reverse, line_no, key.column);
+            self.prompt.rtl_reverse = try self.parseBool(value, line_no);
+        } else {
+            return self.fail(line_no, key.column, "unknown key");
+        }
     }
 
     fn parseCwdKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
@@ -812,6 +828,7 @@ test "parses per-module options" {
         \\
         \\[prompt]
         \\modules = ["cwd", "time"]
+        \\rtl_reverse = true
         \\
         \\[modules.cwd]
         \\truncate_to = 2
@@ -857,6 +874,7 @@ test "parses per-module options" {
 
     try std.testing.expectEqualStrings("minimal", config.theme);
     try std.testing.expectEqualSlices(ModuleId, &.{ .cwd, .time }, config.prompt_modules);
+    try std.testing.expect(config.prompt.rtl_reverse);
     try std.testing.expectEqual(@as(u8, 2), config.modules.cwd.truncate_to);
     try std.testing.expect(!config.modules.cwd.home_tilde);
     try std.testing.expect(!config.modules.git_branch.show_dirty);

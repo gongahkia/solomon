@@ -1,4 +1,7 @@
 const std = @import("std");
+const contrast = @import("contrast.zig");
+
+pub const Rgb = contrast.Rgb;
 
 pub const Diagnostic = struct {
     message: []const u8 = "",
@@ -130,6 +133,14 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8, diagnostic: *Diag
     };
     errdefer parser.deinitWorking();
     return parser.parse();
+}
+
+pub fn resolvePaletteSlot(theme: Theme, name: []const u8) ?Rgb {
+    return resolvePaletteSlotDepth(theme, name, 0);
+}
+
+pub fn resolvePaletteColor(theme: Theme, value: []const u8) ?Rgb {
+    return resolvePaletteColorDepth(theme, value, 0);
 }
 
 const Parser = struct {
@@ -444,6 +455,23 @@ fn parseGlyphCapability(value: []const u8) ?GlyphCapability {
     return null;
 }
 
+fn resolvePaletteSlotDepth(theme: Theme, name: []const u8, depth: u8) ?Rgb {
+    if (depth > 16) return null;
+    for (theme.palette) |entry| {
+        if (std.mem.eql(u8, entry.name, name)) {
+            return resolvePaletteColorDepth(theme, entry.value, depth + 1);
+        }
+    }
+    return null;
+}
+
+fn resolvePaletteColorDepth(theme: Theme, value: []const u8, depth: u8) ?Rgb {
+    const trimmed = std.mem.trim(u8, value, " \t\r\n\"");
+    if (trimmed.len == 0) return null;
+    if (trimmed[0] == '@') return resolvePaletteSlotDepth(theme, trimmed[1..], depth + 1);
+    return contrast.parseColor(trimmed);
+}
+
 fn stripComment(line: []const u8) []const u8 {
     var in_string = false;
     var escaped = false;
@@ -583,6 +611,45 @@ test "parses all built-in theme files" {
         try std.testing.expect(theme.palette.len >= 6);
         try std.testing.expect(findSegment(theme, "cwd") != null);
     }
+}
+
+test "resolves palette references" {
+    const source =
+        \\version = 1
+        \\name = "refs"
+        \\
+        \\[palette]
+        \\fg = "15"
+        \\accent = "@fg"
+        \\danger = "#ff0000"
+        \\
+    ;
+
+    var diagnostic: Diagnostic = .{};
+    var theme = try parse(std.testing.allocator, source, &diagnostic);
+    defer theme.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(Rgb{ .r = 255, .g = 255, .b = 255 }, resolvePaletteSlot(theme, "accent").?);
+    try std.testing.expectEqual(Rgb{ .r = 255, .g = 0, .b = 0 }, resolvePaletteColor(theme, "@danger").?);
+    try std.testing.expect(resolvePaletteSlot(theme, "missing") == null);
+}
+
+test "rejects palette reference cycles" {
+    const source =
+        \\version = 1
+        \\name = "cycle"
+        \\
+        \\[palette]
+        \\a = "@b"
+        \\b = "@a"
+        \\
+    ;
+
+    var diagnostic: Diagnostic = .{};
+    var theme = try parse(std.testing.allocator, source, &diagnostic);
+    defer theme.deinit(std.testing.allocator);
+
+    try std.testing.expect(resolvePaletteSlot(theme, "a") == null);
 }
 
 test "reports theme parse spans" {

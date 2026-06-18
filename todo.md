@@ -974,7 +974,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ## Phase 30 â€” Theme & rendering engine
 
 ### 30.1 Color model
-- [ ] Implement Oklab + Oklch parsing
+- [x] Implement Oklab + Oklch parsing
 - [ ] Downcast to truecolor / 256 / 16 / none
 - [ ] Tests against established Oklab reference values
 

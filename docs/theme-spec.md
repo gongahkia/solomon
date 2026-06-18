@@ -71,6 +71,8 @@ Palette values are strings:
 - ANSI indexes: `"0"` through `"15"`.
 - ANSI-256 indexes: `"16"` through `"255"`.
 - Truecolor hex: `"#RRGGBB"`.
+- Oklab: `"oklab(0.72 0.04 -0.08)"`; lightness also accepts percent.
+- Oklch: `"oklch(72% 0.12 240deg)"`; hue accepts bare degrees, `deg`, `rad`, or `turn`.
 - Palette references: `"@accent"`.
 
 References resolve inside the final inherited palette. Cycles are invalid.

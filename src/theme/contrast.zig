@@ -33,6 +33,8 @@ const SegmentStyle = struct {
 pub fn parseColor(value: []const u8) ?Rgb {
     const trimmed = std.mem.trim(u8, value, " \t\r\n\"");
     if (parseHexColor(trimmed)) |rgb| return rgb;
+    if (parseOklabColor(trimmed)) |rgb| return rgb;
+    if (parseOklchColor(trimmed)) |rgb| return rgb;
     return parseAnsiColor(trimmed);
 }
 
@@ -118,6 +120,20 @@ pub fn rgbToOklab(rgb: Rgb) Oklab {
         .l = 0.2104542553 * l_root + 0.7936177850 * m_root - 0.0040720468 * s_root,
         .a = 1.9779984951 * l_root - 2.4285922050 * m_root + 0.4505937099 * s_root,
         .b = 0.0259040371 * l_root + 0.7827717662 * m_root - 0.8086757660 * s_root,
+    };
+}
+
+pub fn oklabToRgb(color: Oklab) Rgb {
+    const l_root = color.l + 0.3963377774 * color.a + 0.2158037573 * color.b;
+    const m_root = color.l - 0.1055613458 * color.a - 0.0638541728 * color.b;
+    const s_root = color.l - 0.0894841775 * color.a - 1.2914855480 * color.b;
+    const l = l_root * l_root * l_root;
+    const m = m_root * m_root * m_root;
+    const s = s_root * s_root * s_root;
+    return .{
+        .r = linearSrgbToByte(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+        .g = linearSrgbToByte(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+        .b = linearSrgbToByte(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s),
     };
 }
 
@@ -218,6 +234,68 @@ fn parseHexColor(value: []const u8) ?Rgb {
     return null;
 }
 
+fn parseOklabColor(value: []const u8) ?Rgb {
+    const args = colorFunctionArgs(value, "oklab") orelse return null;
+    var parts = splitColorArgs(args);
+    const l = parseLightness(parts.next() orelse return null) orelse return null;
+    const a = parseFiniteFloat(parts.next() orelse return null) orelse return null;
+    const b = parseFiniteFloat(parts.next() orelse return null) orelse return null;
+    if (parts.next() != null) return null;
+    return oklabToRgb(.{ .l = l, .a = a, .b = b });
+}
+
+fn parseOklchColor(value: []const u8) ?Rgb {
+    const args = colorFunctionArgs(value, "oklch") orelse return null;
+    var parts = splitColorArgs(args);
+    const l = parseLightness(parts.next() orelse return null) orelse return null;
+    const chroma = parseFiniteFloat(parts.next() orelse return null) orelse return null;
+    const hue_degrees = parseHueDegrees(parts.next() orelse return null) orelse return null;
+    if (parts.next() != null) return null;
+    const hue_radians = hue_degrees * std.math.pi / 180.0;
+    return oklabToRgb(.{
+        .l = l,
+        .a = chroma * std.math.cos(hue_radians),
+        .b = chroma * std.math.sin(hue_radians),
+    });
+}
+
+fn colorFunctionArgs(value: []const u8, name: []const u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, value, name)) return null;
+    if (value.len < name.len + 2 or value[name.len] != '(' or value[value.len - 1] != ')') return null;
+    return value[name.len + 1 .. value.len - 1];
+}
+
+fn splitColorArgs(args: []const u8) std.mem.TokenIterator(u8, .any) {
+    return std.mem.tokenizeAny(u8, args, " \t\r\n,");
+}
+
+fn parseLightness(value: []const u8) ?f64 {
+    if (std.mem.endsWith(u8, value, "%")) {
+        const percent = parseFiniteFloat(value[0 .. value.len - 1]) orelse return null;
+        return percent / 100.0;
+    }
+    return parseFiniteFloat(value);
+}
+
+fn parseHueDegrees(value: []const u8) ?f64 {
+    if (std.mem.endsWith(u8, value, "deg")) return parseFiniteFloat(value[0 .. value.len - 3]);
+    if (std.mem.endsWith(u8, value, "rad")) {
+        const radians = parseFiniteFloat(value[0 .. value.len - 3]) orelse return null;
+        return radians * 180.0 / std.math.pi;
+    }
+    if (std.mem.endsWith(u8, value, "turn")) {
+        const turns = parseFiniteFloat(value[0 .. value.len - 4]) orelse return null;
+        return turns * 360.0;
+    }
+    return parseFiniteFloat(value);
+}
+
+fn parseFiniteFloat(value: []const u8) ?f64 {
+    const parsed = std.fmt.parseFloat(f64, value) catch return null;
+    if (!std.math.isFinite(parsed)) return null;
+    return parsed;
+}
+
 fn parseHexByte(high: u8, low: u8) ?u8 {
     const high_value = parseHexDigit(high) orelse return null;
     const low_value = parseHexDigit(low) orelse return null;
@@ -271,11 +349,31 @@ fn srgbByteToLinear(byte: u8) f64 {
     return std.math.pow(f64, (value + 0.055) / 1.055, 2.4);
 }
 
+fn linearSrgbToByte(value: f64) u8 {
+    const srgb = if (value <= 0.0031308) 12.92 * value else 1.055 * std.math.pow(f64, value, 1.0 / 2.4) - 0.055;
+    const clamped = @min(@max(srgb, 0.0), 1.0);
+    return @intFromFloat(std.math.round(clamped * 255.0));
+}
+
 test "parses theme color values" {
     try std.testing.expectEqual(Rgb{ .r = 255, .g = 255, .b = 255 }, parseColor("#fff").?);
     try std.testing.expectEqual(Rgb{ .r = 51, .g = 102, .b = 255 }, parseColor("#3366ff").?);
     try std.testing.expectEqual(Rgb{ .r = 0, .g = 255, .b = 255 }, parseColor("14").?);
     try std.testing.expectEqual(Rgb{ .r = 175, .g = 135, .b = 0 }, parseColor("136").?);
+    try std.testing.expectEqual(Rgb{ .r = 255, .g = 255, .b = 255 }, parseColor("oklab(1 0 0)").?);
+    try std.testing.expectEqual(Rgb{ .r = 0, .g = 0, .b = 0 }, parseColor("oklch(0% 0 0deg)").?);
+    try expectRgbApprox(Rgb{ .r = 255, .g = 0, .b = 0 }, parseColor("oklab(0.62796 0.22486 0.12585)").?, 1);
+    try expectRgbApprox(Rgb{ .r = 255, .g = 0, .b = 0 }, parseColor("oklch(62.796% 0.25768 29.23deg)").?, 1);
+}
+
+fn expectRgbApprox(expected: Rgb, actual: Rgb, tolerance: u8) !void {
+    try std.testing.expect(absByteDiff(expected.r, actual.r) <= tolerance);
+    try std.testing.expect(absByteDiff(expected.g, actual.g) <= tolerance);
+    try std.testing.expect(absByteDiff(expected.b, actual.b) <= tolerance);
+}
+
+fn absByteDiff(a: u8, b: u8) u8 {
+    return if (a > b) a - b else b - a;
 }
 
 test "calculates oklab contrast delta" {

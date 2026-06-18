@@ -530,6 +530,44 @@ test "snapshots stable prompt segments" {
     try std.testing.expectEqualStrings(expected, rendered.prompt);
 }
 
+const PromptFixtureKind = enum {
+    clean,
+    dirty,
+    conflict,
+    prod,
+};
+
+const PromptFixture = struct {
+    name: []const u8,
+    kind: PromptFixtureKind,
+};
+
+test "snapshots prompt fixture corpus" {
+    const allocator = std.testing.allocator;
+    const root_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-prompt-fixtures-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(root_path);
+    defer std.fs.cwd().deleteTree(root_path) catch {};
+
+    const fixtures = [_]PromptFixture{
+        .{ .name = "clean", .kind = .clean },
+        .{ .name = "dirty", .kind = .dirty },
+        .{ .name = "conflict", .kind = .conflict },
+        .{ .name = "prod", .kind = .prod },
+    };
+
+    for (fixtures) |fixture| {
+        const actual = try renderPromptFixtureAlloc(allocator, root_path, fixture);
+        defer allocator.free(actual);
+        const normalized = try normalizePromptSnapshotAlloc(allocator, actual, root_path);
+        defer allocator.free(normalized);
+        const path = try std.fmt.allocPrint(allocator, "test/snapshots/prompt/{s}.txt", .{fixture.name});
+        defer allocator.free(path);
+        const expected = try std.fs.cwd().readFileAlloc(allocator, path, 4096);
+        defer allocator.free(expected);
+        try std.testing.expectEqualStrings(expected, normalized);
+    }
+}
+
 test "module names are public for diagnostics" {
     try std.testing.expectEqualStrings("language_versions", moduleIdName(.language_versions));
 }
@@ -578,6 +616,147 @@ fn expectLayoutSnapshot(name: []const u8, lines: []const LayoutLineInput, cols: 
     try std.testing.expectEqualStrings(expected, actual);
 }
 
+fn renderPromptFixtureAlloc(allocator: std.mem.Allocator, root_path: []const u8, fixture: PromptFixture) ![]u8 {
+    const cwd_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ root_path, fixture.name });
+    defer allocator.free(cwd_path);
+    const home_path = try std.fmt.allocPrint(allocator, "{s}/home-{s}", .{ root_path, fixture.name });
+    defer allocator.free(home_path);
+    try setupPromptFixture(allocator, cwd_path, home_path, fixture.kind);
+
+    var git_cache = git_branch_module.Cache{};
+    defer git_cache.deinit(allocator);
+    var language_cache = language_versions_module.Cache{};
+    defer language_cache.deinit(allocator);
+    var cloud_cache = cloud_ctx_module.Cache{ .gcp_valid = true, .azure_valid = true, .kube_valid = true };
+    defer cloud_cache.deinit(allocator);
+
+    const base_pipeline = [_]ModuleSpec{
+        .{ .id = .cwd, .execution_class = .sync },
+        .{ .id = .git_branch, .execution_class = .sync },
+        .{ .id = .exit_status, .execution_class = .sync },
+        .{ .id = .jobs, .execution_class = .sync },
+        .{ .id = .cmd_duration, .execution_class = .sync },
+    };
+    const prod_pipeline = [_]ModuleSpec{
+        .{ .id = .cwd, .execution_class = .sync },
+        .{ .id = .git_branch, .execution_class = .sync },
+        .{ .id = .time, .execution_class = .sync },
+        .{ .id = .exit_status, .execution_class = .sync },
+        .{ .id = .jobs, .execution_class = .sync },
+        .{ .id = .cmd_duration, .execution_class = .sync },
+        .{ .id = .user_host, .execution_class = .sync },
+        .{ .id = .cloud_ctx, .execution_class = .sync },
+        .{ .id = .sso_expiry, .execution_class = .sync },
+        .{ .id = .iac_workspace, .execution_class = .sync },
+        .{ .id = .region_drift, .execution_class = .sync },
+        .{ .id = .cost_glance, .execution_class = .sync },
+        .{ .id = .ssh_target, .execution_class = .sync },
+    };
+
+    const is_prod = fixture.kind == .prod;
+    var rendered = try renderPipeline(allocator, .{
+        .git_branch = &git_cache,
+        .language_versions = &language_cache,
+        .cloud_ctx = &cloud_cache,
+    }, .{
+        .cwd = cwd_path,
+        .home = home_path,
+        .exit = if (fixture.kind == .conflict or is_prod) 2 else 0,
+        .jobs = if (is_prod) 2 else 0,
+        .duration_ms = if (is_prod) 1500 else 0,
+        .time = is_prod,
+        .no_async = true,
+        .timestamp = 3660,
+        .ssh = if (is_prod) "192.0.2.1 55555 198.51.100.2 22" else null,
+        .user = "u",
+        .host = if (is_prod) "prod-bastion" else "h",
+        .aws_profile = if (is_prod) "prod" else null,
+        .aws_region = if (is_prod) "us-west-2" else null,
+    }, if (is_prod) prod_pipeline[0..] else base_pipeline[0..]);
+    defer rendered.deinit(allocator);
+    return allocator.dupe(u8, rendered.prompt);
+}
+
+fn setupPromptFixture(allocator: std.mem.Allocator, cwd_path: []const u8, home_path: []const u8, kind: PromptFixtureKind) !void {
+    try std.fs.cwd().makePath(cwd_path);
+    try std.fs.cwd().makePath(home_path);
+    try runGit(allocator, cwd_path, &.{ "git", "init", "-b", "main" });
+    switch (kind) {
+        .clean => {},
+        .dirty => try writeFileAbsoluteAlloc(allocator, cwd_path, "dirty.txt", "dirty\n"),
+        .conflict => try setupConflictFixture(allocator, cwd_path),
+        .prod => try setupProdFixture(allocator, cwd_path, home_path),
+    }
+}
+
+fn setupConflictFixture(allocator: std.mem.Allocator, cwd_path: []const u8) !void {
+    try writeFileAbsoluteAlloc(allocator, cwd_path, "conflict.txt", "base\n");
+    try runGit(allocator, cwd_path, &.{ "git", "add", "conflict.txt" });
+    try runGitCommit(allocator, cwd_path, "base", false);
+    try runGit(allocator, cwd_path, &.{ "git", "checkout", "-b", "side" });
+    try writeFileAbsoluteAlloc(allocator, cwd_path, "conflict.txt", "side\n");
+    try runGitCommit(allocator, cwd_path, "side", true);
+    try runGit(allocator, cwd_path, &.{ "git", "checkout", "main" });
+    try writeFileAbsoluteAlloc(allocator, cwd_path, "conflict.txt", "main\n");
+    try runGitCommit(allocator, cwd_path, "main", true);
+    try runGitExpectFailure(allocator, cwd_path, &.{ "git", "merge", "side" });
+}
+
+fn setupProdFixture(allocator: std.mem.Allocator, cwd_path: []const u8, home_path: []const u8) !void {
+    const aws_dir = try std.fmt.allocPrint(allocator, "{s}/.aws", .{home_path});
+    defer allocator.free(aws_dir);
+    try std.fs.cwd().makePath(aws_dir);
+    try writeFileAbsoluteAlloc(allocator, aws_dir, "config", "[profile prod]\nregion = us-east-1\n");
+
+    const cost_path = (try cost_glance_module.costCachePathAlloc(allocator, home_path)).?;
+    defer allocator.free(cost_path);
+    try cost_glance_module.writeCostCache(allocator, cost_path, &.{
+        .{ .provider = "aws", .amount = "1.2", .unit = "USD", .updated = 10 },
+    }, 10);
+
+    const sso_dir = try std.fmt.allocPrint(allocator, "{s}/.cache/shisa", .{home_path});
+    defer allocator.free(sso_dir);
+    try std.fs.cwd().makePath(sso_dir);
+    try writeFileAbsoluteAlloc(allocator, sso_dir, "op-signin-status.json", "{\"session\":{\"expires_in\":1200}}");
+
+    const terraform_dir = try std.fmt.allocPrint(allocator, "{s}/.terraform", .{cwd_path});
+    defer allocator.free(terraform_dir);
+    try std.fs.cwd().makePath(terraform_dir);
+    try writeFileAbsoluteAlloc(allocator, terraform_dir, "environment", "prod\n");
+    try writeFileAbsoluteAlloc(allocator, cwd_path, ".terraform.tfstate.lock.info", "{}");
+}
+
+fn writeFileAbsoluteAlloc(allocator: std.mem.Allocator, dir_path: []const u8, name: []const u8, contents: []const u8) !void {
+    const path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_path, name });
+    defer allocator.free(path);
+    var file = try std.fs.createFileAbsolute(path, .{});
+    defer file.close();
+    try file.writeAll(contents);
+}
+
+fn normalizePromptSnapshotAlloc(allocator: std.mem.Allocator, prompt: []const u8, root_path: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    var index: usize = 0;
+    while (index < prompt.len) {
+        if (std.mem.startsWith(u8, prompt[index..], root_path)) {
+            try out.appendSlice(allocator, "<root>");
+            index += root_path.len;
+            continue;
+        }
+        switch (prompt[index]) {
+            0x1b => try out.appendSlice(allocator, "\\x1b"),
+            0x07 => try out.appendSlice(allocator, "\\x07"),
+            '\n' => try out.appendSlice(allocator, "\\n\n"),
+            0x80...0xff => try std.fmt.format(out.writer(allocator), "\\x{x:0>2}", .{prompt[index]}),
+            else => try out.append(allocator, prompt[index]),
+        }
+        index += 1;
+    }
+    try out.append(allocator, '\n');
+    return out.toOwnedSlice(allocator);
+}
+
 fn runGit(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !void {
     const result = try std.process.Child.run(.{
         .allocator = allocator,
@@ -590,6 +769,29 @@ fn runGit(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []co
     defer allocator.free(result.stderr);
     try std.testing.expect(switch (result.term) {
         .Exited => |code| code == 0,
+        else => false,
+    });
+}
+
+fn runGitCommit(allocator: std.mem.Allocator, cwd_path: []const u8, message: []const u8, all: bool) !void {
+    if (all) {
+        return runGit(allocator, cwd_path, &.{ "git", "-c", "user.email=shisa@example.invalid", "-c", "user.name=Shisa Test", "-c", "commit.gpgsign=false", "commit", "-am", message });
+    }
+    return runGit(allocator, cwd_path, &.{ "git", "-c", "user.email=shisa@example.invalid", "-c", "user.name=Shisa Test", "-c", "commit.gpgsign=false", "commit", "-m", message });
+}
+
+fn runGitExpectFailure(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !void {
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .cwd = cwd_path,
+        .max_output_bytes = 4096,
+        .expand_arg0 = .expand,
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    try std.testing.expect(switch (result.term) {
+        .Exited => |code| code != 0,
         else => false,
     });
 }

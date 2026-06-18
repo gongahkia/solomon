@@ -31,6 +31,8 @@ scripts/update-snapshots.sh --confirm update-snapshots
 
 Per-shell session coverage lives in `test/integration/*_fake_socket.sh` for `zsh`, `bash`, `fish`, `nu`, and `pwsh`, plus `test/integration/shell_expect.exp` for interactive expect sessions. These scripts are wired into `zig build test`.
 
+Hook/redraw/transient coverage is split by shell: Bash checks `PROMPT_COMMAND`, debug/precmd, and Readline redraw; Fish checks prompt and redraw functions; Nu checks reprompt hooks; PowerShell checks async fill events; Expect checks the Zsh transient prompt path.
+
 Run the full local gate before opening a PR:
 
 ```sh

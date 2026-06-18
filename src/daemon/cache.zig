@@ -2,7 +2,8 @@ const std = @import("std");
 
 const legacy_persist_magic = "SHISA-CACHE\n";
 const persist_magic = "SHISA-CACHE\x00";
-const persist_schema_version: u32 = 1;
+const persist_schema_version: u32 = 2;
+const checksum_seed: u64 = 0x51_48_49_53_41;
 const max_persisted_entries = 1_000_000;
 const max_persisted_bytes = 64 * 1024 * 1024;
 const max_persisted_slice = 16 * 1024 * 1024;
@@ -116,30 +117,42 @@ pub const Store = struct {
     }
 
     pub fn saveToFile(self: *Store, path: []const u8) !void {
+        var payload: std.ArrayList(u8) = .empty;
+        defer payload.deinit(self.allocator);
+        try self.writeEntriesToBytes(&payload);
+
         var bytes: std.ArrayList(u8) = .empty;
         defer bytes.deinit(self.allocator);
         try bytes.appendSlice(self.allocator, persist_magic);
         try appendU32(self.allocator, &bytes, persist_schema_version);
-        try appendU32(self.allocator, &bytes, try checkedU32(self.entries.count()));
+        try appendU64(self.allocator, &bytes, cacheChecksum(payload.items));
+        try bytes.appendSlice(self.allocator, payload.items);
+        try self.writeBytesToFile(path, bytes.items);
+    }
 
+    fn writeEntriesToBytes(self: *Store, bytes: *std.ArrayList(u8)) !void {
+        try appendU32(self.allocator, bytes, try checkedU32(self.entries.count()));
         var it = self.entries.iterator();
         while (it.next()) |entry| {
-            try appendU32(self.allocator, &bytes, try checkedU32(entry.key_ptr.*.len));
-            try appendU32(self.allocator, &bytes, try checkedU32(entry.value_ptr.output.len));
-            try appendU64(self.allocator, &bytes, entry.value_ptr.cache_rev);
-            try appendU64(self.allocator, &bytes, entry.value_ptr.created_ns);
-            try appendU64(self.allocator, &bytes, entry.value_ptr.last_access_ns);
+            try appendU32(self.allocator, bytes, try checkedU32(entry.key_ptr.*.len));
+            try appendU32(self.allocator, bytes, try checkedU32(entry.value_ptr.output.len));
+            try appendU64(self.allocator, bytes, entry.value_ptr.cache_rev);
+            try appendU64(self.allocator, bytes, entry.value_ptr.created_ns);
+            try appendU64(self.allocator, bytes, entry.value_ptr.last_access_ns);
             try bytes.appendSlice(self.allocator, entry.key_ptr.*);
             try bytes.appendSlice(self.allocator, entry.value_ptr.output);
         }
+    }
 
+    fn writeBytesToFile(self: *Store, path: []const u8, bytes: []const u8) !void {
+        _ = self;
         if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
         var file = if (std.fs.path.isAbsolute(path))
             try std.fs.createFileAbsolute(path, .{ .truncate = true })
         else
             try std.fs.cwd().createFile(path, .{ .truncate = true });
         defer file.close();
-        try file.writeAll(bytes.items);
+        try file.writeAll(bytes);
     }
 
     pub fn loadFromFile(self: *Store, path: []const u8) !void {
@@ -155,9 +168,17 @@ pub const Store = struct {
         var input = contents;
         if (consumePrefix(&input, persist_magic)) {
             const schema_version = try readU32(&input);
-            if (schema_version != persist_schema_version) return error.UnsupportedCacheSchema;
-            try self.loadEntriesFromBytes(input);
-            return;
+            if (schema_version == 2) {
+                const expected_checksum = try readU64(&input);
+                if (cacheChecksum(input) != expected_checksum) return error.CacheChecksumMismatch;
+                try self.loadEntriesFromBytes(input);
+                return;
+            }
+            if (schema_version == 1) {
+                try self.loadEntriesFromBytes(input);
+                return;
+            }
+            return error.UnsupportedCacheSchema;
         }
         if (consumePrefix(&input, legacy_persist_magic)) {
             try self.loadEntriesFromBytes(input);
@@ -309,6 +330,10 @@ fn keyAlloc(allocator: std.mem.Allocator, module_id: []const u8, cwd: []const u8
 
 fn checkedU32(value: usize) !u32 {
     return std.math.cast(u32, value) orelse error.CacheFileTooLarge;
+}
+
+fn cacheChecksum(bytes: []const u8) u64 {
+    return std.hash.Wyhash.hash(checksum_seed, bytes);
 }
 
 fn appendU32(allocator: std.mem.Allocator, out: *std.ArrayList(u8), value: u32) !void {
@@ -471,6 +496,51 @@ test "loads legacy unversioned persistent cache as migration" {
     const git = (try store.getAt("git_branch", "/repo", 120)).?;
     try std.testing.expectEqualStrings("git:main", git.output);
     try std.testing.expectEqual(@as(u64, 9), git.cache_rev);
+}
+
+test "loads v1 persistent cache as migration" {
+    const allocator = std.testing.allocator;
+    const key = try keyAlloc(allocator, "language_versions", "/repo");
+    defer allocator.free(key);
+
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+    try bytes.appendSlice(allocator, persist_magic);
+    try appendU32(allocator, &bytes, 1);
+    try appendU32(allocator, &bytes, 1);
+    try appendU32(allocator, &bytes, try checkedU32(key.len));
+    try appendU32(allocator, &bytes, 7);
+    try appendU64(allocator, &bytes, 10);
+    try appendU64(allocator, &bytes, 100);
+    try appendU64(allocator, &bytes, 100);
+    try bytes.appendSlice(allocator, key);
+    try bytes.appendSlice(allocator, "py:3.14");
+
+    var store = Store.initWithOptions(allocator, .{ .max_entries = 16, .max_age_ns = 0 });
+    defer store.deinit();
+    try store.loadFromBytes(bytes.items);
+
+    const lang = (try store.getAt("language_versions", "/repo", 120)).?;
+    try std.testing.expectEqualStrings("py:3.14", lang.output);
+    try std.testing.expectEqual(@as(u64, 10), lang.cache_rev);
+}
+
+test "rejects persistent cache checksum mismatch" {
+    const allocator = std.testing.allocator;
+    var payload: std.ArrayList(u8) = .empty;
+    defer payload.deinit(allocator);
+    try appendU32(allocator, &payload, 0);
+
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+    try bytes.appendSlice(allocator, persist_magic);
+    try appendU32(allocator, &bytes, persist_schema_version);
+    try appendU64(allocator, &bytes, cacheChecksum(payload.items) + 1);
+    try bytes.appendSlice(allocator, payload.items);
+
+    var store = Store.init(allocator);
+    defer store.deinit();
+    try std.testing.expectError(error.CacheChecksumMismatch, store.loadFromBytes(bytes.items));
 }
 
 test "rejects unsupported persistent cache schema" {

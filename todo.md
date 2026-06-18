@@ -884,7 +884,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 27.2 L2 module-output cache
 - [x] Persist optionally to `~/.cache/shisa/cache.bin`
 - [x] Versioned schema with migration
-- [ ] Cold-start hydration with checksum verification
+- [x] Cold-start hydration with checksum verification
 
 ### 27.3 L3 external-command cache
 - [ ] Keyed on `(cmd, args, cwd, mtime-set-of-watched-paths)`

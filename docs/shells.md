@@ -16,6 +16,14 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 
 Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from the hook.
 
+## Graceful Degradation Matrix
+
+| Condition | zsh | bash | fish | nushell | PowerShell |
+| --- | --- | --- | --- | --- | --- |
+| Daemon socket missing, instant off | `%~> ` fallback | cwd fallback | `prompt_pwd` fallback | `pwd` fallback | `Get-Location` fallback |
+| Async redraw unavailable | `TRAPUSR1` calls direct `zle reset-prompt`; non-ZLE contexts no-op | no automatic repaint; bound key only works while Readline is active | `emit shisa_async_redraw` calls `commandline -f repaint`; non-interactive contexts no-op | no external parent-shell repaint; next `pre_prompt` consumes `shisa-reprompt` state | event hook skipped if unsupported or disabled; `Invoke-ShisaAsyncFill` falls back to `Invoke-ShisaRedraw` |
+| Old shell or host | zsh 5.0+ documented | Bash 3.x uses sync `--no-async` prompt | fish hook path documented | Nushell 0.113.x tested baseline | `Register-EngineEvent` host support required for event delivery |
+
 ## zsh
 
 - Requires zsh 5.0 or newer.

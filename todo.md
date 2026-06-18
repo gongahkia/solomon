@@ -924,7 +924,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 28.5 PowerShell
 - [x] `Register-EngineEvent` async-fill where supported
-- [ ] Graceful degradation matrix in docs
+- [x] Graceful degradation matrix in docs
 
 ### 28.6 Integration tests
 - [ ] expect/pexpect scenarios per shell

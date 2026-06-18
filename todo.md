@@ -991,7 +991,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] tokyo-night (familiar)
 - [x] nord-dark (familiar)
 - [x] plain (zero-color baseline)
-- [ ] a11y (WCAG AAA, ASCII)
+- [x] a11y (WCAG AAA, ASCII)
 
 ### 30.4 Multi-line layout
 - [ ] Implement `[layout]` parser

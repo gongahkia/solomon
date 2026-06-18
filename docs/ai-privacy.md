@@ -11,6 +11,8 @@ Shisa AI features are opt-in. The default supported path is local Ollama on `127
 - Secrets, tokens, SSH config, kubeconfig data, cloud account ids, and command history must be redacted before cloud requests.
 - Audit logs for cloud requests must store hashes and metadata by default, not raw prompt text.
 
+Provider-scoped trust uses `shisa plugin trust <name> --net=<provider>`. A trust grant for one provider does not cover another provider or non-network capabilities.
+
 ## Local Data
 
 Local AI commands may read:

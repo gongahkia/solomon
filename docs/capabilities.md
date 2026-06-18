@@ -36,7 +36,7 @@ net = { "*" }
 
 ## Trust prompts
 
-`shisa plugin install` shows the manifest before installing. `shisa plugin trust <name>` records user intent for capability escalation. A plugin upgrade that changes requested capabilities must be treated as a new trust decision.
+`shisa plugin install` shows the manifest before installing. `shisa plugin trust <name>` records user intent for capability escalation. `shisa plugin trust <name> --net=<provider>` records a provider-scoped network grant; it does not trust other providers or non-network capabilities. A plugin upgrade that changes requested capabilities must be treated as a new trust decision.
 
 ## Review checklist
 

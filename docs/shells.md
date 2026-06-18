@@ -45,6 +45,7 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 - Captures exit via `$status`, jobs via `jobs -p`, and duration via `$CMD_DURATION`.
 - Enables `SHISA_INSTANT=1` by default, so cached prompts render before a daemon request.
 - Redraw path is fish-native: handlers can `emit shisa_async_redraw`, which calls `commandline -f repaint`.
+- Shisa does not source or require `fish-async-prompt`. If that plugin is installed, keep its scheduling separate and emit `shisa_async_redraw` after Shisa async state changes.
 - When `SHISA_PROD_GUARD=1`, `fish_preexec` sends `shisa cloud preexec --socket <socket> --shell fish -- <command>` to the daemon.
 
 ## nushell

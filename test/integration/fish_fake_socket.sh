@@ -68,3 +68,4 @@ SHISA_SOCKET="/tmp/shisa-fish-missing-$$.sock" SHISA_BIN="$root/zig-out/bin/shis
 grep -F 'cached-fish> ' "$out" >/dev/null
 
 fish -c 'source init/shisa.fish; functions -q fish_prompt; functions -q shisa_async_redraw; emit shisa_async_redraw'
+fish -c 'source init/shisa.fish; functions -q shisa_async_redraw; not functions -q fish_async_prompt'

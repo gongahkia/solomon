@@ -127,6 +127,8 @@ right = ["cmd_duration"]
 
 `left` and `right` are optional arrays of segment ids. A theme may use either `[layout]` or `[layout.line.N]`, but not both.
 
+Filler width is computed from visible cells after ignoring ANSI CSI and OSC control sequences. When left and right content exceed the terminal columns, filler width is `0`.
+
 ## `[segments.<id>]`
 
 Segment ids are core module ids or plugin module ids.

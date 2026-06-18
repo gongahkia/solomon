@@ -173,6 +173,50 @@ pub fn renderPipeline(allocator: std.mem.Allocator, caches: CacheSet, input: Ren
     };
 }
 
+pub fn fillerWidth(left: []const u8, right: []const u8, cols: u16) usize {
+    const used = visibleWidth(left) + visibleWidth(right);
+    const total: usize = cols;
+    return if (used < total) total - used else 0;
+}
+
+pub fn visibleWidth(value: []const u8) usize {
+    var width: usize = 0;
+    var index: usize = 0;
+    while (index < value.len) {
+        if (value[index] == 0x1b and index + 1 < value.len) {
+            if (value[index + 1] == '[') {
+                index = skipCsi(value, index + 2);
+                continue;
+            }
+            if (value[index + 1] == ']') {
+                index = skipOsc(value, index + 2);
+                continue;
+            }
+        }
+        const len = std.unicode.utf8ByteSequenceLength(value[index]) catch 1;
+        width += 1;
+        index += @min(len, value.len - index);
+    }
+    return width;
+}
+
+fn skipCsi(value: []const u8, start: usize) usize {
+    var index = start;
+    while (index < value.len) : (index += 1) {
+        if (value[index] >= 0x40 and value[index] <= 0x7e) return index + 1;
+    }
+    return value.len;
+}
+
+fn skipOsc(value: []const u8, start: usize) usize {
+    var index = start;
+    while (index < value.len) : (index += 1) {
+        if (value[index] == 0x07) return index + 1;
+        if (value[index] == 0x1b and index + 1 < value.len and value[index + 1] == '\\') return index + 2;
+    }
+    return value.len;
+}
+
 fn dispatchAsync(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId, input: RenderInput) !AsyncRender {
     return switch (module_id) {
         .git_branch => fromGit(try caches.git_branch.renderAsync(allocator, input.cwd)),
@@ -461,6 +505,17 @@ test "snapshots stable prompt segments" {
 
 test "module names are public for diagnostics" {
     try std.testing.expectEqualStrings("language_versions", moduleIdName(.language_versions));
+}
+
+test "calculates filler width from visible cells" {
+    try std.testing.expectEqual(@as(usize, 4), fillerWidth("cwd", "git", 10));
+    try std.testing.expectEqual(@as(usize, 0), fillerWidth("left", "right", 4));
+    try std.testing.expectEqual(@as(usize, 6), fillerWidth("\x1b[31merr\x1b[0m", "ok", 11));
+    try std.testing.expectEqual(@as(usize, 6), fillerWidth("\x1b]7;file://host/tmp\x07cwd", "ok", 11));
+}
+
+test "counts unicode glyphs as one visible cell for layout filler" {
+    try std.testing.expectEqual(@as(usize, 3), visibleWidth("a→b"));
 }
 
 fn runGit(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !void {

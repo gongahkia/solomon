@@ -7,6 +7,8 @@ pub const Backend = enum {
     unsupported,
 };
 
+pub const default_debounce_ms: u64 = 50;
+
 pub const WatchPath = struct {
     path: []const u8,
     recursive: bool = false,
@@ -16,7 +18,7 @@ pub const Scope = struct {
     module_id: []const u8,
     cwd: []const u8,
     paths: []const WatchPath,
-    debounce_ms: u64 = 50,
+    debounce_ms: u64 = default_debounce_ms,
 };
 
 pub const Invalidation = struct {

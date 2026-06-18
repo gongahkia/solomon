@@ -365,7 +365,7 @@ test "fsnotify declared watch invalidates module cwd entries" {
     var watcher = fsnotify.Watcher.init(std.testing.allocator);
     defer watcher.deinit();
     const paths = [_]fsnotify.WatchPath{.{ .path = "/repo/package.json" }};
-    try registerDeclaredWatches(&watcher, "language_versions", "/repo", paths[0..], 50);
+    try registerDeclaredWatches(&watcher, "language_versions", "/repo", paths[0..], fsnotify.default_debounce_ms);
 
     var store = Store.initWithOptions(std.testing.allocator, .{ .default_ttl_ns = 0 });
     defer store.deinit();

@@ -14,6 +14,7 @@ commands:
   cloud         cloud helpers: audit, doctor, explain, preexec
   doctor        diagnose socket, config, plugins, lua, fsnotify
   explain       print resolved module pipeline
+  font          render glyph fallback probes
   import-starship <path>
                 translate starship.toml to shisa.toml
   import-p10k <path>
@@ -40,6 +41,15 @@ options:
 ```
 
 ## Command Help
+
+### `shisa font`
+
+```text
+usage: shisa font check
+
+commands:
+  check         render Nerd Font, Unicode, and ASCII glyph probes
+```
 
 ### `shisa theme`
 

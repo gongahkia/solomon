@@ -20,6 +20,7 @@ No raw-mode, full-screen, readline, or ncurses UI path is present in the current
 | `cloud` | args/stdout/stderr only | no prompt |
 | `doctor` | args/stdout/stderr only | no prompt |
 | `explain` | args/stdout/stderr only | no prompt |
+| `font` | args/stdout only | no prompt |
 | `import-starship` | path arg/stdout | no prompt |
 | `import-p10k` | path arg/stdout | no prompt |
 | `import-oh-my-posh` | path arg/stdout | no prompt |

@@ -68,6 +68,11 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[1], "font")) {
+        try fontCommand(allocator, args[2..]);
+        return;
+    }
+
     if (std.mem.eql(u8, args[1], "vouch")) {
         try vouchCommand(allocator, args[2..]);
         return;
@@ -234,6 +239,36 @@ fn themeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return error.ThemeContrastFailed;
     }
     try std.fs.File.stdout().writeAll("theme validate: ok\n");
+}
+
+fn fontCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len == 0 or std.mem.eql(u8, args[0], "--help") or std.mem.eql(u8, args[0], "-h")) {
+        try std.fs.File.stdout().writeAll(font_help_text);
+        return;
+    }
+    if (!std.mem.eql(u8, args[0], "check")) return error.UnknownFontCommand;
+    if (args.len != 1) return error.UnknownFontArgument;
+
+    const report = try fontCheckReportAlloc(allocator);
+    defer allocator.free(report);
+    try std.fs.File.stdout().writeAll(report);
+}
+
+fn fontCheckReportAlloc(allocator: std.mem.Allocator) ![]u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "font check: render probe\nnerd-font: {s}  private-use branch glyph\nunicode:   {s}  unicode arrow fallback\nascii:     {s} ascii fallback\nfont check: inspect output for missing-glyph boxes\n",
+        .{ "\xee\x82\xa0", "\xe2\x86\x92", "->" },
+    );
+}
+
+test "font check report includes fallback tiers" {
+    const report = try fontCheckReportAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "nerd-font: \xee\x82\xa0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "unicode:   \xe2\x86\x92") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "ascii:     ->") != null);
 }
 
 fn defaultConfigPathFromEnv(allocator: std.mem.Allocator, xdg_config_home: ?[]const u8, home: ?[]const u8) ![]u8 {
@@ -6089,6 +6124,7 @@ const help_text =
     \\  cloud         cloud helpers: audit, doctor, explain, preexec
     \\  doctor        diagnose socket, config, plugins, lua, fsnotify
     \\  explain       print resolved module pipeline
+    \\  font          render glyph fallback probes
     \\  import-starship <path>
     \\                translate starship.toml to shisa.toml
     \\  import-p10k <path>
@@ -6120,5 +6156,13 @@ const vouch_help_text =
     \\
     \\commands:
     \\  verify [path] validate VOUCHES format; defaults to ./VOUCHES
+    \\
+;
+
+const font_help_text =
+    \\usage: shisa font check
+    \\
+    \\commands:
+    \\  check         render Nerd Font, Unicode, and ASCII glyph probes
     \\
 ;

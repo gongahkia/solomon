@@ -988,7 +988,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] okiya-night (signature dark)
 - [x] okiya-day (matching light)
 - [x] gruvbox-rainbow (familiar)
-- [ ] tokyo-night (familiar)
+- [x] tokyo-night (familiar)
 - [ ] nord-dark (familiar)
 - [ ] plain (zero-color baseline)
 - [ ] a11y (WCAG AAA, ASCII)

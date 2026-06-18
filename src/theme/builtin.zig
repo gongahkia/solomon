@@ -1,5 +1,6 @@
 const std = @import("std");
 const contrast = @import("contrast.zig");
+const loader = @import("loader.zig");
 
 const ThemeAsset = struct {
     name: []const u8,
@@ -57,6 +58,34 @@ test "built-in theme glyphs include ascii fallbacks" {
     }
 }
 
+test "built-in themes render under glyph and color cap matrix" {
+    const color_caps = [_]contrast.ColorCaps{ .none, .@"16", .@"256", .truecolor };
+    const glyph_tiers = [_]loader.GlyphTier{ .ascii, .unicode, .nerdfont };
+
+    for (themes) |asset| {
+        const source = try std.fs.cwd().readFileAlloc(std.testing.allocator, asset.path, 1024 * 1024);
+        defer std.testing.allocator.free(source);
+
+        var diagnostic: loader.Diagnostic = .{};
+        var theme = try loader.parse(std.testing.allocator, source, &diagnostic);
+        defer theme.deinit(std.testing.allocator);
+
+        const failures = try loader.validateAlloc(std.testing.allocator, theme);
+        defer std.testing.allocator.free(failures);
+        try std.testing.expectEqual(@as(usize, 0), failures.len);
+
+        for (color_caps) |color_cap| {
+            for (glyph_tiers) |glyph_tier| {
+                const rendered = try renderMatrixLineAlloc(std.testing.allocator, theme, color_cap, glyph_tier);
+                defer std.testing.allocator.free(rendered);
+                try std.testing.expect(rendered.len > 0);
+                try std.testing.expect(std.mem.indexOf(u8, rendered, "~/work/shisa") != null);
+                try std.testing.expect(std.mem.indexOf(u8, rendered, "main") != null);
+            }
+        }
+    }
+}
+
 fn expectContains(source: []const u8, needle: []const u8) !void {
     try std.testing.expect(std.mem.indexOf(u8, source, needle) != null);
 }
@@ -92,4 +121,53 @@ fn expectGlyphFallbacks(source: []const u8) !void {
 fn unquote(value: []const u8) []const u8 {
     if (value.len >= 2 and value[0] == '"' and value[value.len - 1] == '"') return value[1 .. value.len - 1];
     return value;
+}
+
+fn renderMatrixLineAlloc(allocator: std.mem.Allocator, theme: loader.Theme, color_cap: contrast.ColorCaps, glyph_tier: loader.GlyphTier) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    for (theme.segments, 0..) |segment, index| {
+        if (index > 0) try out.appendSlice(allocator, theme.separators.segment);
+        var styled = false;
+        styled = try appendSegmentColorSgr(allocator, &out, theme, segment.fg, .foreground, color_cap) or styled;
+        styled = try appendSegmentColorSgr(allocator, &out, theme, segment.bg, .background, color_cap) or styled;
+        try out.appendSlice(allocator, theme.separators.left);
+        try out.appendSlice(allocator, segment.prefix);
+        try out.appendSlice(allocator, loader.resolveSegmentGlyph(segment, glyph_tier));
+        try out.appendSlice(allocator, previewValue(segment.id));
+        try out.appendSlice(allocator, segment.suffix);
+        try out.appendSlice(allocator, theme.separators.right);
+        if (styled) try out.appendSlice(allocator, "\x1b[0m");
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendSegmentColorSgr(
+    allocator: std.mem.Allocator,
+    out: *std.ArrayList(u8),
+    theme: loader.Theme,
+    ref: []const u8,
+    role: contrast.ColorRole,
+    color_cap: contrast.ColorCaps,
+) !bool {
+    if (ref.len == 0) return false;
+    const rgb = loader.resolvePaletteColor(theme, ref) orelse return false;
+    const sgr = try contrast.formatSgrColorAlloc(allocator, role, rgb, color_cap);
+    defer allocator.free(sgr);
+    if (sgr.len == 0) return false;
+    try out.appendSlice(allocator, sgr);
+    return true;
+}
+
+fn previewValue(id: []const u8) []const u8 {
+    if (std.mem.eql(u8, id, "cwd")) return "~/work/shisa";
+    if (std.mem.eql(u8, id, "git_branch")) return "main*";
+    if (std.mem.eql(u8, id, "exit_status")) return "2";
+    if (std.mem.eql(u8, id, "jobs")) return "2";
+    if (std.mem.eql(u8, id, "cmd_duration")) return "1.5s";
+    if (std.mem.eql(u8, id, "time")) return "14:32";
+    if (std.mem.eql(u8, id, "language_versions")) return "zig:0.15";
+    return id;
 }

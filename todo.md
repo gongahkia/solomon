@@ -1042,7 +1042,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 ## Phase 32 — Advanced testing infrastructure
 
 ### 32.1 Snapshot tests
-- [ ] All built-in themes × glyph caps × color caps
+- [x] All built-in themes × glyph caps × color caps
 - [ ] Prompt fixtures: clean, dirty git, conflict, prod, etc.
 - [ ] Update tool with explicit confirm gate (no auto-write)
 

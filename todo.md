@@ -1025,7 +1025,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Failure crashes uploaded to private bucket
 
 ### 31.3 Bug bounty
-- [ ] Define scope (sandbox escapes, IPC spoofing, supply chain)
+- [x] Define scope (sandbox escapes, IPC spoofing, supply chain)
 - [ ] Pool funded by Open Collective (publicly tracked)
 - [ ] Public hall of fame for valid reports
 

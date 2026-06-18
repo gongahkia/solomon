@@ -1,6 +1,6 @@
 # Bug Bounty
 
-This policy defines the Shisa sandbox-escape bounty pool.
+This policy defines the Shisa security bounty pool.
 
 ## Status
 
@@ -18,6 +18,14 @@ Restricted bounty funds are reserved for bounty awards, payment fees, and tax/ac
 
 ## Scope
 
+Eligible bounty areas:
+
+| Area | Eligible impact |
+| --- | --- |
+| Sandbox escapes | Untrusted Lua or plugin package code reaches host APIs, removed globals, filesystem, exec, network, env, secrets, or pre-exec access without explicit trusted capability review. |
+| IPC spoofing | A local attacker forges, hijacks, or cross-user accesses daemon socket traffic or accepted wire-protocol responses. |
+| Supply chain | A release, update, package, docs, signing, attestation, or verified plugin path lets attackers substitute code or bypass provenance checks. |
+
 Eligible reports demonstrate one of these behaviors in current `main` or a supported release:
 
 - Lua plugin code reaches removed globals such as `os`, `io`, `package`, `debug`, `require`, `dofile`, or `loadfile` without an explicit safe wrapper.
@@ -25,6 +33,8 @@ Eligible reports demonstrate one of these behaviors in current `main` or a suppo
 - The local `require` wrapper loads code outside the configured plugin root.
 - Lua plugin code disables or bypasses CPU or memory limits in a way that preserves host API access.
 - A plugin package or manifest bypass lets untrusted code run before trust or capability review.
+- Daemon IPC accepts spoofed cross-user requests or responses, or processes malformed authenticated-local traffic as another user/session.
+- A release, installer, package, checksum, signature, attestation, or verified plugin workflow can be replaced or bypassed without detection.
 
 Out of scope:
 

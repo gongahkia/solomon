@@ -1022,7 +1022,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] JSON request decoder
 - [x] Lua bridge surface
 - [x] Redaction rules
-- [ ] Failure crashes uploaded to private bucket
+- [x] Failure crashes uploaded to private bucket
 
 ### 31.3 Bug bounty
 - [ ] Define scope (sandbox escapes, IPC spoofing, supply chain)

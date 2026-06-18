@@ -64,6 +64,8 @@ Unknown top-level keys are invalid.
 
 The renderer must downgrade to terminal capabilities at runtime. `glyphs = "nerd-font"` requires every glyph-bearing segment to also define `ascii`.
 
+Runtime color caps are `truecolor`, `256`, `16`, or `none`. Theme capability `ansi256` maps to `256`; `ansi` maps to `16`. Downcasting emits SGR `38;2`/`48;2` for truecolor, nearest xterm-256 indexes for `256`, nearest ANSI base/bright indexes for `16`, and no color escape for `none`.
+
 ## `[palette]`
 
 Palette values are strings:

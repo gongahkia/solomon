@@ -12,6 +12,33 @@ pub const Oklab = struct {
     b: f64,
 };
 
+pub const ColorCaps = enum {
+    truecolor,
+    @"256",
+    @"16",
+    none,
+
+    pub fn fromName(value: []const u8) ?ColorCaps {
+        if (std.mem.eql(u8, value, "truecolor")) return .truecolor;
+        if (std.mem.eql(u8, value, "256") or std.mem.eql(u8, value, "ansi256")) return .@"256";
+        if (std.mem.eql(u8, value, "16") or std.mem.eql(u8, value, "ansi")) return .@"16";
+        if (std.mem.eql(u8, value, "none")) return .none;
+        return null;
+    }
+};
+
+pub const ColorRole = enum {
+    foreground,
+    background,
+};
+
+pub const DowncastColor = union(enum) {
+    truecolor: Rgb,
+    ansi256: u8,
+    ansi16: u8,
+    none,
+};
+
 pub const ContrastFailure = struct {
     target: []const u8,
     role: []const u8,
@@ -134,6 +161,44 @@ pub fn oklabToRgb(color: Oklab) Rgb {
         .r = linearSrgbToByte(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
         .g = linearSrgbToByte(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
         .b = linearSrgbToByte(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s),
+    };
+}
+
+pub fn downcastColor(rgb: Rgb, caps: ColorCaps) DowncastColor {
+    return switch (caps) {
+        .truecolor => .{ .truecolor = rgb },
+        .@"256" => .{ .ansi256 = nearestAnsi256Index(rgb) },
+        .@"16" => .{ .ansi16 = nearestAnsi16Index(rgb) },
+        .none => .none,
+    };
+}
+
+pub fn nearestAnsi256Index(rgb: Rgb) u8 {
+    return nearestAnsiIndex(rgb, 256);
+}
+
+pub fn nearestAnsi16Index(rgb: Rgb) u8 {
+    return nearestAnsiIndex(rgb, 16);
+}
+
+pub fn formatSgrColorAlloc(allocator: std.mem.Allocator, role: ColorRole, rgb: Rgb, caps: ColorCaps) ![]u8 {
+    return switch (downcastColor(rgb, caps)) {
+        .truecolor => |color| try std.fmt.allocPrint(
+            allocator,
+            "\x1b[{d};2;{d};{d};{d}m",
+            .{ colorRoleTruecolorCode(role), color.r, color.g, color.b },
+        ),
+        .ansi256 => |index| try std.fmt.allocPrint(
+            allocator,
+            "\x1b[{d};5;{d}m",
+            .{ colorRole256Code(role), index },
+        ),
+        .ansi16 => |index| try std.fmt.allocPrint(
+            allocator,
+            "\x1b[{d}m",
+            .{ansi16SgrCode(role, index)},
+        ),
+        .none => try allocator.dupe(u8, ""),
     };
 }
 
@@ -311,6 +376,10 @@ fn parseHexDigit(byte: u8) ?u8 {
 
 fn parseAnsiColor(value: []const u8) ?Rgb {
     const index = std.fmt.parseInt(u8, value, 10) catch return null;
+    return ansiIndexRgb(index);
+}
+
+pub fn ansiIndexRgb(index: u8) Rgb {
     const base = [_]Rgb{
         .{ .r = 0, .g = 0, .b = 0 },
         .{ .r = 128, .g = 0, .b = 0 },
@@ -341,6 +410,51 @@ fn parseAnsiColor(value: []const u8) ?Rgb {
     }
     const gray: u8 = 8 + (index - 232) * 10;
     return .{ .r = gray, .g = gray, .b = gray };
+}
+
+fn nearestAnsiIndex(rgb: Rgb, comptime limit: u16) u8 {
+    var best_index: u8 = 0;
+    var best_distance: u32 = std.math.maxInt(u32);
+    var index: u16 = 0;
+    while (index < limit) : (index += 1) {
+        const candidate_index: u8 = @intCast(index);
+        const distance = colorDistanceSquared(rgb, ansiIndexRgb(candidate_index));
+        if (distance < best_distance) {
+            best_index = candidate_index;
+            best_distance = distance;
+        }
+    }
+    return best_index;
+}
+
+fn colorDistanceSquared(a: Rgb, b: Rgb) u32 {
+    return channelDistanceSquared(a.r, b.r) + channelDistanceSquared(a.g, b.g) + channelDistanceSquared(a.b, b.b);
+}
+
+fn channelDistanceSquared(a: u8, b: u8) u32 {
+    const lhs: i32 = @intCast(a);
+    const rhs: i32 = @intCast(b);
+    const delta = lhs - rhs;
+    return @intCast(delta * delta);
+}
+
+fn colorRoleTruecolorCode(role: ColorRole) u8 {
+    return switch (role) {
+        .foreground => 38,
+        .background => 48,
+    };
+}
+
+fn colorRole256Code(role: ColorRole) u8 {
+    return colorRoleTruecolorCode(role);
+}
+
+fn ansi16SgrCode(role: ColorRole, index: u8) u8 {
+    std.debug.assert(index < 16);
+    return switch (role) {
+        .foreground => if (index < 8) 30 + index else 90 + (index - 8),
+        .background => if (index < 8) 40 + index else 100 + (index - 8),
+    };
 }
 
 fn srgbByteToLinear(byte: u8) f64 {
@@ -374,6 +488,37 @@ fn expectRgbApprox(expected: Rgb, actual: Rgb, tolerance: u8) !void {
 
 fn absByteDiff(a: u8, b: u8) u8 {
     return if (a > b) a - b else b - a;
+}
+
+test "downcasts colors to terminal capability tiers" {
+    const red = Rgb{ .r = 255, .g = 0, .b = 0 };
+    try std.testing.expectEqual(ColorCaps.truecolor, ColorCaps.fromName("truecolor").?);
+    try std.testing.expectEqual(ColorCaps.@"256", ColorCaps.fromName("ansi256").?);
+    try std.testing.expectEqual(ColorCaps.@"16", ColorCaps.fromName("ansi").?);
+    try std.testing.expectEqual(ColorCaps.none, ColorCaps.fromName("none").?);
+    try std.testing.expectEqual(@as(u8, 9), nearestAnsi256Index(red));
+    try std.testing.expectEqual(@as(u8, 9), nearestAnsi16Index(red));
+    try std.testing.expectEqual(@as(u8, 136), nearestAnsi256Index(Rgb{ .r = 175, .g = 135, .b = 0 }));
+    try std.testing.expectEqual(@as(u8, 14), nearestAnsi16Index(Rgb{ .r = 0, .g = 255, .b = 255 }));
+}
+
+test "formats downcast colors as SGR" {
+    const allocator = std.testing.allocator;
+    const truecolor = try formatSgrColorAlloc(allocator, .foreground, Rgb{ .r = 51, .g = 102, .b = 255 }, .truecolor);
+    defer allocator.free(truecolor);
+    try std.testing.expectEqualStrings("\x1b[38;2;51;102;255m", truecolor);
+
+    const ansi256 = try formatSgrColorAlloc(allocator, .background, Rgb{ .r = 175, .g = 135, .b = 0 }, .@"256");
+    defer allocator.free(ansi256);
+    try std.testing.expectEqualStrings("\x1b[48;5;136m", ansi256);
+
+    const ansi16 = try formatSgrColorAlloc(allocator, .foreground, Rgb{ .r = 255, .g = 0, .b = 0 }, .@"16");
+    defer allocator.free(ansi16);
+    try std.testing.expectEqualStrings("\x1b[91m", ansi16);
+
+    const none = try formatSgrColorAlloc(allocator, .foreground, Rgb{ .r = 255, .g = 0, .b = 0 }, .none);
+    defer allocator.free(none);
+    try std.testing.expectEqualStrings("", none);
 }
 
 test "calculates oklab contrast delta" {

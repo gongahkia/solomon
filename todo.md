@@ -975,7 +975,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 30.1 Color model
 - [x] Implement Oklab + Oklch parsing
-- [ ] Downcast to truecolor / 256 / 16 / none
+- [x] Downcast to truecolor / 256 / 16 / none
 - [ ] Tests against established Oklab reference values
 
 ### 30.2 Theme loader

@@ -59,6 +59,8 @@ usage: shisa theme <command> [args]
 commands:
   validate <path>   validate a theme file
   preview <theme>   render a stub prompt from a built-in id or theme file
+  gallery [--no-open]
+                    generate a local static gallery and open it
 ```
 
 ### `shisa vouch`

@@ -216,6 +216,10 @@ fn themeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try themePreviewCommand(allocator, args[1]);
         return;
     }
+    if (std.mem.eql(u8, args[0], "gallery")) {
+        try themeGalleryCommand(allocator, args[1..]);
+        return;
+    }
     return error.UnknownThemeCommand;
 }
 
@@ -481,6 +485,137 @@ test "theme preview renders stub prompt" {
     try std.testing.expect(std.mem.indexOf(u8, preview, "exit:2") != null);
     try std.testing.expect(std.mem.indexOf(u8, preview, "jobs:2") != null);
     try std.testing.expect(std.mem.indexOf(u8, preview, "took:1.5s") != null);
+}
+
+fn themeGalleryCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    var open_browser = true;
+    for (args) |arg| {
+        if (std.mem.eql(u8, arg, "--no-open")) {
+            open_browser = false;
+        } else {
+            return error.UnknownThemeArgument;
+        }
+    }
+
+    const path = try writeThemeGalleryAlloc(allocator);
+    defer allocator.free(path);
+    if (open_browser) try openPathInBrowser(allocator, path);
+    const message = try std.fmt.allocPrint(allocator, "theme gallery: {s}\n", .{path});
+    defer allocator.free(message);
+    try std.fs.File.stdout().writeAll(message);
+}
+
+fn writeThemeGalleryAlloc(allocator: std.mem.Allocator) ![]u8 {
+    const out_dir = "zig-out/theme-gallery";
+    try std.fs.cwd().makePath(out_dir);
+    const html = try themeGalleryHtmlAlloc(allocator);
+    defer allocator.free(html);
+    const path = out_dir ++ "/index.html";
+    var file = try std.fs.cwd().createFile(path, .{ .truncate = true });
+    defer file.close();
+    try file.writeAll(html);
+    return allocator.dupe(u8, path);
+}
+
+fn themeGalleryHtmlAlloc(allocator: std.mem.Allocator) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try out.appendSlice(allocator,
+        \\<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        \\<title>Shisa Theme Gallery</title><style>
+        \\body{font:15px system-ui,sans-serif;margin:24px;background:#101216;color:#f2f4f8}
+        \\main{max-width:1120px;margin:0 auto}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+        \\article{border:1px solid #303642;border-radius:8px;padding:14px;background:#171a21}
+        \\h1{font-size:28px;margin:0 0 18px}h2{font-size:16px;margin:0 0 10px}
+        \\pre{overflow:auto;margin:10px 0 0;padding:12px;background:#090b0f;border-radius:6px;color:#f8fafc}
+        \\.swatches{display:flex;gap:6px}.swatch{width:24px;height:24px;border-radius:4px;border:1px solid rgba(255,255,255,.25)}
+        \\</style></head><body><main><h1>Shisa Theme Gallery</h1><div class="grid">
+    );
+    for (built_in_theme_ids) |id| {
+        const path = try themePathAlloc(allocator, id);
+        defer allocator.free(path);
+        const source = try std.fs.cwd().readFileAlloc(allocator, path, max_config_bytes);
+        defer allocator.free(source);
+        var diagnostic: theme_loader.Diagnostic = .{};
+        var theme = try theme_loader.parse(allocator, source, &diagnostic);
+        defer theme.deinit(allocator);
+        const failures = try theme_loader.validateAlloc(allocator, theme);
+        defer allocator.free(failures);
+        if (failures.len > 0) return error.InvalidTheme;
+        try appendThemeGalleryCard(allocator, &out, theme);
+    }
+    try out.appendSlice(allocator, "</div></main></body></html>\n");
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendThemeGalleryCard(allocator: std.mem.Allocator, out: *std.ArrayList(u8), theme: theme_loader.Theme) !void {
+    const name = try htmlEscapeAlloc(allocator, theme.name);
+    defer allocator.free(name);
+    const preview = try themePreviewAlloc(allocator, theme, 80);
+    defer allocator.free(preview);
+    const plain_preview = try stripAnsiAlloc(allocator, preview);
+    defer allocator.free(plain_preview);
+    const escaped_preview = try htmlEscapeAlloc(allocator, plain_preview);
+    defer allocator.free(escaped_preview);
+
+    try appendFmt(allocator, out, "<article><h2>{s}</h2><div class=\"swatches\">", .{name});
+    inline for (.{ "fg", "muted", "accent", "success", "warning", "danger" }) |slot| {
+        if (theme_loader.resolvePaletteSlot(theme, slot)) |rgb| {
+            try appendFmt(allocator, out, "<span class=\"swatch\" title=\"{s}\" style=\"background:rgb({d},{d},{d})\"></span>", .{ slot, rgb.r, rgb.g, rgb.b });
+        }
+    }
+    try appendFmt(allocator, out, "</div><pre>{s}</pre></article>", .{escaped_preview});
+}
+
+fn htmlEscapeAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    for (value) |byte| {
+        switch (byte) {
+            '&' => try out.appendSlice(allocator, "&amp;"),
+            '<' => try out.appendSlice(allocator, "&lt;"),
+            '>' => try out.appendSlice(allocator, "&gt;"),
+            '"' => try out.appendSlice(allocator, "&quot;"),
+            '\'' => try out.appendSlice(allocator, "&#39;"),
+            else => try out.append(allocator, byte),
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn openPathInBrowser(allocator: std.mem.Allocator, path: []const u8) !void {
+    switch (builtin.os.tag) {
+        .macos => try runBrowserOpen(allocator, &.{ "open", path }),
+        .linux, .freebsd, .openbsd, .netbsd => try runBrowserOpen(allocator, &.{ "xdg-open", path }),
+        .windows => try runBrowserOpen(allocator, &.{ "cmd", "/C", "start", "", path }),
+        else => return error.UnsupportedBrowserOpen,
+    }
+}
+
+fn runBrowserOpen(allocator: std.mem.Allocator, argv: []const []const u8) !void {
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .max_output_bytes = 4096,
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!childExitedZero(result.term)) return error.OpenBrowserFailed;
+}
+
+fn childExitedZero(term: std.process.Child.Term) bool {
+    return switch (term) {
+        .Exited => |code| code == 0,
+        else => false,
+    };
+}
+
+test "theme gallery html lists built-in previews" {
+    const html = try themeGalleryHtmlAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(html);
+    try std.testing.expect(std.mem.indexOf(u8, html, "Shisa Theme Gallery") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<h2>plain</h2>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "~/work/shisa") != null);
 }
 
 fn fontCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
@@ -6407,6 +6542,8 @@ const theme_help_text =
     \\commands:
     \\  validate <path>   validate a theme file
     \\  preview <theme>   render a stub prompt from a built-in id or theme file
+    \\  gallery [--no-open]
+    \\                    generate a local static gallery and open it
     \\
 ;
 

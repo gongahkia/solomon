@@ -1007,7 +1007,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 30.6 Live preview
 - [x] `shisa theme preview <theme>` renders a sample prompt with stub state
-- [ ] `shisa theme gallery` opens the gallery in a browser (no telemetry)
+- [x] `shisa theme gallery` opens the gallery in a browser (no telemetry)
 - [ ] Web preview at shisa.sh/themes (no JS framework; static)
 
 ## Phase 31 â€” Security threat model + audits

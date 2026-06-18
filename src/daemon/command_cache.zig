@@ -384,3 +384,28 @@ test "fsnotify declared watch invalidates module cwd entries" {
     try store.invalidateModuleCwd(invalidation.module_id, invalidation.cwd);
     try std.testing.expect(try store.getAt(input, 52 * std.time.ns_per_ms) == null);
 }
+
+test "thrash invalidation keeps command cache bounded" {
+    var watcher = fsnotify.Watcher.init(std.testing.allocator);
+    defer watcher.deinit();
+    const paths = [_]fsnotify.WatchPath{.{ .path = "/repo/package.json" }};
+    try registerDeclaredWatches(&watcher, "language_versions", "/repo", paths[0..], 0);
+
+    var store = Store.initWithOptions(std.testing.allocator, .{ .default_ttl_ns = 0 });
+    defer store.deinit();
+
+    for (0..1000) |index| {
+        const input = KeyInput{
+            .module_id = "language_versions",
+            .cmd = "node",
+            .args = &.{"--version"},
+            .cwd = "/repo",
+            .mtimes = &.{.{ .path = "/repo/package.json", .mtime_ns = @intCast(index) }},
+        };
+        try store.putOutputAt(input, "v24.0.0", @intCast(index));
+        watcher.recordEvent("/repo/package.json", @intCast(index));
+        const invalidation = watcher.nextInvalidation(@intCast(index)).?;
+        try store.invalidateModuleCwd(invalidation.module_id, invalidation.cwd);
+        try std.testing.expectEqual(@as(usize, 0), store.count());
+    }
+}

@@ -899,7 +899,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 27.5 Stress tests
 - [x] 10k cd loops with cache hit-rate measured
-- [ ] Cache thrash scenario (constantly invalidated)
+- [x] Cache thrash scenario (constantly invalidated)
 - [ ] Memory ceiling under high-churn
 
 ## Phase 28 â€” Async / redraw mechanism (per-shell)

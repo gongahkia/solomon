@@ -179,6 +179,16 @@ pub fn fillerWidth(left: []const u8, right: []const u8, cols: u16) usize {
     return if (used < total) total - used else 0;
 }
 
+pub fn renderAlignedLineAlloc(allocator: std.mem.Allocator, left: []const u8, right: []const u8, cols: u16) ![]u8 {
+    if (right.len == 0) return allocator.dupe(u8, left);
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try out.appendSlice(allocator, left);
+    try out.appendNTimes(allocator, ' ', fillerWidth(left, right, cols));
+    try out.appendSlice(allocator, right);
+    return out.toOwnedSlice(allocator);
+}
+
 pub fn visibleWidth(value: []const u8) usize {
     var width: usize = 0;
     var index: usize = 0;
@@ -512,6 +522,20 @@ test "calculates filler width from visible cells" {
     try std.testing.expectEqual(@as(usize, 0), fillerWidth("left", "right", 4));
     try std.testing.expectEqual(@as(usize, 6), fillerWidth("\x1b[31merr\x1b[0m", "ok", 11));
     try std.testing.expectEqual(@as(usize, 6), fillerWidth("\x1b]7;file://host/tmp\x07cwd", "ok", 11));
+}
+
+test "renders right-aligned layout line" {
+    const line = try renderAlignedLineAlloc(std.testing.allocator, "cwd", "time", 12);
+    defer std.testing.allocator.free(line);
+    try std.testing.expectEqualStrings("cwd     time", line);
+    try std.testing.expectEqual(@as(usize, 12), visibleWidth(line));
+}
+
+test "right-aligns through control sequences" {
+    const line = try renderAlignedLineAlloc(std.testing.allocator, "\x1b[32mcwd\x1b[0m", "ok", 8);
+    defer std.testing.allocator.free(line);
+    try std.testing.expectEqualStrings("\x1b[32mcwd\x1b[0m   ok", line);
+    try std.testing.expectEqual(@as(usize, 8), visibleWidth(line));
 }
 
 test "counts unicode glyphs as one visible cell for layout filler" {

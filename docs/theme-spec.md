@@ -129,6 +129,8 @@ right = ["cmd_duration"]
 
 Filler width is computed from visible cells after ignoring ANSI CSI and OSC control sequences. When left and right content exceed the terminal columns, filler width is `0`.
 
+Right-side content starts after the filler and is aligned to the terminal column when the line fits.
+
 ## `[segments.<id>]`
 
 Segment ids are core module ids or plugin module ids.

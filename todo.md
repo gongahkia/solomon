@@ -996,7 +996,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 30.4 Multi-line layout
 - [x] Implement `[layout]` parser
 - [x] Filler segment width calc
-- [ ] Right-aligned segments per line
+- [x] Right-aligned segments per line
 - [ ] Snapshot tests for each layout shape
 
 ### 30.5 Glyph fallback

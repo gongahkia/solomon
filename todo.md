@@ -1077,19 +1077,19 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] CI gate: every PR touching user-facing text updates the catalog
 
 ### 33.2 Locale routing
-- [ ] Detect `LANG` / `LC_*` env
+- [x] Detect `LANG` / `LC_*` env
 - [ ] `shisa config set locale=...` override
 - [ ] Fall through to en-US for missing translations
 
 ### 33.3 RTL rendering
 - [ ] Bidi detection
-- [ ] Optional segment reversal
-- [ ] Tested with Arabic, Hebrew, Persian fixture strings
+- [x] Optional segment reversal
+- [x] Tested with Arabic, Hebrew, Persian fixture strings
 
 ### 33.4 CJK width
-- [ ] UAX-11 East Asian Width table
-- [ ] Width-aware segment truncation
-- [ ] Tested with Chinese, Japanese, Korean fixtures
+- [x] UAX-11 East Asian Width table
+- [x] Width-aware segment truncation
+- [x] Tested with Chinese, Japanese, Korean fixtures
 
 ### 33.5 Translator onboarding
 - [ ] Weblate or equivalent set up

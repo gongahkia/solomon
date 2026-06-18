@@ -694,6 +694,54 @@ test "counts East Asian wide cells for layout filler" {
     try std.testing.expectEqual(@as(usize, 3), visibleWidth("a\xc2\xb7b"));
 }
 
+const LocaleFixtureFile = struct {
+    locale_fixtures: []LocaleFixture,
+};
+
+const LocaleFixture = struct {
+    locale: []const u8 = "",
+    language: []const u8 = "",
+    direction: []const u8 = "",
+    cwd: []const u8 = "",
+    risk_tier: []const u8 = "",
+    exit_status: []const u8 = "",
+    branch: []const u8 = "",
+};
+
+test "renders RTL locale fixture strings without layout corruption" {
+    var parsed = try readLocaleFixtures(std.testing.allocator, "test/fixtures/i18n/rtl.json");
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 3), parsed.value.locale_fixtures.len);
+    for (parsed.value.locale_fixtures) |fixture| {
+        try std.testing.expectEqualStrings("rtl", fixture.direction);
+        const line = try renderAlignedLineAlloc(std.testing.allocator, fixture.cwd, fixture.exit_status, 24);
+        defer std.testing.allocator.free(line);
+        try std.testing.expectEqual(@as(usize, 24), visibleWidth(line));
+        try std.testing.expect(std.mem.indexOf(u8, line, fixture.cwd) != null);
+        try std.testing.expect(std.mem.indexOf(u8, line, fixture.exit_status) != null);
+    }
+}
+
+test "renders CJK locale fixture strings with East Asian widths" {
+    var parsed = try readLocaleFixtures(std.testing.allocator, "test/fixtures/i18n/cjk.json");
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 3), parsed.value.locale_fixtures.len);
+    for (parsed.value.locale_fixtures) |fixture| {
+        try std.testing.expectEqualStrings("ltr", fixture.direction);
+        const line = try renderAlignedLineAlloc(std.testing.allocator, fixture.cwd, fixture.exit_status, 20);
+        defer std.testing.allocator.free(line);
+        try std.testing.expectEqual(@as(usize, 20), visibleWidth(line));
+        try std.testing.expect(std.mem.indexOf(u8, line, fixture.cwd) != null);
+        try std.testing.expect(std.mem.indexOf(u8, line, fixture.exit_status) != null);
+    }
+}
+
+fn readLocaleFixtures(allocator: std.mem.Allocator, path: []const u8) !std.json.Parsed(LocaleFixtureFile) {
+    const source = try std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024);
+    defer allocator.free(source);
+    return std.json.parseFromSlice(LocaleFixtureFile, allocator, source, .{ .ignore_unknown_fields = true, .allocate = .alloc_always });
+}
+
 fn expectLayoutSnapshot(name: []const u8, lines: []const LayoutLineInput, cols: u16) !void {
     const actual = try renderLayoutLinesAlloc(std.testing.allocator, lines, cols);
     defer std.testing.allocator.free(actual);

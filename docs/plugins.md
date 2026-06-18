@@ -122,11 +122,14 @@ Common commands:
 ```sh
 shisa plugin new demo-plugin
 shisa plugin lint demo-plugin
+shisa plugin pack demo-plugin
 shisa plugin list
 shisa plugin disable demo-plugin
 shisa plugin enable demo-plugin
 shisa plugin trust demo-plugin
 ```
+
+`shisa plugin pack <path>` writes `<name>-<version>.shisa-plugin`, a tar bundle with `SHISA_PLUGIN_BUNDLE.json` containing file SHA-256 values and an Ed25519 signature over the canonical bundle manifest.
 
 ## Current Limits
 

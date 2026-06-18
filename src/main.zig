@@ -4470,6 +4470,16 @@ fn pluginCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[0], "pack")) {
+        if (args.len != 2) return error.UnknownPluginArgument;
+        const output_path = try pluginPack(allocator, args[1], ".");
+        defer allocator.free(output_path);
+        const message = try std.fmt.allocPrint(allocator, "packed {s}\n", .{output_path});
+        defer allocator.free(message);
+        try std.fs.File.stdout().writeAll(message);
+        return;
+    }
+
     const plugins_dir = try pluginsDirPath(allocator);
     defer allocator.free(plugins_dir);
     const disabled_path = try disabledPluginsPath(allocator);
@@ -4672,6 +4682,186 @@ fn pathExistsInDir(allocator: std.mem.Allocator, dir: []const u8, name: []const 
         else => return err,
     };
     return true;
+}
+
+const PluginBundleFile = struct {
+    path: []u8,
+    size: u64,
+    sha256_hex: [std.crypto.hash.sha2.Sha256.digest_length * 2]u8,
+};
+
+fn pluginPack(allocator: std.mem.Allocator, path: []const u8, out_dir: []const u8) ![]u8 {
+    const manifest_path = try pluginManifestPathAlloc(allocator, path);
+    defer allocator.free(manifest_path);
+    const plugin_dir = std.fs.path.dirname(manifest_path) orelse ".";
+    const source = try std.fs.cwd().readFileAlloc(allocator, manifest_path, 1024 * 1024);
+    defer allocator.free(source);
+
+    var runtime = try plugin_lua.Runtime.initSandboxedWithOptions(allocator, .{ .require_root = plugin_dir });
+    defer runtime.deinit();
+    var loaded = try runtime.loadManifestStrict(source);
+    defer loaded.deinit(allocator);
+
+    var files = try collectPluginBundleFiles(allocator, plugin_dir);
+    defer deinitPluginBundleFiles(allocator, &files);
+    const canonical = try canonicalPluginBundleManifestAlloc(allocator, loaded.manifest, files.items);
+    defer allocator.free(canonical);
+    const metadata = try signedPluginBundleMetadataAlloc(allocator, loaded.manifest, files.items, canonical);
+    defer allocator.free(metadata);
+
+    const bundle_name = try std.fmt.allocPrint(allocator, "{s}-{s}.shisa-plugin", .{ loaded.manifest.name, loaded.manifest.version });
+    defer allocator.free(bundle_name);
+    const output_path = try std.fs.path.join(allocator, &.{ out_dir, bundle_name });
+    errdefer allocator.free(output_path);
+    var output = try std.fs.cwd().createFile(output_path, .{ .exclusive = true });
+    defer output.close();
+    try writePluginBundleTar(allocator, output, plugin_dir, files.items, metadata);
+    return output_path;
+}
+
+fn collectPluginBundleFiles(allocator: std.mem.Allocator, plugin_dir: []const u8) !std.ArrayList(PluginBundleFile) {
+    var dir = try openIterableDir(plugin_dir);
+    defer dir.close();
+    var walker = try dir.walk(allocator);
+    defer walker.deinit();
+
+    var files: std.ArrayList(PluginBundleFile) = .empty;
+    errdefer deinitPluginBundleFiles(allocator, &files);
+    while (try walker.next()) |entry| {
+        if (entry.kind != .file) continue;
+        if (std.mem.eql(u8, entry.path, "SHISA_PLUGIN_BUNDLE.json")) return error.PluginPackReservedPath;
+        if (std.mem.eql(u8, entry.path, ".git") or std.mem.startsWith(u8, entry.path, ".git/")) continue;
+        const full_path = try std.fs.path.join(allocator, &.{ plugin_dir, entry.path });
+        defer allocator.free(full_path);
+        const data = try std.fs.cwd().readFileAlloc(allocator, full_path, 16 * 1024 * 1024);
+        defer allocator.free(data);
+        var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(data, &digest, .{});
+        const hex = std.fmt.bytesToHex(digest, .lower);
+        try files.append(allocator, .{
+            .path = try allocator.dupe(u8, entry.path),
+            .size = data.len,
+            .sha256_hex = hex,
+        });
+    }
+    std.mem.sort(PluginBundleFile, files.items, {}, lessThanPluginBundleFile);
+    return files;
+}
+
+fn openIterableDir(path: []const u8) !std.fs.Dir {
+    if (std.fs.path.isAbsolute(path)) return std.fs.openDirAbsolute(path, .{ .iterate = true });
+    return std.fs.cwd().openDir(path, .{ .iterate = true });
+}
+
+fn deinitPluginBundleFiles(allocator: std.mem.Allocator, files: *std.ArrayList(PluginBundleFile)) void {
+    for (files.items) |file| allocator.free(file.path);
+    files.deinit(allocator);
+}
+
+fn lessThanPluginBundleFile(_: void, lhs: PluginBundleFile, rhs: PluginBundleFile) bool {
+    return std.mem.lessThan(u8, lhs.path, rhs.path);
+}
+
+fn canonicalPluginBundleManifestAlloc(allocator: std.mem.Allocator, manifest: plugin_manifest.Manifest, files: []const PluginBundleFile) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try appendFmt(allocator, &out, "format:shisa-plugin-bundle-v1\nname:{s}\nversion:{s}\n", .{ manifest.name, manifest.version });
+    for (files) |file| {
+        try appendFmt(allocator, &out, "file:{d}:{s}:{d}:{s}\n", .{ file.path.len, file.path, file.size, file.sha256_hex[0..] });
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn signedPluginBundleMetadataAlloc(allocator: std.mem.Allocator, manifest: plugin_manifest.Manifest, files: []const PluginBundleFile, canonical: []const u8) ![]u8 {
+    const Ed25519 = std.crypto.sign.Ed25519;
+    const key_pair = Ed25519.KeyPair.generate();
+    const signature = try key_pair.sign(canonical, null);
+    const public_key_hex = std.fmt.bytesToHex(key_pair.public_key.toBytes(), .lower);
+    const signature_hex = std.fmt.bytesToHex(signature.toBytes(), .lower);
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    const escaped_name = try jsonEscapeAlloc(allocator, manifest.name);
+    defer allocator.free(escaped_name);
+    const escaped_version = try jsonEscapeAlloc(allocator, manifest.version);
+    defer allocator.free(escaped_version);
+    try appendFmt(allocator, &out,
+        \\{{"format":"shisa-plugin-bundle-v1","name":"{s}","version":"{s}","files":[
+    , .{ escaped_name, escaped_version });
+    for (files, 0..) |file, index| {
+        if (index != 0) try out.append(allocator, ',');
+        const escaped_path = try jsonEscapeAlloc(allocator, file.path);
+        defer allocator.free(escaped_path);
+        try appendFmt(allocator, &out, "{{\"path\":\"{s}\",\"size\":{d},\"sha256\":\"{s}\"}}", .{ escaped_path, file.size, file.sha256_hex[0..] });
+    }
+    try appendFmt(allocator, &out,
+        \\],"signature":{{"algorithm":"Ed25519","public_key":"{s}","signature":"{s}"}}}}
+        \\
+    , .{ public_key_hex[0..], signature_hex[0..] });
+    return out.toOwnedSlice(allocator);
+}
+
+fn writePluginBundleTar(allocator: std.mem.Allocator, output: std.fs.File, plugin_dir: []const u8, files: []const PluginBundleFile, metadata: []const u8) !void {
+    for (files) |file| {
+        const full_path = try std.fs.path.join(allocator, &.{ plugin_dir, file.path });
+        defer allocator.free(full_path);
+        const data = try std.fs.cwd().readFileAlloc(allocator, full_path, 16 * 1024 * 1024);
+        defer allocator.free(data);
+        try writeTarEntry(output, file.path, data);
+    }
+    try writeTarEntry(output, "SHISA_PLUGIN_BUNDLE.json", metadata);
+    const zero = [_]u8{0} ** 1024;
+    try output.writeAll(&zero);
+}
+
+fn writeTarEntry(output: std.fs.File, name: []const u8, data: []const u8) !void {
+    if (name.len == 0 or name.len > 100) return error.PluginPackPathTooLong;
+    var header = [_]u8{0} ** 512;
+    @memcpy(header[0..name.len], name);
+    try writeTarOctal(header[100..108], 0o644);
+    try writeTarOctal(header[108..116], 0);
+    try writeTarOctal(header[116..124], 0);
+    try writeTarOctal(header[124..136], data.len);
+    try writeTarOctal(header[136..148], 0);
+    @memset(header[148..156], ' ');
+    header[156] = '0';
+    @memcpy(header[257..263], "ustar\x00");
+    @memcpy(header[263..265], "00");
+    var checksum: u64 = 0;
+    for (header) |byte| checksum += byte;
+    try writeTarChecksum(header[148..156], checksum);
+    try output.writeAll(&header);
+    try output.writeAll(data);
+    try writeTarPadding(output, data.len);
+}
+
+fn writeTarOctal(field: []u8, value: u64) !void {
+    @memset(field, 0);
+    var buffer: [32]u8 = undefined;
+    const text = try std.fmt.bufPrint(&buffer, "{o}", .{value});
+    const digits_len = field.len - 1;
+    if (text.len > digits_len) return error.PluginPackTarFieldOverflow;
+    const start = digits_len - text.len;
+    @memset(field[0..start], '0');
+    @memcpy(field[start..digits_len], text);
+    field[digits_len] = 0;
+}
+
+fn writeTarChecksum(field: []u8, checksum: u64) !void {
+    var buffer: [32]u8 = undefined;
+    const text = try std.fmt.bufPrint(&buffer, "{o}", .{checksum});
+    if (text.len > 6) return error.PluginPackTarFieldOverflow;
+    @memset(field[0..6], '0');
+    @memcpy(field[6 - text.len .. 6], text);
+    field[6] = 0;
+    field[7] = ' ';
+}
+
+fn writeTarPadding(output: std.fs.File, len: usize) !void {
+    const remainder = len % 512;
+    if (remainder == 0) return;
+    const zero = [_]u8{0} ** 512;
+    try output.writeAll(zero[0 .. 512 - remainder]);
 }
 
 const PluginInstallConfig = struct {
@@ -5257,6 +5447,33 @@ test "plugin lint accepts plugin.lua path" {
     };
     defer allocator.free(output);
     try std.testing.expectEqualStrings("ok linted-file 0.1.0\n", output);
+}
+
+test "plugin pack writes signed bundle" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-pack-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    try pluginNew(allocator, dir_path, "pack-plugin");
+    const plugin_path = try std.fmt.allocPrint(allocator, "{s}/pack-plugin", .{dir_path});
+    defer allocator.free(plugin_path);
+    const bundle_path = pluginPack(allocator, plugin_path, dir_path) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    defer allocator.free(bundle_path);
+    try std.testing.expect(std.mem.endsWith(u8, bundle_path, "pack-plugin-0.1.0.shisa-plugin"));
+
+    const bundle = try std.fs.cwd().readFileAlloc(allocator, bundle_path, 1024 * 1024);
+    defer allocator.free(bundle);
+    try std.testing.expect(std.mem.indexOf(u8, bundle, "plugin.lua") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bundle, "README.md") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bundle, "LICENSE") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bundle, "SHISA_PLUGIN_BUNDLE.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bundle, "\"algorithm\":\"Ed25519\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bundle, "\"signature\":\"") != null);
 }
 
 test "plugin enable disable is duplicate safe" {
@@ -5864,7 +6081,7 @@ const help_text =
     \\                print the minimal Pure-compatible preset
     \\  init          write default shisa.toml; --a11y uses the a11y theme
     \\  pin           mark a path as never-evicted
-    \\  plugin        new, lint, install, list, enable, disable, or trust plugins
+    \\  plugin        new, lint, pack, install, list, enable, disable, or trust plugins
     \\  prompt        render prompt through shisad; --a11y strips ANSI and normalizes glyphs
     \\  stack         dump detected stacked-diff metadata
     \\  supervisor    run shisad under a crash-restart supervisor

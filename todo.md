@@ -905,7 +905,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ## Phase 28 â€” Async / redraw mechanism (per-shell)
 
 ### 28.1 Zsh
-- [ ] Self-pipe FD wired to `zle reset-prompt`
+- [x] Self-pipe FD wired to `zle reset-prompt`
 - [ ] Test in tmux + plain zsh + alacritty + iTerm
 - [ ] Document `RPS1` interaction
 

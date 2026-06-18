@@ -24,6 +24,9 @@ typeset -g SHISA_LAST_DURATION_MS=0
 typeset -g SHISA_LAST_COMMAND=
 typeset -g SHISA_PREEXEC_REALTIME=
 typeset -g SHISA_ASYNC_SIGNAL=${SHISA_ASYNC_SIGNAL:-USR1}
+typeset -g SHISA_ASYNC_SELF_PIPE=${SHISA_ASYNC_SELF_PIPE:-1}
+typeset -g SHISA_ASYNC_PIPE=
+typeset -g SHISA_ASYNC_FD=
 typeset -g SHISA_TRANSIENT_PROMPT=${SHISA_TRANSIENT_PROMPT:-1}
 typeset -g SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 typeset -g SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
@@ -52,6 +55,10 @@ shisa_hook_once() {
     preexec)
       typeset -ga preexec_functions
       (( ${preexec_functions[(I)${hook_fn}]} == 0 )) && preexec_functions+=("${hook_fn}")
+      ;;
+    zshexit)
+      typeset -ga zshexit_functions
+      (( ${zshexit_functions[(I)${hook_fn}]} == 0 )) && zshexit_functions+=("${hook_fn}")
       ;;
   esac
 }
@@ -112,12 +119,60 @@ shisa_async_redraw() {
   zle reset-prompt 2>/dev/null || true
 }
 
+shisa_async_self_pipe_readable() {
+  emulate -L zsh
+  local fd=${1:-${SHISA_ASYNC_FD:-}}
+  [[ -n ${fd} ]] || return 0
+  local byte
+  while read -r -k 1 -t 0 -u ${fd} byte 2>/dev/null; do
+    :
+  done
+  shisa_async_redraw
+}
+
+shisa_async_self_pipe_notify() {
+  emulate -L zsh
+  if [[ -n ${SHISA_ASYNC_FD:-} ]]; then
+    print -rn -- . >&${SHISA_ASYNC_FD} 2>/dev/null && return 0
+  fi
+  shisa_async_redraw
+}
+
+shisa_async_self_pipe_cleanup() {
+  emulate -L zsh
+  if [[ -n ${SHISA_ASYNC_FD:-} ]]; then
+    zle -F ${SHISA_ASYNC_FD} 2>/dev/null || true
+    exec {SHISA_ASYNC_FD}>&- 2>/dev/null || true
+    SHISA_ASYNC_FD=
+  fi
+  if [[ -n ${SHISA_ASYNC_PIPE:-} ]]; then
+    rm -f -- "${SHISA_ASYNC_PIPE}" 2>/dev/null || true
+    SHISA_ASYNC_PIPE=
+  fi
+}
+
+shisa_async_self_pipe_setup() {
+  emulate -L zsh
+  [[ ${SHISA_ASYNC_SELF_PIPE:-1} == 1 ]] || return 0
+  [[ -o interactive ]] || return 0
+  [[ -z ${SHISA_ASYNC_FD:-} ]] || return 0
+  local dir="${TMPDIR:-/tmp}/shisa-${UID:-0}"
+  mkdir -p -- "${dir}" 2>/dev/null || return 0
+  SHISA_ASYNC_PIPE="${dir}/zsh-redraw-${$}.fifo"
+  [[ -p ${SHISA_ASYNC_PIPE} ]] || mkfifo -m 600 -- "${SHISA_ASYNC_PIPE}" 2>/dev/null || return 0
+  exec {SHISA_ASYNC_FD}<>"${SHISA_ASYNC_PIPE}" 2>/dev/null || return 0
+  zle -F ${SHISA_ASYNC_FD} shisa_async_self_pipe_readable 2>/dev/null || true
+}
+
 if [[ ${SHISA_ASYNC_SIGNAL} == USR1 ]]; then
   TRAPUSR1() {
-    shisa_async_redraw
+    shisa_async_self_pipe_notify
     return 0
   }
 fi
+
+shisa_hook_once zshexit shisa_async_self_pipe_cleanup
+shisa_async_self_pipe_setup
 
 shisa_accept_line() {
   emulate -L zsh

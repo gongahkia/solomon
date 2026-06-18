@@ -58,3 +58,4 @@ done
 
 SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" zsh -fc 'source init/shisa.zsh; print -P "$PROMPT"' >"$out"
 grep -F 'fake> ' "$out" >/dev/null
+zsh -fc 'source init/shisa.zsh; whence shisa_async_self_pipe_setup >/dev/null; whence shisa_async_self_pipe_readable >/dev/null; whence shisa_async_self_pipe_notify >/dev/null'

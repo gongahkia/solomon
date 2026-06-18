@@ -141,11 +141,14 @@ Segment ids are core module ids or plugin module ids.
 | `bg` | color ref | no | Empty means no background color. |
 | `style` | string | no | Space-separated `bold`, `dim`, `italic`, `underline`. |
 | `glyph` | string | no | Preferred glyph for rich terminals. |
+| `unicode` | string | no | Unicode fallback when `glyph` needs Nerd Font/private-use codepoints. |
 | `ascii` | string | no | ASCII fallback. Required when `glyph` is non-empty. |
 | `prefix` | string | no | Text before segment content. |
 | `suffix` | string | no | Text after segment content. |
 
 Unknown keys are invalid.
+
+Glyph tier resolution uses `glyph` → `unicode` → `ascii` for Nerd Font terminals, `unicode` or non-private-use `glyph` → `ascii` for Unicode terminals, and `ascii` for ASCII terminals.
 
 ## Inheritance
 

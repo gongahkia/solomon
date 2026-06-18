@@ -21,6 +21,12 @@ pub const GlyphCapability = enum {
     nerd_font,
 };
 
+pub const GlyphTier = enum {
+    nerdfont,
+    unicode,
+    ascii,
+};
+
 pub const Capabilities = struct {
     color: ColorCapability = .ansi,
     glyphs: GlyphCapability = .ascii,
@@ -64,6 +70,7 @@ pub const Segment = struct {
     bg: []u8 = "",
     style: []u8 = "",
     glyph: []u8 = "",
+    unicode: []u8 = "",
     ascii: []u8 = "",
     prefix: []u8 = "",
     suffix: []u8 = "",
@@ -197,6 +204,19 @@ pub fn resolvePaletteSlot(theme: Theme, name: []const u8) ?Rgb {
 
 pub fn resolvePaletteColor(theme: Theme, value: []const u8) ?Rgb {
     return resolvePaletteColorDepth(theme, value, 0);
+}
+
+pub fn resolveSegmentGlyph(segment: Segment, tier: GlyphTier) []const u8 {
+    return switch (tier) {
+        .nerdfont => firstNonEmpty(&.{ segment.glyph, segment.unicode, segment.ascii }),
+        .unicode => if (segment.unicode.len > 0)
+            segment.unicode
+        else if (segment.glyph.len > 0 and !hasPrivateUseCodepoint(segment.glyph))
+            segment.glyph
+        else
+            segment.ascii,
+        .ascii => segment.ascii,
+    };
 }
 
 pub fn validateAlloc(allocator: std.mem.Allocator, theme: Theme) ![]ValidationFailure {
@@ -455,6 +475,8 @@ const Parser = struct {
             try self.setSegmentString(&current_segment.style, line_no, value);
         } else if (std.mem.eql(u8, key.text, "glyph")) {
             try self.setSegmentString(&current_segment.glyph, line_no, value);
+        } else if (std.mem.eql(u8, key.text, "unicode")) {
+            try self.setSegmentString(&current_segment.unicode, line_no, value);
         } else if (std.mem.eql(u8, key.text, "ascii")) {
             try self.setSegmentString(&current_segment.ascii, line_no, value);
         } else if (std.mem.eql(u8, key.text, "prefix")) {
@@ -504,6 +526,8 @@ const Parser = struct {
         errdefer self.allocator.free(style);
         const glyph = try self.allocator.dupe(u8, "");
         errdefer self.allocator.free(glyph);
+        const unicode = try self.allocator.dupe(u8, "");
+        errdefer self.allocator.free(unicode);
         const ascii = try self.allocator.dupe(u8, "");
         errdefer self.allocator.free(ascii);
         const prefix = try self.allocator.dupe(u8, "");
@@ -516,6 +540,7 @@ const Parser = struct {
             .bg = bg,
             .style = style,
             .glyph = glyph,
+            .unicode = unicode,
             .ascii = ascii,
             .prefix = prefix,
             .suffix = suffix,
@@ -709,6 +734,30 @@ fn resolvePaletteColorDepth(theme: Theme, value: []const u8, depth: u8) ?Rgb {
     return contrast.parseColor(trimmed);
 }
 
+fn firstNonEmpty(values: []const []const u8) []const u8 {
+    for (values) |value| {
+        if (value.len > 0) return value;
+    }
+    return "";
+}
+
+fn hasPrivateUseCodepoint(value: []const u8) bool {
+    var index: usize = 0;
+    while (index < value.len) {
+        const view = std.unicode.Utf8View.init(value[index..]) catch return true;
+        var iterator = view.iterator();
+        const codepoint = iterator.nextCodepoint() orelse return false;
+        if ((codepoint >= 0xe000 and codepoint <= 0xf8ff) or
+            (codepoint >= 0xf0000 and codepoint <= 0xffffd) or
+            (codepoint >= 0x100000 and codepoint <= 0x10fffd))
+        {
+            return true;
+        }
+        index += iterator.i;
+    }
+    return false;
+}
+
 fn validThemeName(name: []const u8) bool {
     if (name.len == 0) return false;
     if (!isLowerAlnum(name[0])) return false;
@@ -861,6 +910,7 @@ fn freeSegment(allocator: std.mem.Allocator, item: Segment) void {
     allocator.free(item.bg);
     allocator.free(item.style);
     allocator.free(item.glyph);
+    allocator.free(item.unicode);
     allocator.free(item.ascii);
     allocator.free(item.prefix);
     allocator.free(item.suffix);
@@ -970,6 +1020,42 @@ test "parses indexed multi-line layout" {
     try std.testing.expectEqualStrings("git_branch", theme.layout.lines[0].left[1]);
     try std.testing.expectEqualStrings("exit_status", theme.layout.lines[1].left[0]);
     try std.testing.expectEqualStrings("cmd_duration", theme.layout.lines[1].right[0]);
+}
+
+test "resolves glyph tiers" {
+    var empty: [0]u8 = .{};
+    var private_glyph = [_]u8{ 0xee, 0x82, 0xa0 };
+    var git_unicode = [_]u8{ 'g', 'i', 't' };
+    var git_ascii = [_]u8{ 'g', 'i', 't', ':' };
+    const segment_with_private_glyph = Segment{
+        .id = empty[0..],
+        .fg = empty[0..],
+        .bg = empty[0..],
+        .style = empty[0..],
+        .glyph = private_glyph[0..],
+        .unicode = git_unicode[0..],
+        .ascii = git_ascii[0..],
+        .prefix = empty[0..],
+        .suffix = empty[0..],
+    };
+    try std.testing.expectEqualStrings("\xee\x82\xa0", resolveSegmentGlyph(segment_with_private_glyph, .nerdfont));
+    try std.testing.expectEqualStrings("git", resolveSegmentGlyph(segment_with_private_glyph, .unicode));
+    try std.testing.expectEqualStrings("git:", resolveSegmentGlyph(segment_with_private_glyph, .ascii));
+
+    var arrow = [_]u8{ 0xe2, 0x86, 0x92 };
+    var ascii_arrow = [_]u8{ '-', '>' };
+    const segment_with_unicode_glyph = Segment{
+        .id = empty[0..],
+        .fg = empty[0..],
+        .bg = empty[0..],
+        .style = empty[0..],
+        .glyph = arrow[0..],
+        .unicode = empty[0..],
+        .ascii = ascii_arrow[0..],
+        .prefix = empty[0..],
+        .suffix = empty[0..],
+    };
+    try std.testing.expectEqualStrings("\xe2\x86\x92", resolveSegmentGlyph(segment_with_unicode_glyph, .unicode));
 }
 
 test "resolves palette references" {

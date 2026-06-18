@@ -979,7 +979,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Tests against established Oklab reference values
 
 ### 30.2 Theme loader
-- [ ] Parse TOML themes (`okiya-night.toml`)
+- [x] Parse TOML themes (`okiya-night.toml`)
 - [ ] Resolve palette references (`@accent`)
 - [ ] Validate (`shisa theme validate`)
 - [ ] Generate preview screenshots in CI

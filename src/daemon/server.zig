@@ -1,4 +1,5 @@
 const std = @import("std");
+const cdhint_module = @import("modules/cdhint.zig");
 const cloud_ctx_module = @import("modules/cloud_ctx.zig");
 const dispatcher = @import("dispatcher.zig");
 const cost_glance_module = @import("modules/cost_glance.zig");
@@ -52,8 +53,10 @@ const RenderRequest = struct {
     cols: u16 = 80,
     rows: u16 = 24,
     request_id: []const u8 = "",
+    modules: []const []const u8 = &.{},
     cloud_ctx: cloud_ctx_module.Options = .{},
     cwd_options: cwd_module.Options = .{},
+    cdhint: cdhint_module.Options = .{},
     risk_tier: risk_tier_module.BarColors = .{},
     sso_expiry: sso_expiry_module.Options = .{},
     rtl: bool = false,
@@ -476,11 +479,12 @@ pub const Server = struct {
         }
         self.prompt_cache_misses += 1;
 
-        var rendered = try dispatcher.renderDefault(std.heap.page_allocator, .{
+        const cache_set = dispatcher.CacheSet{
             .git_branch = &self.git_branch_cache,
             .language_versions = &self.language_versions_cache,
             .cloud_ctx = &self.cloud_ctx_cache,
-        }, .{
+        };
+        const render_input = dispatcher.RenderInput{
             .cwd = parsed.value.cwd,
             .home = home,
             .exit = parsed.value.exit,
@@ -502,11 +506,18 @@ pub const Server = struct {
             .azure_default_location = azure_default_location,
             .kubeconfig = kubeconfig,
             .cloud_ctx = parsed.value.cloud_ctx,
+            .cdhint = parsed.value.cdhint,
             .risk_tier = parsed.value.risk_tier,
             .sso_expiry = parsed.value.sso_expiry,
             .rtl = parsed.value.rtl,
             .rtl_reverse = parsed.value.rtl_reverse,
-        });
+        };
+        const request_pipeline = try renderPipelineFromModuleNamesAlloc(std.heap.page_allocator, parsed.value.modules);
+        defer if (request_pipeline) |pipeline| std.heap.page_allocator.free(pipeline);
+        var rendered = if (request_pipeline) |pipeline|
+            try dispatcher.renderPipeline(std.heap.page_allocator, cache_set, render_input, pipeline)
+        else
+            try dispatcher.renderDefault(std.heap.page_allocator, cache_set, render_input);
         defer rendered.deinit(std.heap.page_allocator);
         try self.logSlowWarning(rendered.slow_warning);
 
@@ -1043,6 +1054,20 @@ fn promptCacheHitRatePpm(hits: u64, misses: u64) u64 {
     return @intCast((@as(u128, hits) * 1_000_000) / total);
 }
 
+fn renderPipelineFromModuleNamesAlloc(allocator: std.mem.Allocator, modules: []const []const u8) !?[]dispatcher.ModuleSpec {
+    if (modules.len == 0) return null;
+    const pipeline = try allocator.alloc(dispatcher.ModuleSpec, modules.len);
+    errdefer allocator.free(pipeline);
+    for (modules, 0..) |module_name, index| {
+        const module_id = dispatcher.moduleIdFromName(module_name) orelse return error.UnknownModule;
+        pipeline[index] = .{
+            .id = module_id,
+            .execution_class = dispatcher.executionClass(module_id),
+        };
+    }
+    return pipeline;
+}
+
 fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderRequest, context: RenderCacheContext) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
@@ -1058,6 +1083,12 @@ fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderReques
     try appendKeyString(allocator, &out, "shell", request.shell);
     try appendKeyInt(allocator, &out, "cols", request.cols);
     try appendKeyInt(allocator, &out, "rows", request.rows);
+    try appendKeyInt(allocator, &out, "modules_len", request.modules.len);
+    for (request.modules, 0..) |module_name, index| {
+        const key = try std.fmt.allocPrint(allocator, "module_{d}", .{index});
+        defer allocator.free(key);
+        try appendKeyString(allocator, &out, key, module_name);
+    }
     try appendKeyBool(allocator, &out, "cloud_aws", request.cloud_ctx.aws);
     try appendKeyBool(allocator, &out, "cloud_gcp", request.cloud_ctx.gcp);
     try appendKeyBool(allocator, &out, "cloud_azure", request.cloud_ctx.azure);
@@ -1065,6 +1096,7 @@ fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderReques
     try appendKeyInt(allocator, &out, "cwd_truncate_to", request.cwd_options.truncate_to);
     try appendKeyBool(allocator, &out, "cwd_home_tilde", request.cwd_options.home_tilde);
     try appendKeyInt(allocator, &out, "cwd_max_width", request.cwd_options.max_width);
+    try appendKeyBool(allocator, &out, "cdhint_enabled", request.cdhint.enabled);
     try appendKeyString(allocator, &out, "risk_unknown_bg", risk_tier_module.colorSlotName(request.risk_tier.unknown_bg));
     try appendKeyString(allocator, &out, "risk_dev_bg", risk_tier_module.colorSlotName(request.risk_tier.dev_bg));
     try appendKeyString(allocator, &out, "risk_staging_bg", risk_tier_module.colorSlotName(request.risk_tier.staging_bg));
@@ -1797,6 +1829,32 @@ test "render response carries request id and v1 shape" {
     try std.testing.expect(parsed.value.prompt.len > 0);
 }
 
+test "render request modules select cdhint" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-cdhint-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    const marker_path = try std.fmt.allocPrint(allocator, "{s}/package.json", .{dir_path});
+    defer allocator.free(marker_path);
+    {
+        var file = try std.fs.createFileAbsolute(marker_path, .{});
+        defer file.close();
+        try file.writeAll("{}");
+    }
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"cdhint-test\",\"modules\":[\"cdhint\"]}}", .{dir_path});
+    defer allocator.free(request);
+    const response = try server.renderResponse(request);
+    defer std.heap.page_allocator.free(response);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"prompt\":\"cd:node> \"") != null);
+}
+
 test "render prompt cache key ignores request id and includes tuple fields" {
     const allocator = std.testing.allocator;
     const first = try renderPromptCacheKeyAlloc(allocator, .{
@@ -1860,10 +1918,44 @@ test "render prompt cache key ignores request id and includes tuple fields" {
         .cache_rev = 1,
     });
     defer allocator.free(different_rev);
+    const different_modules = try renderPromptCacheKeyAlloc(allocator, .{
+        .cwd = "/tmp/project",
+        .exit = 0,
+        .jobs = 1,
+        .duration_ms = 10,
+        .shell = "zsh",
+        .cols = 80,
+        .rows = 24,
+        .request_id = "first",
+        .modules = &.{"cdhint"},
+    }, .{
+        .timestamp_minute = 123,
+        .user = "me",
+        .host = "host",
+    });
+    defer allocator.free(different_modules);
+    const different_cdhint = try renderPromptCacheKeyAlloc(allocator, .{
+        .cwd = "/tmp/project",
+        .exit = 0,
+        .jobs = 1,
+        .duration_ms = 10,
+        .shell = "zsh",
+        .cols = 80,
+        .rows = 24,
+        .request_id = "first",
+        .cdhint = .{ .enabled = false },
+    }, .{
+        .timestamp_minute = 123,
+        .user = "me",
+        .host = "host",
+    });
+    defer allocator.free(different_cdhint);
 
     try std.testing.expectEqualStrings(first, second);
     try std.testing.expect(!std.mem.eql(u8, first, different_exit));
     try std.testing.expect(!std.mem.eql(u8, first, different_rev));
+    try std.testing.expect(!std.mem.eql(u8, first, different_modules));
+    try std.testing.expect(!std.mem.eql(u8, first, different_cdhint));
 }
 
 test "prompt cache hit rate uses ppm" {

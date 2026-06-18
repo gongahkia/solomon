@@ -1,4 +1,5 @@
 const std = @import("std");
+const cdhint_module = @import("modules/cdhint.zig");
 const cloud_ctx_module = @import("modules/cloud_ctx.zig");
 const container_provenance_module = @import("modules/container_provenance.zig");
 const cmd_duration_module = @import("modules/cmd_duration.zig");
@@ -34,6 +35,7 @@ pub const ModuleId = enum {
     cmd_duration,
     user_host,
     cloud_ctx,
+    cdhint,
     risk_tier,
     region_drift,
     cost_glance,
@@ -95,6 +97,7 @@ pub const RenderInput = struct {
     azure_default_location: ?[]const u8 = null,
     kubeconfig: ?[]const u8 = null,
     cloud_ctx: cloud_ctx_module.Options = .{},
+    cdhint: cdhint_module.Options = .{},
     risk_tier: risk_tier_module.BarColors = .{},
     sso_expiry: sso_expiry_module.Options = .{},
     rtl: bool = false,
@@ -310,6 +313,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
         .cmd_duration => try cmd_duration_module.render(allocator, input.duration_ms, 1000),
         .user_host => try user_host_module.render(allocator, input.ssh, input.user, input.host),
         .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.kubeconfig, input.home, caches.cloud_ctx, input.cloud_ctx),
+        .cdhint => try cdhint_module.render(allocator, input.cwd, input.cdhint),
         .risk_tier => try risk_tier_module.render(allocator, .{ .aws = input.aws_profile }, if (input.ssh == null) null else input.host, null, input.risk_tier),
         .region_drift => try region_drift_module.render(allocator, input.home, input.aws_profile, input.aws_region, input.aws_default_region, input.cloudsdk_compute_region, input.azure_location, input.arm_location, input.azure_default_location),
         .cost_glance => try cost_glance_module.render(allocator, input.home),
@@ -336,6 +340,7 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
         .cmd_duration => "cmd_duration",
         .user_host => "user_host",
         .cloud_ctx => "cloud_ctx",
+        .cdhint => "cdhint",
         .risk_tier => "risk_tier",
         .region_drift => "region_drift",
         .cost_glance => "cost_glance",
@@ -347,8 +352,31 @@ pub fn moduleIdName(module_id: ModuleId) []const u8 {
     };
 }
 
+pub fn moduleIdFromName(name: []const u8) ?ModuleId {
+    if (std.mem.eql(u8, name, "cwd")) return .cwd;
+    if (std.mem.eql(u8, name, "git_branch")) return .git_branch;
+    if (std.mem.eql(u8, name, "language_versions")) return .language_versions;
+    if (std.mem.eql(u8, name, "time")) return .time;
+    if (std.mem.eql(u8, name, "exit_status")) return .exit_status;
+    if (std.mem.eql(u8, name, "jobs")) return .jobs;
+    if (std.mem.eql(u8, name, "cmd_duration")) return .cmd_duration;
+    if (std.mem.eql(u8, name, "user_host")) return .user_host;
+    if (std.mem.eql(u8, name, "cloud_ctx")) return .cloud_ctx;
+    if (std.mem.eql(u8, name, "cdhint")) return .cdhint;
+    if (std.mem.eql(u8, name, "risk_tier")) return .risk_tier;
+    if (std.mem.eql(u8, name, "region_drift")) return .region_drift;
+    if (std.mem.eql(u8, name, "cost_glance")) return .cost_glance;
+    if (std.mem.eql(u8, name, "vpn_status")) return .vpn_status;
+    if (std.mem.eql(u8, name, "ssh_target")) return .ssh_target;
+    if (std.mem.eql(u8, name, "container_provenance")) return .container_provenance;
+    if (std.mem.eql(u8, name, "sso_expiry")) return .sso_expiry;
+    if (std.mem.eql(u8, name, "iac_workspace")) return .iac_workspace;
+    return null;
+}
+
 test "classifies module execution" {
     try std.testing.expectEqual(ExecutionClass.sync, executionClass(.cwd));
+    try std.testing.expectEqual(ExecutionClass.sync, executionClass(.cdhint));
     try std.testing.expectEqual(ExecutionClass.async, executionClass(.git_branch));
     try std.testing.expectEqual(ExecutionClass.async, executionClass(.language_versions));
 }
@@ -415,6 +443,50 @@ test "renders rtl opt-in reversed segment order" {
     }, pipeline[0..]);
     defer rendered.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("jobs:1 \x1b[31mexit:2\x1b[0m /tmp/project> ", rendered.prompt);
+}
+
+test "renders opt-in cdhint module" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-dispatcher-cdhint-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    const marker_path = try std.fmt.allocPrint(allocator, "{s}/package.json", .{dir_path});
+    defer allocator.free(marker_path);
+    {
+        var file = try std.fs.createFileAbsolute(marker_path, .{});
+        defer file.close();
+        try file.writeAll("{}");
+    }
+
+    var git_cache = git_branch_module.Cache{};
+    defer git_cache.deinit(allocator);
+    var language_cache = language_versions_module.Cache{};
+    defer language_cache.deinit(allocator);
+    var cloud_cache = cloud_ctx_module.Cache{};
+    defer cloud_cache.deinit(allocator);
+    const pipeline = [_]ModuleSpec{
+        .{ .id = .cdhint, .execution_class = .sync },
+    };
+    var rendered = try renderPipeline(allocator, .{
+        .git_branch = &git_cache,
+        .language_versions = &language_cache,
+        .cloud_ctx = &cloud_cache,
+    }, .{
+        .cwd = dir_path,
+        .home = null,
+        .exit = 0,
+        .jobs = 0,
+        .duration_ms = 0,
+        .time = false,
+        .no_async = true,
+        .timestamp = 0,
+        .ssh = null,
+        .user = "u",
+        .host = "h",
+    }, pipeline[0..]);
+    defer rendered.deinit(allocator);
+    try std.testing.expectEqualStrings("cd:node> ", rendered.prompt);
 }
 
 test "renders async placeholder and redraw token" {
@@ -647,6 +719,8 @@ test "snapshots prompt fixture corpus" {
 
 test "module names are public for diagnostics" {
     try std.testing.expectEqualStrings("language_versions", moduleIdName(.language_versions));
+    try std.testing.expectEqual(ModuleId.cdhint, moduleIdFromName("cdhint").?);
+    try std.testing.expect(moduleIdFromName("missing") == null);
 }
 
 test "calculates filler width from visible cells" {

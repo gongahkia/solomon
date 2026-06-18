@@ -6882,6 +6882,7 @@ fn coreA11yLabel(module_id: shisa_config.ModuleId) []const u8 {
         .cmd_duration => "command duration",
         .user_host => "user and host",
         .cloud_ctx => "cloud context",
+        .cdhint => "cd hint",
         .risk_tier => "risk tier",
         .sso_expiry => "SSO expiry",
         .iac_workspace => "infrastructure workspace",
@@ -6918,7 +6919,10 @@ fn renderSyncPromptAlloc(allocator: std.mem.Allocator, config: PromptConfig, cwd
     var cloud_cache = cloud_ctx_module.Cache{};
     defer cloud_cache.deinit(allocator);
 
-    const module_options = try promptModuleOptions(allocator);
+    var module_options = try promptModuleOptions(allocator);
+    defer module_options.deinit(allocator);
+    const pipeline = try promptPipelineAlloc(allocator, module_options.modules);
+    defer allocator.free(pipeline);
     const home = std.process.getEnvVarOwned(allocator, "HOME") catch null;
     defer if (home) |value| allocator.free(value);
     const kubeconfig = std.process.getEnvVarOwned(allocator, "KUBECONFIG") catch null;
@@ -6944,7 +6948,7 @@ fn renderSyncPromptAlloc(allocator: std.mem.Allocator, config: PromptConfig, cwd
     var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
     const host = std.posix.gethostname(&host_buffer) catch "unknown";
 
-    var rendered = try dispatcher.renderDefault(allocator, .{
+    var rendered = try dispatcher.renderPipeline(allocator, .{
         .git_branch = &git_cache,
         .language_versions = &language_cache,
         .cloud_ctx = &cloud_cache,
@@ -6974,10 +6978,48 @@ fn renderSyncPromptAlloc(allocator: std.mem.Allocator, config: PromptConfig, cwd
             .azure = module_options.cloud_ctx.azure,
             .kubernetes = module_options.cloud_ctx.kubernetes,
         },
+        .cdhint = module_options.cdhint,
+        .risk_tier = module_options.risk_tier,
         .sso_expiry = module_options.sso_expiry,
-    });
+    }, pipeline);
     defer rendered.deinit(allocator);
     return allocator.dupe(u8, rendered.prompt);
+}
+
+fn promptPipelineAlloc(allocator: std.mem.Allocator, modules: []const shisa_config.ModuleId) ![]dispatcher.ModuleSpec {
+    const pipeline = try allocator.alloc(dispatcher.ModuleSpec, modules.len);
+    errdefer allocator.free(pipeline);
+    for (modules, 0..) |module_id, index| {
+        const id = dispatcherModuleId(module_id);
+        pipeline[index] = .{
+            .id = id,
+            .execution_class = dispatcher.executionClass(id),
+        };
+    }
+    return pipeline;
+}
+
+fn dispatcherModuleId(module_id: shisa_config.ModuleId) dispatcher.ModuleId {
+    return switch (module_id) {
+        .cwd => .cwd,
+        .git_branch => .git_branch,
+        .language_versions => .language_versions,
+        .time => .time,
+        .exit_status => .exit_status,
+        .jobs => .jobs,
+        .cmd_duration => .cmd_duration,
+        .user_host => .user_host,
+        .cloud_ctx => .cloud_ctx,
+        .cdhint => .cdhint,
+        .risk_tier => .risk_tier,
+        .sso_expiry => .sso_expiry,
+        .iac_workspace => .iac_workspace,
+        .region_drift => .region_drift,
+        .cost_glance => .cost_glance,
+        .vpn_status => .vpn_status,
+        .ssh_target => .ssh_target,
+        .container_provenance => .container_provenance,
+    };
 }
 
 fn writePromptText(allocator: std.mem.Allocator, prompt_text: []const u8, a11y: bool, cwd: []const u8) !void {
@@ -7094,14 +7136,41 @@ fn nextValue(args: []const []const u8, index: *usize) ![]const u8 {
 
 const PromptModuleOptions = struct {
     rtl_reverse: bool = false,
+    modules: []const shisa_config.ModuleId,
+    owns_modules: bool = false,
     cwd: shisa_config.CwdOptions,
     cloud_ctx: shisa_config.CloudCtxOptions,
+    cdhint: shisa_config.CdhintOptions,
     risk_tier: shisa_config.RiskTierOptions,
     sso_expiry: shisa_config.SsoExpiryOptions,
+
+    fn deinit(self: *PromptModuleOptions, allocator: std.mem.Allocator) void {
+        if (self.owns_modules) allocator.free(self.modules);
+        self.* = undefined;
+    }
+};
+
+const default_prompt_modules = [_]shisa_config.ModuleId{
+    .cwd,
+    .git_branch,
+    .language_versions,
+    .exit_status,
+    .jobs,
+    .cmd_duration,
+    .user_host,
+    .risk_tier,
+    .sso_expiry,
+    .iac_workspace,
+    .region_drift,
+    .cost_glance,
+    .vpn_status,
+    .ssh_target,
+    .container_provenance,
 };
 
 fn buildPromptPayload(allocator: std.mem.Allocator, config: PromptConfig, cwd: []const u8) ![]u8 {
-    const module_options = try promptModuleOptions(allocator);
+    var module_options = try promptModuleOptions(allocator);
+    defer module_options.deinit(allocator);
     return buildPromptPayloadWithModuleOptions(allocator, config, cwd, module_options);
 }
 
@@ -7110,15 +7179,27 @@ fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config: Pro
     defer allocator.free(escaped_cwd);
     const escaped_shell = try jsonEscapeAlloc(allocator, config.shell);
     defer allocator.free(escaped_shell);
+    const modules_json = try promptModulesJsonAlloc(allocator, module_options.modules);
+    defer allocator.free(modules_json);
     const request_id = try std.fmt.allocPrint(allocator, "cli-{x}", .{std.crypto.random.int(u64)});
     defer allocator.free(request_id);
     const rtl_reverse = config.rtl_reverse or module_options.rtl_reverse;
 
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\",\"rtl\":{},\"rtl_reverse\":{},\"cwd_options\":{{\"truncate_to\":{d},\"home_tilde\":{},\"max_width\":{d}}},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"risk_tier\":{{\"unknown_bg\":\"{s}\",\"dev_bg\":\"{s}\",\"staging_bg\":\"{s}\",\"prod_bg\":\"{s}\"}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
-        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), std.posix.getuid(), request_id, config.rtl, rtl_reverse, module_options.cwd.truncate_to, module_options.cwd.home_tilde, module_options.cwd.max_width, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, risk_tier_module.colorSlotName(module_options.risk_tier.unknown_bg), risk_tier_module.colorSlotName(module_options.risk_tier.dev_bg), risk_tier_module.colorSlotName(module_options.risk_tier.staging_bg), risk_tier_module.colorSlotName(module_options.risk_tier.prod_bg), module_options.sso_expiry.warning_minutes },
+        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\",\"modules\":[{s}],\"rtl\":{},\"rtl_reverse\":{},\"cwd_options\":{{\"truncate_to\":{d},\"home_tilde\":{},\"max_width\":{d}}},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"cdhint\":{{\"enabled\":{}}},\"risk_tier\":{{\"unknown_bg\":\"{s}\",\"dev_bg\":\"{s}\",\"staging_bg\":\"{s}\",\"prod_bg\":\"{s}\"}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
+        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), std.posix.getuid(), request_id, modules_json, config.rtl, rtl_reverse, module_options.cwd.truncate_to, module_options.cwd.home_tilde, module_options.cwd.max_width, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, module_options.cdhint.enabled, risk_tier_module.colorSlotName(module_options.risk_tier.unknown_bg), risk_tier_module.colorSlotName(module_options.risk_tier.dev_bg), risk_tier_module.colorSlotName(module_options.risk_tier.staging_bg), risk_tier_module.colorSlotName(module_options.risk_tier.prod_bg), module_options.sso_expiry.warning_minutes },
     );
+}
+
+fn promptModulesJsonAlloc(allocator: std.mem.Allocator, modules: []const shisa_config.ModuleId) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    for (modules, 0..) |module_id, index| {
+        if (index != 0) try out.appendSlice(allocator, ",");
+        try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+    }
+    return out.toOwnedSlice(allocator);
 }
 
 fn promptColorCaps(config: PromptConfig) []const u8 {
@@ -7132,8 +7213,10 @@ fn promptGlyphCaps(config: PromptConfig) []const u8 {
 fn defaultPromptModuleOptions() PromptModuleOptions {
     return .{
         .rtl_reverse = false,
+        .modules = default_prompt_modules[0..],
         .cwd = .{},
         .cloud_ctx = .{},
+        .cdhint = .{},
         .risk_tier = .{},
         .sso_expiry = .{},
     };
@@ -7155,10 +7238,15 @@ fn promptModuleOptions(allocator: std.mem.Allocator) !PromptModuleOptions {
         else => return err,
     };
     defer parsed.deinit(allocator);
+    const modules = try allocator.dupe(shisa_config.ModuleId, parsed.prompt_modules);
+    errdefer allocator.free(modules);
     return .{
         .rtl_reverse = parsed.prompt.rtl_reverse,
+        .modules = modules,
+        .owns_modules = true,
         .cwd = parsed.modules.cwd,
         .cloud_ctx = parsed.modules.cloud_ctx,
+        .cdhint = parsed.modules.cdhint,
         .risk_tier = parsed.modules.risk_tier,
         .sso_expiry = parsed.modules.sso_expiry,
     };

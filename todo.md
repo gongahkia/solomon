@@ -408,8 +408,8 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ### 12.8 cd hint (`cdhint`)
 - [x] Rule-based project detector (package.json → node; Cargo.toml → rust; etc.)
-- [ ] Compact one-line hint after cd into a recognized project (configurable / disable per dir)
-- [ ] No model required; pure rules
+- [x] Compact one-line hint after cd into a recognized project (configurable / disable per dir)
+- [x] No model required; pure rules
 
 ### 12.9 Privacy & audit
 - [x] Enforce `net` capability gate (no network unless explicitly granted)

@@ -129,6 +129,12 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\AWS profile is resolved from `AWS_PROFILE`; when unset, Shisa reads `~/.aws/config` and uses `[default]` or the first `[profile <name>]` section. GCP project is cached from the active Cloud SDK config file under `~/.config/gcloud/configurations/` and invalidated when `~/.config/gcloud/` changes. Azure subscription is cached from `~/.azure/azureProfile.json` and invalidated when that file changes. Kubernetes context is cached from the first `KUBECONFIG` path, or `~/.kube/config`, and invalidated when that file changes. Multiple providers render in one `cloud[...]` segment with ASCII provider markers: `aws`, `gcp`, `az`, and `k8s`.
         \\
     );
+    try writeOptionsSection(allocator, &out, "cdhint", &.{
+        .{ .key = "enabled", .type = "bool", .default_value = "`true`", .constraints = "Disable cdhint rendering when false." },
+    },
+        \\Place `.shisa-no-cdhint` in the current directory or detected project tree to suppress local cd hints for that tree.
+        \\
+    );
     try writeOptionsSection(allocator, &out, "risk_tier", &.{
         .{ .key = "unknown_bg", .type = "string", .default_value = "`\"muted\"`", .constraints = "One of `\"fg\"`, `\"muted\"`, `\"accent\"`, `\"success\"`, `\"warning\"`, `\"danger\"`." },
         .{ .key = "dev_bg", .type = "string", .default_value = "`\"success\"`", .constraints = "Same as `unknown_bg`." },
@@ -178,6 +184,7 @@ const module_docs = [_]ModuleDoc{
     .{ .id = .cmd_duration, .summary = "Last command duration above threshold." },
     .{ .id = .user_host, .summary = "User and host, normally only over SSH." },
     .{ .id = .cloud_ctx, .summary = "Optional cloud account context; AWS, GCP, Azure, and Kubernetes support are available." },
+    .{ .id = .cdhint, .summary = "Compact local project kind hint from marker files." },
     .{ .id = .risk_tier, .summary = "Risk classification and prompt background-bar color mapping." },
     .{ .id = .sso_expiry, .summary = "Warn when cached SSO/session expiry metadata is below the configured threshold." },
     .{ .id = .iac_workspace, .summary = "Render local Terraform/OpenTofu/Pulumi/CDK workspace metadata." },

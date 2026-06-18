@@ -51,6 +51,7 @@ Allowed core module ids for schema v1:
 | `cmd_duration` | sync | Last command duration above threshold. |
 | `user_host` | sync | User and host, normally only over SSH. |
 | `cloud_ctx` | sync | Optional cloud account context; AWS, GCP, Azure, and Kubernetes support are available. |
+| `cdhint` | sync | Compact local project kind hint from marker files. |
 | `risk_tier` | sync | Risk classification and prompt background-bar color mapping. |
 | `sso_expiry` | sync | Warn when cached SSO/session expiry metadata is below the configured threshold. |
 | `iac_workspace` | sync | Render local Terraform/OpenTofu/Pulumi/CDK workspace metadata. |
@@ -122,6 +123,14 @@ Per-module config lives under `[modules.<id>]`. Option tables may exist only for
 | `kubernetes` | bool | `true` | Show Kubernetes context and namespace. |
 
 AWS profile is resolved from `AWS_PROFILE`; when unset, Shisa reads `~/.aws/config` and uses `[default]` or the first `[profile <name>]` section. GCP project is cached from the active Cloud SDK config file under `~/.config/gcloud/configurations/` and invalidated when `~/.config/gcloud/` changes. Azure subscription is cached from `~/.azure/azureProfile.json` and invalidated when that file changes. Kubernetes context is cached from the first `KUBECONFIG` path, or `~/.kube/config`, and invalidated when that file changes. Multiple providers render in one `cloud[...]` segment with ASCII provider markers: `aws`, `gcp`, `az`, and `k8s`.
+
+### `[modules.cdhint]`
+
+| Key | Type | Default | Constraints |
+| --- | --- | --- | --- |
+| `enabled` | bool | `true` | Disable cdhint rendering when false. |
+
+Place `.shisa-no-cdhint` in the current directory or detected project tree to suppress local cd hints for that tree.
 
 ### `[modules.risk_tier]`
 

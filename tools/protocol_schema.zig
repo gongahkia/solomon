@@ -73,6 +73,13 @@ const schema_json =
     \\        "kubernetes": { "type": "boolean" }
     \\      }
     \\    },
+    \\    "cdhint": {
+    \\      "type": "object",
+    \\      "additionalProperties": true,
+    \\      "properties": {
+    \\        "enabled": { "type": "boolean" }
+    \\      }
+    \\    },
     \\    "riskTierColor": {
     \\      "type": "string",
     \\      "enum": ["fg", "muted", "accent", "success", "warning", "danger"]
@@ -126,10 +133,15 @@ const schema_json =
     \\        "glyph_caps": { "$ref": "#/$defs/glyphCaps" },
     \\        "user_id": { "type": "integer", "minimum": 0 },
     \\        "session": { "type": "string" },
+    \\        "modules": {
+    \\          "type": "array",
+    \\          "items": { "type": "string" }
+    \\        },
     \\        "rtl": { "type": "boolean" },
     \\        "rtl_reverse": { "type": "boolean" },
     \\        "cwd_options": { "$ref": "#/$defs/cwdOptions" },
     \\        "cloud_ctx": { "$ref": "#/$defs/cloudCtx" },
+    \\        "cdhint": { "$ref": "#/$defs/cdhint" },
     \\        "risk_tier": { "$ref": "#/$defs/riskTier" },
     \\        "sso_expiry": { "$ref": "#/$defs/ssoExpiry" }
     \\      }
@@ -156,10 +168,15 @@ const schema_json =
     \\        "glyph_caps": { "$ref": "#/$defs/glyphCaps" },
     \\        "user_id": { "type": "integer", "minimum": 0 },
     \\        "session": { "type": "string" },
+    \\        "modules": {
+    \\          "type": "array",
+    \\          "items": { "type": "string" }
+    \\        },
     \\        "rtl": { "type": "boolean" },
     \\        "rtl_reverse": { "type": "boolean" },
     \\        "cwd_options": { "$ref": "#/$defs/cwdOptions" },
     \\        "cloud_ctx": { "$ref": "#/$defs/cloudCtx" },
+    \\        "cdhint": { "$ref": "#/$defs/cdhint" },
     \\        "risk_tier": { "$ref": "#/$defs/riskTier" },
     \\        "sso_expiry": { "$ref": "#/$defs/ssoExpiry" }
     \\      }

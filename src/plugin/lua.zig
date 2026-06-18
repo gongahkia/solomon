@@ -94,6 +94,10 @@ pub const OwnedManifest = struct {
     }
 };
 
+pub const SandboxOptions = struct {
+    require_root: ?[]const u8 = null,
+};
+
 pub const Runtime = struct {
     allocator: std.mem.Allocator,
     lib: std.DynLib,
@@ -116,9 +120,14 @@ pub const Runtime = struct {
     }
 
     pub fn initSandboxed(allocator: std.mem.Allocator) !Runtime {
+        return initSandboxedWithOptions(allocator, .{});
+    }
+
+    pub fn initSandboxedWithOptions(allocator: std.mem.Allocator, options: SandboxOptions) !Runtime {
         var runtime = try init(allocator);
         errdefer runtime.deinit();
-        try runtime.stripDangerousGlobals();
+        if (options.require_root) |root| try runtime.configureLocalRequire(root);
+        try runtime.stripDangerousGlobals(options.require_root != null);
         return runtime;
     }
 
@@ -169,18 +178,44 @@ pub const Runtime = struct {
         return is_nil;
     }
 
-    /// plugin-api: sandbox | removed_globals | `os`, `io`, `package`, `debug`, `require`, `dofile`, `loadfile` | always | sandbox startup removes direct shell, filesystem, loader, debug, and package APIs from Lua globals.
-    fn stripDangerousGlobals(self: *Runtime) !void {
+    /// plugin-api: sandbox | removed_globals | `os`, `io`, `package`, `debug`, `dofile`, `loadfile` | always | sandbox startup removes direct shell, filesystem, loader, debug, and package APIs from Lua globals.
+    /// plugin-api: sandbox | require | project-local module name | opt-in | `initSandboxedWithOptions(.require_root)` allows `require` only through `<root>/?.lua` and `<root>/?/init.lua`.
+    fn stripDangerousGlobals(self: *Runtime, keep_require: bool) !void {
         const globals = [_][]const u8{
             "os",
             "io",
             "package",
             "debug",
-            "require",
             "dofile",
             "loadfile",
         };
         for (globals) |name| try self.stripGlobal(name);
+        if (!keep_require) try self.stripGlobal("require");
+    }
+
+    fn configureLocalRequire(self: *Runtime, root: []const u8) !void {
+        const quoted_root = try luaQuoteAlloc(self.allocator, root);
+        defer self.allocator.free(quoted_root);
+        const source = try std.fmt.allocPrint(
+            self.allocator,
+            \\do
+            \\  local root = {s}
+            \\  package.path = root .. "/?.lua;" .. root .. "/?/init.lua"
+            \\  package.cpath = ""
+            \\  package.loadlib = nil
+            \\  local original_require = require
+            \\  require = function(name)
+            \\    if type(name) ~= "string" or name:find("/", 1, true) or name:find("\\", 1, true) or name:find("..", 1, true) then
+            \\      error("require outside plugin root", 2)
+            \\    end
+            \\    return original_require(name)
+            \\  end
+            \\end
+            ,
+            .{quoted_root},
+        );
+        defer self.allocator.free(source);
+        try self.doString(source);
     }
 
     fn stripGlobal(self: *Runtime, name: []const u8) !void {
@@ -566,6 +601,31 @@ test "sandbox strips dangerous globals" {
     try std.testing.expectError(error.LuaRuntimeError, runtime.doString("return require('x')"));
     try runtime.doString("shisa_safe_value = tostring(42)");
     try std.testing.expect(!(try runtime.globalIsNil("shisa_safe_value")));
+}
+
+test "sandbox require is limited to plugin root" {
+    const allocator = std.testing.allocator;
+    var runtime_probe = Runtime.initSandboxed(allocator) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    runtime_probe.deinit();
+
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-lua-require-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    const helper_path = try std.fmt.allocPrint(allocator, "{s}/helper.lua", .{dir_path});
+    defer allocator.free(helper_path);
+    try std.fs.cwd().writeFile(.{ .sub_path = helper_path, .data = "return { value = 42 }\n" });
+
+    var runtime = try Runtime.initSandboxedWithOptions(allocator, .{ .require_root = dir_path });
+    defer runtime.deinit();
+
+    try runtime.doString("local helper = require('helper'); shisa_require_value = tostring(helper.value)");
+    try std.testing.expect(!(try runtime.globalIsNil("shisa_require_value")));
+    try std.testing.expect(try runtime.globalIsNil("package"));
+    try std.testing.expectError(error.LuaRuntimeError, runtime.doString("return require('../outside')"));
 }
 
 test "loads plugin manifest table" {

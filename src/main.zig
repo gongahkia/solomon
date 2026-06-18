@@ -4532,7 +4532,7 @@ fn pluginInstall(allocator: std.mem.Allocator, plugins_dir: []const u8, config: 
     const manifest_source = try std.fs.cwd().readFileAlloc(allocator, manifest_path, 1024 * 1024);
     defer allocator.free(manifest_source);
 
-    var runtime = try plugin_lua.Runtime.initSandboxed(allocator);
+    var runtime = try plugin_lua.Runtime.initSandboxedWithOptions(allocator, .{ .require_root = temp_path });
     defer runtime.deinit();
     var loaded = if (config.strict)
         try runtime.loadManifestStrict(manifest_source)

@@ -17,5 +17,6 @@ Loading:
 Sandbox:
 
 - `Runtime.initSandboxed` opens standard libraries, then removes `os`, `io`, `package`, `debug`, `require`, `dofile`, and `loadfile` from the global table.
+- `Runtime.initSandboxedWithOptions(.require_root)` keeps a wrapped `require` that accepts module names only and resolves through `<root>/?.lua` and `<root>/?/init.lua`.
 - Host APIs must still enforce the manifest capability gate for filesystem, exec, network, env, secrets, and pre-exec access.
 - `Runtime.loadManifestStrict` rejects unknown top-level manifest fields and unknown capability fields.

@@ -784,13 +784,12 @@ pub const Server = struct {
 
         var names: std.ArrayList([]u8) = .empty;
         errdefer deinitStringArrayList(allocator, &names);
-        var runtime: ?plugin_lua.Runtime = null;
-        defer if (runtime) |*value| value.deinit();
-
         var it = dir.iterate();
         while (try it.next()) |entry| {
             if (entry.kind != .directory) continue;
-            const manifest_path = try std.fmt.allocPrint(allocator, "{s}/{s}/plugin.lua", .{ plugins_dir, entry.name });
+            const plugin_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ plugins_dir, entry.name });
+            defer allocator.free(plugin_dir);
+            const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{plugin_dir});
             defer allocator.free(manifest_path);
             const source = std.fs.cwd().readFileAlloc(allocator, manifest_path, max_config_bytes) catch |err| switch (err) {
                 error.FileNotFound => continue,
@@ -798,12 +797,11 @@ pub const Server = struct {
             };
             defer allocator.free(source);
 
-            if (runtime == null) runtime = try plugin_lua.Runtime.initSandboxed(allocator);
-            if (runtime) |*value| {
-                var loaded = try value.loadManifestStrict(source);
-                defer loaded.deinit(allocator);
-                try names.append(allocator, try allocator.dupe(u8, loaded.manifest.name));
-            }
+            var runtime = try plugin_lua.Runtime.initSandboxedWithOptions(allocator, .{ .require_root = plugin_dir });
+            defer runtime.deinit();
+            var loaded = try runtime.loadManifestStrict(source);
+            defer loaded.deinit(allocator);
+            try names.append(allocator, try allocator.dupe(u8, loaded.manifest.name));
         }
 
         return names.toOwnedSlice(allocator);

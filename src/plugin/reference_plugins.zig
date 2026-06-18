@@ -13,15 +13,14 @@ const reference_manifests = [_][]const u8{
 };
 
 test "reference plugin manifests load in strict mode" {
-    var runtime = lua.Runtime.initSandboxed(std.testing.allocator) catch |err| switch (err) {
-        error.LuaUnavailable => return error.SkipZigTest,
-        else => return err,
-    };
-    defer runtime.deinit();
-
     for (reference_manifests) |path| {
         const source = try std.fs.cwd().readFileAlloc(std.testing.allocator, path, 1024 * 1024);
         defer std.testing.allocator.free(source);
+        var runtime = lua.Runtime.initSandboxedWithOptions(std.testing.allocator, .{ .require_root = std.fs.path.dirname(path) orelse "." }) catch |err| switch (err) {
+            error.LuaUnavailable => return error.SkipZigTest,
+            else => return err,
+        };
+        defer runtime.deinit();
         var loaded = try runtime.loadManifestStrict(source);
         defer loaded.deinit(std.testing.allocator);
         try loaded.manifest.validate();

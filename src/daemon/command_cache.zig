@@ -6,10 +6,21 @@ pub const WatchedMtime = struct {
 };
 
 pub const KeyInput = struct {
+    module_id: []const u8 = "",
     cmd: []const u8,
     args: []const []const u8 = &.{},
     cwd: []const u8,
     mtimes: []const WatchedMtime = &.{},
+};
+
+pub const ModuleTtl = struct {
+    module_id: []const u8,
+    ttl_ns: u64,
+};
+
+pub const Options = struct {
+    default_ttl_ns: u64 = 5 * std.time.ns_per_min,
+    module_ttls: []const ModuleTtl = &.{},
 };
 
 pub const Entry = union(enum) {
@@ -26,15 +37,22 @@ const StoredEntry = struct {
     key: []u8,
     value: []u8,
     kind: StoredKind,
+    created_ns: u64,
 };
 
 pub const Store = struct {
     allocator: std.mem.Allocator,
+    options: Options,
     entries: std.StringHashMap(StoredEntry),
 
     pub fn init(allocator: std.mem.Allocator) Store {
+        return initWithOptions(allocator, .{});
+    }
+
+    pub fn initWithOptions(allocator: std.mem.Allocator, options: Options) Store {
         return .{
             .allocator = allocator,
+            .options = options,
             .entries = std.StringHashMap(StoredEntry).init(allocator),
         };
     }
@@ -47,17 +65,33 @@ pub const Store = struct {
     }
 
     pub fn putOutput(self: *Store, input: KeyInput, output: []const u8) !void {
-        try self.put(input, .output, output);
+        try self.putOutputAt(input, output, nowNs());
     }
 
     pub fn putMissingTool(self: *Store, input: KeyInput, tool: []const u8) !void {
-        try self.put(input, .missing_tool, tool);
+        try self.putMissingToolAt(input, tool, nowNs());
+    }
+
+    pub fn putOutputAt(self: *Store, input: KeyInput, output: []const u8, timestamp_ns: u64) !void {
+        try self.putAt(input, .output, output, timestamp_ns);
+    }
+
+    pub fn putMissingToolAt(self: *Store, input: KeyInput, tool: []const u8, timestamp_ns: u64) !void {
+        try self.putAt(input, .missing_tool, tool, timestamp_ns);
     }
 
     pub fn get(self: *Store, input: KeyInput) !?Entry {
+        return self.getAt(input, nowNs());
+    }
+
+    pub fn getAt(self: *Store, input: KeyInput, timestamp_ns: u64) !?Entry {
         const key = try keyAlloc(self.allocator, input);
         defer self.allocator.free(key);
-        const entry = self.entries.get(key) orelse return null;
+        const entry = self.entries.getPtr(key) orelse return null;
+        if (self.isExpired(input.module_id, entry.created_ns, timestamp_ns)) {
+            self.removeBorrowedKey(key);
+            return null;
+        }
         return switch (entry.kind) {
             .output => .{ .output = entry.value },
             .missing_tool => .{ .missing_tool = entry.value },
@@ -68,7 +102,7 @@ pub const Store = struct {
         return self.entries.count();
     }
 
-    fn put(self: *Store, input: KeyInput, kind: StoredKind, value_source: []const u8) !void {
+    fn putAt(self: *Store, input: KeyInput, kind: StoredKind, value_source: []const u8, timestamp_ns: u64) !void {
         const key = try keyAlloc(self.allocator, input);
         errdefer self.allocator.free(key);
         const value = try self.allocator.dupe(u8, value_source);
@@ -80,11 +114,33 @@ pub const Store = struct {
             self.allocator.free(entry.value_ptr.value);
             entry.value_ptr.value = value;
             entry.value_ptr.kind = kind;
+            entry.value_ptr.created_ns = timestamp_ns;
         } else {
-            entry.value_ptr.* = .{ .key = key, .value = value, .kind = kind };
+            entry.value_ptr.* = .{ .key = key, .value = value, .kind = kind, .created_ns = timestamp_ns };
         }
     }
+
+    fn removeBorrowedKey(self: *Store, key: []const u8) void {
+        const removed = self.entries.fetchRemove(key) orelse return;
+        freeStored(self.allocator, removed.value);
+    }
+
+    fn isExpired(self: Store, module_id: []const u8, created_ns: u64, timestamp_ns: u64) bool {
+        const ttl_ns = self.ttlNs(module_id);
+        return ttl_ns != 0 and timestamp_ns >= created_ns and timestamp_ns - created_ns > ttl_ns;
+    }
+
+    fn ttlNs(self: Store, module_id: []const u8) u64 {
+        for (self.options.module_ttls) |ttl| {
+            if (std.mem.eql(u8, ttl.module_id, module_id)) return ttl.ttl_ns;
+        }
+        return self.options.default_ttl_ns;
+    }
 };
+
+fn nowNs() u64 {
+    return @intCast(std.time.nanoTimestamp());
+}
 
 pub fn keyAlloc(allocator: std.mem.Allocator, input: KeyInput) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
@@ -226,4 +282,34 @@ test "negative cache entries are keyed by full command input" {
     try std.testing.expect((try store.get(.{ .cmd = "node", .args = &.{"--version"}, .cwd = "/repo" })) != null);
     try std.testing.expect(try store.get(.{ .cmd = "node", .args = &.{"--version"}, .cwd = "/other" }) == null);
     try std.testing.expect(try store.get(.{ .cmd = "node", .args = &.{"-v"}, .cwd = "/repo" }) == null);
+}
+
+test "module ttl expires command cache entries" {
+    const module_ttls = [_]ModuleTtl{
+        .{ .module_id = "language_versions", .ttl_ns = 10 },
+        .{ .module_id = "git_branch", .ttl_ns = 100 },
+    };
+    var store = Store.initWithOptions(std.testing.allocator, .{
+        .default_ttl_ns = 0,
+        .module_ttls = module_ttls[0..],
+    });
+    defer store.deinit();
+
+    const language_input = KeyInput{ .module_id = "language_versions", .cmd = "python3", .args = &.{"--version"}, .cwd = "/repo" };
+    try store.putOutputAt(language_input, "Python 3.14", 100);
+    try std.testing.expect((try store.getAt(language_input, 110)) != null);
+    try std.testing.expect(try store.getAt(language_input, 111) == null);
+
+    const git_input = KeyInput{ .module_id = "git_branch", .cmd = "git", .args = &.{ "status", "--short" }, .cwd = "/repo" };
+    try store.putOutputAt(git_input, "clean", 100);
+    try std.testing.expect((try store.getAt(git_input, 111)) != null);
+}
+
+test "zero ttl disables command cache expiry" {
+    var store = Store.initWithOptions(std.testing.allocator, .{ .default_ttl_ns = 0 });
+    defer store.deinit();
+
+    const input = KeyInput{ .module_id = "tools", .cmd = "tool", .cwd = "/repo" };
+    try store.putMissingToolAt(input, "tool", 1);
+    try std.testing.expect((try store.getAt(input, 1_000_000)) != null);
 }

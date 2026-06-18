@@ -734,6 +734,8 @@ pub fn build(b: *std.Build) void {
     nu_integration.step.dependOn(&debug_install.step);
     const pwsh_integration = b.addSystemCommand(&.{ "bash", "test/integration/pwsh_fake_socket.sh" });
     pwsh_integration.step.dependOn(&debug_install.step);
+    const render_a11y_integration = b.addSystemCommand(&.{ "bash", "test/integration/render_a11y_fake_socket.sh" });
+    render_a11y_integration.step.dependOn(&debug_install.step);
     const shell_expect_integration = b.addSystemCommand(&.{ "expect", "test/integration/shell_expect.exp" });
     shell_expect_integration.step.dependOn(&debug_install.step);
     const starship_presets_import = b.addSystemCommand(&.{ "bash", "test/integration/starship_presets_import.sh" });
@@ -815,6 +817,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&fish_integration.step);
     test_step.dependOn(&nu_integration.step);
     test_step.dependOn(&pwsh_integration.step);
+    test_step.dependOn(&render_a11y_integration.step);
     test_step.dependOn(&shell_expect_integration.step);
     test_step.dependOn(&starship_presets_import.step);
     test_step.dependOn(&pure_import_smoke.step);

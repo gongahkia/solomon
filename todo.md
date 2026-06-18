@@ -428,7 +428,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [ ] Provider switch via plugin config; daemon enforces capability
 
 ### 12.11 Tests & benches
-- [ ] Mock-model harness for deterministic tests
+- [x] Mock-model harness for deterministic tests
 - [ ] Prompt-regression suite (snapshot of model outputs against curated examples; tolerate drift)
 - [ ] Cold-model latency benchmark
 - [ ] Warm-model latency benchmark

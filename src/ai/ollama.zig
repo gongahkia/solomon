@@ -168,6 +168,32 @@ pub fn consumeGenerateStreamLines(allocator: std.mem.Allocator, source: []const 
     }
 }
 
+pub fn mockModelListener() !std.net.Server {
+    const address = try std.net.Address.parseIp(default_host, 0);
+    return address.listen(.{ .reuse_address = true });
+}
+
+pub fn mockModelPort(listener: *const std.net.Server) u16 {
+    return listener.listen_address.getPort();
+}
+
+pub fn serveOneMockGenerate(allocator: std.mem.Allocator, listener: *std.net.Server, response_json: []const u8) !void {
+    var connection = try listener.accept();
+    defer connection.stream.close();
+    var request_buffer: [8192]u8 = undefined;
+    const request_len = try connection.stream.read(&request_buffer);
+    const request = request_buffer[0..request_len];
+    const status: []const u8 = if (std.mem.indexOf(u8, request, "POST /api/generate ") != null) "200 OK" else "404 Not Found";
+    const body = if (std.mem.startsWith(u8, status, "200")) response_json else "{\"error\":\"not found\"}";
+    const response = try std.fmt.allocPrint(
+        allocator,
+        "HTTP/1.1 {s}\r\nContent-Type: application/json\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
+        .{ status, body.len, body },
+    );
+    defer allocator.free(response);
+    try connection.stream.writeAll(response);
+}
+
 fn httpGetOk(allocator: std.mem.Allocator, host: []const u8, port: u16, path: []const u8) !bool {
     var response = try httpRequestAlloc(allocator, host, port, "GET", path, "");
     defer response.deinit(allocator);
@@ -360,6 +386,21 @@ test "parses generate response" {
     const text = try parseGenerateResponseAlloc(std.testing.allocator, "{\"response\":\"ok\",\"done\":true}");
     defer std.testing.allocator.free(text);
     try std.testing.expectEqualStrings("ok", text);
+}
+
+test "mock model harness returns deterministic generate response" {
+    var listener = try mockModelListener();
+    defer listener.deinit();
+    const thread = try std.Thread.spawn(.{}, serveOneMockGenerate, .{
+        std.testing.allocator,
+        &listener,
+        "{\"response\":\"mock-ok\",\"done\":true}",
+    });
+    defer thread.join();
+
+    const text = try generateAlloc(std.testing.allocator, default_host, mockModelPort(&listener), "mock-model", "say ok");
+    defer std.testing.allocator.free(text);
+    try std.testing.expectEqualStrings("mock-ok", text);
 }
 
 test "parses generate stream line" {

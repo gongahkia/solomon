@@ -17,6 +17,8 @@ The client supports:
 
 `shisa ai status` reports local Ollama install/running state, the recommended local model, configured cloud-provider state, and local audit-log paths.
 
+Deterministic tests use `ollama.mockModelListener` and `ollama.serveOneMockGenerate` to serve a local one-request `/api/generate` response without requiring Ollama or a downloaded model.
+
 Ollama's local API is documented at <https://docs.ollama.com/api/introduction>. `/api/tags`, `/api/pull`, and `/api/generate` are documented at <https://docs.ollama.com/api/tags>, <https://docs.ollama.com/api/pull>, and <https://docs.ollama.com/api/generate>.
 
 Privacy rules live in [AI Privacy](ai-privacy.md).

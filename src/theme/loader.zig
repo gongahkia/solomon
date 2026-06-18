@@ -258,8 +258,11 @@ pub fn validateAlloc(allocator: std.mem.Allocator, theme: Theme) ![]ValidationFa
         if (!validStyleList(item.style)) {
             try failures.append(allocator, .{ .section = item.id, .key = "style", .message = "invalid style" });
         }
-        if (!isAscii(item.glyph) and item.ascii.len == 0) {
+        if ((item.glyph.len > 0 or item.unicode.len > 0) and item.ascii.len == 0) {
             try failures.append(allocator, .{ .section = item.id, .key = "ascii", .message = "missing ASCII fallback" });
+        }
+        if (hasPrivateUseCodepoint(item.glyph) and item.unicode.len == 0) {
+            try failures.append(allocator, .{ .section = item.id, .key = "unicode", .message = "missing Unicode fallback" });
         }
     }
 
@@ -808,13 +811,6 @@ fn validStyle(value: []const u8) bool {
         std.mem.eql(u8, value, "underline");
 }
 
-fn isAscii(value: []const u8) bool {
-    for (value) |byte| {
-        if (byte > 0x7f) return false;
-    }
-    return true;
-}
-
 fn stripComment(line: []const u8) []const u8 {
     var in_string = false;
     var escaped = false;
@@ -1170,6 +1166,52 @@ test "reports theme validation failures" {
     try std.testing.expect(std.mem.indexOf(u8, report, "theme.name: invalid theme name") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "cwd.style: invalid style") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "cwd.ascii: missing ASCII fallback") != null);
+}
+
+test "requires declared glyph fallbacks" {
+    const source =
+        \\version = 1
+        \\name = "fallbacks"
+        \\
+        \\[palette]
+        \\fg = "15"
+        \\muted = "8"
+        \\accent = "14"
+        \\success = "10"
+        \\warning = "11"
+        \\danger = "9"
+        \\
+        \\[segments.cwd]
+        \\fg = "@accent"
+        \\glyph = ""
+        \\ascii = "git:"
+        \\
+        \\[segments.git_branch]
+        \\fg = "@success"
+        \\unicode = "git"
+        \\
+        \\[segments.exit_status]
+        \\fg = "@danger"
+        \\
+        \\[segments.jobs]
+        \\fg = "@warning"
+        \\
+        \\[segments.cmd_duration]
+        \\fg = "@muted"
+        \\
+    ;
+
+    var diagnostic: Diagnostic = .{};
+    var theme = try parse(std.testing.allocator, source, &diagnostic);
+    defer theme.deinit(std.testing.allocator);
+
+    const failures = try validateAlloc(std.testing.allocator, theme);
+    defer std.testing.allocator.free(failures);
+    try std.testing.expectEqual(@as(usize, 2), failures.len);
+    const report = try formatValidationFailuresAlloc(std.testing.allocator, failures);
+    defer std.testing.allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "cwd.unicode: missing Unicode fallback") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "git_branch.ascii: missing ASCII fallback") != null);
 }
 
 test "reports theme parse spans" {

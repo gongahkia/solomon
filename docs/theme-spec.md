@@ -141,8 +141,8 @@ Segment ids are core module ids or plugin module ids.
 | `bg` | color ref | no | Empty means no background color. |
 | `style` | string | no | Space-separated `bold`, `dim`, `italic`, `underline`. |
 | `glyph` | string | no | Preferred glyph for rich terminals. |
-| `unicode` | string | no | Unicode fallback when `glyph` needs Nerd Font/private-use codepoints. |
-| `ascii` | string | no | ASCII fallback. Required when `glyph` is non-empty. |
+| `unicode` | string | no | Unicode fallback. Required when `glyph` uses Nerd Font/private-use codepoints. |
+| `ascii` | string | no | ASCII fallback. Required when `glyph` or `unicode` is non-empty. |
 | `prefix` | string | no | Text before segment content. |
 | `suffix` | string | no | Text after segment content. |
 
@@ -170,6 +170,7 @@ Parent cycles are invalid.
 - Contrast checks use Oklab lightness deltas for perceptual diagnostics and WCAG ratios for AA thresholds.
 - Segment color fields must be empty or valid palette refs/concrete colors.
 - `style` may contain only known style tokens.
-- Non-ASCII `glyph` requires `ascii`.
+- Non-empty `glyph` or `unicode` requires `ascii`.
+- Private-use `glyph` requires `unicode`.
 - Built-in themes must not require `truecolor`; they must render acceptably at `ansi256` or lower.
 - A theme must define segment styles for `cwd`, `git_branch`, `exit_status`, `jobs`, and `cmd_duration`.

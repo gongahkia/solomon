@@ -1001,7 +1001,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 
 ### 30.5 Glyph fallback
 - [x] Glyph tier resolver (nerdfont → unicode → ascii)
-- [ ] Validator enforces fallback declarations
+- [x] Validator enforces fallback declarations
 - [ ] `shisa font check` rendering probe
 - [ ] Documented NerdFont version requirements per theme
 

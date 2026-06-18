@@ -14,6 +14,30 @@ set -q SHISA_PROD_GUARD; or set -g SHISA_PROD_GUARD 0
 set -q SHISA_PROD_GUARD_FORCE; or set -g SHISA_PROD_GUARD_FORCE 0
 set -q SHISA_AI_RISK_GUARD; or set -g SHISA_AI_RISK_GUARD 0
 set -q SHISA_A11Y; or set -g SHISA_A11Y 0
+
+function shisa_detect_rtl_locale
+    set -l locale ""
+    if set -q LC_ALL; and test -n "$LC_ALL"
+        set locale "$LC_ALL"
+    else if set -q LC_CTYPE; and test -n "$LC_CTYPE"
+        set locale "$LC_CTYPE"
+    else if set -q LANG
+        set locale "$LANG"
+    end
+    set locale (string lower -- "$locale")
+    set locale (string split -m1 . -- "$locale")[1]
+    set locale (string split -m1 @ -- "$locale")[1]
+    set locale (string split -m1 _ -- "$locale")[1]
+    set locale (string split -m1 - -- "$locale")[1]
+    switch "$locale"
+        case ar he fa ur ps dv yi
+            printf '1'
+        case '*'
+            printf '0'
+    end
+end
+
+set -q SHISA_RTL; or set -g SHISA_RTL (shisa_detect_rtl_locale)
 set -q SHISA_NEXTCMD_KEYSEQ; or set -g SHISA_NEXTCMD_KEYSEQ \cx\cn
 set -q SHISA_NEXTCMD_ACCEPT_KEYSEQ; or set -g SHISA_NEXTCMD_ACCEPT_KEYSEQ \t
 set -q SHISA_NEXTCMD_REJECT_KEYSEQ; or set -g SHISA_NEXTCMD_REJECT_KEYSEQ \e

@@ -5,6 +5,21 @@ __SHISA_BASH_INIT=1
 SHISA_BIN=${SHISA_BIN:-shisa}
 SHISA_SOCKET=${SHISA_SOCKET:-}
 
+shisa_detect_rtl_locale() {
+  local locale=${LC_ALL:-${LC_CTYPE:-${LANG:-}}}
+  locale=$(printf '%s' "${locale}" | tr '[:upper:]' '[:lower:]')
+  locale=${locale%%.*}
+  locale=${locale%%@*}
+  locale=${locale%%_*}
+  locale=${locale%%-*}
+  case ${locale} in
+    ar|he|fa|ur|ps|dv|yi) printf '1' ;;
+    *) printf '0' ;;
+  esac
+}
+
+SHISA_RTL=${SHISA_RTL:-$(shisa_detect_rtl_locale)}
+
 shisa_bash_version_at_least_4() {
   local major=${1:-${BASH_VERSINFO[0]:-0}}
   [[ ${major} =~ ^[0-9]+$ ]] || return 1

@@ -741,7 +741,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Generated docs include translation status table
 
 ### 22.2 Bidi / RTL
-- [ ] Detect RTL locale at session start
+- [x] Detect RTL locale at session start
 - [ ] Segment-order reversal opt-in
 - [x] Fixture strings for Arabic, Hebrew, Persian
 - [ ] Snapshot tests for RTL rendering

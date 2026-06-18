@@ -32,6 +32,22 @@ typeset -g SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 typeset -g SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
 typeset -g SHISA_AI_RISK_GUARD=${SHISA_AI_RISK_GUARD:-0}
 typeset -g SHISA_A11Y=${SHISA_A11Y:-0}
+
+shisa_detect_rtl_locale() {
+  emulate -L zsh
+  local locale=${LC_ALL:-${LC_CTYPE:-${LANG:-}}}
+  locale=${locale:l}
+  locale=${locale%%.*}
+  locale=${locale%%@*}
+  locale=${locale%%_*}
+  locale=${locale%%-*}
+  case ${locale} in
+    ar|he|fa|ur|ps|dv|yi) printf '1' ;;
+    *) printf '0' ;;
+  esac
+}
+
+typeset -g SHISA_RTL=${SHISA_RTL:-$(shisa_detect_rtl_locale)}
 typeset -g SHISA_NEXTCMD_KEYSEQ=${SHISA_NEXTCMD_KEYSEQ:-'^X^N'}
 typeset -g SHISA_NEXTCMD_ACCEPT_KEYSEQ=${SHISA_NEXTCMD_ACCEPT_KEYSEQ:-'^I'}
 typeset -g SHISA_NEXTCMD_REJECT_KEYSEQ=${SHISA_NEXTCMD_REJECT_KEYSEQ:-'^['}

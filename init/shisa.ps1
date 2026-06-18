@@ -5,6 +5,15 @@ if (-not $env:SHISA_BIN) { $env:SHISA_BIN = "shisa" }
 if (-not $env:SHISA_SOCKET) { $env:SHISA_SOCKET = "" }
 if (-not $env:SHISA_INSTANT) { $env:SHISA_INSTANT = "0" }
 if (-not $env:SHISA_A11Y) { $env:SHISA_A11Y = "0" }
+
+function global:Get-ShisaRtlLocale {
+    $locale = if ($env:LC_ALL) { $env:LC_ALL } elseif ($env:LC_CTYPE) { $env:LC_CTYPE } elseif ($env:LANG) { $env:LANG } else { "" }
+    $tag = (($locale -split '[.@_-]', 2)[0]).ToLowerInvariant()
+    if (@("ar", "he", "fa", "ur", "ps", "dv", "yi") -contains $tag) { return "1" }
+    return "0"
+}
+
+if (-not $env:SHISA_RTL) { $env:SHISA_RTL = Get-ShisaRtlLocale }
 if (-not $env:SHISA_PWSH_ASYNC_EVENT) { $env:SHISA_PWSH_ASYNC_EVENT = "1" }
 if (-not $env:SHISA_NEXTCMD_CHORD) { $env:SHISA_NEXTCMD_CHORD = "Ctrl+x,Ctrl+n" }
 if (-not $env:SHISA_NEXTCMD_ACCEPT_CHORD) { $env:SHISA_NEXTCMD_ACCEPT_CHORD = "Tab" }

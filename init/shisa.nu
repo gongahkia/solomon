@@ -5,6 +5,20 @@ if not ("__SHISA_NU_INIT" in $env) {
     if not ("SHISA_INSTANT" in $env) { $env.SHISA_INSTANT = "0" }
     if not ("SHISA_A11Y" in $env) { $env.SHISA_A11Y = "0" }
 
+    def shisa-detect-rtl-locale [] {
+        let locale = if (($env.LC_ALL? | default "") != "") {
+            $env.LC_ALL
+        } else if (($env.LC_CTYPE? | default "") != "") {
+            $env.LC_CTYPE
+        } else {
+            $env.LANG? | default ""
+        }
+        let tag = ($locale | str downcase | split row "." | get 0 | split row "@" | get 0 | split row "_" | get 0 | split row "-" | get 0)
+        if ($tag in [ar he fa ur ps dv yi]) { "1" } else { "0" }
+    }
+
+    if not ("SHISA_RTL" in $env) { $env.SHISA_RTL = (shisa-detect-rtl-locale) }
+
     def shisa-socket-path [] {
         if (($env.SHISA_SOCKET? | default "") != "") {
             $env.SHISA_SOCKET

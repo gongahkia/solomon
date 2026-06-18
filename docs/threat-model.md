@@ -93,5 +93,6 @@ Phase 32 test infrastructure is security evidence, not a replacement for review.
 - [Plugin Runtime](plugin-runtime.md)
 - [Prod Guard](prod-guard.md)
 - [Protocol Errors](protocol/errors.md)
+- [Security Calendar](security-calendar.ics)
 - [RFC-0003 Lua Plugin Capability Manifest](../rfcs/0003-lua-plugin-capability-manifest.md)
 - [RFC-0005 Wire Protocol v1](../rfcs/0005-wire-protocol-v1.md)

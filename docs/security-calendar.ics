@@ -1,0 +1,14 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Shisa//Security Calendar//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:threat-model-annual-review@shisa.sh
+DTSTAMP:20260618T000000Z
+DTSTART;VALUE=DATE:20270618
+RRULE:FREQ=YEARLY
+SUMMARY:Review Shisa threat model
+DESCRIPTION:Review docs/threat-model.md against shipped architecture, plugins, themes, fuzz findings, Phase 32 test coverage, and release/docs workflows.
+END:VEVENT
+END:VCALENDAR

@@ -1713,6 +1713,10 @@ fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try aiStatus(allocator);
         return;
     }
+    if (std.mem.eql(u8, args[0], "redact")) {
+        try aiRedact(allocator, args[1..]);
+        return;
+    }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "bench")) {
         const config = try parseAiBenchArgs(args[1..]);
         try aiBench(allocator, config);
@@ -1751,6 +1755,132 @@ fn aiStatus(allocator: std.mem.Allocator) !void {
     const output = try aiStatusOutputAlloc(allocator, status, home);
     defer allocator.free(output);
     try std.fs.File.stdout().writeAll(output);
+}
+
+const AiRedactMode = union(enum) {
+    @"test": []const u8,
+    add_literal: []const u8,
+};
+
+const AiRedactConfig = struct {
+    mode: AiRedactMode,
+    rules_path: ?[]const u8 = null,
+};
+
+fn aiRedact(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len == 0 or (args.len == 1 and (std.mem.eql(u8, args[0], "--help") or std.mem.eql(u8, args[0], "-h")))) {
+        try std.fs.File.stdout().writeAll(ai_redact_help_text);
+        return;
+    }
+    const config = try parseAiRedactArgs(args);
+    const default_rules_path = if (config.rules_path == null) try defaultAiRedactRulesPathAlloc(allocator) else null;
+    defer if (default_rules_path) |path| allocator.free(path);
+    const rules_path = config.rules_path orelse default_rules_path.?;
+    switch (config.mode) {
+        .@"test" => |text| {
+            const output = try aiRedactWithRulesAlloc(allocator, text, rules_path);
+            defer allocator.free(output);
+            try std.fs.File.stdout().writeAll(output);
+            try std.fs.File.stdout().writeAll("\n");
+        },
+        .add_literal => |literal| {
+            try appendAiRedactLiteralRule(rules_path, literal);
+            const message = try std.fmt.allocPrint(allocator, "added literal rule to {s}\n", .{rules_path});
+            defer allocator.free(message);
+            try std.fs.File.stdout().writeAll(message);
+        },
+    }
+}
+
+fn parseAiRedactArgs(args: []const []const u8) !AiRedactConfig {
+    var rules_path: ?[]const u8 = null;
+    var mode: ?AiRedactMode = null;
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--rules")) {
+            rules_path = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--test")) {
+            if (mode != null) return error.UnknownAiArgument;
+            mode = .{ .@"test" = try nextValue(args, &i) };
+        } else if (std.mem.eql(u8, args[i], "--add-literal")) {
+            if (mode != null) return error.UnknownAiArgument;
+            mode = .{ .add_literal = try nextValue(args, &i) };
+        } else {
+            return error.UnknownAiArgument;
+        }
+    }
+    return .{ .mode = mode orelse return error.MissingValue, .rules_path = rules_path };
+}
+
+fn defaultAiRedactRulesPathAlloc(allocator: std.mem.Allocator) ![]u8 {
+    const dir = try configDirPath(allocator);
+    defer allocator.free(dir);
+    return std.fmt.allocPrint(allocator, "{s}/ai-redact.rules", .{dir});
+}
+
+fn aiRedactWithRulesAlloc(allocator: std.mem.Allocator, text: []const u8, rules_path: []const u8) ![]u8 {
+    var redacted = try ai_redact.redactAlloc(allocator, text);
+    errdefer allocator.free(redacted);
+    const rules = try readAiRedactRulesAlloc(allocator, rules_path);
+    defer freeOwnedStringSlice(allocator, rules);
+    for (rules) |rule| {
+        const next = try redactLiteralAlloc(allocator, redacted, rule);
+        allocator.free(redacted);
+        redacted = next;
+    }
+    return redacted;
+}
+
+fn readAiRedactRulesAlloc(allocator: std.mem.Allocator, rules_path: []const u8) ![][]u8 {
+    const source = std.fs.cwd().readFileAlloc(allocator, rules_path, 256 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return allocator.alloc([]u8, 0),
+        else => return err,
+    };
+    defer allocator.free(source);
+    var rules: std.ArrayList([]u8) = .empty;
+    errdefer {
+        for (rules.items) |rule| allocator.free(rule);
+        rules.deinit(allocator);
+    }
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |line_raw| {
+        const line = std.mem.trim(u8, line_raw, " \t\r\n");
+        if (line.len == 0 or line[0] == '#') continue;
+        try rules.append(allocator, try allocator.dupe(u8, line));
+    }
+    return rules.toOwnedSlice(allocator);
+}
+
+fn freeOwnedStringSlice(allocator: std.mem.Allocator, items: [][]u8) void {
+    for (items) |item| allocator.free(item);
+    allocator.free(items);
+}
+
+fn redactLiteralAlloc(allocator: std.mem.Allocator, text: []const u8, literal: []const u8) ![]u8 {
+    if (literal.len == 0) return allocator.dupe(u8, text);
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    var index: usize = 0;
+    while (index < text.len) {
+        if (std.mem.startsWith(u8, text[index..], literal)) {
+            try out.appendSlice(allocator, ai_redact.marker);
+            index += literal.len;
+        } else {
+            try out.append(allocator, text[index]);
+            index += 1;
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendAiRedactLiteralRule(rules_path: []const u8, literal: []const u8) !void {
+    if (literal.len == 0 or std.mem.indexOfAny(u8, literal, "\r\n") != null) return error.InvalidRedactRule;
+    if (std.fs.path.dirname(rules_path)) |parent| try std.fs.cwd().makePath(parent);
+    var file = try std.fs.cwd().createFile(rules_path, .{ .read = true, .truncate = false });
+    defer file.close();
+    try file.seekFromEnd(0);
+    try file.writeAll(literal);
+    try file.writeAll("\n");
 }
 
 fn aiStatusOutputAlloc(allocator: std.mem.Allocator, status: ollama.Status, home: ?[]const u8) ![]u8 {
@@ -2137,6 +2267,31 @@ test "ai status output reports local cloud and logging state" {
     try std.testing.expect(std.mem.indexOf(u8, output, "logging:\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "prod_guard_audit: missing /tmp/shisa-ai-status-home/.local/state/shisa/prod_guard.jsonl") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "ai_cloud_audit: not_configured") != null);
+}
+
+test "ai redact args parse test and add literal modes" {
+    const test_config = try parseAiRedactArgs(&.{ "--rules", "/tmp/rules", "--test", "token=secret" });
+    try std.testing.expectEqualStrings("/tmp/rules", test_config.rules_path.?);
+    try std.testing.expectEqualStrings("token=secret", test_config.mode.@"test");
+
+    const add_config = try parseAiRedactArgs(&.{ "--add-literal", "internal-host" });
+    try std.testing.expectEqualStrings("internal-host", add_config.mode.add_literal);
+}
+
+test "ai redact applies built-in and local literal rules" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-ai-redact-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    const rules_path = try std.fmt.allocPrint(allocator, "{s}/ai-redact.rules", .{dir_path});
+    defer allocator.free(rules_path);
+    try appendAiRedactLiteralRule(rules_path, "internal-host");
+
+    const output = try aiRedactWithRulesAlloc(allocator, "token=kube-secret host=internal-host", rules_path);
+    defer allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "kube-secret") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "internal-host") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output, ai_redact.marker) != null);
 }
 
 test "ai risk args parse" {
@@ -6915,7 +7070,7 @@ const help_text =
     \\usage: shisa <command> [options]
     \\
     \\commands:
-    \\  ai            local AI helpers: status, bench, risk, explain, nextcmd, nl2cmd
+    \\  ai            local AI helpers: status, redact, bench, risk, explain, nextcmd, nl2cmd
     \\  bench         benchmark prompt render via hyperfine
     \\  cache         dump or clear cache state
     \\  cloud         cloud helpers: audit, doctor, explain, preexec
@@ -6955,11 +7110,22 @@ const ai_help_text =
     \\
     \\commands:
     \\  status        show local model, cloud provider, and audit status
+    \\  redact        test or edit local redaction literal rules
     \\  bench         benchmark local Ollama generation
     \\  risk          classify command risk
     \\  explain       explain a command
     \\  nextcmd       suggest a next command from local context
     \\  nl2cmd        convert ?? input to a command suggestion
+    \\
+;
+
+const ai_redact_help_text =
+    \\usage: shisa ai redact (--test text | --add-literal text) [--rules path]
+    \\
+    \\options:
+    \\      --test <text>        print built-in + local-rule redacted text
+    \\      --add-literal <text> append a literal local redaction rule
+    \\      --rules <path>       override rules file; default is config dir ai-redact.rules
     \\
 ;
 

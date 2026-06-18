@@ -38,6 +38,8 @@ Cloud provider support is not part of the default prompt path. A cloud provider 
 
 Default redaction replaces matched values with `[redacted]`. The built-in rules cover key/value fields named `password`, `token`, `secret`, `api_key`, AWS credential names, kubeconfig key data, and SSH `IdentityFile`; bearer tokens; AWS access keys; GitHub `gh*_` tokens; `sk-` provider keys; PEM private-key blocks; and 12-digit cloud account ids.
 
+Local literal rules are stored in the config-dir `ai-redact.rules` file by default. Blank lines and `#` comments are ignored. Use `shisa ai redact --add-literal <text>` to append a rule, `shisa ai redact --test <text>` to preview built-in plus local redaction, and `--rules <path>` to test an alternate file.
+
 ## Audit Fields
 
 Cloud request audit entries should include:

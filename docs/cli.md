@@ -8,7 +8,7 @@ Generated from `shisa --help` with `zig build cli-docs`.
 usage: shisa <command> [options]
 
 commands:
-  ai            local AI helpers: status, bench, risk, explain, nextcmd, nl2cmd
+  ai            local AI helpers: status, redact, bench, risk, explain, nextcmd, nl2cmd
   bench         benchmark prompt render via hyperfine
   cache         dump or clear cache state
   cloud         cloud helpers: audit, doctor, explain, preexec
@@ -51,6 +51,7 @@ usage: shisa ai <command> [args]
 
 commands:
   status        show local model, cloud provider, and audit status
+  redact        test or edit local redaction literal rules
   bench         benchmark local Ollama generation
   risk          classify command risk
   explain       explain a command

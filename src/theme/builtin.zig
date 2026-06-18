@@ -10,6 +10,7 @@ const themes = [_]ThemeAsset{
     .{ .name = "plain", .path = "themes/plain.toml" },
     .{ .name = "minimal-monochrome", .path = "themes/minimal-monochrome.toml" },
     .{ .name = "okiya-night", .path = "themes/okiya-night.toml" },
+    .{ .name = "okiya-day", .path = "themes/okiya-day.toml" },
     .{ .name = "nord-dark", .path = "themes/nord-dark.toml" },
     .{ .name = "gruvbox-rainbow", .path = "themes/gruvbox-rainbow.toml" },
     .{ .name = "tokyo-night", .path = "themes/tokyo-night.toml" },

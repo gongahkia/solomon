@@ -79,7 +79,7 @@ pub fn validateThemeContrastWithThresholdsAlloc(allocator: std.mem.Allocator, so
 
     var failures: std.ArrayList(ContrastFailure) = .empty;
     const default_fg = resolveThemeColor(palette.items, "@fg", 0) orelse Rgb{ .r = 255, .g = 255, .b = 255 };
-    const default_bg = Rgb{ .r = 0, .g = 0, .b = 0 };
+    const default_bg = resolveThemeColor(palette.items, "@bg", 0) orelse Rgb{ .r = 0, .g = 0, .b = 0 };
 
     for (segments.items) |segment| {
         const fg = if (segment.fg.len > 0) resolveThemeColor(palette.items, segment.fg, 0) orelse default_fg else default_fg;

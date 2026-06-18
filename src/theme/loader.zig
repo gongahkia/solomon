@@ -712,6 +712,7 @@ test "parses all built-in theme files" {
         "themes/plain.toml",
         "themes/minimal-monochrome.toml",
         "themes/okiya-night.toml",
+        "themes/okiya-day.toml",
         "themes/nord-dark.toml",
         "themes/gruvbox-rainbow.toml",
         "themes/tokyo-night.toml",

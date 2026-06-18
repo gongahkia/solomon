@@ -986,7 +986,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 30.3 Built-in themes
 - [x] okiya-night (signature dark)
-- [ ] okiya-day (matching light)
+- [x] okiya-day (matching light)
 - [ ] gruvbox-rainbow (familiar)
 - [ ] tokyo-night (familiar)
 - [ ] nord-dark (familiar)

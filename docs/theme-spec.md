@@ -2,7 +2,7 @@
 
 Theme files are TOML documents. Built-in theme ids use the same schema as external theme files.
 
-Built-in ids: `plain`, `minimal-monochrome`, `okiya-night`, `nord-dark`, `gruvbox-rainbow`, `tokyo-night`, `pure`, `a11y`.
+Built-in ids: `plain`, `minimal-monochrome`, `okiya-night`, `okiya-day`, `nord-dark`, `gruvbox-rainbow`, `tokyo-night`, `pure`, `a11y`.
 
 ## File Shape
 
@@ -22,6 +22,7 @@ accent = "14"
 success = "2"
 warning = "3"
 danger = "1"
+bg = "0"
 
 [separators]
 segment = " "
@@ -89,6 +90,7 @@ Required semantic slots:
 | `success` | OK state. |
 | `warning` | Slow or risky state. |
 | `danger` | Error state. |
+| `bg` | Optional default background for contrast validation and light themes. |
 
 Themes may add custom palette slots, but custom slots must be referenced at least once.
 

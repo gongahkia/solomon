@@ -1054,7 +1054,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 32.3 Integration tests via expect/pexpect
 - [x] Per-shell session scripts
 - [x] Verify hooks, redraw, transient prompt
-- [ ] Verify pre_exec blocking and bypass
+- [x] Verify pre_exec blocking and bypass
 
 ### 32.4 E2E in Docker
 - [ ] Full-OS images for each supported distro

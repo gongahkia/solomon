@@ -737,6 +737,8 @@ pub fn build(b: *std.Build) void {
     const render_a11y_integration = b.addSystemCommand(&.{ "bash", "test/integration/render_a11y_fake_socket.sh" });
     render_a11y_integration.step.dependOn(&debug_install.step);
     const rtl_locale_integration = b.addSystemCommand(&.{ "bash", "test/integration/rtl_locale_init.sh" });
+    const preexec_expect_integration = b.addSystemCommand(&.{ "bash", "test/integration/preexec_expect.sh" });
+    preexec_expect_integration.step.dependOn(&debug_install.step);
     const shell_expect_integration = b.addSystemCommand(&.{ "expect", "test/integration/shell_expect.exp" });
     shell_expect_integration.step.dependOn(&debug_install.step);
     const starship_presets_import = b.addSystemCommand(&.{ "bash", "test/integration/starship_presets_import.sh" });
@@ -820,6 +822,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&pwsh_integration.step);
     test_step.dependOn(&render_a11y_integration.step);
     test_step.dependOn(&rtl_locale_integration.step);
+    test_step.dependOn(&preexec_expect_integration.step);
     test_step.dependOn(&shell_expect_integration.step);
     test_step.dependOn(&starship_presets_import.step);
     test_step.dependOn(&pure_import_smoke.step);

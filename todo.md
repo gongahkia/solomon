@@ -934,7 +934,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ## Phase 29 â€” Lua plugin SDK hardening
 
 ### 29.1 Lua VM selection
-- [ ] Benchmark Lua 5.4 vs LuaJIT on plugin hot paths
+- [x] Benchmark Lua 5.4 vs LuaJIT on plugin hot paths
 - [ ] Pick winner based on sandbox safety + perf
 - [ ] Document decision
 

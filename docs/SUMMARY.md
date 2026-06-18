@@ -65,6 +65,7 @@
 - [Plugin API Reference](plugin-api.md)
 - [Plugin Manifest](plugin-manifest.md)
 - [Plugin Runtime](plugin-runtime.md)
+- [Lua VM Benchmark](lua-vm-benchmark.md)
 - [Plugin Policy](plugin-policy.md)
 - [Pack Status](pack-status.md)
 

@@ -181,6 +181,8 @@ pub const Server = struct {
     render_max_us: u64 = 0,
     render_histogram: [render_histogram_buckets]u64 = [_]u64{0} ** render_histogram_buckets,
     prompt_cache: daemon_cache.Store,
+    prompt_cache_hits: u64 = 0,
+    prompt_cache_misses: u64 = 0,
     git_branch_cache: git_branch_module.Cache = .{},
     language_versions_cache: language_versions_module.Cache = .{},
     cloud_ctx_cache: cloud_ctx_module.Cache = .{},
@@ -452,6 +454,7 @@ pub const Server = struct {
         defer std.heap.page_allocator.free(cache_key);
 
         if (try self.prompt_cache.get(prompt_cache_module, cache_key)) |cached| {
+            self.prompt_cache_hits += 1;
             const escaped_request_id = try json.escapeAlloc(std.heap.page_allocator, parsed.value.request_id);
             defer std.heap.page_allocator.free(escaped_request_id);
             const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, cached.output);
@@ -460,6 +463,7 @@ pub const Server = struct {
             self.recordRender(elapsed_us);
             return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, elapsed_us });
         }
+        self.prompt_cache_misses += 1;
 
         var rendered = try dispatcher.renderDefault(std.heap.page_allocator, .{
             .git_branch = &self.git_branch_cache,
@@ -651,6 +655,8 @@ pub const Server = struct {
         const azure_valid = self.cloud_ctx_cache.azure_valid;
         const kube_valid = self.cloud_ctx_cache.kube_valid;
         self.cloud_ctx_cache.mutex.unlock();
+        const prompt_cache_entries = self.prompt_cache.count();
+        const prompt_cache_hit_rate_ppm = promptCacheHitRatePpm(self.prompt_cache_hits, self.prompt_cache_misses);
 
         if (parsed) |value| {
             if (std.mem.eql(u8, value.value.format, "prometheus")) {
@@ -660,16 +666,16 @@ pub const Server = struct {
 
         return std.fmt.allocPrint(
             allocator,
-            "{{\"v\":1,\"request_id\":\"{s}\",\"connections\":{d},\"cache\":{{\"git_branch\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"language_versions\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"cloud_ctx\":{{\"gcp_valid\":{},\"azure_valid\":{},\"kube_valid\":{}}}}},\"render\":{{\"count\":{d},\"total_us\":{d},\"max_us\":{d},\"histogram\":{{\"le_100us\":{d},\"le_500us\":{d},\"le_1000us\":{d},\"le_5000us\":{d},\"gt_5000us\":{d}}}}},\"plugins\":{d},\"fsnotify\":{{\"backend\":\"{s}\",\"registrations\":{d}}}}}",
-            .{ escaped_request_id, self.connections, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid, self.render_count, self.render_total_us, self.render_max_us, self.render_histogram[0], self.render_histogram[1], self.render_histogram[2], self.render_histogram[3], self.render_histogram[4], self.reload_state.plugin_names.len, @tagName(self.fs_watcher.backend), self.fs_watcher.registrations.items.len },
+            "{{\"v\":1,\"request_id\":\"{s}\",\"connections\":{d},\"cache\":{{\"git_branch\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"language_versions\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"cloud_ctx\":{{\"gcp_valid\":{},\"azure_valid\":{},\"kube_valid\":{}}},\"prompt_l1\":{{\"entries\":{d},\"hits\":{d},\"misses\":{d},\"hit_rate_ppm\":{d}}}}},\"render\":{{\"count\":{d},\"total_us\":{d},\"max_us\":{d},\"histogram\":{{\"le_100us\":{d},\"le_500us\":{d},\"le_1000us\":{d},\"le_5000us\":{d},\"gt_5000us\":{d}}}}},\"plugins\":{d},\"fsnotify\":{{\"backend\":\"{s}\",\"registrations\":{d}}}}}",
+            .{ escaped_request_id, self.connections, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid, prompt_cache_entries, self.prompt_cache_hits, self.prompt_cache_misses, prompt_cache_hit_rate_ppm, self.render_count, self.render_total_us, self.render_max_us, self.render_histogram[0], self.render_histogram[1], self.render_histogram[2], self.render_histogram[3], self.render_histogram[4], self.reload_state.plugin_names.len, @tagName(self.fs_watcher.backend), self.fs_watcher.registrations.items.len },
         );
     }
 
     fn metricsPrometheusAlloc(self: *Server, allocator: std.mem.Allocator, git_valid: bool, git_in_flight: bool, git_generation: u64, language_valid: bool, language_in_flight: bool, language_generation: u64, gcp_valid: bool, azure_valid: bool, kube_valid: bool) ![]u8 {
         return std.fmt.allocPrint(
             allocator,
-            "# HELP shisa_connections Active accepted connections.\n# TYPE shisa_connections gauge\nshisa_connections {d}\n# HELP shisa_render_count Render requests served.\n# TYPE shisa_render_count counter\nshisa_render_count {d}\n# HELP shisa_render_total_us Total render latency in microseconds.\n# TYPE shisa_render_total_us counter\nshisa_render_total_us {d}\n# HELP shisa_render_max_us Max observed render latency in microseconds.\n# TYPE shisa_render_max_us gauge\nshisa_render_max_us {d}\n# HELP shisa_render_latency_bucket Render latency buckets.\n# TYPE shisa_render_latency_bucket counter\nshisa_render_latency_bucket{{le=\"100\"}} {d}\nshisa_render_latency_bucket{{le=\"500\"}} {d}\nshisa_render_latency_bucket{{le=\"1000\"}} {d}\nshisa_render_latency_bucket{{le=\"5000\"}} {d}\nshisa_render_latency_bucket{{le=\"+Inf\"}} {d}\n# HELP shisa_plugins Loaded plugins.\n# TYPE shisa_plugins gauge\nshisa_plugins {d}\n# HELP shisa_cache_valid Cache validity by module.\n# TYPE shisa_cache_valid gauge\nshisa_cache_valid{{module=\"git_branch\"}} {d}\nshisa_cache_valid{{module=\"language_versions\"}} {d}\nshisa_cache_valid{{module=\"cloud_ctx_gcp\"}} {d}\nshisa_cache_valid{{module=\"cloud_ctx_azure\"}} {d}\nshisa_cache_valid{{module=\"cloud_ctx_kube\"}} {d}\n# HELP shisa_cache_in_flight Cache worker in-flight by module.\n# TYPE shisa_cache_in_flight gauge\nshisa_cache_in_flight{{module=\"git_branch\"}} {d}\nshisa_cache_in_flight{{module=\"language_versions\"}} {d}\n# HELP shisa_cache_generation Cache generation by module.\n# TYPE shisa_cache_generation counter\nshisa_cache_generation{{module=\"git_branch\"}} {d}\nshisa_cache_generation{{module=\"language_versions\"}} {d}\n",
-            .{ self.connections, self.render_count, self.render_total_us, self.render_max_us, self.render_histogram[0], self.render_histogram[1], self.render_histogram[2], self.render_histogram[3], self.render_histogram[4], self.reload_state.plugin_names.len, @intFromBool(git_valid), @intFromBool(language_valid), @intFromBool(gcp_valid), @intFromBool(azure_valid), @intFromBool(kube_valid), @intFromBool(git_in_flight), @intFromBool(language_in_flight), git_generation, language_generation },
+            "# HELP shisa_connections Active accepted connections.\n# TYPE shisa_connections gauge\nshisa_connections {d}\n# HELP shisa_render_count Render requests served.\n# TYPE shisa_render_count counter\nshisa_render_count {d}\n# HELP shisa_render_total_us Total render latency in microseconds.\n# TYPE shisa_render_total_us counter\nshisa_render_total_us {d}\n# HELP shisa_render_max_us Max observed render latency in microseconds.\n# TYPE shisa_render_max_us gauge\nshisa_render_max_us {d}\n# HELP shisa_render_latency_bucket Render latency buckets.\n# TYPE shisa_render_latency_bucket counter\nshisa_render_latency_bucket{{le=\"100\"}} {d}\nshisa_render_latency_bucket{{le=\"500\"}} {d}\nshisa_render_latency_bucket{{le=\"1000\"}} {d}\nshisa_render_latency_bucket{{le=\"5000\"}} {d}\nshisa_render_latency_bucket{{le=\"+Inf\"}} {d}\n# HELP shisa_prompt_cache_entries L1 rendered-prompt cache entries.\n# TYPE shisa_prompt_cache_entries gauge\nshisa_prompt_cache_entries {d}\n# HELP shisa_prompt_cache_hits L1 rendered-prompt cache hits.\n# TYPE shisa_prompt_cache_hits counter\nshisa_prompt_cache_hits {d}\n# HELP shisa_prompt_cache_misses L1 rendered-prompt cache misses.\n# TYPE shisa_prompt_cache_misses counter\nshisa_prompt_cache_misses {d}\n# HELP shisa_prompt_cache_hit_rate_ppm L1 rendered-prompt cache hit rate in parts per million.\n# TYPE shisa_prompt_cache_hit_rate_ppm gauge\nshisa_prompt_cache_hit_rate_ppm {d}\n# HELP shisa_plugins Loaded plugins.\n# TYPE shisa_plugins gauge\nshisa_plugins {d}\n# HELP shisa_cache_valid Cache validity by module.\n# TYPE shisa_cache_valid gauge\nshisa_cache_valid{{module=\"git_branch\"}} {d}\nshisa_cache_valid{{module=\"language_versions\"}} {d}\nshisa_cache_valid{{module=\"cloud_ctx_gcp\"}} {d}\nshisa_cache_valid{{module=\"cloud_ctx_azure\"}} {d}\nshisa_cache_valid{{module=\"cloud_ctx_kube\"}} {d}\n# HELP shisa_cache_in_flight Cache worker in-flight by module.\n# TYPE shisa_cache_in_flight gauge\nshisa_cache_in_flight{{module=\"git_branch\"}} {d}\nshisa_cache_in_flight{{module=\"language_versions\"}} {d}\n# HELP shisa_cache_generation Cache generation by module.\n# TYPE shisa_cache_generation counter\nshisa_cache_generation{{module=\"git_branch\"}} {d}\nshisa_cache_generation{{module=\"language_versions\"}} {d}\n",
+            .{ self.connections, self.render_count, self.render_total_us, self.render_max_us, self.render_histogram[0], self.render_histogram[1], self.render_histogram[2], self.render_histogram[3], self.render_histogram[4], self.prompt_cache.count(), self.prompt_cache_hits, self.prompt_cache_misses, promptCacheHitRatePpm(self.prompt_cache_hits, self.prompt_cache_misses), self.reload_state.plugin_names.len, @intFromBool(git_valid), @intFromBool(language_valid), @intFromBool(gcp_valid), @intFromBool(azure_valid), @intFromBool(kube_valid), @intFromBool(git_in_flight), @intFromBool(language_in_flight), git_generation, language_generation },
         );
     }
 
@@ -997,6 +1003,12 @@ fn renderHistogramIndex(elapsed_us: u64) usize {
     if (elapsed_us <= 1000) return 2;
     if (elapsed_us <= 5000) return 3;
     return 4;
+}
+
+fn promptCacheHitRatePpm(hits: u64, misses: u64) u64 {
+    const total = @as(u128, hits) + @as(u128, misses);
+    if (total == 0) return 0;
+    return @intCast((@as(u128, hits) * 1_000_000) / total);
 }
 
 fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderRequest, context: RenderCacheContext) ![]u8 {
@@ -1635,6 +1647,12 @@ test "render prompt cache key ignores request id and includes tuple fields" {
     try std.testing.expect(!std.mem.eql(u8, first, different_exit));
 }
 
+test "prompt cache hit rate uses ppm" {
+    try std.testing.expectEqual(@as(u64, 0), promptCacheHitRatePpm(0, 0));
+    try std.testing.expectEqual(@as(u64, 750000), promptCacheHitRatePpm(3, 1));
+    try std.testing.expectEqual(@as(u64, 333333), promptCacheHitRatePpm(1, 2));
+}
+
 test "render response stores completed prompts in bounded l1 cache" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-l1-{x}", .{std.crypto.random.int(u64)});
@@ -1654,6 +1672,8 @@ test "render response stores completed prompts in bounded l1 cache" {
     defer std.heap.page_allocator.free(first);
     try std.testing.expect(std.mem.indexOf(u8, first, "\"request_id\":\"first\"") != null);
     try std.testing.expectEqual(@as(usize, 1), server.prompt_cache.count());
+    try std.testing.expectEqual(@as(u64, 0), server.prompt_cache_hits);
+    try std.testing.expectEqual(@as(u64, 1), server.prompt_cache_misses);
 
     const second_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render_continue\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"second\"}}", .{dir_path});
     defer allocator.free(second_request);
@@ -1661,6 +1681,8 @@ test "render response stores completed prompts in bounded l1 cache" {
     defer std.heap.page_allocator.free(second);
     try std.testing.expect(std.mem.indexOf(u8, second, "\"request_id\":\"second\"") != null);
     try std.testing.expectEqual(@as(usize, 1), server.prompt_cache.count());
+    try std.testing.expectEqual(@as(u64, 1), server.prompt_cache_hits);
+    try std.testing.expectEqual(@as(u64, 1), server.prompt_cache_misses);
 
     const different_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":2,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"different\"}}", .{dir_path});
     defer allocator.free(different_request);
@@ -1668,6 +1690,8 @@ test "render response stores completed prompts in bounded l1 cache" {
     defer std.heap.page_allocator.free(different);
     try std.testing.expect(std.mem.indexOf(u8, different, "exit:2") != null);
     try std.testing.expectEqual(@as(usize, 1), server.prompt_cache.count());
+    try std.testing.expectEqual(@as(u64, 1), server.prompt_cache_hits);
+    try std.testing.expectEqual(@as(u64, 2), server.prompt_cache_misses);
 }
 
 test "render_continue fills async git segment from cache" {
@@ -2114,6 +2138,9 @@ test "metrics op returns JSON metrics dump" {
     server.connections = 3;
     server.recordRender(50);
     server.recordRender(6000);
+    server.prompt_cache_hits = 3;
+    server.prompt_cache_misses = 1;
+    try server.prompt_cache.put(prompt_cache_module, "metrics-key", "cached> ", 0);
     server.reload_state.plugin_names = try std.heap.page_allocator.alloc([]u8, 1);
     server.reload_state.plugin_names[0] = try std.heap.page_allocator.dupe(u8, "demo-plugin");
 
@@ -2122,6 +2149,7 @@ test "metrics op returns JSON metrics dump" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"request_id\":\"metrics-1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"connections\":3") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"git_branch\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"prompt_l1\":{\"entries\":1,\"hits\":3,\"misses\":1,\"hit_rate_ppm\":750000}") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"render\":{\"count\":2,\"total_us\":6050,\"max_us\":6000") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"le_100us\":1") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"gt_5000us\":1") != null);
@@ -2133,6 +2161,8 @@ test "metrics op returns JSON metrics dump" {
     try std.testing.expect(std.mem.indexOf(u8, prometheus, "# TYPE shisa_connections gauge") != null);
     try std.testing.expect(std.mem.indexOf(u8, prometheus, "shisa_render_count 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, prometheus, "shisa_render_latency_bucket{le=\"+Inf\"} 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, prometheus, "shisa_prompt_cache_entries 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, prometheus, "shisa_prompt_cache_hit_rate_ppm 750000") != null);
     try std.testing.expect(std.mem.indexOf(u8, prometheus, "shisa_plugins 1") != null);
 }
 

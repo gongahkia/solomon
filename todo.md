@@ -887,7 +887,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Cold-start hydration with checksum verification
 
 ### 27.3 L3 external-command cache
-- [ ] Keyed on `(cmd, args, cwd, mtime-set-of-watched-paths)`
+- [x] Keyed on `(cmd, args, cwd, mtime-set-of-watched-paths)`
 - [ ] Negative caching for missing tools
 - [ ] Configurable per-module TTL
 

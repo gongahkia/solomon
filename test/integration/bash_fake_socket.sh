@@ -61,3 +61,4 @@ grep -F 'fake-bash> ' "$out" >/dev/null
 
 bash --noprofile --norc -c 'source init/shisa.bash; EPOCHREALTIME=100.000000; shisa_debug_trap "sleep 1"; EPOCHREALTIME=101.234000; shisa_precmd 7; [[ ${SHISA_LAST_EXIT} == 7 ]]; [[ ${SHISA_LAST_DURATION_MS} == 1234 ]]'
 bash --noprofile --norc -c 'source init/shisa.bash; [[ ${SHISA_ASYNC_KEYSEQ} == "\\C-x\\C-s" ]]; declare -F shisa_async_redraw >/dev/null'
+bash --noprofile --norc -c 'source init/shisa.bash; READLINE_LINE=abc; READLINE_POINT=2; bytes=$(shisa_async_redraw | od -An -tx1 | tr -d " \n"); [[ ${bytes} == 0d1b5b324b ]]; [[ ${READLINE_LINE} == abc ]]; [[ ${READLINE_POINT} == 2 ]]'

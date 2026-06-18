@@ -910,7 +910,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Document `RPS1` interaction
 
 ### 28.2 Bash
-- [ ] `bind -x` + escape sequence redraw trick
+- [x] `bind -x` + escape sequence redraw trick
 - [ ] Document Bash 4+ requirement
 - [ ] Graceful sync fallback on older bash
 

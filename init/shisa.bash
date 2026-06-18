@@ -134,6 +134,11 @@ shisa_prompt_render() {
 }
 
 shisa_async_redraw() {
+  local line=${READLINE_LINE-}
+  local point=${READLINE_POINT-0}
+  printf '\r\033[2K'
+  READLINE_LINE=${line}
+  READLINE_POINT=${point}
   return 0
 }
 

@@ -1044,7 +1044,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred �
 ### 32.1 Snapshot tests
 - [x] All built-in themes × glyph caps × color caps
 - [x] Prompt fixtures: clean, dirty git, conflict, prod, etc.
-- [ ] Update tool with explicit confirm gate (no auto-write)
+- [x] Update tool with explicit confirm gate (no auto-write)
 
 ### 32.2 Property tests
 - [ ] Wire protocol roundtrip

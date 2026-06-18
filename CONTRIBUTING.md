@@ -23,6 +23,12 @@ zig build test
 zig build bench
 ```
 
+Snapshot files are read-only by default. To rewrite generated snapshots, use the explicit confirmation gate:
+
+```sh
+scripts/update-snapshots.sh --confirm update-snapshots
+```
+
 Run the full local gate before opening a PR:
 
 ```sh

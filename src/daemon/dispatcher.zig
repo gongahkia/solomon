@@ -562,9 +562,7 @@ test "snapshots prompt fixture corpus" {
         defer allocator.free(normalized);
         const path = try std.fmt.allocPrint(allocator, "test/snapshots/prompt/{s}.txt", .{fixture.name});
         defer allocator.free(path);
-        const expected = try std.fs.cwd().readFileAlloc(allocator, path, 4096);
-        defer allocator.free(expected);
-        try std.testing.expectEqualStrings(expected, normalized);
+        try expectOrUpdatePromptSnapshot(allocator, path, normalized);
     }
 }
 
@@ -755,6 +753,28 @@ fn normalizePromptSnapshotAlloc(allocator: std.mem.Allocator, prompt: []const u8
     }
     try out.append(allocator, '\n');
     return out.toOwnedSlice(allocator);
+}
+
+fn expectOrUpdatePromptSnapshot(allocator: std.mem.Allocator, path: []const u8, actual: []const u8) !void {
+    const token = std.process.getEnvVarOwned(allocator, "SHISA_UPDATE_SNAPSHOTS") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    defer if (token) |value| allocator.free(value);
+
+    if (token) |value| {
+        if (std.mem.eql(u8, value, "update-snapshots")) {
+            if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
+            var file = try std.fs.cwd().createFile(path, .{ .truncate = true });
+            defer file.close();
+            try file.writeAll(actual);
+            return;
+        }
+    }
+
+    const expected = try std.fs.cwd().readFileAlloc(allocator, path, 4096);
+    defer allocator.free(expected);
+    try std.testing.expectEqualStrings(expected, actual);
 }
 
 fn runGit(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !void {

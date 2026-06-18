@@ -11,6 +11,7 @@ const ai_explain = @import("ai/explain.zig");
 const nextcmd = @import("ai/nextcmd.zig");
 const nl2cmd = @import("ai/nl2cmd.zig");
 const ollama = @import("ai/ollama.zig");
+const ai_redact = @import("ai/redact.zig");
 const ai_risk = @import("ai/risk.zig");
 const shisa_config = @import("config.zig");
 const paths = @import("daemon/paths.zig");
@@ -65,6 +66,11 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, args[1], "doctor")) {
         try doctorCommand(allocator, args[2..]);
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "report")) {
+        try reportCommand(allocator, args[2..]);
         return;
     }
 
@@ -832,6 +838,228 @@ fn deprecationWarningsAlloc(allocator: std.mem.Allocator, source: []const u8, ru
     }
     if (count == 0) try out.appendSlice(allocator, "deprecations: none\n");
     return out.toOwnedSlice(allocator);
+}
+
+const report_max_log_bytes = 1024 * 1024;
+const report_bench_iterations = 8;
+
+const ReportConfig = struct {
+    output_path: ?[]const u8 = null,
+};
+
+fn reportCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len == 1 and (std.mem.eql(u8, args[0], "--help") or std.mem.eql(u8, args[0], "-h"))) {
+        try std.fs.File.stdout().writeAll(report_help_text);
+        return;
+    }
+
+    const config = try parseReportArgs(args);
+    const output_path = if (config.output_path) |path| path else try defaultReportPathAlloc(allocator);
+    defer if (config.output_path == null) allocator.free(output_path);
+
+    const staging_dir = try reportStagingDirAlloc(allocator);
+    defer allocator.free(staging_dir);
+    defer std.fs.cwd().deleteTree(staging_dir) catch {};
+    try std.fs.cwd().makePath(staging_dir);
+
+    try writeReportBundleFiles(allocator, staging_dir);
+    try createReportArchive(allocator, staging_dir, output_path);
+
+    const message = try std.fmt.allocPrint(allocator, "wrote {s}\n", .{output_path});
+    defer allocator.free(message);
+    try std.fs.File.stdout().writeAll(message);
+}
+
+fn parseReportArgs(args: []const []const u8) !ReportConfig {
+    var config = ReportConfig{};
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--output") or std.mem.eql(u8, args[i], "-o")) {
+            config.output_path = try nextValue(args, &i);
+        } else {
+            return error.UnknownReportArgument;
+        }
+    }
+    return config;
+}
+
+fn defaultReportPathAlloc(allocator: std.mem.Allocator) ![]u8 {
+    return std.fmt.allocPrint(allocator, "shisa-report-{d}.tar.gz", .{std.time.timestamp()});
+}
+
+fn reportStagingDirAlloc(allocator: std.mem.Allocator) ![]u8 {
+    return std.fmt.allocPrint(allocator, "/tmp/shisa-report-{x}", .{std.crypto.random.int(u64)});
+}
+
+fn writeReportBundleFiles(allocator: std.mem.Allocator, staging_dir: []const u8) !void {
+    const config_path = try defaultConfigPath(allocator);
+    defer allocator.free(config_path);
+    const log_path = try paths.defaultLogPath(allocator);
+    defer allocator.free(log_path);
+
+    const manifest = try reportManifestAlloc(allocator, config_path, log_path);
+    defer allocator.free(manifest);
+    try writeReportFile(allocator, staging_dir, "README.txt", manifest);
+
+    const config_text = try reportConfigRedactedAlloc(allocator, config_path);
+    defer allocator.free(config_text);
+    try writeReportFile(allocator, staging_dir, "config.redacted.toml", config_text);
+
+    const log_text = try reportLogRedactedAlloc(allocator, log_path);
+    defer allocator.free(log_text);
+    try writeReportFile(allocator, staging_dir, "shisad.log.redacted", log_text);
+
+    const bench_text = try reportBenchAlloc(allocator);
+    defer allocator.free(bench_text);
+    try writeReportFile(allocator, staging_dir, "bench.txt", bench_text);
+}
+
+fn reportManifestAlloc(allocator: std.mem.Allocator, config_path: []const u8, log_path: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator,
+        \\Shisa support bundle
+        \\
+        \\Files:
+        \\- config.redacted.toml: active config from {s}, or built-in defaults when missing
+        \\- shisad.log.redacted: last 1MiB of {s}, or missing/unreadable status
+        \\- bench.txt: local prompt payload microbench metadata
+        \\
+        \\Redaction:
+        \\Values matching documented secret patterns are replaced with [redacted] before archive creation.
+        \\
+    , .{ config_path, log_path });
+}
+
+fn reportConfigRedactedAlloc(allocator: std.mem.Allocator, config_path: []const u8) ![]u8 {
+    const raw = try readConfigOrDefault(allocator, config_path);
+    defer allocator.free(raw);
+    return redactReportDataAlloc(allocator, raw);
+}
+
+fn reportLogRedactedAlloc(allocator: std.mem.Allocator, log_path: []const u8) ![]u8 {
+    const raw = readFileTailAlloc(allocator, log_path, report_max_log_bytes) catch |err| switch (err) {
+        error.FileNotFound => return std.fmt.allocPrint(allocator, "log_path: {s}\nstatus: missing\n", .{log_path}),
+        else => return std.fmt.allocPrint(allocator, "log_path: {s}\nstatus: unreadable\nerror: {s}\n", .{ log_path, @errorName(err) }),
+    };
+    defer allocator.free(raw);
+    return redactReportDataAlloc(allocator, raw);
+}
+
+fn redactReportDataAlloc(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
+    return ai_redact.redactAlloc(allocator, data);
+}
+
+fn readFileTailAlloc(allocator: std.mem.Allocator, path: []const u8, max_bytes: usize) ![]u8 {
+    var file = try std.fs.openFileAbsolute(path, .{});
+    defer file.close();
+    const end = try file.getEndPos();
+    const start = if (end > max_bytes) end - max_bytes else 0;
+    try file.seekTo(start);
+    return file.readToEndAlloc(allocator, max_bytes);
+}
+
+fn reportBenchAlloc(allocator: std.mem.Allocator) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try appendFmt(allocator, &out, "version: {s}\n", .{version});
+    try appendFmt(allocator, &out, "os: {s}\n", .{@tagName(builtin.os.tag)});
+    try appendFmt(allocator, &out, "iterations: {d}\n", .{report_bench_iterations});
+
+    const cwd = std.fs.cwd().realpathAlloc(allocator, ".") catch |err| {
+        try appendFmt(allocator, &out, "status: failed\nerror: {s}\n", .{@errorName(err)});
+        return out.toOwnedSlice(allocator);
+    };
+    defer allocator.free(cwd);
+
+    var total_ns: u64 = 0;
+    var min_ns: u64 = std.math.maxInt(u64);
+    var max_ns: u64 = 0;
+    const config = PromptConfig{ .no_async = true, .cols = 80, .rows = 24 };
+    const module_options = defaultPromptModuleOptions();
+    for (0..report_bench_iterations) |_| {
+        const start = std.time.nanoTimestamp();
+        const payload = buildPromptPayloadWithModuleOptions(allocator, config, cwd, module_options) catch |err| {
+            try appendFmt(allocator, &out, "status: failed\nerror: {s}\n", .{@errorName(err)});
+            return out.toOwnedSlice(allocator);
+        };
+        defer allocator.free(payload);
+        const elapsed: u64 = @intCast(std.time.nanoTimestamp() - start);
+        total_ns += elapsed;
+        min_ns = @min(min_ns, elapsed);
+        max_ns = @max(max_ns, elapsed);
+    }
+    try out.appendSlice(allocator, "status: ok\n");
+    try appendFmt(allocator, &out, "avg_ns: {d}\n", .{total_ns / report_bench_iterations});
+    try appendFmt(allocator, &out, "min_ns: {d}\n", .{min_ns});
+    try appendFmt(allocator, &out, "max_ns: {d}\n", .{max_ns});
+    return out.toOwnedSlice(allocator);
+}
+
+fn writeReportFile(allocator: std.mem.Allocator, staging_dir: []const u8, name: []const u8, data: []const u8) !void {
+    const path = try std.fs.path.join(allocator, &.{ staging_dir, name });
+    defer allocator.free(path);
+    var file = try std.fs.createFileAbsolute(path, .{ .truncate = true });
+    defer file.close();
+    try file.writeAll(data);
+}
+
+fn createReportArchive(allocator: std.mem.Allocator, staging_dir: []const u8, output_path: []const u8) !void {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "tar", "-czf", output_path, "-C", staging_dir, "." },
+        .max_output_bytes = 1024 * 1024,
+        .expand_arg0 = .expand,
+    }) catch |err| switch (err) {
+        error.FileNotFound => {
+            try std.fs.File.stderr().writeAll("shisa report: tar not found in PATH\n");
+            return err;
+        },
+        else => return err,
+    };
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    try std.fs.File.stderr().writeAll(result.stderr);
+    if (!exitedZero(result.term)) return error.ReportArchiveFailed;
+}
+
+test "report args parse output path" {
+    const config = try parseReportArgs(&.{ "--output", "/tmp/shisa-report.tar.gz" });
+    try std.testing.expectEqualStrings("/tmp/shisa-report.tar.gz", config.output_path.?);
+}
+
+test "report redaction scrubs documented patterns" {
+    const input =
+        \\password = "hunter2"
+        \\Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig
+        \\AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+        \\aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        \\github=ghp_abcdefghijklmnopqrstuvwxyz1234567890
+        \\openai=sk-abcdefghijklmnopqrst
+        \\account=123456789012
+        \\IdentityFile ~/.ssh/id_rsa
+        \\client-key-data: kube-secret
+        \\-----BEGIN OPENSSH PRIVATE KEY-----
+        \\abc123
+        \\-----END OPENSSH PRIVATE KEY-----
+        \\
+    ;
+    const output = try redactReportDataAlloc(std.testing.allocator, input);
+    defer std.testing.allocator.free(output);
+
+    inline for (.{
+        "hunter2",
+        "eyJhbGciOiJIUzI1NiJ9.payload.sig",
+        "AKIAIOSFODNN7EXAMPLE",
+        "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        "ghp_abcdefghijklmnopqrstuvwxyz1234567890",
+        "sk-abcdefghijklmnopqrst",
+        "123456789012",
+        "~/.ssh/id_rsa",
+        "kube-secret",
+        "abc123",
+    }) |secret| {
+        try std.testing.expect(std.mem.indexOf(u8, output, secret) == null);
+    }
+    try std.testing.expect(std.mem.indexOf(u8, output, ai_redact.marker) != null);
 }
 
 fn configDirPath(allocator: std.mem.Allocator) ![]u8 {
@@ -6417,13 +6645,17 @@ const PromptModuleOptions = struct {
 };
 
 fn buildPromptPayload(allocator: std.mem.Allocator, config: PromptConfig, cwd: []const u8) ![]u8 {
+    const module_options = try promptModuleOptions(allocator);
+    return buildPromptPayloadWithModuleOptions(allocator, config, cwd, module_options);
+}
+
+fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config: PromptConfig, cwd: []const u8, module_options: PromptModuleOptions) ![]u8 {
     const escaped_cwd = try jsonEscapeAlloc(allocator, cwd);
     defer allocator.free(escaped_cwd);
     const escaped_shell = try jsonEscapeAlloc(allocator, config.shell);
     defer allocator.free(escaped_shell);
     const request_id = try std.fmt.allocPrint(allocator, "cli-{x}", .{std.crypto.random.int(u64)});
     defer allocator.free(request_id);
-    const module_options = try promptModuleOptions(allocator);
     const rtl_reverse = config.rtl_reverse or module_options.rtl_reverse;
 
     return std.fmt.allocPrint(
@@ -6439,6 +6671,16 @@ fn promptColorCaps(config: PromptConfig) []const u8 {
 
 fn promptGlyphCaps(config: PromptConfig) []const u8 {
     return if (config.a11y) "ascii" else "unicode";
+}
+
+fn defaultPromptModuleOptions() PromptModuleOptions {
+    return .{
+        .rtl_reverse = false,
+        .cwd = .{},
+        .cloud_ctx = .{},
+        .risk_tier = .{},
+        .sso_expiry = .{},
+    };
 }
 
 fn promptModuleOptions(allocator: std.mem.Allocator) !PromptModuleOptions {
@@ -6646,6 +6888,7 @@ const help_text =
     \\  plugin        new, lint, pack, install, list, enable, disable, or trust plugins
     \\  prompt        render prompt through shisad; --a11y strips ANSI and normalizes glyphs
     \\  render        alias for prompt; --explain-a11y dumps segment labels
+    \\  report        write a redacted support bundle .tar.gz
     \\  stack         dump detected stacked-diff metadata
     \\  supervisor    run shisad under a crash-restart supervisor
     \\  theme         validate theme files
@@ -6655,6 +6898,14 @@ const help_text =
     \\options:
     \\  -h, --help    print help
     \\      --version print version
+    \\
+;
+
+const report_help_text =
+    \\usage: shisa report [--output path]
+    \\
+    \\options:
+    \\  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz
     \\
 ;
 

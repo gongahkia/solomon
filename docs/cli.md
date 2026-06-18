@@ -30,6 +30,7 @@ commands:
   plugin        new, lint, pack, install, list, enable, disable, or trust plugins
   prompt        render prompt through shisad; --a11y strips ANSI and normalizes glyphs
   render        alias for prompt; --explain-a11y dumps segment labels
+  report        write a redacted support bundle .tar.gz
   stack         dump detected stacked-diff metadata
   supervisor    run shisad under a crash-restart supervisor
   theme         validate theme files
@@ -50,6 +51,15 @@ usage: shisa font check
 
 commands:
   check         render Nerd Font, Unicode, and ASCII glyph probes
+```
+
+### `shisa report`
+
+```text
+usage: shisa report [--output path]
+
+options:
+  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz
 ```
 
 ### `shisa theme`

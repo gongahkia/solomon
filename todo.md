@@ -821,10 +821,10 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ## Phase 25 â€” Feedback + community
 
 ### 25.1 `shisa report`
-- [ ] CLI: capture config (redacted) + logs (last 1MB) + bench results
-- [ ] Output a single .tar.gz the user inspects before sharing
-- [ ] Document what's in the bundle
-- [ ] CI test: redaction rules actually scrub the documented patterns
+- [x] CLI: capture config (redacted) + logs (last 1MB) + bench results
+- [x] Output a single .tar.gz the user inspects before sharing
+- [x] Document what's in the bundle
+- [x] CI test: redaction rules actually scrub the documented patterns
 
 ### 25.2 Community channels
 - [ ] Set up Discord (low-friction) + Matrix mirror (privacy-friendly)

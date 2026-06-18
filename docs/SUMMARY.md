@@ -28,6 +28,7 @@
 - [Socket Paths](socket-paths.md)
 - [Supervisor](supervisor.md)
 - [Doctor](doctor.md)
+- [Support Report](report.md)
 - [Linux](linux.md)
 - [Deprecations](deprecations.md)
 - [Internationalization](i18n.md)

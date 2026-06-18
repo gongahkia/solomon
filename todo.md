@@ -967,7 +967,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 29.7 Plugin tooling
 - [x] `shisa plugin new <name>` scaffolds a starter plugin
-- [ ] `shisa plugin lint <path>` validates manifest + best practices
+- [x] `shisa plugin lint <path>` validates manifest + best practices
 - [ ] `shisa plugin pack <path>` produces a signed `.shisa-plugin` bundle
 - [ ] Sample plugin template repo
 

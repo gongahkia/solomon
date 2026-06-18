@@ -121,6 +121,7 @@ Common commands:
 
 ```sh
 shisa plugin new demo-plugin
+shisa plugin lint demo-plugin
 shisa plugin list
 shisa plugin disable demo-plugin
 shisa plugin enable demo-plugin

@@ -4462,6 +4462,14 @@ fn pluginCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[0], "lint")) {
+        if (args.len != 2) return error.UnknownPluginArgument;
+        const output = try pluginLintAlloc(allocator, args[1]);
+        defer allocator.free(output);
+        try std.fs.File.stdout().writeAll(output);
+        return;
+    }
+
     const plugins_dir = try pluginsDirPath(allocator);
     defer allocator.free(plugins_dir);
     const disabled_path = try disabledPluginsPath(allocator);
@@ -4524,6 +4532,12 @@ fn pluginNew(allocator: std.mem.Allocator, parent_dir: []const u8, name: []const
     const readme_path = try std.fs.path.join(allocator, &.{ target_path, "README.md" });
     defer allocator.free(readme_path);
     try std.fs.cwd().writeFile(.{ .sub_path = readme_path, .data = readme_source });
+
+    const license_source = try renderPluginLicenseAlloc(allocator, name);
+    defer allocator.free(license_source);
+    const license_path = try std.fs.path.join(allocator, &.{ target_path, "LICENSE" });
+    defer allocator.free(license_path);
+    try std.fs.cwd().writeFile(.{ .sub_path = license_path, .data = license_source });
 }
 
 fn pluginModuleNameAlloc(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
@@ -4590,6 +4604,74 @@ fn renderPluginReadmeAlloc(allocator: std.mem.Allocator, name: []const u8) ![]u8
         \\```
         \\
     , .{name});
+}
+
+fn renderPluginLicenseAlloc(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator,
+        \\MIT License
+        \\
+        \\Copyright (c) 2026 {s} contributors
+        \\
+        \\Permission is hereby granted, free of charge, to any person obtaining a copy
+        \\of this software and associated documentation files (the "Software"), to deal
+        \\in the Software without restriction, including without limitation the rights
+        \\to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        \\copies of the Software, and to permit persons to whom the Software is
+        \\furnished to do so, subject to the following conditions:
+        \\
+        \\The above copyright notice and this permission notice shall be included in all
+        \\copies or substantial portions of the Software.
+        \\
+        \\THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        \\IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        \\FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        \\AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        \\LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        \\OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+        \\SOFTWARE.
+        \\
+    , .{name});
+}
+
+fn pluginLintAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const manifest_path = try pluginManifestPathAlloc(allocator, path);
+    defer allocator.free(manifest_path);
+    const plugin_dir = std.fs.path.dirname(manifest_path) orelse ".";
+    const source = try std.fs.cwd().readFileAlloc(allocator, manifest_path, 1024 * 1024);
+    defer allocator.free(source);
+
+    var runtime = try plugin_lua.Runtime.initSandboxedWithOptions(allocator, .{ .require_root = plugin_dir });
+    defer runtime.deinit();
+    var loaded = try runtime.loadManifestStrict(source);
+    defer loaded.deinit(allocator);
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try appendFmt(allocator, &out, "ok {s} {s}\n", .{ loaded.manifest.name, loaded.manifest.version });
+    try appendPluginLintWarnings(allocator, &out, plugin_dir, loaded.manifest);
+    return out.toOwnedSlice(allocator);
+}
+
+fn pluginManifestPathAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    if (std.mem.eql(u8, std.fs.path.basename(path), "plugin.lua")) return allocator.dupe(u8, path);
+    return std.fs.path.join(allocator, &.{ path, "plugin.lua" });
+}
+
+fn appendPluginLintWarnings(allocator: std.mem.Allocator, out: *std.ArrayList(u8), plugin_dir: []const u8, manifest: plugin_manifest.Manifest) !void {
+    if (!(try pathExistsInDir(allocator, plugin_dir, "README.md"))) try out.appendSlice(allocator, "warning: missing README.md\n");
+    if (!(try pathExistsInDir(allocator, plugin_dir, "LICENSE"))) try out.appendSlice(allocator, "warning: missing LICENSE\n");
+    if (manifest.capabilities.pre_exec and manifest.entry_points.pre_exec == null) try out.appendSlice(allocator, "warning: pre_exec capability without pre_exec hook\n");
+    if (!manifest.capabilities.pre_exec and manifest.entry_points.pre_exec != null) try out.appendSlice(allocator, "warning: pre_exec hook without pre_exec capability\n");
+}
+
+fn pathExistsInDir(allocator: std.mem.Allocator, dir: []const u8, name: []const u8) !bool {
+    const path = try std.fs.path.join(allocator, &.{ dir, name });
+    defer allocator.free(path);
+    std.fs.cwd().access(path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return err,
+    };
+    return true;
 }
 
 const PluginInstallConfig = struct {
@@ -5076,6 +5158,11 @@ test "plugin new scaffolds valid strict manifest" {
     const readme = try std.fs.cwd().readFileAlloc(allocator, readme_path, 16 * 1024);
     defer allocator.free(readme);
     try std.testing.expect(std.mem.indexOf(u8, readme, "# demo-plugin") != null);
+    const license_path = try std.fmt.allocPrint(allocator, "{s}/demo-plugin/LICENSE", .{dir_path});
+    defer allocator.free(license_path);
+    const license = try std.fs.cwd().readFileAlloc(allocator, license_path, 16 * 1024);
+    defer allocator.free(license);
+    try std.testing.expect(std.mem.indexOf(u8, license, "MIT License") != null);
 
     var runtime = plugin_lua.Runtime.initSandboxedWithOptions(allocator, .{ .require_root = dir_path }) catch |err| switch (err) {
         error.LuaUnavailable => return error.SkipZigTest,
@@ -5091,6 +5178,85 @@ test "plugin new scaffolds valid strict manifest" {
 
 test "plugin new rejects invalid names" {
     try std.testing.expectError(error.InvalidPluginName, pluginNew(std.testing.allocator, "/tmp", "Bad"));
+}
+
+test "plugin lint validates strict manifest and reports warnings" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-lint-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{dir_path});
+    defer allocator.free(manifest_path);
+    try std.fs.cwd().writeFile(.{
+        .sub_path = manifest_path,
+        .data =
+        \\return {
+        \\  name = "linted",
+        \\  version = "0.1.0",
+        \\  api_version = 1,
+        \\  license = "MIT",
+        \\  capabilities = {
+        \\    pre_exec = false,
+        \\  },
+        \\  modules = { "linted" },
+        \\  pre_exec = "pre_exec",
+        \\}
+        ,
+    });
+
+    const output = pluginLintAlloc(allocator, dir_path) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    defer allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "ok linted 0.1.0\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "warning: missing README.md\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "warning: missing LICENSE\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "warning: pre_exec hook without pre_exec capability\n") != null);
+}
+
+test "plugin lint accepts plugin.lua path" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-lint-file-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const readme_path = try std.fmt.allocPrint(allocator, "{s}/README.md", .{dir_path});
+    defer allocator.free(readme_path);
+    try std.fs.cwd().writeFile(.{
+        .sub_path = readme_path,
+        .data = "# linted\n",
+    });
+    const license_path = try std.fmt.allocPrint(allocator, "{s}/LICENSE", .{dir_path});
+    defer allocator.free(license_path);
+    try std.fs.cwd().writeFile(.{
+        .sub_path = license_path,
+        .data = "MIT\n",
+    });
+    const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{dir_path});
+    defer allocator.free(manifest_path);
+    try std.fs.cwd().writeFile(.{
+        .sub_path = manifest_path,
+        .data =
+        \\return {
+        \\  name = "linted-file",
+        \\  version = "0.1.0",
+        \\  api_version = 1,
+        \\  license = "MIT",
+        \\  modules = { "linted_file" },
+        \\}
+        ,
+    });
+
+    const output = pluginLintAlloc(allocator, manifest_path) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    defer allocator.free(output);
+    try std.testing.expectEqualStrings("ok linted-file 0.1.0\n", output);
 }
 
 test "plugin enable disable is duplicate safe" {
@@ -5698,7 +5864,7 @@ const help_text =
     \\                print the minimal Pure-compatible preset
     \\  init          write default shisa.toml; --a11y uses the a11y theme
     \\  pin           mark a path as never-evicted
-    \\  plugin        new, install, list, enable, disable, or trust plugins
+    \\  plugin        new, lint, install, list, enable, disable, or trust plugins
     \\  prompt        render prompt through shisad; --a11y strips ANSI and normalizes glyphs
     \\  stack         dump detected stacked-diff metadata
     \\  supervisor    run shisad under a crash-restart supervisor

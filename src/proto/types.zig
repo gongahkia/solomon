@@ -410,6 +410,30 @@ test "validates required request fields with structured errors" {
     try std.testing.expect(valid == null);
 }
 
+test "fuzz request decoder invariants" {
+    return std.testing.fuzz({}, fuzzRequestDecode, .{
+        .corpus = &.{
+            "",
+            "{}",
+            "{\"v\":\"1\"}",
+            "{\"v\":2}",
+            \\{"v":1,"op":"render","shell":"zsh","cwd":"/tmp","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"tty":"/dev/tty","color_caps":"truecolor","glyph_caps":"unicode","user_id":501,"session":"s1","request_id":"r1"}
+        },
+    });
+}
+
+fn fuzzRequestDecode(_: void, input: []const u8) !void {
+    if (input.len > 8192) return;
+    const validation = validateRequestPayload(std.testing.allocator, input) catch return;
+    if (validation) |envelope| {
+        try std.testing.expect(envelope.@"error".code == .E_MALFORMED or envelope.@"error".code == .E_VERSION);
+        return;
+    }
+    var parsed = decodeAlloc(Request, std.testing.allocator, input) catch return;
+    defer parsed.deinit();
+    try std.testing.expectEqual(version, parsed.value.v);
+}
+
 test "snapshots every op and protocol shape" {
     const allocator = std.testing.allocator;
     const ops = [_]Op{ .render, .render_continue, .health, .metrics, .reload, .version, .subscribe };

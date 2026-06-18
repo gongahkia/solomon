@@ -1019,7 +1019,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 31.2 Fuzz nightly
 - [x] Frame deframer
-- [ ] JSON request decoder
+- [x] JSON request decoder
 - [ ] Lua bridge surface
 - [ ] Redaction rules
 - [ ] Failure crashes uploaded to private bucket

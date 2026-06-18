@@ -12,6 +12,80 @@ pub const KeyInput = struct {
     mtimes: []const WatchedMtime = &.{},
 };
 
+pub const Entry = union(enum) {
+    output: []const u8,
+    missing_tool: []const u8,
+};
+
+const StoredKind = enum {
+    output,
+    missing_tool,
+};
+
+const StoredEntry = struct {
+    key: []u8,
+    value: []u8,
+    kind: StoredKind,
+};
+
+pub const Store = struct {
+    allocator: std.mem.Allocator,
+    entries: std.StringHashMap(StoredEntry),
+
+    pub fn init(allocator: std.mem.Allocator) Store {
+        return .{
+            .allocator = allocator,
+            .entries = std.StringHashMap(StoredEntry).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *Store) void {
+        var it = self.entries.iterator();
+        while (it.next()) |entry| freeStored(self.allocator, entry.value_ptr.*);
+        self.entries.deinit();
+        self.* = undefined;
+    }
+
+    pub fn putOutput(self: *Store, input: KeyInput, output: []const u8) !void {
+        try self.put(input, .output, output);
+    }
+
+    pub fn putMissingTool(self: *Store, input: KeyInput, tool: []const u8) !void {
+        try self.put(input, .missing_tool, tool);
+    }
+
+    pub fn get(self: *Store, input: KeyInput) !?Entry {
+        const key = try keyAlloc(self.allocator, input);
+        defer self.allocator.free(key);
+        const entry = self.entries.get(key) orelse return null;
+        return switch (entry.kind) {
+            .output => .{ .output = entry.value },
+            .missing_tool => .{ .missing_tool = entry.value },
+        };
+    }
+
+    pub fn count(self: *Store) usize {
+        return self.entries.count();
+    }
+
+    fn put(self: *Store, input: KeyInput, kind: StoredKind, value_source: []const u8) !void {
+        const key = try keyAlloc(self.allocator, input);
+        errdefer self.allocator.free(key);
+        const value = try self.allocator.dupe(u8, value_source);
+        errdefer self.allocator.free(value);
+
+        const entry = try self.entries.getOrPut(key);
+        if (entry.found_existing) {
+            self.allocator.free(key);
+            self.allocator.free(entry.value_ptr.value);
+            entry.value_ptr.value = value;
+            entry.value_ptr.kind = kind;
+        } else {
+            entry.value_ptr.* = .{ .key = key, .value = value, .kind = kind };
+        }
+    }
+};
+
 pub fn keyAlloc(allocator: std.mem.Allocator, input: KeyInput) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
@@ -51,6 +125,11 @@ fn appendInt(allocator: std.mem.Allocator, out: *std.ArrayList(u8), name: []cons
     try out.append(allocator, '=');
     try std.fmt.format(out.writer(allocator), "{d}", .{value});
     try out.append(allocator, '|');
+}
+
+fn freeStored(allocator: std.mem.Allocator, entry: StoredEntry) void {
+    allocator.free(entry.key);
+    allocator.free(entry.value);
 }
 
 test "keys include command args cwd and mtimes" {
@@ -122,4 +201,29 @@ test "length prefixes prevent separator collisions" {
     const second = try keyAlloc(allocator, .{ .cmd = "a", .args = &.{"bc"}, .cwd = "/repo" });
     defer allocator.free(second);
     try std.testing.expect(!std.mem.eql(u8, first, second));
+}
+
+test "caches missing tools negatively" {
+    var store = Store.init(std.testing.allocator);
+    defer store.deinit();
+
+    const input = KeyInput{ .cmd = "python3", .args = &.{"--version"}, .cwd = "/repo" };
+    try store.putMissingTool(input, "python3");
+
+    const cached = (try store.get(input)).?;
+    switch (cached) {
+        .missing_tool => |tool| try std.testing.expectEqualStrings("python3", tool),
+        .output => return error.ExpectedMissingTool,
+    }
+    try std.testing.expectEqual(@as(usize, 1), store.count());
+}
+
+test "negative cache entries are keyed by full command input" {
+    var store = Store.init(std.testing.allocator);
+    defer store.deinit();
+
+    try store.putMissingTool(.{ .cmd = "node", .args = &.{"--version"}, .cwd = "/repo" }, "node");
+    try std.testing.expect((try store.get(.{ .cmd = "node", .args = &.{"--version"}, .cwd = "/repo" })) != null);
+    try std.testing.expect(try store.get(.{ .cmd = "node", .args = &.{"--version"}, .cwd = "/other" }) == null);
+    try std.testing.expect(try store.get(.{ .cmd = "node", .args = &.{"-v"}, .cwd = "/repo" }) == null);
 }

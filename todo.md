@@ -888,7 +888,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 27.3 L3 external-command cache
 - [x] Keyed on `(cmd, args, cwd, mtime-set-of-watched-paths)`
-- [ ] Negative caching for missing tools
+- [x] Negative caching for missing tools
 - [ ] Configurable per-module TTL
 
 ### 27.4 Invalidation

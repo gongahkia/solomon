@@ -962,7 +962,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 29.6 Plugin lifecycle
 - [x] `on_load`, `render`, `update`, `pre_exec`, `on_unload` contracts
-- [ ] Tests for each hook
+- [x] Tests for each hook
 - [ ] Document max-allowed wall time per hook
 
 ### 29.7 Plugin tooling

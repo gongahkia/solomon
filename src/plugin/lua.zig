@@ -956,6 +956,39 @@ test "loads minimal plugin manifest table" {
     try std.testing.expectEqual(@as(usize, 0), loaded.manifest.capabilities.fs_read.len);
 }
 
+test "strict manifest stores each lifecycle hook" {
+    var runtime = Runtime.initSandboxed(std.testing.allocator) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    defer runtime.deinit();
+
+    var loaded = try runtime.loadManifestStrict(
+        \\return {
+        \\  name = "lifecycle",
+        \\  version = "0.1.0",
+        \\  api_version = 1,
+        \\  license = "MIT",
+        \\  capabilities = {
+        \\    pre_exec = true,
+        \\  },
+        \\  modules = { "life" },
+        \\  on_load = "load_hook",
+        \\  render = "render_hook",
+        \\  update = "update_hook",
+        \\  pre_exec = "pre_exec_hook",
+        \\  on_unload = "unload_hook",
+        \\}
+    );
+    defer loaded.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("load_hook", loaded.manifest.entry_points.on_load.?);
+    try std.testing.expectEqualStrings("render_hook", loaded.manifest.entry_points.render);
+    try std.testing.expectEqualStrings("update_hook", loaded.manifest.entry_points.update.?);
+    try std.testing.expectEqualStrings("pre_exec_hook", loaded.manifest.entry_points.pre_exec.?);
+    try std.testing.expectEqualStrings("unload_hook", loaded.manifest.entry_points.on_unload.?);
+}
+
 test "strict manifest rejects unknown fields" {
     var runtime = Runtime.initSandboxed(std.testing.allocator) catch |err| switch (err) {
         error.LuaUnavailable => return error.SkipZigTest,

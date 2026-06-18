@@ -950,7 +950,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Re-prompt on capability upgrade
 
 ### 29.4 Resource limits
-- [ ] Memory: 16 MiB hard cap per plugin (instrumented allocator)
+- [x] Memory: 16 MiB hard cap per plugin (instrumented allocator)
 - [ ] CPU: 1 ms wall budget, 5 ms hard kill in debug
 - [ ] Three-strikes-disabled rule for slow plugins
 - [ ] Plugin status visible via `shisa plugin list`

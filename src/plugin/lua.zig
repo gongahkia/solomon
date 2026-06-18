@@ -21,6 +21,7 @@ pub const Vm = enum {
 };
 
 pub const selected_vm: Vm = .luajit;
+pub const default_memory_limit_bytes: usize = 16 * 1024 * 1024;
 
 const always_removed_globals = [_][]const u8{
     "debug",
@@ -31,7 +32,8 @@ const always_removed_globals = [_][]const u8{
     "package",
 };
 
-const LuaLNewState = *const fn () callconv(.c) ?*LuaState;
+const LuaAlloc = *const fn (?*anyopaque, ?*anyopaque, usize, usize) callconv(.c) ?*anyopaque;
+const LuaNewState = *const fn (LuaAlloc, ?*anyopaque) callconv(.c) ?*LuaState;
 const LuaClose = *const fn (?*LuaState) callconv(.c) void;
 const LuaLOpenLibs = *const fn (?*LuaState) callconv(.c) void;
 const LuaLLoadBuffer = *const fn (?*LuaState, [*]const u8, usize, [*:0]const u8) callconv(.c) CInt;
@@ -50,7 +52,7 @@ const LuaNext = *const fn (?*LuaState, CInt) callconv(.c) CInt;
 const LuaSetTop = *const fn (?*LuaState, CInt) callconv(.c) void;
 
 const Api = struct {
-    luaL_newstate: LuaLNewState,
+    lua_newstate: LuaNewState,
     lua_close: LuaClose,
     luaL_openlibs: LuaLOpenLibs,
     luaL_loadbuffer: LuaLLoadBuffer,
@@ -109,6 +111,7 @@ pub const OwnedManifest = struct {
 
 pub const SandboxOptions = struct {
     require_root: ?[]const u8 = null,
+    memory_limit_bytes: usize = default_memory_limit_bytes,
 };
 
 pub const Runtime = struct {
@@ -116,12 +119,20 @@ pub const Runtime = struct {
     lib: std.DynLib,
     api: Api,
     state: *LuaState,
+    memory_limiter: *LuaMemoryLimiter,
 
     pub fn init(allocator: std.mem.Allocator) !Runtime {
+        return initWithMemoryLimit(allocator, default_memory_limit_bytes);
+    }
+
+    pub fn initWithMemoryLimit(allocator: std.mem.Allocator, memory_limit_bytes: usize) !Runtime {
         var lib = try openSelectedVm();
         errdefer lib.close();
         const api = try loadApi(&lib);
-        const state = api.luaL_newstate() orelse return error.LuaOutOfMemory;
+        const limiter = try allocator.create(LuaMemoryLimiter);
+        errdefer allocator.destroy(limiter);
+        limiter.* = .{ .limit = memory_limit_bytes };
+        const state = api.lua_newstate(luaMemoryAlloc, limiter) orelse return error.LuaOutOfMemory;
         errdefer api.lua_close(state);
         api.luaL_openlibs(state);
         return .{
@@ -129,6 +140,7 @@ pub const Runtime = struct {
             .lib = lib,
             .api = api,
             .state = state,
+            .memory_limiter = limiter,
         };
     }
 
@@ -137,7 +149,7 @@ pub const Runtime = struct {
     }
 
     pub fn initSandboxedWithOptions(allocator: std.mem.Allocator, options: SandboxOptions) !Runtime {
-        var runtime = try init(allocator);
+        var runtime = try initWithMemoryLimit(allocator, options.memory_limit_bytes);
         errdefer runtime.deinit();
         if (options.require_root) |root| try runtime.configureLocalRequire(root);
         try runtime.stripDangerousGlobals(options.require_root != null);
@@ -146,6 +158,7 @@ pub const Runtime = struct {
 
     pub fn deinit(self: *Runtime) void {
         self.api.lua_close(self.state);
+        self.allocator.destroy(self.memory_limiter);
         self.lib.close();
         self.* = undefined;
     }
@@ -216,7 +229,7 @@ pub const Runtime = struct {
             \\    return original_require(name)
             \\  end
             \\end
-            ,
+        ,
             .{quoted_root},
         );
         defer self.allocator.free(source);
@@ -516,6 +529,44 @@ fn buildOwnedManifest(args: BuildOwnedManifestArgs) OwnedManifest {
     return owned;
 }
 
+const LuaMemoryLimiter = struct {
+    limit: usize,
+    used: usize = 0,
+    high_water: usize = 0,
+
+    fn reserve(self: *LuaMemoryLimiter, bytes: usize) bool {
+        if (bytes > self.limit -| self.used) return false;
+        self.used += bytes;
+        self.high_water = @max(self.high_water, self.used);
+        return true;
+    }
+
+    fn release(self: *LuaMemoryLimiter, bytes: usize) void {
+        self.used -|= bytes;
+    }
+};
+
+fn luaMemoryAlloc(ud: ?*anyopaque, ptr: ?*anyopaque, osize: usize, nsize: usize) callconv(.c) ?*anyopaque {
+    const limiter: *LuaMemoryLimiter = @ptrCast(@alignCast(ud.?));
+    const old_size: usize = if (ptr == null) 0 else osize;
+    if (nsize == 0) {
+        if (ptr) |existing| {
+            std.c.free(existing);
+            limiter.release(old_size);
+        }
+        return null;
+    }
+
+    if (nsize > old_size and !limiter.reserve(nsize - old_size)) return null;
+    const resized = if (ptr) |existing| std.c.realloc(existing, nsize) else std.c.malloc(nsize);
+    if (resized == null) {
+        if (nsize > old_size) limiter.release(nsize - old_size);
+        return null;
+    }
+    if (nsize < old_size) limiter.release(old_size - nsize);
+    return resized;
+}
+
 fn freeStringList(allocator: std.mem.Allocator, items: [][]u8) void {
     if (items.len == 0) return;
     for (items) |item| allocator.free(item);
@@ -565,7 +616,7 @@ fn openLuaJit() !std.DynLib {
 
 fn loadApi(lib: *std.DynLib) !Api {
     return .{
-        .luaL_newstate = lib.lookup(LuaLNewState, "luaL_newstate") orelse return error.LuaSymbolMissing,
+        .lua_newstate = lib.lookup(LuaNewState, "lua_newstate") orelse return error.LuaSymbolMissing,
         .lua_close = lib.lookup(LuaClose, "lua_close") orelse return error.LuaSymbolMissing,
         .luaL_openlibs = lib.lookup(LuaLOpenLibs, "luaL_openlibs") orelse return error.LuaSymbolMissing,
         .luaL_loadbuffer = lib.lookup(LuaLLoadBuffer, "luaL_loadbuffer") orelse return error.LuaSymbolMissing,
@@ -598,6 +649,35 @@ test "loads luajit and runs code" {
 
 test "selected plugin Lua VM is LuaJIT" {
     try std.testing.expectEqual(Vm.luajit, selected_vm);
+}
+
+test "lua memory limiter enforces hard cap" {
+    var limiter = LuaMemoryLimiter{ .limit = 16 };
+
+    try std.testing.expect(limiter.reserve(8));
+    try std.testing.expectEqual(@as(usize, 8), limiter.used);
+    try std.testing.expect(!limiter.reserve(9));
+    try std.testing.expectEqual(@as(usize, 8), limiter.used);
+    limiter.release(4);
+    try std.testing.expect(limiter.reserve(8));
+    try std.testing.expectEqual(@as(usize, 12), limiter.used);
+    try std.testing.expectEqual(@as(usize, 12), limiter.high_water);
+}
+
+test "runtime enforces configured lua memory limit" {
+    var runtime = Runtime.initWithMemoryLimit(std.testing.allocator, 1024 * 1024) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    defer runtime.deinit();
+
+    try std.testing.expectError(error.LuaRuntimeError, runtime.doString(
+        \\local held = {}
+        \\for i = 1, 4096 do
+        \\  held[i] = tostring(i) .. string.rep("x", 1024)
+        \\end
+    ));
+    try std.testing.expect(runtime.memory_limiter.high_water <= runtime.memory_limiter.limit);
 }
 
 test "sandbox strips dangerous globals" {

@@ -84,6 +84,80 @@ test "roundtrips boundary payload sizes" {
     }
 }
 
+test "property wire protocol request frame roundtrip" {
+    const allocator = std.testing.allocator;
+    var prng = std.Random.DefaultPrng.init(0x574952455254);
+    const random = prng.random();
+
+    const ops = [_]types.Op{ .render, .render_continue, .health, .metrics, .reload, .version, .subscribe };
+    const shells = [_]types.Shell{ .zsh, .bash, .fish, .nu, .pwsh };
+    const color_caps = [_]types.ColorCaps{ .truecolor, .@"256", .@"16", .none };
+    const glyph_caps = [_]types.GlyphCaps{ .nerdfont, .unicode, .ascii };
+    const cwds = [_][]const u8{ "/tmp", "/repo/shisa", "/Users/test/src/project" };
+    const ttys = [_][]const u8{ "/dev/ttys001", "/dev/pts/7", "not-a-tty" };
+    const sessions = [_][]const u8{ "s1", "session-long", "ci" };
+    const exits = [_]i32{ 0, 1, 2, 127 };
+
+    for (0..256) |index| {
+        const request_id = try std.fmt.allocPrint(allocator, "roundtrip-{d}-{x}", .{ index, random.int(u32) });
+        defer allocator.free(request_id);
+        const request = types.Request{
+            .op = ops[random.intRangeAtMost(usize, 0, ops.len - 1)],
+            .cwd = cwds[random.intRangeAtMost(usize, 0, cwds.len - 1)],
+            .exit = exits[random.intRangeAtMost(usize, 0, exits.len - 1)],
+            .jobs = random.intRangeAtMost(u32, 0, 16),
+            .duration_ms = random.intRangeAtMost(u64, 0, 120_000),
+            .time = random.boolean(),
+            .no_async = random.boolean(),
+            .shell = shells[random.intRangeAtMost(usize, 0, shells.len - 1)],
+            .cols = random.intRangeAtMost(u16, 1, 512),
+            .rows = random.intRangeAtMost(u16, 1, 128),
+            .tty = ttys[random.intRangeAtMost(usize, 0, ttys.len - 1)],
+            .color_caps = color_caps[random.intRangeAtMost(usize, 0, color_caps.len - 1)],
+            .glyph_caps = glyph_caps[random.intRangeAtMost(usize, 0, glyph_caps.len - 1)],
+            .user_id = random.intRangeAtMost(u32, 1, 65535),
+            .session = sessions[random.intRangeAtMost(usize, 0, sessions.len - 1)],
+            .request_id = request_id,
+            .cloud_ctx = .{
+                .aws = random.boolean(),
+                .gcp = random.boolean(),
+                .azure = random.boolean(),
+                .kubernetes = random.boolean(),
+            },
+        };
+
+        const payload = try types.encodeAlloc(allocator, request);
+        defer allocator.free(payload);
+        const frame = try encodeAlloc(allocator, payload);
+        defer allocator.free(frame);
+        const decoded_payload = try decode(frame);
+        try std.testing.expectEqualSlices(u8, payload, decoded_payload);
+
+        var parsed = try types.decodeAlloc(types.Request, allocator, decoded_payload);
+        defer parsed.deinit();
+        try std.testing.expectEqual(request.op, parsed.value.op);
+        try std.testing.expectEqualStrings(request.cwd, parsed.value.cwd);
+        try std.testing.expectEqual(request.exit, parsed.value.exit);
+        try std.testing.expectEqual(request.jobs, parsed.value.jobs);
+        try std.testing.expectEqual(request.duration_ms, parsed.value.duration_ms);
+        try std.testing.expectEqual(request.time, parsed.value.time);
+        try std.testing.expectEqual(request.no_async, parsed.value.no_async);
+        try std.testing.expectEqual(request.shell, parsed.value.shell);
+        try std.testing.expectEqual(request.cols, parsed.value.cols);
+        try std.testing.expectEqual(request.rows, parsed.value.rows);
+        try std.testing.expectEqualStrings(request.tty.?, parsed.value.tty.?);
+        try std.testing.expectEqual(request.color_caps, parsed.value.color_caps);
+        try std.testing.expectEqual(request.glyph_caps, parsed.value.glyph_caps);
+        try std.testing.expectEqual(request.user_id.?, parsed.value.user_id.?);
+        try std.testing.expectEqualStrings(request.session.?, parsed.value.session.?);
+        try std.testing.expectEqualStrings(request.request_id, parsed.value.request_id);
+        try std.testing.expectEqual(request.cloud_ctx.aws, parsed.value.cloud_ctx.aws);
+        try std.testing.expectEqual(request.cloud_ctx.gcp, parsed.value.cloud_ctx.gcp);
+        try std.testing.expectEqual(request.cloud_ctx.azure, parsed.value.cloud_ctx.azure);
+        try std.testing.expectEqual(request.cloud_ctx.kubernetes, parsed.value.cloud_ctx.kubernetes);
+    }
+}
+
 test "detects corrupted length headers" {
     const allocator = std.testing.allocator;
     const encoded = try encodeAlloc(allocator, "abcd");

@@ -1047,7 +1047,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Update tool with explicit confirm gate (no auto-write)
 
 ### 32.2 Property tests
-- [ ] Wire protocol roundtrip
+- [x] Wire protocol roundtrip
 - [ ] Theme renders survive arbitrary state
 - [ ] Cache eviction invariants
 

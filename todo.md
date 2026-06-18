@@ -928,7 +928,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 28.6 Integration tests
 - [x] expect/pexpect scenarios per shell
-- [ ] Verify async fill arrives within N ms
+- [x] Verify async fill arrives within N ms
 - [ ] Verify transient prompt shrinks history
 
 ## Phase 29 â€” Lua plugin SDK hardening

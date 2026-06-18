@@ -1756,7 +1756,7 @@ test "stress 10k cd loop records prompt cache hit rate" {
     try std.testing.expectEqual(@as(u64, 1_000_000), promptCacheHitRatePpm(server.prompt_cache_hits, server.prompt_cache_misses));
 }
 
-test "render_continue fills async git segment from cache" {
+test "render_continue fills async git segment from cache within 1000 ms" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-continue-{x}", .{std.crypto.random.int(u64)});
     defer allocator.free(dir_path);
@@ -1778,17 +1778,22 @@ test "render_continue fills async git segment from cache" {
 
     const continue_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render_continue\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"render-continue\"}}", .{dir_path});
     defer allocator.free(continue_request);
-    for (0..50) |_| {
-        std.Thread.sleep(20 * std.time.ns_per_ms);
+    const deadline_ms: i64 = 1000;
+    const poll_ms: u64 = 20;
+    const start_ms = std.time.milliTimestamp();
+    while (std.time.milliTimestamp() - start_ms < deadline_ms) {
+        std.Thread.sleep(poll_ms * std.time.ns_per_ms);
         const response = try server.renderResponse(continue_request);
         defer std.heap.page_allocator.free(response);
         if (std.mem.indexOf(u8, response, "git:main") != null) {
+            const elapsed_ms = std.time.milliTimestamp() - start_ms;
             try std.testing.expect(std.mem.indexOf(u8, response, "\"request_id\":\"render-continue\"") != null);
             try std.testing.expect(std.mem.indexOf(u8, response, "\"redraw_token\":null") != null);
+            try std.testing.expect(elapsed_ms <= deadline_ms);
             return;
         }
     }
-    return error.AsyncFillNotReady;
+    return error.AsyncFillDeadlineExceeded;
 }
 
 test "health op returns minimal ok response" {

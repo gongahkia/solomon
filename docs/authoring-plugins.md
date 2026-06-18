@@ -84,4 +84,4 @@ Before submitting a marketplace entry:
 - include screenshots or prompt output examples when the plugin renders user-visible text
 - state whether the plugin reads secrets, cloud state, SSH config, or kubeconfig data
 
-Reference plugins live under `examples/plugins/`.
+Reference plugins live under `examples/plugins/`. A repo-shaped starter template lives under `examples/shisa-plugin-template/`.

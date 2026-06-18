@@ -149,3 +149,5 @@ Reference manifests live under `examples/plugins/`:
 - `fossil`: community Fossil VCS status template.
 - `pijul`: community Pijul VCS status template.
 - `breezy`: community Bazaar/Breezy VCS status template.
+
+The repo-shaped starter template lives under `examples/shisa-plugin-template/`.

@@ -453,7 +453,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [ ] `shisa plugin doctor` for plugin self-diagnosis
 - [x] Community moderation policy (`docs/plugin-policy.md`)
 - [x] Plugin author quickstart (`docs/authoring-plugins.md`)
-- [ ] Sample plugin template repo (`shisa-plugin-template`)
+- [x] Sample plugin template repo (`shisa-plugin-template`)
 - [ ] Bug bounty for sandbox escapes (small, via GitHub sponsors)
 
 ## Continuous (extended)
@@ -969,7 +969,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] `shisa plugin new <name>` scaffolds a starter plugin
 - [x] `shisa plugin lint <path>` validates manifest + best practices
 - [x] `shisa plugin pack <path>` produces a signed `.shisa-plugin` bundle
-- [ ] Sample plugin template repo
+- [x] Sample plugin template repo
 
 ## Phase 30 â€” Theme & rendering engine
 

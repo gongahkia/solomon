@@ -16,6 +16,14 @@ function update(ctx)
   return nil
 end
 
+function on_load(ctx)
+  return nil
+end
+
+function on_unload(ctx)
+  return nil
+end
+
 return {
   name = "demo-plugin",
   version = "0.1.0",
@@ -32,8 +40,10 @@ return {
     pre_exec = false,
   },
   modules = { "demo" },
+  on_load = "on_load",
   render = "render",
   update = "update",
+  on_unload = "on_unload",
 }
 LUA
 git init

@@ -961,7 +961,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Bug-bounty pool for sandbox escapes
 
 ### 29.6 Plugin lifecycle
-- [ ] `on_load`, `render`, `update`, `pre_exec`, `on_unload` contracts
+- [x] `on_load`, `render`, `update`, `pre_exec`, `on_unload` contracts
 - [ ] Tests for each hook
 - [ ] Document max-allowed wall time per hook
 

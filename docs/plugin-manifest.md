@@ -18,8 +18,10 @@ return {
     pre_exec = false,
   },
   modules = { "k8s_ctx" },
+  on_load = "on_load",
   render = "render",
   update = "update",
+  on_unload = "on_unload",
 }
 ```
 
@@ -31,11 +33,14 @@ Required fields:
 - `license`: SPDX-like identifier.
 - `capabilities`: capability table. Omitted capabilities deny access.
 - `modules`: non-empty exported module id list.
-- `render`: Lua function name, defaults to `render`.
 
 Optional fields:
 
+- `on_load`: Lua function name for load-time setup.
+- `render`: Lua function name, defaults to `render`.
 - `update`: Lua function name for async/cache refresh.
+- `pre_exec`: Lua function name. Requires `capabilities.pre_exec = true` before command preflight integration can call it.
+- `on_unload`: Lua function name for cleanup.
 - `description`
 - `author`
 - `homepage`
@@ -62,3 +67,15 @@ Capability checks:
 - `~/` resolves against the loading user's home directory.
 - Relative filesystem scopes resolve under the plugin directory.
 - `exec`, `net`, and `env_read` are exact allow-lists.
+
+Lifecycle contracts:
+
+| Hook | Contract |
+| --- | --- |
+| `on_load(ctx)` | Initialize plugin-local state after trust/load. Return value is ignored. |
+| `render(ctx)` | Return a prompt segment string, `nil`, or an empty string. It must be bounded and side-effect-light. |
+| `update(ctx)` | Refresh plugin cache/state outside the prompt hot path. Return value is plugin-defined. |
+| `pre_exec(ctx)` | Inspect a pending command and return `nil` or a decision table such as `{ allow = false, message = "..." }`. Requires `capabilities.pre_exec = true`. |
+| `on_unload(ctx)` | Release transient resources before reload, disable, or daemon shutdown. Return value is ignored. |
+
+Current runtime validation stores these hook names in the manifest. Daemon hook invocation is tracked separately from manifest validation.

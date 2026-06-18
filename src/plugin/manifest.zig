@@ -19,8 +19,11 @@ pub const supported_api_version: u32 = 1;
 /// plugin-api: capability | secrets | bool | false | enables host secret APIs when those APIs exist.
 /// plugin-api: capability | env_read | string array | empty | exact allow-list of environment variable names.
 /// plugin-api: capability | pre_exec | bool | false | allows pre-exec hook integration.
-/// plugin-api: entrypoint | render | Lua identifier | `render` | synchronous render function name.
-/// plugin-api: entrypoint | update | Lua identifier | optional | async/cache refresh function name.
+/// plugin-api: entrypoint | on_load | Lua identifier | optional | called after trust/load before the first plugin hook.
+/// plugin-api: entrypoint | render | Lua identifier | `render` | synchronous prompt segment hook.
+/// plugin-api: entrypoint | update | Lua identifier | optional | async/cache refresh hook.
+/// plugin-api: entrypoint | pre_exec | Lua identifier | optional | command preflight hook; requires `capabilities.pre_exec = true`.
+/// plugin-api: entrypoint | on_unload | Lua identifier | optional | called before reload, disable, or daemon shutdown.
 pub fn isValidPluginName(value: []const u8) bool {
     return isPluginName(value);
 }
@@ -80,13 +83,25 @@ pub const ListCapability = union(enum) {
 };
 
 pub const EntryPoints = struct {
+    on_load: ?[]const u8 = null,
     render: []const u8 = "render",
     update: ?[]const u8 = null,
+    pre_exec: ?[]const u8 = null,
+    on_unload: ?[]const u8 = null,
 
     fn validate(self: EntryPoints) !void {
+        if (self.on_load) |name| {
+            if (!isLuaIdentifier(name)) return error.InvalidOnLoadEntryPoint;
+        }
         if (!isLuaIdentifier(self.render)) return error.InvalidRenderEntryPoint;
         if (self.update) |name| {
             if (!isLuaIdentifier(name)) return error.InvalidUpdateEntryPoint;
+        }
+        if (self.pre_exec) |name| {
+            if (!isLuaIdentifier(name)) return error.InvalidPreExecEntryPoint;
+        }
+        if (self.on_unload) |name| {
+            if (!isLuaIdentifier(name)) return error.InvalidOnUnloadEntryPoint;
         }
     }
 };
@@ -225,7 +240,13 @@ test "validates granular capabilities and entry points" {
             .pre_exec = true,
         },
         .modules = &.{ "cloud_ctx", "risk_tier" },
-        .entry_points = .{ .render = "render", .update = "update" },
+        .entry_points = .{
+            .on_load = "on_load",
+            .render = "render",
+            .update = "update",
+            .pre_exec = "pre_exec",
+            .on_unload = "on_unload",
+        },
     };
     try manifest.validate();
 }
@@ -242,5 +263,9 @@ test "rejects malformed module and capability fields" {
     try std.testing.expectError(error.InvalidModuleName, (Manifest{ .name = "ok", .version = "1.0.0", .api_version = supported_api_version, .license = "MIT", .modules = &.{"Bad"} }).validate());
     try std.testing.expectError(error.DuplicateModuleName, (Manifest{ .name = "ok", .version = "1.0.0", .api_version = supported_api_version, .license = "MIT", .modules = &.{ "same", "same" } }).validate());
     try std.testing.expectError(error.InvalidEnvRead, (Manifest{ .name = "ok", .version = "1.0.0", .api_version = supported_api_version, .license = "MIT", .capabilities = .{ .env_read = &.{"bad-name"} }, .modules = &.{"ok"} }).validate());
+    try std.testing.expectError(error.InvalidOnLoadEntryPoint, (Manifest{ .name = "ok", .version = "1.0.0", .api_version = supported_api_version, .license = "MIT", .modules = &.{"ok"}, .entry_points = .{ .on_load = "1load" } }).validate());
     try std.testing.expectError(error.InvalidRenderEntryPoint, (Manifest{ .name = "ok", .version = "1.0.0", .api_version = supported_api_version, .license = "MIT", .modules = &.{"ok"}, .entry_points = .{ .render = "1render" } }).validate());
+    try std.testing.expectError(error.InvalidUpdateEntryPoint, (Manifest{ .name = "ok", .version = "1.0.0", .api_version = supported_api_version, .license = "MIT", .modules = &.{"ok"}, .entry_points = .{ .update = "1update" } }).validate());
+    try std.testing.expectError(error.InvalidPreExecEntryPoint, (Manifest{ .name = "ok", .version = "1.0.0", .api_version = supported_api_version, .license = "MIT", .modules = &.{"ok"}, .entry_points = .{ .pre_exec = "1pre_exec" } }).validate());
+    try std.testing.expectError(error.InvalidOnUnloadEntryPoint, (Manifest{ .name = "ok", .version = "1.0.0", .api_version = supported_api_version, .license = "MIT", .modules = &.{"ok"}, .entry_points = .{ .on_unload = "1unload" } }).validate());
 }

@@ -33,8 +33,11 @@ Generated from `/// plugin-api:` annotations in `src/plugin/*.zig` with `zig bui
 
 | Name | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `render` | Lua identifier | `render` | synchronous render function name. |
-| `update` | Lua identifier | optional | async/cache refresh function name. |
+| `on_load` | Lua identifier | optional | called after trust/load before the first plugin hook. |
+| `render` | Lua identifier | `render` | synchronous prompt segment hook. |
+| `update` | Lua identifier | optional | async/cache refresh hook. |
+| `pre_exec` | Lua identifier | optional | command preflight hook; requires `capabilities.pre_exec = true`. |
+| `on_unload` | Lua identifier | optional | called before reload, disable, or daemon shutdown. |
 
 ## Capability Gate
 

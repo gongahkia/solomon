@@ -98,8 +98,11 @@ pub const OwnedManifest = struct {
     exec_allow: ?[][]u8 = null,
     net_allow: ?[][]u8 = null,
     env_read: [][]u8 = &.{},
+    on_load: ?[]u8 = null,
     render: []u8,
     update: ?[]u8 = null,
+    pre_exec: ?[]u8 = null,
+    on_unload: ?[]u8 = null,
     description: ?[]u8 = null,
     author: ?[]u8 = null,
     homepage: ?[]u8 = null,
@@ -115,8 +118,11 @@ pub const OwnedManifest = struct {
         if (self.exec_allow) |items| freeStringList(allocator, items);
         if (self.net_allow) |items| freeStringList(allocator, items);
         freeStringList(allocator, self.env_read);
+        if (self.on_load) |value| allocator.free(value);
         allocator.free(self.render);
         if (self.update) |value| allocator.free(value);
+        if (self.pre_exec) |value| allocator.free(value);
+        if (self.on_unload) |value| allocator.free(value);
         if (self.description) |value| allocator.free(value);
         if (self.author) |value| allocator.free(value);
         if (self.homepage) |value| allocator.free(value);
@@ -334,10 +340,16 @@ pub const Runtime = struct {
         errdefer self.allocator.free(license);
         const modules = try self.requiredStringListField(index, "modules");
         errdefer freeStringList(self.allocator, modules);
+        const on_load = try self.optionalStringField(index, "on_load");
+        errdefer if (on_load) |value| self.allocator.free(value);
         const render = try self.optionalStringField(index, "render") orelse try self.allocator.dupe(u8, "render");
         errdefer self.allocator.free(render);
         const update = try self.optionalStringField(index, "update");
         errdefer if (update) |value| self.allocator.free(value);
+        const pre_exec = try self.optionalStringField(index, "pre_exec");
+        errdefer if (pre_exec) |value| self.allocator.free(value);
+        const on_unload = try self.optionalStringField(index, "on_unload");
+        errdefer if (on_unload) |value| self.allocator.free(value);
 
         var capabilities = try self.readCapabilities(index, strict);
         errdefer capabilities.deinit(self.allocator);
@@ -359,8 +371,11 @@ pub const Runtime = struct {
             .license = license,
             .modules = modules,
             .capabilities = capabilities,
+            .on_load = on_load,
             .render = render,
             .update = update,
+            .pre_exec = pre_exec,
+            .on_unload = on_unload,
             .description = description,
             .author = author,
             .homepage = homepage,
@@ -501,8 +516,11 @@ const top_level_manifest_fields = [_][]const u8{
     "license",
     "capabilities",
     "modules",
+    "on_load",
     "render",
     "update",
+    "pre_exec",
+    "on_unload",
     "description",
     "author",
     "homepage",
@@ -546,8 +564,11 @@ const BuildOwnedManifestArgs = struct {
     license: []u8,
     modules: [][]u8,
     capabilities: OwnedCapabilities,
+    on_load: ?[]u8,
     render: []u8,
     update: ?[]u8,
+    pre_exec: ?[]u8,
+    on_unload: ?[]u8,
     description: ?[]u8,
     author: ?[]u8,
     homepage: ?[]u8,
@@ -566,8 +587,11 @@ fn buildOwnedManifest(args: BuildOwnedManifestArgs) OwnedManifest {
         .exec_allow = args.capabilities.exec_allow,
         .net_allow = args.capabilities.net_allow,
         .env_read = args.capabilities.env_read,
+        .on_load = args.on_load,
         .render = args.render,
         .update = args.update,
+        .pre_exec = args.pre_exec,
+        .on_unload = args.on_unload,
         .description = args.description,
         .author = args.author,
         .homepage = args.homepage,
@@ -589,8 +613,11 @@ fn buildOwnedManifest(args: BuildOwnedManifestArgs) OwnedManifest {
         },
         .modules = owned.modules,
         .entry_points = .{
+            .on_load = owned.on_load,
             .render = owned.render,
             .update = owned.update,
+            .pre_exec = owned.pre_exec,
+            .on_unload = owned.on_unload,
         },
         .description = owned.description,
         .author = owned.author,
@@ -877,8 +904,11 @@ test "loads plugin manifest table" {
         \\    pre_exec = true,
         \\  },
         \\  modules = { "k8s_ctx" },
+        \\  on_load = "on_load",
         \\  render = "render",
         \\  update = "update",
+        \\  pre_exec = "pre_exec",
+        \\  on_unload = "on_unload",
         \\}
     );
     defer loaded.deinit(std.testing.allocator);
@@ -892,7 +922,11 @@ test "loads plugin manifest table" {
     try std.testing.expectEqualStrings("kubectl", loaded.exec_allow.?[0]);
     try std.testing.expectEqual(manifest_schema.ListCapability.deny, loaded.manifest.capabilities.net);
     try std.testing.expect(loaded.manifest.capabilities.pre_exec);
+    try std.testing.expectEqualStrings("on_load", loaded.manifest.entry_points.on_load.?);
+    try std.testing.expectEqualStrings("render", loaded.manifest.entry_points.render);
     try std.testing.expectEqualStrings("update", loaded.manifest.entry_points.update.?);
+    try std.testing.expectEqualStrings("pre_exec", loaded.manifest.entry_points.pre_exec.?);
+    try std.testing.expectEqualStrings("on_unload", loaded.manifest.entry_points.on_unload.?);
 }
 
 test "loads minimal plugin manifest table" {
@@ -914,7 +948,11 @@ test "loads minimal plugin manifest table" {
     defer loaded.deinit(std.testing.allocator);
 
     try std.testing.expectEqualStrings("render", loaded.manifest.entry_points.render);
+    try std.testing.expect(loaded.manifest.entry_points.on_load == null);
     try std.testing.expectEqual(manifest_schema.ListCapability.deny, loaded.manifest.capabilities.exec);
+    try std.testing.expect(loaded.manifest.entry_points.update == null);
+    try std.testing.expect(loaded.manifest.entry_points.pre_exec == null);
+    try std.testing.expect(loaded.manifest.entry_points.on_unload == null);
     try std.testing.expectEqual(@as(usize, 0), loaded.manifest.capabilities.fs_read.len);
 }
 

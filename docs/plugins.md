@@ -29,8 +29,10 @@ return {
     pre_exec = false,
   },
   modules = { "demo" },
+  on_load = "on_load",
   render = "render",
   update = "update",
+  on_unload = "on_unload",
 }
 ```
 
@@ -45,8 +47,11 @@ Required fields:
 Optional fields:
 
 - `capabilities`: omitted fields deny access.
+- `on_load`: Lua function name for load-time setup.
 - `render`: Lua function name, defaults to `render`.
 - `update`: Lua function name for async refresh.
+- `pre_exec`: Lua function name for command preflight, requiring `capabilities.pre_exec = true`.
+- `on_unload`: Lua function name for cleanup.
 - `description`, `author`, `homepage`, `repository`.
 
 See `docs/plugin-manifest.md` for exact validation rules.
@@ -122,7 +127,7 @@ shisa plugin trust demo-plugin
 
 ## Current Limits
 
-- Plugin render functions are not yet wired into the daemon render pipeline.
+- Plugin lifecycle hook names are validated and stored, but hook invocation is not yet wired into the daemon pipeline.
 - Host API bindings for filesystem, exec, network, env, secrets, and pre-exec are not exposed to Lua yet.
 - `shisa plugin install` audits `plugin.lua` by sandbox-loading and validating the returned manifest table before installing.
 

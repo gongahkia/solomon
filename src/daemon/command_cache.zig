@@ -20,6 +20,7 @@ pub const ModuleTtl = struct {
 };
 
 pub const Options = struct {
+    max_entries: usize = 1024,
     default_ttl_ns: u64 = 5 * std.time.ns_per_min,
     module_ttls: []const ModuleTtl = &.{},
 };
@@ -41,6 +42,7 @@ const StoredEntry = struct {
     value: []u8,
     kind: StoredKind,
     created_ns: u64,
+    last_access_ns: u64,
 };
 
 pub const Store = struct {
@@ -95,6 +97,7 @@ pub const Store = struct {
             self.removeBorrowedKey(key);
             return null;
         }
+        entry.last_access_ns = timestamp_ns;
         return switch (entry.kind) {
             .output => .{ .output = entry.value },
             .missing_tool => .{ .missing_tool = entry.value },
@@ -143,6 +146,7 @@ pub const Store = struct {
             entry.value_ptr.value = value;
             entry.value_ptr.kind = kind;
             entry.value_ptr.created_ns = timestamp_ns;
+            entry.value_ptr.last_access_ns = timestamp_ns;
         } else {
             entry.value_ptr.* = .{
                 .key = key,
@@ -151,13 +155,46 @@ pub const Store = struct {
                 .value = value,
                 .kind = kind,
                 .created_ns = timestamp_ns,
+                .last_access_ns = timestamp_ns,
             };
         }
+        self.evictLru();
     }
 
     fn removeBorrowedKey(self: *Store, key: []const u8) void {
         const removed = self.entries.fetchRemove(key) orelse return;
         freeStored(self.allocator, removed.value);
+    }
+
+    fn evictLru(self: *Store) void {
+        if (self.options.max_entries == 0) {
+            self.clear();
+            return;
+        }
+        while (self.entries.count() > self.options.max_entries) {
+            var oldest_key: ?[]const u8 = null;
+            var oldest_access: u64 = std.math.maxInt(u64);
+
+            var it = self.entries.iterator();
+            while (it.next()) |entry| {
+                if (entry.value_ptr.last_access_ns < oldest_access) {
+                    oldest_access = entry.value_ptr.last_access_ns;
+                    oldest_key = entry.key_ptr.*;
+                }
+            }
+
+            if (oldest_key) |key| {
+                self.removeBorrowedKey(key);
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn clear(self: *Store) void {
+        var it = self.entries.iterator();
+        while (it.next()) |entry| freeStored(self.allocator, entry.value_ptr.*);
+        self.entries.clearRetainingCapacity();
     }
 
     fn isExpired(self: Store, module_id: []const u8, created_ns: u64, timestamp_ns: u64) bool {
@@ -408,4 +445,24 @@ test "thrash invalidation keeps command cache bounded" {
         try store.invalidateModuleCwd(invalidation.module_id, invalidation.cwd);
         try std.testing.expectEqual(@as(usize, 0), store.count());
     }
+}
+
+test "high churn respects command cache memory ceiling" {
+    var store = Store.initWithOptions(std.testing.allocator, .{ .max_entries = 128, .default_ttl_ns = 0 });
+    defer store.deinit();
+
+    for (0..5000) |index| {
+        var arg_buffer: [32]u8 = undefined;
+        const arg = try std.fmt.bufPrint(&arg_buffer, "probe-{d}", .{index});
+        try store.putOutputAt(.{
+            .module_id = "language_versions",
+            .cmd = "probe",
+            .args = &.{arg},
+            .cwd = "/repo",
+        }, "ok", @intCast(index));
+    }
+
+    try std.testing.expectEqual(@as(usize, 128), store.count());
+    try std.testing.expect(try store.getAt(.{ .module_id = "language_versions", .cmd = "probe", .args = &.{"probe-0"}, .cwd = "/repo" }, 5001) == null);
+    try std.testing.expect((try store.getAt(.{ .module_id = "language_versions", .cmd = "probe", .args = &.{"probe-4999"}, .cwd = "/repo" }, 5001)) != null);
 }

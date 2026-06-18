@@ -1052,7 +1052,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Cache eviction invariants
 
 ### 32.3 Integration tests via expect/pexpect
-- [ ] Per-shell session scripts
+- [x] Per-shell session scripts
 - [ ] Verify hooks, redraw, transient prompt
 - [ ] Verify pre_exec blocking and bypass
 

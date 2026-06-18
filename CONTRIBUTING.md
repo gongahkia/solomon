@@ -29,6 +29,8 @@ Snapshot files are read-only by default. To rewrite generated snapshots, use the
 scripts/update-snapshots.sh --confirm update-snapshots
 ```
 
+Per-shell session coverage lives in `test/integration/*_fake_socket.sh` for `zsh`, `bash`, `fish`, `nu`, and `pwsh`, plus `test/integration/shell_expect.exp` for interactive expect sessions. These scripts are wired into `zig build test`.
+
 Run the full local gate before opening a PR:
 
 ```sh

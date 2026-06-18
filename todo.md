@@ -915,7 +915,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Graceful sync fallback on older bash
 
 ### 28.3 Fish
-- [ ] `commandline -f repaint` after async fill
+- [x] `commandline -f repaint` after async fill
 - [ ] Compatibility with fish-async-prompt mechanism without depending on it
 
 ### 28.4 Nushell

@@ -60,3 +60,4 @@ done
 SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" nu --no-config-file -c 'source init/shisa.nu; do $env.PROMPT_COMMAND' >"$out"
 grep -F 'fake-nu> ' "$out" >/dev/null
 nu --no-config-file -c 'source init/shisa.nu; if not ("__SHISA_NU_INIT" in $env) { exit 1 }'
+nu --no-config-file -c 'source init/shisa.nu; shisa-reprompt; if $env.SHISA_REPROMPT_REQUESTED != "1" { exit 1 }; do --env ($env.config.hooks.pre_prompt | last); if $env.SHISA_REPROMPT_REQUESTED != "0" { exit 1 }'

@@ -52,6 +52,7 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 
 - Uses `$env.PROMPT_COMMAND` and a cwd fallback.
 - Captures exit via `$env.LAST_EXIT_CODE` and jobs via `job list`; generic command duration is reported as `0ms`.
+- Provides `shisa-reprompt`, which sets `SHISA_REPROMPT_REQUESTED=1`; a `pre_prompt` hook consumes it before the next prompt render.
 - No reliable parent-shell repaint hook is available from an external process, so async redraw is documented as limited.
 
 ## PowerShell

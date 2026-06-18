@@ -95,5 +95,15 @@ if not ("__SHISA_NU_INIT" in $env) {
         }
     }
 
+    $env.config.hooks.pre_prompt = ($env.config.hooks.pre_prompt | append {||
+        if (($env.SHISA_REPROMPT_REQUESTED? | default "0") == "1") {
+            $env.SHISA_REPROMPT_REQUESTED = "0"
+        }
+    })
+
     $env.PROMPT_COMMAND = {|| shisa-prompt-render }
+}
+
+def --env shisa-reprompt [] {
+    $env.SHISA_REPROMPT_REQUESTED = "1"
 }

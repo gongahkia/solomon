@@ -705,7 +705,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Every risk-encoding color also has a glyph
 - [x] Every glyph also has an ASCII fallback
 - [x] Every prompt segment carries an `a11y` string
-- [ ] `shisa render --explain-a11y` dumps the alt-text for the current prompt
+- [x] `shisa render --explain-a11y` dumps the alt-text for the current prompt
 
 ### 21.3 `--a11y` mode
 - [x] `shisa init --a11y` writes a config with colors stripped + glyphs ASCII

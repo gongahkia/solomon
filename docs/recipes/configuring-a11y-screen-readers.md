@@ -88,6 +88,6 @@ modules = ["cwd", "git_branch", "exit_status", "jobs", "cmd_duration", "cloud_ct
 
 For maximum contrast, set `theme = "a11y"`. The built-in `a11y` theme uses ASCII-only labels and white text on the terminal default background.
 
-Current scope: `SHISA_A11Y=1` configures prompt rendering. The alt-text dump command is a separate accessibility-roadmap item.
+Use `shisa render --explain-a11y` to print the configured prompt modules with their screen-reader labels.
 
 See [Shells](../shells.md), [OSC Sequences](../protocol/osc.md), [SSH Target](../ssh-target.md), [Risk Tiers](../risk-tiers.md), and [Config Schema](../config-schema.md).

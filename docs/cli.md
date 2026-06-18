@@ -29,6 +29,7 @@ commands:
   pin           mark a path as never-evicted
   plugin        new, lint, pack, install, list, enable, disable, or trust plugins
   prompt        render prompt through shisad; --a11y strips ANSI and normalizes glyphs
+  render        alias for prompt; --explain-a11y dumps segment labels
   stack         dump detected stacked-diff metadata
   supervisor    run shisad under a crash-restart supervisor
   theme         validate theme files

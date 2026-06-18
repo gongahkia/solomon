@@ -148,7 +148,7 @@ pub fn main() !void {
         return;
     }
 
-    if (std.mem.eql(u8, args[1], "prompt")) {
+    if (std.mem.eql(u8, args[1], "prompt") or std.mem.eql(u8, args[1], "render")) {
         try prompt(allocator, args[2..]);
         return;
     }
@@ -6036,6 +6036,7 @@ const PromptConfig = struct {
     instant: bool = false,
     auto_spawn: bool = false,
     a11y: bool = false,
+    explain_a11y: bool = false,
     shell: []const u8 = "zsh",
     cols: u16 = 80,
     rows: u16 = 24,
@@ -6045,6 +6046,12 @@ const prompt_auto_spawn_grace_ms: i64 = 100;
 
 fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const config = try parsePrompt(args);
+    if (config.explain_a11y) {
+        const output = try promptA11yExplanationAlloc(allocator);
+        defer allocator.free(output);
+        try std.fs.File.stdout().writeAll(output);
+        return;
+    }
     const socket_path = if (config.socket_path) |path| path else try paths.defaultSocketPath(allocator);
     defer if (config.socket_path == null) allocator.free(socket_path);
     const cwd = if (config.cwd) |path| path else try std.fs.cwd().realpathAlloc(allocator, ".");
@@ -6108,6 +6115,8 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
             config.auto_spawn = true;
         } else if (std.mem.eql(u8, arg, "--a11y")) {
             config.a11y = true;
+        } else if (std.mem.eql(u8, arg, "--explain-a11y")) {
+            config.explain_a11y = true;
         } else if (std.mem.eql(u8, arg, "--shell")) {
             config.shell = try nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--cols")) {
@@ -6120,6 +6129,79 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
     }
 
     return config;
+}
+
+fn promptA11yExplanationAlloc(allocator: std.mem.Allocator) ![]u8 {
+    const path = try defaultConfigPath(allocator);
+    defer allocator.free(path);
+    const source = try readConfigOrDefault(allocator, path);
+    defer allocator.free(source);
+    var config_diagnostic: shisa_config.Diagnostic = .{};
+    var parsed = shisa_config.parse(allocator, source, &config_diagnostic) catch |err| switch (err) {
+        error.InvalidConfig => {
+            const message = try std.fmt.allocPrint(allocator, "{s}:{d}:{d}: {s}\n", .{ path, config_diagnostic.line, config_diagnostic.column, config_diagnostic.message });
+            defer allocator.free(message);
+            try std.fs.File.stderr().writeAll(message);
+            return err;
+        },
+        else => return err,
+    };
+    defer parsed.deinit(allocator);
+
+    const theme_path = try themePathAlloc(allocator, parsed.theme);
+    defer allocator.free(theme_path);
+    const theme_source = try std.fs.cwd().readFileAlloc(allocator, theme_path, max_config_bytes);
+    defer allocator.free(theme_source);
+    var theme_diagnostic: theme_loader.Diagnostic = .{};
+    var theme = theme_loader.parse(allocator, theme_source, &theme_diagnostic) catch |err| switch (err) {
+        error.InvalidTheme => {
+            const message = try std.fmt.allocPrint(allocator, "{s}:{d}:{d}: {s}\n", .{ theme_path, theme_diagnostic.line, theme_diagnostic.column, theme_diagnostic.message });
+            defer allocator.free(message);
+            try std.fs.File.stderr().writeAll(message);
+            return err;
+        },
+        else => return err,
+    };
+    defer theme.deinit(allocator);
+
+    return a11yExplanationAlloc(allocator, parsed, theme);
+}
+
+fn a11yExplanationAlloc(allocator: std.mem.Allocator, parsed: shisa_config.Config, theme: theme_loader.Theme) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try out.appendSlice(allocator, "a11y:\n");
+    for (parsed.prompt_modules) |module_id| {
+        const id = shisa_config.moduleIdName(module_id);
+        const label = if (findThemeSegment(theme, id)) |segment|
+            if (segment.a11y.len > 0) segment.a11y else coreA11yLabel(module_id)
+        else
+            coreA11yLabel(module_id);
+        try appendFmt(allocator, &out, "  {s}: {s}\n", .{ id, label });
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn coreA11yLabel(module_id: shisa_config.ModuleId) []const u8 {
+    return switch (module_id) {
+        .cwd => "current directory",
+        .git_branch => "git branch",
+        .language_versions => "language versions",
+        .exit_status => "exit status",
+        .jobs => "background jobs",
+        .cmd_duration => "command duration",
+        .user_host => "user and host",
+        .cloud_ctx => "cloud context",
+        .risk_tier => "risk tier",
+        .sso_expiry => "SSO expiry",
+        .iac_workspace => "infrastructure workspace",
+        .region_drift => "region drift",
+        .cost_glance => "cost glance",
+        .vpn_status => "VPN status",
+        .ssh_target => "SSH target",
+        .container_provenance => "container provenance",
+        .time => "time",
+    };
 }
 
 fn spawnPromptDaemon(allocator: std.mem.Allocator, socket_path: []const u8) !void {
@@ -6459,6 +6541,11 @@ test "prompt args parse a11y" {
     try std.testing.expect(config.no_async);
 }
 
+test "prompt args parse explain a11y" {
+    const config = try parsePrompt(&.{"--explain-a11y"});
+    try std.testing.expect(config.explain_a11y);
+}
+
 test "prompt args parse auto spawn" {
     const config = try parsePrompt(&.{"--auto-spawn"});
     try std.testing.expect(config.auto_spawn);
@@ -6493,6 +6580,22 @@ test "a11y prompt strips ansi and normalizes glyphs" {
     try std.testing.expectEqualStrings("exit:2 -> prod ok\n", output);
 }
 
+test "a11y explanation dumps configured module labels" {
+    var config_diagnostic: shisa_config.Diagnostic = .{};
+    var parsed = try shisa_config.parse(std.testing.allocator, shisa_config.default_config_text, &config_diagnostic);
+    defer parsed.deinit(std.testing.allocator);
+    const theme_source = try std.fs.cwd().readFileAlloc(std.testing.allocator, "themes/plain.toml", max_config_bytes);
+    defer std.testing.allocator.free(theme_source);
+    var theme_diagnostic: theme_loader.Diagnostic = .{};
+    var theme = try theme_loader.parse(std.testing.allocator, theme_source, &theme_diagnostic);
+    defer theme.deinit(std.testing.allocator);
+
+    const output = try a11yExplanationAlloc(std.testing.allocator, parsed, theme);
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "  cwd: current directory\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "  risk_tier: risk tier\n") != null);
+}
+
 const help_text =
     \\usage: shisa <command> [options]
     \\
@@ -6518,6 +6621,7 @@ const help_text =
     \\  pin           mark a path as never-evicted
     \\  plugin        new, lint, pack, install, list, enable, disable, or trust plugins
     \\  prompt        render prompt through shisad; --a11y strips ANSI and normalizes glyphs
+    \\  render        alias for prompt; --explain-a11y dumps segment labels
     \\  stack         dump detected stacked-diff metadata
     \\  supervisor    run shisad under a crash-restart supervisor
     \\  theme         validate theme files

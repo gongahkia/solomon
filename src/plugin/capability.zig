@@ -137,6 +137,21 @@ test "denies omitted capabilities" {
     try std.testing.expectError(error.CapabilityDenied, gate.checkPreExec());
 }
 
+test "host api dispatcher rejects undeclared capabilities" {
+    const gate = Gate.init(.{}, .{});
+    const calls = [_]HostApiCall{
+        .{ .fs_read = "/tmp/a" },
+        .{ .fs_watch = "/tmp/a" },
+        .{ .exec = "git" },
+        .{ .net = "api.example.com" },
+        .{ .env_read = "HOME" },
+        .secrets,
+        .pre_exec,
+    };
+
+    for (calls) |call| try std.testing.expectError(error.CapabilityDenied, gate.checkCall(call));
+}
+
 test "allows scoped fs read and watch paths" {
     const gate = Gate.init(.{
         .fs_read = &.{ "~/project/config.json", "assets/**" },

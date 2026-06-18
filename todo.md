@@ -946,7 +946,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 29.3 Capability gate
 - [x] Implement manifest parsing + validation
 - [x] Daemon-side check on every API call
-- [ ] Reject runtime calls without declared capability
+- [x] Reject runtime calls without declared capability
 - [ ] Re-prompt on capability upgrade
 
 ### 29.4 Resource limits

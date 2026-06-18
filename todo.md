@@ -476,7 +476,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Implement length-prefixed JSON framer/deframer in Zig (`src/proto/frame.zig`)
 - [x] u32 BE length header; validate against 1 MiB cap
 - [x] Property tests: roundtrip arbitrary payloads; corruption detection
-- [ ] Fuzz harness for the deframer (libFuzzer via Zig)
+- [x] Fuzz harness for the deframer (libFuzzer via Zig)
 - [x] Benchmark: deframe 100k frames in < 1 s on baseline machine
 
 ### 15.2 Request/response schemas

@@ -1105,7 +1105,7 @@ Opened 30 days post v1.0. Pre-work tasks below.
 - [ ] Native Windows POC: ReadDirectoryChangesW prototype
 - [ ] Persistent daemon via launchd / systemd unit prototype
 - [ ] age + git-remote dotfile sync prototype
-- [ ] Per-project config layering RFC draft
+- [x] Per-project config layering RFC draft
 - [ ] Marketplace 2.0 RFC draft
 
 ## Continuous extensions (additions)

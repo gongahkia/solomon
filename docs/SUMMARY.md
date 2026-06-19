@@ -123,3 +123,11 @@
 - [Profiling Notes](profiling.md)
 - [Cache Architecture](cache-architecture.md)
 - [Why Zig](why-zig.md)
+
+# Internal Decisions
+
+- [RFC-0001 Daemon Wire Protocol](internals/rfc-0001-daemon-wire-protocol.md)
+- [RFC-0002 Module Execution Classes](internals/rfc-0002-module-execution-classes.md)
+- [RFC-0003 Lua Plugin Capability Manifest](internals/rfc-0003-lua-plugin-capability-manifest.md)
+- [RFC-0004 Cache Invalidation Rules](internals/rfc-0004-cache-invalidation-rules.md)
+- [RFC-0005 Wire Protocol v1](internals/rfc-0005-wire-protocol-v1.md)

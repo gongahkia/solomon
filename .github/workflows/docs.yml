@@ -43,6 +43,9 @@ jobs:
       - name: Install mdBook
         run: cargo install mdbook --locked --version 0.5.3
 
+      - name: RFC internals gate
+        run: bash scripts/rfc-internals-gate.sh
+
       - name: Build docs
         run: mdbook build docs
 

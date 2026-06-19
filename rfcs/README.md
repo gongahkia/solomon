@@ -4,6 +4,8 @@ RFCs are required for changes to the wire protocol, plugin API, security model, 
 
 PRs under public RFC review carry the `rfc-comment-window` label. The label starts a 14-day gate; CI passes after the label has been present for 14 days.
 
+Accepted RFCs must also have a matching `docs/internals/rfc-NNNN-*.md` decision summary. CI enforces this with `scripts/rfc-internals-gate.sh`.
+
 | RFC | Title | Status | Area |
 | --- | --- | --- | --- |
 | [0000](0000-template.md) | Template | Active | core |

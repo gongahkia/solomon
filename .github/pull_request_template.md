@@ -14,6 +14,7 @@ Are you vouched? If not, expect a 2-vouched-reviewer review.
 
 - [ ] Tests added or updated, or not needed with reason above.
 - [ ] Benchmarks run, or not needed with reason above.
+- [ ] New modules include benchmark evidence, a11y labels, and glyph fallbacks, or not applicable.
 - [ ] RFC referenced for protocol, plugin API, security, or theme changes.
 - [ ] User-facing docs updated for flags, config, modules, or behavior changes.
 - [ ] `shisa doctor` updated for new detectable failure modes, or not applicable.

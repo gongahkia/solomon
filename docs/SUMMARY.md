@@ -22,6 +22,7 @@
 - [Config Schema](config-schema.md)
 - [CLI Reference](cli.md)
 - [CLI Keyboard Audit](cli-keyboard.md)
+- [Module Contract](module-contract.md)
 - [Theme Spec](theme-spec.md)
 - [Style Guide](style-guide.md)
 - [Capabilities](capabilities.md)

@@ -1102,7 +1102,7 @@ Opened 30 days post v1.0. Pre-work tasks below.
 
 - [x] Track "v2 candidate" issues with a label
 - [ ] Collect v2 candidates from quarterly retros
-- [ ] Native Windows POC: ReadDirectoryChangesW prototype
+- [x] Native Windows POC: ReadDirectoryChangesW prototype
 - [x] Persistent daemon via launchd / systemd unit prototype
 - [x] age + git-remote dotfile sync prototype
 - [x] Per-project config layering RFC draft

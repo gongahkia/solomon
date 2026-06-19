@@ -59,7 +59,7 @@ commands:
   nl2cmd        convert ?? input to a command suggestion
 
 provider options for risk/explain/nextcmd/nl2cmd:
-      --provider ollama|openai|anthropic|gemini|lmstudio
+      --provider ollama|openai|anthropic|gemini|lmstudio|llamacpp
                                 default: ollama; cloud providers require API keys
       --model <name>            default: provider-specific
 ```

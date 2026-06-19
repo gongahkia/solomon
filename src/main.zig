@@ -10,6 +10,7 @@ const language_versions_module = @import("daemon/modules/language_versions.zig")
 const ai_explain = @import("ai/explain.zig");
 const anthropic_provider = @import("ai/anthropic.zig");
 const gemini_provider = @import("ai/gemini.zig");
+const llama_cpp_provider = @import("ai/llamacpp.zig");
 const lmstudio_provider = @import("ai/lmstudio.zig");
 const nextcmd = @import("ai/nextcmd.zig");
 const nl2cmd = @import("ai/nl2cmd.zig");
@@ -1858,6 +1859,7 @@ const AiProvider = enum {
     openai,
     anthropic,
     gemini,
+    llamacpp,
     lmstudio,
 };
 
@@ -1866,6 +1868,7 @@ fn parseAiProvider(value: []const u8) !AiProvider {
     if (std.mem.eql(u8, value, "openai")) return .openai;
     if (std.mem.eql(u8, value, "anthropic")) return .anthropic;
     if (std.mem.eql(u8, value, "gemini")) return .gemini;
+    if (std.mem.eql(u8, value, "llamacpp") or std.mem.eql(u8, value, "llama.cpp")) return .llamacpp;
     if (std.mem.eql(u8, value, "lmstudio")) return .lmstudio;
     return error.UnknownAiProvider;
 }
@@ -1876,6 +1879,7 @@ fn aiProviderName(provider: AiProvider) []const u8 {
         .openai => "openai",
         .anthropic => "anthropic",
         .gemini => "gemini",
+        .llamacpp => "llamacpp",
         .lmstudio => "lmstudio",
     };
 }
@@ -1884,6 +1888,7 @@ fn aiEffectiveModel(provider: AiProvider, model: []const u8) []const u8 {
     if (provider == .openai and std.mem.eql(u8, model, ollama.recommended_model)) return openai_provider.default_model;
     if (provider == .anthropic and std.mem.eql(u8, model, ollama.recommended_model)) return anthropic_provider.default_model;
     if (provider == .gemini and std.mem.eql(u8, model, ollama.recommended_model)) return gemini_provider.default_model;
+    if (provider == .llamacpp and std.mem.eql(u8, model, ollama.recommended_model)) return llama_cpp_provider.default_model;
     if (provider == .lmstudio and std.mem.eql(u8, model, ollama.recommended_model)) return lmstudio_provider.default_model;
     return model;
 }
@@ -1967,7 +1972,9 @@ fn aiStatus(allocator: std.mem.Allocator) !void {
         else => return err,
     };
     defer if (lmstudio_base_url) |value| allocator.free(value);
-    const output = try aiStatusOutputAlloc(allocator, status, home, lmstudio_base_url, openai_provider.isConfiguredEnv(allocator), anthropic_provider.isConfiguredEnv(allocator), gemini_provider.isConfiguredEnv(allocator));
+    const llamacpp_bin_path = try llama_cpp_provider.binPathFromEnvAlloc(allocator);
+    defer allocator.free(llamacpp_bin_path);
+    const output = try aiStatusOutputAlloc(allocator, status, home, lmstudio_base_url, llamacpp_bin_path, llama_cpp_provider.modelPathConfiguredEnv(allocator), openai_provider.isConfiguredEnv(allocator), anthropic_provider.isConfiguredEnv(allocator), gemini_provider.isConfiguredEnv(allocator));
     defer allocator.free(output);
     try std.fs.File.stdout().writeAll(output);
 }
@@ -2098,7 +2105,7 @@ fn appendAiRedactLiteralRule(rules_path: []const u8, literal: []const u8) !void 
     try file.writeAll("\n");
 }
 
-fn aiStatusOutputAlloc(allocator: std.mem.Allocator, status: ollama.Status, home: ?[]const u8, lmstudio_base_url: ?[]const u8, openai_configured: bool, anthropic_configured: bool, gemini_configured: bool) ![]u8 {
+fn aiStatusOutputAlloc(allocator: std.mem.Allocator, status: ollama.Status, home: ?[]const u8, lmstudio_base_url: ?[]const u8, llamacpp_bin_path: []const u8, llamacpp_model_configured: bool, openai_configured: bool, anthropic_configured: bool, gemini_configured: bool) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
     try appendFmt(allocator, &out, "local:\n  ollama_installed: {}\n  ollama_running: {}\n  recommended_model: {s}\n", .{ status.installed, status.daemon_running, ollama.recommended_model });
@@ -2107,6 +2114,7 @@ fn aiStatusOutputAlloc(allocator: std.mem.Allocator, status: ollama.Status, home
     } else {
         try out.appendSlice(allocator, "  lmstudio_base_url: invalid\n");
     }
+    try appendFmt(allocator, &out, "  llamacpp_bin: {s}\n  llamacpp_model_configured: {}\n", .{ llamacpp_bin_path, llamacpp_model_configured });
     try appendFmt(
         allocator,
         &out,
@@ -2251,6 +2259,7 @@ fn aiProviderGenerateAlloc(allocator: std.mem.Allocator, provider: AiProvider, m
         .openai => try aiOpenAiGenerateAlloc(allocator, effective_model, prompt_text, purpose),
         .anthropic => try aiAnthropicGenerateAlloc(allocator, effective_model, prompt_text, purpose),
         .gemini => try aiGeminiGenerateAlloc(allocator, effective_model, prompt_text, purpose),
+        .llamacpp => try aiLlamaCppGenerateAlloc(allocator, effective_model, prompt_text),
         .lmstudio => try aiLmStudioGenerateAlloc(allocator, effective_model, prompt_text),
     };
 }
@@ -2333,6 +2342,16 @@ fn aiLmStudioGenerateAlloc(allocator: std.mem.Allocator, model: []const u8, prom
     return lmstudio_provider.generateAlloc(allocator, .{
         .model = model,
         .base_url = base_url,
+        .input = prompt_text,
+    });
+}
+
+fn aiLlamaCppGenerateAlloc(allocator: std.mem.Allocator, model: []const u8, prompt_text: []const u8) ![]u8 {
+    const bin_path = try llama_cpp_provider.binPathFromEnvAlloc(allocator);
+    defer allocator.free(bin_path);
+    return llama_cpp_provider.generateAlloc(allocator, .{
+        .bin_path = bin_path,
+        .model = model,
         .input = prompt_text,
     });
 }
@@ -2727,11 +2746,12 @@ test "ai bench args parse" {
 }
 
 test "ai status output reports local cloud and logging state" {
-    const output = try aiStatusOutputAlloc(std.testing.allocator, .{ .installed = true, .daemon_running = false }, "/tmp/shisa-ai-status-home", lmstudio_provider.default_base_url, false, false, false);
+    const output = try aiStatusOutputAlloc(std.testing.allocator, .{ .installed = true, .daemon_running = false }, "/tmp/shisa-ai-status-home", lmstudio_provider.default_base_url, llama_cpp_provider.default_bin_path, false, false, false, false);
     defer std.testing.allocator.free(output);
     try std.testing.expect(std.mem.indexOf(u8, output, "local:\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "ollama_installed: true") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "lmstudio_base_url: http://127.0.0.1:1234/v1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "llamacpp_bin: llama-cli") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "cloud:\n  providers: openai,anthropic,gemini\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "openai_configured: false") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "anthropic_configured: false") != null);
@@ -2811,14 +2831,17 @@ test "ai provider default model maps openai" {
     try std.testing.expectEqualStrings(openai_provider.default_model, aiEffectiveModel(.openai, ollama.recommended_model));
     try std.testing.expectEqualStrings(anthropic_provider.default_model, aiEffectiveModel(.anthropic, ollama.recommended_model));
     try std.testing.expectEqualStrings(gemini_provider.default_model, aiEffectiveModel(.gemini, ollama.recommended_model));
+    try std.testing.expectEqualStrings(llama_cpp_provider.default_model, aiEffectiveModel(.llamacpp, ollama.recommended_model));
     try std.testing.expectEqualStrings(lmstudio_provider.default_model, aiEffectiveModel(.lmstudio, ollama.recommended_model));
     try std.testing.expectEqualStrings("custom", aiEffectiveModel(.openai, "custom"));
     try std.testing.expectEqualStrings(ollama.recommended_model, aiEffectiveModel(.ollama, ollama.recommended_model));
 }
 
-test "ai provider parser accepts anthropic gemini and lmstudio" {
+test "ai provider parser accepts anthropic gemini llamacpp and lmstudio" {
     try std.testing.expectEqual(AiProvider.anthropic, try parseAiProvider("anthropic"));
     try std.testing.expectEqual(AiProvider.gemini, try parseAiProvider("gemini"));
+    try std.testing.expectEqual(AiProvider.llamacpp, try parseAiProvider("llamacpp"));
+    try std.testing.expectEqual(AiProvider.llamacpp, try parseAiProvider("llama.cpp"));
     try std.testing.expectEqual(AiProvider.lmstudio, try parseAiProvider("lmstudio"));
 }
 
@@ -8276,7 +8299,7 @@ const ai_help_text =
     \\  nl2cmd        convert ?? input to a command suggestion
     \\
     \\provider options for risk/explain/nextcmd/nl2cmd:
-    \\      --provider ollama|openai|anthropic|gemini|lmstudio
+    \\      --provider ollama|openai|anthropic|gemini|lmstudio|llamacpp
     \\                                default: ollama; cloud providers require API keys
     \\      --model <name>            default: provider-specific
     \\

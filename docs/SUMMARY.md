@@ -86,6 +86,7 @@
 - [Anthropic](ai-anthropic.md)
 - [Gemini](ai-gemini.md)
 - [LM Studio](ai-lmstudio.md)
+- [llama.cpp](ai-llamacpp.md)
 - [AI Privacy](ai-privacy.md)
 
 # Videos

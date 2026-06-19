@@ -25,6 +25,20 @@ jobs:
           SHISA_PR_BODY: ${{ github.event.pull_request.body }}
           SHISA_REQUIRE_PR_BODY_RFC: ${{ github.event_name == 'pull_request' && '1' || '0' }}
 
+  user-docs:
+    name: user docs gate
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - run: bash .github/scripts/user-docs-gate.sh
+        env:
+          SHISA_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          SHISA_PR_BODY: ${{ github.event.pull_request.body }}
+
   zig:
     name: zig / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

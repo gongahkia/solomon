@@ -36,6 +36,8 @@ The meeting owner records the session or writes timestamped notes when recording
 
 The first-response SLA check is mechanical: every public issue or pull request without maintainer response after 7 days becomes a triage blocker until it is answered or closed with a reason.
 
+User-facing changes to CLI, config, modules, themes, shell hooks, AI commands, plugin APIs, example plugins, or the marketplace index must update `docs/`, `README.md`, or `CHANGELOG.md`. The CI user-docs gate enforces this and allows an explicit PR-body "docs not needed" note for internal-only changes.
+
 ## Labels
 
 Every public issue and pull request should have one `kind/*`, one `area/*`, and one `priority/*` label once triaged. The canonical label manifest lives at `.github/labels.yml`.

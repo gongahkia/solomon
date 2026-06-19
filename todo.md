@@ -1079,7 +1079,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 33.2 Locale routing
 - [x] Detect `LANG` / `LC_*` env
 - [x] `shisa config set locale=...` override
-- [ ] Fall through to en-US for missing translations
+- [x] Fall through to en-US for missing translations
 
 ### 33.3 RTL rendering
 - [x] Bidi detection

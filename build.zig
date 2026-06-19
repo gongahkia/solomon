@@ -795,6 +795,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const i18n_extract_test_run = b.addRunArtifact(i18n_extract_tests);
+    const i18n_catalog_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/i18n/catalog.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const i18n_catalog_test_run = b.addRunArtifact(i18n_catalog_tests);
     const i18n_extract_check_run = b.addRunArtifact(i18n_extract_exe);
     i18n_extract_check_run.addArg("zig-out/shisa.pot");
     i18n_extract_check_run.addArg("zig-out/shisa.en-US.po");
@@ -924,6 +932,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&plugin_api_docs_test_run.step);
     test_step.dependOn(&plugin_api_docs_diff.step);
     test_step.dependOn(&i18n_extract_test_run.step);
+    test_step.dependOn(&i18n_catalog_test_run.step);
     test_step.dependOn(&i18n_pot_diff.step);
     test_step.dependOn(&i18n_po_diff.step);
     test_step.dependOn(&client_test_run.step);

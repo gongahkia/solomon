@@ -676,7 +676,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] AUR `shisa-git` PKGBUILD
 - [ ] Nixpkgs derivation
 - [ ] Scoop manifest (WSL)
-- [ ] AppImage build pipeline
+- [x] AppImage build pipeline
 - [ ] Flatpak manifest (community)
 - [ ] Snap (community)
 - [x] DEB packaging script

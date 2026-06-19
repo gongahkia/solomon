@@ -248,6 +248,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const ollama_test_run = b.addRunArtifact(ollama_tests);
+    const openai_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/ai/openai.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const openai_test_run = b.addRunArtifact(openai_tests);
     const nextcmd_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/ai/nextcmd.zig"),
@@ -775,6 +783,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&test_run.step);
     test_step.dependOn(&cli_test_run.step);
     test_step.dependOn(&ollama_test_run.step);
+    test_step.dependOn(&openai_test_run.step);
     test_step.dependOn(&nextcmd_test_run.step);
     test_step.dependOn(&nl2cmd_test_run.step);
     test_step.dependOn(&ai_explain_test_run.step);

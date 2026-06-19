@@ -420,7 +420,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Add a `shisa ai status` showing what's local, what's cloud, what's logged
 
 ### 12.10 Provider abstraction (optional cloud)
-- [ ] OpenAI provider (opt-in)
+- [x] OpenAI provider (opt-in)
 - [ ] Anthropic provider (opt-in)
 - [ ] Gemini provider (opt-in)
 - [ ] LM Studio provider (local but non-Ollama)

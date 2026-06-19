@@ -36,6 +36,8 @@ Cloud provider support is not part of the default prompt path. A cloud provider 
 - audit-log fields
 - retention assumptions
 
+The built-in OpenAI provider uses provider id `openai`, endpoint `POST https://api.openai.com/v1/responses`, `Authorization: Bearer $OPENAI_API_KEY`, `model`, redacted `input`, and `store:false`. It is selected per command with `--provider openai`.
+
 ## Default Redaction Rules
 
 Default redaction replaces matched values with `[redacted]`. The built-in rules cover key/value fields named `password`, `token`, `secret`, `api_key`, AWS credential names, kubeconfig key data, and SSH `IdentityFile`; bearer tokens; AWS access keys; GitHub `gh*_` tokens; `sk-` provider keys; PEM private-key blocks; and 12-digit cloud account ids.
@@ -53,6 +55,6 @@ Pre-exec cloud request audit entries in `~/.local/state/shisa/cloud_requests.jso
 - command SHA-256 hash
 - force flag
 
-Provider-backed AI request audit entries should include provider id, model id, request hash, redaction profile hash, success or failure class, and latency bucket.
+Provider-backed AI request audit entries in `~/.local/state/shisa/ai_cloud.jsonl` include provider id, model id, request SHA-256 hash, redaction profile SHA-256 hash, success or failure class, purpose, and latency bucket.
 
 Raw command text, raw cwd, and raw model prompts are excluded by default.

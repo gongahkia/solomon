@@ -11,6 +11,7 @@ const ai_explain = @import("ai/explain.zig");
 const nextcmd = @import("ai/nextcmd.zig");
 const nl2cmd = @import("ai/nl2cmd.zig");
 const ollama = @import("ai/ollama.zig");
+const openai_provider = @import("ai/openai.zig");
 const ai_redact = @import("ai/redact.zig");
 const ai_risk = @import("ai/risk.zig");
 const shisa_config = @import("config.zig");
@@ -1849,6 +1850,29 @@ test "cloud explain output shows reason" {
     try std.testing.expect(std.mem.indexOf(u8, output, "pattern: *-prd-*\n") != null);
 }
 
+const AiProvider = enum {
+    ollama,
+    openai,
+};
+
+fn parseAiProvider(value: []const u8) !AiProvider {
+    if (std.mem.eql(u8, value, "ollama")) return .ollama;
+    if (std.mem.eql(u8, value, "openai")) return .openai;
+    return error.UnknownAiProvider;
+}
+
+fn aiProviderName(provider: AiProvider) []const u8 {
+    return switch (provider) {
+        .ollama => "ollama",
+        .openai => "openai",
+    };
+}
+
+fn aiEffectiveModel(provider: AiProvider, model: []const u8) []const u8 {
+    if (provider == .openai and std.mem.eql(u8, model, ollama.recommended_model)) return openai_provider.default_model;
+    return model;
+}
+
 const AiBenchConfig = struct {
     model: []const u8 = ollama.recommended_model,
     prompt: []const u8 = "Reply with one short sentence.",
@@ -1923,7 +1947,7 @@ fn aiStatus(allocator: std.mem.Allocator) !void {
         else => return err,
     };
     defer if (home) |value| allocator.free(value);
-    const output = try aiStatusOutputAlloc(allocator, status, home);
+    const output = try aiStatusOutputAlloc(allocator, status, home, openai_provider.isConfiguredEnv(allocator));
     defer allocator.free(output);
     try std.fs.File.stdout().writeAll(output);
 }
@@ -2054,11 +2078,11 @@ fn appendAiRedactLiteralRule(rules_path: []const u8, literal: []const u8) !void 
     try file.writeAll("\n");
 }
 
-fn aiStatusOutputAlloc(allocator: std.mem.Allocator, status: ollama.Status, home: ?[]const u8) ![]u8 {
+fn aiStatusOutputAlloc(allocator: std.mem.Allocator, status: ollama.Status, home: ?[]const u8, openai_configured: bool) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
     try appendFmt(allocator, &out, "local:\n  ollama_installed: {}\n  ollama_running: {}\n  recommended_model: {s}\n", .{ status.installed, status.daemon_running, ollama.recommended_model });
-    try out.appendSlice(allocator, "cloud:\n  providers: none\n  enabled: false\n");
+    try appendFmt(allocator, &out, "cloud:\n  providers: openai\n  openai_configured: {}\n  enabled: {}\n  default_model: {s}\n", .{ openai_configured, openai_configured, openai_provider.default_model });
     try out.appendSlice(allocator, "logging:\n");
     if (home) |home_path| {
         const cloud_audit_path = try cloudRequestAuditPathAlloc(allocator, home_path);
@@ -2067,11 +2091,14 @@ fn aiStatusOutputAlloc(allocator: std.mem.Allocator, status: ollama.Status, home
         const audit_path = try prodGuardAuditPathAlloc(allocator, home_path);
         defer allocator.free(audit_path);
         try appendFmt(allocator, &out, "  prod_guard_audit: {s} {s}\n", .{ pathAccessStatus(audit_path), audit_path });
+        const ai_audit_path = try aiCloudAuditPathAlloc(allocator, home_path);
+        defer allocator.free(ai_audit_path);
+        try appendFmt(allocator, &out, "  ai_cloud_audit: {s} {s}\n", .{ pathAccessStatus(ai_audit_path), ai_audit_path });
     } else {
         try out.appendSlice(allocator, "  cloud_request_audit: missing HOME\n");
         try out.appendSlice(allocator, "  prod_guard_audit: missing HOME\n");
+        try out.appendSlice(allocator, "  ai_cloud_audit: missing HOME\n");
     }
-    try out.appendSlice(allocator, "  ai_cloud_audit: not_configured\n");
     return out.toOwnedSlice(allocator);
 }
 
@@ -2100,6 +2127,7 @@ fn parseAiBenchArgs(args: []const []const u8) !AiBenchConfig {
 
 const AiRiskConfig = struct {
     command: []const u8 = "",
+    provider: AiProvider = .ollama,
     model: []const u8 = ollama.recommended_model,
     slm: bool = false,
     preexec: bool = false,
@@ -2107,6 +2135,7 @@ const AiRiskConfig = struct {
 
 const AiExplainConfig = struct {
     command: []const u8 = "",
+    provider: AiProvider = .ollama,
     model: []const u8 = ollama.recommended_model,
 };
 
@@ -2116,6 +2145,8 @@ fn parseAiRiskArgs(args: []const []const u8) !AiRiskConfig {
     while (i < args.len) : (i += 1) {
         if (std.mem.eql(u8, args[i], "--command")) {
             config.command = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--provider")) {
+            config.provider = try parseAiProvider(try nextValue(args, &i));
         } else if (std.mem.eql(u8, args[i], "--model")) {
             config.model = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--slm")) {
@@ -2141,6 +2172,8 @@ fn parseAiExplainArgs(args: []const []const u8) !AiExplainConfig {
     while (i < args.len) : (i += 1) {
         if (std.mem.eql(u8, args[i], "--command")) {
             config.command = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--provider")) {
+            config.provider = try parseAiProvider(try nextValue(args, &i));
         } else if (std.mem.eql(u8, args[i], "--model")) {
             config.model = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--")) {
@@ -2163,20 +2196,68 @@ fn aiExplain(allocator: std.mem.Allocator, config: AiExplainConfig) !void {
 }
 
 fn aiExplainModelAlloc(allocator: std.mem.Allocator, config: AiExplainConfig) ![]u8 {
-    const status = try ollama.detect(allocator);
-    if (!status.installed or !status.daemon_running) return error.OllamaUnavailable;
     const flags = try ai_explain.flagContextAlloc(allocator, config.command);
     defer allocator.free(flags);
     const template = try ai_explain.readDefaultPromptAlloc(allocator);
     defer allocator.free(template);
     const prompt_text = try ai_explain.promptWithInputAlloc(allocator, template, config.command, flags);
     defer allocator.free(prompt_text);
-    const raw = try ollama.generateAlloc(allocator, ollama.default_host, ollama.default_port, config.model, prompt_text);
+    const raw = try aiProviderGenerateAlloc(allocator, config.provider, config.model, prompt_text, "explain");
     defer allocator.free(raw);
     const cleaned = try ai_explain.cleanExplanationAlloc(allocator, raw);
     errdefer allocator.free(cleaned);
     if (cleaned.len == 0) return error.EmptyExplanation;
     return cleaned;
+}
+
+fn aiProviderGenerateAlloc(allocator: std.mem.Allocator, provider: AiProvider, model: []const u8, prompt_text: []const u8, purpose: []const u8) ![]u8 {
+    const effective_model = aiEffectiveModel(provider, model);
+    return switch (provider) {
+        .ollama => blk: {
+            const status = try ollama.detect(allocator);
+            if (!status.installed or !status.daemon_running) return error.OllamaUnavailable;
+            break :blk try ollama.generateAlloc(allocator, ollama.default_host, ollama.default_port, effective_model, prompt_text);
+        },
+        .openai => try aiOpenAiGenerateAlloc(allocator, effective_model, prompt_text, purpose),
+    };
+}
+
+fn aiOpenAiGenerateAlloc(allocator: std.mem.Allocator, model: []const u8, prompt_text: []const u8, purpose: []const u8) ![]u8 {
+    const rules_path = defaultAiRedactRulesPathAlloc(allocator) catch |err| switch (err) {
+        error.EnvironmentVariableNotFound, error.MissingHome, error.MissingConfigDir => null,
+        else => return err,
+    };
+    defer if (rules_path) |path| allocator.free(path);
+    const redacted_prompt = if (rules_path) |path|
+        try aiRedactWithRulesAlloc(allocator, prompt_text, path)
+    else
+        try ai_redact.redactAlloc(allocator, prompt_text);
+    defer allocator.free(redacted_prompt);
+
+    const api_key = try openai_provider.apiKeyFromEnvAlloc(allocator);
+    defer allocator.free(api_key);
+    const base_url = try openai_provider.baseUrlFromEnvAlloc(allocator);
+    defer allocator.free(base_url);
+
+    const start_ns = std.time.nanoTimestamp();
+    const raw = openai_provider.generateAlloc(allocator, .{
+        .api_key = api_key,
+        .model = model,
+        .base_url = base_url,
+        .input = redacted_prompt,
+    }) catch |err| {
+        appendAiCloudAudit(allocator, openai_provider.provider_id, model, redacted_prompt, "error", purpose, elapsedMs(start_ns)) catch {};
+        return err;
+    };
+    errdefer allocator.free(raw);
+    appendAiCloudAudit(allocator, openai_provider.provider_id, model, redacted_prompt, "success", purpose, elapsedMs(start_ns)) catch {};
+    return raw;
+}
+
+fn elapsedMs(start_ns: i128) u64 {
+    const elapsed = std.time.nanoTimestamp() - start_ns;
+    if (elapsed <= 0) return 0;
+    return @intCast(@divFloor(elapsed, std.time.ns_per_ms));
 }
 
 fn aiRisk(allocator: std.mem.Allocator, config: AiRiskConfig) !void {
@@ -2198,11 +2279,9 @@ fn aiRisk(allocator: std.mem.Allocator, config: AiRiskConfig) !void {
 }
 
 fn aiRiskSlm(allocator: std.mem.Allocator, config: AiRiskConfig, fallback: ai_risk.Explanation) !ai_risk.Explanation {
-    const status = try ollama.detect(allocator);
-    if (!status.installed or !status.daemon_running) return fallback;
     const prompt_text = try ai_risk.promptWithCommandAlloc(allocator, config.command);
     defer allocator.free(prompt_text);
-    const raw = try ollama.generateAlloc(allocator, ollama.default_host, ollama.default_port, config.model, prompt_text);
+    const raw = try aiProviderGenerateAlloc(allocator, config.provider, config.model, prompt_text, "risk");
     defer allocator.free(raw);
     const risk = ai_risk.parseSlmRisk(raw) orelse return fallback;
     return .{ .risk = risk, .source = "slm", .pattern = fallback.pattern };
@@ -2279,8 +2358,10 @@ fn appendAiBenchResult(allocator: std.mem.Allocator, out: *std.ArrayList(u8), la
 }
 
 fn aiNextcmd(allocator: std.mem.Allocator, config: AiNextcmdConfig) !void {
-    const status = ollama.detect(allocator) catch return;
-    if (!status.installed or !status.daemon_running) return;
+    if (config.provider == .ollama) {
+        const status = ollama.detect(allocator) catch return;
+        if (!status.installed or !status.daemon_running) return;
+    }
     const history_source = if (config.history_path.len == 0) null else std.fs.cwd().readFileAlloc(allocator, config.history_path, 256 * 1024) catch null;
     defer if (history_source) |value| allocator.free(value);
     const suggestion = aiNextcmdSuggestionAlloc(allocator, config, history_source orelse "") catch return;
@@ -2301,7 +2382,7 @@ fn aiNextcmdSuggestionAlloc(allocator: std.mem.Allocator, config: AiNextcmdConfi
     defer allocator.free(template);
     const prompt_text = try nextcmd.promptWithContextAlloc(allocator, template, context);
     defer allocator.free(prompt_text);
-    const raw = try ollama.generateAlloc(allocator, ollama.default_host, ollama.default_port, config.model, prompt_text);
+    const raw = try aiProviderGenerateAlloc(allocator, config.provider, config.model, prompt_text, "nextcmd");
     defer allocator.free(raw);
     return nextcmd.cleanSuggestionAlloc(allocator, raw);
 }
@@ -2317,13 +2398,15 @@ fn aiNl2cmd(allocator: std.mem.Allocator, config: AiNl2cmdConfig) !void {
         try std.fs.File.stdout().writeAll(request);
         return;
     }
-    const status = ollama.detect(allocator) catch {
-        appendNl2cmdAudit(allocator, config, request, "", "error") catch {};
-        return;
-    };
-    if (!status.installed or !status.daemon_running) {
-        appendNl2cmdAudit(allocator, config, request, "", "unavailable") catch {};
-        return;
+    if (config.provider == .ollama) {
+        const status = ollama.detect(allocator) catch {
+            appendNl2cmdAudit(allocator, config, request, "", "error") catch {};
+            return;
+        };
+        if (!status.installed or !status.daemon_running) {
+            appendNl2cmdAudit(allocator, config, request, "", "unavailable") catch {};
+            return;
+        }
     }
     const command = aiNl2cmdCommandAlloc(allocator, config, request) catch {
         appendNl2cmdAudit(allocator, config, request, "", "error") catch {};
@@ -2357,7 +2440,7 @@ fn aiNl2cmdCommandAlloc(allocator: std.mem.Allocator, config: AiNl2cmdConfig, re
         .request = request,
     });
     defer allocator.free(prompt_text);
-    const raw = try ollama.generateAlloc(allocator, ollama.default_host, ollama.default_port, config.model, prompt_text);
+    const raw = try aiProviderGenerateAlloc(allocator, config.provider, config.model, prompt_text, "nl2cmd");
     defer allocator.free(raw);
     return nl2cmd.cleanCommandAlloc(allocator, raw);
 }
@@ -2376,20 +2459,77 @@ fn nl2cmdAuditPathAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8 {
     return std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/nl2cmd.jsonl", .{home});
 }
 
+fn appendAiCloudAudit(allocator: std.mem.Allocator, provider: []const u8, model: []const u8, request: []const u8, status: []const u8, purpose: []const u8, latency_ms: u64) !void {
+    const home = std.process.getEnvVarOwned(allocator, "HOME") catch return;
+    defer allocator.free(home);
+    const path = try aiCloudAuditPathAlloc(allocator, home);
+    defer allocator.free(path);
+    const line = try aiCloudAuditLineAlloc(allocator, provider, model, request, status, purpose, latency_ms);
+    defer allocator.free(line);
+    try appendLineToPath(path, line);
+}
+
+fn aiCloudAuditPathAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/ai_cloud.jsonl", .{home});
+}
+
+fn aiCloudAuditLineAlloc(allocator: std.mem.Allocator, provider: []const u8, model: []const u8, request: []const u8, status: []const u8, purpose: []const u8, latency_ms: u64) ![]u8 {
+    const escaped_provider = try jsonEscapeAlloc(allocator, provider);
+    defer allocator.free(escaped_provider);
+    const escaped_model = try jsonEscapeAlloc(allocator, model);
+    defer allocator.free(escaped_model);
+    const escaped_status = try jsonEscapeAlloc(allocator, status);
+    defer allocator.free(escaped_status);
+    const escaped_purpose = try jsonEscapeAlloc(allocator, purpose);
+    defer allocator.free(escaped_purpose);
+    const request_hash = sha256Hex(request);
+    const redaction_hash = sha256Hex("builtin+local-literal-v1");
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"ts\":{d},\"provider\":\"{s}\",\"model\":\"{s}\",\"request_sha256\":\"{s}\",\"redaction_profile_sha256\":\"{s}\",\"status\":\"{s}\",\"latency_bucket_ms\":\"{s}\",\"purpose\":\"{s}\"}}\n",
+        .{ std.time.timestamp(), escaped_provider, escaped_model, request_hash[0..], redaction_hash[0..], escaped_status, latencyBucketMs(latency_ms), escaped_purpose },
+    );
+}
+
+fn sha256Hex(value: []const u8) [std.crypto.hash.sha2.Sha256.digest_length * 2]u8 {
+    var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(value, &digest, .{});
+    return std.fmt.bytesToHex(digest, .lower);
+}
+
+fn latencyBucketMs(ms: u64) []const u8 {
+    if (ms < 1000) return "0-999";
+    if (ms < 5000) return "1000-4999";
+    if (ms < 30000) return "5000-29999";
+    return "30000+";
+}
+
 fn nl2cmdAuditLineAlloc(allocator: std.mem.Allocator, config: AiNl2cmdConfig, request: []const u8, candidate: []const u8, status: []const u8) ![]u8 {
     const escaped_shell = try jsonEscapeAlloc(allocator, config.shell);
     defer allocator.free(escaped_shell);
+    const escaped_provider = try jsonEscapeAlloc(allocator, aiProviderName(config.provider));
+    defer allocator.free(escaped_provider);
+    const confidence = if (candidate.len == 0) "none" else nl2cmd.commandConfidence(candidate).label();
+    if (config.provider == .openai) {
+        const cwd_hash = sha256Hex(config.cwd);
+        const request_hash = sha256Hex(request);
+        const candidate_hash = sha256Hex(candidate);
+        return std.fmt.allocPrint(
+            allocator,
+            "{{\"ts\":{d},\"provider\":\"{s}\",\"shell\":\"{s}\",\"cwd_sha256\":\"{s}\",\"request_sha256\":\"{s}\",\"candidate_sha256\":\"{s}\",\"confidence\":\"{s}\",\"status\":\"{s}\"}}\n",
+            .{ std.time.timestamp(), escaped_provider, escaped_shell, cwd_hash[0..], request_hash[0..], candidate_hash[0..], confidence, status },
+        );
+    }
     const escaped_cwd = try jsonEscapeAlloc(allocator, config.cwd);
     defer allocator.free(escaped_cwd);
     const escaped_request = try jsonEscapeAlloc(allocator, request);
     defer allocator.free(escaped_request);
     const escaped_candidate = try jsonEscapeAlloc(allocator, candidate);
     defer allocator.free(escaped_candidate);
-    const confidence = if (candidate.len == 0) "none" else nl2cmd.commandConfidence(candidate).label();
     return std.fmt.allocPrint(
         allocator,
-        "{{\"ts\":{d},\"shell\":\"{s}\",\"cwd\":\"{s}\",\"request\":\"{s}\",\"candidate\":\"{s}\",\"confidence\":\"{s}\",\"status\":\"{s}\"}}\n",
-        .{ std.time.timestamp(), escaped_shell, escaped_cwd, escaped_request, escaped_candidate, confidence, status },
+        "{{\"ts\":{d},\"provider\":\"{s}\",\"shell\":\"{s}\",\"cwd\":\"{s}\",\"request\":\"{s}\",\"candidate\":\"{s}\",\"confidence\":\"{s}\",\"status\":\"{s}\"}}\n",
+        .{ std.time.timestamp(), escaped_provider, escaped_shell, escaped_cwd, escaped_request, escaped_candidate, confidence, status },
     );
 }
 
@@ -2407,6 +2547,7 @@ fn appendLineToPath(path: []const u8, line: []const u8) !void {
 
 const AiNextcmdConfig = struct {
     shell: []const u8 = "",
+    provider: AiProvider = .ollama,
     model: []const u8 = ollama.recommended_model,
     cwd: []const u8 = "",
     last_command: []const u8 = "",
@@ -2417,6 +2558,7 @@ const AiNextcmdConfig = struct {
 
 const AiNl2cmdConfig = struct {
     shell: []const u8 = "",
+    provider: AiProvider = .ollama,
     model: []const u8 = ollama.recommended_model,
     cwd: []const u8 = "",
     input: []const u8 = "",
@@ -2431,6 +2573,8 @@ fn parseAiNextcmdArgs(args: []const []const u8) !AiNextcmdConfig {
     while (i < args.len) : (i += 1) {
         if (std.mem.eql(u8, args[i], "--shell")) {
             config.shell = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--provider")) {
+            config.provider = try parseAiProvider(try nextValue(args, &i));
         } else if (std.mem.eql(u8, args[i], "--model")) {
             config.model = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--cwd")) {
@@ -2456,6 +2600,8 @@ fn parseAiNl2cmdArgs(args: []const []const u8) !AiNl2cmdConfig {
     while (i < args.len) : (i += 1) {
         if (std.mem.eql(u8, args[i], "--shell")) {
             config.shell = try nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--provider")) {
+            config.provider = try parseAiProvider(try nextValue(args, &i));
         } else if (std.mem.eql(u8, args[i], "--model")) {
             config.model = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--cwd")) {
@@ -2486,15 +2632,16 @@ test "ai bench args parse" {
 }
 
 test "ai status output reports local cloud and logging state" {
-    const output = try aiStatusOutputAlloc(std.testing.allocator, .{ .installed = true, .daemon_running = false }, "/tmp/shisa-ai-status-home");
+    const output = try aiStatusOutputAlloc(std.testing.allocator, .{ .installed = true, .daemon_running = false }, "/tmp/shisa-ai-status-home", false);
     defer std.testing.allocator.free(output);
     try std.testing.expect(std.mem.indexOf(u8, output, "local:\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "ollama_installed: true") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "cloud:\n  providers: none\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "cloud:\n  providers: openai\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "openai_configured: false") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "logging:\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "cloud_request_audit: missing /tmp/shisa-ai-status-home/.local/state/shisa/cloud_requests.jsonl") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "prod_guard_audit: missing /tmp/shisa-ai-status-home/.local/state/shisa/prod_guard.jsonl") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "ai_cloud_audit: not_configured") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "ai_cloud_audit: missing /tmp/shisa-ai-status-home/.local/state/shisa/ai_cloud.jsonl") != null);
 }
 
 test "ai redact args parse test and add literal modes" {
@@ -2523,23 +2670,26 @@ test "ai redact applies built-in and local literal rules" {
 }
 
 test "ai risk args parse" {
-    const config = try parseAiRiskArgs(&.{ "--command", "rm -rf /tmp/x", "--model", "gemma3:1b", "--slm", "--preexec" });
+    const config = try parseAiRiskArgs(&.{ "--command", "rm -rf /tmp/x", "--provider", "openai", "--model", "gpt-5.5", "--slm", "--preexec" });
     try std.testing.expectEqualStrings("rm -rf /tmp/x", config.command);
-    try std.testing.expectEqualStrings("gemma3:1b", config.model);
+    try std.testing.expectEqual(AiProvider.openai, config.provider);
+    try std.testing.expectEqualStrings("gpt-5.5", config.model);
     try std.testing.expect(config.slm);
     try std.testing.expect(config.preexec);
 }
 
 test "ai explain args parse" {
-    const config = try parseAiExplainArgs(&.{ "--command", "tar -xf app.tar", "--model", "gemma3:1b" });
+    const config = try parseAiExplainArgs(&.{ "--command", "tar -xf app.tar", "--provider", "openai", "--model", "gpt-5.5" });
     try std.testing.expectEqualStrings("tar -xf app.tar", config.command);
-    try std.testing.expectEqualStrings("gemma3:1b", config.model);
+    try std.testing.expectEqual(AiProvider.openai, config.provider);
+    try std.testing.expectEqualStrings("gpt-5.5", config.model);
 }
 
 test "ai nextcmd args parse" {
-    const config = try parseAiNextcmdArgs(&.{ "--shell", "zsh", "--model", "gemma3:1b", "--cwd", "/tmp", "--last-command", "zig test", "--last-exit", "2", "--history-path", "/tmp/h", "--history-limit", "3" });
+    const config = try parseAiNextcmdArgs(&.{ "--shell", "zsh", "--provider", "openai", "--model", "gpt-5.5", "--cwd", "/tmp", "--last-command", "zig test", "--last-exit", "2", "--history-path", "/tmp/h", "--history-limit", "3" });
     try std.testing.expectEqualStrings("zsh", config.shell);
-    try std.testing.expectEqualStrings("gemma3:1b", config.model);
+    try std.testing.expectEqual(AiProvider.openai, config.provider);
+    try std.testing.expectEqualStrings("gpt-5.5", config.model);
     try std.testing.expectEqualStrings("/tmp", config.cwd);
     try std.testing.expectEqualStrings("zig test", config.last_command);
     try std.testing.expectEqual(@as(i32, 2), config.last_exit);
@@ -2548,14 +2698,30 @@ test "ai nextcmd args parse" {
 }
 
 test "ai nl2cmd args parse" {
-    const config = try parseAiNl2cmdArgs(&.{ "--shell", "zsh", "--model", "gemma3:1b", "--cwd", "/tmp", "--input", "?? list files", "--detect-only", "--plain", "--exec" });
+    const config = try parseAiNl2cmdArgs(&.{ "--shell", "zsh", "--provider", "openai", "--model", "gpt-5.5", "--cwd", "/tmp", "--input", "?? list files", "--detect-only", "--plain", "--exec" });
     try std.testing.expectEqualStrings("zsh", config.shell);
-    try std.testing.expectEqualStrings("gemma3:1b", config.model);
+    try std.testing.expectEqual(AiProvider.openai, config.provider);
+    try std.testing.expectEqualStrings("gpt-5.5", config.model);
     try std.testing.expectEqualStrings("/tmp", config.cwd);
     try std.testing.expectEqualStrings("?? list files", config.input);
     try std.testing.expect(config.detect_only);
     try std.testing.expect(config.plain);
     try std.testing.expect(config.exec_requested);
+}
+
+test "ai provider default model maps openai" {
+    try std.testing.expectEqualStrings(openai_provider.default_model, aiEffectiveModel(.openai, ollama.recommended_model));
+    try std.testing.expectEqualStrings("custom", aiEffectiveModel(.openai, "custom"));
+    try std.testing.expectEqualStrings(ollama.recommended_model, aiEffectiveModel(.ollama, ollama.recommended_model));
+}
+
+test "ai cloud audit line stores hashes only" {
+    const line = try aiCloudAuditLineAlloc(std.testing.allocator, openai_provider.provider_id, openai_provider.default_model, "token=secret", "success", "explain", 42);
+    defer std.testing.allocator.free(line);
+    try std.testing.expect(std.mem.indexOf(u8, line, "\"provider\":\"openai\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, line, "\"request_sha256\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, line, "\"redaction_profile_sha256\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, line, "token=secret") == null);
 }
 
 test "ai nl2cmd audit line escapes fields" {
@@ -2569,6 +2735,21 @@ test "ai nl2cmd audit line escapes fields" {
     try std.testing.expect(std.mem.indexOf(u8, line, "\"candidate\":\"ls -lS\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, line, "\"confidence\":\"high\"") != null);
     try std.testing.expect(std.mem.endsWith(u8, line, "\n"));
+}
+
+test "ai nl2cmd openai audit line hashes raw fields" {
+    const line = try nl2cmdAuditLineAlloc(std.testing.allocator, .{
+        .shell = "zsh",
+        .provider = .openai,
+        .cwd = "/tmp/repo",
+        .input = "?? list files",
+    }, "list files", "ls -lS", "candidate");
+    defer std.testing.allocator.free(line);
+    try std.testing.expect(std.mem.indexOf(u8, line, "\"provider\":\"openai\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, line, "\"request_sha256\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, line, "\"candidate_sha256\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, line, "list files") == null);
+    try std.testing.expect(std.mem.indexOf(u8, line, "ls -lS") == null);
 }
 
 test "ai bench output reports metrics" {
@@ -7986,6 +8167,10 @@ const ai_help_text =
     \\  explain       explain a command
     \\  nextcmd       suggest a next command from local context
     \\  nl2cmd        convert ?? input to a command suggestion
+    \\
+    \\provider options for risk/explain/nextcmd/nl2cmd:
+    \\      --provider ollama|openai  default: ollama; openai requires OPENAI_API_KEY
+    \\      --model <name>            default: gemma3:1b for ollama, gpt-5.5 for openai
     \\
 ;
 

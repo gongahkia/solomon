@@ -8,6 +8,7 @@ A release train can ship only when:
 
 - `main` passes CI
 - no `priority/p0` or release-blocker issue remains open
+- `CHANGELOG.md` has a dated `## [X.Y.Z] - YYYY-MM-DD` section for the release tag
 - release notes cover user-visible CLI, config, plugin, packaging, security, and deprecation changes
 - changed user-facing docs are merged before the tag
 - artifacts are signed and published by the tag-driven release workflow
@@ -22,7 +23,7 @@ Run the local gate from a clean worktree:
 scripts/monthly-release.sh --tag vX.Y.Z --verify-tag
 ```
 
-The script runs formatting, schema generation, tests, release build, changelog generation, and GitHub draft-release creation. Use `--dry-run` before the release window to inspect the generated notes and `gh release create` command.
+The script checks `CHANGELOG.md`, then runs formatting, schema generation, tests, release build, changelog generation, and GitHub draft-release creation. Use `--dry-run` before the release window to inspect the generated notes and `gh release create` command.
 
 ## Timing
 

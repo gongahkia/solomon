@@ -125,6 +125,7 @@ if [ "$dry_run" -eq 0 ]; then
     exit 1
   fi
   mkdir -p "$(dirname "$notes_file")"
+  run_step "$repo_root/scripts/check-changelog.sh" --tag "$tag"
   if [ "$skip_checks" -eq 0 ]; then
     run_step zig fmt --check "$repo_root/build.zig" "$repo_root/src" "$repo_root/tools"
     run_step zig build schema

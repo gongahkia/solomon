@@ -200,7 +200,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 
 - [ ] Keep the benchmark dashboard green and public
 - [ ] Triage issues weekly, target 7-day first-response SLA
-- [ ] Update the changelog on every release (keep-a-changelog format)
+- [x] Update the changelog on every release (keep-a-changelog format)
 - [ ] Update `docs/` whenever a user-facing flag, config field, or module changes
 - [x] Run the fuzzer in CI nightly
 - [ ] Run the comparison benchmark vs. starship + p10k + oh-my-posh on every tagged release

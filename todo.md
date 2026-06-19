@@ -423,7 +423,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] OpenAI provider (opt-in)
 - [x] Anthropic provider (opt-in)
 - [x] Gemini provider (opt-in)
-- [ ] LM Studio provider (local but non-Ollama)
+- [x] LM Studio provider (local but non-Ollama)
 - [ ] llama.cpp direct (local, no daemon)
 - [ ] Provider switch via plugin config; daemon enforces capability
 

@@ -272,6 +272,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const gemini_test_run = b.addRunArtifact(gemini_tests);
+    const lmstudio_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/ai/lmstudio.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const lmstudio_test_run = b.addRunArtifact(lmstudio_tests);
     const nextcmd_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/ai/nextcmd.zig"),
@@ -802,6 +810,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&openai_test_run.step);
     test_step.dependOn(&anthropic_test_run.step);
     test_step.dependOn(&gemini_test_run.step);
+    test_step.dependOn(&lmstudio_test_run.step);
     test_step.dependOn(&nextcmd_test_run.step);
     test_step.dependOn(&nl2cmd_test_run.step);
     test_step.dependOn(&ai_explain_test_run.step);

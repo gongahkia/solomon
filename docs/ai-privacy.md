@@ -25,6 +25,8 @@ Local AI commands may read:
 
 Local AI commands must fail closed when the model daemon is unavailable.
 
+The built-in LM Studio provider uses provider id `lmstudio`, endpoint `POST http://127.0.0.1:1234/v1/responses` by default, `model`, and raw `input`. Its base URL must remain loopback (`127.0.0.1`, `localhost`, or `[::1]`).
+
 ## Cloud Data
 
 Cloud provider support is not part of the default prompt path. A cloud provider must document:

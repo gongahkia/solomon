@@ -85,6 +85,7 @@
 - [OpenAI](ai-openai.md)
 - [Anthropic](ai-anthropic.md)
 - [Gemini](ai-gemini.md)
+- [LM Studio](ai-lmstudio.md)
 - [AI Privacy](ai-privacy.md)
 
 # Videos

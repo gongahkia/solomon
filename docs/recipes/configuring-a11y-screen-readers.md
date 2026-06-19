@@ -2,6 +2,12 @@
 
 Use `SHISA_A11Y=1` for interactive hooks, or `shisa prompt --a11y` for one-shot checks.
 
+Bell and notification preferences can be written without an interactive editor:
+
+```sh
+./zig-out/bin/shisa init --cmd-complete-bell --cmd-complete-bell-mode osc9 --cmd-complete-bell-threshold-ms 10000
+```
+
 To create a new accessibility-first config:
 
 ```sh

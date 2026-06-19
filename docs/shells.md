@@ -14,6 +14,8 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 
 Set `SHISA_CMD_COMPLETE_BELL=1` before sourcing zsh, bash, or fish init to emit a completion notification after commands whose measured duration is at least `SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS` (default `10000`). `SHISA_CMD_COMPLETE_BELL_MODE` accepts `bell`, `osc9`, `notify-send`, or `macos`.
 
+`shisa init --cmd-complete-bell --cmd-complete-bell-mode osc9 --cmd-complete-bell-threshold-ms 10000` writes these preferences to `shell.env` next to `shisa.toml`. The zsh, bash, and fish hooks read that file without sourcing it as shell code.
+
 Set `SHISA_LONG_RUNNING=1` before sourcing zsh, bash, or fish init to print `shisa: command still running` after `SHISA_LONG_RUNNING_THRESHOLD_SECONDS` (default `30`) while a foreground command is still active. The default message does not include the command text.
 
 `shisa prompt` emits OSC-7 cwd metadata before the rendered prompt so terminals that support it can open new tabs in the current directory. The sequence uses `file://<host><cwd>` and percent-encodes path bytes.

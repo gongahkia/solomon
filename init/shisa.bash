@@ -69,6 +69,32 @@ if ! shisa_bash_version_at_least_4; then
   return 0 2>/dev/null || exit 0
 fi
 
+shisa_config_dir() {
+  if [[ -n ${XDG_CONFIG_HOME:-} ]]; then
+    printf '%s' "${XDG_CONFIG_HOME}/shisa"
+  else
+    printf '%s' "${HOME}/.config/shisa"
+  fi
+}
+
+shisa_load_shell_prefs() {
+  local path line key value
+  path="$(shisa_config_dir)/shell.env"
+  [[ -r ${path} ]] || return 0
+  while IFS= read -r line || [[ -n ${line} ]]; do
+    [[ -n ${line} && ${line:0:1} != "#" && ${line} == *=* ]] || continue
+    key=${line%%=*}
+    value=${line#*=}
+    case ${key} in
+      SHISA_CMD_COMPLETE_BELL|SHISA_CMD_COMPLETE_BELL_MODE|SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS|SHISA_CMD_COMPLETE_BELL_MESSAGE)
+        printf -v "${key}" '%s' "${value}"
+        ;;
+    esac
+  done <"${path}"
+}
+
+shisa_load_shell_prefs
+
 SHISA_LAST_EXIT=0
 SHISA_LAST_JOBS=0
 SHISA_LAST_DURATION_MS=0

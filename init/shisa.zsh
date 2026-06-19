@@ -18,6 +18,36 @@ shisa_zsh_version_at_least_5 || return 0
 typeset -g __SHISA_ZSH_INIT=1
 typeset -g SHISA_BIN=${SHISA_BIN:-shisa}
 typeset -g SHISA_SOCKET=${SHISA_SOCKET:-}
+
+shisa_config_dir() {
+  emulate -L zsh
+  if [[ -n ${XDG_CONFIG_HOME:-} ]]; then
+    print -rn -- "${XDG_CONFIG_HOME}/shisa"
+  else
+    print -rn -- "${HOME}/.config/shisa"
+  fi
+}
+
+shisa_load_shell_prefs() {
+  emulate -L zsh
+  local path
+  path="$(shisa_config_dir)/shell.env"
+  [[ -r ${path} ]] || return 0
+  local line key value
+  while IFS= read -r line || [[ -n ${line} ]]; do
+    [[ -n ${line} && ${line[1]} != '#' && ${line} == *=* ]] || continue
+    key=${line%%=*}
+    value=${line#*=}
+    case ${key} in
+      SHISA_CMD_COMPLETE_BELL|SHISA_CMD_COMPLETE_BELL_MODE|SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS|SHISA_CMD_COMPLETE_BELL_MESSAGE)
+        typeset -g "${key}=${value}"
+        ;;
+    esac
+  done <"${path}"
+}
+
+shisa_load_shell_prefs
+
 typeset -g SHISA_LAST_EXIT=0
 typeset -g SHISA_LAST_JOBS=0
 typeset -g SHISA_LAST_DURATION_MS=0

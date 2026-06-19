@@ -167,15 +167,20 @@ test "smoke" {
     try std.testing.expect(true);
 }
 
+const InitConfig = struct {
+    a11y: bool = false,
+    shell_preferences: ?ShellPreferences = null,
+};
+
+const ShellPreferences = struct {
+    cmd_complete_bell: bool = false,
+    cmd_complete_bell_mode: []const u8 = "bell",
+    cmd_complete_bell_threshold_ms: u64 = 10000,
+    cmd_complete_bell_message: []const u8 = "shisa: command complete",
+};
+
 fn initConfig(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    var a11y = false;
-    for (args) |arg| {
-        if (std.mem.eql(u8, arg, "--a11y")) {
-            a11y = true;
-        } else {
-            return error.UnknownInitArgument;
-        }
-    }
+    const config = try parseInitArgs(args);
 
     const path = try defaultConfigPath(allocator);
     defer allocator.free(path);
@@ -183,13 +188,108 @@ fn initConfig(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try std.fs.cwd().makePath(parent);
     }
 
-    var file = try std.fs.createFileAbsolute(path, .{ .exclusive = true });
-    defer file.close();
-    try file.writeAll(if (a11y) shisa_config.a11y_config_text else shisa_config.default_config_text);
+    var wrote_config = false;
+    if (std.fs.createFileAbsolute(path, .{ .exclusive = true })) |file| {
+        var config_file = file;
+        defer config_file.close();
+        try config_file.writeAll(if (config.a11y) shisa_config.a11y_config_text else shisa_config.default_config_text);
+        wrote_config = true;
+    } else |err| switch (err) {
+        error.PathAlreadyExists => {
+            if (config.shell_preferences == null or config.a11y) return err;
+        },
+        else => return err,
+    }
 
-    const message = try std.fmt.allocPrint(allocator, "wrote {s}\n", .{path});
+    var wrote_shell_preferences = false;
+    var shell_path_for_message: ?[]u8 = null;
+    defer if (shell_path_for_message) |shell_path| allocator.free(shell_path);
+    if (config.shell_preferences) |preferences| {
+        const shell_path = try shellPreferencesPathAlloc(allocator, path);
+        errdefer allocator.free(shell_path);
+        const source = try renderShellPreferencesAlloc(allocator, preferences);
+        defer allocator.free(source);
+        var shell_file = try std.fs.createFileAbsolute(shell_path, .{ .truncate = true });
+        defer shell_file.close();
+        try shell_file.writeAll(source);
+        shell_path_for_message = shell_path;
+        wrote_shell_preferences = true;
+    }
+
+    const message = if (wrote_config and wrote_shell_preferences)
+        try std.fmt.allocPrint(allocator, "wrote {s}\nwrote {s}\n", .{ path, shell_path_for_message.? })
+    else if (wrote_shell_preferences)
+        try std.fmt.allocPrint(allocator, "wrote {s}\n", .{shell_path_for_message.?})
+    else
+        try std.fmt.allocPrint(allocator, "wrote {s}\n", .{path});
     defer allocator.free(message);
     try std.fs.File.stdout().writeAll(message);
+}
+
+fn parseInitArgs(args: []const []const u8) !InitConfig {
+    var config: InitConfig = .{};
+    var prefs: ShellPreferences = .{};
+    var seen_prefs = false;
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "--a11y")) {
+            config.a11y = true;
+        } else if (std.mem.eql(u8, arg, "--cmd-complete-bell")) {
+            prefs.cmd_complete_bell = true;
+            seen_prefs = true;
+        } else if (std.mem.eql(u8, arg, "--cmd-complete-bell-mode")) {
+            i += 1;
+            if (i >= args.len) return error.UnknownInitArgument;
+            if (!validCmdCompleteBellMode(args[i])) return error.InvalidCmdCompleteBellMode;
+            prefs.cmd_complete_bell_mode = args[i];
+            prefs.cmd_complete_bell = true;
+            seen_prefs = true;
+        } else if (std.mem.eql(u8, arg, "--cmd-complete-bell-threshold-ms")) {
+            i += 1;
+            if (i >= args.len) return error.UnknownInitArgument;
+            prefs.cmd_complete_bell_threshold_ms = try std.fmt.parseInt(u64, args[i], 10);
+            prefs.cmd_complete_bell = true;
+            seen_prefs = true;
+        } else if (std.mem.eql(u8, arg, "--cmd-complete-bell-message")) {
+            i += 1;
+            if (i >= args.len) return error.UnknownInitArgument;
+            if (std.mem.indexOfAny(u8, args[i], "\r\n") != null) return error.InvalidCmdCompleteBellMessage;
+            prefs.cmd_complete_bell_message = args[i];
+            prefs.cmd_complete_bell = true;
+            seen_prefs = true;
+        } else {
+            return error.UnknownInitArgument;
+        }
+    }
+    if (seen_prefs) config.shell_preferences = prefs;
+    return config;
+}
+
+fn validCmdCompleteBellMode(mode: []const u8) bool {
+    return std.mem.eql(u8, mode, "bell") or
+        std.mem.eql(u8, mode, "terminal") or
+        std.mem.eql(u8, mode, "osc9") or
+        std.mem.eql(u8, mode, "notify-send") or
+        std.mem.eql(u8, mode, "macos");
+}
+
+fn shellPreferencesPathAlloc(allocator: std.mem.Allocator, config_path: []const u8) ![]u8 {
+    const dir = std.fs.path.dirname(config_path) orelse return error.MissingConfigDir;
+    return std.fmt.allocPrint(allocator, "{s}/shell.env", .{dir});
+}
+
+fn renderShellPreferencesAlloc(allocator: std.mem.Allocator, preferences: ShellPreferences) ![]u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "SHISA_CMD_COMPLETE_BELL={d}\nSHISA_CMD_COMPLETE_BELL_MODE={s}\nSHISA_CMD_COMPLETE_BELL_THRESHOLD_MS={d}\nSHISA_CMD_COMPLETE_BELL_MESSAGE={s}\n",
+        .{
+            @intFromBool(preferences.cmd_complete_bell),
+            preferences.cmd_complete_bell_mode,
+            preferences.cmd_complete_bell_threshold_ms,
+            preferences.cmd_complete_bell_message,
+        },
+    );
 }
 
 fn defaultConfigPath(allocator: std.mem.Allocator) ![]u8 {
@@ -670,6 +770,33 @@ test "default config path falls back to home" {
     const path = try defaultConfigPathFromEnv(std.testing.allocator, null, "/tmp/home");
     defer std.testing.allocator.free(path);
     try std.testing.expectEqualStrings("/tmp/home/.config/shisa/shisa.toml", path);
+}
+
+test "init args render shell notification preferences" {
+    const config = try parseInitArgs(&.{
+        "--a11y",
+        "--cmd-complete-bell-mode",
+        "osc9",
+        "--cmd-complete-bell-threshold-ms",
+        "2500",
+        "--cmd-complete-bell-message",
+        "done",
+    });
+    try std.testing.expect(config.a11y);
+    try std.testing.expect(config.shell_preferences != null);
+    const prefs = config.shell_preferences.?;
+    try std.testing.expect(prefs.cmd_complete_bell);
+    try std.testing.expectEqualStrings("osc9", prefs.cmd_complete_bell_mode);
+    try std.testing.expectEqual(@as(u64, 2500), prefs.cmd_complete_bell_threshold_ms);
+    try std.testing.expectEqualStrings("done", prefs.cmd_complete_bell_message);
+
+    const source = try renderShellPreferencesAlloc(std.testing.allocator, prefs);
+    defer std.testing.allocator.free(source);
+    try std.testing.expectEqualStrings(
+        "SHISA_CMD_COMPLETE_BELL=1\nSHISA_CMD_COMPLETE_BELL_MODE=osc9\nSHISA_CMD_COMPLETE_BELL_THRESHOLD_MS=2500\nSHISA_CMD_COMPLETE_BELL_MESSAGE=done\n",
+        source,
+    );
+    try std.testing.expectError(error.InvalidCmdCompleteBellMode, parseInitArgs(&.{ "--cmd-complete-bell-mode", "bad" }));
 }
 
 fn explainConfig(allocator: std.mem.Allocator, args: []const []const u8) !void {
@@ -7801,7 +7928,7 @@ const help_text =
     \\                translate Tide fish settings to shisa.toml
     \\  import-pure
     \\                print the minimal Pure-compatible preset
-    \\  init          write default shisa.toml; --a11y uses the a11y theme
+    \\  init          write default shisa.toml; --a11y and shell notification prefs supported
     \\  pin           mark a path as never-evicted
     \\  plugin        new, lint, doctor, search, pack, install, list, enable, disable, or trust plugins
     \\  prompt        render prompt through shisad; --right prints configured right prompt

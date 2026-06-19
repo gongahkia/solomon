@@ -10,6 +10,34 @@ set -g __SHISA_FISH_INIT 1
 set -q SHISA_BIN; or set -g SHISA_BIN shisa
 set -q SHISA_SOCKET; or set -g SHISA_SOCKET ""
 set -q SHISA_INSTANT; or set -g SHISA_INSTANT 1
+
+function shisa_config_dir
+    if set -q XDG_CONFIG_HOME; and test -n "$XDG_CONFIG_HOME"
+        printf '%s' "$XDG_CONFIG_HOME/shisa"
+    else
+        printf '%s' "$HOME/.config/shisa"
+    end
+end
+
+function shisa_load_shell_prefs
+    set -l path (shisa_config_dir)/shell.env
+    test -r "$path"; or return 0
+    while read -l line
+        test -n "$line"; or continue
+        string match -qr '^#' -- "$line"; and continue
+        string match -q '*=*' -- "$line"; or continue
+        set -l parts (string split -m1 = -- "$line")
+        set -l key $parts[1]
+        set -l value $parts[2]
+        switch "$key"
+            case SHISA_CMD_COMPLETE_BELL SHISA_CMD_COMPLETE_BELL_MODE SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS SHISA_CMD_COMPLETE_BELL_MESSAGE
+                set -g $key "$value"
+        end
+    end <"$path"
+end
+
+shisa_load_shell_prefs
+
 set -q SHISA_PROD_GUARD; or set -g SHISA_PROD_GUARD 0
 set -q SHISA_PROD_GUARD_FORCE; or set -g SHISA_PROD_GUARD_FORCE 0
 set -q SHISA_AI_RISK_GUARD; or set -g SHISA_AI_RISK_GUARD 0

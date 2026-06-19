@@ -26,7 +26,7 @@ Marketplace 2.0 should answer those questions without turning core maintainers i
 
 ### Index Shape
 
-The v2 index is still static JSON published from `shisa.sh`, but it is split into:
+The v2 index is still static JSON published from the repo or release artifacts, but it is split into:
 
 - `plugins/index.v2.json`: compact search/install index
 - `plugins/<plugin-id>.json`: per-plugin metadata document
@@ -42,7 +42,7 @@ The top-level index contains only stable lookup fields:
     {
       "name": "git-tools",
       "kind": "plugin",
-      "metadata_url": "https://shisa.sh/plugins/git-tools.json",
+      "metadata_url": "plugins/git-tools.json",
       "latest": "0.4.1",
       "verified": true,
       "capability_summary": ["fs_read", "exec"],

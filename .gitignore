@@ -1,3 +1,5 @@
 CLAUDE.md
 .zig-cache/
 zig-out/
+.playwright-cli/
+output/

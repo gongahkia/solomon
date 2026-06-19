@@ -41,5 +41,5 @@ cp -R examples %{buildroot}%{_datadir}/shisa/examples
 %{_datadir}/shisa
 
 %changelog
-* Wed Jun 17 2026 Shisa maintainers <security@shisa.sh> - 0.1.0-1
+* Wed Jun 17 2026 Shisa maintainers <angryapplegravy@gmail.com> - 0.1.0-1
 - Initial package spec.

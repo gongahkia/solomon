@@ -41,8 +41,6 @@ A pack cannot move to `graduated` unless its row lists a pack-level issue tracke
 
 Pack changes that add a prompt path, parser, cache reader, local model pre/post-processing path, or official template must update this table and the matching `src/bench.zig` budget in the same change.
 
-Quarterly review procedure: [Pack Performance Review](governance/pack-perf-review.md).
-
 Status changes require a changelog entry and capability review when capabilities change.
 
-Adding a new official pack, graduating a pack, or expanding pack capabilities must update `docs/threat-model.md` in the same change. The update should cover new trust boundaries, declared capabilities, filesystem/env/exec/network access, audit output, and the Phase 32 evidence that exercises the pack.
+Adding a new official pack, graduating a pack, or expanding pack capabilities must update local capability docs in the same change.

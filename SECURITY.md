@@ -18,10 +18,6 @@ Include:
 
 Do not open a public issue for an unpatched vulnerability.
 
-## Sandbox Bounty Pool
-
-Sandbox escape reports are eligible for the pool defined in [Bug Bounty](docs/governance/bug-bounty.md). Payouts require a private reproducible report and available restricted bounty funds, including GitHub Sponsors receipts only after they are published as `sandbox-bounty` ledger entries.
-
 ## Scope
 
 In scope:

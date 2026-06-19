@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://shisa.sh/plugins/index.schema.json",
+  "$id": "docs/plugins/index.schema.json",
   "title": "Shisa plugin marketplace index",
   "type": "object",
   "required": ["version", "updated", "plugins"],

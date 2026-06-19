@@ -1,6 +1,6 @@
 [Unit]
 Description=Shisa prompt supervisor
-Documentation=https://shisa.sh/docs/supervisor.html
+Documentation=https://github.com/gongahkia/shisa/blob/main/docs/supervisor.md
 After=default.target
 
 [Service]

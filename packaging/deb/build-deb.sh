@@ -64,7 +64,7 @@ Section: shells
 Priority: optional
 Architecture: $arch
 Depends: libc6
-Maintainer: Shisa maintainers <security@shisa.sh>
+Maintainer: Shisa maintainers <angryapplegravy@gmail.com>
 Description: daemon-backed async-first cross-shell prompt
  Shisa keeps slow prompt work out of the shell by rendering through
  a per-user daemon with cached prompt modules.

@@ -5,11 +5,11 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: shisa 0.1.0\n"
-"Report-Msgid-Bugs-To: security@shisa.sh\n"
+"Report-Msgid-Bugs-To: angryapplegravy@gmail.com\n"
 "POT-Creation-Date: 2026-06-19 00:00+0000\n"
 "PO-Revision-Date: 2026-06-19 00:00+0000\n"
-"Last-Translator: Shisa contributors <security@shisa.sh>\n"
-"Language-Team: Shisa contributors <security@shisa.sh>\n"
+"Last-Translator: Shisa contributors <angryapplegravy@gmail.com>\n"
+"Language-Team: Shisa contributors <angryapplegravy@gmail.com>\n"
 "Language: \n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -20,42 +20,42 @@ msgid ""
 "shisa: unknown command; run `shisa --help`\n"
 msgstr ""
 
-#: src/main.zig:542
+#: src/main.zig:538
 msgid ""
 "theme validate: ok\n"
 msgstr ""
 
-#: src/main.zig:1320
+#: src/main.zig:1185
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""
 
-#: src/main.zig:1471
+#: src/main.zig:1336
 msgid ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 msgstr ""
 
-#: src/main.zig:2667
+#: src/main.zig:2532
 msgid ""
 "shisa ai bench: ollama not installed\n"
 msgstr ""
 
-#: src/main.zig:2671
+#: src/main.zig:2536
 msgid ""
 "shisa ai bench: ollama daemon not running\n"
 msgstr ""
 
-#: src/main.zig:2766
+#: src/main.zig:2631
 msgid ""
 "shisa ai nl2cmd: refusing to execute generated commands; confirm manually\n"
 msgstr ""
 
-#: src/main.zig:5927
+#: src/main.zig:5792
 msgid ""
 "shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 
-#: src/main.zig:8659
+#: src/main.zig:8524
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
@@ -96,7 +96,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:8699
+#: src/main.zig:8564
 msgid ""
 "usage: shisa ai <command> [args]\n"
 "\n"
@@ -116,7 +116,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:8718
+#: src/main.zig:8583
 msgid ""
 "usage: shisa ai redact (--test text | --add-literal text) [--rules path]\n"
 "\n"
@@ -127,7 +127,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:8728
+#: src/main.zig:8593
 msgid ""
 "usage: shisa config set locale=<locale|auto>\n"
 "\n"
@@ -136,7 +136,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:8736
+#: src/main.zig:8601
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -145,7 +145,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:8744
+#: src/main.zig:8609
 msgid ""
 "usage: shisa vouch verify [path]\n"
 "\n"
@@ -154,19 +154,17 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:8752
+#: src/main.zig:8617
 msgid ""
 "usage: shisa theme <command> [args]\n"
 "\n"
 "commands:\n"
 "  validate <path>   validate a theme file\n"
 "  preview <theme>   render a stub prompt from a built-in id or theme file\n"
-"  gallery [--no-open]\n"
-"                    generate a local static gallery and open it\n"
 "\n"
 msgstr ""
 
-#: src/main.zig:8763
+#: src/main.zig:8626
 msgid ""
 "usage: shisa font check\n"
 "\n"

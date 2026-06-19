@@ -251,8 +251,8 @@ fn appendHeader(allocator: std.mem.Allocator, out: *std.ArrayList(u8), kind: Cat
         .en_us => "English (United States) translations for Shisa.",
     };
     const language_team = switch (kind) {
-        .pot => "Shisa contributors <security@shisa.sh>",
-        .en_us => "English (United States) <security@shisa.sh>",
+        .pot => "Shisa contributors <angryapplegravy@gmail.com>",
+        .en_us => "English (United States) <angryapplegravy@gmail.com>",
     };
     const language = switch (kind) {
         .pot => "",
@@ -266,10 +266,10 @@ fn appendHeader(allocator: std.mem.Allocator, out: *std.ArrayList(u8), kind: Cat
         \\msgid ""
         \\msgstr ""
         \\"Project-Id-Version: shisa 0.1.0\n"
-        \\"Report-Msgid-Bugs-To: security@shisa.sh\n"
+        \\"Report-Msgid-Bugs-To: angryapplegravy@gmail.com\n"
         \\"POT-Creation-Date: 2026-06-19 00:00+0000\n"
         \\"PO-Revision-Date: 2026-06-19 00:00+0000\n"
-        \\"Last-Translator: Shisa contributors <security@shisa.sh>\n"
+        \\"Last-Translator: Shisa contributors <angryapplegravy@gmail.com>\n"
         \\"Language-Team: {s}\n"
         \\"Language: {s}\n"
         \\"MIME-Version: 1.0\n"

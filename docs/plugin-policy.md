@@ -15,7 +15,7 @@ Marketplace entries must:
 
 Plugins that handle secrets, cloud accounts, kubeconfigs, SSH config, or production context must describe their local data flow in the README.
 
-The static marketplace index is published from `docs/plugins/index.json` to `https://shisa.sh/plugins/index.json`. Entries stay out of the index until the repository URL, manifest hash, and signature metadata can be reviewed.
+The marketplace index is checked in at `docs/plugins/index.json`. Entries stay out of the index until the repository URL, manifest hash, and signature metadata can be reviewed.
 
 ## Verified Badge
 
@@ -38,4 +38,4 @@ Delisting is reversible when the owner fixes the issue and publishes a reviewabl
 
 ## Appeals
 
-Plugin owners may appeal by opening a governance issue or using the private project contact once configured. Appeals must include the plugin id, repository, disputed action, and remediation evidence.
+Plugin owners may appeal with a regular project issue once the plugin has published a reviewable remediation. Appeals must include the plugin id, repository, disputed action, and remediation evidence.

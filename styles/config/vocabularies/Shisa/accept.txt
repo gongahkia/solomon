@@ -4,7 +4,6 @@ Lua
 LuaJIT
 Nushell
 Oh My Posh
-Pagefind
 PowerShell
 Powerlevel10k
 Shisa
@@ -16,9 +15,7 @@ asciinema
 cache_rev
 fsnotify
 gcloud
-mdBook
 nixpkgs
-pagefind
 preexec
 precmd
 shisa

@@ -145,7 +145,7 @@ A `shisa bench` subcommand runs the above locally and emits a shareable JSON rep
 - `scoop install shisa` (Windows via WSL)
 - AUR (`shisa-bin`)
 - nixpkgs
-- single-line installer: `curl -sSL shisa.sh/install | sh` (after auditing supply chain)
+- repo installer script from GitHub Releases after supply-chain verification lands
 
 ## 12. Telemetry & privacy
 
@@ -168,9 +168,9 @@ Performance wins are surfaced through:
 - **Phase 3 — Cross-shell parity.** Bash + fish. Instant prompt for zsh and fish.
 - **Phase 4 — Plugin SDK + Lua sandbox.** Capability system, plugin loader, vetted-core module migration.
 - **Phase 5 — Nu + PowerShell.** Wider shell support, Linux hardening.
-- **Phase 6 — Theming + starship importer.** Theme spec, gallery, `shisa import-starship`.
-- **Phase 7 — 1.0 Launch.** Show HN post, brew formula, AUR, nixpkgs PR, blog series with benchmarks.
-- **Phase 8 — Post-GA.** Plugin marketplace, community modules, optional local-LLM hint plugin (opt-in only).
+- **Phase 6 — Theming + starship importer.** Theme spec, local preview, `shisa import-starship`.
+- **Phase 7 — Distribution + supply chain.** Package channels, signing, SBOM/SLSA, installer, self-update verification.
+- **Phase 8 — Deferred features.** Plugin marketplace, optional local-LLM hint plugin, advanced VCS integrations.
 
 ## 15. Success criteria
 
@@ -694,7 +694,7 @@ STRIDE-flavored survey of the surface area:
 | Elev. priv. | Lua sandbox escape via FFI / metatable abuse | Stripped stdlib; fuzz bridge; bug bounty; quick-pull mechanism.            |
 | Supply chain| Daemon binary tampered                       | Sigstore signing, SBOM published, SLSA Level 2 attestation, repro builds.   |
 
-A `docs/threat-model.md` keeps this current; an annual review is scheduled.
+Security-sensitive changes update the local capability, signing, and protocol docs that describe the affected surface.
 
 ## 33. Accessibility commitment (WCAG AA + a11y mode)
 
@@ -724,7 +724,7 @@ $ shisa init --a11y
 
 - All themes run through a contrast checker on every PR.
 - New themes refused until pass.
-- Public theme gallery shows the contrast ratio next to each.
+- Local theme preview output shows contrast validation results.
 
 ### 33.5 Keyboard-only operation
 
@@ -802,31 +802,13 @@ Shisa is OSS-free-forever. No paid tier. No private plugins. No cloud lock-in.
 
 ### 36.2 Funding sources
 
-- GitHub Sponsors (individuals + companies)
-- Open Collective (transparent ledger)
-- Optional fiscal-host (e.g., Software Freedom Conservancy) once income > $5k/yr
-- No corporate sponsorship that comes with feature demands
-
-### 36.3 Use of funds
-
-Documented in `FUNDING.md`:
-1. Bug bounty pool for sandbox escapes
-2. Maintainer stipends (only after maintainer team exists)
-3. Conference travel for talks
-4. Domain + landing-page hosting
-5. Audit (a11y, security) commissions
+Community funding is out of current scope.
 
 ### 36.4 No selling out
 
 Shisa will never relicense to a more restrictive license. The MIT decision is final.
 
-## 37. Brand & identity
-
-### 37.1 Mascot
-
-A stylized lion-dog (shisa) glyph. Two-tone, geometric, terminal-color-friendly. Used as repo icon, landing page hero, sticker designs.
-
-### 37.2 Voice
+## 37. Project voice
 
 - Calm, technical, opinionated.
 - Never breathless. Never AI-style "delve" or "underscore".
@@ -836,35 +818,26 @@ A stylized lion-dog (shisa) glyph. Two-tone, geometric, terminal-color-friendly.
 
 - Primary palette: warm dark grays + a single accent (`#FF6E50`-ish coral).
 - Typography: a humanist sans for prose, JetBrains Mono for code samples.
-- Slide deck + README + landing must look like the same product.
+- README remains the canonical public overview.
 
-### 37.4 Domain & socials
+### 37.4 Public surface
 
-- `shisa.sh` (canonical)
-- GitHub: `shisa-org/shisa`
-- Mastodon over Twitter for project announcements
-- Discord + GH Discussions for community
+- README and GitHub Releases are canonical.
 
 ## 38. Documentation strategy
 
 ### 38.1 Tiers
 
-- **Quickstart:** `shisa.sh/quickstart` — install + 5 min to a working prompt.
+- **Quickstart:** README install + 5 min to a working prompt.
 - **Recipes:** task-driven, copy-paste-runnable.
 - **Reference:** generated from sources (config schema, CLI, plugin API).
 - **Internals:** the architecture, threat model, RFCs, profiling notes.
 
 ### 38.2 Tooling
 
-- mdBook for docs site (Rust-built, fits the ecosystem, fast).
 - Schema docs auto-generated from `build.zig` + a `shisa schema dump`.
 - Examples folder is CI-tested.
 - All docs run through `vale` for style consistency.
-
-### 38.3 Videos
-
-- 3 short YouTube videos for launch: "Why Shisa", "5-min Setup", "Plugin in 10 lines".
-- Captioned for a11y. Transcripts checked into the repo.
 
 ## 39. Testing strategy & quality gates
 
@@ -928,7 +901,7 @@ Semver. `v0.x` is API-unstable; `v1.0` is the first stable wire protocol + plugi
 - Flatpak (community)
 - Snap (community)
 - DEB + RPM packages
-- `curl -sSL shisa.sh/install | sh` (with signature verification)
+- repo installer script with signature verification
 
 ### 40.5 Deprecation policy
 

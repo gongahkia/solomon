@@ -186,7 +186,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 ## Phase 9 — Post-GA
 
 - [ ] Stand up the plugin marketplace (static directory, plugins live in user-owned repos, index in shisa.sh/plugins)
-- [ ] Add plugin verification: signed manifests, maintainer-vetted "verified" badge
+- [x] Add plugin verification: signed manifests, maintainer-vetted "verified" badge
 - [ ] Optional: opt-in local-LLM hint plugin (ollama-backed). Off by default. Lives outside core.
 - [ ] Optional: cloud-safety plugin pack (prod-warning, k8s-namespace-risk, IAM-principal). Lives outside core.
 - [ ] Native Windows support (ReadDirectoryChangesW) — community-led

@@ -218,6 +218,23 @@ pub fn build(b: *std.Build) void {
     const plugin_api_docs_step = b.step("plugin-api-docs", "Generate plugin API docs from Zig source annotations");
     plugin_api_docs_step.dependOn(&plugin_api_docs_run.step);
 
+    const i18n_extract_exe = b.addExecutable(.{
+        .name = "shisa-i18n-extract",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/i18n_extract.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const i18n_extract_run = b.addRunArtifact(i18n_extract_exe);
+    i18n_extract_run.addFileArg(b.path("i18n/shisa.pot"));
+    i18n_extract_run.addFileArg(b.path("i18n/en-US/LC_MESSAGES/shisa.po"));
+    i18n_extract_run.addFileArg(b.path("src/main.zig"));
+    i18n_extract_run.addFileArg(b.path("src/shisad.zig"));
+    i18n_extract_run.addFileArg(b.path("src/shisa-supervisor.zig"));
+    const i18n_extract_step = b.step("i18n-extract", "Extract user-facing strings into gettext catalogs");
+    i18n_extract_step.dependOn(&i18n_extract_run.step);
+
     const run_cmd = b.addRunArtifact(exe);
     if (b.args) |args| run_cmd.addArgs(args);
     const run_step = b.step("run", "Run shisa");
@@ -770,6 +787,24 @@ pub fn build(b: *std.Build) void {
     plugin_api_docs_check_run.addFileArg(b.path("src/plugin/lua.zig"));
     const plugin_api_docs_diff = b.addSystemCommand(&.{ "cmp", "docs/plugin-api.md", "zig-out/plugin-api.md" });
     plugin_api_docs_diff.step.dependOn(&plugin_api_docs_check_run.step);
+    const i18n_extract_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/i18n_extract.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const i18n_extract_test_run = b.addRunArtifact(i18n_extract_tests);
+    const i18n_extract_check_run = b.addRunArtifact(i18n_extract_exe);
+    i18n_extract_check_run.addArg("zig-out/shisa.pot");
+    i18n_extract_check_run.addArg("zig-out/shisa.en-US.po");
+    i18n_extract_check_run.addFileArg(b.path("src/main.zig"));
+    i18n_extract_check_run.addFileArg(b.path("src/shisad.zig"));
+    i18n_extract_check_run.addFileArg(b.path("src/shisa-supervisor.zig"));
+    const i18n_pot_diff = b.addSystemCommand(&.{ "cmp", "i18n/shisa.pot", "zig-out/shisa.pot" });
+    i18n_pot_diff.step.dependOn(&i18n_extract_check_run.step);
+    const i18n_po_diff = b.addSystemCommand(&.{ "cmp", "i18n/en-US/LC_MESSAGES/shisa.po", "zig-out/shisa.en-US.po" });
+    i18n_po_diff.step.dependOn(&i18n_extract_check_run.step);
     const client_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/shisa-client.zig"),
@@ -888,6 +923,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cli_docs_diff.step);
     test_step.dependOn(&plugin_api_docs_test_run.step);
     test_step.dependOn(&plugin_api_docs_diff.step);
+    test_step.dependOn(&i18n_extract_test_run.step);
+    test_step.dependOn(&i18n_pot_diff.step);
+    test_step.dependOn(&i18n_po_diff.step);
     test_step.dependOn(&client_test_run.step);
     test_step.dependOn(&server_test_run.step);
     test_step.dependOn(&zsh_integration.step);

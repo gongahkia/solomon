@@ -440,7 +440,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] `cmd_complete_bell` (terminal bell / OSC-9 / notify-send / macOS UserNotifications)
 - [x] `tmux_pane` segment (pane/window when inside tmux)
 - [x] `right_prompt` (right-aligned secondary segment, RPS in zsh / fish_right_prompt in fish)
-- [ ] Per-shell ergonomic shims for right_prompt where shell support is partial
+- [x] Per-shell ergonomic shims for right_prompt where shell support is partial
 - [x] Tests for tmux integration via expect/pexpect scripts
 
 ## Phase 14 — Plugin marketplace polish

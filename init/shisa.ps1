@@ -82,6 +82,42 @@ function global:prompt {
     shisa_prompt_render
 }
 
+function global:shisa_right_prompt_render {
+    $lastCommandSucceeded = $?
+    $lastNativeExitCode = $global:LASTEXITCODE
+    $socketPath = shisa_socket_path
+    if (-not (Test-Path -LiteralPath $socketPath)) { return "" }
+
+    $location = Get-Location
+    $cwd = if ($location.ProviderPath) { $location.ProviderPath } else { $location.Path }
+    $jobs = @(Get-Job -ErrorAction SilentlyContinue | Where-Object { $_.State -eq "Running" }).Count
+    $lastExit = if ($lastCommandSucceeded) { 0 } elseif ($null -ne $lastNativeExitCode) { [int]$lastNativeExitCode } else { 1 }
+    $args = @(
+        "prompt",
+        "--right",
+        "--shell", "pwsh",
+        "--cwd", $cwd,
+        "--exit", "$lastExit",
+        "--jobs", "$jobs",
+        "--duration-ms", "0",
+        "--socket", $socketPath
+    )
+    if ($env:SHISA_A11Y -eq "1") { $args += "--a11y" }
+    if ($env:SHISA_RTL -eq "1") { $args += "--rtl" }
+
+    try {
+        $rendered = & $env:SHISA_BIN @args 2>$null
+        $shisaExitCode = $global:LASTEXITCODE
+        $global:LASTEXITCODE = $lastNativeExitCode
+        if ($shisaExitCode -eq 0 -and $null -ne $rendered) {
+            return ($rendered -join "`n")
+        }
+    } catch {
+        $global:LASTEXITCODE = $lastNativeExitCode
+    }
+    return ""
+}
+
 function global:Invoke-ShisaRedraw {
     [Console]::Write("`e[2K`r")
 }

@@ -70,6 +70,40 @@ if not ("__SHISA_NU_INIT" in $env) {
         }
     }
 
+    def shisa-right-prompt-render [] {
+        let socket_path = (shisa-socket-path)
+        if not ($socket_path | path exists) {
+            return ""
+        }
+
+        let exit_code = ($env.LAST_EXIT_CODE? | default 0 | into int)
+        let jobs_count = (job list | length)
+        let args = [
+            prompt
+            --right
+            --shell
+            nu
+            --cwd
+            (pwd)
+            --exit
+            ($exit_code | into string)
+            --jobs
+            ($jobs_count | into string)
+            --duration-ms
+            "0"
+            --socket
+            $socket_path
+        ]
+        let args = if (($env.SHISA_A11Y? | default "0") == "1") { $args | append "--a11y" } else { $args }
+        let args = if (($env.SHISA_RTL? | default "0") == "1") { $args | append "--rtl" } else { $args }
+        let rendered = (try { run-external $env.SHISA_BIN ...$args e> /dev/null | complete } catch { { stdout: "", exit_code: 1 } })
+        if $rendered.exit_code == 0 {
+            $rendered.stdout
+        } else {
+            ""
+        }
+    }
+
     def shisa-nextcmd [] {
         let last_exit = ($env.LAST_EXIT_CODE? | default 0 | into string)
         let args = [ai nextcmd --shell nu --cwd (pwd) --last-exit $last_exit]
@@ -117,6 +151,7 @@ if not ("__SHISA_NU_INIT" in $env) {
     })
 
     $env.PROMPT_COMMAND = {|| shisa-prompt-render }
+    $env.PROMPT_COMMAND_RIGHT = {|| shisa-right-prompt-render }
 }
 
 def --env shisa-reprompt [] {

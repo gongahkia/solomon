@@ -75,6 +75,7 @@ SHISA_LAST_DURATION_MS=0
 SHISA_LAST_COMMAND=
 SHISA_ASYNC_REDRAW=${SHISA_ASYNC_REDRAW:-1}
 SHISA_ASYNC_KEYSEQ=${SHISA_ASYNC_KEYSEQ:-'\C-x\C-s'}
+SHISA_BASH_RIGHT_PROMPT=${SHISA_BASH_RIGHT_PROMPT:-0}
 SHISA_NEXTCMD_KEYSEQ=${SHISA_NEXTCMD_KEYSEQ:-'\C-x\C-n'}
 SHISA_NEXTCMD_ACCEPT_KEYSEQ=${SHISA_NEXTCMD_ACCEPT_KEYSEQ:-'\C-i'}
 SHISA_NEXTCMD_REJECT_KEYSEQ=${SHISA_NEXTCMD_REJECT_KEYSEQ:-'\e'}
@@ -221,6 +222,30 @@ shisa_prompt_render() {
   "${SHISA_BIN}" "${args[@]}" || shisa_prompt_fallback
 }
 
+shisa_bash_right_prompt_render() {
+  local socket_path
+  socket_path=$(shisa_socket_path)
+  [[ -S ${socket_path} ]] || return 0
+
+  local -a args
+  args=(prompt --right --shell bash --cwd "${PWD}" --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
+  [[ ${SHISA_A11Y:-0} == 1 ]] && args+=(--a11y)
+  [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)
+  "${SHISA_BIN}" "${args[@]}" 2>/dev/null || true
+}
+
+shisa_bash_right_prompt_draw() {
+  [[ ${SHISA_BASH_RIGHT_PROMPT:-0} == 1 ]] || return 0
+  local right_prompt
+  right_prompt=$(shisa_bash_right_prompt_render) || return 0
+  [[ -n ${right_prompt} ]] || return 0
+  local cols=${COLUMNS:-80}
+  [[ ${cols} =~ ^[0-9]+$ ]] || cols=80
+  local width=${#right_prompt}
+  ((width < cols)) || return 0
+  printf '\r%*s\r' "${cols}" "${right_prompt}"
+}
+
 shisa_async_redraw() {
   local line=${READLINE_LINE-}
   local point=${READLINE_POINT-0}
@@ -287,6 +312,7 @@ shisa_prompt_command() {
     eval "${__SHISA_OLD_PROMPT_COMMAND}"
   fi
   shisa_precmd "${last_status}"
+  shisa_bash_right_prompt_draw
   SHISA_IN_PROMPT=0
   return "${last_status}"
 }

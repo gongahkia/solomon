@@ -47,6 +47,7 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 - Captures duration with a `DEBUG` trap and `$EPOCHREALTIME`; Bash builds without `$EPOCHREALTIME` report `0ms`.
 - Uses a Readline binding (`SHISA_ASYNC_KEYSEQ`, default `\C-x\C-s`) for async redraw.
 - Bash redraw limitation: an external notifier must inject the bound key sequence into the active tty. Redraw only works while Readline is active, not while a foreground command is running.
+- Bash has no native right prompt; set `SHISA_BASH_RIGHT_PROMPT=1` to draw `[prompt].right_modules` before `PS1` as a best-effort shim.
 - When `SHISA_PROD_GUARD=1`, the `DEBUG` trap sends `shisa cloud preexec --socket <socket> --shell bash -- <command>` to the daemon.
 
 ## fish
@@ -64,6 +65,7 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 - Uses `$env.PROMPT_COMMAND` and a cwd fallback.
 - Captures exit via `$env.LAST_EXIT_CODE` and jobs via `job list`; generic command duration is reported as `0ms`.
 - Supported/tested baseline: Nushell 0.113.x.
+- Sets `$env.PROMPT_COMMAND_RIGHT` to render `[prompt].right_modules`.
 - Provides `shisa-reprompt`, which sets `SHISA_REPROMPT_REQUESTED=1`; a `pre_prompt` hook consumes it before the next prompt render.
 - No reliable parent-shell repaint hook is available from an external process, so async redraw is documented as limited.
 
@@ -72,6 +74,7 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 - Uses a global `prompt` function and a cwd fallback.
 - Captures native exit status and running PowerShell jobs; generic command duration is reported as `0ms`.
 - Registers `Shisa.AsyncFill` with `Register-EngineEvent` when available; the action calls `Invoke-ShisaRedraw`.
+- Defines `shisa_right_prompt_render` for hosts that compose their own right prompt; default `prompt` output remains left-only.
 - Set `SHISA_PWSH_ASYNC_EVENT=0` before sourcing `init/shisa.ps1` to disable the event hook.
 
 ## Pending Shells

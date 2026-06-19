@@ -18,6 +18,10 @@ set -q SHISA_CMD_COMPLETE_BELL; or set -g SHISA_CMD_COMPLETE_BELL 0
 set -q SHISA_CMD_COMPLETE_BELL_MODE; or set -g SHISA_CMD_COMPLETE_BELL_MODE bell
 set -q SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS; or set -g SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS 10000
 set -q SHISA_CMD_COMPLETE_BELL_MESSAGE; or set -g SHISA_CMD_COMPLETE_BELL_MESSAGE "shisa: command complete"
+set -q SHISA_LONG_RUNNING; or set -g SHISA_LONG_RUNNING 0
+set -q SHISA_LONG_RUNNING_THRESHOLD_SECONDS; or set -g SHISA_LONG_RUNNING_THRESHOLD_SECONDS 30
+set -q SHISA_LONG_RUNNING_MESSAGE; or set -g SHISA_LONG_RUNNING_MESSAGE "shisa: command still running"
+set -g SHISA_LONG_RUNNING_PID ""
 
 function shisa_detect_rtl_locale
     set -l locale ""
@@ -85,6 +89,7 @@ function shisa_prompt_render
     set -g SHISA_LAST_STATUS $last_status
     set -g SHISA_LAST_JOBS $jobs_count
     set -g SHISA_LAST_DURATION_MS $duration_ms
+    shisa_long_running_stop
     shisa_cmd_complete_bell $duration_ms
 
     set -l args prompt --shell fish --cwd "$PWD" --exit "$last_status" --jobs "$jobs_count" --duration-ms "$duration_ms" --socket "$socket_path"
@@ -133,15 +138,17 @@ function shisa_preexec_guard --on-event fish_preexec
     if test "$SHISA_AI_RISK_GUARD" = 1
         command "$SHISA_BIN" ai risk --preexec -- "$SHISA_LAST_COMMAND"; or return $status
     end
-    test "$SHISA_PROD_GUARD" = 1; or return 0
-    set -l command "$SHISA_LAST_COMMAND"
-    test -n "$command"; or return 0
-    set -l socket_path (shisa_socket_path)
-    set -l args cloud preexec --socket "$socket_path" --shell fish
-    if test "$SHISA_PROD_GUARD_FORCE" = 1
-        set args $args --force
+    if test "$SHISA_PROD_GUARD" = 1
+        set -l command "$SHISA_LAST_COMMAND"
+        test -n "$command"; or return 0
+        set -l socket_path (shisa_socket_path)
+        set -l args cloud preexec --socket "$socket_path" --shell fish
+        if test "$SHISA_PROD_GUARD_FORCE" = 1
+            set args $args --force
+        end
+        command "$SHISA_BIN" $args -- "$command"; or return $status
     end
-    command "$SHISA_BIN" $args -- "$command"
+    shisa_long_running_start
 end
 
 function shisa_cmd_complete_bell
@@ -163,6 +170,30 @@ function shisa_cmd_complete_bell
             type -q osascript; and osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "shisa"' -e 'end run' "$message" >/dev/null 2>&1
     end
     return 0
+end
+
+function shisa_long_running_start
+    shisa_long_running_stop
+    test "$SHISA_LONG_RUNNING" = 1; or return 0
+    string match -qr '^[0-9]+$' -- "$SHISA_LONG_RUNNING_THRESHOLD_SECONDS"; or return 0
+    set -l message "$SHISA_LONG_RUNNING_MESSAGE"
+    begin
+        sleep "$SHISA_LONG_RUNNING_THRESHOLD_SECONDS"
+        printf '\n%s\n' "$message"
+    end &
+    set -g SHISA_LONG_RUNNING_PID $last_pid
+end
+
+function shisa_long_running_stop
+    if test -n "$SHISA_LONG_RUNNING_PID"
+        kill "$SHISA_LONG_RUNNING_PID" >/dev/null 2>&1
+        or true
+        set -g SHISA_LONG_RUNNING_PID ""
+    end
+end
+
+function shisa_long_running_cleanup --on-event fish_exit
+    shisa_long_running_stop
 end
 
 function shisa_async_redraw --on-event shisa_async_redraw

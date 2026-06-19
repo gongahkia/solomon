@@ -36,6 +36,10 @@ typeset -g SHISA_CMD_COMPLETE_BELL=${SHISA_CMD_COMPLETE_BELL:-0}
 typeset -g SHISA_CMD_COMPLETE_BELL_MODE=${SHISA_CMD_COMPLETE_BELL_MODE:-bell}
 typeset -g SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS=${SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS:-10000}
 typeset -g SHISA_CMD_COMPLETE_BELL_MESSAGE=${SHISA_CMD_COMPLETE_BELL_MESSAGE:-shisa: command complete}
+typeset -g SHISA_LONG_RUNNING=${SHISA_LONG_RUNNING:-0}
+typeset -g SHISA_LONG_RUNNING_THRESHOLD_SECONDS=${SHISA_LONG_RUNNING_THRESHOLD_SECONDS:-30}
+typeset -g SHISA_LONG_RUNNING_MESSAGE=${SHISA_LONG_RUNNING_MESSAGE:-shisa: command still running}
+typeset -g SHISA_LONG_RUNNING_PID=
 
 shisa_detect_rtl_locale() {
   emulate -L zsh
@@ -94,6 +98,7 @@ shisa_precmd() {
   else
     SHISA_LAST_DURATION_MS=0
   fi
+  shisa_long_running_stop
   shisa_cmd_complete_bell "${SHISA_LAST_DURATION_MS}"
 }
 
@@ -105,7 +110,8 @@ shisa_preexec() {
   SHISA_LAST_COMMAND=${command}
   SHISA_PREEXEC_REALTIME=${EPOCHREALTIME:-}
   shisa_ai_risk_preexec "${command}" || return $?
-  shisa_preexec_guard zsh "${command}"
+  shisa_preexec_guard zsh "${command}" || return $?
+  shisa_long_running_start
 }
 
 shisa_hook_once preexec shisa_preexec
@@ -149,6 +155,28 @@ shisa_cmd_complete_bell() {
   esac
   return 0
 }
+
+shisa_long_running_start() {
+  emulate -L zsh
+  shisa_long_running_stop
+  [[ ${SHISA_LONG_RUNNING:-0} == 1 ]] || return 0
+  local threshold=${SHISA_LONG_RUNNING_THRESHOLD_SECONDS:-30}
+  [[ ${threshold} == <-> ]] || return 0
+  local message=${SHISA_LONG_RUNNING_MESSAGE:-shisa: command still running}
+  ( sleep "${threshold}"; print -r -- $'\n'"${message}" ) &
+  SHISA_LONG_RUNNING_PID=$!
+  disown "${SHISA_LONG_RUNNING_PID}" 2>/dev/null || true
+}
+
+shisa_long_running_stop() {
+  emulate -L zsh
+  local pid=${SHISA_LONG_RUNNING_PID:-}
+  SHISA_LONG_RUNNING_PID=
+  [[ -n ${pid} ]] || return 0
+  kill "${pid}" >/dev/null 2>&1 || true
+}
+
+shisa_hook_once zshexit shisa_long_running_stop
 
 setopt prompt_subst
 PROMPT='$(shisa_prompt_render)'

@@ -87,3 +87,5 @@ fish -c 'source init/shisa.fish; functions -q fish_prompt; functions -q fish_rig
 fish -c 'source init/shisa.fish; functions -q shisa_async_redraw; not functions -q fish_async_prompt'
 bell_bytes="$(SHISA_CMD_COMPLETE_BELL=1 SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS=1000 fish -c 'source init/shisa.fish; set -g SHISA_LAST_COMMAND "sleep 1"; shisa_cmd_complete_bell 1200' | od -An -tx1 | tr -d ' \n')"
 [[ "$bell_bytes" == 07 ]]
+long_output="$(SHISA_LONG_RUNNING=1 SHISA_LONG_RUNNING_THRESHOLD_SECONDS=0 fish -c 'source init/shisa.fish; shisa_long_running_start; sleep 0.1; shisa_long_running_stop')"
+grep -F 'shisa: command still running' <<<"$long_output" >/dev/null

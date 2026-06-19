@@ -436,7 +436,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ## Phase 13 — Activity & focus pack (`shisa.activity`)
 
-- [ ] `long_running` indicator (timer when foreground cmd > N seconds)
+- [x] `long_running` indicator (timer when foreground cmd > N seconds)
 - [x] `cmd_complete_bell` (terminal bell / OSC-9 / notify-send / macOS UserNotifications)
 - [x] `tmux_pane` segment (pane/window when inside tmux)
 - [x] `right_prompt` (right-aligned secondary segment, RPS in zsh / fish_right_prompt in fish)

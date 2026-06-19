@@ -92,6 +92,10 @@ SHISA_CMD_COMPLETE_BELL=${SHISA_CMD_COMPLETE_BELL:-0}
 SHISA_CMD_COMPLETE_BELL_MODE=${SHISA_CMD_COMPLETE_BELL_MODE:-bell}
 SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS=${SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS:-10000}
 SHISA_CMD_COMPLETE_BELL_MESSAGE=${SHISA_CMD_COMPLETE_BELL_MESSAGE:-shisa: command complete}
+SHISA_LONG_RUNNING=${SHISA_LONG_RUNNING:-0}
+SHISA_LONG_RUNNING_THRESHOLD_SECONDS=${SHISA_LONG_RUNNING_THRESHOLD_SECONDS:-30}
+SHISA_LONG_RUNNING_MESSAGE=${SHISA_LONG_RUNNING_MESSAGE:-shisa: command still running}
+SHISA_LONG_RUNNING_PID=
 SHISA_COMMAND_STARTED=0
 SHISA_COMMAND_START_US=
 SHISA_IN_PROMPT=0
@@ -136,6 +140,7 @@ shisa_precmd() {
   else
     SHISA_LAST_DURATION_MS=0
   fi
+  shisa_long_running_stop
   shisa_cmd_complete_bell "${SHISA_LAST_DURATION_MS}"
   SHISA_COMMAND_STARTED=0
   SHISA_COMMAND_START_US=
@@ -168,6 +173,7 @@ shisa_debug_trap() {
   now_us=$(shisa_epoch_us) || return 0
   SHISA_COMMAND_START_US=${now_us}
   SHISA_COMMAND_STARTED=1
+  shisa_long_running_start
 }
 
 shisa_preexec_guard() {
@@ -205,6 +211,24 @@ shisa_cmd_complete_bell() {
     macos|osascript|user-notification) command -v osascript >/dev/null 2>&1 && osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "shisa"' -e 'end run' "${message}" >/dev/null 2>&1 || true ;;
   esac
   return 0
+}
+
+shisa_long_running_start() {
+  shisa_long_running_stop
+  [[ ${SHISA_LONG_RUNNING:-0} == 1 ]] || return 0
+  local threshold=${SHISA_LONG_RUNNING_THRESHOLD_SECONDS:-30}
+  [[ ${threshold} =~ ^[0-9]+$ ]] || return 0
+  local message=${SHISA_LONG_RUNNING_MESSAGE:-shisa: command still running}
+  ( sleep "${threshold}"; printf '\n%s\n' "${message}" ) &
+  SHISA_LONG_RUNNING_PID=$!
+  disown "${SHISA_LONG_RUNNING_PID}" 2>/dev/null || true
+}
+
+shisa_long_running_stop() {
+  local pid=${SHISA_LONG_RUNNING_PID:-}
+  SHISA_LONG_RUNNING_PID=
+  [[ -n ${pid} ]] || return 0
+  kill "${pid}" >/dev/null 2>&1 || true
 }
 
 shisa_prompt_render() {
@@ -319,6 +343,7 @@ shisa_prompt_command() {
 
 PROMPT_COMMAND=shisa_prompt_command
 trap 'case " ${FUNCNAME[*]:-} " in *" shisa_"*) ;; *) shisa_debug_trap "$BASH_COMMAND" ;; esac' DEBUG
+trap 'shisa_long_running_stop' EXIT
 shisa_install_async_redraw
 shopt -s promptvars
 PS1='$(shisa_prompt_render)'

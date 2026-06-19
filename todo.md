@@ -188,7 +188,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Stand up the plugin marketplace (static directory, plugins live in user-owned repos, index in shisa.sh/plugins)
 - [x] Add plugin verification: signed manifests, maintainer-vetted "verified" badge
 - [ ] Optional: opt-in local-LLM hint plugin (ollama-backed). Off by default. Lives outside core.
-- [ ] Optional: cloud-safety plugin pack (prod-warning, k8s-namespace-risk, IAM-principal). Lives outside core.
+- [x] Optional: cloud-safety plugin pack (prod-warning, k8s-namespace-risk, IAM-principal). Lives outside core.
 - [ ] Native Windows support (ReadDirectoryChangesW) — community-led
 - [x] Build a `shisa doctor` subcommand for self-diagnosis (socket, perms, lua plugins, fsnotify limits)
 - [x] Monthly release cadence (first Tuesday of each month)

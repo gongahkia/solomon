@@ -56,7 +56,19 @@ pub fn generateAlloc(allocator: std.mem.Allocator, shisa_path: []const u8) ![]u8
         try out.appendSlice(allocator, "## Command Help\n\nNo command-specific help is currently exposed.\n");
     }
 
-    return out.toOwnedSlice(allocator);
+    const docs = try out.toOwnedSlice(allocator);
+    return singleTrailingNewlineAlloc(allocator, docs);
+}
+
+fn singleTrailingNewlineAlloc(allocator: std.mem.Allocator, docs: []u8) ![]u8 {
+    errdefer allocator.free(docs);
+    const trimmed = std.mem.trimRight(u8, docs, "\n");
+    if (trimmed.len + 1 == docs.len) return docs;
+    const normalized = try allocator.alloc(u8, trimmed.len + 1);
+    @memcpy(normalized[0..trimmed.len], trimmed);
+    normalized[trimmed.len] = '\n';
+    allocator.free(docs);
+    return normalized;
 }
 
 fn runRequiredHelp(allocator: std.mem.Allocator, argv: []const []const u8) ![]u8 {

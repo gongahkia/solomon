@@ -5936,6 +5936,7 @@ const PluginInstallConfig = struct {
     url: []const u8,
     yes: bool = false,
     strict: bool = false,
+    index_path: ?[]const u8 = null,
 };
 
 fn parsePluginInstallArgs(args: []const []const u8) !PluginInstallConfig {
@@ -5943,12 +5944,19 @@ fn parsePluginInstallArgs(args: []const []const u8) !PluginInstallConfig {
     var seen_url = false;
     config.yes = false;
     config.strict = false;
+    config.index_path = null;
 
-    for (args) |arg| {
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
         if (std.mem.eql(u8, arg, "--yes") or std.mem.eql(u8, arg, "-y")) {
             config.yes = true;
         } else if (std.mem.eql(u8, arg, "--plugin-sandbox-strict")) {
             config.strict = true;
+        } else if (std.mem.eql(u8, arg, "--index")) {
+            i += 1;
+            if (i >= args.len) return error.UnknownPluginArgument;
+            config.index_path = args[i];
         } else if (!seen_url) {
             config.url = arg;
             seen_url = true;
@@ -5963,11 +5971,14 @@ fn parsePluginInstallArgs(args: []const []const u8) !PluginInstallConfig {
 fn pluginInstall(allocator: std.mem.Allocator, plugins_dir: []const u8, trusted_path: []const u8, config: PluginInstallConfig) !void {
     try std.fs.cwd().makePath(plugins_dir);
 
+    const resolved_url = try pluginInstallSourceUrlAlloc(allocator, config);
+    defer allocator.free(resolved_url);
+
     const temp_path = try std.fmt.allocPrint(allocator, "{s}/.install-{x}", .{ plugins_dir, std.crypto.random.int(u64) });
     defer allocator.free(temp_path);
     defer std.fs.cwd().deleteTree(temp_path) catch {};
 
-    try runGitClone(allocator, config.url, temp_path);
+    try runGitClone(allocator, resolved_url, temp_path);
 
     const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{temp_path});
     defer allocator.free(manifest_path);
@@ -5997,6 +6008,34 @@ fn pluginInstall(allocator: std.mem.Allocator, plugins_dir: []const u8, trusted_
     const message = try std.fmt.allocPrint(allocator, "installed {s} {s}\n", .{ loaded.manifest.name, loaded.manifest.version });
     defer allocator.free(message);
     try std.fs.File.stdout().writeAll(message);
+}
+
+fn pluginInstallSourceUrlAlloc(allocator: std.mem.Allocator, config: PluginInstallConfig) ![]u8 {
+    if (!pluginInstallSourceNeedsMarketplace(config.url)) return allocator.dupe(u8, config.url);
+    const index_path = if (config.index_path) |path| try allocator.dupe(u8, path) else try marketplaceIndexPath(allocator);
+    defer allocator.free(index_path);
+    return marketplacePluginUrlAlloc(allocator, index_path, config.url);
+}
+
+fn pluginInstallSourceNeedsMarketplace(source: []const u8) bool {
+    if (!plugin_manifest.isValidPluginName(source)) return false;
+    if (std.mem.startsWith(u8, source, ".") or std.mem.startsWith(u8, source, "/") or std.mem.startsWith(u8, source, "~")) return false;
+    if (std.mem.indexOf(u8, source, "://") != null) return false;
+    if (std.mem.indexOfScalar(u8, source, ':') != null) return false;
+    if (std.mem.endsWith(u8, source, ".git")) return false;
+    return true;
+}
+
+fn marketplacePluginUrlAlloc(allocator: std.mem.Allocator, index_path: []const u8, name: []const u8) ![]u8 {
+    const source = try std.fs.cwd().readFileAlloc(allocator, index_path, 1024 * 1024);
+    defer allocator.free(source);
+    var parsed = try std.json.parseFromSlice(PluginMarketplaceIndex, allocator, source, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    for (parsed.value.plugins) |entry| {
+        if (!plugin_manifest.isValidPluginName(entry.name)) continue;
+        if (std.mem.eql(u8, entry.name, name)) return allocator.dupe(u8, entry.url);
+    }
+    return error.PluginMarketplaceEntryNotFound;
 }
 
 fn runGitClone(allocator: std.mem.Allocator, url: []const u8, target_path: []const u8) !void {
@@ -6612,10 +6651,11 @@ test "plugin list reports enabled disabled and slow plugins" {
 }
 
 test "parses plugin install args" {
-    const config = try parsePluginInstallArgs(&.{ "https://example.com/plugin.git", "--yes", "--plugin-sandbox-strict" });
+    const config = try parsePluginInstallArgs(&.{ "https://example.com/plugin.git", "--yes", "--plugin-sandbox-strict", "--index", "/tmp/plugins.index.json" });
     try std.testing.expectEqualStrings("https://example.com/plugin.git", config.url);
     try std.testing.expect(config.yes);
     try std.testing.expect(config.strict);
+    try std.testing.expectEqualStrings("/tmp/plugins.index.json", config.index_path.?);
     try std.testing.expectError(error.UnknownPluginArgument, parsePluginInstallArgs(&.{"--yes"}));
 }
 
@@ -6646,6 +6686,13 @@ test "plugin search filters marketplace index" {
     const config = try parsePluginSearchArgs(&.{ "risk", "--index", index_path });
     try std.testing.expectEqualStrings("risk", config.query);
     try std.testing.expectEqualStrings(index_path, config.index_path.?);
+
+    const install_config = try parsePluginInstallArgs(&.{ "cloud-risk", "--index", index_path, "--yes" });
+    const resolved_url = try pluginInstallSourceUrlAlloc(allocator, install_config);
+    defer allocator.free(resolved_url);
+    try std.testing.expectEqualStrings("https://example.com/cloud-risk.git", resolved_url);
+    try std.testing.expect(pluginInstallSourceNeedsMarketplace("cloud-risk"));
+    try std.testing.expect(!pluginInstallSourceNeedsMarketplace("https://example.com/cloud-risk.git"));
 }
 
 test "plugin new scaffolds valid strict manifest" {

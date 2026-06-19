@@ -14,6 +14,7 @@ need() {
 need git
 need msgcat
 need msgfmt
+need zig
 
 if [ -n "${SHISA_CHANGED_FILES:-}" ]; then
   changed_files="$SHISA_CHANGED_FILES"
@@ -22,10 +23,11 @@ else
     base_ref="$(git rev-parse HEAD~1 2>/dev/null || true)"
   fi
   if [ -z "$base_ref" ]; then
-    echo "i18n catalog gate: no base ref; skipping"
-    exit 0
+    echo "i18n catalog gate: no base ref; checking generated catalogs only"
+    changed_files=""
+  else
+    changed_files="$(git diff --name-only "$base_ref"... "$head_ref")"
   fi
-  changed_files="$(git diff --name-only "$base_ref"... "$head_ref")"
 fi
 
 changed_catalogs=0
@@ -48,6 +50,12 @@ while IFS= read -r path; do
 done <<EOF
 $changed_files
 EOF
+
+zig build i18n-extract
+if ! git diff --exit-code -- i18n/shisa.pot i18n/en-US/LC_MESSAGES/shisa.po; then
+  echo "i18n catalog gate: generated catalogs are stale; run zig build i18n-extract" >&2
+  exit 1
+fi
 
 if [ "$changed_catalogs" -eq 1 ]; then
   echo "::warning title=i18n catalog review::Locale catalogs changed; request translation review before merge."

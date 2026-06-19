@@ -1074,7 +1074,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 33.1 Strings extraction
 - [x] Tool to extract user-facing strings to `i18n/en-US.po`
-- [ ] CI gate: every PR touching user-facing text updates the catalog
+- [x] CI gate: every PR touching user-facing text updates the catalog
 
 ### 33.2 Locale routing
 - [x] Detect `LANG` / `LC_*` env

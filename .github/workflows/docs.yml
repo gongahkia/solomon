@@ -82,6 +82,12 @@ jobs:
       - name: Install gettext
         run: sudo apt-get update && sudo apt-get install -y gettext
 
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.15.2
+          use-cache: true
+          cache-key: i18n-${{ hashFiles('build.zig.zon') }}
+
       - name: Validate changed catalogs
         run: bash .github/scripts/i18n-catalog-gate.sh
         env:

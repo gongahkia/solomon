@@ -445,7 +445,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ## Phase 14 — Plugin marketplace polish
 
-- [ ] Static marketplace index hosted on shisa.sh (JSON manifest of community plugins)
+- [x] Static marketplace index hosted on shisa.sh (JSON manifest of community plugins)
 - [ ] Signature scheme: plugin manifests signed with maintainer minisign / sigstore
 - [x] `verified` badge in `shisa plugin list`
 - [x] `shisa plugin install <name>` from marketplace

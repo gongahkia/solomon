@@ -15,6 +15,8 @@ Marketplace entries must:
 
 Plugins that handle secrets, cloud accounts, kubeconfigs, SSH config, or production context must describe their local data flow in the README.
 
+The static marketplace index is published from `docs/plugins/index.json` to `https://shisa.sh/plugins/index.json`. Entries stay out of the index until the repository URL and manifest can be reviewed.
+
 ## Verified Badge
 
 `verified` means the latest submitted manifest passed maintainer review for identity, capability scope, and obvious abuse. It does not mean the code is bug-free, safe for every environment, or endorsed for production use.

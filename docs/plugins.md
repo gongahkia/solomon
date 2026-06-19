@@ -137,7 +137,7 @@ shisa plugin trust shisa.ai --net=openai
 
 `shisa plugin doctor [path]` defaults to the current directory and prefixes strict lint output with `doctor ok` or `doctor warnings`.
 
-`shisa plugin search <query> [--index <path>]` reads a marketplace JSON index. By default the index path is `plugins.index.json` next to `shisa.toml`.
+`shisa plugin search <query> [--index <path>]` reads a marketplace JSON index. By default the index path is `plugins.index.json` next to `shisa.toml`. The release-site index is published at `https://shisa.sh/plugins/index.json`; the checked-in source lives at `docs/plugins/index.json`.
 
 `shisa plugin install <name> [--index <path>]` resolves `<name>` through the marketplace index, then clones the entry URL. Direct URLs and explicit paths still bypass the index.
 

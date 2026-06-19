@@ -7311,6 +7311,15 @@ test "plugin search filters marketplace index" {
     try std.testing.expect(!pluginInstallSourceNeedsMarketplace("https://example.com/cloud-risk.git"));
 }
 
+test "checked-in marketplace index parses" {
+    const allocator = std.testing.allocator;
+    const source = try std.fs.cwd().readFileAlloc(allocator, "docs/plugins/index.json", 64 * 1024);
+    defer allocator.free(source);
+    var parsed = try std.json.parseFromSlice(PluginMarketplaceIndex, allocator, source, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 0), parsed.value.plugins.len);
+}
+
 test "plugin new scaffolds valid strict manifest" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-new-{x}", .{std.crypto.random.int(u64)});

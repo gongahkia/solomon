@@ -1114,7 +1114,7 @@ Opened 30 days post v1.0. Pre-work tasks below.
 - [x] SBOM diff review on every tagged release
 - [x] Re-run threat-model annually with calendar reminder
 - [x] A11y audit calendar reminder
-- [ ] Update `VOUCHES` whenever a contributor is granted write access
+- [x] Update `VOUCHES` whenever a contributor is granted write access
 - [ ] Each merged RFC produces a `docs/internals/` page summarizing the decision
 - [ ] Each pack tracks its own pack-perf budget; regressions blocked at PR time
 - [ ] Each shell-version drop documented in compatibility matrix

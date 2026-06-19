@@ -23,7 +23,7 @@ Before granting write access:
 3. Confirm 2FA is enabled on the GitHub account.
 4. Review recent PRs for test quality, scope control, and response to feedback.
 5. Record the access decision in the relevant issue or PR.
-6. Update `VOUCHES` if the role changes.
+6. Update `VOUCHES` in the same change that grants write access or changes a maintainer role.
 
 ## Maintainer Duties
 

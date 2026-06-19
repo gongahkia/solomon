@@ -674,7 +674,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [ ] Homebrew formula (tap â†’ core)
 - [x] AUR `shisa-bin` PKGBUILD
 - [x] AUR `shisa-git` PKGBUILD
-- [ ] Nixpkgs derivation
+- [x] Nixpkgs derivation
 - [ ] Scoop manifest (WSL)
 - [x] AppImage build pipeline
 - [ ] Flatpak manifest (community)

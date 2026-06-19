@@ -1,0 +1,13 @@
+[Unit]
+Description=Shisa prompt supervisor
+Documentation=https://shisa.sh/docs/supervisor.html
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/shisa-supervisor --daemon %h/.local/bin/shisad --socket %t/shisa.sock
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

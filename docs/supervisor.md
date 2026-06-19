@@ -57,6 +57,8 @@ Recommended `ProgramArguments`:
 /Users/<user>/Library/Caches/shisa/shisa.sock
 ```
 
+Prototype template: `packaging/services/shisa.supervisor.plist`. Replace every `REPLACE_ME` path segment before loading it with `launchctl bootstrap gui/$UID`.
+
 Daemon logs go to:
 
 ```text
@@ -76,6 +78,8 @@ Recommended `ExecStart`:
 ```text
 %h/.local/bin/shisa-supervisor --daemon %h/.local/bin/shisad --socket %t/shisa.sock
 ```
+
+Prototype template: `packaging/services/shisa-supervisor.service`. Install it under `~/.config/systemd/user/`, then run `systemctl --user enable --now shisa-supervisor.service`.
 
 Daemon logs go to `$XDG_STATE_HOME/shisa/shisad.log` when set, otherwise:
 

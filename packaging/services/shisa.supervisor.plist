@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>shisa.supervisor</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/REPLACE_ME/.local/bin/shisa-supervisor</string>
+    <string>--daemon</string>
+    <string>/Users/REPLACE_ME/.local/bin/shisad</string>
+    <string>--socket</string>
+    <string>/Users/REPLACE_ME/Library/Caches/shisa/shisa.sock</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>Crashed</key>
+    <true/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/REPLACE_ME/Library/Logs/shisa/supervisor.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/REPLACE_ME/Library/Logs/shisa/supervisor.err.log</string>
+</dict>
+</plist>

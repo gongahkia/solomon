@@ -730,7 +730,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 ### 21.6 External audit
 - [ ] Commission a one-time a11y audit before v1.0
 - [ ] Publish audit findings + remediation
-- [ ] Plan annual re-audits
+- [x] Plan annual re-audits
 
 ## Phase 22 â€” Internationalization
 
@@ -1113,7 +1113,7 @@ Opened 30 days post v1.0. Pre-work tasks below.
 - [ ] Reproducibility check on every tagged release
 - [x] SBOM diff review on every tagged release
 - [x] Re-run threat-model annually with calendar reminder
-- [ ] A11y audit calendar reminder
+- [x] A11y audit calendar reminder
 - [ ] Update `VOUCHES` whenever a contributor is granted write access
 - [ ] Each merged RFC produces a `docs/internals/` page summarizing the decision
 - [ ] Each pack tracks its own pack-perf budget; regressions blocked at PR time

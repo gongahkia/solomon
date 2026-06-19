@@ -102,6 +102,7 @@
 - [Maintainer Onboarding](governance/maintainer-onboarding.md)
 - [Triage](governance/triage.md)
 - [Release Cadence](governance/release-cadence.md)
+- [Accessibility Audit](governance/accessibility-audit.md)
 - [Bug Bounty](governance/bug-bounty.md)
 - [Bounty Ledger](governance/bounty-ledger.md)
 - [Security Hall of Fame](governance/security-hall-of-fame.md)

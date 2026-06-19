@@ -1938,26 +1938,57 @@ fn aiCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "risk")) {
-        const config = try parseAiRiskArgs(args[1..]);
+        var defaults = try loadAiCommandDefaults(allocator);
+        defer if (defaults) |*value| value.deinit(allocator);
+        var config = try parseAiRiskArgs(args[1..]);
+        const provider_from_config = applyAiConfigDefaults(&config.provider, &config.model, config.provider_explicit, config.model_explicit, if (defaults) |*value| value else null);
+        try enforceAiConfiguredProviderCapability(allocator, config.provider, provider_from_config, if (defaults) |*value| value else null);
         try aiRisk(allocator, config);
         return;
     }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "explain")) {
-        const config = try parseAiExplainArgs(args[1..]);
+        var defaults = try loadAiCommandDefaults(allocator);
+        defer if (defaults) |*value| value.deinit(allocator);
+        var config = try parseAiExplainArgs(args[1..]);
+        const provider_from_config = applyAiConfigDefaults(&config.provider, &config.model, config.provider_explicit, config.model_explicit, if (defaults) |*value| value else null);
+        try enforceAiConfiguredProviderCapability(allocator, config.provider, provider_from_config, if (defaults) |*value| value else null);
         try aiExplain(allocator, config);
         return;
     }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "nextcmd")) {
-        const config = try parseAiNextcmdArgs(args[1..]);
+        var defaults = try loadAiCommandDefaults(allocator);
+        defer if (defaults) |*value| value.deinit(allocator);
+        var config = try parseAiNextcmdArgs(args[1..]);
+        const provider_from_config = applyAiConfigDefaults(&config.provider, &config.model, config.provider_explicit, config.model_explicit, if (defaults) |*value| value else null);
+        try enforceAiConfiguredProviderCapability(allocator, config.provider, provider_from_config, if (defaults) |*value| value else null);
         try aiNextcmd(allocator, config);
         return;
     }
     if (args.len >= 1 and std.mem.eql(u8, args[0], "nl2cmd")) {
-        const config = try parseAiNl2cmdArgs(args[1..]);
+        var defaults = try loadAiCommandDefaults(allocator);
+        defer if (defaults) |*value| value.deinit(allocator);
+        var config = try parseAiNl2cmdArgs(args[1..]);
+        const provider_from_config = applyAiConfigDefaults(&config.provider, &config.model, config.provider_explicit, config.model_explicit, if (defaults) |*value| value else null);
+        try enforceAiConfiguredProviderCapability(allocator, config.provider, provider_from_config, if (defaults) |*value| value else null);
         try aiNl2cmd(allocator, config);
         return;
     }
     return error.UnknownAiArgument;
+}
+
+fn loadAiCommandDefaults(allocator: std.mem.Allocator) !?shisa_config.Config {
+    const path = defaultConfigPath(allocator) catch |err| switch (err) {
+        error.MissingHome => return null,
+        else => return err,
+    };
+    defer allocator.free(path);
+    const source = try readConfigOrDefault(allocator, path);
+    defer allocator.free(source);
+    var diagnostic: shisa_config.Diagnostic = .{};
+    return shisa_config.parse(allocator, source, &diagnostic) catch |err| switch (err) {
+        error.InvalidConfig => return err,
+        else => return err,
+    };
 }
 
 fn aiStatus(allocator: std.mem.Allocator) !void {
@@ -2167,6 +2198,8 @@ const AiRiskConfig = struct {
     command: []const u8 = "",
     provider: AiProvider = .ollama,
     model: []const u8 = ollama.recommended_model,
+    provider_explicit: bool = false,
+    model_explicit: bool = false,
     slm: bool = false,
     preexec: bool = false,
 };
@@ -2175,6 +2208,8 @@ const AiExplainConfig = struct {
     command: []const u8 = "",
     provider: AiProvider = .ollama,
     model: []const u8 = ollama.recommended_model,
+    provider_explicit: bool = false,
+    model_explicit: bool = false,
 };
 
 fn parseAiRiskArgs(args: []const []const u8) !AiRiskConfig {
@@ -2185,8 +2220,10 @@ fn parseAiRiskArgs(args: []const []const u8) !AiRiskConfig {
             config.command = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--provider")) {
             config.provider = try parseAiProvider(try nextValue(args, &i));
+            config.provider_explicit = true;
         } else if (std.mem.eql(u8, args[i], "--model")) {
             config.model = try nextValue(args, &i);
+            config.model_explicit = true;
         } else if (std.mem.eql(u8, args[i], "--slm")) {
             config.slm = true;
         } else if (std.mem.eql(u8, args[i], "--preexec")) {
@@ -2212,8 +2249,10 @@ fn parseAiExplainArgs(args: []const []const u8) !AiExplainConfig {
             config.command = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--provider")) {
             config.provider = try parseAiProvider(try nextValue(args, &i));
+            config.provider_explicit = true;
         } else if (std.mem.eql(u8, args[i], "--model")) {
             config.model = try nextValue(args, &i);
+            config.model_explicit = true;
         } else if (std.mem.eql(u8, args[i], "--")) {
             config.command = try nextValue(args, &i);
             if (i + 1 != args.len) return error.UnknownAiArgument;
@@ -2224,6 +2263,52 @@ fn parseAiExplainArgs(args: []const []const u8) !AiExplainConfig {
         }
     }
     return config;
+}
+
+fn applyAiConfigDefaults(provider: *AiProvider, model: *[]const u8, provider_explicit: bool, model_explicit: bool, defaults: ?*const shisa_config.Config) bool {
+    const config = defaults orelse return false;
+    var provider_from_config = false;
+    if (!provider_explicit) {
+        provider.* = aiProviderFromConfig(config.ai.provider);
+        provider_from_config = true;
+    }
+    if (!model_explicit) {
+        if (config.ai.model) |configured_model| model.* = configured_model;
+    }
+    return provider_from_config;
+}
+
+fn aiProviderFromConfig(provider: shisa_config.AiProviderId) AiProvider {
+    return switch (provider) {
+        .ollama => .ollama,
+        .openai => .openai,
+        .anthropic => .anthropic,
+        .gemini => .gemini,
+        .lmstudio => .lmstudio,
+        .llamacpp => .llamacpp,
+    };
+}
+
+fn enforceAiConfiguredProviderCapability(allocator: std.mem.Allocator, provider: AiProvider, provider_from_config: bool, defaults: ?*const shisa_config.Config) !void {
+    if (!provider_from_config or !aiProviderRequiresPluginNet(provider)) return;
+    const config = defaults orelse return error.AiPluginRequired;
+    const plugin_name = config.ai.plugin orelse return error.AiPluginRequired;
+    const trusted_path = try trustedPluginsPath(allocator);
+    defer allocator.free(trusted_path);
+    try enforceAiConfiguredProviderCapabilityAtPath(allocator, trusted_path, plugin_name, provider);
+}
+
+fn enforceAiConfiguredProviderCapabilityAtPath(allocator: std.mem.Allocator, trusted_path: []const u8, plugin_name: []const u8, provider: AiProvider) !void {
+    if (!plugin_manifest.isValidPluginName(plugin_name)) return error.InvalidPluginName;
+    if (!(try pluginTrusted(allocator, trusted_path, plugin_name))) return error.AiPluginNotTrusted;
+    if (!(try pluginTrustedNet(allocator, trusted_path, plugin_name, aiProviderName(provider)))) return error.AiProviderCapabilityDenied;
+}
+
+fn aiProviderRequiresPluginNet(provider: AiProvider) bool {
+    return switch (provider) {
+        .openai, .anthropic, .gemini => true,
+        .ollama, .lmstudio, .llamacpp => false,
+    };
 }
 
 fn aiExplain(allocator: std.mem.Allocator, config: AiExplainConfig) !void {
@@ -2663,6 +2748,8 @@ const AiNextcmdConfig = struct {
     shell: []const u8 = "",
     provider: AiProvider = .ollama,
     model: []const u8 = ollama.recommended_model,
+    provider_explicit: bool = false,
+    model_explicit: bool = false,
     cwd: []const u8 = "",
     last_command: []const u8 = "",
     last_exit: i32 = 0,
@@ -2674,6 +2761,8 @@ const AiNl2cmdConfig = struct {
     shell: []const u8 = "",
     provider: AiProvider = .ollama,
     model: []const u8 = ollama.recommended_model,
+    provider_explicit: bool = false,
+    model_explicit: bool = false,
     cwd: []const u8 = "",
     input: []const u8 = "",
     detect_only: bool = false,
@@ -2689,8 +2778,10 @@ fn parseAiNextcmdArgs(args: []const []const u8) !AiNextcmdConfig {
             config.shell = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--provider")) {
             config.provider = try parseAiProvider(try nextValue(args, &i));
+            config.provider_explicit = true;
         } else if (std.mem.eql(u8, args[i], "--model")) {
             config.model = try nextValue(args, &i);
+            config.model_explicit = true;
         } else if (std.mem.eql(u8, args[i], "--cwd")) {
             config.cwd = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--last-command")) {
@@ -2716,8 +2807,10 @@ fn parseAiNl2cmdArgs(args: []const []const u8) !AiNl2cmdConfig {
             config.shell = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--provider")) {
             config.provider = try parseAiProvider(try nextValue(args, &i));
+            config.provider_explicit = true;
         } else if (std.mem.eql(u8, args[i], "--model")) {
             config.model = try nextValue(args, &i);
+            config.model_explicit = true;
         } else if (std.mem.eql(u8, args[i], "--cwd")) {
             config.cwd = try nextValue(args, &i);
         } else if (std.mem.eql(u8, args[i], "--input")) {
@@ -2843,6 +2936,62 @@ test "ai provider parser accepts anthropic gemini llamacpp and lmstudio" {
     try std.testing.expectEqual(AiProvider.llamacpp, try parseAiProvider("llamacpp"));
     try std.testing.expectEqual(AiProvider.llamacpp, try parseAiProvider("llama.cpp"));
     try std.testing.expectEqual(AiProvider.lmstudio, try parseAiProvider("lmstudio"));
+}
+
+test "ai config defaults provider model and enforces plugin net trust" {
+    const allocator = std.testing.allocator;
+    const source =
+        \\version = 1
+        \\
+        \\[ai]
+        \\provider = "openai"
+        \\model = "gpt-5.5"
+        \\plugin = "shisa.ai"
+        \\
+    ;
+    var diagnostic: shisa_config.Diagnostic = .{};
+    var defaults = try shisa_config.parse(allocator, source, &diagnostic);
+    defer defaults.deinit(allocator);
+
+    var config = try parseAiExplainArgs(&.{ "--command", "tar -xf app.tar" });
+    const from_config = applyAiConfigDefaults(&config.provider, &config.model, config.provider_explicit, config.model_explicit, &defaults);
+    try std.testing.expect(from_config);
+    try std.testing.expectEqual(AiProvider.openai, config.provider);
+    try std.testing.expectEqualStrings("gpt-5.5", config.model);
+
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-ai-provider-config-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    const trusted_path = try std.fmt.allocPrint(allocator, "{s}/plugins.trusted", .{dir_path});
+    defer allocator.free(trusted_path);
+
+    try std.testing.expectError(error.AiPluginNotTrusted, enforceAiConfiguredProviderCapabilityAtPath(allocator, trusted_path, defaults.ai.plugin.?, config.provider));
+    try setPluginTrusted(allocator, trusted_path, "shisa.ai");
+    try std.testing.expectError(error.AiProviderCapabilityDenied, enforceAiConfiguredProviderCapabilityAtPath(allocator, trusted_path, defaults.ai.plugin.?, config.provider));
+    try setPluginTrustedNet(allocator, trusted_path, "shisa.ai", "openai");
+    try enforceAiConfiguredProviderCapabilityAtPath(allocator, trusted_path, defaults.ai.plugin.?, config.provider);
+}
+
+test "ai explicit provider bypasses config provider" {
+    const source =
+        \\version = 1
+        \\
+        \\[ai]
+        \\provider = "openai"
+        \\model = "gpt-5.5"
+        \\plugin = "shisa.ai"
+        \\
+    ;
+    var diagnostic: shisa_config.Diagnostic = .{};
+    var defaults = try shisa_config.parse(std.testing.allocator, source, &diagnostic);
+    defer defaults.deinit(std.testing.allocator);
+
+    var config = try parseAiExplainArgs(&.{ "--command", "tar -xf app.tar", "--provider", "ollama", "--model", "custom-local" });
+    const from_config = applyAiConfigDefaults(&config.provider, &config.model, config.provider_explicit, config.model_explicit, &defaults);
+    try std.testing.expect(!from_config);
+    try std.testing.expectEqual(AiProvider.ollama, config.provider);
+    try std.testing.expectEqualStrings("custom-local", config.model);
 }
 
 test "ai cloud audit line stores hashes only" {

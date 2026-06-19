@@ -46,6 +46,8 @@ The built-in Anthropic provider uses provider id `anthropic`, endpoint `POST htt
 
 The built-in Gemini provider uses provider id `gemini`, endpoint `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key=$GEMINI_API_KEY`, `contents[].parts[].text`, `role:user`, and `store:false`. It is selected per command with `--provider gemini`.
 
+When `[ai].provider` selects `openai`, `anthropic`, or `gemini`, `[ai].plugin` must name a trusted plugin and that plugin must have a matching `net=<provider>` grant. Explicit CLI `--provider` still requires the provider API key but does not inherit `[ai].plugin`.
+
 ## Default Redaction Rules
 
 Default redaction replaces matched values with `[redacted]`. The built-in rules cover key/value fields named `password`, `token`, `secret`, `api_key`, AWS credential names, kubeconfig key data, and SSH `IdentityFile`; bearer tokens; AWS access keys; GitHub `gh*_` tokens; `sk-` provider keys; PEM private-key blocks; and 12-digit cloud account ids.

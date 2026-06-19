@@ -45,6 +45,9 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\modules = [{s}]
         \\right_modules = []
         \\rtl_reverse = false
+        \\
+        \\[ai]
+        \\provider = "ollama"
         \\```
         \\
         \\## Top-Level Keys
@@ -72,6 +75,16 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\right_modules = []
         \\rtl_reverse = false
         \\```
+        \\
+        \\## `[ai]`
+        \\
+        \\| Key | Type | Required | Default | Notes |
+        \\| --- | --- | --- | --- | --- |
+        \\| `provider` | string | no | `"ollama"` | One of `"ollama"`, `"openai"`, `"anthropic"`, `"gemini"`, `"lmstudio"`, or `"llamacpp"`. |
+        \\| `model` | string | no | provider default | Default model or local model path for AI commands. Explicit `--model` wins. |
+        \\| `plugin` | string | only for configured cloud providers | none | Plugin id whose `net=<provider>` trust grant authorizes config-selected cloud providers. |
+        \\
+        \\`[ai]` defaults apply to `shisa ai risk`, `explain`, `nextcmd`, and `nl2cmd`. Explicit CLI flags override config. Config-selected cloud providers require `shisa plugin trust <plugin> --net=<provider>`.
         \\
         \\Allowed core module ids for schema v1:
         \\
@@ -167,6 +180,8 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\- `version` must be present and equal to `1`.
         \\- `[prompt].modules` must be an array of unique strings.
         \\- `[prompt].right_modules` must be an array of unique strings.
+        \\- `[ai].provider` must be a known AI provider id.
+        \\- Config-selected cloud AI providers require `[ai].plugin` and a matching plugin net trust grant.
         \\- Each module in `[prompt].modules` and `[prompt].right_modules` must be a known core module id or a loaded plugin module id.
         \\- `[modules.<id>]` must reference a known module id.
         \\- Unknown keys in known tables are invalid.

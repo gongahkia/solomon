@@ -141,7 +141,7 @@ shisa plugin trust shisa.ai --net=openai
 
 `shisa plugin install <name> [--index <path>]` resolves `<name>` through the marketplace index, then clones the entry URL. Direct URLs and explicit paths still bypass the index.
 
-`shisa plugin trust <name> --net=<provider>` records provider-scoped network trust. A grant for `openai` does not cover another provider such as `anthropic`, and it does not cover non-network capability changes.
+`shisa plugin trust <name> --net=<provider>` records provider-scoped network trust. A grant for `openai` does not cover another provider such as `anthropic`, and it does not cover non-network capability changes. `[ai].provider` may select a cloud provider only when `[ai].plugin` names a trusted plugin with the matching `net=<provider>` grant.
 
 `shisa plugin list` prints `verified` for plugins recorded in `plugins.verified`. Marketplace sync is expected to maintain that file once the public index ships.
 

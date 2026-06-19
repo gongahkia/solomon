@@ -199,7 +199,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 ## Continuous (every phase)
 
 - [ ] Keep the benchmark dashboard green and public
-- [ ] Triage issues weekly, target 7-day first-response SLA
+- [x] Triage issues weekly, target 7-day first-response SLA
 - [x] Update the changelog on every release (keep-a-changelog format)
 - [ ] Update `docs/` whenever a user-facing flag, config field, or module changes
 - [x] Run the fuzzer in CI nightly
@@ -833,7 +833,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] First-response SLA: 7 days
 
 ### 25.3 Triage cadence
-- [ ] Weekly triage meeting (15 min, recorded)
+- [x] Weekly triage meeting (15 min, recorded)
 - [x] Labels: kind (bug/perf/feat), area (core/cloud/ai/vcs/...), priority
 - [ ] Public board mirroring labels
 

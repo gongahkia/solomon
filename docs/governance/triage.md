@@ -12,13 +12,29 @@ First response means one of:
 
 Severity can change the response order. Security reports follow `SECURITY.md`, not the public triage SLA.
 
-Weekly triage should review:
+## Weekly Triage
+
+Weekly triage uses a 15-minute recorded meeting. The calendar source lives at [Triage Calendar](triage-calendar.ics).
+
+Agenda:
 
 - unlabeled issues
 - new pull requests
 - stale bug reports awaiting reporter input
 - performance regressions
 - release blockers
+
+The meeting owner records the session or writes timestamped notes when recording is unavailable. Notes should include:
+
+- date
+- attendees
+- issue and pull request links reviewed
+- labels changed
+- owners assigned
+- release blockers identified
+- first-response SLA misses
+
+The first-response SLA check is mechanical: every public issue or pull request without maintainer response after 7 days becomes a triage blocker until it is answered or closed with a reason.
 
 ## Labels
 

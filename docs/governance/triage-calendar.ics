@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Shisa//Triage Calendar//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:weekly-triage@shisa.sh
+DTSTAMP:20260619T000000Z
+DTSTART:20260623T160000Z
+DURATION:PT15M
+RRULE:FREQ=WEEKLY
+SUMMARY:Shisa weekly triage
+DESCRIPTION:Review unlabeled issues, new pull requests, stale reporter-waiting bugs, performance regressions, release blockers, and 7-day first-response SLA misses.
+END:VEVENT
+END:VCALENDAR

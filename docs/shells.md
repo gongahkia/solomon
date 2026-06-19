@@ -12,6 +12,8 @@
 
 Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from the hook.
 
+Set `SHISA_CMD_COMPLETE_BELL=1` before sourcing zsh, bash, or fish init to emit a completion notification after commands whose measured duration is at least `SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS` (default `10000`). `SHISA_CMD_COMPLETE_BELL_MODE` accepts `bell`, `osc9`, `notify-send`, or `macos`.
+
 `shisa prompt` emits OSC-7 cwd metadata before the rendered prompt so terminals that support it can open new tabs in the current directory. The sequence uses `file://<host><cwd>` and percent-encodes path bytes.
 
 Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from the hook.

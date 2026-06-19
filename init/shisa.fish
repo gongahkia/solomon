@@ -14,6 +14,10 @@ set -q SHISA_PROD_GUARD; or set -g SHISA_PROD_GUARD 0
 set -q SHISA_PROD_GUARD_FORCE; or set -g SHISA_PROD_GUARD_FORCE 0
 set -q SHISA_AI_RISK_GUARD; or set -g SHISA_AI_RISK_GUARD 0
 set -q SHISA_A11Y; or set -g SHISA_A11Y 0
+set -q SHISA_CMD_COMPLETE_BELL; or set -g SHISA_CMD_COMPLETE_BELL 0
+set -q SHISA_CMD_COMPLETE_BELL_MODE; or set -g SHISA_CMD_COMPLETE_BELL_MODE bell
+set -q SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS; or set -g SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS 10000
+set -q SHISA_CMD_COMPLETE_BELL_MESSAGE; or set -g SHISA_CMD_COMPLETE_BELL_MESSAGE "shisa: command complete"
 
 function shisa_detect_rtl_locale
     set -l locale ""
@@ -81,6 +85,7 @@ function shisa_prompt_render
     set -g SHISA_LAST_STATUS $last_status
     set -g SHISA_LAST_JOBS $jobs_count
     set -g SHISA_LAST_DURATION_MS $duration_ms
+    shisa_cmd_complete_bell $duration_ms
 
     set -l args prompt --shell fish --cwd "$PWD" --exit "$last_status" --jobs "$jobs_count" --duration-ms "$duration_ms" --socket "$socket_path"
     if test "$SHISA_INSTANT" = 1
@@ -137,6 +142,27 @@ function shisa_preexec_guard --on-event fish_preexec
         set args $args --force
     end
     command "$SHISA_BIN" $args -- "$command"
+end
+
+function shisa_cmd_complete_bell
+    test "$SHISA_CMD_COMPLETE_BELL" = 1; or return 0
+    test -n "$SHISA_LAST_COMMAND"; or return 0
+    set -l duration_ms $argv[1]
+    string match -qr '^[0-9]+$' -- "$duration_ms"; or return 0
+    string match -qr '^[0-9]+$' -- "$SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS"; or return 0
+    test $duration_ms -ge $SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS; or return 0
+    set -l message "$SHISA_CMD_COMPLETE_BELL_MESSAGE"
+    switch "$SHISA_CMD_COMPLETE_BELL_MODE"
+        case bell terminal
+            printf '\a'
+        case osc9
+            printf '\e]9;%s\a' "$message"
+        case notify notify-send
+            type -q notify-send; and notify-send shisa "$message" >/dev/null 2>&1
+        case macos osascript user-notification
+            type -q osascript; and osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "shisa"' -e 'end run' "$message" >/dev/null 2>&1
+    end
+    return 0
 end
 
 function shisa_async_redraw --on-event shisa_async_redraw

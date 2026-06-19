@@ -32,6 +32,10 @@ typeset -g SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 typeset -g SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
 typeset -g SHISA_AI_RISK_GUARD=${SHISA_AI_RISK_GUARD:-0}
 typeset -g SHISA_A11Y=${SHISA_A11Y:-0}
+typeset -g SHISA_CMD_COMPLETE_BELL=${SHISA_CMD_COMPLETE_BELL:-0}
+typeset -g SHISA_CMD_COMPLETE_BELL_MODE=${SHISA_CMD_COMPLETE_BELL_MODE:-bell}
+typeset -g SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS=${SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS:-10000}
+typeset -g SHISA_CMD_COMPLETE_BELL_MESSAGE=${SHISA_CMD_COMPLETE_BELL_MESSAGE:-shisa: command complete}
 
 shisa_detect_rtl_locale() {
   emulate -L zsh
@@ -90,6 +94,7 @@ shisa_precmd() {
   else
     SHISA_LAST_DURATION_MS=0
   fi
+  shisa_cmd_complete_bell "${SHISA_LAST_DURATION_MS}"
 }
 
 shisa_hook_once precmd shisa_precmd
@@ -125,6 +130,24 @@ shisa_ai_risk_preexec() {
   local command=${1:-}
   [[ -n ${command} ]] || return 0
   "${SHISA_BIN}" ai risk --preexec -- "${command}"
+}
+
+shisa_cmd_complete_bell() {
+  emulate -L zsh
+  [[ ${SHISA_CMD_COMPLETE_BELL:-0} == 1 ]] || return 0
+  [[ -n ${SHISA_LAST_COMMAND:-} ]] || return 0
+  local duration_ms=${1:-0}
+  local threshold_ms=${SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS:-10000}
+  [[ ${duration_ms} == <-> && ${threshold_ms} == <-> ]] || return 0
+  (( duration_ms >= threshold_ms )) || return 0
+  local message=${SHISA_CMD_COMPLETE_BELL_MESSAGE:-shisa: command complete}
+  case ${SHISA_CMD_COMPLETE_BELL_MODE:-bell} in
+    bell|terminal) print -rn -- $'\a' ;;
+    osc9) print -rn -- $'\e]9;'"${message}"$'\a' ;;
+    notify|notify-send) command -v notify-send >/dev/null 2>&1 && notify-send shisa "${message}" >/dev/null 2>&1 || true ;;
+    macos|osascript|user-notification) command -v osascript >/dev/null 2>&1 && osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "shisa"' -e 'end run' "${message}" >/dev/null 2>&1 || true ;;
+  esac
+  return 0
 }
 
 setopt prompt_subst

@@ -5465,6 +5465,16 @@ fn pluginCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[0], "search")) {
+        const config = try parsePluginSearchArgs(args[1..]);
+        const index_path = if (config.index_path) |path| try allocator.dupe(u8, path) else try marketplaceIndexPath(allocator);
+        defer allocator.free(index_path);
+        const output = try pluginSearchAlloc(allocator, index_path, config.query);
+        defer allocator.free(output);
+        try std.fs.File.stdout().writeAll(output);
+        return;
+    }
+
     if (std.mem.eql(u8, args[0], "pack")) {
         if (args.len != 2) return error.UnknownPluginArgument;
         const output_path = try pluginPack(allocator, args[1], ".");
@@ -5525,6 +5535,33 @@ const PluginTrustConfig = struct {
     name: []const u8,
     net: ?[]const u8 = null,
 };
+
+const PluginSearchConfig = struct {
+    query: []const u8,
+    index_path: ?[]const u8 = null,
+};
+
+fn parsePluginSearchArgs(args: []const []const u8) !PluginSearchConfig {
+    var config: PluginSearchConfig = undefined;
+    config.index_path = null;
+    var seen_query = false;
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "--index")) {
+            i += 1;
+            if (i >= args.len) return error.UnknownPluginArgument;
+            config.index_path = args[i];
+        } else if (!seen_query) {
+            config.query = arg;
+            seen_query = true;
+        } else {
+            return error.UnknownPluginArgument;
+        }
+    }
+    if (!seen_query) return error.UnknownPluginArgument;
+    return config;
+}
 
 fn parsePluginTrustArgs(args: []const []const u8) !PluginTrustConfig {
     if (args.len == 0) return error.UnknownPluginArgument;
@@ -6019,6 +6056,13 @@ fn verifiedPluginsPath(allocator: std.mem.Allocator) ![]u8 {
     return std.fmt.allocPrint(allocator, "{s}/plugins.verified", .{dir});
 }
 
+fn marketplaceIndexPath(allocator: std.mem.Allocator) ![]u8 {
+    const config_path = try defaultConfigPath(allocator);
+    defer allocator.free(config_path);
+    const dir = std.fs.path.dirname(config_path) orelse return error.MissingConfigDir;
+    return std.fmt.allocPrint(allocator, "{s}/plugins.index.json", .{dir});
+}
+
 fn pluginListAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, disabled_path: []const u8, slow_strikes_path: []const u8, verified_path: []const u8) ![]u8 {
     var names: std.ArrayList([]u8) = .empty;
     defer {
@@ -6058,6 +6102,51 @@ fn pluginListAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, disabl
         }
     }
     return out.toOwnedSlice(allocator);
+}
+
+const PluginMarketplaceIndex = struct {
+    plugins: []PluginMarketplaceEntry,
+};
+
+const PluginMarketplaceEntry = struct {
+    name: []const u8,
+    url: []const u8,
+    description: []const u8 = "",
+    verified: bool = false,
+};
+
+fn pluginSearchAlloc(allocator: std.mem.Allocator, index_path: []const u8, query: []const u8) ![]u8 {
+    const source = try std.fs.cwd().readFileAlloc(allocator, index_path, 1024 * 1024);
+    defer allocator.free(source);
+    var parsed = try std.json.parseFromSlice(PluginMarketplaceIndex, allocator, source, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    for (parsed.value.plugins) |entry| {
+        if (!plugin_manifest.isValidPluginName(entry.name)) continue;
+        if (!containsIgnoreAsciiCase(entry.name, query) and !containsIgnoreAsciiCase(entry.description, query)) continue;
+        const badge = if (entry.verified) " verified" else "";
+        if (entry.description.len != 0) {
+            try appendFmt(allocator, &out, "{s}{s} {s} - {s}\n", .{ entry.name, badge, entry.url, entry.description });
+        } else {
+            try appendFmt(allocator, &out, "{s}{s} {s}\n", .{ entry.name, badge, entry.url });
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn containsIgnoreAsciiCase(haystack: []const u8, needle: []const u8) bool {
+    if (needle.len == 0) return true;
+    if (needle.len > haystack.len) return false;
+    var start: usize = 0;
+    while (start + needle.len <= haystack.len) : (start += 1) {
+        var index: usize = 0;
+        while (index < needle.len) : (index += 1) {
+            if (std.ascii.toLower(haystack[start + index]) != std.ascii.toLower(needle[index])) break;
+        } else return true;
+    }
+    return false;
 }
 
 fn setPluginDisabled(allocator: std.mem.Allocator, disabled_path: []const u8, name: []const u8, disabled: bool) !void {
@@ -6528,6 +6617,35 @@ test "parses plugin install args" {
     try std.testing.expect(config.yes);
     try std.testing.expect(config.strict);
     try std.testing.expectError(error.UnknownPluginArgument, parsePluginInstallArgs(&.{"--yes"}));
+}
+
+test "plugin search filters marketplace index" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-search-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const index_path = try std.fmt.allocPrint(allocator, "{s}/plugins.index.json", .{dir_path});
+    defer allocator.free(index_path);
+    try std.fs.cwd().writeFile(.{
+        .sub_path = index_path,
+        .data =
+        \\{"plugins":[
+        \\  {"name":"git-tools","url":"https://example.com/git-tools.git","description":"Git prompt helpers","verified":true},
+        \\  {"name":"cloud-risk","url":"https://example.com/cloud-risk.git","description":"Kubernetes and AWS risk"},
+        \\  {"name":"Bad","url":"https://example.com/bad.git","description":"invalid"}
+        \\]}
+        ,
+    });
+
+    const output = try pluginSearchAlloc(allocator, index_path, "git");
+    defer allocator.free(output);
+    try std.testing.expectEqualStrings("git-tools verified https://example.com/git-tools.git - Git prompt helpers\n", output);
+
+    const config = try parsePluginSearchArgs(&.{ "risk", "--index", index_path });
+    try std.testing.expectEqualStrings("risk", config.query);
+    try std.testing.expectEqualStrings(index_path, config.index_path.?);
 }
 
 test "plugin new scaffolds valid strict manifest" {
@@ -7638,7 +7756,7 @@ const help_text =
     \\                print the minimal Pure-compatible preset
     \\  init          write default shisa.toml; --a11y uses the a11y theme
     \\  pin           mark a path as never-evicted
-    \\  plugin        new, lint, doctor, pack, install, list, enable, disable, or trust plugins
+    \\  plugin        new, lint, doctor, search, pack, install, list, enable, disable, or trust plugins
     \\  prompt        render prompt through shisad; --right prints configured right prompt
     \\  render        alias for prompt; --explain-a11y dumps segment labels
     \\  report        write a redacted support bundle .tar.gz

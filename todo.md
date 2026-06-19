@@ -449,7 +449,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [ ] Signature scheme: plugin manifests signed with maintainer minisign / sigstore
 - [x] `verified` badge in `shisa plugin list`
 - [ ] `shisa plugin install <name>` from marketplace
-- [ ] `shisa plugin search <query>`
+- [x] `shisa plugin search <query>`
 - [x] `shisa plugin doctor` for plugin self-diagnosis
 - [x] Community moderation policy (`docs/plugin-policy.md`)
 - [x] Plugin author quickstart (`docs/authoring-plugins.md`)

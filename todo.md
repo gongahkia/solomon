@@ -1100,7 +1100,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 Opened 30 days post v1.0. Pre-work tasks below.
 
-- [ ] Track "v2 candidate" issues with a label
+- [x] Track "v2 candidate" issues with a label
 - [ ] Collect v2 candidates from quarterly retros
 - [ ] Native Windows POC: ReadDirectoryChangesW prototype
 - [ ] Persistent daemon via launchd / systemd unit prototype

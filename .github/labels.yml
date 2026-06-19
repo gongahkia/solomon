@@ -58,3 +58,6 @@
 - name: priority/p3
   color: cccccc
   description: Backlog or opportunistic work.
+- name: v2/candidate
+  color: 5319e7
+  description: Candidate for post-v1.0 v2 RFC planning.

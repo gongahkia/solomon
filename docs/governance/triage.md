@@ -68,3 +68,7 @@ Priority labels describe scheduling:
 - `priority/p1`: high-priority bug or near-term roadmap work
 - `priority/p2`: normal priority
 - `priority/p3`: backlog or opportunistic work
+
+Planning labels describe cross-cutting queues:
+
+- `v2/candidate`: candidate for post-v1.0 v2 RFC planning

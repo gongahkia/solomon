@@ -13,6 +13,7 @@
 - [Custom Theme Inheriting from okiya-night](recipes/custom-theme-okiya-night.md)
 - [Migrating from Powerlevel10k Step-by-Step](recipes/migrate-from-powerlevel10k.md)
 - [Plugin in 30 Lines of Lua](recipes/plugin-in-30-lines.md)
+- [Dotfile Sync with age and Git](recipes/dotfile-sync-age-git.md)
 - [Running Shisa over SSH Without Slowing the Prompt](recipes/ssh-without-slow-prompt.md)
 - [Configuring `--a11y` for Screen Readers](recipes/configuring-a11y-screen-readers.md)
 

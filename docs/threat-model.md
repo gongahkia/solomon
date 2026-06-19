@@ -12,7 +12,7 @@ This document covers the current Shisa architecture, theme/static-site surface, 
 | Unix socket | The CLI and shell hooks trust daemon responses received over the per-user socket. |
 | Plugin trust state | Capability changes decide which host APIs a plugin can use. |
 | Theme files and previews | Theme TOML and generated/static preview HTML influence what users inspect before installing or copying themes. |
-| Audit logs | `prod_guard` decisions need enough context for review without leaking secrets. |
+| Audit logs | Cloud request and `prod_guard` decisions need enough context for review without leaking secrets. |
 | Release artifacts and docs | Users install binaries and follow docs produced by CI. |
 
 ## Trust Boundaries
@@ -33,7 +33,7 @@ This document covers the current Shisa architecture, theme/static-site surface, 
 | --- | --- | --- | --- |
 | Spoofing | A process impersonates the daemon socket. | Socket path is per-user; `shisa doctor` reports socket and daemon status. | Same-user malware can still interfere with user-owned sockets. |
 | Tampering | A plugin mutates host state through undeclared APIs. | Lua globals remove direct `os`, `io`, `package`, `require`, `dofile`, and `loadfile`; host API access must pass capability gates. | A LuaJIT sandbox escape remains a high-impact bug class. |
-| Repudiation | A destructive prod command is denied or forced without traceability. | `prod_guard` appends decisions to `~/.local/state/shisa/prod_guard.jsonl`; `--force` logs `prod_guard_force`. | A user can edit local audit logs. They are local evidence, not tamper-proof records. |
+| Repudiation | A cloud pre-exec request or destructive prod command is denied or forced without traceability. | Pre-exec requests append hash-only entries to `~/.local/state/shisa/cloud_requests.jsonl`; `prod_guard` appends hash-only decisions to `~/.local/state/shisa/prod_guard.jsonl`; `--force` logs `prod_guard_force`. | A user can edit local audit logs. They are local evidence, not tamper-proof records. |
 | Information disclosure | A plugin reads local secrets or sends context off-host. | Missing `fs_read`, `env_read`, `secrets`, and `net` capabilities deny access. Install/trust flows surface declared capabilities. | User-approved broad scopes can still leak data. |
 | Denial of service | Prompt rendering blocks shell input. | Slow work is daemon-side or async; shell hooks use fallback prompts when the daemon is unreachable. | Expensive core probes can still hurt daemon latency until profiled and cached. |
 | Denial of service | Theme preview or static gallery generation consumes unbounded local resources. | Theme loader caps file reads at 1 MiB; built-in gallery generation uses a fixed theme list. | Large external theme previews may still be slow once inheritance and external packs expand. |

@@ -1633,12 +1633,28 @@ fn cloudAudit(allocator: std.mem.Allocator) !void {
 }
 
 fn cloudAuditAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8 {
-    const path = try prodGuardAuditPathAlloc(allocator, home);
-    defer allocator.free(path);
-    return std.fs.cwd().readFileAlloc(allocator, path, max_config_bytes) catch |err| switch (err) {
-        error.FileNotFound => try allocator.dupe(u8, ""),
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    const cloud_path = try cloudRequestAuditPathAlloc(allocator, home);
+    defer allocator.free(cloud_path);
+    try appendAuditFileIfExists(allocator, &out, cloud_path);
+    const prod_path = try prodGuardAuditPathAlloc(allocator, home);
+    defer allocator.free(prod_path);
+    try appendAuditFileIfExists(allocator, &out, prod_path);
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendAuditFileIfExists(allocator: std.mem.Allocator, out: *std.ArrayList(u8), path: []const u8) !void {
+    const contents = std.fs.cwd().readFileAlloc(allocator, path, max_config_bytes) catch |err| switch (err) {
+        error.FileNotFound => return,
         else => return err,
     };
+    defer allocator.free(contents);
+    try out.appendSlice(allocator, contents);
+}
+
+fn cloudRequestAuditPathAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/cloud_requests.jsonl", .{home});
 }
 
 fn prodGuardAuditPathAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8 {
@@ -1783,18 +1799,26 @@ test "cloud audit reads prod guard jsonl" {
     defer allocator.free(dir_path);
     defer std.fs.cwd().deleteTree(dir_path) catch {};
 
-    const path = try prodGuardAuditPathAlloc(allocator, dir_path);
-    defer allocator.free(path);
-    if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
+    const cloud_path = try cloudRequestAuditPathAlloc(allocator, dir_path);
+    defer allocator.free(cloud_path);
+    if (std.fs.path.dirname(cloud_path)) |parent| try std.fs.cwd().makePath(parent);
     {
-        var file = try std.fs.createFileAbsolute(path, .{});
+        var file = try std.fs.createFileAbsolute(cloud_path, .{});
+        defer file.close();
+        try file.writeAll("{\"kind\":\"preexec\"}\n");
+    }
+
+    const prod_path = try prodGuardAuditPathAlloc(allocator, dir_path);
+    defer allocator.free(prod_path);
+    {
+        var file = try std.fs.createFileAbsolute(prod_path, .{});
         defer file.close();
         try file.writeAll("{\"tier\":\"prod\"}\n");
     }
 
     const output = try cloudAuditAlloc(allocator, dir_path);
     defer allocator.free(output);
-    try std.testing.expectEqualStrings("{\"tier\":\"prod\"}\n", output);
+    try std.testing.expectEqualStrings("{\"kind\":\"preexec\"}\n{\"tier\":\"prod\"}\n", output);
 }
 
 test "cloud doctor reports config status" {
@@ -2037,10 +2061,14 @@ fn aiStatusOutputAlloc(allocator: std.mem.Allocator, status: ollama.Status, home
     try out.appendSlice(allocator, "cloud:\n  providers: none\n  enabled: false\n");
     try out.appendSlice(allocator, "logging:\n");
     if (home) |home_path| {
+        const cloud_audit_path = try cloudRequestAuditPathAlloc(allocator, home_path);
+        defer allocator.free(cloud_audit_path);
+        try appendFmt(allocator, &out, "  cloud_request_audit: {s} {s}\n", .{ pathAccessStatus(cloud_audit_path), cloud_audit_path });
         const audit_path = try prodGuardAuditPathAlloc(allocator, home_path);
         defer allocator.free(audit_path);
         try appendFmt(allocator, &out, "  prod_guard_audit: {s} {s}\n", .{ pathAccessStatus(audit_path), audit_path });
     } else {
+        try out.appendSlice(allocator, "  cloud_request_audit: missing HOME\n");
         try out.appendSlice(allocator, "  prod_guard_audit: missing HOME\n");
     }
     try out.appendSlice(allocator, "  ai_cloud_audit: not_configured\n");
@@ -2464,6 +2492,7 @@ test "ai status output reports local cloud and logging state" {
     try std.testing.expect(std.mem.indexOf(u8, output, "ollama_installed: true") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "cloud:\n  providers: none\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "logging:\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "cloud_request_audit: missing /tmp/shisa-ai-status-home/.local/state/shisa/cloud_requests.jsonl") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "prod_guard_audit: missing /tmp/shisa-ai-status-home/.local/state/shisa/prod_guard.jsonl") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "ai_cloud_audit: not_configured") != null);
 }

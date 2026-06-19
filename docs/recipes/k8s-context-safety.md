@@ -60,6 +60,6 @@ Review destructive pre-exec decisions:
 shisa cloud audit
 ```
 
-The audit log lives at `~/.local/state/shisa/prod_guard.jsonl`.
+The request audit log lives at `~/.local/state/shisa/cloud_requests.jsonl`; destructive decisions live at `~/.local/state/shisa/prod_guard.jsonl`.
 
 See [Config Schema](../config-schema.md), [Risk Tiers](../risk-tiers.md), [Prod Guard](../prod-guard.md), and [Shells](../shells.md).

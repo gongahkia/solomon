@@ -594,6 +594,7 @@ pub const Server = struct {
     fn preexecResponse(self: *Server, request_payload: []const u8) ![]u8 {
         var parsed = try std.json.parseFromSlice(PreexecRequest, std.heap.page_allocator, request_payload, .{ .ignore_unknown_fields = true });
         defer parsed.deinit();
+        try self.appendCloudRequestAudit(parsed.value);
         const reason = risk_tier_module.explain(parsed.value.command, null);
         const escaped_pattern = try json.escapeAlloc(std.heap.page_allocator, if (reason.pattern.len == 0) "-" else reason.pattern);
         defer std.heap.page_allocator.free(escaped_pattern);
@@ -627,6 +628,37 @@ pub const Server = struct {
         try logger.warn("prod_guard_force", message);
     }
 
+    fn appendCloudRequestAudit(self: *Server, request: PreexecRequest) !void {
+        const home_owned = if (self.prod_guard_audit_home == null)
+            std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch return
+        else
+            null;
+        defer if (home_owned) |value| std.heap.page_allocator.free(value);
+        const home = self.prod_guard_audit_home orelse home_owned.?;
+        const path = try cloudRequestAuditPathAlloc(std.heap.page_allocator, home);
+        defer std.heap.page_allocator.free(path);
+        if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
+        var file = try std.fs.createFileAbsolute(path, .{
+            .read = true,
+            .truncate = false,
+            .mode = 0o600,
+        });
+        defer file.close();
+        try file.seekFromEnd(0);
+
+        const cwd_hash = sha256Hex(request.cwd);
+        const command_hash = sha256Hex(request.command);
+        const escaped_shell = try json.escapeAlloc(std.heap.page_allocator, request.shell);
+        defer std.heap.page_allocator.free(escaped_shell);
+        const line = try std.fmt.allocPrint(
+            std.heap.page_allocator,
+            "{{\"ts\":{d},\"kind\":\"preexec\",\"shell\":\"{s}\",\"cwd_sha256\":\"{s}\",\"command_sha256\":\"{s}\",\"force\":{}}}\n",
+            .{ std.time.timestamp(), escaped_shell, cwd_hash[0..], command_hash[0..], request.force },
+        );
+        defer std.heap.page_allocator.free(line);
+        try file.writeAll(line);
+    }
+
     fn appendProdGuardAudit(self: *Server, tier: risk_tier_module.Tier, allow: bool, forced: bool, pattern: []const u8, command: []const u8) !void {
         const home_owned = if (self.prod_guard_audit_home == null)
             std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch return
@@ -647,12 +679,11 @@ pub const Server = struct {
 
         const escaped_pattern = try json.escapeAlloc(std.heap.page_allocator, pattern);
         defer std.heap.page_allocator.free(escaped_pattern);
-        const escaped_command = try json.escapeAlloc(std.heap.page_allocator, command);
-        defer std.heap.page_allocator.free(escaped_command);
+        const command_hash = sha256Hex(command);
         const line = try std.fmt.allocPrint(
             std.heap.page_allocator,
-            "{{\"ts\":{d},\"tier\":\"{s}\",\"allow\":{},\"forced\":{},\"pattern\":\"{s}\",\"command\":\"{s}\"}}\n",
-            .{ std.time.timestamp(), risk_tier_module.tierName(tier), allow, forced, escaped_pattern, escaped_command },
+            "{{\"ts\":{d},\"tier\":\"{s}\",\"allow\":{},\"forced\":{},\"pattern\":\"{s}\",\"command_sha256\":\"{s}\"}}\n",
+            .{ std.time.timestamp(), risk_tier_module.tierName(tier), allow, forced, escaped_pattern, command_hash[0..] },
         );
         defer std.heap.page_allocator.free(line);
         try file.writeAll(line);
@@ -1575,6 +1606,16 @@ fn prodGuardAuditPathAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8
     return std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/prod_guard.jsonl", .{home});
 }
 
+fn cloudRequestAuditPathAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/cloud_requests.jsonl", .{home});
+}
+
+fn sha256Hex(value: []const u8) [std.crypto.hash.sha2.Sha256.digest_length * 2]u8 {
+    var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(value, &digest, .{});
+    return std.fmt.bytesToHex(digest, .lower);
+}
+
 fn acceptOneThread(server: *Server) !void {
     try server.acceptOne();
 }
@@ -1755,6 +1796,16 @@ test "preexec response denies destructive prod command" {
     defer allocator.free(audit);
     try std.testing.expect(std.mem.indexOf(u8, audit, "\"allow\":false") != null);
     try std.testing.expect(std.mem.indexOf(u8, audit, "\"pattern\":\"kubectl delete\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, audit, "\"command_sha256\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, audit, "kubectl delete pod x") == null);
+
+    const request_audit_path = try cloudRequestAuditPathAlloc(allocator, dir_path);
+    defer allocator.free(request_audit_path);
+    const request_audit = try std.fs.cwd().readFileAlloc(allocator, request_audit_path, 4096);
+    defer allocator.free(request_audit);
+    try std.testing.expect(std.mem.indexOf(u8, request_audit, "\"kind\":\"preexec\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, request_audit, "\"command_sha256\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, request_audit, "kubectl delete pod x") == null);
 }
 
 test "preexec force allows and logs destructive command" {
@@ -1788,6 +1839,7 @@ test "preexec force allows and logs destructive command" {
     const audit = try std.fs.cwd().readFileAlloc(allocator, audit_path, 4096);
     defer allocator.free(audit);
     try std.testing.expect(std.mem.indexOf(u8, audit, "\"forced\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, audit, "\"command_sha256\"") != null);
 }
 
 test "fs event invalidates git branch cache" {

@@ -44,14 +44,15 @@ Local literal rules are stored in the config-dir `ai-redact.rules` file by defau
 
 ## Audit Fields
 
-Cloud request audit entries should include:
+Pre-exec cloud request audit entries in `~/.local/state/shisa/cloud_requests.jsonl` include:
 
 - timestamp
-- provider id
-- model id
-- request hash
-- redaction profile hash
-- success or failure class
-- latency bucket
+- request kind
+- shell
+- cwd SHA-256 hash
+- command SHA-256 hash
+- force flag
 
-Raw command text and raw model prompts are excluded by default.
+Provider-backed AI request audit entries should include provider id, model id, request hash, redaction profile hash, success or failure class, and latency bucket.
+
+Raw command text, raw cwd, and raw model prompts are excluded by default.

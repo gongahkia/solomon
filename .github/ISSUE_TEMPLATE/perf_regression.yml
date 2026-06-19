@@ -1,5 +1,5 @@
 name: Performance regression
-description: Report a prompt-render, startup, cache, or daemon regression.
+description: Report a prompt-render, startup, cache, or daemon regression. Graduated-pack regressions belong in the pack tracker listed in docs/pack-status.md.
 title: "perf: "
 labels:
   - kind/perf

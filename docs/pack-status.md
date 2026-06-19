@@ -11,12 +11,23 @@ Pack lifecycle:
 
 Current packs:
 
-| Pack | State | Owner | Notes |
-| --- | --- | --- | --- |
-| `shisa.vcs` | incubation | core | jj/sapling core support plus fossil/pijul/bazaar community templates. |
-| `shisa.cloud` | incubation | core | AWS, cached GCP, cached Azure, and cached Kubernetes context landed; no network by default. |
-| `shisa.ai` | incubation | core | Optional local-first hint pack; outside core. |
-| community templates | incubation | community | Template repos planned before marketplace verification. |
+| Pack | State | Owner | Issue tracker | Notes |
+| --- | --- | --- | --- | --- |
+| `shisa.vcs` | incubation | core | core repo | jj/sapling core support plus fossil/pijul/bazaar community templates. |
+| `shisa.cloud` | incubation | core | core repo | AWS, cached GCP, cached Azure, and cached Kubernetes context landed; no network by default. |
+| `shisa.ai` | incubation | core | core repo | Optional local-first hint pack; outside core. |
+| community templates | incubation | community | template owner repo | Template repos planned before marketplace verification. |
+
+## Issue Routing
+
+Incubation packs are triaged in the core repo until they have a stable owner, release cadence, and issue tracker.
+
+A pack cannot move to `graduated` unless its row lists a pack-level issue tracker. After graduation:
+
+- pack module bugs, feature requests, and pack-specific performance reports move to the pack repo
+- core keeps host API, protocol, security, marketplace, and cross-pack compatibility issues
+- misplaced core issues should be closed with a link to the pack tracker or transferred when GitHub supports it
+- pack owners must include core issue links when a pack bug exposes a core host/API defect
 
 ## Pack Performance Budgets
 

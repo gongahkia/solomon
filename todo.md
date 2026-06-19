@@ -1118,5 +1118,5 @@ Opened 30 days post v1.0. Pre-work tasks below.
 - [x] Each merged RFC produces a `docs/internals/` page summarizing the decision
 - [ ] Each pack tracks its own pack-perf budget; regressions blocked at PR time
 - [x] Each shell-version drop documented in compatibility matrix
-- [ ] `shisa doctor` updated whenever a new failure mode is added
+- [x] `shisa doctor` updated whenever a new failure mode is added
 - [ ] Every new module ships with a benchmark + an a11y label + a glyph fallback

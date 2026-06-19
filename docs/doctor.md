@@ -28,3 +28,22 @@ Statuses:
 | `ok` | Daemon health check returned `ok`. |
 
 Deprecation output is either `deprecations: none` or one line per deprecated interface in use.
+
+## Adding Failure Modes
+
+Any new user-visible failure mode must update `shisa doctor` in the same change unless the failure is impossible to detect locally.
+
+Required review notes:
+
+- failure symptom
+- local signal `doctor` checks
+- output status or warning text
+- test or reason detection cannot be tested
+
+Examples that should update `doctor`:
+
+- new socket path or daemon health failure
+- new config file location or permission rule
+- new plugin runtime dependency
+- new filesystem watcher backend or limit
+- deprecated interface that can be detected from config

@@ -12,6 +12,7 @@ commands:
   bench         benchmark prompt render via hyperfine
   cache         dump or clear cache state
   cloud         cloud helpers: audit, doctor, explain, preexec
+  config        set persistent config values
   doctor        diagnose socket, config, plugins, lua, fsnotify
   explain       print resolved module pipeline
   font          render glyph fallback probes
@@ -62,6 +63,15 @@ provider options for risk/explain/nextcmd/nl2cmd:
       --provider ollama|openai|anthropic|gemini|lmstudio|llamacpp
                                 default: ollama; cloud providers require API keys
       --model <name>            default: provider-specific
+```
+
+### `shisa config`
+
+```text
+usage: shisa config set locale=<locale|auto>
+
+commands:
+  set locale=<locale|auto> set locale override; auto uses LC_ALL, LC_CTYPE, then LANG
 ```
 
 ### `shisa font`

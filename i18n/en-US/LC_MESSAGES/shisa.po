@@ -16,55 +16,55 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/main.zig:167
+#: src/main.zig:172
 msgid ""
 "shisa: unknown command; run `shisa --help`\n"
 msgstr ""
 "shisa: unknown command; run `shisa --help`\n"
 
-#: src/main.zig:367
+#: src/main.zig:542
 msgid ""
 "theme validate: ok\n"
 msgstr ""
 "theme validate: ok\n"
 
-#: src/main.zig:1145
+#: src/main.zig:1320
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""
 "shisa report: tar not found in PATH\n"
 
-#: src/main.zig:1296
+#: src/main.zig:1471
 msgid ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 msgstr ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 
-#: src/main.zig:2492
+#: src/main.zig:2667
 msgid ""
 "shisa ai bench: ollama not installed\n"
 msgstr ""
 "shisa ai bench: ollama not installed\n"
 
-#: src/main.zig:2496
+#: src/main.zig:2671
 msgid ""
 "shisa ai bench: ollama daemon not running\n"
 msgstr ""
 "shisa ai bench: ollama daemon not running\n"
 
-#: src/main.zig:2591
+#: src/main.zig:2766
 msgid ""
 "shisa ai nl2cmd: refusing to execute generated commands; confirm manually\n"
 msgstr ""
 "shisa ai nl2cmd: refusing to execute generated commands; confirm manually\n"
 
-#: src/main.zig:5752
+#: src/main.zig:5927
 msgid ""
 "shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 "shisa bench: hyperfine not found in PATH\n"
 
-#: src/main.zig:8450
+#: src/main.zig:8659
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
@@ -73,6 +73,7 @@ msgid ""
 "  bench         benchmark prompt render via hyperfine\n"
 "  cache         dump or clear cache state\n"
 "  cloud         cloud helpers: audit, doctor, explain, preexec\n"
+"  config        set persistent config values\n"
 "  doctor        diagnose socket, config, plugins, lua, fsnotify\n"
 "  explain       print resolved module pipeline\n"
 "  font          render glyph fallback probes\n"
@@ -110,6 +111,7 @@ msgstr ""
 "  bench         benchmark prompt render via hyperfine\n"
 "  cache         dump or clear cache state\n"
 "  cloud         cloud helpers: audit, doctor, explain, preexec\n"
+"  config        set persistent config values\n"
 "  doctor        diagnose socket, config, plugins, lua, fsnotify\n"
 "  explain       print resolved module pipeline\n"
 "  font          render glyph fallback probes\n"
@@ -140,7 +142,7 @@ msgstr ""
 "      --version print version\n"
 "\n"
 
-#: src/main.zig:8489
+#: src/main.zig:8699
 msgid ""
 "usage: shisa ai <command> [args]\n"
 "\n"
@@ -176,7 +178,7 @@ msgstr ""
 "      --model <name>            default: provider-specific\n"
 "\n"
 
-#: src/main.zig:8508
+#: src/main.zig:8718
 msgid ""
 "usage: shisa ai redact (--test text | --add-literal text) [--rules path]\n"
 "\n"
@@ -194,7 +196,21 @@ msgstr ""
 "      --rules <path>       override rules file; default is config dir ai-redact.rules\n"
 "\n"
 
-#: src/main.zig:8518
+#: src/main.zig:8728
+msgid ""
+"usage: shisa config set locale=<locale|auto>\n"
+"\n"
+"commands:\n"
+"  set locale=<locale|auto> set locale override; auto uses LC_ALL, LC_CTYPE, then LANG\n"
+"\n"
+msgstr ""
+"usage: shisa config set locale=<locale|auto>\n"
+"\n"
+"commands:\n"
+"  set locale=<locale|auto> set locale override; auto uses LC_ALL, LC_CTYPE, then LANG\n"
+"\n"
+
+#: src/main.zig:8736
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -208,7 +224,7 @@ msgstr ""
 "  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
 "\n"
 
-#: src/main.zig:8526
+#: src/main.zig:8744
 msgid ""
 "usage: shisa vouch verify [path]\n"
 "\n"
@@ -222,7 +238,7 @@ msgstr ""
 "  verify [path] validate VOUCHES format; defaults to ./VOUCHES\n"
 "\n"
 
-#: src/main.zig:8534
+#: src/main.zig:8752
 msgid ""
 "usage: shisa theme <command> [args]\n"
 "\n"
@@ -242,7 +258,7 @@ msgstr ""
 "                    generate a local static gallery and open it\n"
 "\n"
 
-#: src/main.zig:8545
+#: src/main.zig:8763
 msgid ""
 "usage: shisa font check\n"
 "\n"

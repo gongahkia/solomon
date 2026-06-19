@@ -40,6 +40,7 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\```toml
         \\version = 1
         \\theme = "plain"
+        \\locale = "auto"
         \\
         \\[prompt]
         \\modules = [{s}]
@@ -56,6 +57,7 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\| --- | --- | --- | --- | --- |
         \\| `version` | integer | yes | none | Must be `1`. |
         \\| `theme` | string | no | `"plain"` | Built-in theme id or absolute/tilde path to a theme TOML file. See `docs/theme-spec.md`. |
+        \\| `locale` | string | no | `"auto"` | `auto` uses shell locale detection; otherwise a BCP 47-ish locale such as `en-US` or `ar-EG`. |
         \\
         \\Unknown top-level keys are invalid.
         \\

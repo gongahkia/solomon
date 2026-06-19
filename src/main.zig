@@ -64,6 +64,11 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[1], "config")) {
+        try configCommand(allocator, args[2..]);
+        return;
+    }
+
     if (std.mem.eql(u8, args[1], "explain")) {
         try explainConfig(allocator, args[2..]);
         return;
@@ -310,6 +315,176 @@ fn defaultConfigPath(allocator: std.mem.Allocator) ![]u8 {
     const home = try std.process.getEnvVarOwned(allocator, "HOME");
     defer allocator.free(home);
     return defaultConfigPathFromEnv(allocator, null, home);
+}
+
+const ConfigSet = struct {
+    locale: []const u8,
+};
+
+fn configCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len == 0 or std.mem.eql(u8, args[0], "--help") or std.mem.eql(u8, args[0], "-h")) {
+        try std.fs.File.stdout().writeAll(config_help_text);
+        return;
+    }
+    if (std.mem.eql(u8, args[0], "set")) {
+        const set = try parseConfigSetArgs(args[1..]);
+        try configSetCommand(allocator, set);
+        return;
+    }
+    return error.UnknownConfigCommand;
+}
+
+fn parseConfigSetArgs(args: []const []const u8) !ConfigSet {
+    if (args.len != 1) return error.UnknownConfigSetArgument;
+    const prefix = "locale=";
+    const arg = args[0];
+    if (!std.mem.startsWith(u8, arg, prefix)) return error.UnknownConfigSetArgument;
+    const locale = arg[prefix.len..];
+    if (!shisa_config.isValidLocaleOverride(locale)) return error.InvalidLocale;
+    return .{ .locale = locale };
+}
+
+fn configSetCommand(allocator: std.mem.Allocator, set: ConfigSet) !void {
+    const path = try defaultConfigPath(allocator);
+    defer allocator.free(path);
+    const source = try readConfigOrDefault(allocator, path);
+    defer allocator.free(source);
+
+    const updated = try upsertTopLevelStringKeyAlloc(allocator, source, "locale", set.locale);
+    defer allocator.free(updated);
+
+    var diagnostic: shisa_config.Diagnostic = .{};
+    var parsed = shisa_config.parse(allocator, updated, &diagnostic) catch |err| switch (err) {
+        error.InvalidConfig => {
+            const message = try std.fmt.allocPrint(allocator, "{s}:{d}:{d}: {s}\n", .{ path, diagnostic.line, diagnostic.column, diagnostic.message });
+            defer allocator.free(message);
+            try std.fs.File.stderr().writeAll(message);
+            return err;
+        },
+        else => return err,
+    };
+    parsed.deinit(allocator);
+
+    if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
+    var file = try std.fs.createFileAbsolute(path, .{ .truncate = true, .mode = 0o600 });
+    defer file.close();
+    try file.writeAll(updated);
+
+    const message = try std.fmt.allocPrint(allocator, "set locale={s}\n", .{set.locale});
+    defer allocator.free(message);
+    try std.fs.File.stdout().writeAll(message);
+}
+
+fn upsertTopLevelStringKeyAlloc(allocator: std.mem.Allocator, source: []const u8, key: []const u8, value: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    const rendered = try std.fmt.allocPrint(allocator, "{s} = \"{s}\"\n", .{ key, value });
+    defer allocator.free(rendered);
+
+    var offset: usize = 0;
+    var in_root = true;
+    var wrote = false;
+    while (offset < source.len) {
+        const rest = source[offset..];
+        const line_len = std.mem.indexOfScalar(u8, rest, '\n') orelse rest.len;
+        const has_newline = line_len < rest.len;
+        const raw_line = rest[0..line_len];
+        const line = if (raw_line.len > 0 and raw_line[raw_line.len - 1] == '\r') raw_line[0 .. raw_line.len - 1] else raw_line;
+
+        if (in_root) {
+            const trimmed = std.mem.trim(u8, stripConfigComment(line), " \t\r\n");
+            if (trimmed.len > 0 and trimmed[0] == '[') {
+                if (!wrote) {
+                    try out.appendSlice(allocator, rendered);
+                    wrote = true;
+                }
+                in_root = false;
+            } else if (topLevelKeyMatches(trimmed, key)) {
+                try out.appendSlice(allocator, rendered);
+                wrote = true;
+                offset += line_len + @intFromBool(has_newline);
+                continue;
+            }
+        }
+
+        try out.appendSlice(allocator, raw_line);
+        if (has_newline) try out.append(allocator, '\n');
+        offset += line_len + @intFromBool(has_newline);
+    }
+
+    if (!wrote) {
+        if (source.len > 0 and source[source.len - 1] != '\n') try out.append(allocator, '\n');
+        try out.appendSlice(allocator, rendered);
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn stripConfigComment(line: []const u8) []const u8 {
+    var in_string = false;
+    var escaped = false;
+    for (line, 0..) |byte, index| {
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (byte == '\\' and in_string) {
+            escaped = true;
+            continue;
+        }
+        if (byte == '"') {
+            in_string = !in_string;
+            continue;
+        }
+        if (byte == '#' and !in_string) return line[0..index];
+    }
+    return line;
+}
+
+fn topLevelKeyMatches(trimmed: []const u8, key: []const u8) bool {
+    const eq_index = std.mem.indexOfScalar(u8, trimmed, '=') orelse return false;
+    const lhs = std.mem.trim(u8, trimmed[0..eq_index], " \t\r\n");
+    return std.mem.eql(u8, lhs, key);
+}
+
+test "config set args accept locale assignment only" {
+    const parsed = try parseConfigSetArgs(&.{"locale=ja-JP"});
+    try std.testing.expectEqualStrings("ja-JP", parsed.locale);
+    try std.testing.expectError(error.InvalidLocale, parseConfigSetArgs(&.{"locale=ja_JP.UTF-8"}));
+    try std.testing.expectError(error.UnknownConfigSetArgument, parseConfigSetArgs(&.{"theme=plain"}));
+}
+
+test "config set upserts top-level locale" {
+    const source =
+        \\version = 1
+        \\theme = "plain"
+        \\
+        \\[prompt]
+        \\modules = ["cwd"]
+        \\
+    ;
+    const updated = try upsertTopLevelStringKeyAlloc(std.testing.allocator, source, "locale", "ar-EG");
+    defer std.testing.allocator.free(updated);
+
+    const locale_index = std.mem.indexOf(u8, updated, "locale = \"ar-EG\"").?;
+    const prompt_index = std.mem.indexOf(u8, updated, "[prompt]").?;
+    try std.testing.expect(locale_index < prompt_index);
+    var diagnostic: shisa_config.Diagnostic = .{};
+    var parsed = try shisa_config.parse(std.testing.allocator, updated, &diagnostic);
+    defer parsed.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("ar-EG", parsed.locale);
+}
+
+test "config set replaces existing top-level locale" {
+    const source =
+        \\version = 1
+        \\locale = "auto" # keep comment away from replacement
+        \\
+    ;
+    const updated = try upsertTopLevelStringKeyAlloc(std.testing.allocator, source, "locale", "en-US");
+    defer std.testing.allocator.free(updated);
+
+    try std.testing.expectEqualStrings("version = 1\nlocale = \"en-US\"\n", updated);
 }
 
 fn themeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
@@ -7988,6 +8163,8 @@ fn renderSyncPromptAlloc(allocator: std.mem.Allocator, config: PromptConfig, cwd
         .cdhint = module_options.cdhint,
         .tmux_pane = tmux_pane,
         .tmux_pane_options = module_options.tmux_pane,
+        .rtl = promptRtl(config, module_options),
+        .rtl_reverse = promptRtlReverse(config, module_options),
         .risk_tier = module_options.risk_tier,
         .sso_expiry = module_options.sso_expiry,
     }, pipeline);
@@ -8145,10 +8322,12 @@ fn nextValue(args: []const []const u8, index: *usize) ![]const u8 {
 }
 
 const PromptModuleOptions = struct {
+    locale: []const u8 = "auto",
     rtl_reverse: bool = false,
     modules: []const shisa_config.ModuleId,
     right_modules: []const shisa_config.ModuleId,
     owns_modules: bool = false,
+    owns_locale: bool = false,
     cwd: shisa_config.CwdOptions,
     cloud_ctx: shisa_config.CloudCtxOptions,
     cdhint: shisa_config.CdhintOptions,
@@ -8161,6 +8340,7 @@ const PromptModuleOptions = struct {
             allocator.free(self.modules);
             allocator.free(self.right_modules);
         }
+        if (self.owns_locale) allocator.free(self.locale);
         self.* = undefined;
     }
 };
@@ -8204,13 +8384,23 @@ fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config: Pro
     defer allocator.free(escaped_tmux_pane);
     const request_id = try std.fmt.allocPrint(allocator, "cli-{x}", .{std.crypto.random.int(u64)});
     defer allocator.free(request_id);
-    const rtl_reverse = config.rtl_reverse or module_options.rtl_reverse;
+    const rtl = promptRtl(config, module_options);
+    const rtl_reverse = promptRtlReverse(config, module_options);
 
     return std.fmt.allocPrint(
         allocator,
         "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\",\"modules\":[{s}],\"right_modules\":[{s}],\"tmux_pane\":\"{s}\",\"rtl\":{},\"rtl_reverse\":{},\"cwd_options\":{{\"truncate_to\":{d},\"home_tilde\":{},\"max_width\":{d}}},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"cdhint\":{{\"enabled\":{}}},\"tmux_pane_options\":{{\"enabled\":{}}},\"risk_tier\":{{\"unknown_bg\":\"{s}\",\"dev_bg\":\"{s}\",\"staging_bg\":\"{s}\",\"prod_bg\":\"{s}\"}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
-        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), std.posix.getuid(), request_id, modules_json, right_modules_json, escaped_tmux_pane, config.rtl, rtl_reverse, module_options.cwd.truncate_to, module_options.cwd.home_tilde, module_options.cwd.max_width, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, module_options.cdhint.enabled, module_options.tmux_pane.enabled, risk_tier_module.colorSlotName(module_options.risk_tier.unknown_bg), risk_tier_module.colorSlotName(module_options.risk_tier.dev_bg), risk_tier_module.colorSlotName(module_options.risk_tier.staging_bg), risk_tier_module.colorSlotName(module_options.risk_tier.prod_bg), module_options.sso_expiry.warning_minutes },
+        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), std.posix.getuid(), request_id, modules_json, right_modules_json, escaped_tmux_pane, rtl, rtl_reverse, module_options.cwd.truncate_to, module_options.cwd.home_tilde, module_options.cwd.max_width, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, module_options.cdhint.enabled, module_options.tmux_pane.enabled, risk_tier_module.colorSlotName(module_options.risk_tier.unknown_bg), risk_tier_module.colorSlotName(module_options.risk_tier.dev_bg), risk_tier_module.colorSlotName(module_options.risk_tier.staging_bg), risk_tier_module.colorSlotName(module_options.risk_tier.prod_bg), module_options.sso_expiry.warning_minutes },
     );
+}
+
+fn promptRtl(config: PromptConfig, module_options: PromptModuleOptions) bool {
+    if (!std.mem.eql(u8, module_options.locale, "auto")) return shisa_config.localeIsRtl(module_options.locale);
+    return config.rtl;
+}
+
+fn promptRtlReverse(config: PromptConfig, module_options: PromptModuleOptions) bool {
+    return config.rtl_reverse or module_options.rtl_reverse;
 }
 
 fn promptModulesJsonAlloc(allocator: std.mem.Allocator, modules: []const shisa_config.ModuleId) ![]u8 {
@@ -8233,6 +8423,7 @@ fn promptGlyphCaps(config: PromptConfig) []const u8 {
 
 fn defaultPromptModuleOptions() PromptModuleOptions {
     return .{
+        .locale = "auto",
         .rtl_reverse = false,
         .modules = default_prompt_modules[0..],
         .right_modules = &.{},
@@ -8265,11 +8456,15 @@ fn promptModuleOptions(allocator: std.mem.Allocator) !PromptModuleOptions {
     errdefer allocator.free(modules);
     const right_modules = try allocator.dupe(shisa_config.ModuleId, parsed.right_prompt_modules);
     errdefer allocator.free(right_modules);
+    const locale = try allocator.dupe(u8, parsed.locale);
+    errdefer allocator.free(locale);
     return .{
+        .locale = locale,
         .rtl_reverse = parsed.prompt.rtl_reverse,
         .modules = modules,
         .right_modules = right_modules,
         .owns_modules = true,
+        .owns_locale = true,
         .cwd = parsed.modules.cwd,
         .cloud_ctx = parsed.modules.cloud_ctx,
         .cdhint = parsed.modules.cdhint,
@@ -8388,6 +8583,20 @@ test "prompt payload carries rtl flags" {
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"rtl_reverse\":true") != null);
 }
 
+test "prompt payload locale override controls rtl" {
+    var rtl_options = defaultPromptModuleOptions();
+    rtl_options.locale = "ar-EG";
+    const rtl_payload = try buildPromptPayloadWithModuleOptions(std.testing.allocator, .{}, "/tmp", rtl_options);
+    defer std.testing.allocator.free(rtl_payload);
+    try std.testing.expect(std.mem.indexOf(u8, rtl_payload, "\"rtl\":true") != null);
+
+    var ltr_options = defaultPromptModuleOptions();
+    ltr_options.locale = "en-US";
+    const ltr_payload = try buildPromptPayloadWithModuleOptions(std.testing.allocator, .{ .rtl = true }, "/tmp", ltr_options);
+    defer std.testing.allocator.free(ltr_payload);
+    try std.testing.expect(std.mem.indexOf(u8, ltr_payload, "\"rtl\":false") != null);
+}
+
 test "prompt payload carries right modules" {
     var options = defaultPromptModuleOptions();
     options.right_modules = &.{.time};
@@ -8454,6 +8663,7 @@ const help_text =
     \\  bench         benchmark prompt render via hyperfine
     \\  cache         dump or clear cache state
     \\  cloud         cloud helpers: audit, doctor, explain, preexec
+    \\  config        set persistent config values
     \\  doctor        diagnose socket, config, plugins, lua, fsnotify
     \\  explain       print resolved module pipeline
     \\  font          render glyph fallback probes
@@ -8511,6 +8721,14 @@ const ai_redact_help_text =
     \\      --test <text>        print built-in + local-rule redacted text
     \\      --add-literal <text> append a literal local redaction rule
     \\      --rules <path>       override rules file; default is config dir ai-redact.rules
+    \\
+;
+
+const config_help_text =
+    \\usage: shisa config set locale=<locale|auto>
+    \\
+    \\commands:
+    \\  set locale=<locale|auto> set locale override; auto uses LC_ALL, LC_CTYPE, then LANG
     \\
 ;
 

@@ -7,6 +7,7 @@ const tmux_pane_module = @import("daemon/modules/tmux_pane.zig");
 pub const default_config_text =
     \\version = 1
     \\theme = "plain"
+    \\locale = "auto"
     \\
     \\[prompt]
     \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
@@ -57,6 +58,7 @@ pub const default_config_text =
 pub const a11y_config_text =
     \\version = 1
     \\theme = "a11y"
+    \\locale = "auto"
     \\
     \\[prompt]
     \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
@@ -276,6 +278,7 @@ pub const TimeOptions = struct {
 pub const Config = struct {
     version: u32,
     theme: []u8,
+    locale: []u8,
     prompt_modules: []ModuleId,
     right_prompt_modules: []ModuleId,
     prompt: PromptOptions = .{},
@@ -284,6 +287,7 @@ pub const Config = struct {
 
     pub fn deinit(self: *Config, allocator: std.mem.Allocator) void {
         allocator.free(self.theme);
+        allocator.free(self.locale);
         allocator.free(self.prompt_modules);
         allocator.free(self.right_prompt_modules);
         self.ai.deinit(allocator);
@@ -313,6 +317,7 @@ const Table = enum {
 const Seen = struct {
     version: bool = false,
     theme: bool = false,
+    locale: bool = false,
     prompt_modules: bool = false,
     prompt_right_modules: bool = false,
     prompt_rtl_reverse: bool = false,
@@ -369,6 +374,7 @@ const Parser = struct {
     table: Table = .root,
     seen: Seen = .{},
     theme: ?[]u8 = null,
+    locale: ?[]u8 = null,
     prompt_modules: std.ArrayList(ModuleId) = .empty,
     right_prompt_modules: std.ArrayList(ModuleId) = .empty,
     prompt: PromptOptions = .{},
@@ -392,6 +398,10 @@ const Parser = struct {
 
         const theme = if (self.theme) |value| value else try self.allocator.dupe(u8, "plain");
         self.theme = null;
+        errdefer self.allocator.free(theme);
+        const locale = if (self.locale) |value| value else try self.allocator.dupe(u8, "auto");
+        self.locale = null;
+        errdefer self.allocator.free(locale);
         const modules = if (self.seen.prompt_modules)
             try self.prompt_modules.toOwnedSlice(self.allocator)
         else
@@ -405,6 +415,7 @@ const Parser = struct {
         return .{
             .version = 1,
             .theme = theme,
+            .locale = locale,
             .prompt_modules = modules,
             .right_prompt_modules = right_modules,
             .prompt = self.prompt,
@@ -415,6 +426,7 @@ const Parser = struct {
 
     fn deinitWorking(self: *Parser) void {
         if (self.theme) |value| self.allocator.free(value);
+        if (self.locale) |value| self.allocator.free(value);
         self.ai.deinit(self.allocator);
         self.prompt_modules.deinit(self.allocator);
         self.right_prompt_modules.deinit(self.allocator);
@@ -496,6 +508,12 @@ const Parser = struct {
         } else if (std.mem.eql(u8, key.text, "theme")) {
             try self.markUnseen(&self.seen.theme, line_no, key.column);
             self.theme = try self.parseStringAlloc(value, line_no);
+        } else if (std.mem.eql(u8, key.text, "locale")) {
+            try self.markUnseen(&self.seen.locale, line_no, key.column);
+            const locale = try self.parseStringAlloc(value, line_no);
+            errdefer self.allocator.free(locale);
+            if (!isValidLocaleOverride(locale)) return self.fail(line_no, value.column, "invalid locale");
+            self.locale = locale;
         } else {
             return self.fail(line_no, key.column, "unknown key");
         }
@@ -903,6 +921,57 @@ fn isSpace(byte: u8) bool {
     return byte == ' ' or byte == '\t' or byte == '\r' or byte == '\n';
 }
 
+pub fn isValidLocaleOverride(value: []const u8) bool {
+    if (std.mem.eql(u8, value, "auto")) return true;
+    if (value.len < 2 or value.len > 35) return false;
+    var last_sep = true;
+    for (value) |byte| {
+        const ok = (byte >= 'A' and byte <= 'Z') or
+            (byte >= 'a' and byte <= 'z') or
+            (byte >= '0' and byte <= '9');
+        if (ok) {
+            last_sep = false;
+            continue;
+        }
+        if ((byte == '-' or byte == '_') and !last_sep) {
+            last_sep = true;
+            continue;
+        }
+        return false;
+    }
+    return !last_sep;
+}
+
+pub fn localeIsRtl(locale: []const u8) bool {
+    const lang = localeLanguageSubtag(locale);
+    return asciiEqIgnoreCase(lang, "ar") or
+        asciiEqIgnoreCase(lang, "he") or
+        asciiEqIgnoreCase(lang, "fa") or
+        asciiEqIgnoreCase(lang, "ur") or
+        asciiEqIgnoreCase(lang, "ps") or
+        asciiEqIgnoreCase(lang, "dv") or
+        asciiEqIgnoreCase(lang, "yi");
+}
+
+fn localeLanguageSubtag(locale: []const u8) []const u8 {
+    var end = locale.len;
+    for (locale, 0..) |byte, index| {
+        if (byte == '-' or byte == '_' or byte == '.' or byte == '@') {
+            end = index;
+            break;
+        }
+    }
+    return locale[0..end];
+}
+
+fn asciiEqIgnoreCase(a: []const u8, b: []const u8) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |left, right| {
+        if (std.ascii.toLower(left) != std.ascii.toLower(right)) return false;
+    }
+    return true;
+}
+
 test "parses minimal config with defaults" {
     const source =
         \\version = 1
@@ -919,6 +988,7 @@ test "parses minimal config with defaults" {
 
     try std.testing.expectEqual(@as(u32, 1), config.version);
     try std.testing.expectEqualStrings("plain", config.theme);
+    try std.testing.expectEqualStrings("auto", config.locale);
     try std.testing.expectEqualSlices(ModuleId, &.{ .cwd, .git_branch, .exit_status }, config.prompt_modules);
     try std.testing.expectEqual(@as(usize, 0), config.right_prompt_modules.len);
     try std.testing.expectEqual(@as(u8, 3), config.modules.cwd.truncate_to);
@@ -959,6 +1029,7 @@ test "default config parses" {
     defer config.deinit(std.testing.allocator);
 
     try std.testing.expectEqualStrings("plain", config.theme);
+    try std.testing.expectEqualStrings("auto", config.locale);
     try std.testing.expectEqualSlices(ModuleId, default_modules[0..], config.prompt_modules);
     try std.testing.expectEqual(@as(usize, 0), config.right_prompt_modules.len);
 }
@@ -989,6 +1060,7 @@ test "a11y config parses" {
     defer config.deinit(std.testing.allocator);
 
     try std.testing.expectEqualStrings("a11y", config.theme);
+    try std.testing.expectEqualStrings("auto", config.locale);
     try std.testing.expectEqualSlices(ModuleId, default_modules[0..], config.prompt_modules);
     try std.testing.expectEqual(@as(usize, 0), config.right_prompt_modules.len);
 }
@@ -997,6 +1069,7 @@ test "parses per-module options" {
     const source =
         \\version = 1
         \\theme = "minimal"
+        \\locale = "en-US"
         \\
         \\[prompt]
         \\modules = ["cwd", "time"]
@@ -1053,6 +1126,7 @@ test "parses per-module options" {
     defer config.deinit(std.testing.allocator);
 
     try std.testing.expectEqualStrings("minimal", config.theme);
+    try std.testing.expectEqualStrings("en-US", config.locale);
     try std.testing.expectEqualSlices(ModuleId, &.{ .cwd, .time }, config.prompt_modules);
     try std.testing.expectEqualSlices(ModuleId, &.{.cmd_duration}, config.right_prompt_modules);
     try std.testing.expect(config.prompt.rtl_reverse);
@@ -1079,6 +1153,25 @@ test "parses per-module options" {
     try std.testing.expectEqual(RiskTierColor.danger, config.modules.risk_tier.prod_bg);
     try std.testing.expectEqual(@as(u32, 15), config.modules.sso_expiry.warning_minutes);
     try std.testing.expect(config.modules.time.utc);
+}
+
+test "parses and validates locale override" {
+    const source =
+        \\version = 1
+        \\locale = "ar-EG"
+        \\
+    ;
+
+    var diagnostic: Diagnostic = .{};
+    var config = try parse(std.testing.allocator, source, &diagnostic);
+    defer config.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("ar-EG", config.locale);
+    try std.testing.expect(localeIsRtl(config.locale));
+    try std.testing.expect(!localeIsRtl("en-US"));
+    try std.testing.expect(isValidLocaleOverride("zh-Hans-CN"));
+    try std.testing.expect(!isValidLocaleOverride("en_US.UTF-8"));
+    try std.testing.expect(!isValidLocaleOverride("../en-US"));
 }
 
 test "reports unknown key span" {

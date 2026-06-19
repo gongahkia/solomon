@@ -83,6 +83,7 @@
 
 - [Ollama](ai-ollama.md)
 - [OpenAI](ai-openai.md)
+- [Anthropic](ai-anthropic.md)
 - [AI Privacy](ai-privacy.md)
 
 # Videos

@@ -38,6 +38,8 @@ Cloud provider support is not part of the default prompt path. A cloud provider 
 
 The built-in OpenAI provider uses provider id `openai`, endpoint `POST https://api.openai.com/v1/responses`, `Authorization: Bearer $OPENAI_API_KEY`, `model`, redacted `input`, and `store:false`. It is selected per command with `--provider openai`.
 
+The built-in Anthropic provider uses provider id `anthropic`, endpoint `POST https://api.anthropic.com/v1/messages`, `x-api-key: $ANTHROPIC_API_KEY`, `anthropic-version: 2023-06-01`, `model`, `max_tokens`, and one redacted user message. It is selected per command with `--provider anthropic`.
+
 ## Default Redaction Rules
 
 Default redaction replaces matched values with `[redacted]`. The built-in rules cover key/value fields named `password`, `token`, `secret`, `api_key`, AWS credential names, kubeconfig key data, and SSH `IdentityFile`; bearer tokens; AWS access keys; GitHub `gh*_` tokens; `sk-` provider keys; PEM private-key blocks; and 12-digit cloud account ids.

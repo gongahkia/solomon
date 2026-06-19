@@ -8,6 +8,7 @@ const cloud_ctx_module = @import("daemon/modules/cloud_ctx.zig");
 const git_branch_module = @import("daemon/modules/git_branch.zig");
 const language_versions_module = @import("daemon/modules/language_versions.zig");
 const ai_explain = @import("ai/explain.zig");
+const anthropic_provider = @import("ai/anthropic.zig");
 const nextcmd = @import("ai/nextcmd.zig");
 const nl2cmd = @import("ai/nl2cmd.zig");
 const ollama = @import("ai/ollama.zig");
@@ -1853,11 +1854,13 @@ test "cloud explain output shows reason" {
 const AiProvider = enum {
     ollama,
     openai,
+    anthropic,
 };
 
 fn parseAiProvider(value: []const u8) !AiProvider {
     if (std.mem.eql(u8, value, "ollama")) return .ollama;
     if (std.mem.eql(u8, value, "openai")) return .openai;
+    if (std.mem.eql(u8, value, "anthropic")) return .anthropic;
     return error.UnknownAiProvider;
 }
 
@@ -1865,11 +1868,13 @@ fn aiProviderName(provider: AiProvider) []const u8 {
     return switch (provider) {
         .ollama => "ollama",
         .openai => "openai",
+        .anthropic => "anthropic",
     };
 }
 
 fn aiEffectiveModel(provider: AiProvider, model: []const u8) []const u8 {
     if (provider == .openai and std.mem.eql(u8, model, ollama.recommended_model)) return openai_provider.default_model;
+    if (provider == .anthropic and std.mem.eql(u8, model, ollama.recommended_model)) return anthropic_provider.default_model;
     return model;
 }
 
@@ -1947,7 +1952,7 @@ fn aiStatus(allocator: std.mem.Allocator) !void {
         else => return err,
     };
     defer if (home) |value| allocator.free(value);
-    const output = try aiStatusOutputAlloc(allocator, status, home, openai_provider.isConfiguredEnv(allocator));
+    const output = try aiStatusOutputAlloc(allocator, status, home, openai_provider.isConfiguredEnv(allocator), anthropic_provider.isConfiguredEnv(allocator));
     defer allocator.free(output);
     try std.fs.File.stdout().writeAll(output);
 }
@@ -2078,11 +2083,16 @@ fn appendAiRedactLiteralRule(rules_path: []const u8, literal: []const u8) !void 
     try file.writeAll("\n");
 }
 
-fn aiStatusOutputAlloc(allocator: std.mem.Allocator, status: ollama.Status, home: ?[]const u8, openai_configured: bool) ![]u8 {
+fn aiStatusOutputAlloc(allocator: std.mem.Allocator, status: ollama.Status, home: ?[]const u8, openai_configured: bool, anthropic_configured: bool) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
     try appendFmt(allocator, &out, "local:\n  ollama_installed: {}\n  ollama_running: {}\n  recommended_model: {s}\n", .{ status.installed, status.daemon_running, ollama.recommended_model });
-    try appendFmt(allocator, &out, "cloud:\n  providers: openai\n  openai_configured: {}\n  enabled: {}\n  default_model: {s}\n", .{ openai_configured, openai_configured, openai_provider.default_model });
+    try appendFmt(
+        allocator,
+        &out,
+        "cloud:\n  providers: openai,anthropic\n  openai_configured: {}\n  anthropic_configured: {}\n  enabled: {}\n  openai_default_model: {s}\n  anthropic_default_model: {s}\n",
+        .{ openai_configured, anthropic_configured, openai_configured or anthropic_configured, openai_provider.default_model, anthropic_provider.default_model },
+    );
     try out.appendSlice(allocator, "logging:\n");
     if (home) |home_path| {
         const cloud_audit_path = try cloudRequestAuditPathAlloc(allocator, home_path);
@@ -2219,19 +2229,12 @@ fn aiProviderGenerateAlloc(allocator: std.mem.Allocator, provider: AiProvider, m
             break :blk try ollama.generateAlloc(allocator, ollama.default_host, ollama.default_port, effective_model, prompt_text);
         },
         .openai => try aiOpenAiGenerateAlloc(allocator, effective_model, prompt_text, purpose),
+        .anthropic => try aiAnthropicGenerateAlloc(allocator, effective_model, prompt_text, purpose),
     };
 }
 
 fn aiOpenAiGenerateAlloc(allocator: std.mem.Allocator, model: []const u8, prompt_text: []const u8, purpose: []const u8) ![]u8 {
-    const rules_path = defaultAiRedactRulesPathAlloc(allocator) catch |err| switch (err) {
-        error.EnvironmentVariableNotFound, error.MissingHome, error.MissingConfigDir => null,
-        else => return err,
-    };
-    defer if (rules_path) |path| allocator.free(path);
-    const redacted_prompt = if (rules_path) |path|
-        try aiRedactWithRulesAlloc(allocator, prompt_text, path)
-    else
-        try ai_redact.redactAlloc(allocator, prompt_text);
+    const redacted_prompt = try aiCloudRedactedPromptAlloc(allocator, prompt_text);
     defer allocator.free(redacted_prompt);
 
     const api_key = try openai_provider.apiKeyFromEnvAlloc(allocator);
@@ -2252,6 +2255,42 @@ fn aiOpenAiGenerateAlloc(allocator: std.mem.Allocator, model: []const u8, prompt
     errdefer allocator.free(raw);
     appendAiCloudAudit(allocator, openai_provider.provider_id, model, redacted_prompt, "success", purpose, elapsedMs(start_ns)) catch {};
     return raw;
+}
+
+fn aiAnthropicGenerateAlloc(allocator: std.mem.Allocator, model: []const u8, prompt_text: []const u8, purpose: []const u8) ![]u8 {
+    const redacted_prompt = try aiCloudRedactedPromptAlloc(allocator, prompt_text);
+    defer allocator.free(redacted_prompt);
+
+    const api_key = try anthropic_provider.apiKeyFromEnvAlloc(allocator);
+    defer allocator.free(api_key);
+    const base_url = try anthropic_provider.baseUrlFromEnvAlloc(allocator);
+    defer allocator.free(base_url);
+
+    const start_ns = std.time.nanoTimestamp();
+    const raw = anthropic_provider.generateAlloc(allocator, .{
+        .api_key = api_key,
+        .model = model,
+        .base_url = base_url,
+        .input = redacted_prompt,
+    }) catch |err| {
+        appendAiCloudAudit(allocator, anthropic_provider.provider_id, model, redacted_prompt, "error", purpose, elapsedMs(start_ns)) catch {};
+        return err;
+    };
+    errdefer allocator.free(raw);
+    appendAiCloudAudit(allocator, anthropic_provider.provider_id, model, redacted_prompt, "success", purpose, elapsedMs(start_ns)) catch {};
+    return raw;
+}
+
+fn aiCloudRedactedPromptAlloc(allocator: std.mem.Allocator, prompt_text: []const u8) ![]u8 {
+    const rules_path = defaultAiRedactRulesPathAlloc(allocator) catch |err| switch (err) {
+        error.EnvironmentVariableNotFound, error.MissingHome, error.MissingConfigDir => null,
+        else => return err,
+    };
+    defer if (rules_path) |path| allocator.free(path);
+    return if (rules_path) |path|
+        try aiRedactWithRulesAlloc(allocator, prompt_text, path)
+    else
+        try ai_redact.redactAlloc(allocator, prompt_text);
 }
 
 fn elapsedMs(start_ns: i128) u64 {
@@ -2510,7 +2549,7 @@ fn nl2cmdAuditLineAlloc(allocator: std.mem.Allocator, config: AiNl2cmdConfig, re
     const escaped_provider = try jsonEscapeAlloc(allocator, aiProviderName(config.provider));
     defer allocator.free(escaped_provider);
     const confidence = if (candidate.len == 0) "none" else nl2cmd.commandConfidence(candidate).label();
-    if (config.provider == .openai) {
+    if (config.provider != .ollama) {
         const cwd_hash = sha256Hex(config.cwd);
         const request_hash = sha256Hex(request);
         const candidate_hash = sha256Hex(candidate);
@@ -2632,12 +2671,13 @@ test "ai bench args parse" {
 }
 
 test "ai status output reports local cloud and logging state" {
-    const output = try aiStatusOutputAlloc(std.testing.allocator, .{ .installed = true, .daemon_running = false }, "/tmp/shisa-ai-status-home", false);
+    const output = try aiStatusOutputAlloc(std.testing.allocator, .{ .installed = true, .daemon_running = false }, "/tmp/shisa-ai-status-home", false, false);
     defer std.testing.allocator.free(output);
     try std.testing.expect(std.mem.indexOf(u8, output, "local:\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "ollama_installed: true") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "cloud:\n  providers: openai\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "cloud:\n  providers: openai,anthropic\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "openai_configured: false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "anthropic_configured: false") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "logging:\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "cloud_request_audit: missing /tmp/shisa-ai-status-home/.local/state/shisa/cloud_requests.jsonl") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "prod_guard_audit: missing /tmp/shisa-ai-status-home/.local/state/shisa/prod_guard.jsonl") != null);
@@ -2711,8 +2751,13 @@ test "ai nl2cmd args parse" {
 
 test "ai provider default model maps openai" {
     try std.testing.expectEqualStrings(openai_provider.default_model, aiEffectiveModel(.openai, ollama.recommended_model));
+    try std.testing.expectEqualStrings(anthropic_provider.default_model, aiEffectiveModel(.anthropic, ollama.recommended_model));
     try std.testing.expectEqualStrings("custom", aiEffectiveModel(.openai, "custom"));
     try std.testing.expectEqualStrings(ollama.recommended_model, aiEffectiveModel(.ollama, ollama.recommended_model));
+}
+
+test "ai provider parser accepts anthropic" {
+    try std.testing.expectEqual(AiProvider.anthropic, try parseAiProvider("anthropic"));
 }
 
 test "ai cloud audit line stores hashes only" {
@@ -8169,8 +8214,9 @@ const ai_help_text =
     \\  nl2cmd        convert ?? input to a command suggestion
     \\
     \\provider options for risk/explain/nextcmd/nl2cmd:
-    \\      --provider ollama|openai  default: ollama; openai requires OPENAI_API_KEY
-    \\      --model <name>            default: gemma3:1b for ollama, gpt-5.5 for openai
+    \\      --provider ollama|openai|anthropic
+    \\                                default: ollama; cloud providers require API keys
+    \\      --model <name>            default: gemma3:1b, gpt-5.5, or claude-fable-5
     \\
 ;
 

@@ -421,7 +421,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 ### 12.10 Provider abstraction (optional cloud)
 - [x] OpenAI provider (opt-in)
-- [ ] Anthropic provider (opt-in)
+- [x] Anthropic provider (opt-in)
 - [ ] Gemini provider (opt-in)
 - [ ] LM Studio provider (local but non-Ollama)
 - [ ] llama.cpp direct (local, no daemon)

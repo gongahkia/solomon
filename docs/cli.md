@@ -59,8 +59,9 @@ commands:
   nl2cmd        convert ?? input to a command suggestion
 
 provider options for risk/explain/nextcmd/nl2cmd:
-      --provider ollama|openai  default: ollama; openai requires OPENAI_API_KEY
-      --model <name>            default: gemma3:1b for ollama, gpt-5.5 for openai
+      --provider ollama|openai|anthropic
+                                default: ollama; cloud providers require API keys
+      --model <name>            default: gemma3:1b, gpt-5.5, or claude-fable-5
 ```
 
 ### `shisa font`

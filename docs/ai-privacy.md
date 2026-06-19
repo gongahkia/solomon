@@ -19,11 +19,14 @@ Local AI commands may read:
 
 - current working directory
 - last command and exit code when passed by the caller
+- stderr text only when a caller explicitly passes it to the local errfix rule engine
 - shell name
 - model name
 - local history paths only when the command explicitly asks for history context
 
 Local AI commands must fail closed when the model daemon is unavailable.
+
+The errfix rule engine is deterministic and local-only. It matches curated stderr patterns before any model-backed suggestion path exists.
 
 The built-in LM Studio provider uses provider id `lmstudio`, endpoint `POST http://127.0.0.1:1234/v1/responses` by default, `model`, and raw `input`. Its base URL must remain loopback (`127.0.0.1`, `localhost`, or `[::1]`).
 

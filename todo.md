@@ -398,7 +398,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [ ] Hook into last command's stderr capture
 - [ ] On non-zero exit, surface a one-line "shisa: try `<x>`?" hint
 - [ ] User opt-in per non-zero exit (don't be noisy)
-- [ ] Maintain a curated set of common error → fix patterns (rules-first, SLM-second)
+- [x] Maintain a curated set of common error → fix patterns (rules-first, SLM-second)
 
 ### 12.7 Semantic history search (`histsearch`)
 - [x] Local embedding model recipe (`nomic-embed-text` via Ollama, or candle/llama.cpp embedding)

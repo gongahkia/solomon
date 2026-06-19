@@ -337,6 +337,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const ai_redact_test_run = b.addRunArtifact(ai_redact_tests);
+    const ai_errfix_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/ai/errfix.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const ai_errfix_test_run = b.addRunArtifact(ai_errfix_tests);
     const ai_regression_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/ai/regression.zig"),
@@ -875,6 +883,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&nl2cmd_test_run.step);
     test_step.dependOn(&ai_explain_test_run.step);
     test_step.dependOn(&ai_redact_test_run.step);
+    test_step.dependOn(&ai_errfix_test_run.step);
     test_step.dependOn(&ai_regression_test_run.step);
     test_step.dependOn(&config_test_run.step);
     test_step.dependOn(&plugin_manifest_test_run.step);

@@ -1117,6 +1117,6 @@ Opened 30 days post v1.0. Pre-work tasks below.
 - [x] Update `VOUCHES` whenever a contributor is granted write access
 - [x] Each merged RFC produces a `docs/internals/` page summarizing the decision
 - [ ] Each pack tracks its own pack-perf budget; regressions blocked at PR time
-- [ ] Each shell-version drop documented in compatibility matrix
+- [x] Each shell-version drop documented in compatibility matrix
 - [ ] `shisa doctor` updated whenever a new failure mode is added
 - [ ] Every new module ships with a benchmark + an a11y label + a glyph fallback

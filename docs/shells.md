@@ -10,6 +10,18 @@
 | nushell | `init/shisa.nu` | `$env.PROMPT_COMMAND` | exit/jobs yes; duration 0 | documented limitation | no | CLI supports `--instant`; hook off by default | `test/integration/nu_fake_socket.sh` |
 | PowerShell | `init/shisa.ps1` | `prompt` | exit/jobs yes; duration 0 | `Register-EngineEvent` via `Shisa.AsyncFill`; host-limited | no | CLI supports `--instant`; hook off by default | `test/integration/pwsh_fake_socket.sh` |
 
+## Version Compatibility Matrix
+
+| Shell | Supported floor | Full feature floor | Current evidence | Drop rule |
+| --- | --- | --- | --- | --- |
+| zsh | 5.0; init returns without installing hooks below 5.0 | 5.0 plus `zsh/datetime` for duration | `test/integration/zsh_fake_socket.sh` when `zsh` is in PATH | update this table, changelog, release notes, and integration skip reason |
+| bash | 3.x fallback prompt | 4.x for `PROMPT_COMMAND` + `DEBUG` trap + async key binding | `test/integration/bash_fake_socket.sh` plus Bash 3 fallback docs | update this table, changelog, release notes, and fallback behavior |
+| fish | no hard version gate in init | version with `fish_prompt`, `fish_preexec`, `$CMD_DURATION`, and `commandline -f repaint` | `test/integration/fish_fake_socket.sh` when `fish` is in PATH | update this table, changelog, release notes, and integration skip reason |
+| nushell | 0.113.x documented baseline | 0.113.x for `$env.PROMPT_COMMAND` and `job list` path | `test/integration/nu_fake_socket.sh` when `nu` is in PATH | update this table, changelog, release notes, and integration skip reason |
+| PowerShell | `pwsh` host that can source `init/shisa.ps1` | host support for `Register-EngineEvent` if async repaint is desired | `test/integration/pwsh_fake_socket.sh` when `pwsh` is in PATH | update this table, changelog, release notes, and event-hook fallback |
+
+Any shell-version drop must be documented here in the same change that updates init behavior or test coverage.
+
 Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from the hook.
 
 Set `SHISA_CMD_COMPLETE_BELL=1` before sourcing zsh, bash, or fish init to emit a completion notification after commands whose measured duration is at least `SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS` (default `10000`). `SHISA_CMD_COMPLETE_BELL_MODE` accepts `bell`, `osc9`, `notify-send`, or `macos`.

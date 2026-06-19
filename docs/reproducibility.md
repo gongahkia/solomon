@@ -1,5 +1,7 @@
 # Reproducibility
 
+[![release reproducibility gate](https://github.com/gongahkia/shisa/actions/workflows/release.yml/badge.svg)](https://github.com/gongahkia/shisa/actions/workflows/release.yml)
+
 This page defines the controlled release-build invocation for Shisa. It is the baseline for later bit-identical artifact checks.
 
 ## Inputs
@@ -57,6 +59,8 @@ bash .github/scripts/reproducibility-check.sh
 ```
 
 The script builds `release` twice with fixed `SOURCE_DATE_EPOCH`, locale, timezone, cache paths, seed, optional target, and build-id mode. It compares SHA-256 hashes for `shisa`, `shisad`, and `shisa-supervisor`, then fails the tagged release job on any mismatch.
+
+The badge above reports the tag-driven release workflow status. For now, that means the same-runner reproducibility gate ran on Linux, not that cross-host artifacts are bit-identical.
 
 ## Current Limits
 

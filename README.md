@@ -1,5 +1,7 @@
 # Shisa
 
+[![release reproducibility gate](https://github.com/gongahkia/shisa/actions/workflows/release.yml/badge.svg)](https://github.com/gongahkia/shisa/actions/workflows/release.yml)
+
 A daemon-backed, async-first, cross-shell prompt that never blocks.
 
 Shisa keeps slow prompt work out of the shell. A per-user daemon watches filesystem state, caches module output, and returns pre-rendered prompts over a Unix-domain socket so git status, language probes, and cloud context do not stall input.

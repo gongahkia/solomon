@@ -652,7 +652,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 - [x] Pin Zig version + lockfile for all deps
 - [x] Document the deterministic build invocation
 - [ ] Verify bit-identical artifacts across two CI hosts
-- [ ] Publish reproducibility status badge
+- [x] Publish reproducibility status badge
 
 ### 20.2 SBOM
 - [x] Generate SPDX SBOM on every tagged release

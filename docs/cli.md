@@ -27,7 +27,7 @@ commands:
                 print the minimal Pure-compatible preset
   init          write default shisa.toml; --a11y uses the a11y theme
   pin           mark a path as never-evicted
-  plugin        new, lint, pack, install, list, enable, disable, or trust plugins
+  plugin        new, lint, doctor, pack, install, list, enable, disable, or trust plugins
   prompt        render prompt through shisad; --right prints configured right prompt
   render        alias for prompt; --explain-a11y dumps segment labels
   report        write a redacted support bundle .tar.gz

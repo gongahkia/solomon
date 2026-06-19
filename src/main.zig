@@ -5456,6 +5456,15 @@ fn pluginCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[0], "doctor")) {
+        if (args.len > 2) return error.UnknownPluginArgument;
+        const path = if (args.len == 2) args[1] else ".";
+        const output = try pluginDoctorAlloc(allocator, path);
+        defer allocator.free(output);
+        try std.fs.File.stdout().writeAll(output);
+        return;
+    }
+
     if (std.mem.eql(u8, args[0], "pack")) {
         if (args.len != 2) return error.UnknownPluginArgument;
         const output_path = try pluginPack(allocator, args[1], ".");
@@ -5675,6 +5684,13 @@ fn pluginLintAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     try appendFmt(allocator, &out, "ok {s} {s}\n", .{ loaded.manifest.name, loaded.manifest.version });
     try appendPluginLintWarnings(allocator, &out, plugin_dir, loaded.manifest);
     return out.toOwnedSlice(allocator);
+}
+
+fn pluginDoctorAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const lint = try pluginLintAlloc(allocator, path);
+    defer allocator.free(lint);
+    const status: []const u8 = if (std.mem.indexOf(u8, lint, "warning:") == null) "doctor ok\n" else "doctor warnings\n";
+    return std.fmt.allocPrint(allocator, "{s}{s}", .{ status, lint });
 }
 
 fn pluginManifestPathAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
@@ -6635,6 +6651,10 @@ test "plugin lint accepts plugin.lua path" {
     };
     defer allocator.free(output);
     try std.testing.expectEqualStrings("ok linted-file 0.1.0\n", output);
+
+    const doctor = try pluginDoctorAlloc(allocator, manifest_path);
+    defer allocator.free(doctor);
+    try std.testing.expectEqualStrings("doctor ok\nok linted-file 0.1.0\n", doctor);
 }
 
 test "plugin pack writes signed bundle" {
@@ -7618,7 +7638,7 @@ const help_text =
     \\                print the minimal Pure-compatible preset
     \\  init          write default shisa.toml; --a11y uses the a11y theme
     \\  pin           mark a path as never-evicted
-    \\  plugin        new, lint, pack, install, list, enable, disable, or trust plugins
+    \\  plugin        new, lint, doctor, pack, install, list, enable, disable, or trust plugins
     \\  prompt        render prompt through shisad; --right prints configured right prompt
     \\  render        alias for prompt; --explain-a11y dumps segment labels
     \\  report        write a redacted support bundle .tar.gz

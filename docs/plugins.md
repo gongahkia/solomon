@@ -122,6 +122,7 @@ Common commands:
 ```sh
 shisa plugin new demo-plugin
 shisa plugin lint demo-plugin
+shisa plugin doctor demo-plugin
 shisa plugin pack demo-plugin
 shisa plugin list
 shisa plugin disable demo-plugin
@@ -131,6 +132,8 @@ shisa plugin trust shisa.ai --net=openai
 ```
 
 `shisa plugin pack <path>` writes `<name>-<version>.shisa-plugin`, a tar bundle with `SHISA_PLUGIN_BUNDLE.json` containing file SHA-256 values and an Ed25519 signature over the canonical bundle manifest.
+
+`shisa plugin doctor [path]` defaults to the current directory and prefixes strict lint output with `doctor ok` or `doctor warnings`.
 
 `shisa plugin trust <name> --net=<provider>` records provider-scoped network trust. A grant for `openai` does not cover another provider such as `anthropic`, and it does not cover non-network capability changes.
 

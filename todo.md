@@ -450,7 +450,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] `verified` badge in `shisa plugin list`
 - [ ] `shisa plugin install <name>` from marketplace
 - [ ] `shisa plugin search <query>`
-- [ ] `shisa plugin doctor` for plugin self-diagnosis
+- [x] `shisa plugin doctor` for plugin self-diagnosis
 - [x] Community moderation policy (`docs/plugin-policy.md`)
 - [x] Plugin author quickstart (`docs/authoring-plugins.md`)
 - [x] Sample plugin template repo (`shisa-plugin-template`)

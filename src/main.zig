@@ -6768,6 +6768,18 @@ const PluginMarketplaceEntry = struct {
     url: []const u8,
     description: []const u8 = "",
     verified: bool = false,
+    manifest_sha256: []const u8 = "",
+    signatures: []PluginMarketplaceSignature = &.{},
+};
+
+const PluginMarketplaceSignature = struct {
+    scheme: []const u8 = "",
+    public_key: ?[]const u8 = null,
+    signature_url: ?[]const u8 = null,
+    trusted_comment: ?[]const u8 = null,
+    bundle_url: ?[]const u8 = null,
+    certificate_identity: ?[]const u8 = null,
+    certificate_issuer: ?[]const u8 = null,
 };
 
 fn pluginSearchAlloc(allocator: std.mem.Allocator, index_path: []const u8, query: []const u8) ![]u8 {
@@ -6781,14 +6793,43 @@ fn pluginSearchAlloc(allocator: std.mem.Allocator, index_path: []const u8, query
     for (parsed.value.plugins) |entry| {
         if (!plugin_manifest.isValidPluginName(entry.name)) continue;
         if (!containsIgnoreAsciiCase(entry.name, query) and !containsIgnoreAsciiCase(entry.description, query)) continue;
-        const badge = if (entry.verified) " verified" else "";
+        const verified_badge = if (entry.verified) " verified" else "";
+        const signed_badge = if (pluginMarketplaceEntrySigned(entry)) " signed" else "";
         if (entry.description.len != 0) {
-            try appendFmt(allocator, &out, "{s}{s} {s} - {s}\n", .{ entry.name, badge, entry.url, entry.description });
+            try appendFmt(allocator, &out, "{s}{s}{s} {s} - {s}\n", .{ entry.name, verified_badge, signed_badge, entry.url, entry.description });
         } else {
-            try appendFmt(allocator, &out, "{s}{s} {s}\n", .{ entry.name, badge, entry.url });
+            try appendFmt(allocator, &out, "{s}{s}{s} {s}\n", .{ entry.name, verified_badge, signed_badge, entry.url });
         }
     }
     return out.toOwnedSlice(allocator);
+}
+
+fn pluginMarketplaceEntrySigned(entry: PluginMarketplaceEntry) bool {
+    if (!isLowerHexSha256(entry.manifest_sha256) or entry.signatures.len == 0) return false;
+    for (entry.signatures) |signature| {
+        if (pluginMarketplaceSignatureValid(signature)) return true;
+    }
+    return false;
+}
+
+fn pluginMarketplaceSignatureValid(signature: PluginMarketplaceSignature) bool {
+    if (std.mem.eql(u8, signature.scheme, "minisign")) {
+        const public_key = signature.public_key orelse return false;
+        if (!std.mem.startsWith(u8, public_key, "RW")) return false;
+        return signature.signature_url != null and signature.trusted_comment != null;
+    }
+    if (std.mem.eql(u8, signature.scheme, "sigstore")) {
+        return signature.bundle_url != null and signature.certificate_identity != null and signature.certificate_issuer != null;
+    }
+    return false;
+}
+
+fn isLowerHexSha256(value: []const u8) bool {
+    if (value.len != std.crypto.hash.sha2.Sha256.digest_length * 2) return false;
+    for (value) |byte| {
+        if (!std.ascii.isHex(byte) or std.ascii.isUpper(byte)) return false;
+    }
+    return true;
 }
 
 fn containsIgnoreAsciiCase(haystack: []const u8, needle: []const u8) bool {
@@ -7288,7 +7329,7 @@ test "plugin search filters marketplace index" {
         .sub_path = index_path,
         .data =
         \\{"plugins":[
-        \\  {"name":"git-tools","url":"https://example.com/git-tools.git","description":"Git prompt helpers","verified":true},
+        \\  {"name":"git-tools","url":"https://example.com/git-tools.git","description":"Git prompt helpers","verified":true,"manifest_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","signatures":[{"scheme":"minisign","public_key":"RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3","signature_url":"https://example.com/plugin.lua.minisig","trusted_comment":"shisa-plugin:git-tools:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]},
         \\  {"name":"cloud-risk","url":"https://example.com/cloud-risk.git","description":"Kubernetes and AWS risk"},
         \\  {"name":"Bad","url":"https://example.com/bad.git","description":"invalid"}
         \\]}
@@ -7297,7 +7338,7 @@ test "plugin search filters marketplace index" {
 
     const output = try pluginSearchAlloc(allocator, index_path, "git");
     defer allocator.free(output);
-    try std.testing.expectEqualStrings("git-tools verified https://example.com/git-tools.git - Git prompt helpers\n", output);
+    try std.testing.expectEqualStrings("git-tools verified signed https://example.com/git-tools.git - Git prompt helpers\n", output);
 
     const config = try parsePluginSearchArgs(&.{ "risk", "--index", index_path });
     try std.testing.expectEqualStrings("risk", config.query);

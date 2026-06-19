@@ -145,6 +145,8 @@ shisa plugin trust shisa.ai --net=openai
 
 `shisa plugin list` prints `verified` for plugins recorded in `plugins.verified`. Marketplace sync is expected to maintain that file once the public index ships.
 
+Marketplace entries must include `manifest_sha256` plus Minisign or Sigstore signature metadata. See [Plugin Signing](plugin-signing.md).
+
 ## Current Limits
 
 - Plugin lifecycle hook names are validated and stored, but hook invocation is not yet wired into the daemon pipeline.

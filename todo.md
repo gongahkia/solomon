@@ -1112,7 +1112,7 @@ Opened 30 days post v1.0. Pre-work tasks below.
 
 - [ ] Reproducibility check on every tagged release
 - [x] SBOM diff review on every tagged release
-- [ ] Re-run threat-model annually with calendar reminder
+- [x] Re-run threat-model annually with calendar reminder
 - [ ] A11y audit calendar reminder
 - [ ] Update `VOUCHES` whenever a contributor is granted write access
 - [ ] Each merged RFC produces a `docs/internals/` page summarizing the decision

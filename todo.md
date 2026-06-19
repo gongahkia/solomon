@@ -168,7 +168,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Cut v1.0-rc1, run a 2-week public beta with a feedback issue template
 - [ ] Triage and fix all release-blocker issues
 - [ ] Author the `brew` formula (homebrew-core PR)
-- [ ] Author the AUR PKGBUILD (`shisa-bin` and `shisa-git`)
+- [x] Author the AUR PKGBUILD (`shisa-bin` and `shisa-git`)
 - [ ] Author the nixpkgs derivation and open PR
 - [ ] Author the scoop manifest (for WSL users on Windows)
 - [x] Build install script (`shisa.sh/install`) with checksum verification + signed releases
@@ -672,7 +672,7 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 20.5 Distribution channels
 - [ ] Homebrew formula (tap â†’ core)
-- [ ] AUR `shisa-bin` PKGBUILD
+- [x] AUR `shisa-bin` PKGBUILD
 - [x] AUR `shisa-git` PKGBUILD
 - [ ] Nixpkgs derivation
 - [ ] Scoop manifest (WSL)

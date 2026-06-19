@@ -4,15 +4,17 @@ set -eu
 repo="${SHISA_GITHUB_REPO:-gongahkia/shisa}"
 version="${SHISA_VERSION:-latest}"
 install_dir="${SHISA_INSTALL_DIR:-$HOME/.local/bin}"
+verify_signatures="${SHISA_VERIFY_SIGNATURES:-1}"
 
 usage() {
   cat <<'EOF'
-usage: install.sh [--repo OWNER/REPO] [--version TAG|latest] [--dir DIR]
+usage: install.sh [--repo OWNER/REPO] [--version TAG|latest] [--dir DIR] [--no-verify-signatures]
 
 Environment:
-  SHISA_GITHUB_REPO  GitHub repository. Default: gongahkia/shisa.
-  SHISA_VERSION      Release tag or latest. Default: latest.
-  SHISA_INSTALL_DIR  Install directory. Default: ~/.local/bin.
+  SHISA_GITHUB_REPO        GitHub repository. Default: gongahkia/shisa.
+  SHISA_VERSION            Release tag or latest. Default: latest.
+  SHISA_INSTALL_DIR        Install directory. Default: ~/.local/bin.
+  SHISA_VERIFY_SIGNATURES  Verify Sigstore bundles with cosign. Default: 1.
 EOF
 }
 
@@ -40,6 +42,14 @@ while [ "$#" -gt 0 ]; do
       install_dir="$2"
       shift 2
       ;;
+    --verify-signatures)
+      verify_signatures=1
+      shift
+      ;;
+    --no-verify-signatures)
+      verify_signatures=0
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -57,6 +67,15 @@ need tar
 need shasum
 need install
 need mktemp
+
+case "$verify_signatures" in
+  0|1) ;;
+  *) printf 'install.sh: SHISA_VERIFY_SIGNATURES must be 0 or 1\n' >&2; exit 1 ;;
+esac
+
+if [ "$verify_signatures" = "1" ]; then
+  need cosign
+fi
 
 case "$(uname -s)" in
   Darwin) os=macos ;;
@@ -84,11 +103,25 @@ fi
 name="shisa-$tag-$os-$arch"
 archive="$name.tar.gz"
 base_url="https://github.com/$repo/releases/download/$tag"
+identity="https://github.com/$repo/.github/workflows/release.yml@refs/tags/$tag"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT HUP TERM
 
 curl -fsSL "$base_url/$archive" -o "$work/$archive"
 curl -fsSL "$base_url/$archive.sha256" -o "$work/$archive.sha256"
+
+if [ "$verify_signatures" = "1" ]; then
+  curl -fsSL "$base_url/$archive.sigstore.json" -o "$work/$archive.sigstore.json"
+  curl -fsSL "$base_url/$archive.sha256.sigstore.json" -o "$work/$archive.sha256.sigstore.json"
+  cosign verify-blob "$work/$archive.sha256" \
+    --bundle "$work/$archive.sha256.sigstore.json" \
+    --certificate-identity "$identity" \
+    --certificate-oidc-issuer "https://token.actions.githubusercontent.com" >/dev/null
+  cosign verify-blob "$work/$archive" \
+    --bundle "$work/$archive.sigstore.json" \
+    --certificate-identity "$identity" \
+    --certificate-oidc-issuer "https://token.actions.githubusercontent.com" >/dev/null
+fi
 
 expected="$(awk '{ print $1; exit }' "$work/$archive.sha256")"
 actual="$(shasum -a 256 "$work/$archive" | awk '{ print $1; exit }')"

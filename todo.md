@@ -171,7 +171,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Author the AUR PKGBUILD (`shisa-bin` and `shisa-git`)
 - [ ] Author the nixpkgs derivation and open PR
 - [ ] Author the scoop manifest (for WSL users on Windows)
-- [ ] Build install script (`shisa.sh/install`) with checksum verification + signed releases
+- [x] Build install script (`shisa.sh/install`) with checksum verification + signed releases
 - [ ] Set up code signing (macOS notarization, sigstore for Linux)
 - [x] Author SBOM publication step in CI
 - [ ] Cut v1.0.0

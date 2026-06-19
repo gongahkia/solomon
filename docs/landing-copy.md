@@ -22,4 +22,4 @@ Shisa pre-renders your prompt in a background daemon so your shell stays respons
 curl -sSL https://shisa.sh/install | sh
 ```
 
-The installer is served from `packaging/install.sh` and verifies the downloaded release archive against its SHA-256 file before installing binaries.
+The installer is served from `packaging/install.sh` and verifies the release archive plus SHA-256 file against Sigstore bundles before installing binaries.

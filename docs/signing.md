@@ -35,6 +35,16 @@ Verify GitHub provenance with:
 gh attestation verify "$artifact" -R gongahkia/shisa
 ```
 
+## Installer Policy
+
+`packaging/install.sh` verifies both the archive and its checksum file with `cosign verify-blob` before checking SHA-256. The expected certificate identity is:
+
+```sh
+https://github.com/gongahkia/shisa/.github/workflows/release.yml@refs/tags/$tag
+```
+
+The installer requires `cosign` by default. Set `SHISA_VERIFY_SIGNATURES=0` or pass `--no-verify-signatures` only for manual recovery from a trusted mirror.
+
 ## Distrust Triggers
 
 Treat a release as distrusted when any of these are true:

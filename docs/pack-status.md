@@ -18,6 +18,18 @@ Current packs:
 | `shisa.ai` | incubation | core | Optional local-first hint pack; outside core. |
 | community templates | incubation | community | Template repos planned before marketplace verification. |
 
+## Pack Performance Budgets
+
+`zig build bench` emits a `packs` JSON object and fails when any CI-gated pack budget is exceeded.
+
+| Pack | PR gate | Budget |
+| --- | --- | --- |
+| `shisa.vcs` | `packs.shisa.vcs.fixture_batch_ns` | <= 250 ms for 1000 VCS fixture parse/format passes. |
+| `shisa.cloud` | `packs.shisa.cloud.cloud_ctx_cold_ns`, `packs.shisa.cloud.cloud_ctx_warm_avg_ns` | cold < 30 ms; warm average < 1 ms. |
+| `shisa.ai` | `packs.shisa.ai.redact_batch_ns` | <= 80 ms for 1000 local redaction passes. |
+
+Pack changes that add a prompt path, parser, cache reader, local model pre/post-processing path, or official template must update this table and the matching `src/bench.zig` budget in the same change.
+
 Status changes require a changelog entry and capability review when capabilities change.
 
 Adding a new official pack, graduating a pack, or expanding pack capabilities must update `docs/threat-model.md` in the same change. The update should cover new trust boundaries, declared capabilities, filesystem/env/exec/network access, audit output, and the Phase 32 evidence that exercises the pack.

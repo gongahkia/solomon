@@ -58,6 +58,12 @@ jobs:
           zig build release
           ./zig-out/bin/shisa bench --export-json ../bench-head.json | tee ../bench-head.txt
 
+      - name: Gate pack perf budgets
+        working-directory: head
+        run: |
+          set -eu
+          zig build bench | tee ../pack-bench-head.json
+
       - name: Gate p99 regression
         if: github.event_name == 'pull_request'
         run: |
@@ -121,6 +127,7 @@ jobs:
             bench-main.json
             bench-head.txt
             bench-head.json
+            pack-bench-head.json
           if-no-files-found: ignore
 
   deploy:

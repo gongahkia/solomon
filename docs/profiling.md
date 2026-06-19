@@ -6,7 +6,7 @@ Use this page before changing prompt rendering, cache invalidation, VCS probing,
 
 | Target | Command | Evidence |
 | --- | --- | --- |
-| Core microbench | `zig build bench` | JSON stdout with cloud-context cold/warm timings and protocol frame timing. |
+| Core and pack microbench | `zig build bench` | JSON stdout with cloud-context cold/warm timings, protocol frame timing, and `packs` budget timings. |
 | Prompt comparison | `bench/compare-prompts.sh` | `bench-results/comparison.json` and `.md` from `hyperfine`. |
 | VCS prompt comparison | `bench/vcs-starship-git.sh` | Shisa vs Starship on clean, dirty, and linked-worktree repos. |
 | jj scale probe | `bench/jj-10k.sh` | jj command timings on a generated large history. |
@@ -87,6 +87,8 @@ Use `--no-async` only to isolate worst-case module cost. It is not the target in
 ## CI Gate
 
 `.github/workflows/bench.yml` runs `shisa bench` on pull requests and compares p99 against `main`. A pull request fails when the measured p99 is more than 10% above the baseline.
+
+The same workflow runs `zig build bench` on pull requests. That command fails when any pack-level budget in [Pack Status](pack-status.md) is exceeded.
 
 The same workflow publishes a benchmark dashboard on pushes to `main`.
 

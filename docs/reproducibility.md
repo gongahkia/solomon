@@ -60,7 +60,9 @@ bash .github/scripts/reproducibility-check.sh
 
 The script builds `release` twice with fixed `SOURCE_DATE_EPOCH`, locale, timezone, cache paths, seed, optional target, and build-id mode. It compares SHA-256 hashes for `shisa`, `shisad`, and `shisa-supervisor`, then fails the tagged release job on any mismatch.
 
-The badge above reports the tag-driven release workflow status. For now, that means the same-runner reproducibility gate ran on Linux, not that cross-host artifacts are bit-identical.
+The release workflow also runs the same check in two independent Ubuntu job slots, uploads each hash file, and diffs those files before publishing the GitHub Release.
+
+The badge above reports the tag-driven release workflow status. For now, that means the Linux same-runner and two-job hash comparison gates passed, not that every platform artifact is bit-identical.
 
 ## Current Limits
 
@@ -68,8 +70,8 @@ This invocation controls the project-level inputs and checks two repeated builds
 
 Known gaps:
 
-- Native macOS Mach-O outputs still include nondeterministic `LC_UUID` and code-signature data, so the tagged-release gate is Linux-only for now.
+- Native macOS Mach-O outputs still include nondeterministic `LC_UUID` and code-signature data, so the reproducibility gate is Linux-only for now.
 - Linux cross-builds need a separate release-target fix before they can join the reproducibility matrix.
-- Cross-host artifact comparison remains future release-engineering work.
+- Cross-provider artifact comparison remains future release-engineering work.
 
-Until cross-host comparison is complete, release notes should say "same-runner reproducibility check", not "reproducible build".
+Until multi-provider comparison is complete, release notes should say "Linux reproducibility check", not "reproducible build".

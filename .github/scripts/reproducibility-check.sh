@@ -61,4 +61,8 @@ if ! diff -u "$work_dir/first.sha256" "$work_dir/second.sha256"; then
   exit 1
 fi
 
+if [ -n "${SHISA_REPRO_HASH_OUTPUT:-}" ]; then
+  cp "$work_dir/first.sha256" "$SHISA_REPRO_HASH_OUTPUT"
+fi
+
 cat "$work_dir/first.sha256"

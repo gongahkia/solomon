@@ -102,11 +102,66 @@ jobs:
             dist/*.sigstore.json
           if-no-files-found: error
 
+  reproducibility:
+    name: reproducibility / ubuntu-24.04 / ${{ matrix.slot }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        slot:
+          - first
+          - second
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.15.2
+          use-cache: true
+          cache-key: repro-${{ matrix.slot }}-${{ hashFiles('build.zig.zon') }}
+
+      - name: Check release reproducibility
+        env:
+          SHISA_REPRO_HASH_OUTPUT: repro-${{ matrix.slot }}.sha256
+        run: bash .github/scripts/reproducibility-check.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reproducibility-${{ matrix.slot }}
+          path: repro-${{ matrix.slot }}.sha256
+          if-no-files-found: error
+
+  compare-reproducibility:
+    name: reproducibility / compare
+    runs-on: ubuntu-24.04
+    needs:
+      - reproducibility
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: repro
+          pattern: reproducibility-*
+          merge-multiple: true
+
+      - name: Compare release hashes
+        run: |
+          set -eu
+          first="repro/repro-first.sha256"
+          second="repro/repro-second.sha256"
+          test -s "$first"
+          test -s "$second"
+          diff -u "$first" "$second"
+
   publish:
     name: publish
     runs-on: ubuntu-24.04
     needs:
       - build
+      - compare-reproducibility
 
     steps:
       - uses: actions/checkout@v4

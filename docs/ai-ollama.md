@@ -31,4 +31,4 @@ Prompt regression snapshots live in `test/fixtures/ai/prompt-regression.json` an
 
 Ollama's local API is documented at <https://docs.ollama.com/api/introduction>. `/api/tags`, `/api/pull`, and `/api/generate` are documented at <https://docs.ollama.com/api/tags>, <https://docs.ollama.com/api/pull>, and <https://docs.ollama.com/api/generate>.
 
-Opt-in cloud providers are documented in [OpenAI Provider](ai-openai.md) and [Anthropic Provider](ai-anthropic.md). Privacy rules live in [AI Privacy](ai-privacy.md).
+Opt-in cloud providers are documented in [OpenAI Provider](ai-openai.md), [Anthropic Provider](ai-anthropic.md), and [Gemini Provider](ai-gemini.md). Privacy rules live in [AI Privacy](ai-privacy.md).

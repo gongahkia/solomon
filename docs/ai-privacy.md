@@ -40,6 +40,8 @@ The built-in OpenAI provider uses provider id `openai`, endpoint `POST https://a
 
 The built-in Anthropic provider uses provider id `anthropic`, endpoint `POST https://api.anthropic.com/v1/messages`, `x-api-key: $ANTHROPIC_API_KEY`, `anthropic-version: 2023-06-01`, `model`, `max_tokens`, and one redacted user message. It is selected per command with `--provider anthropic`.
 
+The built-in Gemini provider uses provider id `gemini`, endpoint `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key=$GEMINI_API_KEY`, `contents[].parts[].text`, `role:user`, and `store:false`. It is selected per command with `--provider gemini`.
+
 ## Default Redaction Rules
 
 Default redaction replaces matched values with `[redacted]`. The built-in rules cover key/value fields named `password`, `token`, `secret`, `api_key`, AWS credential names, kubeconfig key data, and SSH `IdentityFile`; bearer tokens; AWS access keys; GitHub `gh*_` tokens; `sk-` provider keys; PEM private-key blocks; and 12-digit cloud account ids.

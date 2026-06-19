@@ -5474,10 +5474,12 @@ fn pluginCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
     defer allocator.free(slow_strikes_path);
     const trusted_path = try trustedPluginsPath(allocator);
     defer allocator.free(trusted_path);
+    const verified_path = try verifiedPluginsPath(allocator);
+    defer allocator.free(verified_path);
 
     if (std.mem.eql(u8, args[0], "list")) {
         if (args.len != 1) return error.UnknownPluginArgument;
-        const output = try pluginListAlloc(allocator, plugins_dir, disabled_path, slow_strikes_path);
+        const output = try pluginListAlloc(allocator, plugins_dir, disabled_path, slow_strikes_path, verified_path);
         defer allocator.free(output);
         try std.fs.File.stdout().writeAll(output);
     } else if (std.mem.eql(u8, args[0], "install")) {
@@ -5994,7 +5996,14 @@ fn trustedPluginsPath(allocator: std.mem.Allocator) ![]u8 {
     return std.fmt.allocPrint(allocator, "{s}/plugins.trusted", .{dir});
 }
 
-fn pluginListAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, disabled_path: []const u8, slow_strikes_path: []const u8) ![]u8 {
+fn verifiedPluginsPath(allocator: std.mem.Allocator) ![]u8 {
+    const config_path = try defaultConfigPath(allocator);
+    defer allocator.free(config_path);
+    const dir = std.fs.path.dirname(config_path) orelse return error.MissingConfigDir;
+    return std.fmt.allocPrint(allocator, "{s}/plugins.verified", .{dir});
+}
+
+fn pluginListAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, disabled_path: []const u8, slow_strikes_path: []const u8, verified_path: []const u8) ![]u8 {
     var names: std.ArrayList([]u8) = .empty;
     defer {
         for (names.items) |name| allocator.free(name);
@@ -6020,14 +6029,16 @@ fn pluginListAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, disabl
     for (names.items) |name| {
         const disabled = try pluginDisabled(allocator, disabled_path, name);
         const slow_strikes = try pluginSlowStrikeCount(allocator, slow_strikes_path, name);
+        const verified = try pluginVerified(allocator, verified_path, name);
+        const badge = if (verified) "verified " else "";
         if (disabled and slow_strikes > 0) {
-            try appendFmt(allocator, &out, "{s} disabled slow-strikes={d}/{d}\n", .{ name, slow_strikes, plugin_slow_strike_limit });
+            try appendFmt(allocator, &out, "{s} {s}disabled slow-strikes={d}/{d}\n", .{ name, badge, slow_strikes, plugin_slow_strike_limit });
         } else if (disabled) {
-            try appendFmt(allocator, &out, "{s} disabled\n", .{name});
+            try appendFmt(allocator, &out, "{s} {s}disabled\n", .{ name, badge });
         } else if (slow_strikes > 0) {
-            try appendFmt(allocator, &out, "{s} slow-strikes={d}/{d}\n", .{ name, slow_strikes, plugin_slow_strike_limit });
+            try appendFmt(allocator, &out, "{s} {s}slow-strikes={d}/{d}\n", .{ name, badge, slow_strikes, plugin_slow_strike_limit });
         } else {
-            try appendFmt(allocator, &out, "{s} enabled\n", .{name});
+            try appendFmt(allocator, &out, "{s} {s}enabled\n", .{ name, badge });
         }
     }
     return out.toOwnedSlice(allocator);
@@ -6055,6 +6066,15 @@ fn setPluginDisabled(allocator: std.mem.Allocator, disabled_path: []const u8, na
 
 fn pluginDisabled(allocator: std.mem.Allocator, disabled_path: []const u8, name: []const u8) !bool {
     var names = try readPluginNames(allocator, disabled_path);
+    defer {
+        for (names.items) |item| allocator.free(item);
+        names.deinit(allocator);
+    }
+    return indexOfString(names.items, name) != null;
+}
+
+fn pluginVerified(allocator: std.mem.Allocator, verified_path: []const u8, name: []const u8) !bool {
+    var names = try readPluginNames(allocator, verified_path);
     defer {
         for (names.items) |item| allocator.free(item);
         names.deinit(allocator);
@@ -6477,10 +6497,13 @@ test "plugin list reports enabled disabled and slow plugins" {
         \\
         ,
     });
+    const verified_path = try std.fmt.allocPrint(allocator, "{s}/plugins.verified", .{dir_path});
+    defer allocator.free(verified_path);
+    try writePluginNames(verified_path, &.{ "alpha", "stuck" });
 
-    const output = try pluginListAlloc(allocator, plugins_dir, disabled_path, slow_strikes_path);
+    const output = try pluginListAlloc(allocator, plugins_dir, disabled_path, slow_strikes_path, verified_path);
     defer allocator.free(output);
-    try std.testing.expectEqualStrings("alpha enabled\nbeta disabled\nslow slow-strikes=2/3\nstuck disabled slow-strikes=3/3\n", output);
+    try std.testing.expectEqualStrings("alpha verified enabled\nbeta disabled\nslow slow-strikes=2/3\nstuck verified disabled slow-strikes=3/3\n", output);
 }
 
 test "parses plugin install args" {

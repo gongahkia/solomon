@@ -134,6 +134,8 @@ shisa plugin trust shisa.ai --net=openai
 
 `shisa plugin trust <name> --net=<provider>` records provider-scoped network trust. A grant for `openai` does not cover another provider such as `anthropic`, and it does not cover non-network capability changes.
 
+`shisa plugin list` prints `verified` for plugins recorded in `plugins.verified`. Marketplace sync is expected to maintain that file once the public index ships.
+
 ## Current Limits
 
 - Plugin lifecycle hook names are validated and stored, but hook invocation is not yet wired into the daemon pipeline.

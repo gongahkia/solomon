@@ -447,7 +447,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 
 - [ ] Static marketplace index hosted on shisa.sh (JSON manifest of community plugins)
 - [ ] Signature scheme: plugin manifests signed with maintainer minisign / sigstore
-- [ ] `verified` badge in `shisa plugin list`
+- [x] `verified` badge in `shisa plugin list`
 - [ ] `shisa plugin install <name>` from marketplace
 - [ ] `shisa plugin search <query>`
 - [ ] `shisa plugin doctor` for plugin self-diagnosis

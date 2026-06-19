@@ -193,7 +193,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [x] Build a `shisa doctor` subcommand for self-diagnosis (socket, perms, lua plugins, fsnotify limits)
 - [ ] Monthly release cadence (first Tuesday of each month)
 - [ ] Quarterly retros published as blog posts
-- [ ] Bug bounty (small, via GitHub sponsors) for sandbox escapes
+- [x] Bug bounty (small, via GitHub sponsors) for sandbox escapes
 - [ ] Submit a talk to FOSDEM 2027 / SCALE / RustConf-Zig-track
 
 ## Continuous (every phase)
@@ -454,7 +454,7 @@ These run in parallel to core hardening. Pack work **must not** regress core per
 - [x] Community moderation policy (`docs/plugin-policy.md`)
 - [x] Plugin author quickstart (`docs/authoring-plugins.md`)
 - [x] Sample plugin template repo (`shisa-plugin-template`)
-- [ ] Bug bounty for sandbox escapes (small, via GitHub sponsors)
+- [x] Bug bounty for sandbox escapes (small, via GitHub sponsors)
 
 ## Continuous (extended)
 

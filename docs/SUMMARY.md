@@ -101,6 +101,7 @@
 - [Vouch](governance/vouch.md)
 - [Maintainer Onboarding](governance/maintainer-onboarding.md)
 - [Triage](governance/triage.md)
+- [Release Cadence](governance/release-cadence.md)
 - [Bug Bounty](governance/bug-bounty.md)
 - [Bounty Ledger](governance/bounty-ledger.md)
 - [Security Hall of Fame](governance/security-hall-of-fame.md)

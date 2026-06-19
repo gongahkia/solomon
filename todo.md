@@ -191,7 +191,7 @@ Status legend: `[ ]` open  `[~]` in progress  `[x]` done.
 - [ ] Optional: cloud-safety plugin pack (prod-warning, k8s-namespace-risk, IAM-principal). Lives outside core.
 - [ ] Native Windows support (ReadDirectoryChangesW) — community-led
 - [x] Build a `shisa doctor` subcommand for self-diagnosis (socket, perms, lua plugins, fsnotify limits)
-- [ ] Monthly release cadence (first Tuesday of each month)
+- [x] Monthly release cadence (first Tuesday of each month)
 - [ ] Quarterly retros published as blog posts
 - [x] Bug bounty (small, via GitHub sponsors) for sandbox escapes
 - [ ] Submit a talk to FOSDEM 2027 / SCALE / RustConf-Zig-track

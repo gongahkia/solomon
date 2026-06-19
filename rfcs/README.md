@@ -15,3 +15,4 @@ Accepted RFCs must also have a matching `docs/internals/rfc-NNNN-*.md` decision 
 | [0004](0004-cache-invalidation-rules.md) | Cache Invalidation Rules | Accepted | cache |
 | [0005](0005-wire-protocol-v1.md) | Wire Protocol v1 | Accepted | wire protocol |
 | [0006](0006-per-project-config-layering.md) | Per-Project Config Layering | Draft | config |
+| [0007](0007-marketplace-2.md) | Marketplace 2.0 | Draft | plugin marketplace |

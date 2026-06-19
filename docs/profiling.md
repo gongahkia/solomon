@@ -88,7 +88,7 @@ Use `--no-async` only to isolate worst-case module cost. It is not the target in
 
 `.github/workflows/bench.yml` runs `shisa bench` on pull requests and compares p99 against `main`. A pull request fails when the measured p99 is more than 10% above the baseline.
 
-The same workflow runs `zig build bench` on pull requests. That command fails when any pack-level budget in [Pack Status](pack-status.md) is exceeded.
+The same workflow runs `zig build bench` on pull requests and every Monday at 03:17 UTC on `main`. That command fails when any pack-level budget in [Pack Status](pack-status.md) is exceeded.
 
 The same workflow publishes a benchmark dashboard on pushes to `main`.
 

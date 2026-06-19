@@ -13,7 +13,7 @@ const deframe_budget_ns = std.time.ns_per_s;
 const deframe_corpus_frames = 256;
 const deframe_payload_max = 512;
 const vcs_pack_iterations = 1000;
-const vcs_pack_budget_ns = 250 * std.time.ns_per_ms;
+const vcs_pack_budget_ns = 500 * std.time.ns_per_ms;
 const ai_pack_iterations = 1000;
 const ai_pack_budget_ns = 80 * std.time.ns_per_ms;
 

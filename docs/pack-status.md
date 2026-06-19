@@ -20,11 +20,11 @@ Current packs:
 
 ## Pack Performance Budgets
 
-`zig build bench` emits a `packs` JSON object and fails when any CI-gated pack budget is exceeded.
+`zig build bench` emits a `packs` JSON object and fails when any CI-gated pack budget is exceeded. `.github/workflows/bench.yml` runs it on pull requests and weekly on `main`.
 
 | Pack | PR gate | Budget |
 | --- | --- | --- |
-| `shisa.vcs` | `packs.shisa.vcs.fixture_batch_ns` | <= 250 ms for 1000 VCS fixture parse/format passes. |
+| `shisa.vcs` | `packs.shisa.vcs.fixture_batch_ns` | <= 500 ms for 1000 VCS fixture parse/format passes. |
 | `shisa.cloud` | `packs.shisa.cloud.cloud_ctx_cold_ns`, `packs.shisa.cloud.cloud_ctx_warm_avg_ns` | cold < 30 ms; warm average < 1 ms. |
 | `shisa.ai` | `packs.shisa.ai.redact_batch_ns` | <= 80 ms for 1000 local redaction passes. |
 

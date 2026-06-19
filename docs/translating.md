@@ -39,3 +39,5 @@ Translations use gettext-compatible PO files under `i18n/`.
 - Do not commit generated `.mo` files.
 
 Translation PRs should include the locale, status table output, and the validation command used.
+
+Credited translators are listed in [Translator Credits](translator-credits.md) after opt-in consent.

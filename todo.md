@@ -1093,8 +1093,8 @@ Each phase below is normative for v1.0 quality. Tasks here are *not* deferred â€
 
 ### 33.5 Translator onboarding
 - [ ] Weblate or equivalent set up
-- [ ] Document the workflow
-- [ ] Translator credits page
+- [x] Document the workflow
+- [x] Translator credits page
 
 ## Phase 34 â€” v2 RFC preparation
 

@@ -34,6 +34,7 @@
 - [Deprecations](deprecations.md)
 - [Internationalization](i18n.md)
 - [Translating Shisa](translating.md)
+- [Translator Credits](translator-credits.md)
 
 # Modules
 

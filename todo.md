@@ -1110,7 +1110,7 @@ Opened 30 days post v1.0. Pre-work tasks below.
 
 ## Continuous extensions (additions)
 
-- [ ] Reproducibility check on every tagged release
+- [x] Reproducibility check on every tagged release
 - [x] SBOM diff review on every tagged release
 - [x] Re-run threat-model annually with calendar reminder
 - [x] A11y audit calendar reminder

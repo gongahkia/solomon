@@ -12,6 +12,7 @@ A release train can ship only when:
 - release notes cover user-visible CLI, config, plugin, packaging, security, and deprecation changes
 - changed user-facing docs are merged before the tag
 - artifacts are signed and published by the tag-driven release workflow
+- the release workflow passes the Linux same-runner reproducibility check
 
 If any gate fails, skip that month instead of cutting a partial release.
 

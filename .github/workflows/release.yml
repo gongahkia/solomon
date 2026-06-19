@@ -33,6 +33,10 @@ jobs:
           use-cache: true
           cache-key: release-${{ hashFiles('build.zig.zon') }}
 
+      - name: Check release reproducibility
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/reproducibility-check.sh
+
       - run: zig build release
 
       - name: Package artifact

@@ -40,21 +40,32 @@ The release artifacts are:
 
 - `zig-out/bin/shisa`
 - `zig-out/bin/shisad`
+- `zig-out/bin/shisa-supervisor`
 
 Record artifact hashes with:
 
 ```sh
-shasum -a 256 zig-out/bin/shisa zig-out/bin/shisad
+shasum -a 256 zig-out/bin/shisa zig-out/bin/shisad zig-out/bin/shisa-supervisor
 ```
+
+## Tagged Release Gate
+
+The Ubuntu job in the tag-driven release workflow runs:
+
+```sh
+bash .github/scripts/reproducibility-check.sh
+```
+
+The script builds `release` twice with fixed `SOURCE_DATE_EPOCH`, locale, timezone, cache paths, seed, optional target, and build-id mode. It compares SHA-256 hashes for `shisa`, `shisad`, and `shisa-supervisor`, then fails the tagged release job on any mismatch.
 
 ## Current Limits
 
-This invocation controls the project-level inputs. It is not yet proof that artifacts are bit-identical across hosts.
+This invocation controls the project-level inputs and checks two repeated builds on the same runner. It is not yet proof that artifacts are bit-identical across hosts.
 
 Known gaps:
 
-- macOS Mach-O outputs include `LC_UUID` and code-signature data.
+- Native macOS Mach-O outputs still include nondeterministic `LC_UUID` and code-signature data, so the tagged-release gate is Linux-only for now.
 - Linux cross-builds need a separate release-target fix before they can join the reproducibility matrix.
-- Cross-host artifact comparison is tracked as the next release-engineering TODO.
+- Cross-host artifact comparison remains future release-engineering work.
 
-Until that comparison is complete, release notes should say "controlled build invocation", not "reproducible build".
+Until cross-host comparison is complete, release notes should say "same-runner reproducibility check", not "reproducible build".

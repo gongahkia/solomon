@@ -22,6 +22,22 @@ Tracks the audit-driven refocus. One commit per task, easy `git revert` per row.
 - [x] T8 — Drop §15 5K-stars success criterion, replace with reproducible-benchmark outcome
 - [x] T9 — Align README / architecture / quickstart / CHANGELOG with the gates and deletions
 
+## Phase-0 re-audit follow-ups
+
+Triggered after empirical verification: `shisad` boots, renders, async path works, warm p99 < 2 ms achievable. The "pre-MVP" README label understates state.
+
+- [ ] T10 — Reality-check README "pre-MVP" status (working daemon-rendered prompt today; re-label as alpha + known-issues)
+- [ ] T11 — Wire `bench/compare-prompts.sh` into CI on a representative big-repo fixture (verifies the headline)
+- [ ] T12 — Add p99 assertion to `zig build bench`; characterize the 5 ms render outliers (3.5% > 5ms in the 56-run sample)
+- [ ] T13 — Promote RFC-0008 from Draft to Accepted (or relax north-star §16 wording so the gate has teeth)
+- [ ] T14 — CI guard: fail PRs that push any `src/daemon/*.zig` past 3000 lines
+- [ ] T15 — Write `docs/internals/rfc-0008-daemon-lifecycle.md` decision summary (required by `scripts/rfc-internals-gate.sh` once RFC-0008 is Accepted)
+- [ ] T16 — Finish T7b–e main.zig split (config / doctor / plugin / stack+worktree)
+- [ ] T17 — *Needs user approval (destructive)*: squash or rewrite the two stray `adde`/`added` commits with descriptive messages
+- [ ] T18 — Freeze additions to plugin infrastructure (signing, marketplace validation, manifest CI) until ≥ 1 third-party plugin exists
+- [ ] T19 — First-run smoke integration test: fresh `$HOME` → `shisa init` → source hook → assert working prompt
+- [ ] T20 — Read `docs/why-zig.md` and reconcile any claims against the empirical state
+
 ## MVP-blocking (phase 1: zsh + macOS + basic git)
 
 Do these before any phase 2+ work. The MVP gate is: a working zsh-on-macOS prompt that beats starship on a cold render in nixpkgs.

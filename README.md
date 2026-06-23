@@ -8,7 +8,21 @@ Shisa keeps slow prompt work out of the shell. A per-user daemon watches filesys
 
 ## Status
 
-Shisa is pre-MVP. The repo currently contains the product spec, RFCs, build skeleton, and project scaffolding.
+**Alpha — works on a developer machine, not yet packaged.** The daemon (`shisad`) renders prompts over a Unix-domain socket; the `shisa prompt` client returns a composed prompt with async-fill placeholders for slow modules. Warm renders measured at 2–4 ms mean on macOS / Apple Silicon. There is no released artifact, no installer, and no signed binary yet — see [todo.md](todo.md) for what's still in the way.
+
+Known gaps before a first release:
+- Cold-render-in-big-repo benchmark is not yet CI-verified (the headline claim — see [north-star §10](north-star.md) — is empirically achievable but not yet guarded on PR).
+- RFC-0008 (daemon lifecycle in SSH / containers / nix-shell / tmux / sudo) is Draft. Further dispatcher growth is gated on its acceptance.
+- `main.zig` split is partial (~7K lines remaining). Zig pre-1.0 churn risk concentrates here.
+- Packaging (Homebrew / AUR / nixpkgs / scoop), code signing, and supply-chain attestation are not done.
+
+To try it locally:
+
+```sh
+zig build
+./zig-out/bin/shisad --foreground &
+./zig-out/bin/shisa prompt --shell zsh --cwd "$PWD"
+```
 
 ## Goals
 
@@ -27,7 +41,7 @@ Shisa is pre-MVP. The repo currently contains the product spec, RFCs, build skel
 
 ## Quickstart
 
-No usable release exists yet. For local scaffold verification:
+See [`docs/quickstart.md`](docs/quickstart.md) for the full first-run walkthrough. Local scaffold verification:
 
 ```sh
 zig build test

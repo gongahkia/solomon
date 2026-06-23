@@ -26,7 +26,7 @@ Tracks the audit-driven refocus. One commit per task, easy `git revert` per row.
 
 Triggered after empirical verification: `shisad` boots, renders, async path works, warm p99 < 2 ms achievable. The "pre-MVP" README label understates state.
 
-- [ ] T10 — Reality-check README "pre-MVP" status (working daemon-rendered prompt today; re-label as alpha + known-issues)
+- [x] T10 — Reality-check README "pre-MVP" status (working daemon-rendered prompt today; re-label as alpha + known-issues)
 - [ ] T11 — Wire `bench/compare-prompts.sh` into CI on a representative big-repo fixture (verifies the headline)
 - [ ] T12 — Add p99 assertion to `zig build bench`; characterize the 5 ms render outliers (3.5% > 5ms in the 56-run sample)
 - [ ] T13 — Promote RFC-0008 from Draft to Accepted (or relax north-star §16 wording so the gate has teeth)

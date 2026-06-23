@@ -27,7 +27,7 @@ Tracks the audit-driven refocus. One commit per task, easy `git revert` per row.
 Triggered after empirical verification: `shisad` boots, renders, async path works, warm p99 < 2 ms achievable. The "pre-MVP" README label understates state.
 
 - [x] T10 — Reality-check README "pre-MVP" status (working daemon-rendered prompt today; re-label as alpha + known-issues)
-- [ ] T11 — Wire `bench/compare-prompts.sh` into CI on a representative big-repo fixture (verifies the headline)
+- [x] T11 — Wire cold big-repo bench into CI via `scripts/cold-bigrepo-bench.sh` + `.github/workflows/cold-bigrepo.yml`. Generates a synthetic 2000-commit/1500-file repo, clears the daemon cache before each run, asserts max cold render < 150 ms. Starship comparison logged as informational.
 - [x] T12 — Add p99 assertion via `scripts/render-p99-gate.sh`; CI fails if end-to-end p99 > 15 ms
 - [ ] T12-followup — Tighten the render p99 budget from 15 ms toward north-star §10's <2 ms warm target. Current end-to-end baseline is ~10 ms p99 (binary startup + socket + render); the gap is dominated by `shisa` binary cold start, not daemon render (sub-500us per `shisad --metrics`). Investigate static linking or daemon-bundled client mode.
 - [x] T13 — Promote RFC-0008 from Draft to Accepted (or relax north-star §16 wording so the gate has teeth)

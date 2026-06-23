@@ -8,7 +8,6 @@ Generated from `shisa --help` with `zig build cli-docs`.
 usage: shisa <command> [options]
 
 commands:
-  ai            local AI helpers: status, redact, bench, risk, explain, nextcmd, nl2cmd
   bench         benchmark prompt render via hyperfine
   cache         dump or clear cache state
   cloud         cloud helpers: audit, doctor, explain, preexec
@@ -44,26 +43,6 @@ options:
 ```
 
 ## Command Help
-
-### `shisa ai`
-
-```text
-usage: shisa ai <command> [args]
-
-commands:
-  status        show local model, cloud provider, and audit status
-  redact        test or edit local redaction literal rules
-  bench         benchmark local Ollama cold/warm/memory
-  risk          classify command risk
-  explain       explain a command
-  nextcmd       suggest a next command from local context
-  nl2cmd        convert ?? input to a command suggestion
-
-provider options for risk/explain/nextcmd/nl2cmd:
-      --provider ollama|openai|anthropic|gemini|lmstudio|llamacpp
-                                default: ollama; cloud providers require API keys
-      --model <name>            default: provider-specific
-```
 
 ### `shisa config`
 

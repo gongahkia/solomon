@@ -16,60 +16,41 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/main.zig:172
+#: src/main.zig:157
 msgid ""
 "shisa: unknown command; run `shisa --help`\n"
 msgstr ""
 "shisa: unknown command; run `shisa --help`\n"
 
-#: src/main.zig:538
+#: src/main.zig:523
 msgid ""
 "theme validate: ok\n"
 msgstr ""
 "theme validate: ok\n"
 
-#: src/main.zig:1185
+#: src/main.zig:1170
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""
 "shisa report: tar not found in PATH\n"
 
-#: src/main.zig:1336
+#: src/main.zig:1321
 msgid ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 msgstr ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 
-#: src/main.zig:2532
-msgid ""
-"shisa ai bench: ollama not installed\n"
-msgstr ""
-"shisa ai bench: ollama not installed\n"
-
-#: src/main.zig:2536
-msgid ""
-"shisa ai bench: ollama daemon not running\n"
-msgstr ""
-"shisa ai bench: ollama daemon not running\n"
-
-#: src/main.zig:2631
-msgid ""
-"shisa ai nl2cmd: refusing to execute generated commands; confirm manually\n"
-msgstr ""
-"shisa ai nl2cmd: refusing to execute generated commands; confirm manually\n"
-
-#: src/main.zig:5792
+#: src/main.zig:4577
 msgid ""
 "shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 "shisa bench: hyperfine not found in PATH\n"
 
-#: src/main.zig:8524
+#: src/main.zig:7309
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
 "commands:\n"
-"  ai            local AI helpers: status, redact, bench, risk, explain, nextcmd, nl2cmd\n"
 "  bench         benchmark prompt render via hyperfine\n"
 "  cache         dump or clear cache state\n"
 "  cloud         cloud helpers: audit, doctor, explain, preexec\n"
@@ -107,7 +88,6 @@ msgstr ""
 "usage: shisa <command> [options]\n"
 "\n"
 "commands:\n"
-"  ai            local AI helpers: status, redact, bench, risk, explain, nextcmd, nl2cmd\n"
 "  bench         benchmark prompt render via hyperfine\n"
 "  cache         dump or clear cache state\n"
 "  cloud         cloud helpers: audit, doctor, explain, preexec\n"
@@ -142,61 +122,7 @@ msgstr ""
 "      --version print version\n"
 "\n"
 
-#: src/main.zig:8564
-msgid ""
-"usage: shisa ai <command> [args]\n"
-"\n"
-"commands:\n"
-"  status        show local model, cloud provider, and audit status\n"
-"  redact        test or edit local redaction literal rules\n"
-"  bench         benchmark local Ollama cold/warm/memory\n"
-"  risk          classify command risk\n"
-"  explain       explain a command\n"
-"  nextcmd       suggest a next command from local context\n"
-"  nl2cmd        convert ?? input to a command suggestion\n"
-"\n"
-"provider options for risk/explain/nextcmd/nl2cmd:\n"
-"      --provider ollama|openai|anthropic|gemini|lmstudio|llamacpp\n"
-"                                default: ollama; cloud providers require API keys\n"
-"      --model <name>            default: provider-specific\n"
-"\n"
-msgstr ""
-"usage: shisa ai <command> [args]\n"
-"\n"
-"commands:\n"
-"  status        show local model, cloud provider, and audit status\n"
-"  redact        test or edit local redaction literal rules\n"
-"  bench         benchmark local Ollama cold/warm/memory\n"
-"  risk          classify command risk\n"
-"  explain       explain a command\n"
-"  nextcmd       suggest a next command from local context\n"
-"  nl2cmd        convert ?? input to a command suggestion\n"
-"\n"
-"provider options for risk/explain/nextcmd/nl2cmd:\n"
-"      --provider ollama|openai|anthropic|gemini|lmstudio|llamacpp\n"
-"                                default: ollama; cloud providers require API keys\n"
-"      --model <name>            default: provider-specific\n"
-"\n"
-
-#: src/main.zig:8583
-msgid ""
-"usage: shisa ai redact (--test text | --add-literal text) [--rules path]\n"
-"\n"
-"options:\n"
-"      --test <text>        print built-in + local-rule redacted text\n"
-"      --add-literal <text> append a literal local redaction rule\n"
-"      --rules <path>       override rules file; default is config dir ai-redact.rules\n"
-"\n"
-msgstr ""
-"usage: shisa ai redact (--test text | --add-literal text) [--rules path]\n"
-"\n"
-"options:\n"
-"      --test <text>        print built-in + local-rule redacted text\n"
-"      --add-literal <text> append a literal local redaction rule\n"
-"      --rules <path>       override rules file; default is config dir ai-redact.rules\n"
-"\n"
-
-#: src/main.zig:8593
+#: src/main.zig:7348
 msgid ""
 "usage: shisa config set locale=<locale|auto>\n"
 "\n"
@@ -210,7 +136,7 @@ msgstr ""
 "  set locale=<locale|auto> set locale override; auto uses LC_ALL, LC_CTYPE, then LANG\n"
 "\n"
 
-#: src/main.zig:8601
+#: src/main.zig:7356
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -224,7 +150,7 @@ msgstr ""
 "  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
 "\n"
 
-#: src/main.zig:8609
+#: src/main.zig:7364
 msgid ""
 "usage: shisa vouch verify [path]\n"
 "\n"
@@ -238,7 +164,7 @@ msgstr ""
 "  verify [path] validate VOUCHES format; defaults to ./VOUCHES\n"
 "\n"
 
-#: src/main.zig:8617
+#: src/main.zig:7372
 msgid ""
 "usage: shisa theme <command> [args]\n"
 "\n"
@@ -254,7 +180,7 @@ msgstr ""
 "  preview <theme>   render a stub prompt from a built-in id or theme file\n"
 "\n"
 
-#: src/main.zig:8626
+#: src/main.zig:7381
 msgid ""
 "usage: shisa font check\n"
 "\n"

@@ -15,52 +15,36 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/main.zig:172
+#: src/main.zig:157
 msgid ""
 "shisa: unknown command; run `shisa --help`\n"
 msgstr ""
 
-#: src/main.zig:538
+#: src/main.zig:523
 msgid ""
 "theme validate: ok\n"
 msgstr ""
 
-#: src/main.zig:1185
+#: src/main.zig:1170
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""
 
-#: src/main.zig:1336
+#: src/main.zig:1321
 msgid ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 msgstr ""
 
-#: src/main.zig:2532
-msgid ""
-"shisa ai bench: ollama not installed\n"
-msgstr ""
-
-#: src/main.zig:2536
-msgid ""
-"shisa ai bench: ollama daemon not running\n"
-msgstr ""
-
-#: src/main.zig:2631
-msgid ""
-"shisa ai nl2cmd: refusing to execute generated commands; confirm manually\n"
-msgstr ""
-
-#: src/main.zig:5792
+#: src/main.zig:4577
 msgid ""
 "shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 
-#: src/main.zig:8524
+#: src/main.zig:7309
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
 "commands:\n"
-"  ai            local AI helpers: status, redact, bench, risk, explain, nextcmd, nl2cmd\n"
 "  bench         benchmark prompt render via hyperfine\n"
 "  cache         dump or clear cache state\n"
 "  cloud         cloud helpers: audit, doctor, explain, preexec\n"
@@ -96,38 +80,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:8564
-msgid ""
-"usage: shisa ai <command> [args]\n"
-"\n"
-"commands:\n"
-"  status        show local model, cloud provider, and audit status\n"
-"  redact        test or edit local redaction literal rules\n"
-"  bench         benchmark local Ollama cold/warm/memory\n"
-"  risk          classify command risk\n"
-"  explain       explain a command\n"
-"  nextcmd       suggest a next command from local context\n"
-"  nl2cmd        convert ?? input to a command suggestion\n"
-"\n"
-"provider options for risk/explain/nextcmd/nl2cmd:\n"
-"      --provider ollama|openai|anthropic|gemini|lmstudio|llamacpp\n"
-"                                default: ollama; cloud providers require API keys\n"
-"      --model <name>            default: provider-specific\n"
-"\n"
-msgstr ""
-
-#: src/main.zig:8583
-msgid ""
-"usage: shisa ai redact (--test text | --add-literal text) [--rules path]\n"
-"\n"
-"options:\n"
-"      --test <text>        print built-in + local-rule redacted text\n"
-"      --add-literal <text> append a literal local redaction rule\n"
-"      --rules <path>       override rules file; default is config dir ai-redact.rules\n"
-"\n"
-msgstr ""
-
-#: src/main.zig:8593
+#: src/main.zig:7348
 msgid ""
 "usage: shisa config set locale=<locale|auto>\n"
 "\n"
@@ -136,7 +89,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:8601
+#: src/main.zig:7356
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -145,7 +98,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:8609
+#: src/main.zig:7364
 msgid ""
 "usage: shisa vouch verify [path]\n"
 "\n"
@@ -154,7 +107,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:8617
+#: src/main.zig:7372
 msgid ""
 "usage: shisa theme <command> [args]\n"
 "\n"
@@ -164,7 +117,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:8626
+#: src/main.zig:7381
 msgid ""
 "usage: shisa font check\n"
 "\n"

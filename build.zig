@@ -257,102 +257,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const cli_test_run = b.addRunArtifact(cli_tests);
-    const ollama_tests = b.addTest(.{
+    const redact_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/ai/ollama.zig"),
+            .root_source_file = b.path("src/redact.zig"),
             .target = target,
             .optimize = optimize,
         }),
     });
-    const ollama_test_run = b.addRunArtifact(ollama_tests);
-    const openai_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/ai/openai.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const openai_test_run = b.addRunArtifact(openai_tests);
-    const anthropic_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/ai/anthropic.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const anthropic_test_run = b.addRunArtifact(anthropic_tests);
-    const gemini_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/ai/gemini.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const gemini_test_run = b.addRunArtifact(gemini_tests);
-    const lmstudio_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/ai/lmstudio.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const lmstudio_test_run = b.addRunArtifact(lmstudio_tests);
-    const llamacpp_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/ai/llamacpp.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const llamacpp_test_run = b.addRunArtifact(llamacpp_tests);
-    const nextcmd_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/ai/nextcmd.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const nextcmd_test_run = b.addRunArtifact(nextcmd_tests);
-    const nl2cmd_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/ai/nl2cmd.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const nl2cmd_test_run = b.addRunArtifact(nl2cmd_tests);
-    const ai_explain_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/ai/explain.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const ai_explain_test_run = b.addRunArtifact(ai_explain_tests);
-    const ai_redact_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/ai/redact.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const ai_redact_test_run = b.addRunArtifact(ai_redact_tests);
-    const ai_errfix_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/ai/errfix.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const ai_errfix_test_run = b.addRunArtifact(ai_errfix_tests);
-    const ai_regression_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/ai/regression.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const ai_regression_test_run = b.addRunArtifact(ai_regression_tests);
+    const redact_test_run = b.addRunArtifact(redact_tests);
     const config_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/config.zig"),
@@ -873,18 +785,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&test_run.step);
     test_step.dependOn(&cli_test_run.step);
-    test_step.dependOn(&ollama_test_run.step);
-    test_step.dependOn(&openai_test_run.step);
-    test_step.dependOn(&anthropic_test_run.step);
-    test_step.dependOn(&gemini_test_run.step);
-    test_step.dependOn(&lmstudio_test_run.step);
-    test_step.dependOn(&llamacpp_test_run.step);
-    test_step.dependOn(&nextcmd_test_run.step);
-    test_step.dependOn(&nl2cmd_test_run.step);
-    test_step.dependOn(&ai_explain_test_run.step);
-    test_step.dependOn(&ai_redact_test_run.step);
-    test_step.dependOn(&ai_errfix_test_run.step);
-    test_step.dependOn(&ai_regression_test_run.step);
+    test_step.dependOn(&redact_test_run.step);
     test_step.dependOn(&config_test_run.step);
     test_step.dependOn(&plugin_manifest_test_run.step);
     test_step.dependOn(&plugin_capability_test_run.step);

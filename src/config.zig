@@ -14,9 +14,6 @@ pub const default_config_text =
     \\right_modules = []
     \\rtl_reverse = false
     \\
-    \\[ai]
-    \\provider = "ollama"
-    \\
     \\[modules.cwd]
     \\truncate_to = 3
     \\home_tilde = true
@@ -64,9 +61,6 @@ pub const a11y_config_text =
     \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
     \\right_modules = []
     \\rtl_reverse = false
-    \\
-    \\[ai]
-    \\provider = "ollama"
     \\
     \\[modules.cwd]
     \\truncate_to = 3
@@ -191,38 +185,6 @@ pub const PromptOptions = struct {
     rtl_reverse: bool = false,
 };
 
-pub const AiProviderId = enum {
-    ollama,
-    openai,
-    anthropic,
-    gemini,
-    lmstudio,
-    llamacpp,
-};
-
-pub fn aiProviderIdName(provider: AiProviderId) []const u8 {
-    return switch (provider) {
-        .ollama => "ollama",
-        .openai => "openai",
-        .anthropic => "anthropic",
-        .gemini => "gemini",
-        .lmstudio => "lmstudio",
-        .llamacpp => "llamacpp",
-    };
-}
-
-pub const AiOptions = struct {
-    provider: AiProviderId = .ollama,
-    model: ?[]u8 = null,
-    plugin: ?[]u8 = null,
-
-    pub fn deinit(self: *AiOptions, allocator: std.mem.Allocator) void {
-        if (self.model) |value| allocator.free(value);
-        if (self.plugin) |value| allocator.free(value);
-        self.* = .{};
-    }
-};
-
 pub const CwdOptions = struct {
     truncate_to: u8 = 3,
     home_tilde: bool = true,
@@ -282,7 +244,6 @@ pub const Config = struct {
     prompt_modules: []ModuleId,
     right_prompt_modules: []ModuleId,
     prompt: PromptOptions = .{},
-    ai: AiOptions = .{},
     modules: ModuleOptions = .{},
 
     pub fn deinit(self: *Config, allocator: std.mem.Allocator) void {
@@ -290,7 +251,6 @@ pub const Config = struct {
         allocator.free(self.locale);
         allocator.free(self.prompt_modules);
         allocator.free(self.right_prompt_modules);
-        self.ai.deinit(allocator);
         self.* = undefined;
     }
 };
@@ -298,7 +258,6 @@ pub const Config = struct {
 const Table = enum {
     root,
     prompt,
-    ai,
     cwd,
     git_branch,
     language_versions,
@@ -321,9 +280,6 @@ const Seen = struct {
     prompt_modules: bool = false,
     prompt_right_modules: bool = false,
     prompt_rtl_reverse: bool = false,
-    ai_provider: bool = false,
-    ai_model: bool = false,
-    ai_plugin: bool = false,
     cwd_truncate_to: bool = false,
     cwd_home_tilde: bool = false,
     cwd_max_width: bool = false,
@@ -378,7 +334,6 @@ const Parser = struct {
     prompt_modules: std.ArrayList(ModuleId) = .empty,
     right_prompt_modules: std.ArrayList(ModuleId) = .empty,
     prompt: PromptOptions = .{},
-    ai: AiOptions = .{},
     modules: ModuleOptions = .{},
 
     fn parse(self: *Parser) !Config {
@@ -419,7 +374,6 @@ const Parser = struct {
             .prompt_modules = modules,
             .right_prompt_modules = right_modules,
             .prompt = self.prompt,
-            .ai = self.ai,
             .modules = self.modules,
         };
     }
@@ -427,7 +381,6 @@ const Parser = struct {
     fn deinitWorking(self: *Parser) void {
         if (self.theme) |value| self.allocator.free(value);
         if (self.locale) |value| self.allocator.free(value);
-        self.ai.deinit(self.allocator);
         self.prompt_modules.deinit(self.allocator);
         self.right_prompt_modules.deinit(self.allocator);
     }
@@ -466,7 +419,6 @@ const Parser = struct {
         switch (self.table) {
             .root => try self.parseRootKey(line_no, key, value),
             .prompt => try self.parsePromptKey(line_no, key, value),
-            .ai => try self.parseAiKey(line_no, key, value),
             .cwd => try self.parseCwdKey(line_no, key, value),
             .git_branch => try self.parseGitBranchKey(line_no, key, value),
             .language_versions => try self.parseLanguageVersionsKey(line_no, key, value),
@@ -480,23 +432,6 @@ const Parser = struct {
             .risk_tier => try self.parseRiskTierKey(line_no, key, value),
             .sso_expiry => try self.parseSsoExpiryKey(line_no, key, value),
             .time => try self.parseTimeKey(line_no, key, value),
-        }
-    }
-
-    fn parseAiKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
-        if (std.mem.eql(u8, key.text, "provider")) {
-            try self.markUnseen(&self.seen.ai_provider, line_no, key.column);
-            const provider = try self.parseStringAlloc(value, line_no);
-            defer self.allocator.free(provider);
-            self.ai.provider = parseAiProviderId(provider) orelse return self.fail(line_no, value.column, "invalid ai provider");
-        } else if (std.mem.eql(u8, key.text, "model")) {
-            try self.markUnseen(&self.seen.ai_model, line_no, key.column);
-            self.ai.model = try self.parseStringAlloc(value, line_no);
-        } else if (std.mem.eql(u8, key.text, "plugin")) {
-            try self.markUnseen(&self.seen.ai_plugin, line_no, key.column);
-            self.ai.plugin = try self.parseStringAlloc(value, line_no);
-        } else {
-            return self.fail(line_no, key.column, "unknown key");
         }
     }
 
@@ -810,7 +745,6 @@ const Parser = struct {
 
 fn parseTableName(name: []const u8) ?Table {
     if (std.mem.eql(u8, name, "prompt")) return .prompt;
-    if (std.mem.eql(u8, name, "ai")) return .ai;
     if (std.mem.eql(u8, name, "modules.cwd")) return .cwd;
     if (std.mem.eql(u8, name, "modules.git_branch")) return .git_branch;
     if (std.mem.eql(u8, name, "modules.language_versions")) return .language_versions;
@@ -827,15 +761,6 @@ fn parseTableName(name: []const u8) ?Table {
     return null;
 }
 
-fn parseAiProviderId(name: []const u8) ?AiProviderId {
-    if (std.mem.eql(u8, name, "ollama")) return .ollama;
-    if (std.mem.eql(u8, name, "openai")) return .openai;
-    if (std.mem.eql(u8, name, "anthropic")) return .anthropic;
-    if (std.mem.eql(u8, name, "gemini")) return .gemini;
-    if (std.mem.eql(u8, name, "lmstudio")) return .lmstudio;
-    if (std.mem.eql(u8, name, "llamacpp") or std.mem.eql(u8, name, "llama.cpp")) return .llamacpp;
-    return null;
-}
 
 fn parseModuleId(id: []const u8) ?ModuleId {
     if (std.mem.eql(u8, id, "cwd")) return .cwd;
@@ -992,8 +917,6 @@ test "parses minimal config with defaults" {
     try std.testing.expectEqualSlices(ModuleId, &.{ .cwd, .git_branch, .exit_status }, config.prompt_modules);
     try std.testing.expectEqual(@as(usize, 0), config.right_prompt_modules.len);
     try std.testing.expectEqual(@as(u8, 3), config.modules.cwd.truncate_to);
-    try std.testing.expectEqual(AiProviderId.ollama, config.ai.provider);
-    try std.testing.expect(config.ai.model == null);
 }
 
 test "module metadata names execution classes" {
@@ -1032,26 +955,6 @@ test "default config parses" {
     try std.testing.expectEqualStrings("auto", config.locale);
     try std.testing.expectEqualSlices(ModuleId, default_modules[0..], config.prompt_modules);
     try std.testing.expectEqual(@as(usize, 0), config.right_prompt_modules.len);
-}
-
-test "parses ai provider defaults" {
-    const source =
-        \\version = 1
-        \\
-        \\[ai]
-        \\provider = "openai"
-        \\model = "gpt-5.5"
-        \\plugin = "shisa.ai"
-        \\
-    ;
-
-    var diagnostic: Diagnostic = .{};
-    var config = try parse(std.testing.allocator, source, &diagnostic);
-    defer config.deinit(std.testing.allocator);
-
-    try std.testing.expectEqual(AiProviderId.openai, config.ai.provider);
-    try std.testing.expectEqualStrings("gpt-5.5", config.ai.model.?);
-    try std.testing.expectEqualStrings("shisa.ai", config.ai.plugin.?);
 }
 
 test "a11y config parses" {

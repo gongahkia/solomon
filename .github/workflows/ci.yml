@@ -162,6 +162,21 @@ jobs:
 
       - run: zig test src/vcs/${{ matrix.module }}.zig
 
+  first-run-smoke:
+    name: first-run smoke
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.15.2
+          use-cache: true
+          cache-key: shisa-first-run-${{ hashFiles('build.zig.zon') }}
+
+      - run: zig build
+      - run: bash test/integration/first_run_smoke.sh
+
   shell-hooks:
     name: shell hooks / ${{ matrix.shell }}
     runs-on: macos-14

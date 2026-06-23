@@ -36,7 +36,7 @@ Triggered after empirical verification: `shisad` boots, renders, async path work
 - [ ] T16 — Finish T7b–e main.zig split (config / doctor / plugin / stack+worktree)
 - [ ] T17 — *Needs user approval (destructive)*: squash or rewrite the two stray `adde`/`added` commits with descriptive messages
 - [x] T18 — Freeze additions to plugin infrastructure (signing, marketplace validation, manifest CI) until ≥ 1 third-party plugin exists
-- [ ] T19 — First-run smoke integration test: fresh `$HOME` → `shisa init` → source hook → assert working prompt
+- [x] T19 — First-run smoke integration test: fresh `$HOME` → `shisa init` → boot shisad → assert working `shisa prompt` output + `shisa doctor` exit 0. Lives at `test/integration/first_run_smoke.sh`, wired into `ci.yml` first-run-smoke job.
 - [x] T20 — Read `docs/why-zig.md` and reconcile any claims against the empirical state
 
 ## MVP-blocking (phase 1: zsh + macOS + basic git)

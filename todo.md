@@ -29,7 +29,7 @@ Triggered after empirical verification: `shisad` boots, renders, async path work
 - [x] T10 — Reality-check README "pre-MVP" status (working daemon-rendered prompt today; re-label as alpha + known-issues)
 - [ ] T11 — Wire `bench/compare-prompts.sh` into CI on a representative big-repo fixture (verifies the headline)
 - [ ] T12 — Add p99 assertion to `zig build bench`; characterize the 5 ms render outliers (3.5% > 5ms in the 56-run sample)
-- [ ] T13 — Promote RFC-0008 from Draft to Accepted (or relax north-star §16 wording so the gate has teeth)
+- [x] T13 — Promote RFC-0008 from Draft to Accepted (or relax north-star §16 wording so the gate has teeth)
 - [ ] T14 — CI guard: fail PRs that push any `src/daemon/*.zig` past 3000 lines
 - [x] T15 — Write `docs/internals/rfc-0008-daemon-lifecycle.md` decision summary (required by `scripts/rfc-internals-gate.sh` once RFC-0008 is Accepted)
 - [ ] T16 — Finish T7b–e main.zig split (config / doctor / plugin / stack+worktree)
@@ -42,7 +42,7 @@ Triggered after empirical verification: `shisad` boots, renders, async path work
 
 Do these before any phase 2+ work. The MVP gate is: a working zsh-on-macOS prompt that beats starship on a cold render in nixpkgs.
 
-- [ ] Land RFC-0008 (T3) before any further `src/daemon/server.zig` growth
+- [x] Land RFC-0008 (T3, T13) before any further `src/daemon/server.zig` growth
 - [ ] Bench `nextcmd` median round-trip under 800ms on a 2020 MacBook Air — **rewrite as a prompt-render bench, not AI** (AI removed in T4)
 - [ ] Run prompt benchmarks on nixpkgs and chromium clones; record cold and warm numbers
 - [ ] Run comparison benchmark vs starship, p10k, and oh-my-posh

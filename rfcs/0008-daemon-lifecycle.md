@@ -1,7 +1,8 @@
 # RFC-0008: Daemon Lifecycle Across SSH, Containers, nix-shell, tmux, sudo
 
-- Status: Draft
+- Status: Accepted
 - Created: 2026-06-23
+- Accepted: 2026-06-23
 - Owner: core maintainers
 - Area: daemon lifecycle, hot-path failure modes
 

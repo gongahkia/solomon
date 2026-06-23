@@ -34,7 +34,7 @@ Triggered after empirical verification: `shisad` boots, renders, async path work
 - [ ] T15 — Write `docs/internals/rfc-0008-daemon-lifecycle.md` decision summary (required by `scripts/rfc-internals-gate.sh` once RFC-0008 is Accepted)
 - [ ] T16 — Finish T7b–e main.zig split (config / doctor / plugin / stack+worktree)
 - [ ] T17 — *Needs user approval (destructive)*: squash or rewrite the two stray `adde`/`added` commits with descriptive messages
-- [ ] T18 — Freeze additions to plugin infrastructure (signing, marketplace validation, manifest CI) until ≥ 1 third-party plugin exists
+- [x] T18 — Freeze additions to plugin infrastructure (signing, marketplace validation, manifest CI) until ≥ 1 third-party plugin exists
 - [ ] T19 — First-run smoke integration test: fresh `$HOME` → `shisa init` → source hook → assert working prompt
 - [x] T20 — Read `docs/why-zig.md` and reconcile any claims against the empirical state
 
@@ -88,6 +88,8 @@ The packs in north-star §18–21 are deferred. No code or docs added under thes
 - `shisa.activity` (long_running, cmd_complete_bell, tmux_pane, right_prompt)
 
 ## Plugin marketplace (phase 14; do not work on until MVP ships)
+
+**Freeze** (T18): no further additions to plugin infrastructure (signing, marketplace validation, manifest CI) until ≥ 1 third-party plugin actually exists. Current `src/plugin/lua.zig` is 1090 lines and `plugins=0` in daemon metrics — the runtime is built ahead of any consumer. Phase-4 maintenance pressure should be deferred behind real-user signal.
 
 - [ ] Stand up plugin marketplace index in-repo without hosted-site dependency
 - [ ] Seed marketplace with vetted community plugin entries

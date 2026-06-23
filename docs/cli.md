@@ -31,11 +31,9 @@ commands:
   prompt        render prompt through shisad; --right prints configured right prompt
   render        alias for prompt; --explain-a11y dumps segment labels
   report        write a redacted support bundle .tar.gz
-  stack         dump detected stacked-diff metadata
   supervisor    run shisad under a crash-restart supervisor
   theme         validate theme files
   vouch         verify VOUCHES governance file
-  worktrees     list Git worktrees and mark active
 
 options:
   -h, --help    print help

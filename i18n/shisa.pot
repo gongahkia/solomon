@@ -15,32 +15,32 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/main.zig:157
+#: src/main.zig:158
 msgid ""
 "shisa: unknown command; run `shisa --help`\n"
 msgstr ""
 
-#: src/main.zig:523
+#: src/main.zig:524
 msgid ""
 "theme validate: ok\n"
 msgstr ""
 
-#: src/main.zig:1170
+#: src/main.zig:1171
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""
 
-#: src/main.zig:1321
+#: src/main.zig:1322
 msgid ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 msgstr ""
 
-#: src/main.zig:4577
+#: src/main.zig:4578
 msgid ""
 "shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 
-#: src/main.zig:7309
+#: src/main.zig:7310
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
@@ -68,11 +68,9 @@ msgid ""
 "  prompt        render prompt through shisad; --right prints configured right prompt\n"
 "  render        alias for prompt; --explain-a11y dumps segment labels\n"
 "  report        write a redacted support bundle .tar.gz\n"
-"  stack         dump detected stacked-diff metadata\n"
 "  supervisor    run shisad under a crash-restart supervisor\n"
 "  theme         validate theme files\n"
 "  vouch         verify VOUCHES governance file\n"
-"  worktrees     list Git worktrees and mark active\n"
 "\n"
 "options:\n"
 "  -h, --help    print help\n"
@@ -80,7 +78,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:7348
+#: src/main.zig:7347
 msgid ""
 "usage: shisa config set locale=<locale|auto>\n"
 "\n"
@@ -89,7 +87,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:7356
+#: src/main.zig:7355
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -98,7 +96,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:7364
+#: src/main.zig:7363
 msgid ""
 "usage: shisa vouch verify [path]\n"
 "\n"
@@ -107,7 +105,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:7372
+#: src/main.zig:7371
 msgid ""
 "usage: shisa theme <command> [args]\n"
 "\n"
@@ -117,7 +115,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:7381
+#: src/main.zig:7380
 msgid ""
 "usage: shisa font check\n"
 "\n"

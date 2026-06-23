@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const daemon_cache = @import("daemon/cache.zig");
 const dispatcher = @import("daemon/dispatcher.zig");
 const fsnotify = @import("daemon/fsnotify.zig");
@@ -139,12 +140,12 @@ pub fn main() !void {
         return;
     }
 
-    if (std.mem.eql(u8, args[1], "stack")) {
+    if (build_options.vcs_extra and std.mem.eql(u8, args[1], "stack")) {
         try stackCommand(allocator, args[2..]);
         return;
     }
 
-    if (std.mem.eql(u8, args[1], "worktrees")) {
+    if (build_options.vcs_extra and std.mem.eql(u8, args[1], "worktrees")) {
         try worktreesCommand(allocator, args[2..]);
         return;
     }
@@ -7332,11 +7333,9 @@ const help_text =
     \\  prompt        render prompt through shisad; --right prints configured right prompt
     \\  render        alias for prompt; --explain-a11y dumps segment labels
     \\  report        write a redacted support bundle .tar.gz
-    \\  stack         dump detected stacked-diff metadata
     \\  supervisor    run shisad under a crash-restart supervisor
     \\  theme         validate theme files
     \\  vouch         verify VOUCHES governance file
-    \\  worktrees     list Git worktrees and mark active
     \\
     \\options:
     \\  -h, --help    print help

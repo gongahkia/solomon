@@ -16,37 +16,37 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/main.zig:157
+#: src/main.zig:158
 msgid ""
 "shisa: unknown command; run `shisa --help`\n"
 msgstr ""
 "shisa: unknown command; run `shisa --help`\n"
 
-#: src/main.zig:523
+#: src/main.zig:524
 msgid ""
 "theme validate: ok\n"
 msgstr ""
 "theme validate: ok\n"
 
-#: src/main.zig:1170
+#: src/main.zig:1171
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""
 "shisa report: tar not found in PATH\n"
 
-#: src/main.zig:1321
+#: src/main.zig:1322
 msgid ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 msgstr ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 
-#: src/main.zig:4577
+#: src/main.zig:4578
 msgid ""
 "shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 "shisa bench: hyperfine not found in PATH\n"
 
-#: src/main.zig:7309
+#: src/main.zig:7310
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
@@ -74,11 +74,9 @@ msgid ""
 "  prompt        render prompt through shisad; --right prints configured right prompt\n"
 "  render        alias for prompt; --explain-a11y dumps segment labels\n"
 "  report        write a redacted support bundle .tar.gz\n"
-"  stack         dump detected stacked-diff metadata\n"
 "  supervisor    run shisad under a crash-restart supervisor\n"
 "  theme         validate theme files\n"
 "  vouch         verify VOUCHES governance file\n"
-"  worktrees     list Git worktrees and mark active\n"
 "\n"
 "options:\n"
 "  -h, --help    print help\n"
@@ -111,18 +109,16 @@ msgstr ""
 "  prompt        render prompt through shisad; --right prints configured right prompt\n"
 "  render        alias for prompt; --explain-a11y dumps segment labels\n"
 "  report        write a redacted support bundle .tar.gz\n"
-"  stack         dump detected stacked-diff metadata\n"
 "  supervisor    run shisad under a crash-restart supervisor\n"
 "  theme         validate theme files\n"
 "  vouch         verify VOUCHES governance file\n"
-"  worktrees     list Git worktrees and mark active\n"
 "\n"
 "options:\n"
 "  -h, --help    print help\n"
 "      --version print version\n"
 "\n"
 
-#: src/main.zig:7348
+#: src/main.zig:7347
 msgid ""
 "usage: shisa config set locale=<locale|auto>\n"
 "\n"
@@ -136,7 +132,7 @@ msgstr ""
 "  set locale=<locale|auto> set locale override; auto uses LC_ALL, LC_CTYPE, then LANG\n"
 "\n"
 
-#: src/main.zig:7356
+#: src/main.zig:7355
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -150,7 +146,7 @@ msgstr ""
 "  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
 "\n"
 
-#: src/main.zig:7364
+#: src/main.zig:7363
 msgid ""
 "usage: shisa vouch verify [path]\n"
 "\n"
@@ -164,7 +160,7 @@ msgstr ""
 "  verify [path] validate VOUCHES format; defaults to ./VOUCHES\n"
 "\n"
 
-#: src/main.zig:7372
+#: src/main.zig:7371
 msgid ""
 "usage: shisa theme <command> [args]\n"
 "\n"
@@ -180,7 +176,7 @@ msgstr ""
 "  preview <theme>   render a stub prompt from a built-in id or theme file\n"
 "\n"
 
-#: src/main.zig:7381
+#: src/main.zig:7380
 msgid ""
 "usage: shisa font check\n"
 "\n"

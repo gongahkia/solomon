@@ -3,6 +3,12 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const vcs_extra = b.option(bool, "vcs_extra", "compile hg/jj/sl/stack/worktree CLI verbs (default: false)") orelse false;
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "vcs_extra", vcs_extra);
+    const build_options_module = build_options.createModule();
+
     const vcs_worktree_module = b.createModule(.{
         .root_source_file = b.path("src/vcs/worktree.zig"),
         .target = target,
@@ -53,6 +59,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     exe.root_module.addImport("vcs_worktree", vcs_worktree_module);
+    exe.root_module.addImport("build_options", build_options_module);
     b.installArtifact(exe);
 
     const daemon = b.addExecutable(.{
@@ -86,6 +93,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     debug_exe.root_module.addImport("vcs_worktree", vcs_worktree_debug_module);
+    debug_exe.root_module.addImport("build_options", build_options_module);
     const debug_install = b.addInstallArtifact(debug_exe, .{});
     const debug_daemon = b.addExecutable(.{
         .name = "shisad",
@@ -121,6 +129,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     release_exe.root_module.addImport("vcs_worktree", vcs_worktree_release_module);
+    release_exe.root_module.addImport("build_options", build_options_module);
     const release_install = b.addInstallArtifact(release_exe, .{});
     const release_daemon = b.addExecutable(.{
         .name = "shisad",
@@ -248,6 +257,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     tests.root_module.addImport("vcs_worktree", vcs_worktree_module);
+    tests.root_module.addImport("build_options", build_options_module);
     const test_run = b.addRunArtifact(tests);
     const cli_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -794,12 +804,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&theme_builtin_test_run.step);
     test_step.dependOn(&theme_contrast_test_run.step);
     test_step.dependOn(&theme_loader_test_run.step);
-    test_step.dependOn(&vcs_jj_test_run.step);
-    test_step.dependOn(&vcs_sl_test_run.step);
-    test_step.dependOn(&vcs_hg_test_run.step);
     test_step.dependOn(&vcs_git_state_test_run.step);
-    test_step.dependOn(&vcs_stack_test_run.step);
-    test_step.dependOn(&vcs_worktree_test_run.step);
+    if (vcs_extra) {
+        test_step.dependOn(&vcs_jj_test_run.step);
+        test_step.dependOn(&vcs_sl_test_run.step);
+        test_step.dependOn(&vcs_hg_test_run.step);
+        test_step.dependOn(&vcs_stack_test_run.step);
+        test_step.dependOn(&vcs_worktree_test_run.step);
+    }
     test_step.dependOn(&lock_test_run.step);
     test_step.dependOn(&log_test_run.step);
     test_step.dependOn(&signals_test_run.step);

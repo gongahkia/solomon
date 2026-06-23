@@ -28,7 +28,7 @@ Triggered after empirical verification: `shisad` boots, renders, async path work
 
 - [x] T10 — Reality-check README "pre-MVP" status (working daemon-rendered prompt today; re-label as alpha + known-issues)
 - [x] T11 — Wire cold big-repo bench into CI via `scripts/cold-bigrepo-bench.sh` + `.github/workflows/cold-bigrepo.yml`. Generates a synthetic 2000-commit/1500-file repo, clears the daemon cache before each run, asserts max cold render < 150 ms. Starship comparison logged as informational.
-- [x] T12 — Add p99 assertion via `scripts/render-p99-gate.sh`; CI fails if end-to-end p99 > 15 ms
+- [x] T12 — Add p99 assertion via `scripts/render-p99-gate.sh`; CI fails if end-to-end p99 > 10 ms
 - [x] T12-followup — Tighten the render p99 budget from 15 ms to 10 ms toward north-star §10's <2 ms warm target. 2026-06-23 local evidence: default debug path `scripts/render-p99-gate.sh` p99 3.48-4.27 ms after switching hyperfine to `--shell=none`; ReleaseFast p99 3.33 ms; daemon metrics showed 199/200 renders <=100us and `zig-out/bin/shisa` links only libSystem on macOS. Remaining <2 ms gap is client process/socket overhead.
 - [x] T13 — Promote RFC-0008 from Draft to Accepted (or relax north-star §16 wording so the gate has teeth)
 - [x] T14 — CI guard: fail PRs that push any `src/daemon/*.zig` past 3000 lines
@@ -45,11 +45,11 @@ Do these before any phase 2+ work. The MVP gate is: a working zsh-on-macOS promp
 
 - [x] Land RFC-0008 (T3, T13) before any further `src/daemon/server.zig` growth
 - [x] Replace stale `nextcmd` 800 ms core benchmark with prompt-render evidence — AI removed in T4; `shisa bench` and `scripts/render-p99-gate.sh` now benchmark prompt render. 2026-06-23 local host: `Mac15,12` / Apple M3 / macOS 26.5.1; p99 gate tightened to 10 ms and passed at 3.48-4.27 ms.
-- [ ] Run prompt benchmarks on nixpkgs and chromium clones; record cold and warm numbers — blocked locally: no existing clones found under common work dirs on 2026-06-23, and only 66 GiB free makes a real Chromium checkout unsafe.
+- [~] Run prompt benchmarks on nixpkgs and chromium clones; record cold and warm numbers — nixpkgs done 2026-06-23 (`bench-results/nixpkgs-*`, commit `8986399b3`: cold mean 69.8 ms, warm mean 21.6 ms). Sparse Chromium done 2026-06-23 (`bench-results/chromium-sparse-*`, commit `dd0350b6`: cold mean 30.6 ms, warm mean 1.9 ms, 36 checked-out files, 100 MiB fixture). Full Chromium remains blocked locally: no existing clone found, and 65-66 GiB free is not safe headroom for a real checkout.
 - [x] Run comparison benchmark vs starship, p10k, and oh-my-posh — 2026-06-23 local `bench/compare-prompts.sh`: Shisa 1.7 ms mean, Starship 9.6 ms, Oh My Posh 14.5 ms, p10k 147.6 ms. Results in `bench-results/comparison.{json,md}`.
-- [ ] Test zsh async redraw in tmux, plain zsh, Alacritty, and iTerm — partial 2026-06-23: `expect test/integration/shell_expect.exp`, `expect test/integration/tmux_expect.exp`, and `test/integration/zsh_fake_socket.sh` pass for plain zsh/tmux; Alacritty/iTerm apps were not installed.
-- [ ] Use libgit2 bindings via Zig FFI for advanced git states
-- [ ] Benchmark advanced git states on a 1M-commit repo
+- [x] Test zsh async redraw in tmux, plain zsh, Alacritty, and iTerm — 2026-06-23: `expect test/integration/shell_expect.exp`, `expect test/integration/tmux_expect.exp`, and `test/integration/zsh_fake_socket.sh` pass for plain zsh/tmux. Alacritty 0.17.0 direct DMG and iTerm 3.6.11 AppleScript sessions verified `SHISA_ASYNC_FD`, FIFO creation, and `USR1` notification markers.
+- [x] Use libgit2 bindings via Zig FFI for advanced git states — 2026-06-23: `src/vcs/git_libgit2.zig` runtime-loads libgit2 via `std.DynLib`, reads branch, staged/unstaged/untracked/conflict counts, detached state, and upstream ahead/behind, and `git_branch` falls back to spawned `git` when libgit2 is unavailable. Verified with `zig test src/vcs/git_libgit2.zig` and a no-`git` PATH prompt render.
+- [x] Benchmark advanced git states on a 1M-commit repo — 2026-06-23: `bench/git-advanced-1m.sh` generated/reused a 1,000,000-commit repo with upstream `ahead=1 behind=0`, staged/unstaged/untracked files, and stripped `PATH` for Shisa/shisad so spawned `git` could not satisfy the prompt. Results in `bench-results/git-advanced-1m-*`: cold fresh-daemon mean 264.9 ms, warm mean 8.0 ms.
 
 ## Hardening (phase 2-3)
 

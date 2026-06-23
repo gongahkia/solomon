@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const git_libgit2 = @import("vcs_git_libgit2");
 const vcs_worktree = @import("vcs_worktree");
 
 pub const module_id = "git_branch";
@@ -280,6 +281,8 @@ pub fn probe(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
 }
 
 fn probeCancellable(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8) !?[]u8 {
+    if (try probeLibgit2(allocator, cwd_path)) |segment| return segment;
+
     const branch_result = runCommand(allocator, cache, generation, cwd_path, &.{ "git", "branch", "--show-current" }, 4096) catch return null;
     defer allocator.free(branch_result.stdout);
     defer allocator.free(branch_result.stderr);
@@ -291,6 +294,22 @@ fn probeCancellable(allocator: std.mem.Allocator, cache: ?*Cache, generation: u6
     if (branch.len == 0) return null;
 
     const dirty = try isDirty(allocator, cache, generation, cwd_path);
+    const worktree_segment = worktreeSegmentAlloc(allocator, cwd_path) catch null;
+    defer if (worktree_segment) |segment| allocator.free(segment);
+    if (worktree_segment) |segment| {
+        return try std.fmt.allocPrint(allocator, "git:{s}{s} {s}", .{ branch, if (dirty) "*" else "", segment });
+    }
+    return try std.fmt.allocPrint(allocator, "git:{s}{s}", .{ branch, if (dirty) "*" else "" });
+}
+
+fn probeLibgit2(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
+    var snapshot = (try git_libgit2.readSnapshot(allocator, cwd_path)) orelse return null;
+    defer snapshot.deinit(allocator);
+    const branch = snapshot.branch orelse return null;
+    const dirty = snapshot.counts.staged > 0 or
+        snapshot.counts.unstaged > 0 or
+        snapshot.counts.untracked > 0 or
+        snapshot.counts.conflicts > 0;
     const worktree_segment = worktreeSegmentAlloc(allocator, cwd_path) catch null;
     defer if (worktree_segment) |segment| allocator.free(segment);
     if (worktree_segment) |segment| {

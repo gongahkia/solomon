@@ -4,7 +4,7 @@
 
 ## Git
 
-The planned Git fast path is libgit2 through Zig FFI. When libgit2 bindings, the dynamic library, or a compatible runtime version are unavailable, Shisa falls back to spawned `git` commands from daemon-owned async workers.
+The Git fast path uses runtime-loaded libgit2 through Zig FFI for branch/ref state, working-tree counts, detached HEAD state, and upstream ahead/behind. When the dynamic library or a compatible runtime version is unavailable, Shisa falls back to spawned `git` commands from daemon-owned async workers.
 
 Fallback spawning is not part of the shell hook hot path. The prompt renderer may return cached Git state or a pending async marker while the daemon refreshes state. Filesystem invalidation on `.git/HEAD`, `.git/index`, and the repository root controls cache freshness; generation checks prevent stale worker output from replacing newer cwd state.
 

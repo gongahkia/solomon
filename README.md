@@ -11,7 +11,7 @@ Shisa keeps slow prompt work out of the shell. A per-user daemon watches filesys
 **Alpha — works on a developer machine, not yet packaged.** The daemon (`shisad`) renders prompts over a Unix-domain socket; the `shisa prompt` client returns a composed prompt with async-fill placeholders for slow modules. Warm renders measured at 2–4 ms mean on macOS / Apple Silicon. There is no released artifact, no installer, and no signed binary yet — see [todo.md](todo.md) for what's still in the way.
 
 Known gaps before a first release:
-- Synthetic cold-big-repo CI is guarded; real nixpkgs/chromium benchmark numbers are still missing.
+- Synthetic cold-big-repo CI is guarded; local nixpkgs and sparse Chromium numbers are recorded; full Chromium checkout numbers are still missing.
 - Warm end-to-end p99 is guarded at 10 ms; the north-star <2 ms hot-path target still needs client/socket overhead work.
 - `main.zig` split is partial (~4.4K lines remaining). Zig pre-1.0 churn risk concentrates here.
 - Packaging (Homebrew / AUR / nixpkgs / scoop), code signing, and supply-chain attestation are not done.

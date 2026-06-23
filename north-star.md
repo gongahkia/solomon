@@ -5,9 +5,15 @@
 
 ---
 
+> **Read first.** This document is the source of truth for Shisa's scope and ethos. Contributors and agents must read it in full before touching `todo.md`. Scope decisions are made here, not in the task list. If a task would contradict this file, update this file in the same change.
+
+---
+
 ## 1. One-line pitch
 
-Shisa is a cross-shell prompt that runs as a background daemon, watches your filesystem, and pre-renders prompts so your shell is **never** slowed down by git status, language version probes, or cloud-context lookups — even inside `nixpkgs`, `chromium`, or a 10GB monorepo.
+**The prompt that never times out, in any size repo.**
+
+Shisa is a cross-shell prompt that runs as a background daemon, watches your filesystem, and pre-renders prompts so your shell is **never** slowed down by git status, language version probes, or cloud-context lookups — even inside `nixpkgs`, `chromium`, or a 10GB monorepo. The falsifiable promise is the cold-render number on a real big repo (§10), not a warm-cache benchmark.
 
 ## 2. Why this exists
 
@@ -26,6 +32,7 @@ Tide solves these for fish-only. P10k solves these for zsh-only and is dying. Oh
 - Shisa is **not** a shell. It does not replace zsh, bash, fish, nu, pwsh.
 - Shisa is **not** a terminal emulator. It does not replace WezTerm, Alacritty, Ghostty, Warp.
 - Shisa is **not** an AI coding agent. It does not write code, refactor, or run agents. (A future opt-in plugin may expose local-LLM hints; the core is AI-free.)
+- The daemon and core binary contain **no AI code**. `shisa ai` does not exist as a subcommand in the current build. The `shisa.ai` pack described in §18 is a future opt-in plugin pack, not part of the core. This is a contract enforced at build time, not an aspiration.
 - Shisa is **not** a config compatibility layer. It will not be a drop-in for `starship.toml` at runtime. It ships a one-shot importer.
 
 ## 4. Differentiation matrix
@@ -127,11 +134,15 @@ The daemon enforces capabilities. A plugin that asks for `net = true` requires e
 
 ## 10. Performance targets (publicly benchmarked)
 
+**Headline:** cold render in a real big repo without a timeout. Starship's `command_timeout` cliff is the gap Shisa exists to close. Every other number on this table is supporting evidence, not the marketing line.
+
+**Non-target:** sub-millisecond warm renders. Below ~10 ms is sub-perceptual to humans; chasing warm latency past `< 2ms p99` adds engineering cost without UX gain. The < 2 ms p99 target is an *upper bound on the hot path*, not a competition with starship's ~10 ms.
+
 | Metric                            | Target          | How verified                  |
 |-----------------------------------|-----------------|-------------------------------|
+| Cold prompt in 10GB monorepo      | < 30ms          | nixpkgs / chromium benchmark  |
 | Shell startup overhead            | < 5ms           | `hyperfine` against bare shell|
 | Warm-cache prompt render          | < 2ms p99       | shisa bench, public CI        |
-| Cold prompt in 10GB monorepo      | < 30ms          | nixpkgs / chromium benchmark  |
 | Daemon RSS                        | < 25MB idle     | `ps`, public dashboard        |
 | Daemon CPU idle                   | < 0.1%          | per-second sampling           |
 | Async git in big repo (background)| < 200ms p99     | benchmark suite               |
@@ -184,8 +195,8 @@ This project is successful (not just shipped) when:
 
 ## 16. Risks (named honestly)
 
-- **Zig is pre-1.0.** Language churn could cost weeks. Mitigation: pin to a Zig release, vendor stdlib slices we depend on.
-- **Daemon lifecycle is hard.** Crashes, socket cleanup, multi-user systems, sandboxed environments. Mitigation: ship a robust supervisor + graceful fallback prompt.
+- **Daemon lifecycle is the killer-feature failure mode.** This is what historically kills daemon-prompt projects. The failure set: stale socket after reboot, crashes mid-render, multi-user systems, SSH-into-host (daemon on remote?), devcontainer / distrobox / toolbx nesting, nix-shell PATH-flip cache poisoning, tmux session resume across daemon restarts, sudo'd shells. Mitigation: RFC-0008 specifies the contract per environment; supervisor + graceful sync fallback on every degraded path; **no further dispatcher growth lands before RFC-0008 is signed off**.
+- **Zig is pre-1.0.** Language churn could cost weeks. Mitigation: pin to a Zig release, vendor stdlib slices we depend on, keep CLI modules small enough that a language break is a day of work, not a month.
 - **Lua sandbox escape is a real attack surface.** Mitigation: stripped stdlib + capability gates + fuzz the bridge layer + bug bounty.
 - **Starship has years of module breadth.** Catching up takes time. Mitigation: prioritize the top-20 most-used starship modules first; let community fill the long tail.
 - **fsnotify gaps on macOS** (large dirs, recursive limits) and **inotify limits on Linux** (watcher count). Mitigation: opportunistic watching + periodic refresh fallback.
@@ -198,6 +209,10 @@ This project is successful (not just shipped) when:
 - Theme spec: extend starship's preset format, or invent fresh?
 - Wire protocol: line-delimited JSON vs. MessagePack vs. a hand-rolled framed binary?
 - How does `shisa --no-daemon` behave? (degraded sync mode for restricted envs.)
+- SSH-into-host: does the remote host run its own daemon, or does the local daemon serve via socket-forwarding? Implies remote install footprint.
+- Container nesting: when the user `cd`s into a devcontainer / distrobox / toolbx, do we spawn a nested daemon, share via bind-mount, or fall back to sync? Trade-off: cache freshness vs. complexity.
+- nix-shell PATH-flip: how does the daemon detect language-version cache invalidation when PATH changes without an fsnotify event on a watched file? Probe-on-pwd-change, refresh-on-PATH-hash-change, or both?
+- These three are scoped to RFC-0008 (daemon lifecycle).
 
 ---
 

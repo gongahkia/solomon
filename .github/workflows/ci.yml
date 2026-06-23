@@ -86,6 +86,22 @@ jobs:
 
       - run: bash scripts/file-size-guard.sh
 
+  render-p99:
+    name: render p99 gate
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.15.2
+          use-cache: true
+          cache-key: shisa-p99-${{ hashFiles('build.zig.zon') }}
+
+      - run: brew install hyperfine jq
+      - run: zig build
+      - run: bash scripts/render-p99-gate.sh
+
   theme-contrast:
     name: theme contrast
     runs-on: ubuntu-24.04

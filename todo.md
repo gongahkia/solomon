@@ -28,7 +28,8 @@ Triggered after empirical verification: `shisad` boots, renders, async path work
 
 - [x] T10 — Reality-check README "pre-MVP" status (working daemon-rendered prompt today; re-label as alpha + known-issues)
 - [ ] T11 — Wire `bench/compare-prompts.sh` into CI on a representative big-repo fixture (verifies the headline)
-- [ ] T12 — Add p99 assertion to `zig build bench`; characterize the 5 ms render outliers (3.5% > 5ms in the 56-run sample)
+- [x] T12 — Add p99 assertion via `scripts/render-p99-gate.sh`; CI fails if end-to-end p99 > 15 ms
+- [ ] T12-followup — Tighten the render p99 budget from 15 ms toward north-star §10's <2 ms warm target. Current end-to-end baseline is ~10 ms p99 (binary startup + socket + render); the gap is dominated by `shisa` binary cold start, not daemon render (sub-500us per `shisad --metrics`). Investigate static linking or daemon-bundled client mode.
 - [x] T13 — Promote RFC-0008 from Draft to Accepted (or relax north-star §16 wording so the gate has teeth)
 - [x] T14 — CI guard: fail PRs that push any `src/daemon/*.zig` past 3000 lines
 - [x] T15 — Write `docs/internals/rfc-0008-daemon-lifecycle.md` decision summary (required by `scripts/rfc-internals-gate.sh` once RFC-0008 is Accepted)

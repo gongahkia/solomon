@@ -1,7 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
+const cli_stack = @import("cli/stack.zig");
 const cli_theme = @import("cli/theme.zig");
+const cli_util = @import("cli/util.zig");
+const cli_worktree = @import("cli/worktree.zig");
 const daemon_cache = @import("daemon/cache.zig");
 const dispatcher = @import("daemon/dispatcher.zig");
 const fsnotify = @import("daemon/fsnotify.zig");
@@ -19,8 +22,6 @@ const prod_guard_module = @import("daemon/modules/prod_guard.zig");
 const risk_tier_module = @import("daemon/modules/risk_tier.zig");
 const supervisor = @import("supervisor.zig");
 const theme_loader = @import("theme/loader.zig");
-const vcs_stack = @import("vcs/stack.zig");
-const vcs_worktree = @import("vcs_worktree");
 
 const version = "0.1.0-dev";
 const max_config_bytes = 1024 * 1024;
@@ -141,12 +142,12 @@ pub fn main() !void {
     }
 
     if (build_options.vcs_extra and std.mem.eql(u8, args[1], "stack")) {
-        try stackCommand(allocator, args[2..]);
+        try cli_stack.command(allocator, args[2..]);
         return;
     }
 
     if (build_options.vcs_extra and std.mem.eql(u8, args[1], "worktrees")) {
-        try worktreesCommand(allocator, args[2..]);
+        try cli_worktree.command(allocator, args[2..]);
         return;
     }
 
@@ -587,10 +588,10 @@ fn explainAlloc(allocator: std.mem.Allocator, parsed: shisa_config.Config) ![]u8
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
 
-    try appendFmt(allocator, &out, "theme: {s}\n", .{parsed.theme});
+    try cli_util.appendFmt(allocator, &out, "theme: {s}\n", .{parsed.theme});
     try out.appendSlice(allocator, "pipeline:\n");
     for (parsed.prompt_modules, 0..) |module_id, index| {
-        try appendFmt(
+        try cli_util.appendFmt(
             allocator,
             &out,
             "  {d}. {s} ({s})\n",
@@ -599,12 +600,6 @@ fn explainAlloc(allocator: std.mem.Allocator, parsed: shisa_config.Config) ![]u8
     }
 
     return try out.toOwnedSlice(allocator);
-}
-
-fn appendFmt(allocator: std.mem.Allocator, out: *std.ArrayList(u8), comptime format: []const u8, args: anytype) !void {
-    const line = try std.fmt.allocPrint(allocator, format, args);
-    defer allocator.free(line);
-    try out.appendSlice(allocator, line);
 }
 
 test "explain output dumps pipeline" {
@@ -649,7 +644,7 @@ fn parseDoctorArgs(args: []const []const u8) !DoctorConfig {
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         if (std.mem.eql(u8, args[i], "--socket")) {
-            config.socket_path = try nextValue(args, &i);
+            config.socket_path = try cli_util.nextValue(args, &i);
         } else {
             return error.UnknownDoctorArgument;
         }
@@ -668,18 +663,18 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
 
-    try appendFmt(allocator, &out, "socket: {s} {s}\n", .{ pathAccessStatus(socket_path), socket_path });
-    try appendFmt(allocator, &out, "daemon: {s}\n", .{try daemonHealthStatus(allocator, socket_path)});
-    try appendFmt(allocator, &out, "config_dir: {s} {s}\n", .{ pathAccessStatus(config_dir), config_dir });
-    try appendFmt(allocator, &out, "plugins_dir: {s} {s}\n", .{ pathAccessStatus(plugins_dir), plugins_dir });
-    try appendFmt(allocator, &out, "lua: {s}\n", .{luaRuntimeStatus(allocator)});
-    try appendFmt(allocator, &out, "fsnotify: {s}\n", .{fsnotifyBackendName(fsnotify.selectBackend(builtin.os.tag))});
+    try cli_util.appendFmt(allocator, &out, "socket: {s} {s}\n", .{ pathAccessStatus(socket_path), socket_path });
+    try cli_util.appendFmt(allocator, &out, "daemon: {s}\n", .{try daemonHealthStatus(allocator, socket_path)});
+    try cli_util.appendFmt(allocator, &out, "config_dir: {s} {s}\n", .{ pathAccessStatus(config_dir), config_dir });
+    try cli_util.appendFmt(allocator, &out, "plugins_dir: {s} {s}\n", .{ pathAccessStatus(plugins_dir), plugins_dir });
+    try cli_util.appendFmt(allocator, &out, "lua: {s}\n", .{luaRuntimeStatus(allocator)});
+    try cli_util.appendFmt(allocator, &out, "fsnotify: {s}\n", .{fsnotifyBackendName(fsnotify.selectBackend(builtin.os.tag))});
     try appendDoctorDeprecations(allocator, &out, config_path);
 
     if (builtin.os.tag == .linux) {
         const limit = fsnotify.readLinuxMaxUserWatches(allocator) catch null;
         if (limit) |value| {
-            try appendFmt(allocator, &out, "inotify.max_user_watches: {d}\n", .{value});
+            try cli_util.appendFmt(allocator, &out, "inotify.max_user_watches: {d}\n", .{value});
         } else {
             try out.appendSlice(allocator, "inotify.max_user_watches: unknown\n");
         }
@@ -690,7 +685,7 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u
 
 fn appendDoctorDeprecations(allocator: std.mem.Allocator, out: *std.ArrayList(u8), config_path: []const u8) !void {
     const source = readConfigOrDefault(allocator, config_path) catch |err| {
-        try appendFmt(allocator, out, "deprecations: unreadable ({s})\n", .{@errorName(err)});
+        try cli_util.appendFmt(allocator, out, "deprecations: unreadable ({s})\n", .{@errorName(err)});
         return;
     };
     defer allocator.free(source);
@@ -705,7 +700,7 @@ fn deprecationWarningsAlloc(allocator: std.mem.Allocator, source: []const u8, ru
     var count: usize = 0;
     for (rules) |rule| {
         if (std.mem.indexOf(u8, source, rule.pattern) == null) continue;
-        try appendFmt(
+        try cli_util.appendFmt(
             allocator,
             &out,
             "deprecation: {s} `{s}` deprecated since {s}; use `{s}`; remove before {s}\n",
@@ -752,7 +747,7 @@ fn parseReportArgs(args: []const []const u8) !ReportConfig {
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         if (std.mem.eql(u8, args[i], "--output") or std.mem.eql(u8, args[i], "-o")) {
-            config.output_path = try nextValue(args, &i);
+            config.output_path = try cli_util.nextValue(args, &i);
         } else {
             return error.UnknownReportArgument;
         }
@@ -837,12 +832,12 @@ fn readFileTailAlloc(allocator: std.mem.Allocator, path: []const u8, max_bytes: 
 fn reportBenchAlloc(allocator: std.mem.Allocator) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
-    try appendFmt(allocator, &out, "version: {s}\n", .{version});
-    try appendFmt(allocator, &out, "os: {s}\n", .{@tagName(builtin.os.tag)});
-    try appendFmt(allocator, &out, "iterations: {d}\n", .{report_bench_iterations});
+    try cli_util.appendFmt(allocator, &out, "version: {s}\n", .{version});
+    try cli_util.appendFmt(allocator, &out, "os: {s}\n", .{@tagName(builtin.os.tag)});
+    try cli_util.appendFmt(allocator, &out, "iterations: {d}\n", .{report_bench_iterations});
 
     const cwd = std.fs.cwd().realpathAlloc(allocator, ".") catch |err| {
-        try appendFmt(allocator, &out, "status: failed\nerror: {s}\n", .{@errorName(err)});
+        try cli_util.appendFmt(allocator, &out, "status: failed\nerror: {s}\n", .{@errorName(err)});
         return out.toOwnedSlice(allocator);
     };
     defer allocator.free(cwd);
@@ -855,7 +850,7 @@ fn reportBenchAlloc(allocator: std.mem.Allocator) ![]u8 {
     for (0..report_bench_iterations) |_| {
         const start = std.time.nanoTimestamp();
         const payload = buildPromptPayloadWithModuleOptions(allocator, config, cwd, module_options) catch |err| {
-            try appendFmt(allocator, &out, "status: failed\nerror: {s}\n", .{@errorName(err)});
+            try cli_util.appendFmt(allocator, &out, "status: failed\nerror: {s}\n", .{@errorName(err)});
             return out.toOwnedSlice(allocator);
         };
         defer allocator.free(payload);
@@ -865,9 +860,9 @@ fn reportBenchAlloc(allocator: std.mem.Allocator) ![]u8 {
         max_ns = @max(max_ns, elapsed);
     }
     try out.appendSlice(allocator, "status: ok\n");
-    try appendFmt(allocator, &out, "avg_ns: {d}\n", .{total_ns / report_bench_iterations});
-    try appendFmt(allocator, &out, "min_ns: {d}\n", .{min_ns});
-    try appendFmt(allocator, &out, "max_ns: {d}\n", .{max_ns});
+    try cli_util.appendFmt(allocator, &out, "avg_ns: {d}\n", .{total_ns / report_bench_iterations});
+    try cli_util.appendFmt(allocator, &out, "min_ns: {d}\n", .{min_ns});
+    try cli_util.appendFmt(allocator, &out, "max_ns: {d}\n", .{max_ns});
     return out.toOwnedSlice(allocator);
 }
 
@@ -895,7 +890,7 @@ fn createReportArchive(allocator: std.mem.Allocator, staging_dir: []const u8, ou
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
     try std.fs.File.stderr().writeAll(result.stderr);
-    if (!exitedZero(result.term)) return error.ReportArchiveFailed;
+    if (!cli_util.exitedZero(result.term)) return error.ReportArchiveFailed;
 }
 
 test "report args parse output path" {
@@ -1340,37 +1335,37 @@ fn cloudDoctorAlloc(allocator: std.mem.Allocator, home: ?[]const u8, aws_profile
 
     const aws_profile = try cloud_ctx_module.awsProfileAlloc(allocator, aws_profile_env, home);
     defer if (aws_profile) |value| allocator.free(value);
-    try appendFmt(allocator, &out, "aws_profile: {s}\n", .{aws_profile orelse "-"});
+    try cli_util.appendFmt(allocator, &out, "aws_profile: {s}\n", .{aws_profile orelse "-"});
 
     const gcp_path = try cloud_ctx_module.gcpConfigPathAlloc(allocator, home);
     defer if (gcp_path) |value| allocator.free(value);
     try appendCloudPathLine(allocator, &out, "gcp_config", gcp_path);
     const gcp_project = try cache.gcpProjectAlloc(allocator, home);
     defer if (gcp_project) |value| allocator.free(value);
-    try appendFmt(allocator, &out, "gcp_project: {s}\n", .{gcp_project orelse "-"});
+    try cli_util.appendFmt(allocator, &out, "gcp_project: {s}\n", .{gcp_project orelse "-"});
 
     const azure_path = try cloud_ctx_module.azureProfilePathAlloc(allocator, home);
     defer if (azure_path) |value| allocator.free(value);
     try appendCloudPathLine(allocator, &out, "azure_profile", azure_path);
     const azure_subscription = try cache.azureSubscriptionAlloc(allocator, home);
     defer if (azure_subscription) |value| allocator.free(value);
-    try appendFmt(allocator, &out, "azure_subscription: {s}\n", .{azure_subscription orelse "-"});
+    try cli_util.appendFmt(allocator, &out, "azure_subscription: {s}\n", .{azure_subscription orelse "-"});
 
     const kube_path = try cloud_ctx_module.kubeConfigPathAlloc(allocator, kubeconfig_env, home);
     defer if (kube_path) |value| allocator.free(value);
     try appendCloudPathLine(allocator, &out, "kubeconfig", kube_path);
     const kube_context = try cache.kubeContextAlloc(allocator, kubeconfig_env, home);
     defer if (kube_context) |value| allocator.free(value);
-    try appendFmt(allocator, &out, "kube_context: {s}\n", .{kube_context orelse "-"});
+    try cli_util.appendFmt(allocator, &out, "kube_context: {s}\n", .{kube_context orelse "-"});
 
     return out.toOwnedSlice(allocator);
 }
 
 fn appendCloudPathLine(allocator: std.mem.Allocator, out: *std.ArrayList(u8), label: []const u8, path: ?[]const u8) !void {
     if (path) |value| {
-        try appendFmt(allocator, out, "{s}: {s} {s}\n", .{ label, pathAccessStatus(value), value });
+        try cli_util.appendFmt(allocator, out, "{s}: {s} {s}\n", .{ label, pathAccessStatus(value), value });
     } else {
-        try appendFmt(allocator, out, "{s}: missing\n", .{label});
+        try cli_util.appendFmt(allocator, out, "{s}: missing\n", .{label});
     }
 }
 
@@ -1433,13 +1428,13 @@ fn parseCloudPreexecArgs(args: []const []const u8) !CloudPreexec {
     while (i < args.len) : (i += 1) {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "--socket")) {
-            parsed.socket_path = try nextValue(args, &i);
+            parsed.socket_path = try cli_util.nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--shell")) {
-            parsed.shell = try nextValue(args, &i);
+            parsed.shell = try cli_util.nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--force")) {
             parsed.force = true;
         } else if (std.mem.eql(u8, arg, "--")) {
-            parsed.command = try nextValue(args, &i);
+            parsed.command = try cli_util.nextValue(args, &i);
             if (i + 1 != args.len) return error.UnknownCloudArgument;
         } else if (parsed.command.len == 0) {
             parsed.command = arg;
@@ -1609,195 +1604,6 @@ fn copyFixtureToPath(allocator: std.mem.Allocator, source_path: []const u8, dest
     try file.writeAll(source);
 }
 
-const StackConfig = struct {
-    cwd: ?[]const u8 = null,
-};
-
-fn stackCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const config = try parseStackArgs(args);
-    const cwd = if (config.cwd) |path| path else try std.fs.cwd().realpathAlloc(allocator, ".");
-    defer if (config.cwd == null) allocator.free(cwd);
-
-    const output = try stackOutputAlloc(allocator, cwd);
-    defer allocator.free(output);
-    try std.fs.File.stdout().writeAll(output);
-}
-
-fn parseStackArgs(args: []const []const u8) !StackConfig {
-    var config = StackConfig{};
-    var i: usize = 0;
-    while (i < args.len) : (i += 1) {
-        if (std.mem.eql(u8, args[i], "--cwd")) {
-            config.cwd = try nextValue(args, &i);
-        } else {
-            return error.UnknownStackArgument;
-        }
-    }
-    return config;
-}
-
-fn stackOutputAlloc(allocator: std.mem.Allocator, cwd_path: []const u8) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(allocator);
-
-    var detection = (try vcs_stack.detect(allocator, cwd_path)) orelse {
-        try out.appendSlice(allocator, "stack: none\n");
-        return out.toOwnedSlice(allocator);
-    };
-    defer detection.deinit(allocator);
-
-    try appendFmt(allocator, &out, "provider: {s}\n", .{detection.provider.label()});
-    try appendFmt(allocator, &out, "root: {s}\n", .{detection.root_path});
-    try appendFmt(allocator, &out, "marker: {s}\n", .{detection.marker_path});
-    if (detection.branch_name) |branch_name| {
-        try appendFmt(allocator, &out, "branch: {s}\n", .{branch_name});
-    }
-    return out.toOwnedSlice(allocator);
-}
-
-test "stack args parse cwd override" {
-    const config = try parseStackArgs(&.{ "--cwd", "/tmp/repo" });
-    try std.testing.expectEqualStrings("/tmp/repo", config.cwd.?);
-    try std.testing.expectError(error.UnknownStackArgument, parseStackArgs(&.{"--bad"}));
-}
-
-test "stack output reports no stack" {
-    const allocator = std.testing.allocator;
-    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-cli-stack-{x}", .{std.crypto.random.int(u64)});
-    defer allocator.free(dir_path);
-    defer std.fs.cwd().deleteTree(dir_path) catch {};
-    try std.fs.cwd().makePath(dir_path);
-
-    const output = try stackOutputAlloc(allocator, dir_path);
-    defer allocator.free(output);
-    try std.testing.expectEqualStrings("stack: none\n", output);
-}
-
-test "stack output dumps detected stack" {
-    const allocator = std.testing.allocator;
-    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-cli-stack-{x}", .{std.crypto.random.int(u64)});
-    defer allocator.free(dir_path);
-    defer std.fs.cwd().deleteTree(dir_path) catch {};
-    try std.fs.cwd().makePath(dir_path);
-
-    const marker_path = try std.fmt.allocPrint(allocator, "{s}/.graphite_repo_config", .{dir_path});
-    defer allocator.free(marker_path);
-    var file = try std.fs.createFileAbsolute(marker_path, .{});
-    try file.writeAll("{}\n");
-    file.close();
-
-    const output = try stackOutputAlloc(allocator, dir_path);
-    defer allocator.free(output);
-    try std.testing.expect(std.mem.indexOf(u8, output, "provider: graphite\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, dir_path) != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, marker_path) != null);
-}
-
-const WorktreesConfig = struct {
-    cwd: ?[]const u8 = null,
-};
-
-fn worktreesCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const config = try parseWorktreesArgs(args);
-    const cwd = if (config.cwd) |path| path else try std.fs.cwd().realpathAlloc(allocator, ".");
-    defer if (config.cwd == null) allocator.free(cwd);
-
-    const output = try worktreesOutputAlloc(allocator, cwd);
-    defer allocator.free(output);
-    try std.fs.File.stdout().writeAll(output);
-}
-
-fn parseWorktreesArgs(args: []const []const u8) !WorktreesConfig {
-    var config = WorktreesConfig{};
-    var i: usize = 0;
-    while (i < args.len) : (i += 1) {
-        if (std.mem.eql(u8, args[i], "--cwd")) {
-            config.cwd = try nextValue(args, &i);
-        } else {
-            return error.UnknownWorktreesArgument;
-        }
-    }
-    return config;
-}
-
-fn worktreesOutputAlloc(allocator: std.mem.Allocator, cwd_path: []const u8) ![]u8 {
-    const active_root_output = gitOutputAlloc(allocator, cwd_path, &.{ "git", "rev-parse", "--show-toplevel" }) catch |err| switch (err) {
-        error.CommandFailed, error.FileNotFound => return allocator.dupe(u8, "worktrees: none\n"),
-        else => return err,
-    };
-    defer allocator.free(active_root_output);
-    const active_root = std.mem.trim(u8, active_root_output, " \t\r\n");
-
-    const porcelain = gitOutputAlloc(allocator, cwd_path, &.{ "git", "worktree", "list", "--porcelain" }) catch |err| switch (err) {
-        error.CommandFailed, error.FileNotFound => return allocator.dupe(u8, "worktrees: none\n"),
-        else => return err,
-    };
-    defer allocator.free(porcelain);
-
-    var list = try vcs_worktree.parseListPorcelain(allocator, porcelain, active_root);
-    defer list.deinit(allocator);
-    try markDirtyWorktrees(allocator, &list);
-    return vcs_worktree.renderListAlloc(allocator, list);
-}
-
-fn worktreesRenderAlloc(allocator: std.mem.Allocator, porcelain: []const u8, active_root: []const u8) ![]u8 {
-    var list = try vcs_worktree.parseListPorcelain(allocator, porcelain, active_root);
-    defer list.deinit(allocator);
-    return vcs_worktree.renderListAlloc(allocator, list);
-}
-
-fn markDirtyWorktrees(allocator: std.mem.Allocator, list: *vcs_worktree.List) !void {
-    for (list.entries) |*entry| {
-        entry.dirty = try gitStatusDirty(allocator, entry.path);
-    }
-}
-
-fn gitStatusDirty(allocator: std.mem.Allocator, cwd_path: []const u8) !bool {
-    const output = gitOutputAlloc(allocator, cwd_path, &.{ "git", "status", "--porcelain" }) catch |err| switch (err) {
-        error.CommandFailed, error.FileNotFound => return false,
-        else => return err,
-    };
-    defer allocator.free(output);
-    return std.mem.trim(u8, output, " \t\r\n").len != 0;
-}
-
-fn gitOutputAlloc(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) ![]u8 {
-    const result = try std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = argv,
-        .cwd = cwd_path,
-        .max_output_bytes = 1024 * 1024,
-        .expand_arg0 = .expand,
-    });
-    defer allocator.free(result.stderr);
-    if (!exitedZero(result.term)) {
-        allocator.free(result.stdout);
-        return error.CommandFailed;
-    }
-    return result.stdout;
-}
-
-test "worktrees args parse cwd override" {
-    const config = try parseWorktreesArgs(&.{ "--cwd", "/tmp/repo" });
-    try std.testing.expectEqualStrings("/tmp/repo", config.cwd.?);
-    try std.testing.expectError(error.UnknownWorktreesArgument, parseWorktreesArgs(&.{"--bad"}));
-}
-
-test "worktrees output marks active path" {
-    const source =
-        \\worktree /repo
-        \\HEAD a
-        \\branch refs/heads/main
-        \\
-        \\worktree /repo-linked
-        \\HEAD b
-        \\branch refs/heads/feature
-        \\
-    ;
-    const output = try worktreesRenderAlloc(std.testing.allocator, source, "/repo-linked");
-    defer std.testing.allocator.free(output);
-    try std.testing.expectEqualStrings("  /repo main\n* /repo-linked feature\n", output);
-}
 
 const P10kSetting = struct {
     name: []u8,
@@ -2022,20 +1828,20 @@ fn renderP10kImportedConfigAlloc(allocator: std.mem.Allocator, imported: Starshi
     try appendP10kLayoutComment(allocator, &out, "left", left);
     try appendP10kLayoutComment(allocator, &out, "right", right);
     if (instant_prompt) |value| {
-        try appendFmt(allocator, &out, "# Powerlevel10k instant_prompt: {s}\n", .{value});
-        try appendFmt(allocator, &out, "# Shisa instant prompt: SHISA_INSTANT={d}\n", .{@intFromBool(p10kInstantEnabled(value))});
+        try cli_util.appendFmt(allocator, &out, "# Powerlevel10k instant_prompt: {s}\n", .{value});
+        try cli_util.appendFmt(allocator, &out, "# Shisa instant prompt: SHISA_INSTANT={d}\n", .{@intFromBool(p10kInstantEnabled(value))});
     }
     try out.appendSlice(allocator, "[prompt]\nmodules = [");
     for (imported.modules.items, 0..) |module_id, index| {
         if (index != 0) try out.appendSlice(allocator, ", ");
-        try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+        try cli_util.appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
     }
     try out.appendSlice(allocator, "]\n");
     if (imported.right_modules.items.len != 0) {
         try out.appendSlice(allocator, "right_modules = [");
         for (imported.right_modules.items, 0..) |module_id, index| {
             if (index != 0) try out.appendSlice(allocator, ", ");
-            try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+            try cli_util.appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
         }
         try out.appendSlice(allocator, "]\n");
     }
@@ -2067,7 +1873,7 @@ fn renderP10kImportedConfigAlloc(allocator: std.mem.Allocator, imported: Starshi
 }
 
 fn appendP10kLayoutComment(allocator: std.mem.Allocator, out: *std.ArrayList(u8), side: []const u8, elements: []const []u8) !void {
-    try appendFmt(allocator, out, "# Powerlevel10k {s} elements: ", .{side});
+    try cli_util.appendFmt(allocator, out, "# Powerlevel10k {s} elements: ", .{side});
     for (elements, 0..) |element, index| {
         if (index != 0) try out.appendSlice(allocator, ", ");
         try out.appendSlice(allocator, element);
@@ -2084,7 +1890,7 @@ fn renderP10kMigrationNotesAlloc(allocator: std.mem.Allocator, imported: Starshi
     try out.appendSlice(allocator, "# Powerlevel10k Migration Notes\n\n");
     try out.appendSlice(allocator, "## Unsupported Elements\n\n");
     for (imported.unsupported.items) |name| {
-        try appendFmt(allocator, &out, "- `{s}`: {s}\n", .{ name, p10kUnsupportedReason(name) });
+        try cli_util.appendFmt(allocator, &out, "- `{s}`: {s}\n", .{ name, p10kUnsupportedReason(name) });
     }
     return try out.toOwnedSlice(allocator);
 }
@@ -2498,14 +2304,14 @@ fn renderOmpImportedConfigAlloc(allocator: std.mem.Allocator, imported: Starship
     try out.appendSlice(allocator, "[prompt]\nmodules = [");
     for (imported.modules.items, 0..) |module_id, index| {
         if (index != 0) try out.appendSlice(allocator, ", ");
-        try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+        try cli_util.appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
     }
     try out.appendSlice(allocator, "]\n");
     if (imported.right_modules.items.len != 0) {
         try out.appendSlice(allocator, "right_modules = [");
         for (imported.right_modules.items, 0..) |module_id, index| {
             if (index != 0) try out.appendSlice(allocator, ", ");
-            try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+            try cli_util.appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
         }
         try out.appendSlice(allocator, "]\n");
     }
@@ -2547,7 +2353,7 @@ fn renderOmpMigrationNotesAlloc(allocator: std.mem.Allocator, theme: OmpTheme, i
         count += imported.unsupported.items.len;
         try out.appendSlice(allocator, "## Unsupported Segments\n\n");
         for (imported.unsupported.items) |name| {
-            try appendFmt(allocator, &out, "- `{s}`: {s}\n", .{ name, ompUnsupportedReason(name) });
+            try cli_util.appendFmt(allocator, &out, "- `{s}`: {s}\n", .{ name, ompUnsupportedReason(name) });
         }
         try out.append(allocator, '\n');
     }
@@ -2564,7 +2370,7 @@ fn renderOmpMigrationNotesAlloc(allocator: std.mem.Allocator, theme: OmpTheme, i
                 if (template_count == 0) try out.appendSlice(allocator, "## Untranslated Templates\n\n");
                 template_count += 1;
                 count += 1;
-                try appendFmt(allocator, &out, "- `{s}`: template requires manual port.\n", .{kind});
+                try cli_util.appendFmt(allocator, &out, "- `{s}`: template requires manual port.\n", .{kind});
             }
         }
     }
@@ -2579,7 +2385,7 @@ fn renderOmpMigrationNotesAlloc(allocator: std.mem.Allocator, theme: OmpTheme, i
                     if (color_count == 0) try out.appendSlice(allocator, "## Unresolved Colors\n\n");
                     color_count += 1;
                     count += 1;
-                    try appendFmt(allocator, &out, "- `{s}` foreground `{s}` could not be resolved.\n", .{ kind, foreground });
+                    try cli_util.appendFmt(allocator, &out, "- `{s}` foreground `{s}` could not be resolved.\n", .{ kind, foreground });
                 }
             }
             if (segment.background) |background| {
@@ -2587,7 +2393,7 @@ fn renderOmpMigrationNotesAlloc(allocator: std.mem.Allocator, theme: OmpTheme, i
                     if (color_count == 0) try out.appendSlice(allocator, "## Unresolved Colors\n\n");
                     color_count += 1;
                     count += 1;
-                    try appendFmt(allocator, &out, "- `{s}` background `{s}` could not be resolved.\n", .{ kind, background });
+                    try cli_util.appendFmt(allocator, &out, "- `{s}` background `{s}` could not be resolved.\n", .{ kind, background });
                 }
             }
         }
@@ -2616,7 +2422,7 @@ fn appendOmpLayoutComments(allocator: std.mem.Allocator, out: *std.ArrayList(u8)
 }
 
 fn appendOmpLayoutComment(allocator: std.mem.Allocator, out: *std.ArrayList(u8), theme: OmpTheme, right: bool) !void {
-    try appendFmt(allocator, out, "# Oh My Posh {s} layout: ", .{if (right) "right" else "left"});
+    try cli_util.appendFmt(allocator, out, "# Oh My Posh {s} layout: ", .{if (right) "right" else "left"});
     var count: usize = 0;
     for (theme.blocks.items) |block| {
         if (ompBlockIsRight(block) != right) continue;
@@ -2665,7 +2471,7 @@ fn renderOmpImportedThemeAlloc(allocator: std.mem.Allocator, theme: OmpTheme) !?
             const has_layout = if (layout) |owned| owned.prefix.len != 0 or owned.suffix.len != 0 else false;
             if (!has_layout and fg_ref == null and bg_ref == null) continue;
             try appendModule(allocator, &emitted, module_id);
-            try appendFmt(allocator, &out, "\n[segments.{s}]\n", .{shisa_config.moduleIdName(module_id)});
+            try cli_util.appendFmt(allocator, &out, "\n[segments.{s}]\n", .{shisa_config.moduleIdName(module_id)});
             if (fg_ref) |value| {
                 try out.appendSlice(allocator, "fg = ");
                 try appendTomlString(allocator, &out, value);
@@ -2780,7 +2586,7 @@ fn mapOmpPalette(theme: OmpTheme) MappedOmpPalette {
 fn appendMappedOmpPalette(allocator: std.mem.Allocator, out: *std.ArrayList(u8), mapped: MappedOmpPalette) !void {
     try out.appendSlice(allocator, "\n[palette]\n");
     for (shisa_palette_slots, 0..) |slot, index| {
-        try appendFmt(allocator, out, "{s} = ", .{slot.name});
+        try cli_util.appendFmt(allocator, out, "{s} = ", .{slot.name});
         try appendRgbHexString(allocator, out, mapped.colors[index]);
         try out.append(allocator, '\n');
     }
@@ -3271,14 +3077,14 @@ fn renderTideImportedConfigAlloc(allocator: std.mem.Allocator, imported: Starshi
     try out.appendSlice(allocator, "[prompt]\nmodules = [");
     for (imported.modules.items, 0..) |module_id, index| {
         if (index != 0) try out.appendSlice(allocator, ", ");
-        try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+        try cli_util.appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
     }
     try out.appendSlice(allocator, "]\n");
     if (imported.right_modules.items.len != 0) {
         try out.appendSlice(allocator, "right_modules = [");
         for (imported.right_modules.items, 0..) |module_id, index| {
             if (index != 0) try out.appendSlice(allocator, ", ");
-            try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+            try cli_util.appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
         }
         try out.appendSlice(allocator, "]\n");
     }
@@ -3310,7 +3116,7 @@ fn renderTideImportedConfigAlloc(allocator: std.mem.Allocator, imported: Starshi
 }
 
 fn appendTideItemsComment(allocator: std.mem.Allocator, out: *std.ArrayList(u8), tide: TideConfig, label: []const u8, key: []const u8) !void {
-    try appendFmt(allocator, out, "# Tide {s} items: ", .{label});
+    try cli_util.appendFmt(allocator, out, "# Tide {s} items: ", .{label});
     if (tide.find(key)) |setting| {
         for (setting.values.items, 0..) |item, index| {
             if (index != 0) try out.appendSlice(allocator, ", ");
@@ -3331,7 +3137,7 @@ fn renderTideMigrationNotesAlloc(allocator: std.mem.Allocator, imported: Starshi
         count += imported.unsupported.items.len;
         try out.appendSlice(allocator, "## Unsupported Items\n\n");
         for (imported.unsupported.items) |name| {
-            try appendFmt(allocator, &out, "- `{s}`: {s}\n", .{ name, tideUnsupportedReason(name) });
+            try cli_util.appendFmt(allocator, &out, "- `{s}`: {s}\n", .{ name, tideUnsupportedReason(name) });
         }
         try out.append(allocator, '\n');
     }
@@ -3682,7 +3488,7 @@ fn renderImportedConfigAlloc(allocator: std.mem.Allocator, imported: StarshipImp
     try out.appendSlice(allocator, "[prompt]\nmodules = [");
     for (imported.modules.items, 0..) |module_id, index| {
         if (index != 0) try out.appendSlice(allocator, ", ");
-        try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+        try cli_util.appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
     }
     try out.appendSlice(allocator, "]\n");
 
@@ -3733,7 +3539,7 @@ fn containsAnyModule(imported: StarshipImport, module_id: shisa_config.ModuleId)
 fn appendLanguage(allocator: std.mem.Allocator, out: *std.ArrayList(u8), count: *usize, name: []const u8) !void {
     if (count.* != 0) try out.appendSlice(allocator, ", ");
     count.* += 1;
-    try appendFmt(allocator, out, "\"{s}\"", .{name});
+    try cli_util.appendFmt(allocator, out, "\"{s}\"", .{name});
 }
 
 test "imports starship format into shisa modules" {
@@ -4278,7 +4084,7 @@ fn parseBench(args: []const []const u8) !BenchConfig {
     while (i < args.len) : (i += 1) {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "--export-json")) {
-            config.export_json = try nextValue(args, &i);
+            config.export_json = try cli_util.nextValue(args, &i);
         } else {
             return error.UnknownBenchArgument;
         }
@@ -4301,7 +4107,7 @@ fn ensureHyperfine(allocator: std.mem.Allocator) !void {
     };
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
-    if (!exitedZero(result.term)) return error.HyperfineUnavailable;
+    if (!cli_util.exitedZero(result.term)) return error.HyperfineUnavailable;
 }
 
 fn runHyperfine(allocator: std.mem.Allocator, workload: []const u8, bench_config: BenchConfig) !void {
@@ -4324,7 +4130,7 @@ fn runHyperfine(allocator: std.mem.Allocator, workload: []const u8, bench_config
 
     try std.fs.File.stdout().writeAll(result.stdout);
     try std.fs.File.stderr().writeAll(result.stderr);
-    if (!exitedZero(result.term)) return error.BenchmarkFailed;
+    if (!cli_util.exitedZero(result.term)) return error.BenchmarkFailed;
 }
 
 fn benchWorkloadAlloc(allocator: std.mem.Allocator, self_path: []const u8, socket_path: []const u8, cwd: []const u8) ![]u8 {
@@ -4373,13 +4179,6 @@ fn waitForPath(path: []const u8, timeout_ms: i64) !void {
         return;
     }
     return error.Timeout;
-}
-
-fn exitedZero(term: std.process.Child.Term) bool {
-    return switch (term) {
-        .Exited => |code| code == 0,
-        else => false,
-    };
 }
 
 test "shell quoting handles spaces and quotes" {
@@ -4431,7 +4230,7 @@ fn parseCacheClearModule(args: []const []const u8) !?[]const u8 {
     while (i < args.len) : (i += 1) {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "--module")) {
-            module = try nextValue(args, &i);
+            module = try cli_util.nextValue(args, &i);
         } else if (std.mem.startsWith(u8, arg, "--module=")) {
             module = arg["--module=".len..];
         } else {
@@ -4731,7 +4530,7 @@ fn parsePluginTrustArgs(args: []const []const u8) !PluginTrustConfig {
     while (i < args.len) : (i += 1) {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "--net")) {
-            config.net = try nextValue(args, &i);
+            config.net = try cli_util.nextValue(args, &i);
         } else if (std.mem.startsWith(u8, arg, "--net=")) {
             config.net = arg["--net=".len..];
             if (config.net.?.len == 0) return error.MissingValue;
@@ -4879,7 +4678,7 @@ fn pluginLintAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
 
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
-    try appendFmt(allocator, &out, "ok {s} {s}\n", .{ loaded.manifest.name, loaded.manifest.version });
+    try cli_util.appendFmt(allocator, &out, "ok {s} {s}\n", .{ loaded.manifest.name, loaded.manifest.version });
     try appendPluginLintWarnings(allocator, &out, plugin_dir, loaded.manifest);
     return out.toOwnedSlice(allocator);
 }
@@ -4994,9 +4793,9 @@ fn lessThanPluginBundleFile(_: void, lhs: PluginBundleFile, rhs: PluginBundleFil
 fn canonicalPluginBundleManifestAlloc(allocator: std.mem.Allocator, manifest: plugin_manifest.Manifest, files: []const PluginBundleFile) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
-    try appendFmt(allocator, &out, "format:shisa-plugin-bundle-v1\nname:{s}\nversion:{s}\n", .{ manifest.name, manifest.version });
+    try cli_util.appendFmt(allocator, &out, "format:shisa-plugin-bundle-v1\nname:{s}\nversion:{s}\n", .{ manifest.name, manifest.version });
     for (files) |file| {
-        try appendFmt(allocator, &out, "file:{d}:{s}:{d}:{s}\n", .{ file.path.len, file.path, file.size, file.sha256_hex[0..] });
+        try cli_util.appendFmt(allocator, &out, "file:{d}:{s}:{d}:{s}\n", .{ file.path.len, file.path, file.size, file.sha256_hex[0..] });
     }
     return out.toOwnedSlice(allocator);
 }
@@ -5014,16 +4813,16 @@ fn signedPluginBundleMetadataAlloc(allocator: std.mem.Allocator, manifest: plugi
     defer allocator.free(escaped_name);
     const escaped_version = try jsonEscapeAlloc(allocator, manifest.version);
     defer allocator.free(escaped_version);
-    try appendFmt(allocator, &out,
+    try cli_util.appendFmt(allocator, &out,
         \\{{"format":"shisa-plugin-bundle-v1","name":"{s}","version":"{s}","files":[
     , .{ escaped_name, escaped_version });
     for (files, 0..) |file, index| {
         if (index != 0) try out.append(allocator, ',');
         const escaped_path = try jsonEscapeAlloc(allocator, file.path);
         defer allocator.free(escaped_path);
-        try appendFmt(allocator, &out, "{{\"path\":\"{s}\",\"size\":{d},\"sha256\":\"{s}\"}}", .{ escaped_path, file.size, file.sha256_hex[0..] });
+        try cli_util.appendFmt(allocator, &out, "{{\"path\":\"{s}\",\"size\":{d},\"sha256\":\"{s}\"}}", .{ escaped_path, file.size, file.sha256_hex[0..] });
     }
-    try appendFmt(allocator, &out,
+    try cli_util.appendFmt(allocator, &out,
         \\],"signature":{{"algorithm":"Ed25519","public_key":"{s}","signature":"{s}"}}}}
         \\
     , .{ public_key_hex[0..], signature_hex[0..] });
@@ -5208,7 +5007,7 @@ fn runGitClone(allocator: std.mem.Allocator, url: []const u8, target_path: []con
     });
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
-    if (!exitedZero(result.term)) return error.PluginCloneFailed;
+    if (!cli_util.exitedZero(result.term)) return error.PluginCloneFailed;
 }
 
 fn confirmPluginInstall(allocator: std.mem.Allocator, manifest: plugin_manifest.Manifest) !bool {
@@ -5292,13 +5091,13 @@ fn pluginListAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, disabl
         const verified = try pluginVerified(allocator, verified_path, name);
         const badge = if (verified) "verified " else "";
         if (disabled and slow_strikes > 0) {
-            try appendFmt(allocator, &out, "{s} {s}disabled slow-strikes={d}/{d}\n", .{ name, badge, slow_strikes, plugin_slow_strike_limit });
+            try cli_util.appendFmt(allocator, &out, "{s} {s}disabled slow-strikes={d}/{d}\n", .{ name, badge, slow_strikes, plugin_slow_strike_limit });
         } else if (disabled) {
-            try appendFmt(allocator, &out, "{s} {s}disabled\n", .{ name, badge });
+            try cli_util.appendFmt(allocator, &out, "{s} {s}disabled\n", .{ name, badge });
         } else if (slow_strikes > 0) {
-            try appendFmt(allocator, &out, "{s} {s}slow-strikes={d}/{d}\n", .{ name, badge, slow_strikes, plugin_slow_strike_limit });
+            try cli_util.appendFmt(allocator, &out, "{s} {s}slow-strikes={d}/{d}\n", .{ name, badge, slow_strikes, plugin_slow_strike_limit });
         } else {
-            try appendFmt(allocator, &out, "{s} {s}enabled\n", .{ name, badge });
+            try cli_util.appendFmt(allocator, &out, "{s} {s}enabled\n", .{ name, badge });
         }
     }
     return out.toOwnedSlice(allocator);
@@ -5341,9 +5140,9 @@ fn pluginSearchAlloc(allocator: std.mem.Allocator, index_path: []const u8, query
         const verified_badge = if (entry.verified) " verified" else "";
         const signed_badge = if (pluginMarketplaceEntrySigned(entry)) " signed" else "";
         if (entry.description.len != 0) {
-            try appendFmt(allocator, &out, "{s}{s}{s} {s} - {s}\n", .{ entry.name, verified_badge, signed_badge, entry.url, entry.description });
+            try cli_util.appendFmt(allocator, &out, "{s}{s}{s} {s} - {s}\n", .{ entry.name, verified_badge, signed_badge, entry.url, entry.description });
         } else {
-            try appendFmt(allocator, &out, "{s}{s}{s} {s}\n", .{ entry.name, verified_badge, signed_badge, entry.url });
+            try cli_util.appendFmt(allocator, &out, "{s}{s}{s} {s}\n", .{ entry.name, verified_badge, signed_badge, entry.url });
         }
     }
     return out.toOwnedSlice(allocator);
@@ -5668,22 +5467,22 @@ fn manifestCapabilityFingerprintAlloc(allocator: std.mem.Allocator, manifest: pl
 }
 
 fn appendCapabilityStringList(allocator: std.mem.Allocator, out: *std.ArrayList(u8), label: []const u8, items: []const []const u8) !void {
-    try appendFmt(allocator, out, "{s}:list\n", .{label});
+    try cli_util.appendFmt(allocator, out, "{s}:list\n", .{label});
     const sorted = try allocator.dupe([]const u8, items);
     defer allocator.free(sorted);
     std.mem.sort([]const u8, sorted, {}, lessThanString);
-    for (sorted) |item| try appendFmt(allocator, out, "{s}\n", .{item});
+    for (sorted) |item| try cli_util.appendFmt(allocator, out, "{s}\n", .{item});
 }
 
 fn appendListCapability(allocator: std.mem.Allocator, out: *std.ArrayList(u8), label: []const u8, capability: plugin_manifest.ListCapability) !void {
     switch (capability) {
-        .deny => try appendFmt(allocator, out, "{s}:deny\n", .{label}),
+        .deny => try cli_util.appendFmt(allocator, out, "{s}:deny\n", .{label}),
         .allow => |items| try appendCapabilityStringList(allocator, out, label, items),
     }
 }
 
 fn appendCapabilityBool(allocator: std.mem.Allocator, out: *std.ArrayList(u8), label: []const u8, value: bool) !void {
-    try appendFmt(allocator, out, "{s}:bool:{s}\n", .{ label, if (value) "true" else "false" });
+    try cli_util.appendFmt(allocator, out, "{s}:bool:{s}\n", .{ label, if (value) "true" else "false" });
 }
 
 fn trustedCapabilityFingerprintMatches(allocator: std.mem.Allocator, path: []const u8, name: []const u8, fingerprint: []const u8) !bool {
@@ -5718,15 +5517,15 @@ fn setTrustedCapabilityFingerprint(allocator: std.mem.Allocator, path: []const u
             const record = parseTrustedCapabilityLine(line) orelse continue;
             if (std.mem.eql(u8, record.name, name)) {
                 if (replaced) continue;
-                try appendFmt(allocator, &out, "{s} {s}\n", .{ name, fingerprint });
+                try cli_util.appendFmt(allocator, &out, "{s} {s}\n", .{ name, fingerprint });
                 replaced = true;
             } else {
-                try appendFmt(allocator, &out, "{s} {s}\n", .{ record.name, record.fingerprint });
+                try cli_util.appendFmt(allocator, &out, "{s} {s}\n", .{ record.name, record.fingerprint });
             }
         }
     }
 
-    if (!replaced) try appendFmt(allocator, &out, "{s} {s}\n", .{ name, fingerprint });
+    if (!replaced) try cli_util.appendFmt(allocator, &out, "{s} {s}\n", .{ name, fingerprint });
     if (std.fs.path.dirname(path)) |parent| {
         try std.fs.cwd().makePath(parent);
     }
@@ -6329,15 +6128,15 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
     while (i < args.len) : (i += 1) {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "--socket")) {
-            config.socket_path = try nextValue(args, &i);
+            config.socket_path = try cli_util.nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--cwd")) {
-            config.cwd = try nextValue(args, &i);
+            config.cwd = try cli_util.nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--exit")) {
-            config.exit = try std.fmt.parseInt(i32, try nextValue(args, &i), 10);
+            config.exit = try std.fmt.parseInt(i32, try cli_util.nextValue(args, &i), 10);
         } else if (std.mem.eql(u8, arg, "--jobs")) {
-            config.jobs = try std.fmt.parseInt(u32, try nextValue(args, &i), 10);
+            config.jobs = try std.fmt.parseInt(u32, try cli_util.nextValue(args, &i), 10);
         } else if (std.mem.eql(u8, arg, "--duration-ms")) {
-            config.duration_ms = try std.fmt.parseInt(u64, try nextValue(args, &i), 10);
+            config.duration_ms = try std.fmt.parseInt(u64, try cli_util.nextValue(args, &i), 10);
         } else if (std.mem.eql(u8, arg, "--time")) {
             config.time = true;
         } else if (std.mem.eql(u8, arg, "--no-async")) {
@@ -6357,11 +6156,11 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
         } else if (std.mem.eql(u8, arg, "--right")) {
             config.right = true;
         } else if (std.mem.eql(u8, arg, "--shell")) {
-            config.shell = try nextValue(args, &i);
+            config.shell = try cli_util.nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--cols")) {
-            config.cols = try std.fmt.parseInt(u16, try nextValue(args, &i), 10);
+            config.cols = try std.fmt.parseInt(u16, try cli_util.nextValue(args, &i), 10);
         } else if (std.mem.eql(u8, arg, "--rows")) {
-            config.rows = try std.fmt.parseInt(u16, try nextValue(args, &i), 10);
+            config.rows = try std.fmt.parseInt(u16, try cli_util.nextValue(args, &i), 10);
         } else {
             return error.UnknownPromptArgument;
         }
@@ -6416,7 +6215,7 @@ fn a11yExplanationAlloc(allocator: std.mem.Allocator, parsed: shisa_config.Confi
             if (segment.a11y.len > 0) segment.a11y else coreA11yLabel(module_id)
         else
             coreA11yLabel(module_id);
-        try appendFmt(allocator, &out, "  {s}: {s}\n", .{ id, label });
+        try cli_util.appendFmt(allocator, &out, "  {s}: {s}\n", .{ id, label });
     }
     return out.toOwnedSlice(allocator);
 }
@@ -6685,12 +6484,6 @@ test "osc7 sequence percent-encodes cwd" {
     try std.testing.expectEqualStrings("\x1b]7;file://local%20host/tmp/a%20b/%25\x07", sequence);
 }
 
-fn nextValue(args: []const []const u8, index: *usize) ![]const u8 {
-    if (index.* + 1 >= args.len) return error.MissingValue;
-    index.* += 1;
-    return args[index.*];
-}
-
 const PromptModuleOptions = struct {
     locale: []const u8 = "auto",
     rtl_reverse: bool = false,
@@ -6778,7 +6571,7 @@ fn promptModulesJsonAlloc(allocator: std.mem.Allocator, modules: []const shisa_c
     defer out.deinit(allocator);
     for (modules, 0..) |module_id, index| {
         if (index != 0) try out.appendSlice(allocator, ",");
-        try appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
+        try cli_util.appendFmt(allocator, &out, "\"{s}\"", .{shisa_config.moduleIdName(module_id)});
     }
     return out.toOwnedSlice(allocator);
 }

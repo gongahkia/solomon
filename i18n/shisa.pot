@@ -15,27 +15,27 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/main.zig:158
+#: src/main.zig:159
 msgid ""
 "shisa: unknown command; run `shisa --help`\n"
 msgstr ""
 
-#: src/main.zig:890
+#: src/main.zig:885
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""
 
-#: src/main.zig:1041
+#: src/main.zig:1036
 msgid ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 msgstr ""
 
-#: src/main.zig:4297
+#: src/main.zig:4103
 msgid ""
 "shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 
-#: src/main.zig:7029
+#: src/main.zig:6822
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
@@ -73,7 +73,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:7066
+#: src/main.zig:6859
 msgid ""
 "usage: shisa config set locale=<locale|auto>\n"
 "\n"
@@ -82,7 +82,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:7074
+#: src/main.zig:6867
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -91,7 +91,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:7082
+#: src/main.zig:6875
 msgid ""
 "usage: shisa vouch verify [path]\n"
 "\n"
@@ -100,7 +100,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:7090
+#: src/main.zig:6883
 msgid ""
 "usage: shisa font check\n"
 "\n"

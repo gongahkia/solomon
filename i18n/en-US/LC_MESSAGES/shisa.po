@@ -16,31 +16,31 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/main.zig:158
+#: src/main.zig:159
 msgid ""
 "shisa: unknown command; run `shisa --help`\n"
 msgstr ""
 "shisa: unknown command; run `shisa --help`\n"
 
-#: src/main.zig:890
+#: src/main.zig:885
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""
 "shisa report: tar not found in PATH\n"
 
-#: src/main.zig:1041
+#: src/main.zig:1036
 msgid ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 msgstr ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 
-#: src/main.zig:4297
+#: src/main.zig:4103
 msgid ""
 "shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 "shisa bench: hyperfine not found in PATH\n"
 
-#: src/main.zig:7029
+#: src/main.zig:6822
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
@@ -112,7 +112,7 @@ msgstr ""
 "      --version print version\n"
 "\n"
 
-#: src/main.zig:7066
+#: src/main.zig:6859
 msgid ""
 "usage: shisa config set locale=<locale|auto>\n"
 "\n"
@@ -126,7 +126,7 @@ msgstr ""
 "  set locale=<locale|auto> set locale override; auto uses LC_ALL, LC_CTYPE, then LANG\n"
 "\n"
 
-#: src/main.zig:7074
+#: src/main.zig:6867
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -140,7 +140,7 @@ msgstr ""
 "  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
 "\n"
 
-#: src/main.zig:7082
+#: src/main.zig:6875
 msgid ""
 "usage: shisa vouch verify [path]\n"
 "\n"
@@ -154,7 +154,7 @@ msgstr ""
 "  verify [path] validate VOUCHES format; defaults to ./VOUCHES\n"
 "\n"
 
-#: src/main.zig:7090
+#: src/main.zig:6883
 msgid ""
 "usage: shisa font check\n"
 "\n"

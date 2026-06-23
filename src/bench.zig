@@ -1,5 +1,5 @@
 const std = @import("std");
-const ai_redact = @import("ai/redact.zig");
+const redact = @import("redact.zig");
 const cloud_ctx = @import("daemon/modules/cloud_ctx.zig");
 const frame = @import("proto/frame.zig");
 const git_state = @import("vcs/git_state.zig");
@@ -14,8 +14,8 @@ const deframe_corpus_frames = 256;
 const deframe_payload_max = 512;
 const vcs_pack_iterations = 1000;
 const vcs_pack_budget_ns = 500 * std.time.ns_per_ms;
-const ai_pack_iterations = 1000;
-const ai_pack_budget_ns = 80 * std.time.ns_per_ms;
+const redact_pack_iterations = 1000;
+const redact_pack_budget_ns = 80 * std.time.ns_per_ms;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -27,8 +27,8 @@ pub fn main() !void {
     if (frame_result.deframe_100k_ns >= deframe_budget_ns) return error.ProtoFrameBenchmarkRegression;
     const vcs_result = try benchVcsPack(allocator);
     if (vcs_result.elapsed_ns >= vcs_pack_budget_ns) return error.VcsPackBenchmarkRegression;
-    const ai_result = try benchAiPack(allocator);
-    if (ai_result.elapsed_ns >= ai_pack_budget_ns) return error.AiPackBenchmarkRegression;
+    const redact_result = try benchRedactPack(allocator);
+    if (redact_result.elapsed_ns >= redact_pack_budget_ns) return error.RedactPackBenchmarkRegression;
     const output = try std.fmt.allocPrint(
         allocator,
         "{{\"cloud_ctx\":{{\"cold_ns\":{d},\"warm_avg_ns\":{d},\"cold_budget_ns\":{d},\"warm_budget_ns\":{d}}},\"proto_frame\":{{\"deframe_100k_ns\":{d},\"iterations\":{d},\"budget_ns\":{d}}},\"packs\":{{\"shisa.cloud\":{{\"cloud_ctx_cold_ns\":{d},\"cloud_ctx_warm_avg_ns\":{d},\"cold_budget_ns\":{d},\"warm_budget_ns\":{d}}},\"shisa.vcs\":{{\"fixture_batch_ns\":{d},\"iterations\":{d},\"budget_ns\":{d}}},\"shisa.ai\":{{\"redact_batch_ns\":{d},\"iterations\":{d},\"budget_ns\":{d}}}}}}}\n",
@@ -229,7 +229,7 @@ fn benchVcsPack(allocator: std.mem.Allocator) !PackBench {
     return .{ .elapsed_ns = elapsed, .iterations = vcs_pack_iterations, .budget_ns = vcs_pack_budget_ns };
 }
 
-fn benchAiPack(allocator: std.mem.Allocator) !PackBench {
+fn benchRedactPack(allocator: std.mem.Allocator) !PackBench {
     const sample =
         \\aws_access_key_id = AKIA1234567890ABCDEF
         \\aws_secret_access_key = demo-secret
@@ -242,15 +242,15 @@ fn benchAiPack(allocator: std.mem.Allocator) !PackBench {
     ;
     var checksum: usize = 0;
     const start = std.time.nanoTimestamp();
-    for (0..ai_pack_iterations) |_| {
-        const redacted = try ai_redact.redactAlloc(allocator, sample);
+    for (0..redact_pack_iterations) |_| {
+        const redacted = try redact.redactAlloc(allocator, sample);
         defer allocator.free(redacted);
-        if (std.mem.indexOf(u8, redacted, "demo-secret") != null) return error.AiRedactionLeak;
+        if (std.mem.indexOf(u8, redacted, "demo-secret") != null) return error.RedactionLeak;
         checksum +%= redacted.len;
     }
     const elapsed: u64 = @intCast(std.time.nanoTimestamp() - start);
     std.mem.doNotOptimizeAway(checksum);
-    return .{ .elapsed_ns = elapsed, .iterations = ai_pack_iterations, .budget_ns = ai_pack_budget_ns };
+    return .{ .elapsed_ns = elapsed, .iterations = redact_pack_iterations, .budget_ns = redact_pack_budget_ns };
 }
 
 fn setupCloudHome(allocator: std.mem.Allocator, home_path: []const u8) !void {

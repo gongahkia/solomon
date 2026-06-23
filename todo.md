@@ -56,9 +56,9 @@ Do these before any phase 2+ work. The MVP gate is: a working zsh-on-macOS promp
 - [ ] Verify Linux Wayland-only behavior
 - [ ] Test under systemd-nspawn, podman, and distrobox
 - [ ] Test under nix-shell, devenv, and flox PATH/language-version environments
-- [ ] Build full-OS Docker E2E images for supported distros
-- [ ] Run shells inside E2E containers and assert prompt output
-- [ ] Maintain `shell x distro x version` E2E matrix
+- [x] Build full-OS Docker E2E images for supported distros — 2026-06-23: `test/e2e/docker-shells.sh` builds Ubuntu 24.04, Fedora 40, and Arch rolling images with Zig 0.15.2.
+- [x] Run shells inside E2E containers and assert prompt output — 2026-06-23: full matrix passed for bash/zsh/fish in Ubuntu 24.04, Fedora 40, and Arch rolling; each starts `shisad` and asserts dirty `git:main*` prompt output.
+- [x] Maintain `shell x distro x version` E2E matrix — 2026-06-23: matrix lives in `test/e2e/docker-matrix.tsv`, with usage notes in `test/e2e/README.md`.
 - [ ] Run one documented hardware performance baseline before packaging
 - [ ] Hook `errfix` into last command stderr capture — **deferred to `shisa.ai` pack (phase 12); not core**
 - [ ] On non-zero exit, surface a one-line `shisa: try <x>?` hint — same: deferred to phase 12

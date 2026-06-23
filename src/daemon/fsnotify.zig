@@ -165,7 +165,7 @@ pub fn readLinuxMaxUserWatches(allocator: std.mem.Allocator) !?u64 {
         else => return err,
     };
     defer allocator.free(contents);
-    return parseUnsigned(contents);
+    return try parseUnsigned(contents);
 }
 
 pub fn inotifyLimitStatusForCount(watched_paths: usize, max_user_watches: ?u64) InotifyLimitStatus {

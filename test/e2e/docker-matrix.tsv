@@ -1,0 +1,4 @@
+# distro	image	dockerfile	shells	platform
+ubuntu-24.04	shisa-e2e:ubuntu-24.04	test/e2e/docker/ubuntu-24.04.Dockerfile	bash,zsh,fish	
+fedora-40	shisa-e2e:fedora-40	test/e2e/docker/fedora-40.Dockerfile	bash,zsh,fish	
+arch-rolling	shisa-e2e:arch-rolling	test/e2e/docker/arch-rolling.Dockerfile	bash,zsh,fish	linux/amd64

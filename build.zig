@@ -59,16 +59,19 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    plugin_lua_module.link_libc = true;
     const plugin_lua_debug_module = b.createModule(.{
         .root_source_file = b.path("src/plugin/lua.zig"),
         .target = target,
         .optimize = .Debug,
     });
+    plugin_lua_debug_module.link_libc = true;
     const plugin_lua_release_module = b.createModule(.{
         .root_source_file = b.path("src/plugin/lua.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
+    plugin_lua_release_module.link_libc = true;
     const proto_types_module = b.createModule(.{
         .root_source_file = b.path("src/proto/types.zig"),
         .target = target,
@@ -91,6 +94,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("vcs_worktree", vcs_worktree_module);
     exe.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_stub_module);
     exe.root_module.addImport("build_options", build_options_module);
+    exe.root_module.link_libc = true;
     b.installArtifact(exe);
 
     const daemon = b.addExecutable(.{
@@ -104,6 +108,7 @@ pub fn build(b: *std.Build) void {
     daemon.root_module.addImport("vcs_worktree", vcs_worktree_module);
     daemon.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_module);
     daemon.root_module.addImport("plugin_lua", plugin_lua_module);
+    daemon.root_module.link_libc = true;
     b.installArtifact(daemon);
 
     const supervisor_exe = b.addExecutable(.{
@@ -127,6 +132,7 @@ pub fn build(b: *std.Build) void {
     debug_exe.root_module.addImport("vcs_worktree", vcs_worktree_debug_module);
     debug_exe.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_stub_debug_module);
     debug_exe.root_module.addImport("build_options", build_options_module);
+    debug_exe.root_module.link_libc = true;
     const debug_install = b.addInstallArtifact(debug_exe, .{});
     const debug_daemon = b.addExecutable(.{
         .name = "shisad",
@@ -139,6 +145,7 @@ pub fn build(b: *std.Build) void {
     debug_daemon.root_module.addImport("vcs_worktree", vcs_worktree_debug_module);
     debug_daemon.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_debug_module);
     debug_daemon.root_module.addImport("plugin_lua", plugin_lua_debug_module);
+    debug_daemon.root_module.link_libc = true;
     const debug_daemon_install = b.addInstallArtifact(debug_daemon, .{});
     const debug_supervisor = b.addExecutable(.{
         .name = "shisa-supervisor",
@@ -165,6 +172,7 @@ pub fn build(b: *std.Build) void {
     release_exe.root_module.addImport("vcs_worktree", vcs_worktree_release_module);
     release_exe.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_stub_release_module);
     release_exe.root_module.addImport("build_options", build_options_module);
+    release_exe.root_module.link_libc = true;
     const release_install = b.addInstallArtifact(release_exe, .{});
     const release_daemon = b.addExecutable(.{
         .name = "shisad",
@@ -177,6 +185,7 @@ pub fn build(b: *std.Build) void {
     release_daemon.root_module.addImport("vcs_worktree", vcs_worktree_release_module);
     release_daemon.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_release_module);
     release_daemon.root_module.addImport("plugin_lua", plugin_lua_release_module);
+    release_daemon.root_module.link_libc = true;
     const release_daemon_install = b.addInstallArtifact(release_daemon, .{});
     const release_supervisor = b.addExecutable(.{
         .name = "shisa-supervisor",
@@ -296,6 +305,7 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addImport("vcs_worktree", vcs_worktree_module);
     tests.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_stub_module);
     tests.root_module.addImport("build_options", build_options_module);
+    tests.root_module.link_libc = true;
     const test_run = b.addRunArtifact(tests);
     const cli_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -344,6 +354,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    plugin_lua_tests.root_module.link_libc = true;
     const plugin_lua_test_run = b.addRunArtifact(plugin_lua_tests);
     const plugin_reference_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -703,6 +714,7 @@ pub fn build(b: *std.Build) void {
     shisad_tests.root_module.addImport("vcs_worktree", vcs_worktree_module);
     shisad_tests.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_module);
     shisad_tests.root_module.addImport("plugin_lua", plugin_lua_module);
+    shisad_tests.root_module.link_libc = true;
     const shisad_test_run = b.addRunArtifact(shisad_tests);
     const proto_types_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -811,6 +823,7 @@ pub fn build(b: *std.Build) void {
     server_tests.root_module.addImport("vcs_worktree", vcs_worktree_module);
     server_tests.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_module);
     server_tests.root_module.addImport("plugin_lua", plugin_lua_module);
+    server_tests.root_module.link_libc = true;
     const server_test_run = b.addRunArtifact(server_tests);
     const zsh_integration = b.addSystemCommand(&.{ "bash", "test/integration/zsh_fake_socket.sh" });
     zsh_integration.step.dependOn(&debug_install.step);

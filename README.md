@@ -12,12 +12,18 @@ Shisa is pre-MVP. The repo currently contains the product spec, RFCs, build skel
 
 ## Goals
 
-- Warm prompt render p99 under 2 ms.
+- **Cold render in a real big repo without a timeout** — the falsifiable headline.
 - Shell startup overhead under 5 ms.
+- Warm prompt render p99 under 2 ms (upper bound; not the marketing claim).
 - Cross-shell support for zsh, bash, fish, nushell, and PowerShell.
 - Async, cached git and language probes.
 - Capability-gated Lua plugins.
 - Zero telemetry.
+
+## Build flags
+
+- `-Dvcs_extra=true` enables the `shisa stack` and `shisa worktrees` CLI verbs (hg / jj / sapling support). Default off. git is always on.
+- AI helpers were removed from the core in phase 0; see [north-star §18](north-star.md) for the future opt-in pack spec.
 
 ## Quickstart
 

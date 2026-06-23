@@ -20,7 +20,7 @@ Tracks the audit-driven refocus. One commit per task, easy `git revert` per row.
 - [ ] T7d — Extract `src/cli/plugin.zig` from `main.zig` (largest win, ~2.5K lines)
 - [ ] T7e — Extract `src/cli/stack.zig` + `src/cli/worktree.zig` (gated by `-Dvcs_extra`)
 - [x] T8 — Drop §15 5K-stars success criterion, replace with reproducible-benchmark outcome
-- [ ] T9 — Align README / architecture / quickstart / CHANGELOG with the gates and deletions
+- [x] T9 — Align README / architecture / quickstart / CHANGELOG with the gates and deletions
 
 ## MVP-blocking (phase 1: zsh + macOS + basic git)
 

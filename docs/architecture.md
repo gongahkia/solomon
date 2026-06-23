@@ -78,4 +78,10 @@ Core modules are Zig. Third-party plugins are Lua and must declare capabilities 
 
 ## Performance Contract
 
-Warm render p99 target is under 2 ms. The prompt hot path must not spawn subprocesses, walk large directories, call network APIs, or wait on async workers.
+The falsifiable headline is **cold render in a real big repo without a timeout** (north-star §10). Warm render p99 under 2 ms is an upper bound on the hot path, not the marketing line — below ~10 ms is sub-perceptual to humans, and the cold-big-repo target is what users actually feel.
+
+The prompt hot path must not spawn subprocesses, walk large directories, call network APIs, or wait on async workers. The daemon hot path imports no AI code (north-star §3 contract); `shisa ai` is not a CLI verb in the default build.
+
+## Build flags
+
+- `-Dvcs_extra=true` re-enables `shisa stack` and `shisa worktrees` plus the hg/jj/sl/stack/worktree test stanzas. Default off. git remains always-on.

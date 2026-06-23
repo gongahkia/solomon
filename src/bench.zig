@@ -31,7 +31,7 @@ pub fn main() !void {
     if (redact_result.elapsed_ns >= redact_pack_budget_ns) return error.RedactPackBenchmarkRegression;
     const output = try std.fmt.allocPrint(
         allocator,
-        "{{\"cloud_ctx\":{{\"cold_ns\":{d},\"warm_avg_ns\":{d},\"cold_budget_ns\":{d},\"warm_budget_ns\":{d}}},\"proto_frame\":{{\"deframe_100k_ns\":{d},\"iterations\":{d},\"budget_ns\":{d}}},\"packs\":{{\"shisa.cloud\":{{\"cloud_ctx_cold_ns\":{d},\"cloud_ctx_warm_avg_ns\":{d},\"cold_budget_ns\":{d},\"warm_budget_ns\":{d}}},\"shisa.vcs\":{{\"fixture_batch_ns\":{d},\"iterations\":{d},\"budget_ns\":{d}}},\"shisa.ai\":{{\"redact_batch_ns\":{d},\"iterations\":{d},\"budget_ns\":{d}}}}}}}\n",
+        "{{\"headline\":\"cold-render-in-big-repo target lives in bench/compare-prompts.sh; this output covers microbench budgets only\",\"cloud_ctx\":{{\"cold_ns\":{d},\"warm_avg_ns\":{d},\"cold_budget_ns\":{d},\"warm_budget_ns\":{d}}},\"proto_frame\":{{\"deframe_100k_ns\":{d},\"iterations\":{d},\"budget_ns\":{d}}},\"packs\":{{\"shisa.cloud\":{{\"cloud_ctx_cold_ns\":{d},\"cloud_ctx_warm_avg_ns\":{d},\"cold_budget_ns\":{d},\"warm_budget_ns\":{d}}},\"shisa.vcs\":{{\"fixture_batch_ns\":{d},\"iterations\":{d},\"budget_ns\":{d}}},\"redact\":{{\"batch_ns\":{d},\"iterations\":{d},\"budget_ns\":{d}}}}}}}\n",
         .{
             cloud_result.cold_ns,
             cloud_result.warm_avg_ns,
@@ -47,9 +47,9 @@ pub fn main() !void {
             vcs_result.elapsed_ns,
             vcs_result.iterations,
             vcs_result.budget_ns,
-            ai_result.elapsed_ns,
-            ai_result.iterations,
-            ai_result.budget_ns,
+            redact_result.elapsed_ns,
+            redact_result.iterations,
+            redact_result.budget_ns,
         },
     );
     defer allocator.free(output);

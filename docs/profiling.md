@@ -2,19 +2,26 @@
 
 Use this page before changing prompt rendering, cache invalidation, VCS probing, shell hooks, or plugin host APIs.
 
+## Headline target
+
+**Cold prompt render in a real big repo, no timeout.** This is the falsifiable promise from north-star §10. Every other budget on this page is supporting evidence.
+
+Evidence path: `bench/compare-prompts.sh` driven by `hyperfine` against a synthetic or real big repo (chromium, nixpkgs, or a 1M-commit fixture). The CI gate compares Shisa's cold render to starship's on the same fixture and fails the PR if the gap closes by more than 10%.
+
 ## Targets
 
 | Target | Command | Evidence |
 | --- | --- | --- |
-| Core and pack microbench | `zig build bench` | JSON stdout with cloud-context cold/warm timings, protocol frame timing, and `packs` budget timings. |
-| Prompt comparison | `bench/compare-prompts.sh` | `bench-results/comparison.json` and `.md` from `hyperfine`. |
+| **Cold render in big repo** (headline) | `bench/compare-prompts.sh` | `bench-results/comparison.json` and `.md` from `hyperfine`. |
 | VCS prompt comparison | `bench/vcs-starship-git.sh` | Shisa vs Starship on clean, dirty, and linked-worktree repos. |
 | jj scale probe | `bench/jj-10k.sh` | jj command timings on a generated large history. |
-| AI local model | `shisa ai bench --model gemma3:1b --prompt "Reply with ok."` | cold/warm first-token latency, token throughput, and memory ceiling. |
+| Core and pack microbench | `zig build bench` | JSON stdout: cloud-context cold/warm, protocol frame timing, pack budgets. Supporting only. |
 
 ## Fast-Path Budget
 
-The warm prompt target is p99 under 2 ms. The shell hot path should only package state, call the daemon socket, print the returned prompt, or print the fallback prompt.
+The warm prompt target is p99 under 2 ms — an **upper bound on the hot path**, not the marketing line. Below ~10 ms is sub-perceptual to humans; the cold-big-repo target above is the user-feelable win.
+
+The shell hot path should only package state, call the daemon socket, print the returned prompt, or print the fallback prompt.
 
 Do not add these to the shell hot path:
 
@@ -104,4 +111,4 @@ Attach:
 - JSON output when available
 - the commit range being compared
 
-See [Architecture](architecture.md), [VCS](vcs/index.md), and [AI Ollama](ai-ollama.md).
+See [Architecture](architecture.md) and [VCS](vcs/index.md).

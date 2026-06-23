@@ -13,7 +13,7 @@ Tracks the audit-driven refocus. One commit per task, easy `git revert` per row.
 - [x] T3 — RFC-0008: daemon lifecycle in SSH / containers / nix-shell / tmux / sudo (blocks further dispatcher growth)
 - [x] T4 — Delete `src/ai/` and related docs (spec retained in north-star §18; recoverable from git history)
 - [x] T5 — Gate hg/jj/sl/stack/worktree behind `-Dvcs_extra=false` default
-- [ ] T6 — Reframe `shisa bench` to lead with cold-cache big-repo render
+- [x] T6 — Reframe `shisa bench` to lead with cold-cache big-repo render
 - [ ] T7a — Extract `src/cli/theme.zig` from `main.zig`
 - [ ] T7b — Extract `src/cli/config.zig` from `main.zig`
 - [ ] T7c — Extract `src/cli/doctor.zig` from `main.zig`

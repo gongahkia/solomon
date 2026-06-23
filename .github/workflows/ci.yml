@@ -77,6 +77,15 @@ jobs:
 
       - run: bash scripts/no-interactive-tui-check.sh
 
+  daemon-file-size:
+    name: daemon file size guard
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: bash scripts/file-size-guard.sh
+
   theme-contrast:
     name: theme contrast
     runs-on: ubuntu-24.04

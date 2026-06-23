@@ -10,7 +10,7 @@ Core daemon, renderer, protocol, cache, and vetted modules are written in Zig. T
 
 ### Prompt latency is the product
 
-The warm prompt target is p99 under 2 ms. The shell hook should package state, call the daemon socket, print the result, or print a fallback prompt.
+The headline target is **cold render in a real big repo without a timeout** (north-star §10). Warm p99 under 2 ms is an upper bound on the hot path, not the marketing claim. The shell hook should package state, call the daemon socket, print the result, or print a fallback prompt.
 
 Zig keeps the hot path in native code and lets the codebase keep allocation, subprocess, filesystem, and protocol work explicit. That matches Shisa's profiling rule: slow work moves to daemon caches or async workers, not shell hooks.
 

@@ -15,27 +15,22 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/main.zig:160
+#: src/main.zig:157
 msgid ""
 "shisa: unknown command; run `shisa --help`\n"
 msgstr ""
 
-#: src/main.zig:468
-msgid ""
-"shisa report: tar not found in PATH\n"
-msgstr ""
-
-#: src/main.zig:619
+#: src/main.zig:216
 msgid ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 msgstr ""
 
-#: src/main.zig:3686
+#: src/main.zig:3282
 msgid ""
 "shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 
-#: src/main.zig:6405
+#: src/main.zig:4345
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
@@ -73,16 +68,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:6442
-msgid ""
-"usage: shisa report [--output path]\n"
-"\n"
-"options:\n"
-"  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
-"\n"
-msgstr ""
-
-#: src/main.zig:6450
+#: src/main.zig:4382
 msgid ""
 "usage: shisa vouch verify [path]\n"
 "\n"
@@ -91,13 +77,27 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:6458
+#: src/main.zig:4390
 msgid ""
 "usage: shisa font check\n"
 "\n"
 "commands:\n"
 "  check         render Nerd Font, Unicode, and ASCII glyph probes\n"
 "\n"
+msgstr ""
+
+#: src/cli/doctor.zig:111
+msgid ""
+"usage: shisa report [--output path]\n"
+"\n"
+"options:\n"
+"  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
+"\n"
+msgstr ""
+
+#: src/cli/doctor.zig:282
+msgid ""
+"shisa report: tar not found in PATH\n"
 msgstr ""
 
 #: src/shisad.zig:22

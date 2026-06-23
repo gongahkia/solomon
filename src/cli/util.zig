@@ -33,6 +33,28 @@ pub fn readConfigOrDefault(allocator: std.mem.Allocator, path: []const u8) ![]u8
     return file.readToEndAlloc(allocator, max_config_bytes);
 }
 
+pub fn configDirPath(allocator: std.mem.Allocator) ![]u8 {
+    const config_path = try defaultConfigPath(allocator);
+    defer allocator.free(config_path);
+    const dir = std.fs.path.dirname(config_path) orelse return error.MissingConfigDir;
+    return allocator.dupe(u8, dir);
+}
+
+pub fn pluginsDirPath(allocator: std.mem.Allocator) ![]u8 {
+    const dir = try configDirPath(allocator);
+    defer allocator.free(dir);
+    return std.fmt.allocPrint(allocator, "{s}/plugins", .{dir});
+}
+
+pub fn pathAccessStatus(path: []const u8) []const u8 {
+    std.fs.cwd().access(path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return "missing",
+        error.AccessDenied => return "denied",
+        else => return "error",
+    };
+    return "present";
+}
+
 test "default config path prefers xdg" {
     const path = try defaultConfigPathFromEnv(std.testing.allocator, "/tmp/xdg", "/tmp/home");
     defer std.testing.allocator.free(path);
@@ -78,4 +100,22 @@ pub fn gitOutputAlloc(allocator: std.mem.Allocator, cwd_path: []const u8, argv: 
         return error.CommandFailed;
     }
     return result.stdout;
+}
+
+pub fn jsonEscapeAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    for (value) |byte| {
+        switch (byte) {
+            '"' => try out.appendSlice(allocator, "\\\""),
+            '\\' => try out.appendSlice(allocator, "\\\\"),
+            '\n' => try out.appendSlice(allocator, "\\n"),
+            '\r' => try out.appendSlice(allocator, "\\r"),
+            '\t' => try out.appendSlice(allocator, "\\t"),
+            else => try out.append(allocator, byte),
+        }
+    }
+
+    return out.toOwnedSlice(allocator);
 }

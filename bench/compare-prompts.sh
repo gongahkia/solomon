@@ -36,7 +36,7 @@ need hyperfine
 need zig
 mkdir -p "$out_dir"
 
-zig -C "$root" build release
+(cd "$root" && zig build release)
 "$root/zig-out/bin/shisad" --foreground --socket "$sock" --log "$log" >/dev/null 2>&1 &
 daemon_pid=$!
 trap cleanup EXIT

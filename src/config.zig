@@ -761,7 +761,6 @@ fn parseTableName(name: []const u8) ?Table {
     return null;
 }
 
-
 fn parseModuleId(id: []const u8) ?ModuleId {
     if (std.mem.eql(u8, id, "cwd")) return .cwd;
     if (std.mem.eql(u8, id, "git_branch")) return .git_branch;

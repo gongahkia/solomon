@@ -239,6 +239,7 @@ pub fn build(b: *std.Build) void {
     i18n_extract_run.addFileArg(b.path("i18n/shisa.pot"));
     i18n_extract_run.addFileArg(b.path("i18n/en-US/LC_MESSAGES/shisa.po"));
     i18n_extract_run.addFileArg(b.path("src/main.zig"));
+    i18n_extract_run.addFileArg(b.path("src/cli/doctor.zig"));
     i18n_extract_run.addFileArg(b.path("src/shisad.zig"));
     i18n_extract_run.addFileArg(b.path("src/shisa-supervisor.zig"));
     const i18n_extract_step = b.step("i18n-extract", "Extract user-facing strings into gettext catalogs");
@@ -737,6 +738,7 @@ pub fn build(b: *std.Build) void {
     i18n_extract_check_run.addArg("zig-out/shisa.pot");
     i18n_extract_check_run.addArg("zig-out/shisa.en-US.po");
     i18n_extract_check_run.addFileArg(b.path("src/main.zig"));
+    i18n_extract_check_run.addFileArg(b.path("src/cli/doctor.zig"));
     i18n_extract_check_run.addFileArg(b.path("src/shisad.zig"));
     i18n_extract_check_run.addFileArg(b.path("src/shisa-supervisor.zig"));
     const i18n_pot_diff = b.addSystemCommand(&.{ "cmp", "i18n/shisa.pot", "zig-out/shisa.pot" });

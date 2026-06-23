@@ -16,31 +16,25 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/main.zig:160
+#: src/main.zig:157
 msgid ""
 "shisa: unknown command; run `shisa --help`\n"
 msgstr ""
 "shisa: unknown command; run `shisa --help`\n"
 
-#: src/main.zig:468
-msgid ""
-"shisa report: tar not found in PATH\n"
-msgstr ""
-"shisa report: tar not found in PATH\n"
-
-#: src/main.zig:619
+#: src/main.zig:216
 msgid ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 msgstr ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 
-#: src/main.zig:3686
+#: src/main.zig:3282
 msgid ""
 "shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 "shisa bench: hyperfine not found in PATH\n"
 
-#: src/main.zig:6405
+#: src/main.zig:4345
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
@@ -112,21 +106,7 @@ msgstr ""
 "      --version print version\n"
 "\n"
 
-#: src/main.zig:6442
-msgid ""
-"usage: shisa report [--output path]\n"
-"\n"
-"options:\n"
-"  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
-"\n"
-msgstr ""
-"usage: shisa report [--output path]\n"
-"\n"
-"options:\n"
-"  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
-"\n"
-
-#: src/main.zig:6450
+#: src/main.zig:4382
 msgid ""
 "usage: shisa vouch verify [path]\n"
 "\n"
@@ -140,7 +120,7 @@ msgstr ""
 "  verify [path] validate VOUCHES format; defaults to ./VOUCHES\n"
 "\n"
 
-#: src/main.zig:6458
+#: src/main.zig:4390
 msgid ""
 "usage: shisa font check\n"
 "\n"
@@ -153,6 +133,26 @@ msgstr ""
 "commands:\n"
 "  check         render Nerd Font, Unicode, and ASCII glyph probes\n"
 "\n"
+
+#: src/cli/doctor.zig:111
+msgid ""
+"usage: shisa report [--output path]\n"
+"\n"
+"options:\n"
+"  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
+"\n"
+msgstr ""
+"usage: shisa report [--output path]\n"
+"\n"
+"options:\n"
+"  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
+"\n"
+
+#: src/cli/doctor.zig:282
+msgid ""
+"shisa report: tar not found in PATH\n"
+msgstr ""
+"shisa report: tar not found in PATH\n"
 
 #: src/shisad.zig:22
 msgid ""

@@ -3,17 +3,17 @@
 # + render + result write) and fail if p99 exceeds the budget.
 #
 # Rationale: north-star §10 warm p99 < 2 ms target measures pure render, not
-# the user-visible end-to-end shell-binary path. This gate uses a looser
-# budget (default 10 ms p99) to surface regressions in the path the user
-# actually experiences. Tighten as warm-path work removes overhead.
+# the user-visible end-to-end shell-binary path. This gate uses a tighter
+# but still debug-safe budget (default 10 ms p99) to surface regressions in
+# the path the user actually experiences. Tighten as warm-path work removes overhead.
 #
-# Empirical baseline (Apple Silicon, 2026-06): hyperfine 50 runs ~3.8 ms
-# mean, 2.3 ms min, occasional 5-40 ms outlier on first render after
-# cache invalidation. 3/56 > 5 ms in a free-running sample.
+# Empirical baseline (Apple Silicon, 2026-06): default debug build 200 runs
+# mean ~3.0 ms, p99 3.5-4.3 ms; ReleaseFast mean 2.32 ms, p99 3.33 ms.
+# Daemon metrics show the warm render itself is sub-100us in 199/200 samples.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-BUDGET_MS=${SHISA_RENDER_P99_BUDGET_MS:-15}
+BUDGET_MS=${SHISA_RENDER_P99_BUDGET_MS:-10}
 RUNS=${SHISA_RENDER_P99_RUNS:-200}
 WARMUP=${SHISA_RENDER_P99_WARMUP:-20}
 SOCK="${TMPDIR:-/tmp}/shisa-p99-$$.sock"
@@ -56,6 +56,7 @@ done
 }
 
 hyperfine \
+  --shell=none \
   --warmup "$WARMUP" \
   --runs "$RUNS" \
   --export-json "$OUT_JSON" \

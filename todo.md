@@ -16,8 +16,8 @@ Tracks the audit-driven refocus. One commit per task, easy `git revert` per row.
 - [x] T6 — Reframe `shisa bench` to lead with cold-cache big-repo render
 - [x] T7a — Extract `src/cli/theme.zig` from `main.zig`
 - [x] T7b — Extract `src/cli/config.zig` from `main.zig` (init + config set + explain). Shared helpers `defaultConfigPath`, `defaultConfigPathFromEnv`, `readConfigOrDefault` lifted into `cli/util.zig`.
-- [ ] T7c — Extract `src/cli/doctor.zig` from `main.zig` (~395 lines including report + deprecation helpers). Pattern: same as T7b. Shared helpers (`redactReportDataAlloc`, `appendDoctorDeprecations`, etc.) likely lift to `cli/util.zig`.
-- [ ] T7d — Extract `src/cli/plugin.zig` from `main.zig` (~2500 lines; biggest single win, drops main.zig below 4K). Pattern: same as T7b/T7e but needs careful handling of `plugin_manifest` / `plugin_capability` / `plugin_lua` re-exports that the current main.zig glues together.
+- [x] T7c — Extract `src/cli/doctor.zig` from `main.zig` (~396 lines including report + deprecation helpers). Shared helpers lifted to `cli/util.zig` where reused.
+- [x] T7d — Extract `src/cli/plugin.zig` from `main.zig` (~1647 lines; `plugin_lua` / `plugin_manifest` imports now local to the CLI plugin module).
 - [x] T7e — Extract `src/cli/stack.zig` + `src/cli/worktree.zig` (gated by `-Dvcs_extra`). Also lifted shared helpers (`appendFmt`, `nextValue`, `exitedZero`, `gitOutputAlloc`) to `src/cli/util.zig`.
 - [x] T8 — Drop §15 5K-stars success criterion, replace with reproducible-benchmark outcome
 - [x] T9 — Align README / architecture / quickstart / CHANGELOG with the gates and deletions
@@ -29,11 +29,11 @@ Triggered after empirical verification: `shisad` boots, renders, async path work
 - [x] T10 — Reality-check README "pre-MVP" status (working daemon-rendered prompt today; re-label as alpha + known-issues)
 - [x] T11 — Wire cold big-repo bench into CI via `scripts/cold-bigrepo-bench.sh` + `.github/workflows/cold-bigrepo.yml`. Generates a synthetic 2000-commit/1500-file repo, clears the daemon cache before each run, asserts max cold render < 150 ms. Starship comparison logged as informational.
 - [x] T12 — Add p99 assertion via `scripts/render-p99-gate.sh`; CI fails if end-to-end p99 > 15 ms
-- [ ] T12-followup — Tighten the render p99 budget from 15 ms toward north-star §10's <2 ms warm target. Current end-to-end baseline is ~10 ms p99 (binary startup + socket + render); the gap is dominated by `shisa` binary cold start, not daemon render (sub-500us per `shisad --metrics`). Investigate static linking or daemon-bundled client mode.
+- [x] T12-followup — Tighten the render p99 budget from 15 ms to 10 ms toward north-star §10's <2 ms warm target. 2026-06-23 local evidence: default debug path `scripts/render-p99-gate.sh` p99 3.48-4.27 ms after switching hyperfine to `--shell=none`; ReleaseFast p99 3.33 ms; daemon metrics showed 199/200 renders <=100us and `zig-out/bin/shisa` links only libSystem on macOS. Remaining <2 ms gap is client process/socket overhead.
 - [x] T13 — Promote RFC-0008 from Draft to Accepted (or relax north-star §16 wording so the gate has teeth)
 - [x] T14 — CI guard: fail PRs that push any `src/daemon/*.zig` past 3000 lines
 - [x] T15 — Write `docs/internals/rfc-0008-daemon-lifecycle.md` decision summary (required by `scripts/rfc-internals-gate.sh` once RFC-0008 is Accepted)
-- [ ] T16 — Finish T7b–e main.zig split (config / doctor / plugin / stack+worktree)
+- [x] T16 — Finish T7b–e main.zig split (config / doctor / plugin / stack+worktree)
 - [ ] T17 — *Needs user approval (destructive)*: squash or rewrite the two stray `adde`/`added` commits with descriptive messages
 - [x] T18 — Freeze additions to plugin infrastructure (signing, marketplace validation, manifest CI) until ≥ 1 third-party plugin exists
 - [x] T19 — First-run smoke integration test: fresh `$HOME` → `shisa init` → boot shisad → assert working `shisa prompt` output + `shisa doctor` exit 0. Lives at `test/integration/first_run_smoke.sh`, wired into `ci.yml` first-run-smoke job.
@@ -44,10 +44,10 @@ Triggered after empirical verification: `shisad` boots, renders, async path work
 Do these before any phase 2+ work. The MVP gate is: a working zsh-on-macOS prompt that beats starship on a cold render in nixpkgs.
 
 - [x] Land RFC-0008 (T3, T13) before any further `src/daemon/server.zig` growth
-- [ ] Bench `nextcmd` median round-trip under 800ms on a 2020 MacBook Air — **rewrite as a prompt-render bench, not AI** (AI removed in T4)
-- [ ] Run prompt benchmarks on nixpkgs and chromium clones; record cold and warm numbers
-- [ ] Run comparison benchmark vs starship, p10k, and oh-my-posh
-- [ ] Test zsh async redraw in tmux, plain zsh, Alacritty, and iTerm
+- [x] Replace stale `nextcmd` 800 ms core benchmark with prompt-render evidence — AI removed in T4; `shisa bench` and `scripts/render-p99-gate.sh` now benchmark prompt render. 2026-06-23 local host: `Mac15,12` / Apple M3 / macOS 26.5.1; p99 gate tightened to 10 ms and passed at 3.48-4.27 ms.
+- [ ] Run prompt benchmarks on nixpkgs and chromium clones; record cold and warm numbers — blocked locally: no existing clones found under common work dirs on 2026-06-23, and only 66 GiB free makes a real Chromium checkout unsafe.
+- [x] Run comparison benchmark vs starship, p10k, and oh-my-posh — 2026-06-23 local `bench/compare-prompts.sh`: Shisa 1.7 ms mean, Starship 9.6 ms, Oh My Posh 14.5 ms, p10k 147.6 ms. Results in `bench-results/comparison.{json,md}`.
+- [ ] Test zsh async redraw in tmux, plain zsh, Alacritty, and iTerm — partial 2026-06-23: `expect test/integration/shell_expect.exp`, `expect test/integration/tmux_expect.exp`, and `test/integration/zsh_fake_socket.sh` pass for plain zsh/tmux; Alacritty/iTerm apps were not installed.
 - [ ] Use libgit2 bindings via Zig FFI for advanced git states
 - [ ] Benchmark advanced git states on a 1M-commit repo
 

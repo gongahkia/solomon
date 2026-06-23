@@ -77,7 +77,7 @@ need zig
 mkdir -p "$out_dir"
 trap cleanup EXIT
 
-zig -C "$root" build release
+(cd "$root" && zig build release)
 "$root/zig-out/bin/shisad" --foreground --socket "$sock" --log "$log" >/dev/null 2>&1 &
 daemon_pid=$!
 

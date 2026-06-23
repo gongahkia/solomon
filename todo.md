@@ -16,8 +16,8 @@ Tracks the audit-driven refocus. One commit per task, easy `git revert` per row.
 - [x] T6 — Reframe `shisa bench` to lead with cold-cache big-repo render
 - [x] T7a — Extract `src/cli/theme.zig` from `main.zig`
 - [x] T7b — Extract `src/cli/config.zig` from `main.zig` (init + config set + explain). Shared helpers `defaultConfigPath`, `defaultConfigPathFromEnv`, `readConfigOrDefault` lifted into `cli/util.zig`.
-- [ ] T7c — Extract `src/cli/doctor.zig` from `main.zig`
-- [ ] T7d — Extract `src/cli/plugin.zig` from `main.zig` (largest win, ~2.5K lines)
+- [ ] T7c — Extract `src/cli/doctor.zig` from `main.zig` (~395 lines including report + deprecation helpers). Pattern: same as T7b. Shared helpers (`redactReportDataAlloc`, `appendDoctorDeprecations`, etc.) likely lift to `cli/util.zig`.
+- [ ] T7d — Extract `src/cli/plugin.zig` from `main.zig` (~2500 lines; biggest single win, drops main.zig below 4K). Pattern: same as T7b/T7e but needs careful handling of `plugin_manifest` / `plugin_capability` / `plugin_lua` re-exports that the current main.zig glues together.
 - [x] T7e — Extract `src/cli/stack.zig` + `src/cli/worktree.zig` (gated by `-Dvcs_extra`). Also lifted shared helpers (`appendFmt`, `nextValue`, `exitedZero`, `gitOutputAlloc`) to `src/cli/util.zig`.
 - [x] T8 — Drop §15 5K-stars success criterion, replace with reproducible-benchmark outcome
 - [x] T9 — Align README / architecture / quickstart / CHANGELOG with the gates and deletions

@@ -1,10 +1,56 @@
-# Shisa - Active TODO
+# Shisa — Active TODO
 
-Status legend: `[ ]` open.
+**READ FIRST:** [`north-star.md`](north-star.md) is the source of truth for Shisa's scope and ethos. Read it in full before adding or editing tasks here. If a task would contradict the north star, update the north star in the same change. This file is execution; that file is intent.
 
-Removed scope: launch/comms, external audits/compliance, hosted docs publishing, branding/swag, social/community ops, and release publicity.
+Status legend: `[ ]` open · `[~]` in progress · `[x]` done.
 
-## Packaging and supply chain
+## Phase-0 scope-cut + refocus (in progress)
+
+Tracks the audit-driven refocus. One commit per task, easy `git revert` per row.
+
+- [x] T1 — Rewrite `north-star.md` ethos pass (§1 headline, §3 AI contract, §10 cold-big-repo first, §16 lifecycle risk, §17 lifecycle questions, read-first banner)
+- [x] T2 — Restructure this file as MVP-first, anchor to north-star
+- [ ] T3 — RFC-0008: daemon lifecycle in SSH / containers / nix-shell / tmux / sudo (blocks further dispatcher growth)
+- [ ] T4 — Delete `src/ai/` and related docs (spec retained in north-star §18; recoverable from git history)
+- [ ] T5 — Gate hg/jj/sl/stack/worktree behind `-Dvcs_extra=false` default
+- [ ] T6 — Reframe `shisa bench` to lead with cold-cache big-repo render
+- [ ] T7a — Extract `src/cli/theme.zig` from `main.zig`
+- [ ] T7b — Extract `src/cli/config.zig` from `main.zig`
+- [ ] T7c — Extract `src/cli/doctor.zig` from `main.zig`
+- [ ] T7d — Extract `src/cli/plugin.zig` from `main.zig` (largest win, ~2.5K lines)
+- [ ] T7e — Extract `src/cli/stack.zig` + `src/cli/worktree.zig` (gated by `-Dvcs_extra`)
+- [ ] T8 — Drop §15 5K-stars success criterion, replace with reproducible-benchmark outcome
+- [ ] T9 — Align README / architecture / quickstart / CHANGELOG with the gates and deletions
+
+## MVP-blocking (phase 1: zsh + macOS + basic git)
+
+Do these before any phase 2+ work. The MVP gate is: a working zsh-on-macOS prompt that beats starship on a cold render in nixpkgs.
+
+- [ ] Land RFC-0008 (T3) before any further `src/daemon/server.zig` growth
+- [ ] Bench `nextcmd` median round-trip under 800ms on a 2020 MacBook Air — **rewrite as a prompt-render bench, not AI** (AI removed in T4)
+- [ ] Run prompt benchmarks on nixpkgs and chromium clones; record cold and warm numbers
+- [ ] Run comparison benchmark vs starship, p10k, and oh-my-posh
+- [ ] Test zsh async redraw in tmux, plain zsh, Alacritty, and iTerm
+- [ ] Use libgit2 bindings via Zig FFI for advanced git states
+- [ ] Benchmark advanced git states on a 1M-commit repo
+
+## Hardening (phase 2-3)
+
+- [ ] Verify Linux Wayland-only behavior
+- [ ] Test under systemd-nspawn, podman, and distrobox
+- [ ] Test under nix-shell, devenv, and flox PATH/language-version environments
+- [ ] Build full-OS Docker E2E images for supported distros
+- [ ] Run shells inside E2E containers and assert prompt output
+- [ ] Maintain `shell x distro x version` E2E matrix
+- [ ] Run one documented hardware performance baseline before packaging
+- [ ] Hook `errfix` into last command stderr capture — **deferred to `shisa.ai` pack (phase 12); not core**
+- [ ] On non-zero exit, surface a one-line `shisa: try <x>?` hint — same: deferred to phase 12
+- [ ] Add per-exit user opt-in for `errfix` hints — same: deferred to phase 12
+- [ ] Index shell history into a local vector store — same: deferred to phase 12
+- [ ] Add hotkey for fuzzy semantic history search — same: deferred to phase 12
+- [ ] Add optional atuin sqlite adapter for semantic history search — same: deferred to phase 12
+
+## Packaging + supply chain (phase 7; do not work on until MVP ships)
 
 - [ ] Author Homebrew formula (tap first; homebrew-core only if later needed)
 - [ ] Author Scoop manifest for WSL users
@@ -16,22 +62,16 @@ Removed scope: launch/comms, external audits/compliance, hosted docs publishing,
 - [ ] Implement `shisa update --verify` before applying updates
 - [ ] Implement atomic self-update swap with rollback on failure
 
-## Validation and performance
+## Deferred packs (phase 10-12; do not work on until MVP ships)
 
-- [ ] Run prompt benchmarks on nixpkgs and chromium clones; record cold and warm numbers
-- [ ] Run comparison benchmark vs starship, p10k, and oh-my-posh for package candidates
-- [ ] Verify Linux Wayland-only behavior
-- [ ] Test under systemd-nspawn, podman, and distrobox
-- [ ] Test under nix-shell, devenv, and flox PATH/language-version environments
-- [ ] Build full-OS Docker E2E images for supported distros
-- [ ] Run shells inside E2E containers and assert prompt output
-- [ ] Maintain `shell x distro x version` E2E matrix
-- [ ] Run one documented hardware performance baseline before packaging
-- [ ] Test zsh async redraw in tmux, plain zsh, Alacritty, and iTerm
-- [ ] Bench `nextcmd` median round-trip under 800ms on a 2020 MacBook Air
-- [ ] Benchmark advanced git states on a 1M-commit repo
+The packs in north-star §18–21 are deferred. No code or docs added under these headings before phase 1 ships. Listed here as a reminder, not an active worklist:
 
-## Plugin marketplace
+- `shisa.vcs` extras (jj/sapling/hg) — code exists, gated off in T5
+- `shisa.cloud` (cloud_ctx, risk_tier, prod_guard, sso_expiry, iac_workspace, region_drift, cost_glance, vpn_status, ssh_target, container_provenance)
+- `shisa.ai` (nextcmd, nl2cmd, explain, risk, errfix, histsearch, cdhint) — code deleted in T4; spec lives in north-star §18
+- `shisa.activity` (long_running, cmd_complete_bell, tmux_pane, right_prompt)
+
+## Plugin marketplace (phase 14; do not work on until MVP ships)
 
 - [ ] Stand up plugin marketplace index in-repo without hosted-site dependency
 - [ ] Seed marketplace with vetted community plugin entries
@@ -44,14 +84,10 @@ Removed scope: launch/comms, external audits/compliance, hosted docs publishing,
 - [ ] Keep `README.md` as the canonical public overview
 - [ ] Keep local repo docs aligned with packaging, update, marketplace, and feature changes
 - [ ] Remove stale hosted publishing references when touched
-
-## Feature actionables
-
-- [ ] Hook `errfix` into last command stderr capture
-- [ ] On non-zero exit, surface a one-line `shisa: try <x>?` hint
-- [ ] Add per-exit user opt-in for `errfix` hints
-- [ ] Index shell history into a local vector store
-- [ ] Add hotkey for fuzzy semantic history search
-- [ ] Add optional atuin sqlite adapter for semantic history search
-- [ ] Use libgit2 bindings via Zig FFI for advanced git states
 - [ ] Extract all user-facing strings to the gettext catalog
+
+## Cut from todo (with reason)
+
+These were in this list and are now deliberately out of scope:
+
+- Launch/comms, external audits/compliance, hosted docs publishing, branding/swag, social/community ops, release publicity — out of phase-0 scope. Reflected in T8 (§15 5K-stars criterion replaced with reproducible-benchmark outcome).

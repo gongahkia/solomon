@@ -15,7 +15,7 @@ Tracks the audit-driven refocus. One commit per task, easy `git revert` per row.
 - [x] T5 — Gate hg/jj/sl/stack/worktree behind `-Dvcs_extra=false` default
 - [x] T6 — Reframe `shisa bench` to lead with cold-cache big-repo render
 - [x] T7a — Extract `src/cli/theme.zig` from `main.zig`
-- [ ] T7b — Extract `src/cli/config.zig` from `main.zig`
+- [x] T7b — Extract `src/cli/config.zig` from `main.zig` (init + config set + explain). Shared helpers `defaultConfigPath`, `defaultConfigPathFromEnv`, `readConfigOrDefault` lifted into `cli/util.zig`.
 - [ ] T7c — Extract `src/cli/doctor.zig` from `main.zig`
 - [ ] T7d — Extract `src/cli/plugin.zig` from `main.zig` (largest win, ~2.5K lines)
 - [x] T7e — Extract `src/cli/stack.zig` + `src/cli/worktree.zig` (gated by `-Dvcs_extra`). Also lifted shared helpers (`appendFmt`, `nextValue`, `exitedZero`, `gitOutputAlloc`) to `src/cli/util.zig`.

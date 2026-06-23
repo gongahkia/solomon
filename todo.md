@@ -31,7 +31,7 @@ Triggered after empirical verification: `shisad` boots, renders, async path work
 - [ ] T12 — Add p99 assertion to `zig build bench`; characterize the 5 ms render outliers (3.5% > 5ms in the 56-run sample)
 - [ ] T13 — Promote RFC-0008 from Draft to Accepted (or relax north-star §16 wording so the gate has teeth)
 - [ ] T14 — CI guard: fail PRs that push any `src/daemon/*.zig` past 3000 lines
-- [ ] T15 — Write `docs/internals/rfc-0008-daemon-lifecycle.md` decision summary (required by `scripts/rfc-internals-gate.sh` once RFC-0008 is Accepted)
+- [x] T15 — Write `docs/internals/rfc-0008-daemon-lifecycle.md` decision summary (required by `scripts/rfc-internals-gate.sh` once RFC-0008 is Accepted)
 - [ ] T16 — Finish T7b–e main.zig split (config / doctor / plugin / stack+worktree)
 - [ ] T17 — *Needs user approval (destructive)*: squash or rewrite the two stray `adde`/`added` commits with descriptive messages
 - [x] T18 — Freeze additions to plugin infrastructure (signing, marketplace validation, manifest CI) until ≥ 1 third-party plugin exists

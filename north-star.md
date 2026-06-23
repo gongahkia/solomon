@@ -187,11 +187,12 @@ Performance wins are surfaced through:
 
 This project is successful (not just shipped) when:
 
-- 5,000+ GitHub stars within 12 months of Phase 7.
-- A reproducible benchmark suite shows ≥ 10× warm-render speedup over starship on `nixpkgs`.
+- A reproducible benchmark suite shows Shisa rendering in nixpkgs / chromium without a timeout where starship's `command_timeout` cliff is exceeded, replicable on a third-party machine from a public fixture and a documented hardware baseline. This is the falsifiable headline from §10.
 - ≥ 50 community plugins published.
 - Adoption is visible in dotfile repos (`github.com/search?q=shisa.toml`).
 - The project has shipped a release on time every month for 6 consecutive months.
+
+Star counts were a previous criterion. They were removed because phase-0 deliberately excludes launch/comms scope, and a numeric stargazer target without an activity plan to back it is noise. Adoption signal lives in the benchmark and dotfile rows above, not in stars.
 
 ## 16. Risks (named honestly)
 

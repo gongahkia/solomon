@@ -20,27 +20,22 @@ msgid ""
 "shisa: unknown command; run `shisa --help`\n"
 msgstr ""
 
-#: src/main.zig:524
-msgid ""
-"theme validate: ok\n"
-msgstr ""
-
-#: src/main.zig:1171
+#: src/main.zig:890
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""
 
-#: src/main.zig:1322
+#: src/main.zig:1041
 msgid ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 msgstr ""
 
-#: src/main.zig:4578
+#: src/main.zig:4297
 msgid ""
 "shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 
-#: src/main.zig:7310
+#: src/main.zig:7029
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
@@ -78,7 +73,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:7347
+#: src/main.zig:7066
 msgid ""
 "usage: shisa config set locale=<locale|auto>\n"
 "\n"
@@ -87,7 +82,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:7355
+#: src/main.zig:7074
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -96,7 +91,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:7363
+#: src/main.zig:7082
 msgid ""
 "usage: shisa vouch verify [path]\n"
 "\n"
@@ -105,17 +100,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:7371
-msgid ""
-"usage: shisa theme <command> [args]\n"
-"\n"
-"commands:\n"
-"  validate <path>   validate a theme file\n"
-"  preview <theme>   render a stub prompt from a built-in id or theme file\n"
-"\n"
-msgstr ""
-
-#: src/main.zig:7380
+#: src/main.zig:7090
 msgid ""
 "usage: shisa font check\n"
 "\n"

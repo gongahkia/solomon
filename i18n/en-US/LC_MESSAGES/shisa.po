@@ -22,31 +22,25 @@ msgid ""
 msgstr ""
 "shisa: unknown command; run `shisa --help`\n"
 
-#: src/main.zig:524
-msgid ""
-"theme validate: ok\n"
-msgstr ""
-"theme validate: ok\n"
-
-#: src/main.zig:1171
+#: src/main.zig:890
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""
 "shisa report: tar not found in PATH\n"
 
-#: src/main.zig:1322
+#: src/main.zig:1041
 msgid ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 msgstr ""
 "shisa vouch: unknown command; run `shisa vouch --help`\n"
 
-#: src/main.zig:4578
+#: src/main.zig:4297
 msgid ""
 "shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 "shisa bench: hyperfine not found in PATH\n"
 
-#: src/main.zig:7310
+#: src/main.zig:7029
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
@@ -118,7 +112,7 @@ msgstr ""
 "      --version print version\n"
 "\n"
 
-#: src/main.zig:7347
+#: src/main.zig:7066
 msgid ""
 "usage: shisa config set locale=<locale|auto>\n"
 "\n"
@@ -132,7 +126,7 @@ msgstr ""
 "  set locale=<locale|auto> set locale override; auto uses LC_ALL, LC_CTYPE, then LANG\n"
 "\n"
 
-#: src/main.zig:7355
+#: src/main.zig:7074
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -146,7 +140,7 @@ msgstr ""
 "  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
 "\n"
 
-#: src/main.zig:7363
+#: src/main.zig:7082
 msgid ""
 "usage: shisa vouch verify [path]\n"
 "\n"
@@ -160,23 +154,7 @@ msgstr ""
 "  verify [path] validate VOUCHES format; defaults to ./VOUCHES\n"
 "\n"
 
-#: src/main.zig:7371
-msgid ""
-"usage: shisa theme <command> [args]\n"
-"\n"
-"commands:\n"
-"  validate <path>   validate a theme file\n"
-"  preview <theme>   render a stub prompt from a built-in id or theme file\n"
-"\n"
-msgstr ""
-"usage: shisa theme <command> [args]\n"
-"\n"
-"commands:\n"
-"  validate <path>   validate a theme file\n"
-"  preview <theme>   render a stub prompt from a built-in id or theme file\n"
-"\n"
-
-#: src/main.zig:7380
+#: src/main.zig:7090
 msgid ""
 "usage: shisa font check\n"
 "\n"

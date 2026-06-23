@@ -14,7 +14,7 @@ Tracks the audit-driven refocus. One commit per task, easy `git revert` per row.
 - [x] T4 — Delete `src/ai/` and related docs (spec retained in north-star §18; recoverable from git history)
 - [x] T5 — Gate hg/jj/sl/stack/worktree behind `-Dvcs_extra=false` default
 - [x] T6 — Reframe `shisa bench` to lead with cold-cache big-repo render
-- [ ] T7a — Extract `src/cli/theme.zig` from `main.zig`
+- [x] T7a — Extract `src/cli/theme.zig` from `main.zig`
 - [ ] T7b — Extract `src/cli/config.zig` from `main.zig`
 - [ ] T7c — Extract `src/cli/doctor.zig` from `main.zig`
 - [ ] T7d — Extract `src/cli/plugin.zig` from `main.zig` (largest win, ~2.5K lines)

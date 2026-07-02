@@ -400,6 +400,8 @@ sensitive stores.
   memories, significance, tiers, credence, reconstruction, and graph concepts.
 - [`docs/benchmarks.md`](./docs/benchmarks.md): benchmark methodology,
   reproduction commands, local results, and open gaps.
+- [`docs/competitive-positioning.md`](./docs/competitive-positioning.md):
+  comparison against Mem0, Zep, Letta, and Engram.
 - [`docs/security.md`](./docs/security.md): poisoning posture, logging behavior,
   encryption limits, and operational guidance.
 - [`docs/null-hypothesis.md`](./docs/null-hypothesis.md): when flat retrieval or

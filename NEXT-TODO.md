@@ -158,11 +158,6 @@ the claim against the tests will find this fast.
 - [x] Add Engram (`arXiv:2606.09900`) to `docs/null-hypothesis.md` and benchmark
       docs as the closest published comparison. Do not imply Shibahama is ahead
       until checked-in artifacts prove a win on a matching continuity slice.
-- [ ] (P2) Write a short "vs Mem0 / Zep / Letta / Engram" positioning page that
-    places Shibahama on the epistemic-governance / continuity axis rather than the
-    conversational-recall-accuracy axis, citing the Phase A + B artifacts. Frame
-    for coding agents and framework builders.
-
 ---
 
 ## Part 1 — Offline consolidation pass ("the dream"), but LEGIBLE (first-class) — DONE

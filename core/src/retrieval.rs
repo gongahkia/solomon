@@ -362,6 +362,7 @@ fn timeline_inner(
         let Some(item) = historical_items.remove(&result.id) else {
             continue;
         };
+        let item = hydrate_compacted_item_for_recall(store, item)?;
 
         if !is_recallable_item(&item, request) {
             continue;
@@ -393,6 +394,7 @@ fn timeline_inner(
             let Some(item) = historical_items.remove(&related_id) else {
                 continue;
             };
+            let item = hydrate_compacted_item_for_recall(store, item)?;
 
             if !is_recallable_item(&item, request) {
                 continue;
@@ -418,6 +420,7 @@ fn timeline_inner(
         if !seen_ids.insert(id) || !is_recallable_item(&item, request) {
             continue;
         }
+        let item = hydrate_compacted_item_for_recall(store, item)?;
 
         candidates.push(candidate_from_item(
             id,
@@ -584,13 +587,34 @@ fn refresh_item_for_recall(
     request: &RecallRequest<'_>,
     record_surface_access: bool,
 ) -> Result<MemoryItem, RecallError> {
-    if !record_surface_access {
+    let item = if record_surface_access {
+        store
+            .refresh_significance(item.id, &request.significance, request.now)?
+            .unwrap_or(item)
+    } else {
+        item
+    };
+
+    hydrate_compacted_item_for_recall(store, item)
+}
+
+fn hydrate_compacted_item_for_recall(
+    store: &RedbMemoryStore,
+    mut item: MemoryItem,
+) -> Result<MemoryItem, RecallError> {
+    let Some(pointer) = item.compaction.clone() else {
+        return Ok(item);
+    };
+
+    if !item.content.is_empty() {
         return Ok(item);
     }
 
-    Ok(store
-        .refresh_significance(item.id, &request.significance, request.now)?
-        .unwrap_or(item))
+    if let Some(content) = store.read_compacted_content(&pointer)? {
+        item.content = content;
+    }
+
+    Ok(item)
 }
 
 fn collect_related_memory_ids(
@@ -1297,6 +1321,42 @@ mod tests {
         );
         assert!(cold_candidate.cold_tier_retrieval);
         assert_eq!(cold_candidate.tier, Tier::Cold);
+    }
+
+    #[test]
+    fn recall_rehydrates_compacted_cold_content_when_opted_in() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(1);
+        let mut cold = test_item("cold compacted content", OffsetDateTime::UNIX_EPOCH);
+
+        cold.tier = Tier::Cold;
+        cold.credence_floor = Tier::Cold;
+
+        store
+            .write_embedded(
+                &mut cold,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("cold should write");
+        assert!(
+            store
+                .compact_cold_item(cold.id)
+                .expect("cold compaction should run")
+        );
+
+        let query = [0.0, 0.0];
+        let request = RecallRequest::new(&query, 1, now).include_cold();
+        let candidates = recall(&store, &vector_index, &request).expect("recall should work");
+
+        assert_eq!(candidates[0].id, cold.id);
+        assert_eq!(candidates[0].item.content, "cold compacted content");
+        assert!(candidates[0].item.compaction.is_some());
     }
 
     #[test]

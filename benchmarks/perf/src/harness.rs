@@ -14,6 +14,7 @@ use shibahama_core::storage::{
 };
 use shibahama_core::vector::{HnswVectorIndex, VectorIndex};
 use std::collections::BTreeSet;
+use std::io::{Error as IoError, ErrorKind};
 use std::path::PathBuf;
 use std::time::{Duration as StdDuration, Instant};
 use tempfile::TempDir;
@@ -75,6 +76,7 @@ pub struct BenchStore {
     pub path: PathBuf,
     /// Active Shibahama engine.
     pub engine: Shibahama<HnswVectorIndex>,
+    quality_ids: Option<Vec<MemoryId>>,
 }
 
 impl BenchStore {
@@ -93,6 +95,7 @@ impl BenchStore {
             _tempdir: tempdir,
             path,
             engine,
+            quality_ids: None,
         })
     }
 
@@ -102,10 +105,23 @@ impl BenchStore {
     ///
     /// Returns an error when setup writes or indexing fail.
     pub fn populated(scale: usize) -> BenchResult<Self> {
+        Self::populated_with_quality_ids(scale, false)
+    }
+
+    /// Opens a populated benchmark store and retains ids for exact-quality checks.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when snapshot setup or vector-index hydration fails.
+    pub fn populated_for_quality(scale: usize) -> BenchResult<Self> {
+        Self::populated_with_quality_ids(scale, true)
+    }
+
+    fn populated_with_quality_ids(scale: usize, keep_quality_ids: bool) -> BenchResult<Self> {
         let tempdir = TempDir::new()?;
         let path = tempdir.path().join("shibahama-perf.redb");
         let snapshot_path = tempdir.path().join("shibahama-perf-snapshot.json");
-        let snapshot = snapshot_for_range(0, scale);
+        let (snapshot, quality_ids) = snapshot_for_range(0, scale);
         let snapshot_bytes = serde_json::to_vec(&snapshot)?;
 
         std::fs::write(&snapshot_path, snapshot_bytes)?;
@@ -119,6 +135,7 @@ impl BenchStore {
             _tempdir: tempdir,
             path,
             engine,
+            quality_ids: keep_quality_ids.then_some(quality_ids),
         })
     }
 
@@ -207,12 +224,53 @@ impl BenchStore {
             recall_latency,
         })
     }
+
+    /// Computes average HNSW recall@10 against exact linear-scan ground truth.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when this store was not opened with quality ids, or when vector search
+    /// fails.
+    pub fn hnsw_recall_at_10(&self, query_count: usize) -> BenchResult<f64> {
+        let Some(ids) = &self.quality_ids else {
+            return Err(invalid_input(
+                "quality ids were not retained for this store".to_owned(),
+            ));
+        };
+        let corpus = ids
+            .iter()
+            .enumerate()
+            .map(|(index, id)| (*id, generated_item(index, DEFAULT_SEED).vector))
+            .collect::<Vec<_>>();
+        let mut hits = 0_u32;
+
+        for query_index in 0..query_count {
+            let query = generated_item(ids.len().saturating_add(query_index), DEFAULT_SEED).vector;
+            let exact_ids = exact_top_k(&corpus, &query, TOP_K);
+            let hnsw_ids = self
+                .engine
+                .vector_index()
+                .search(&query, TOP_K)?
+                .into_iter()
+                .map(|result| result.id)
+                .collect::<BTreeSet<_>>();
+            let query_hits = exact_ids.iter().filter(|id| hnsw_ids.contains(id)).count();
+
+            hits = hits.saturating_add(u32::try_from(query_hits).unwrap_or(u32::MAX));
+        }
+
+        let denominator = query_count.saturating_mul(TOP_K);
+        let denominator = u32::try_from(denominator).unwrap_or(u32::MAX);
+
+        Ok(f64::from(hits) / f64::from(denominator))
+    }
 }
 
-fn snapshot_for_range(start_index: usize, count: usize) -> StoreSnapshot {
+fn snapshot_for_range(start_index: usize, count: usize) -> (StoreSnapshot, Vec<MemoryId>) {
     let mut events = Vec::with_capacity(count);
     let mut materialized_items = Vec::with_capacity(count);
     let mut embeddings = Vec::with_capacity(count);
+    let mut quality_ids = Vec::with_capacity(count);
 
     for offset in 0..count {
         let index = start_index.saturating_add(offset);
@@ -242,18 +300,22 @@ fn snapshot_for_range(start_index: usize, count: usize) -> StoreSnapshot {
             model: EMBEDDING_MODEL.to_owned(),
             model_version: EMBEDDING_MODEL_VERSION.to_owned(),
         });
+        quality_ids.push(item.id);
         materialized_items.push(item);
     }
 
-    StoreSnapshot {
-        schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
-        events,
-        materialized_items,
-        embeddings,
-        cold_contents: Vec::new(),
-        graph_entities: Vec::new(),
-        graph_relations: Vec::new(),
-    }
+    (
+        StoreSnapshot {
+            schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+            events,
+            materialized_items,
+            embeddings,
+            cold_contents: Vec::new(),
+            graph_entities: Vec::new(),
+            graph_relations: Vec::new(),
+        },
+        quality_ids,
+    )
 }
 
 fn memory_item_for_generated(source_index: usize, item: &GeneratedItem) -> MemoryItem {
@@ -296,44 +358,6 @@ pub fn held_out_query(seed: u64) -> Vec<f32> {
     unit_vector(seed ^ QUERY_SEED_OFFSET)
 }
 
-/// Computes average HNSW recall@10 against exact linear-scan ground truth.
-///
-/// # Errors
-///
-/// Returns an error when the vector index rejects a generated vector.
-pub fn hnsw_recall_at_10(item_count: usize, query_count: usize) -> BenchResult<f64> {
-    let mut index =
-        HnswVectorIndex::with_capacity(EMBEDDING_DIMENSIONS, item_count.saturating_add(1024));
-    let mut corpus = Vec::with_capacity(item_count);
-    let mut hits = 0_u32;
-
-    for item_index in 0..item_count {
-        let id = MemoryId::new_v7();
-        let vector = generated_item(item_index, DEFAULT_SEED).vector;
-
-        index.add(id, &vector)?;
-        corpus.push((id, vector));
-    }
-
-    for query_index in 0..query_count {
-        let query = generated_item(item_count.saturating_add(query_index), DEFAULT_SEED).vector;
-        let exact_ids = exact_top_k(&corpus, &query, TOP_K);
-        let hnsw_ids = index
-            .search(&query, TOP_K)?
-            .into_iter()
-            .map(|result| result.id)
-            .collect::<BTreeSet<_>>();
-        let query_hits = exact_ids.iter().filter(|id| hnsw_ids.contains(id)).count();
-
-        hits = hits.saturating_add(u32::try_from(query_hits).unwrap_or(u32::MAX));
-    }
-
-    let denominator = query_count.saturating_mul(TOP_K);
-    let denominator = u32::try_from(denominator).unwrap_or(u32::MAX);
-
-    Ok(f64::from(hits) / f64::from(denominator))
-}
-
 /// Returns the fixed timestamp used for benchmark recall.
 #[must_use]
 pub fn benchmark_now() -> OffsetDateTime {
@@ -367,6 +391,10 @@ fn squared_distance(left: &[f32], right: &[f32]) -> f32 {
             delta * delta
         })
         .sum()
+}
+
+fn invalid_input(message: String) -> Box<dyn std::error::Error + Send + Sync> {
+    Box::new(IoError::new(ErrorKind::InvalidInput, message))
 }
 
 fn timestamp_for(index: usize) -> OffsetDateTime {

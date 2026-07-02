@@ -813,6 +813,12 @@ impl<V: VectorIndex> Shibahama<V> {
         &self.store
     }
 
+    /// Returns the active vector index.
+    #[must_use]
+    pub const fn vector_index(&self) -> &V {
+        &self.vector_index
+    }
+
     /// Returns this engine's active config.
     #[must_use]
     pub const fn config(&self) -> ShibahamaConfig {

@@ -6,7 +6,6 @@
 use serde::Serialize;
 use shibahama_perf::harness::{
     BenchResult, BenchStore, DEFAULT_SEED, EMBEDDING_DIMENSIONS, TOP_K, generated_item,
-    hnsw_recall_at_10,
 };
 use std::env;
 use std::fs;
@@ -223,7 +222,12 @@ fn print_help() {
 }
 
 fn measure_tier(tier: ScaleTier, args: &Args) -> BenchResult<PerfArtifact> {
-    let store = BenchStore::populated(tier.items)?;
+    let measure_quality = args.quality_tiers.contains(&tier);
+    let store = if measure_quality {
+        BenchStore::populated_for_quality(tier.items)?
+    } else {
+        BenchStore::populated(tier.items)?
+    };
     let resident_memory_bytes = current_rss_bytes();
     let mut latencies = Vec::with_capacity(args.queries);
 
@@ -242,8 +246,8 @@ fn measure_tier(tier: ScaleTier, args: &Args) -> BenchResult<PerfArtifact> {
 
         latencies.push(latency);
     }
-    let hnsw_recall_at_10 = if args.quality_tiers.contains(&tier) {
-        Some(hnsw_recall_at_10(tier.items, args.quality_queries)?)
+    let hnsw_recall_at_10 = if measure_quality {
+        Some(store.hnsw_recall_at_10(args.quality_queries)?)
     } else {
         None
     };

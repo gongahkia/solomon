@@ -57,8 +57,8 @@ gate before Phase A.
 
 ## Phase A — Performance proof (Rust strength, no LLM, fully under our control)
 
-> **Spec: `PHASE-A.md`** — read before starting. Items
-> 22–27 below map to its deliverables and acceptance criteria.
+> **Spec: `PHASE-A.md`** — read before starting. The Phase A items below map to
+> its deliverables and acceptance criteria.
 
 The Rust-first thesis is a performance claim that currently has zero committed
 numbers. This is the fastest, lowest-risk path to a defensible result and it
@@ -68,10 +68,6 @@ agents specifically, **write-then-immediately-recallable at sub-millisecond loca
 latency** is the property they need — a coding agent that just learned a fact
 cannot wait for background graph processing. Make that property a number.
 
-22. [ ] (P1) Build a criterion-based benchmark harness in `benchmarks/perf/`
-    (Rust, `criterion`). Measure, at minimum: write latency, recall latency
-    p50/p99, ingest throughput (items/sec), and post-write recall availability
-    (is a just-written item recallable on the next call — yes/no + latency).
 23. [ ] (P1) Run the suite at scale tiers: 1k / 10k / 100k / 1M items. Report
     recall p50/p99 and resident memory footprint at each tier. Commit the raw
     output + a generated Markdown table under `benchmarks/results/perf/`.

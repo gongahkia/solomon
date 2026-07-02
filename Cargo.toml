@@ -2,6 +2,7 @@
 
 [workspace]
 members = [
+    "benchmarks/perf",
     "bindings/node",
     "bindings/python",
     "core",

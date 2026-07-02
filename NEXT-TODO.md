@@ -92,11 +92,6 @@ artifact proves a stale-rate, auditability, or token-cost win on a matching
 continuity slice.** This phase is where that artifact gets produced — or where we
 honestly report that it doesn't beat Engram and adjust the claim.
 
-28. [ ] (P1) Design `ContinuityBench` (extends the existing CurrencyBench idea
-    past 12 hand-built queries into a real, larger, documented dataset). Each
-    task: a fact is established, the fact CHANGES over time (supersession), and a
-    later query must reflect the current state. Coding framing: "what's the
-    signature of `foo()`" after `foo` was renamed/re-typed across sessions.
 29. [ ] (P1) Define and report the metrics the field doesn't:
     - **stale-answer rate**: fraction of queries answered with a superseded fact.
     - **contradiction-resolution accuracy**: when two memories conflict, does the

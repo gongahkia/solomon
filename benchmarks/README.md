@@ -51,6 +51,12 @@ valid only when the official exports and raw run artifacts are present. Runs wit
 artifact can be audited later. Report flat-retrieval baselines honestly even when
 they are better.
 
+ContinuityBench v0 is the larger Phase B dataset for that continuity claim. It
+has 200 synthetic, templated tasks across supersession, contradiction,
+evidence-quality, and stable-recall controls. The dataset is committed under
+`benchmarks/continuity/dataset/`; metrics and result artifacts are tracked by
+the remaining Phase B TODO items.
+
 ## Feature Ablations
 
 Run the local feature-isolation suite:

@@ -81,6 +81,23 @@ The checked-in summary is:
 | currencybench | shibahama | 12 | 1.000 | 0.000 | 5.917 |
 | currencybench | warehouse | 12 | 0.000 | 1.000 | 11.833 |
 
+### ContinuityBench
+
+ContinuityBench v0 is the larger Phase B dataset that extends CurrencyBench
+beyond supersession-only smoke tests. It is committed at:
+
+- `benchmarks/continuity/dataset/continuitybench-v0.json`
+- `benchmarks/continuity/dataset/continuitybench-v0.sha256`
+
+The dataset has 200 synthetic, templated tasks: 80 supersession, 50
+contradiction, 40 evidence-quality, and 30 stable-recall controls. The domain
+split is 160 coding-agent tasks and 40 general tasks. Its current canonical
+dataset hash is
+`sha256:a68d3f55a21b3ad0799f4c10e28e02a53b4cac2e39e5679df214323ad961bfaa`.
+
+There are no ContinuityBench result claims yet. The runner, metrics, baselines,
+and result manifests are tracked by the remaining Phase B TODO items.
+
 ### Coding-Agent Memory Task
 
 `coding-agent` is a compact long-horizon coding-agent benchmark. It includes

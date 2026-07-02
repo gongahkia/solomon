@@ -1,6 +1,6 @@
 {
   "manifest": {
-    "commit": "cd2d3c616792de605b5c2093a6ca6e4d31026727",
+    "commit": "fd2e39e8fcbbc2b1cea81333714e8df059a91378",
     "rustc": "rustc 1.93.0 (254b59607 2026-01-19)",
     "os": "Darwin Gabriels-MacBook-Air.local 25.5.0 Darwin Kernel Version 25.5.0: Mon Apr 27 20:41:19 PDT 2026; root:xnu-12377.121.6~2/RELEASE_ARM64_T8122 arm64",
     "cpu": "Apple M3",
@@ -8,27 +8,42 @@
     "embedding_dim": 768,
     "content_bytes": 13,
     "seed": 6853252471773855745,
+    "hnsw_m": 8,
+    "hnsw_ef_construction": 32,
+    "hnsw_ef_search": 512,
     "scale": "10k",
     "item_count": 10000,
-    "query_count": 30,
-    "quality_query_count": 10,
-    "tier_repetition_count": 30,
-    "command": "target/release/record_perf --tiers 1k,10k,100k --queries 30 --quality-tiers 10k,100k --quality-queries 10 --tier-breakdown --tier-repetitions 30 --output-dir benchmarks/results/perf --omit-1m 1M local run omitted; immediate-durability ingest exceeded the available session budget",
-    "timestamp_utc": "2026-07-02T04:36:06.246125Z"
+    "query_count": 10,
+    "quality_query_count": 5,
+    "tier_repetition_count": 3,
+    "command": "target/release/record_perf --tiers 1k,10k,100k --queries 10 --quality-tiers 10k,100k --quality-queries 5 --tier-breakdown --tier-repetitions 3 --output-dir benchmarks/results/perf --omit-1m 1M local run omitted; immediate-durability ingest exceeded the available session budget --hnsw-m 8 --hnsw-ef-construction 32 --hnsw-ef-search 512",
+    "timestamp_utc": "2026-07-02T08:19:22.301309Z"
   },
   "results": {
+    "write_latency_ns": {
+      "p50": 9779500,
+      "p95": 12235833,
+      "p99": 12235833
+    },
     "recall_latency_ns": {
-      "p50": 68170000,
-      "p95": 81952916,
-      "p99": 82967875
+      "p50": 179513791,
+      "p95": 333859417,
+      "p99": 333859417
     },
-    "hnsw_recall_at_10": 0.45,
+    "ingest_items_per_sec": 62.91387824378452,
+    "post_write_available": true,
+    "post_write_recall_latency_ns": {
+      "p50": 173106125,
+      "p95": 652777750,
+      "p99": 652777750
+    },
+    "hnsw_recall_at_10": 0.56,
     "tier_latency_ns": {
-      "hot": 64853417,
-      "warm": 64006417,
-      "cold": 65491625
+      "hot": 130999167,
+      "warm": 142667208,
+      "cold": 138800459
     },
-    "resident_memory_bytes": 667992064,
+    "resident_memory_bytes": 145195008,
     "omitted": null
   }
 }

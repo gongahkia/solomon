@@ -1,6 +1,6 @@
 {
   "manifest": {
-    "commit": "cd2d3c616792de605b5c2093a6ca6e4d31026727",
+    "commit": "fd2e39e8fcbbc2b1cea81333714e8df059a91378",
     "rustc": "rustc 1.93.0 (254b59607 2026-01-19)",
     "os": "Darwin Gabriels-MacBook-Air.local 25.5.0 Darwin Kernel Version 25.5.0: Mon Apr 27 20:41:19 PDT 2026; root:xnu-12377.121.6~2/RELEASE_ARM64_T8122 arm64",
     "cpu": "Apple M3",
@@ -8,16 +8,23 @@
     "embedding_dim": 768,
     "content_bytes": 13,
     "seed": 6853252471773855745,
+    "hnsw_m": 8,
+    "hnsw_ef_construction": 32,
+    "hnsw_ef_search": 512,
     "scale": "1m",
     "item_count": 1000000,
-    "query_count": 30,
+    "query_count": 10,
     "quality_query_count": 0,
     "tier_repetition_count": 0,
-    "command": "target/release/record_perf --tiers 1k,10k,100k --queries 30 --quality-tiers 10k,100k --quality-queries 10 --tier-breakdown --tier-repetitions 30 --output-dir benchmarks/results/perf --omit-1m 1M local run omitted; immediate-durability ingest exceeded the available session budget",
-    "timestamp_utc": "2026-07-02T04:43:19.090112Z"
+    "command": "target/release/record_perf --tiers 1k,10k,100k --queries 10 --quality-tiers 10k,100k --quality-queries 5 --tier-breakdown --tier-repetitions 3 --output-dir benchmarks/results/perf --omit-1m 1M local run omitted; immediate-durability ingest exceeded the available session budget --hnsw-m 8 --hnsw-ef-construction 32 --hnsw-ef-search 512",
+    "timestamp_utc": "2026-07-02T08:34:37.113133Z"
   },
   "results": {
+    "write_latency_ns": null,
     "recall_latency_ns": null,
+    "ingest_items_per_sec": null,
+    "post_write_available": null,
+    "post_write_recall_latency_ns": null,
     "hnsw_recall_at_10": null,
     "tier_latency_ns": null,
     "resident_memory_bytes": null,

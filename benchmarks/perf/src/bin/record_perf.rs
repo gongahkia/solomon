@@ -4,6 +4,7 @@
 #![allow(missing_docs)]
 
 use serde::Serialize;
+use shibahama_core::vector::HnswVectorParams;
 use shibahama_perf::harness::{
     BenchResult, BenchStore, DEFAULT_SEED, EMBEDDING_DIMENSIONS, TOP_K, TierLatencyBreakdown,
     generated_item,
@@ -18,6 +19,8 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 const CONTENT_BYTES: usize = "item_00000000".len();
+const HNSW_RECALL_TARGET: f64 = 0.90;
+const PERF_SMOKE_DEFAULT_P99_NS: u128 = 500_000_000;
 
 #[derive(Clone, Debug)]
 struct Args {
@@ -30,6 +33,7 @@ struct Args {
     max_recall_p99_ns: Option<u128>,
     output_dir: PathBuf,
     omit_1m: Option<String>,
+    hnsw_params: HnswVectorParams,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -83,6 +87,9 @@ struct Manifest {
     embedding_dim: usize,
     content_bytes: usize,
     seed: u64,
+    hnsw_m: usize,
+    hnsw_ef_construction: usize,
+    hnsw_ef_search: usize,
     scale: String,
     item_count: usize,
     query_count: usize,
@@ -94,7 +101,11 @@ struct Manifest {
 
 #[derive(Debug, Serialize)]
 struct PerfResults {
+    write_latency_ns: Option<LatencyStats>,
     recall_latency_ns: Option<LatencyStats>,
+    ingest_items_per_sec: Option<f64>,
+    post_write_available: Option<bool>,
+    post_write_recall_latency_ns: Option<LatencyStats>,
     hnsw_recall_at_10: Option<f64>,
     tier_latency_ns: Option<TierLatencyNs>,
     resident_memory_bytes: Option<u64>,
@@ -128,12 +139,13 @@ impl From<TierLatencyBreakdown> for TierLatencyNs {
 fn main() -> BenchResult<()> {
     let args = parse_args()?;
     fs::create_dir_all(&args.output_dir)?;
+    let mut artifacts = Vec::new();
 
     for tier in &args.tiers {
         let tier = *tier;
         let artifact = if tier == ScaleTier::ONE_M {
             if let Some(reason) = &args.omit_1m {
-                omitted_artifact(tier, args.queries, reason.clone())?
+                omitted_artifact(tier, args.queries, args.hnsw_params, reason.clone())?
             } else {
                 measure_tier(tier, &args)?
             }
@@ -143,14 +155,23 @@ fn main() -> BenchResult<()> {
 
         write_artifacts(&args.output_dir, &artifact)?;
         enforce_recall_p99_threshold(&artifact, args.max_recall_p99_ns)?;
+        artifacts.push(artifact);
     }
 
-    if let Some(reason) = args.omit_1m
+    if let Some(reason) = &args.omit_1m
         && !args.tiers.contains(&ScaleTier::ONE_M)
     {
-        let artifact = omitted_artifact(ScaleTier::ONE_M, args.queries, reason)?;
+        let artifact = omitted_artifact(
+            ScaleTier::ONE_M,
+            args.queries,
+            args.hnsw_params,
+            reason.clone(),
+        )?;
         write_artifacts(&args.output_dir, &artifact)?;
+        artifacts.push(artifact);
     }
+
+    write_summary(&args.output_dir, &artifacts, &args)?;
 
     Ok(())
 }
@@ -165,6 +186,7 @@ fn parse_args() -> BenchResult<Args> {
     let mut max_recall_p99_ns = None;
     let mut output_dir = PathBuf::from("benchmarks/results/perf");
     let mut omit_1m = None;
+    let mut hnsw_params = HnswVectorParams::default();
     let mut raw_args = env::args().skip(1);
 
     while let Some(arg) = raw_args.next() {
@@ -208,6 +230,16 @@ fn parse_args() -> BenchResult<Args> {
             "--omit-1m" => {
                 omit_1m = Some(next_arg(&mut raw_args, "--omit-1m")?);
             }
+            "--hnsw-m" => {
+                hnsw_params.m = parse_nonzero_usize(&mut raw_args, "--hnsw-m")?;
+            }
+            "--hnsw-ef-construction" => {
+                hnsw_params.ef_construction =
+                    parse_nonzero_usize(&mut raw_args, "--hnsw-ef-construction")?;
+            }
+            "--hnsw-ef-search" => {
+                hnsw_params.ef_search = parse_nonzero_usize(&mut raw_args, "--hnsw-ef-search")?;
+            }
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -244,7 +276,21 @@ fn parse_args() -> BenchResult<Args> {
         max_recall_p99_ns,
         output_dir,
         omit_1m,
+        hnsw_params,
     })
+}
+
+fn parse_nonzero_usize(
+    raw_args: &mut impl Iterator<Item = String>,
+    option: &'static str,
+) -> BenchResult<usize> {
+    let value = next_arg(raw_args, option)?.parse::<usize>()?;
+
+    if value == 0 {
+        return Err(invalid_input(format!("{option} must be greater than zero")));
+    }
+
+    Ok(value)
 }
 
 fn next_arg(
@@ -258,18 +304,15 @@ fn next_arg(
 
 fn print_help() {
     eprintln!(
-        "usage: record_perf --tiers 1k,10k,100k --queries 30 --output-dir benchmarks/results/perf [--max-recall-p99-ns NS] [--omit-1m REASON]"
+        "usage: record_perf --tiers 1k,10k,100k --queries 30 --output-dir benchmarks/results/perf [--max-recall-p99-ns NS] [--omit-1m REASON] [--hnsw-m N] [--hnsw-ef-construction N] [--hnsw-ef-search N]"
     );
 }
 
 fn measure_tier(tier: ScaleTier, args: &Args) -> BenchResult<PerfArtifact> {
     let measure_quality = args.quality_tiers.contains(&tier);
     let needs_ids = measure_quality || args.tier_breakdown;
-    let store = if needs_ids {
-        BenchStore::populated_for_quality(tier.items)?
-    } else {
-        BenchStore::populated(tier.items)?
-    };
+    let (mut store, ingest_items_per_sec) =
+        BenchStore::populated_by_ingest_with_params(tier.items, needs_ids, args.hnsw_params)?;
     let resident_memory_bytes = current_rss_bytes();
     let mut latencies = Vec::with_capacity(args.queries);
 
@@ -300,6 +343,16 @@ fn measure_tier(tier: ScaleTier, args: &Args) -> BenchResult<PerfArtifact> {
     } else {
         None
     };
+    let write_latency_ns = measure_write_latency(
+        &mut store,
+        tier.items.saturating_add(args.queries),
+        args.queries,
+    )?;
+    let (post_write_available, post_write_recall_latency_ns) = measure_post_write_availability(
+        &mut store,
+        tier.items.saturating_add(args.queries.saturating_mul(2)),
+        args.queries,
+    )?;
 
     Ok(PerfArtifact {
         manifest: manifest(
@@ -307,9 +360,14 @@ fn measure_tier(tier: ScaleTier, args: &Args) -> BenchResult<PerfArtifact> {
             args.queries,
             args.quality_queries,
             args.tier_repetitions,
+            args.hnsw_params,
         )?,
         results: PerfResults {
+            write_latency_ns: Some(write_latency_ns),
             recall_latency_ns: Some(latency_stats(&mut latencies)),
+            ingest_items_per_sec: Some(ingest_items_per_sec),
+            post_write_available: Some(post_write_available),
+            post_write_recall_latency_ns: Some(post_write_recall_latency_ns),
             hnsw_recall_at_10,
             tier_latency_ns,
             resident_memory_bytes,
@@ -318,11 +376,20 @@ fn measure_tier(tier: ScaleTier, args: &Args) -> BenchResult<PerfArtifact> {
     })
 }
 
-fn omitted_artifact(tier: ScaleTier, queries: usize, reason: String) -> BenchResult<PerfArtifact> {
+fn omitted_artifact(
+    tier: ScaleTier,
+    queries: usize,
+    hnsw_params: HnswVectorParams,
+    reason: String,
+) -> BenchResult<PerfArtifact> {
     Ok(PerfArtifact {
-        manifest: manifest(tier, queries, 0, 0)?,
+        manifest: manifest(tier, queries, 0, 0, hnsw_params)?,
         results: PerfResults {
+            write_latency_ns: None,
             recall_latency_ns: None,
+            ingest_items_per_sec: None,
+            post_write_available: None,
+            post_write_recall_latency_ns: None,
             hnsw_recall_at_10: None,
             tier_latency_ns: None,
             resident_memory_bytes: None,
@@ -331,11 +398,55 @@ fn omitted_artifact(tier: ScaleTier, queries: usize, reason: String) -> BenchRes
     })
 }
 
+fn measure_write_latency(
+    store: &mut BenchStore,
+    start_index: usize,
+    count: usize,
+) -> BenchResult<LatencyStats> {
+    let mut latencies = Vec::with_capacity(count);
+
+    for offset in 0..count {
+        let source_index = start_index.saturating_add(offset);
+        let item = generated_item(source_index, DEFAULT_SEED);
+        let started_at = Instant::now();
+        let written = store.write_generated(source_index, &item)?;
+
+        if written.content != item.content {
+            return Err(invalid_input(format!(
+                "write returned mismatched content for index {source_index}"
+            )));
+        }
+
+        latencies.push(started_at.elapsed().as_nanos());
+    }
+
+    Ok(latency_stats(&mut latencies))
+}
+
+fn measure_post_write_availability(
+    store: &mut BenchStore,
+    start_index: usize,
+    count: usize,
+) -> BenchResult<(bool, LatencyStats)> {
+    let mut available = true;
+    let mut latencies = Vec::with_capacity(count);
+
+    for offset in 0..count {
+        let result = store.post_write_availability(start_index.saturating_add(offset))?;
+
+        available &= result.available;
+        latencies.push(result.recall_latency.as_nanos());
+    }
+
+    Ok((available, latency_stats(&mut latencies)))
+}
+
 fn manifest(
     tier: ScaleTier,
     queries: usize,
     quality_queries: usize,
     tier_repetitions: usize,
+    hnsw_params: HnswVectorParams,
 ) -> BenchResult<Manifest> {
     Ok(Manifest {
         commit: command_output("git", &["rev-parse", "HEAD"])?,
@@ -346,6 +457,9 @@ fn manifest(
         embedding_dim: EMBEDDING_DIMENSIONS,
         content_bytes: CONTENT_BYTES,
         seed: DEFAULT_SEED,
+        hnsw_m: hnsw_params.m,
+        hnsw_ef_construction: hnsw_params.ef_construction,
+        hnsw_ef_search: hnsw_params.ef_search,
         scale: tier.label.to_owned(),
         item_count: tier.items,
         query_count: queries,
@@ -409,50 +523,181 @@ fn enforce_recall_p99_threshold(
 }
 
 fn markdown_table(artifact: &PerfArtifact) -> String {
-    let (p50, p95, p99, hnsw_recall, hot, warm, cold, rss, status) =
-        if let Some(latency) = artifact.results.recall_latency_ns {
-            let tier_latency = artifact.results.tier_latency_ns;
-            (
-                latency.p50.to_string(),
-                latency.p95.to_string(),
-                latency.p99.to_string(),
-                artifact
-                    .results
-                    .hnsw_recall_at_10
-                    .map_or_else(|| "n/a".to_owned(), |value| format!("{value:.4}")),
-                tier_latency.map_or_else(|| "n/a".to_owned(), |value| value.hot.to_string()),
-                tier_latency.map_or_else(|| "n/a".to_owned(), |value| value.warm.to_string()),
-                tier_latency.map_or_else(|| "n/a".to_owned(), |value| value.cold.to_string()),
-                artifact
-                    .results
-                    .resident_memory_bytes
-                    .map_or_else(|| "n/a".to_owned(), |bytes| bytes.to_string()),
-                "measured".to_owned(),
-            )
-        } else {
-            (
-                "n/a".to_owned(),
-                "n/a".to_owned(),
-                "n/a".to_owned(),
-                "n/a".to_owned(),
-                "n/a".to_owned(),
-                "n/a".to_owned(),
-                "n/a".to_owned(),
-                "n/a".to_owned(),
-                artifact
-                    .results
-                    .omitted
-                    .clone()
-                    .unwrap_or_else(|| "omitted".to_owned()),
-            )
-        };
+    format!(
+        "# Perf Scale {scale}\n\n{header}\n{separator}\n{row}\n",
+        scale = artifact.manifest.scale,
+        header = markdown_header(),
+        separator = markdown_separator(),
+        row = markdown_row(artifact),
+    )
+}
+
+fn write_summary(output_dir: &Path, artifacts: &[PerfArtifact], args: &Args) -> BenchResult<()> {
+    let mut lines = vec![
+        "# Phase A Perf Results".to_owned(),
+        String::new(),
+        "Generated with:".to_owned(),
+        String::new(),
+        "```sh".to_owned(),
+        env::args().collect::<Vec<_>>().join(" "),
+        "```".to_owned(),
+        String::new(),
+        markdown_header(),
+        markdown_separator(),
+    ];
+
+    lines.extend(artifacts.iter().map(markdown_row));
+    lines.push(String::new());
+    lines.extend(summary_notes(artifacts, args));
+    lines.push(String::new());
+    lines.push(
+        "Each `scale-*.json` carries the commit, rustc version, OS, CPU, RAM, seed, embedding dimension, HNSW params, exact command, and UTC timestamp."
+            .to_owned(),
+    );
+
+    fs::write(
+        output_dir.join("README.md"),
+        format!("{}\n", lines.join("\n")),
+    )?;
+
+    Ok(())
+}
+
+fn markdown_header() -> String {
+    "| scale | items | queries | write p50 ns | write p95 ns | write p99 ns | recall p50 ns | recall p95 ns | recall p99 ns | ingest items/sec | post-write available | post-write recall p50 ns | post-write recall p95 ns | post-write recall p99 ns | hnsw recall@10 | hot ns | warm ns | cold ns | rss bytes | status |".to_owned()
+}
+
+fn markdown_separator() -> String {
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |".to_owned()
+}
+
+fn markdown_row(artifact: &PerfArtifact) -> String {
+    let (write_p50, write_p95, write_p99) = latency_cells(artifact.results.write_latency_ns);
+    let (recall_p50, recall_p95, recall_p99) = latency_cells(artifact.results.recall_latency_ns);
+    let (post_p50, post_p95, post_p99) =
+        latency_cells(artifact.results.post_write_recall_latency_ns);
+    let tier_latency = artifact.results.tier_latency_ns;
 
     format!(
-        "# Perf Scale {scale}\n\n| scale | items | queries | recall p50 ns | recall p95 ns | recall p99 ns | hnsw recall@10 | hot ns | warm ns | cold ns | rss bytes | status |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n| {scale} | {items} | {queries} | {p50} | {p95} | {p99} | {hnsw_recall} | {hot} | {warm} | {cold} | {rss} | {status} |\n",
+        "| {scale} | {items} | {queries} | {write_p50} | {write_p95} | {write_p99} | {recall_p50} | {recall_p95} | {recall_p99} | {ingest} | {post_available} | {post_p50} | {post_p95} | {post_p99} | {hnsw_recall} | {hot} | {warm} | {cold} | {rss} | {status} |",
         scale = artifact.manifest.scale,
         items = artifact.manifest.item_count,
         queries = artifact.manifest.query_count,
+        ingest = artifact
+            .results
+            .ingest_items_per_sec
+            .map_or_else(|| "n/a".to_owned(), |value| format!("{value:.2}")),
+        post_available = artifact
+            .results
+            .post_write_available
+            .map_or_else(|| "n/a".to_owned(), |value| value.to_string()),
+        hnsw_recall = artifact
+            .results
+            .hnsw_recall_at_10
+            .map_or_else(|| "n/a".to_owned(), |value| format!("{value:.4}")),
+        hot = tier_latency.map_or_else(|| "n/a".to_owned(), |value| value.hot.to_string()),
+        warm = tier_latency.map_or_else(|| "n/a".to_owned(), |value| value.warm.to_string()),
+        cold = tier_latency.map_or_else(|| "n/a".to_owned(), |value| value.cold.to_string()),
+        rss = artifact
+            .results
+            .resident_memory_bytes
+            .map_or_else(|| "n/a".to_owned(), |bytes| bytes.to_string()),
+        status = artifact_status(artifact),
     )
+}
+
+fn latency_cells(stats: Option<LatencyStats>) -> (String, String, String) {
+    stats.map_or_else(
+        || ("n/a".to_owned(), "n/a".to_owned(), "n/a".to_owned()),
+        |value| {
+            (
+                value.p50.to_string(),
+                value.p95.to_string(),
+                value.p99.to_string(),
+            )
+        },
+    )
+}
+
+fn artifact_status(artifact: &PerfArtifact) -> String {
+    artifact
+        .results
+        .omitted
+        .clone()
+        .unwrap_or_else(|| "measured".to_owned())
+}
+
+fn summary_notes(artifacts: &[PerfArtifact], args: &Args) -> Vec<String> {
+    let mut notes = Vec::new();
+    let measured = artifacts
+        .iter()
+        .filter(|artifact| artifact.results.omitted.is_none())
+        .collect::<Vec<_>>();
+
+    if measured.iter().any(|artifact| {
+        artifact
+            .results
+            .recall_latency_ns
+            .is_some_and(|latency| latency.p50 > 1_000_000)
+    }) {
+        notes.push(
+            "These local numbers are first proof artifacts, not a tuned result. They do not show sub-millisecond recall on this machine."
+                .to_owned(),
+        );
+    }
+
+    if measured.iter().any(|artifact| {
+        artifact
+            .results
+            .hnsw_recall_at_10
+            .is_some_and(|value| value < HNSW_RECALL_TARGET)
+    }) {
+        notes.push(format!(
+            "HNSW recall@10 is below the {HNSW_RECALL_TARGET:.3} quality target for at least one measured tier. Treat those rows as tuning failures before using latency as quality-adjusted proof."
+        ));
+    }
+
+    if measured.iter().any(|artifact| {
+        artifact
+            .results
+            .tier_latency_ns
+            .is_some_and(|tier| !(tier.hot <= tier.warm && tier.warm <= tier.cold))
+    }) {
+        notes.push(
+            "The tier breakdown does not currently show hot <= warm <= cold consistently. Treat tier-latency benefit as unproven by these artifacts."
+                .to_owned(),
+        );
+    }
+
+    if measured.iter().all(|artifact| {
+        artifact
+            .results
+            .post_write_available
+            .is_some_and(|available| available)
+    }) {
+        notes.push("Post-write availability is true for every measured tier.".to_owned());
+    } else {
+        notes.push(
+            "At least one measured tier failed post-write availability; investigate before claiming immediate recallability."
+                .to_owned(),
+        );
+    }
+
+    for artifact in artifacts {
+        if let Some(reason) = &artifact.results.omitted {
+            notes.push(format!(
+                "{} local run omitted: {reason}",
+                artifact.manifest.scale
+            ));
+        }
+    }
+
+    let threshold = args.max_recall_p99_ns.unwrap_or(PERF_SMOKE_DEFAULT_P99_NS);
+    notes.push(format!(
+        "CI smoke uses `scripts/ci/perf-smoke.sh`; default gross recall p99 threshold is {PERF_SMOKE_DEFAULT_P99_NS} ns and this run used {threshold} ns when `--max-recall-p99-ns` was set."
+    ));
+
+    notes
 }
 
 fn current_rss_bytes() -> Option<u64> {

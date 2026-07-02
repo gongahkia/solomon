@@ -93,6 +93,27 @@ pub trait VectorIndex {
     fn dimensions(&self) -> usize;
 }
 
+/// HNSW construction and search parameters.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HnswVectorParams {
+    /// Maximum neighbor links per node.
+    pub m: usize,
+    /// Candidate list size used while constructing the index.
+    pub ef_construction: usize,
+    /// Candidate list size used while searching the index.
+    pub ef_search: usize,
+}
+
+impl Default for HnswVectorParams {
+    fn default() -> Self {
+        Self {
+            m: 16,
+            ef_construction: 200,
+            ef_search: 64,
+        }
+    }
+}
+
 /// In-process HNSW vector index.
 pub struct HnswVectorIndex {
     dimensions: usize,
@@ -113,15 +134,21 @@ impl HnswVectorIndex {
     /// Creates an HNSW vector index with a capacity hint.
     #[must_use]
     pub fn with_capacity(dimensions: usize, capacity: usize) -> Self {
+        Self::with_params(dimensions, capacity, HnswVectorParams::default())
+    }
+
+    /// Creates an HNSW vector index with explicit construction and search parameters.
+    #[must_use]
+    pub fn with_params(dimensions: usize, capacity: usize, params: HnswVectorParams) -> Self {
         let index = Builder::new()
-            .m(16)
-            .ef_construction(200)
+            .m(params.m.max(1))
+            .ef_construction(params.ef_construction.max(1))
             .capacity(capacity)
             .build_labeled(Euclidean);
 
         Self {
             dimensions,
-            ef_search: 64,
+            ef_search: params.ef_search.max(1),
             index,
             deleted_slots: HashSet::new(),
             slots_by_id: HashMap::new(),

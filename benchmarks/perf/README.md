@@ -14,18 +14,21 @@ Build without running:
 cargo bench -p shibahama-perf --no-run
 ```
 
-Generate recall-latency/RSS result artifacts for selected scale tiers:
+Generate Phase A result artifacts for selected scale tiers:
 
 ```sh
 cargo run -p shibahama-perf --release --bin record_perf -- \
   --tiers 1k,10k,100k \
-  --queries 30 \
+  --queries 10 \
   --quality-tiers 10k,100k \
-  --quality-queries 10 \
+  --quality-queries 5 \
   --tier-breakdown \
-  --tier-repetitions 30 \
+  --tier-repetitions 3 \
   --output-dir benchmarks/results/perf \
-  --omit-1m "1M local run omitted; immediate-durability ingest exceeded the available session budget"
+  --omit-1m "1M local run omitted; immediate-durability ingest exceeded the available session budget" \
+  --hnsw-m 8 \
+  --hnsw-ef-construction 32 \
+  --hnsw-ef-search 512
 ```
 
 The default local smoke scale is 1,000 synthetic memories, 768-dimensional

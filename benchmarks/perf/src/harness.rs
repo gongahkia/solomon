@@ -12,7 +12,7 @@ use shibahama_core::storage::{
     EventRecord, IngestCredencePolicy, MemoryEvent, MemoryWriteEvent, RedbMemoryStore,
     StoreSnapshot, StoredEmbedding,
 };
-use shibahama_core::vector::{HnswVectorIndex, VectorIndex};
+use shibahama_core::vector::{HnswVectorIndex, HnswVectorParams, VectorIndex};
 use std::collections::BTreeSet;
 use std::io::{Error as IoError, ErrorKind};
 use std::path::PathBuf;
@@ -97,9 +97,18 @@ impl BenchStore {
     ///
     /// Returns an error when the temporary directory or store cannot be created.
     pub fn empty(capacity: usize) -> BenchResult<Self> {
+        Self::empty_with_params(capacity, HnswVectorParams::default())
+    }
+
+    /// Opens an empty benchmark store with explicit HNSW parameters.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the temporary directory or store cannot be created.
+    pub fn empty_with_params(capacity: usize, params: HnswVectorParams) -> BenchResult<Self> {
         let tempdir = TempDir::new()?;
         let path = tempdir.path().join("shibahama-perf.redb");
-        let vector_index = HnswVectorIndex::with_capacity(EMBEDDING_DIMENSIONS, capacity);
+        let vector_index = HnswVectorIndex::with_params(EMBEDDING_DIMENSIONS, capacity, params);
         let engine = Shibahama::open(&path, vector_index)?;
 
         Ok(Self {
@@ -126,6 +135,37 @@ impl BenchStore {
     /// Returns an error when snapshot setup or vector-index hydration fails.
     pub fn populated_for_quality(scale: usize) -> BenchResult<Self> {
         Self::populated_with_quality_ids(scale, true)
+    }
+
+    /// Opens a store populated through the write path and returns ingest throughput.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when setup writes or indexing fail.
+    pub fn populated_by_ingest(scale: usize, keep_quality_ids: bool) -> BenchResult<(Self, f64)> {
+        Self::populated_by_ingest_with_params(scale, keep_quality_ids, HnswVectorParams::default())
+    }
+
+    /// Opens a write-populated store with explicit HNSW parameters and ingest throughput.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when setup writes or indexing fail.
+    pub fn populated_by_ingest_with_params(
+        scale: usize,
+        keep_quality_ids: bool,
+        params: HnswVectorParams,
+    ) -> BenchResult<(Self, f64)> {
+        let mut store = Self::empty_with_params(scale.saturating_add(1024), params)?;
+        let started_at = Instant::now();
+        let quality_ids = store.ingest_range_with_ids(0, scale)?;
+        let elapsed_seconds = started_at.elapsed().as_secs_f64().max(f64::EPSILON);
+
+        if keep_quality_ids {
+            store.quality_ids = Some(quality_ids);
+        }
+
+        Ok((store, scale as f64 / elapsed_seconds))
     }
 
     fn populated_with_quality_ids(scale: usize, keep_quality_ids: bool) -> BenchResult<Self> {
@@ -156,12 +196,29 @@ impl BenchStore {
     ///
     /// Returns an error when a write or vector-index insert fails.
     pub fn ingest_range(&mut self, start_index: usize, count: usize) -> BenchResult<()> {
+        self.ingest_range_with_ids(start_index, count).map(|_| ())
+    }
+
+    /// Writes deterministic items and returns their memory ids.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a write or vector-index insert fails.
+    pub fn ingest_range_with_ids(
+        &mut self,
+        start_index: usize,
+        count: usize,
+    ) -> BenchResult<Vec<MemoryId>> {
+        let mut ids = Vec::with_capacity(count);
+
         for index in start_index..start_index.saturating_add(count) {
             let item = generated_item(index, DEFAULT_SEED);
-            self.write_generated(index, &item)?;
+            let written = self.write_generated(index, &item)?;
+
+            ids.push(written.id);
         }
 
-        Ok(())
+        Ok(ids)
     }
 
     /// Writes one generated item with its embedding.

@@ -69,6 +69,17 @@ pub struct PostWriteAvailability {
     pub recall_latency: StdDuration,
 }
 
+/// Median recall latency by tier in nanoseconds.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TierLatencyBreakdown {
+    /// Hot-tier recall latency.
+    pub hot_ns: u128,
+    /// Warm-tier recall latency.
+    pub warm_ns: u128,
+    /// Cold compacted-content recall latency.
+    pub cold_ns: u128,
+}
+
 /// Temporary benchmark store with a live Shibahama engine.
 pub struct BenchStore {
     _tempdir: TempDir,
@@ -264,6 +275,63 @@ impl BenchStore {
 
         Ok(f64::from(hits) / f64::from(denominator))
     }
+
+    /// Measures median exact-hit recall latency for hot, warm, and compacted cold items.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when this store lacks retained ids, cold compaction fails, or recall misses
+    /// a target item.
+    pub fn tier_latency_breakdown(&self, repetitions: usize) -> BenchResult<TierLatencyBreakdown> {
+        let Some(ids) = &self.quality_ids else {
+            return Err(invalid_input(
+                "quality ids were not retained for this store".to_owned(),
+            ));
+        };
+        let hot = tier_target(ids, Tier::Hot)?;
+        let warm = tier_target(ids, Tier::Warm)?;
+        let cold = tier_target(ids, Tier::Cold)?;
+
+        self.engine.store().compact_cold_item(cold.id)?;
+
+        Ok(TierLatencyBreakdown {
+            hot_ns: self.recall_latency_for_target(hot, repetitions)?,
+            warm_ns: self.recall_latency_for_target(warm, repetitions)?,
+            cold_ns: self.recall_latency_for_target(cold, repetitions)?,
+        })
+    }
+
+    fn recall_latency_for_target(
+        &self,
+        target: TierTarget,
+        repetitions: usize,
+    ) -> BenchResult<u128> {
+        let query = generated_item(target.index, DEFAULT_SEED).vector;
+        let mut latencies = Vec::with_capacity(repetitions);
+
+        for _ in 0..repetitions {
+            let started_at = Instant::now();
+            let candidates = self.recall(&query, TOP_K)?;
+
+            if !candidates.iter().any(|candidate| candidate.id == target.id) {
+                return Err(invalid_input(format!(
+                    "tier recall missed {:?} target {}",
+                    target.tier, target.id
+                )));
+            }
+
+            latencies.push(started_at.elapsed().as_nanos());
+        }
+
+        Ok(median(&mut latencies))
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TierTarget {
+    index: usize,
+    id: MemoryId,
+    tier: Tier,
 }
 
 fn snapshot_for_range(start_index: usize, count: usize) -> (StoreSnapshot, Vec<MemoryId>) {
@@ -339,6 +407,22 @@ fn memory_item_for_generated(source_index: usize, item: &GeneratedItem) -> Memor
     event.into_item_with_policy(IngestCredencePolicy::default())
 }
 
+fn tier_target(ids: &[MemoryId], tier: Tier) -> BenchResult<TierTarget> {
+    for (index, id) in ids.iter().enumerate() {
+        if tier_for_index(index) == tier {
+            return Ok(TierTarget {
+                index,
+                id: *id,
+                tier,
+            });
+        }
+    }
+
+    Err(invalid_input(format!(
+        "no {tier:?} target in generated corpus"
+    )))
+}
+
 /// Generates one deterministic synthetic item.
 #[must_use]
 pub fn generated_item(index: usize, seed: u64) -> GeneratedItem {
@@ -391,6 +475,11 @@ fn squared_distance(left: &[f32], right: &[f32]) -> f32 {
             delta * delta
         })
         .sum()
+}
+
+fn median(values: &mut [u128]) -> u128 {
+    values.sort_unstable();
+    values[values.len() / 2]
 }
 
 fn invalid_input(message: String) -> Box<dyn std::error::Error + Send + Sync> {

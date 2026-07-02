@@ -22,6 +22,8 @@ cargo run -p shibahama-perf --release --bin record_perf -- \
   --queries 30 \
   --quality-tiers 10k,100k \
   --quality-queries 10 \
+  --tier-breakdown \
+  --tier-repetitions 30 \
   --output-dir benchmarks/results/perf \
   --omit-1m "1M local run omitted; immediate-durability ingest exceeded the available session budget"
 ```

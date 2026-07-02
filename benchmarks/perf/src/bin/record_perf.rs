@@ -5,7 +5,8 @@
 
 use serde::Serialize;
 use shibahama_perf::harness::{
-    BenchResult, BenchStore, DEFAULT_SEED, EMBEDDING_DIMENSIONS, TOP_K, generated_item,
+    BenchResult, BenchStore, DEFAULT_SEED, EMBEDDING_DIMENSIONS, TOP_K, TierLatencyBreakdown,
+    generated_item,
 };
 use std::env;
 use std::fs;
@@ -24,6 +25,8 @@ struct Args {
     queries: usize,
     quality_tiers: Vec<ScaleTier>,
     quality_queries: usize,
+    tier_breakdown: bool,
+    tier_repetitions: usize,
     output_dir: PathBuf,
     omit_1m: Option<String>,
 }
@@ -83,6 +86,7 @@ struct Manifest {
     item_count: usize,
     query_count: usize,
     quality_query_count: usize,
+    tier_repetition_count: usize,
     command: String,
     timestamp_utc: String,
 }
@@ -91,6 +95,7 @@ struct Manifest {
 struct PerfResults {
     recall_latency_ns: Option<LatencyStats>,
     hnsw_recall_at_10: Option<f64>,
+    tier_latency_ns: Option<TierLatencyNs>,
     resident_memory_bytes: Option<u64>,
     omitted: Option<String>,
 }
@@ -100,6 +105,23 @@ struct LatencyStats {
     p50: u128,
     p95: u128,
     p99: u128,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+struct TierLatencyNs {
+    hot: u128,
+    warm: u128,
+    cold: u128,
+}
+
+impl From<TierLatencyBreakdown> for TierLatencyNs {
+    fn from(value: TierLatencyBreakdown) -> Self {
+        Self {
+            hot: value.hot_ns,
+            warm: value.warm_ns,
+            cold: value.cold_ns,
+        }
+    }
 }
 
 fn main() -> BenchResult<()> {
@@ -136,6 +158,8 @@ fn parse_args() -> BenchResult<Args> {
     let mut queries = 30_usize;
     let mut quality_tiers = Vec::new();
     let mut quality_queries = 10_usize;
+    let mut tier_breakdown = false;
+    let mut tier_repetitions = 30_usize;
     let mut output_dir = PathBuf::from("benchmarks/results/perf");
     let mut omit_1m = None;
     let mut raw_args = env::args().skip(1);
@@ -172,6 +196,15 @@ fn parse_args() -> BenchResult<Args> {
                 })?;
                 quality_queries = value.parse()?;
             }
+            "--tier-breakdown" => {
+                tier_breakdown = true;
+            }
+            "--tier-repetitions" => {
+                let value = raw_args.next().ok_or_else(|| {
+                    invalid_input("--tier-repetitions requires a value".to_owned())
+                })?;
+                tier_repetitions = value.parse()?;
+            }
             "--output-dir" => {
                 let value = raw_args
                     .next()
@@ -205,11 +238,19 @@ fn parse_args() -> BenchResult<Args> {
         ));
     }
 
+    if tier_repetitions == 0 {
+        return Err(invalid_input(
+            "--tier-repetitions must be greater than zero".to_owned(),
+        ));
+    }
+
     Ok(Args {
         tiers,
         queries,
         quality_tiers,
         quality_queries,
+        tier_breakdown,
+        tier_repetitions,
         output_dir,
         omit_1m,
     })
@@ -223,7 +264,8 @@ fn print_help() {
 
 fn measure_tier(tier: ScaleTier, args: &Args) -> BenchResult<PerfArtifact> {
     let measure_quality = args.quality_tiers.contains(&tier);
-    let store = if measure_quality {
+    let needs_ids = measure_quality || args.tier_breakdown;
+    let store = if needs_ids {
         BenchStore::populated_for_quality(tier.items)?
     } else {
         BenchStore::populated(tier.items)?
@@ -251,12 +293,25 @@ fn measure_tier(tier: ScaleTier, args: &Args) -> BenchResult<PerfArtifact> {
     } else {
         None
     };
+    let tier_latency_ns = if args.tier_breakdown {
+        Some(TierLatencyNs::from(
+            store.tier_latency_breakdown(args.tier_repetitions)?,
+        ))
+    } else {
+        None
+    };
 
     Ok(PerfArtifact {
-        manifest: manifest(tier, args.queries, args.quality_queries)?,
+        manifest: manifest(
+            tier,
+            args.queries,
+            args.quality_queries,
+            args.tier_repetitions,
+        )?,
         results: PerfResults {
             recall_latency_ns: Some(latency_stats(&mut latencies)),
             hnsw_recall_at_10,
+            tier_latency_ns,
             resident_memory_bytes,
             omitted: None,
         },
@@ -265,17 +320,23 @@ fn measure_tier(tier: ScaleTier, args: &Args) -> BenchResult<PerfArtifact> {
 
 fn omitted_artifact(tier: ScaleTier, queries: usize, reason: String) -> BenchResult<PerfArtifact> {
     Ok(PerfArtifact {
-        manifest: manifest(tier, queries, 0)?,
+        manifest: manifest(tier, queries, 0, 0)?,
         results: PerfResults {
             recall_latency_ns: None,
             hnsw_recall_at_10: None,
+            tier_latency_ns: None,
             resident_memory_bytes: None,
             omitted: Some(reason),
         },
     })
 }
 
-fn manifest(tier: ScaleTier, queries: usize, quality_queries: usize) -> BenchResult<Manifest> {
+fn manifest(
+    tier: ScaleTier,
+    queries: usize,
+    quality_queries: usize,
+    tier_repetitions: usize,
+) -> BenchResult<Manifest> {
     Ok(Manifest {
         commit: command_output("git", &["rev-parse", "HEAD"])?,
         rustc: command_output("rustc", &["--version"])?,
@@ -289,6 +350,7 @@ fn manifest(tier: ScaleTier, queries: usize, quality_queries: usize) -> BenchRes
         item_count: tier.items,
         query_count: queries,
         quality_query_count: quality_queries,
+        tier_repetition_count: tier_repetitions,
         command: env::args().collect::<Vec<_>>().join(" "),
         timestamp_utc: OffsetDateTime::now_utc().format(&Rfc3339)?,
     })
@@ -326,8 +388,9 @@ fn write_artifacts(output_dir: &Path, artifact: &PerfArtifact) -> BenchResult<()
 }
 
 fn markdown_table(artifact: &PerfArtifact) -> String {
-    let (p50, p95, p99, hnsw_recall, rss, status) =
+    let (p50, p95, p99, hnsw_recall, hot, warm, cold, rss, status) =
         if let Some(latency) = artifact.results.recall_latency_ns {
+            let tier_latency = artifact.results.tier_latency_ns;
             (
                 latency.p50.to_string(),
                 latency.p95.to_string(),
@@ -336,6 +399,9 @@ fn markdown_table(artifact: &PerfArtifact) -> String {
                     .results
                     .hnsw_recall_at_10
                     .map_or_else(|| "n/a".to_owned(), |value| format!("{value:.4}")),
+                tier_latency.map_or_else(|| "n/a".to_owned(), |value| value.hot.to_string()),
+                tier_latency.map_or_else(|| "n/a".to_owned(), |value| value.warm.to_string()),
+                tier_latency.map_or_else(|| "n/a".to_owned(), |value| value.cold.to_string()),
                 artifact
                     .results
                     .resident_memory_bytes
@@ -344,6 +410,9 @@ fn markdown_table(artifact: &PerfArtifact) -> String {
             )
         } else {
             (
+                "n/a".to_owned(),
+                "n/a".to_owned(),
+                "n/a".to_owned(),
                 "n/a".to_owned(),
                 "n/a".to_owned(),
                 "n/a".to_owned(),
@@ -358,7 +427,7 @@ fn markdown_table(artifact: &PerfArtifact) -> String {
         };
 
     format!(
-        "# Perf Scale {scale}\n\n| scale | items | queries | recall p50 ns | recall p95 ns | recall p99 ns | hnsw recall@10 | rss bytes | status |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n| {scale} | {items} | {queries} | {p50} | {p95} | {p99} | {hnsw_recall} | {rss} | {status} |\n",
+        "# Perf Scale {scale}\n\n| scale | items | queries | recall p50 ns | recall p95 ns | recall p99 ns | hnsw recall@10 | hot ns | warm ns | cold ns | rss bytes | status |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n| {scale} | {items} | {queries} | {p50} | {p95} | {p99} | {hnsw_recall} | {hot} | {warm} | {cold} | {rss} | {status} |\n",
         scale = artifact.manifest.scale,
         items = artifact.manifest.item_count,
         queries = artifact.manifest.query_count,

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -362,6 +363,8 @@ class Mem0OssExactAdapter:
     tokenizer = "whitespace"
 
     def __init__(self, tmpdir: Path) -> None:
+        os.environ["MEM0_DIR"] = str(tmpdir / "mem0-home")
+        os.environ["MEM0_TELEMETRY"] = "False"
         from mem0 import Memory
         import mem0
 

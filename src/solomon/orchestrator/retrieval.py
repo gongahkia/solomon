@@ -91,6 +91,9 @@ class SQLiteRetrievalIndex:
                 self._conn.execute("ALTER TABLE retrieval_index ADD COLUMN vector_json TEXT NOT NULL DEFAULT '[]'")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_retrieval_ref ON retrieval_index(embedding_ref)")
 
+    def close(self) -> None:
+        self._conn.close()
+
     def upsert_item(self, item: KnowledgeItem, *, indexed_at: datetime | None = None) -> KnowledgeItem:
         from solomon.currency.models import now_utc
 
@@ -187,6 +190,8 @@ class RetrievalIndexProtocol(Protocol):
     def embedding_refs(self, item_ids: list[str]) -> dict[str, str]: ...
 
     def search(self, query: str, *, limit: int = 20) -> list[IndexedHit]: ...
+
+    def close(self) -> None: ...
 
 
 @dataclass(frozen=True)

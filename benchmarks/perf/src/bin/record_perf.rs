@@ -27,6 +27,7 @@ struct Args {
     quality_queries: usize,
     tier_breakdown: bool,
     tier_repetitions: usize,
+    max_recall_p99_ns: Option<u128>,
     output_dir: PathBuf,
     omit_1m: Option<String>,
 }
@@ -141,6 +142,7 @@ fn main() -> BenchResult<()> {
         };
 
         write_artifacts(&args.output_dir, &artifact)?;
+        enforce_recall_p99_threshold(&artifact, args.max_recall_p99_ns)?;
     }
 
     if let Some(reason) = args.omit_1m
@@ -160,6 +162,7 @@ fn parse_args() -> BenchResult<Args> {
     let mut quality_queries = 10_usize;
     let mut tier_breakdown = false;
     let mut tier_repetitions = 30_usize;
+    let mut max_recall_p99_ns = None;
     let mut output_dir = PathBuf::from("benchmarks/results/perf");
     let mut omit_1m = None;
     let mut raw_args = env::args().skip(1);
@@ -167,56 +170,43 @@ fn parse_args() -> BenchResult<Args> {
     while let Some(arg) = raw_args.next() {
         match arg.as_str() {
             "--tiers" => {
-                let value = raw_args.next().ok_or_else(|| {
-                    invalid_input("--tiers requires a comma-separated value".to_owned())
-                })?;
+                let value = next_arg(&mut raw_args, "--tiers")?;
                 tiers = value
                     .split(',')
                     .map(ScaleTier::parse)
                     .collect::<BenchResult<Vec<_>>>()?;
             }
             "--queries" => {
-                let value = raw_args
-                    .next()
-                    .ok_or_else(|| invalid_input("--queries requires a value".to_owned()))?;
+                let value = next_arg(&mut raw_args, "--queries")?;
                 queries = value.parse()?;
             }
             "--quality-tiers" => {
-                let value = raw_args.next().ok_or_else(|| {
-                    invalid_input("--quality-tiers requires a comma-separated value".to_owned())
-                })?;
+                let value = next_arg(&mut raw_args, "--quality-tiers")?;
                 quality_tiers = value
                     .split(',')
                     .map(ScaleTier::parse)
                     .collect::<BenchResult<Vec<_>>>()?;
             }
             "--quality-queries" => {
-                let value = raw_args.next().ok_or_else(|| {
-                    invalid_input("--quality-queries requires a value".to_owned())
-                })?;
+                let value = next_arg(&mut raw_args, "--quality-queries")?;
                 quality_queries = value.parse()?;
             }
             "--tier-breakdown" => {
                 tier_breakdown = true;
             }
             "--tier-repetitions" => {
-                let value = raw_args.next().ok_or_else(|| {
-                    invalid_input("--tier-repetitions requires a value".to_owned())
-                })?;
+                let value = next_arg(&mut raw_args, "--tier-repetitions")?;
                 tier_repetitions = value.parse()?;
             }
+            "--max-recall-p99-ns" => {
+                let value = next_arg(&mut raw_args, "--max-recall-p99-ns")?;
+                max_recall_p99_ns = Some(value.parse()?);
+            }
             "--output-dir" => {
-                let value = raw_args
-                    .next()
-                    .ok_or_else(|| invalid_input("--output-dir requires a value".to_owned()))?;
-                output_dir = PathBuf::from(value);
+                output_dir = PathBuf::from(next_arg(&mut raw_args, "--output-dir")?);
             }
             "--omit-1m" => {
-                omit_1m = Some(
-                    raw_args
-                        .next()
-                        .ok_or_else(|| invalid_input("--omit-1m requires a reason".to_owned()))?,
-                );
+                omit_1m = Some(next_arg(&mut raw_args, "--omit-1m")?);
             }
             "--help" | "-h" => {
                 print_help();
@@ -251,14 +241,24 @@ fn parse_args() -> BenchResult<Args> {
         quality_queries,
         tier_breakdown,
         tier_repetitions,
+        max_recall_p99_ns,
         output_dir,
         omit_1m,
     })
 }
 
+fn next_arg(
+    raw_args: &mut impl Iterator<Item = String>,
+    option: &'static str,
+) -> BenchResult<String> {
+    raw_args
+        .next()
+        .ok_or_else(|| invalid_input(format!("{option} requires a value")))
+}
+
 fn print_help() {
     eprintln!(
-        "usage: record_perf --tiers 1k,10k,100k --queries 30 --output-dir benchmarks/results/perf [--omit-1m REASON]"
+        "usage: record_perf --tiers 1k,10k,100k --queries 30 --output-dir benchmarks/results/perf [--max-recall-p99-ns NS] [--omit-1m REASON]"
     );
 }
 
@@ -383,6 +383,27 @@ fn write_artifacts(output_dir: &Path, artifact: &PerfArtifact) -> BenchResult<()
 
     fs::write(json_path, format!("{json}\n"))?;
     fs::write(md_path, markdown_table(artifact))?;
+
+    Ok(())
+}
+
+fn enforce_recall_p99_threshold(
+    artifact: &PerfArtifact,
+    threshold_ns: Option<u128>,
+) -> BenchResult<()> {
+    let Some(threshold_ns) = threshold_ns else {
+        return Ok(());
+    };
+    let Some(latency) = artifact.results.recall_latency_ns else {
+        return Ok(());
+    };
+
+    if latency.p99 > threshold_ns {
+        return Err(invalid_input(format!(
+            "recall p99 {} ns exceeded threshold {} ns for tier {}",
+            latency.p99, threshold_ns, artifact.manifest.scale
+        )));
+    }
 
     Ok(())
 }

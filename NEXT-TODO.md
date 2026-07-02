@@ -68,9 +68,6 @@ agents specifically, **write-then-immediately-recallable at sub-millisecond loca
 latency** is the property they need — a coding agent that just learned a fact
 cannot wait for background graph processing. Make that property a number.
 
-27. [ ] (P3) Add a CI job that runs a small perf smoke (1k items) and fails on
-    gross regression (e.g. p99 recall > threshold), so performance can't silently
-    rot.
 
 ## Phase B — Differentiated continuity / epistemic-governance eval (THE WEDGE)
 

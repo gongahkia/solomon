@@ -58,3 +58,17 @@ jobs:
 
       - name: Node binding smoke test
         run: scripts/ci/node-binding-smoke.sh
+
+  perf-smoke:
+    name: perf smoke (ubuntu)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run 1k perf smoke
+        run: scripts/ci/perf-smoke.sh

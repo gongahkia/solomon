@@ -172,6 +172,7 @@ Optional server mode:
 - `GET /audit/{id}`
 - `POST /write`
 - `POST /recall`
+- `POST /timeline`
 - `POST /reinforce`
 - `POST /consolidate`
 - `POST /challenge`
@@ -180,6 +181,14 @@ Optional server mode:
 - `POST /pin`
 - `POST /unpin`
 - `GET /why/{id}`
+- `GET /graph`
+- `POST /graph/entities`
+- `GET /graph/entities/{id}`
+- `DELETE /graph/entities/{id}`
+- `POST /graph/relations`
+- `GET /graph/relations/{id}`
+- `DELETE /graph/relations/{id}`
+- `POST /graph/traverse`
 - `GET /tideline/snapshot`
 - `GET /tideline/recording`
 - `GET /tideline/live`

@@ -167,9 +167,10 @@ The Rust core is the semantic source of truth. Other surfaces are adapters:
   optional server mode.
 - The HTTP server is a thin wrapper over the same core API. It currently exposes
   `/healthz`, `/readyz`, `/inspect`, `/events`, `/audit/{memory_id}`, `/write`,
-  `/recall`, `/reinforce`, `/consolidate`, `/challenge`, `/affirm`, `/correct`,
-  `/pin`, `/unpin`, `/why/{memory_id}`, and Tideline snapshot/recording/live
-  endpoints.
+  `/recall`, `/timeline`, `/reinforce`, `/consolidate`, `/challenge`,
+  `/affirm`, `/correct`, `/pin`, `/unpin`, `/why/{memory_id}`, graph snapshot,
+  entity CRUD, relation CRUD, graph traversal, and Tideline
+  snapshot/recording/live endpoints.
 - Server mode uses API-key authorization when configured, validates namespaces,
   prefixes namespace ownership into source refs, enforces a per-namespace memory
   quota, and emits metadata-only request logs.

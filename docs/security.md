@@ -129,7 +129,8 @@ The optional HTTP server is a thin wrapper over the core API. It supports:
 - namespace validation with `x-shibahama-namespace`;
 - per-namespace memory quotas;
 - namespace source-ref prefixes used to filter server recall and Tideline
-  snapshots.
+  snapshots;
+- namespace attributes used to filter server graph rows.
 
 Namespace isolation is implemented as application-level source-ref filtering in
 the current server. It is not a cryptographic tenant boundary. Deployments that

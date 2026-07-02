@@ -14,8 +14,8 @@ use crate::learned_policy::{
     evaluate_offline_policy, plan_contextual_bandit_experiment,
 };
 use crate::model::{
-    AccessOutcome, CredenceTier, HumanSignal, HumanSignalAction, MemoryId, MemoryItem, Provenance,
-    SourceKind, Tier,
+    AccessOutcome, CredenceTier, Entity, EntityId, HumanSignal, HumanSignalAction, MemoryId,
+    MemoryItem, Provenance, Relation, RelationId, SourceKind, Tier,
 };
 use crate::reconstruction::{
     BackgroundReconstructionConfig, CorroborationDecision, CorroborationPolicy,
@@ -31,9 +31,10 @@ use crate::retrieval::{
 };
 use crate::significance::{SignificanceBreakdown, SignificanceConfig};
 use crate::storage::{
-    ConsolidationDecisionRecord, EventRecord, HumanSignalRecord, IngestCredencePolicy,
-    MemoryAuditEntry, MemoryEvent, MemoryWriteEvent, ReconstructionReplacementRecord,
-    RedbMemoryStore, StorageError, TierCapacityConfig,
+    ConsolidationDecisionRecord, EventRecord, GraphSnapshot, GraphTraversalRequest,
+    GraphTraversalResult, HumanSignalRecord, IngestCredencePolicy, MemoryAuditEntry, MemoryEvent,
+    MemoryWriteEvent, ReconstructionReplacementRecord, RedbMemoryStore, StorageError,
+    SubgraphRequest, TierCapacityConfig,
 };
 use crate::vector::{VectorIndex, VectorIndexError};
 use std::collections::BTreeMap;
@@ -1510,6 +1511,79 @@ impl<V: VectorIndex> Shibahama<V> {
         request: &RecallRequest<'_>,
     ) -> Result<RecallStream, ShibahamaError> {
         Ok(RecallStream::new(self.timeline(request)?))
+    }
+
+    /// Stores or replaces a graph entity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the graph entity cannot be persisted.
+    pub fn put_graph_entity(&self, entity: &Entity) -> Result<Entity, ShibahamaError> {
+        self.store.put_entity(entity)?;
+
+        Ok(entity.clone())
+    }
+
+    /// Reads a graph entity by id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph state cannot be read.
+    pub fn graph_entity(&self, id: EntityId) -> Result<Option<Entity>, ShibahamaError> {
+        Ok(self.store.get_entity(id)?)
+    }
+
+    /// Stores or replaces a graph relation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the graph relation cannot be persisted.
+    pub fn put_graph_relation(&self, relation: &Relation) -> Result<Relation, ShibahamaError> {
+        self.store.put_relation(relation)?;
+
+        Ok(relation.clone())
+    }
+
+    /// Reads a graph relation by id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph state cannot be read.
+    pub fn graph_relation(&self, id: RelationId) -> Result<Option<Relation>, ShibahamaError> {
+        Ok(self.store.get_relation(id)?)
+    }
+
+    /// Reconstructs graph state believed at a point in time.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph state cannot be read.
+    pub fn graph_snapshot(&self, as_of: OffsetDateTime) -> Result<GraphSnapshot, ShibahamaError> {
+        Ok(self.store.graph_snapshot(as_of)?)
+    }
+
+    /// Traverses graph relations from a starting entity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph state cannot be read.
+    pub fn traverse_graph(
+        &self,
+        request: &GraphTraversalRequest,
+    ) -> Result<GraphTraversalResult, ShibahamaError> {
+        Ok(self.store.traverse_graph(request)?)
+    }
+
+    /// Extracts a graph slice by entity attribute scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph state cannot be read.
+    pub fn extract_subgraph(
+        &self,
+        request: &SubgraphRequest,
+    ) -> Result<GraphTraversalResult, ShibahamaError> {
+        Ok(self.store.extract_subgraph(request)?)
     }
 
     /// Reinforces a memory with a usage outcome.

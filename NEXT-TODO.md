@@ -121,10 +121,6 @@ The bindings are real (PyO3 / napi-rs) but parity is smoke-level only and the
 binding crates have 0 Rust tests — a reviewer comparing "Python/Node bindings"
 the claim against the tests will find this fast.
 
-37. [ ] (P2) Add the missing HTTP endpoints for a complete surface: a standalone
-    `/timeline` route and graph CRUD, so the server mirrors the full
-    write/recall/why/timeline/audit/graph API rather than most of it
-    (`shibahama-cli/src/main.rs:980-998`).
 38. [ ] (P3) Add a minimal Rust integration test per binding crate so they are not
     at zero coverage.
 

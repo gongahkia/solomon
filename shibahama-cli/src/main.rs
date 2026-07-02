@@ -19,16 +19,20 @@ use shibahama_core::api::{
     Shibahama, WhyTrace, WriteEmbedding,
 };
 use shibahama_core::model::{
-    AccessOutcome, ConsolidationAction, ConsolidationWhy, CredenceTier, HumanSignal,
-    HumanSignalAction, MemoryId, MemoryItem, MemoryKind, Provenance, SourceKind, Tier,
+    AccessOutcome, ConsolidationAction, ConsolidationWhy, CredenceTier, Entity, EntityId,
+    HumanSignal, HumanSignalAction, MemoryId, MemoryItem, MemoryKind, Provenance, Relation,
+    RelationId, SourceKind, TemporalBounds, Tier,
 };
 use shibahama_core::retrieval::{
     RecallCandidate, RecallCandidateCurrency, RecallCandidateSource, RecallRequest,
 };
 use shibahama_core::significance::SignificanceBreakdown;
-use shibahama_core::storage::{EventRecord, MemoryEvent, MemoryWriteEvent, RedbMemoryStore};
+use shibahama_core::storage::{
+    EventRecord, GraphTraversalRequest, GraphTraversalResult, MemoryEvent, MemoryWriteEvent,
+    RedbMemoryStore,
+};
 use shibahama_core::vector::HnswVectorIndex;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::convert::Infallible;
 use std::env;
 use std::error::Error;
@@ -564,6 +568,39 @@ struct TidelineGraphEdgeDto {
     valid_to_unix: Option<i64>,
 }
 
+#[derive(Serialize)]
+struct GraphEntityDto {
+    id: String,
+    entity_type: String,
+    label: String,
+    stable_key: String,
+    attributes: BTreeMap<String, String>,
+    valid_from_unix: i64,
+    valid_to_unix: Option<i64>,
+    ingested_at_unix: i64,
+}
+
+#[derive(Serialize)]
+struct GraphRelationDto {
+    id: String,
+    relation_type: String,
+    from_entity: String,
+    to_entity: String,
+    memory_id: Option<String>,
+    supersedes: Option<String>,
+    attributes: BTreeMap<String, String>,
+    valid_from_unix: i64,
+    valid_to_unix: Option<i64>,
+    ingested_at_unix: i64,
+}
+
+#[derive(Serialize)]
+struct GraphSnapshotDto {
+    as_of_unix: i64,
+    entities: Vec<GraphEntityDto>,
+    relations: Vec<GraphRelationDto>,
+}
+
 #[derive(Clone)]
 struct ServerState {
     engine: Arc<Mutex<Shibahama<HnswVectorIndex>>>,
@@ -605,6 +642,17 @@ struct ServerRecallRequest {
 }
 
 #[derive(Deserialize)]
+struct ServerTimelineRequest {
+    query_vector: Vec<f32>,
+    top_k: Option<usize>,
+    as_of_unix: Option<i64>,
+    raw_query_context: Option<String>,
+    include_cold: Option<bool>,
+    include_instructions: Option<bool>,
+    max_context_tokens: Option<usize>,
+}
+
+#[derive(Deserialize)]
 struct ServerReinforceRequest {
     memory_id: String,
     outcome: Option<String>,
@@ -639,6 +687,50 @@ struct TidelineQuery {
 struct EventsQuery {
     as_of_unix: Option<i64>,
     limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct GraphSnapshotQuery {
+    as_of_unix: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct GraphDeleteQuery {
+    valid_to_unix: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct ServerGraphEntityRequest {
+    id: Option<String>,
+    entity_type: String,
+    label: String,
+    stable_key: String,
+    attributes: Option<BTreeMap<String, String>>,
+    valid_from_unix: Option<i64>,
+    valid_to_unix: Option<i64>,
+    ingested_at_unix: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct ServerGraphRelationRequest {
+    id: Option<String>,
+    relation_type: String,
+    from_entity: String,
+    to_entity: String,
+    memory_id: Option<String>,
+    supersedes: Option<String>,
+    attributes: Option<BTreeMap<String, String>>,
+    valid_from_unix: Option<i64>,
+    valid_to_unix: Option<i64>,
+    ingested_at_unix: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct ServerGraphTraverseRequest {
+    start_entity: String,
+    max_hops: Option<usize>,
+    relation_types: Option<Vec<String>>,
+    as_of_unix: Option<i64>,
 }
 
 #[derive(Debug)]
@@ -983,6 +1075,7 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
         .route("/inspect", get(server_inspect))
         .route("/write", post(server_write))
         .route("/recall", post(server_recall))
+        .route("/timeline", post(server_timeline))
         .route("/reinforce", post(server_reinforce))
         .route("/consolidate", post(server_consolidate))
         .route("/challenge", post(server_challenge))
@@ -993,6 +1086,18 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
         .route("/events", get(server_events))
         .route("/audit/{memory_id}", get(server_audit))
         .route("/why/{memory_id}", get(server_why))
+        .route("/graph", get(server_graph_snapshot))
+        .route("/graph/entities", post(server_put_graph_entity))
+        .route(
+            "/graph/entities/{entity_id}",
+            get(server_get_graph_entity).delete(server_delete_graph_entity),
+        )
+        .route("/graph/relations", post(server_put_graph_relation))
+        .route(
+            "/graph/relations/{relation_id}",
+            get(server_get_graph_relation).delete(server_delete_graph_relation),
+        )
+        .route("/graph/traverse", post(server_graph_traverse))
         .route("/tideline/snapshot", get(server_tideline_snapshot))
         .route("/tideline/recording", get(server_tideline_recording))
         .route("/tideline/live", get(server_tideline_live))
@@ -1136,6 +1241,175 @@ fn optional_time_from_unix(value: Option<i64>) -> Result<Option<OffsetDateTime>,
         .map(OffsetDateTime::from_unix_timestamp)
         .transpose()
         .map_err(ServerError::bad_request)
+}
+
+fn required_time_from_unix(value: i64) -> Result<OffsetDateTime, ServerError> {
+    OffsetDateTime::from_unix_timestamp(value).map_err(ServerError::bad_request)
+}
+
+fn now_or_unix(value: Option<i64>) -> Result<OffsetDateTime, ServerError> {
+    value.map_or_else(
+        || Ok(OffsetDateTime::now_utc()),
+        |unix| OffsetDateTime::from_unix_timestamp(unix).map_err(ServerError::bad_request),
+    )
+}
+
+fn parse_entity_id(value: &str) -> Result<EntityId, ServerError> {
+    Uuid::parse_str(value)
+        .map(EntityId::from)
+        .map_err(ServerError::bad_request)
+}
+
+fn parse_relation_id(value: &str) -> Result<RelationId, ServerError> {
+    Uuid::parse_str(value)
+        .map(RelationId::from)
+        .map_err(ServerError::bad_request)
+}
+
+fn graph_namespace(attributes: &BTreeMap<String, String>) -> Option<&str> {
+    attributes.get("namespace").map(String::as_str)
+}
+
+fn graph_entity_in_namespace(entity: &Entity, namespace: &str) -> bool {
+    graph_namespace(&entity.attributes) == Some(namespace)
+}
+
+fn graph_relation_in_namespace(relation: &Relation, namespace: &str) -> bool {
+    graph_namespace(&relation.attributes) == Some(namespace)
+}
+
+fn namespace_graph_attributes(
+    attributes: Option<BTreeMap<String, String>>,
+    namespace: &str,
+) -> BTreeMap<String, String> {
+    let mut attributes = attributes.unwrap_or_default();
+    attributes.insert("namespace".to_owned(), namespace.to_owned());
+    attributes
+}
+
+fn graph_entity_from_request(
+    body: ServerGraphEntityRequest,
+    namespace: &str,
+) -> Result<Entity, ServerError> {
+    let valid_from = now_or_unix(body.valid_from_unix)?;
+    let ingested_at = body
+        .ingested_at_unix
+        .map_or(Ok(valid_from), required_time_from_unix)?;
+    let mut entity = Entity::new(
+        body.entity_type,
+        body.label,
+        body.stable_key,
+        TemporalBounds {
+            valid_from,
+            valid_to: optional_time_from_unix(body.valid_to_unix)?,
+            ingested_at,
+        },
+    );
+
+    if let Some(id) = body.id {
+        entity.id = parse_entity_id(&id)?;
+    }
+    entity.attributes = namespace_graph_attributes(body.attributes, namespace);
+
+    Ok(entity)
+}
+
+fn graph_relation_from_request(
+    body: ServerGraphRelationRequest,
+    namespace: &str,
+) -> Result<Relation, ServerError> {
+    let valid_from = now_or_unix(body.valid_from_unix)?;
+    let ingested_at = body
+        .ingested_at_unix
+        .map_or(Ok(valid_from), required_time_from_unix)?;
+    let mut relation = Relation::new(
+        body.relation_type,
+        parse_entity_id(&body.from_entity)?,
+        parse_entity_id(&body.to_entity)?,
+        body.memory_id
+            .as_deref()
+            .map(parse_memory_id)
+            .transpose()
+            .map_err(ServerError::bad_request)?,
+        TemporalBounds {
+            valid_from,
+            valid_to: optional_time_from_unix(body.valid_to_unix)?,
+            ingested_at,
+        },
+    );
+
+    if let Some(id) = body.id {
+        relation.id = parse_relation_id(&id)?;
+    }
+    relation.supersedes = body
+        .supersedes
+        .as_deref()
+        .map(parse_relation_id)
+        .transpose()?;
+    relation.attributes = namespace_graph_attributes(body.attributes, namespace);
+
+    Ok(relation)
+}
+
+fn filter_graph_snapshot_for_namespace(
+    snapshot: shibahama_core::storage::GraphSnapshot,
+    namespace: &str,
+) -> GraphSnapshotDto {
+    let entities = snapshot
+        .entities
+        .into_iter()
+        .filter(|entity| graph_entity_in_namespace(entity, namespace))
+        .collect::<Vec<_>>();
+    let entity_ids = entities
+        .iter()
+        .map(|entity| entity.id)
+        .collect::<BTreeSet<_>>();
+    let relations = snapshot
+        .relations
+        .into_iter()
+        .filter(|relation| {
+            graph_relation_in_namespace(relation, namespace)
+                && entity_ids.contains(&relation.from_entity)
+                && entity_ids.contains(&relation.to_entity)
+        })
+        .collect::<Vec<_>>();
+
+    GraphSnapshotDto {
+        as_of_unix: snapshot.as_of.unix_timestamp(),
+        entities: entities.into_iter().map(GraphEntityDto::from).collect(),
+        relations: relations.into_iter().map(GraphRelationDto::from).collect(),
+    }
+}
+
+fn filter_graph_traversal_for_namespace(
+    traversal: GraphTraversalResult,
+    namespace: &str,
+    as_of: OffsetDateTime,
+) -> GraphSnapshotDto {
+    let entities = traversal
+        .entities
+        .into_iter()
+        .filter(|entity| graph_entity_in_namespace(entity, namespace))
+        .collect::<Vec<_>>();
+    let entity_ids = entities
+        .iter()
+        .map(|entity| entity.id)
+        .collect::<BTreeSet<_>>();
+    let relations = traversal
+        .relations
+        .into_iter()
+        .filter(|relation| {
+            graph_relation_in_namespace(relation, namespace)
+                && entity_ids.contains(&relation.from_entity)
+                && entity_ids.contains(&relation.to_entity)
+        })
+        .collect::<Vec<_>>();
+
+    GraphSnapshotDto {
+        as_of_unix: as_of.unix_timestamp(),
+        entities: entities.into_iter().map(GraphEntityDto::from).collect(),
+        relations: relations.into_iter().map(GraphRelationDto::from).collect(),
+    }
 }
 
 fn server_json_result<T>(
@@ -2064,6 +2338,67 @@ async fn server_recall(
     }
 }
 
+async fn server_timeline(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerTimelineRequest>,
+) -> Result<Json<Vec<RecallCandidateDto>>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/timeline")?;
+    let result: Result<(Json<Vec<RecallCandidateDto>>, serde_json::Value), ServerError> = (|| {
+        let requested_top_k = body.top_k.unwrap_or(5);
+        let as_of = time_from_optional_unix(body.as_of_unix).map_err(ServerError::bad_request)?;
+        let namespace_prefix = namespace_source_prefix(&context.namespace);
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let all_memories = engine.memory_items().map_err(ServerError::internal)?;
+        let namespace_memory_count = all_memories
+            .iter()
+            .filter(|item| memory_in_namespace(item, &context.namespace))
+            .count();
+        let search_top_k = all_memories.len().max(requested_top_k);
+        let mut request = RecallRequest::new(&body.query_vector, search_top_k, as_of)
+            .with_source_ref_prefix(&namespace_prefix);
+
+        if let Some(raw_query_context) = body.raw_query_context.as_deref() {
+            request = request.with_raw_query_context(raw_query_context);
+        }
+        if body.include_cold.unwrap_or(false) {
+            request = request.include_cold();
+        }
+        if body.include_instructions.unwrap_or(false) {
+            request = request.include_instructions();
+        }
+        if let Some(max_context_tokens) = body.max_context_tokens {
+            request = request.with_max_context_tokens(max_context_tokens);
+        }
+
+        let mut candidates = engine.timeline(&request).map_err(ServerError::internal)?;
+        candidates.truncate(requested_top_k);
+        let returned = candidates.len();
+        let candidates = candidates
+            .into_iter()
+            .map(RecallCandidateDto::from)
+            .collect::<Vec<_>>();
+
+        Ok((
+            Json(candidates),
+            json!({
+                "request_units": 1,
+                "query_dimensions": body.query_vector.len(),
+                "requested_top_k": requested_top_k,
+                "searched_top_k": search_top_k,
+                "max_context_tokens": body.max_context_tokens,
+                "namespace_memory_count": namespace_memory_count,
+                "returned": returned,
+            }),
+        ))
+    })();
+
+    server_json_result("POST", "/timeline", &context, result)
+}
+
 async fn server_reinforce(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -2382,6 +2717,345 @@ async fn server_why(
             Err(error)
         }
     }
+}
+
+async fn server_graph_snapshot(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Query(query): Query<GraphSnapshotQuery>,
+) -> Result<Json<GraphSnapshotDto>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "GET", "/graph")?;
+    let result: Result<(Json<GraphSnapshotDto>, serde_json::Value), ServerError> = (|| {
+        let as_of = now_or_unix(query.as_of_unix)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let snapshot = filter_graph_snapshot_for_namespace(
+            engine
+                .graph_snapshot(as_of)
+                .map_err(ServerError::internal)?,
+            &context.namespace,
+        );
+        let entity_count = snapshot.entities.len();
+        let relation_count = snapshot.relations.len();
+
+        Ok((
+            Json(snapshot),
+            json!({
+                "request_units": 1,
+                "entities_returned": entity_count,
+                "relations_returned": relation_count,
+            }),
+        ))
+    })();
+
+    server_json_result("GET", "/graph", &context, result)
+}
+
+async fn server_put_graph_entity(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerGraphEntityRequest>,
+) -> Result<Json<GraphEntityDto>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/graph/entities")?;
+    let result: Result<(Json<GraphEntityDto>, serde_json::Value), ServerError> = (|| {
+        let entity = graph_entity_from_request(body, &context.namespace)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        if engine
+            .graph_entity(entity.id)
+            .map_err(ServerError::internal)?
+            .as_ref()
+            .is_some_and(|existing| !graph_entity_in_namespace(existing, &context.namespace))
+        {
+            return Err(ServerError::not_found(format!(
+                "graph entity {} not found in namespace {}",
+                entity.id, context.namespace
+            )));
+        }
+        let entity = engine
+            .put_graph_entity(&entity)
+            .map_err(ServerError::internal)?;
+
+        Ok((
+            Json(GraphEntityDto::from(entity)),
+            json!({ "request_units": 1, "graph_writes": 1 }),
+        ))
+    })();
+
+    server_json_result("POST", "/graph/entities", &context, result)
+}
+
+async fn server_get_graph_entity(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    AxumPath(entity_id): AxumPath<String>,
+) -> Result<Json<Option<GraphEntityDto>>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "GET", "/graph/entities/{entity_id}")?;
+    let result: Result<(Json<Option<GraphEntityDto>>, serde_json::Value), ServerError> = (|| {
+        let id = parse_entity_id(&entity_id)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let entity = engine
+            .graph_entity(id)
+            .map_err(ServerError::internal)?
+            .filter(|entity| graph_entity_in_namespace(entity, &context.namespace))
+            .map(GraphEntityDto::from);
+        let found = entity.is_some();
+
+        Ok((Json(entity), json!({ "request_units": 1, "found": found })))
+    })();
+
+    server_json_result("GET", "/graph/entities/{entity_id}", &context, result)
+}
+
+async fn server_delete_graph_entity(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    AxumPath(entity_id): AxumPath<String>,
+    Query(query): Query<GraphDeleteQuery>,
+) -> Result<Json<Option<GraphEntityDto>>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "DELETE", "/graph/entities/{entity_id}")?;
+    let result: Result<(Json<Option<GraphEntityDto>>, serde_json::Value), ServerError> = (|| {
+        let id = parse_entity_id(&entity_id)?;
+        let valid_to = now_or_unix(query.valid_to_unix)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let entity = engine
+            .graph_entity(id)
+            .map_err(ServerError::internal)?
+            .filter(|entity| graph_entity_in_namespace(entity, &context.namespace))
+            .map(|mut entity| {
+                entity.timestamps = entity.timestamps.closed_at(valid_to);
+                engine
+                    .put_graph_entity(&entity)
+                    .map(GraphEntityDto::from)
+                    .map_err(ServerError::internal)
+            })
+            .transpose()?;
+        let found = entity.is_some();
+
+        Ok((
+            Json(entity),
+            json!({ "request_units": 1, "graph_writes": usize::from(found), "found": found }),
+        ))
+    })();
+
+    server_json_result("DELETE", "/graph/entities/{entity_id}", &context, result)
+}
+
+async fn server_put_graph_relation(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerGraphRelationRequest>,
+) -> Result<Json<GraphRelationDto>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/graph/relations")?;
+    let result: Result<(Json<GraphRelationDto>, serde_json::Value), ServerError> = (|| {
+        let relation = graph_relation_from_request(body, &context.namespace)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        if engine
+            .graph_relation(relation.id)
+            .map_err(ServerError::internal)?
+            .as_ref()
+            .is_some_and(|existing| !graph_relation_in_namespace(existing, &context.namespace))
+        {
+            return Err(ServerError::not_found(format!(
+                "graph relation {} not found in namespace {}",
+                relation.id, context.namespace
+            )));
+        }
+        if let Some(memory_id) = relation.memory_id {
+            let memory_in_scope = engine
+                .memory_items()
+                .map_err(ServerError::internal)?
+                .iter()
+                .any(|item| item.id == memory_id && memory_in_namespace(item, &context.namespace));
+            if !memory_in_scope {
+                return Err(ServerError::not_found(format!(
+                    "memory {memory_id} not found in namespace {}",
+                    context.namespace
+                )));
+            }
+        }
+        if let Some(supersedes) = relation.supersedes {
+            let Some(existing) = engine
+                .graph_relation(supersedes)
+                .map_err(ServerError::internal)?
+            else {
+                return Err(ServerError::bad_request(format!(
+                    "superseded graph relation {supersedes} not found"
+                )));
+            };
+            if !graph_relation_in_namespace(&existing, &context.namespace) {
+                return Err(ServerError::not_found(format!(
+                    "graph relation {supersedes} not found in namespace {}",
+                    context.namespace
+                )));
+            }
+        }
+        for entity_id in [relation.from_entity, relation.to_entity] {
+            let Some(entity) = engine
+                .graph_entity(entity_id)
+                .map_err(ServerError::internal)?
+            else {
+                return Err(ServerError::bad_request(format!(
+                    "graph entity {entity_id} not found"
+                )));
+            };
+            if !graph_entity_in_namespace(&entity, &context.namespace) {
+                return Err(ServerError::not_found(format!(
+                    "graph entity {entity_id} not found in namespace {}",
+                    context.namespace
+                )));
+            }
+        }
+        let relation = engine
+            .put_graph_relation(&relation)
+            .map_err(ServerError::internal)?;
+
+        Ok((
+            Json(GraphRelationDto::from(relation)),
+            json!({ "request_units": 1, "graph_writes": 1 }),
+        ))
+    })();
+
+    server_json_result("POST", "/graph/relations", &context, result)
+}
+
+async fn server_get_graph_relation(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    AxumPath(relation_id): AxumPath<String>,
+) -> Result<Json<Option<GraphRelationDto>>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "GET", "/graph/relations/{relation_id}")?;
+    let result: Result<(Json<Option<GraphRelationDto>>, serde_json::Value), ServerError> = (|| {
+        let id = parse_relation_id(&relation_id)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let relation = engine
+            .graph_relation(id)
+            .map_err(ServerError::internal)?
+            .filter(|relation| graph_relation_in_namespace(relation, &context.namespace))
+            .map(GraphRelationDto::from);
+        let found = relation.is_some();
+
+        Ok((
+            Json(relation),
+            json!({ "request_units": 1, "found": found }),
+        ))
+    })();
+
+    server_json_result("GET", "/graph/relations/{relation_id}", &context, result)
+}
+
+async fn server_delete_graph_relation(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    AxumPath(relation_id): AxumPath<String>,
+    Query(query): Query<GraphDeleteQuery>,
+) -> Result<Json<Option<GraphRelationDto>>, ServerError> {
+    let context =
+        server_context_or_log(&headers, &state, "DELETE", "/graph/relations/{relation_id}")?;
+    let result: Result<(Json<Option<GraphRelationDto>>, serde_json::Value), ServerError> = (|| {
+        let id = parse_relation_id(&relation_id)?;
+        let valid_to = now_or_unix(query.valid_to_unix)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let relation = engine
+            .graph_relation(id)
+            .map_err(ServerError::internal)?
+            .filter(|relation| graph_relation_in_namespace(relation, &context.namespace))
+            .map(|mut relation| {
+                relation.timestamps = relation.timestamps.closed_at(valid_to);
+                engine
+                    .put_graph_relation(&relation)
+                    .map(GraphRelationDto::from)
+                    .map_err(ServerError::internal)
+            })
+            .transpose()?;
+        let found = relation.is_some();
+
+        Ok((
+            Json(relation),
+            json!({ "request_units": 1, "graph_writes": usize::from(found), "found": found }),
+        ))
+    })();
+
+    server_json_result("DELETE", "/graph/relations/{relation_id}", &context, result)
+}
+
+async fn server_graph_traverse(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerGraphTraverseRequest>,
+) -> Result<Json<GraphSnapshotDto>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/graph/traverse")?;
+    let result: Result<(Json<GraphSnapshotDto>, serde_json::Value), ServerError> = (|| {
+        let start_entity = parse_entity_id(&body.start_entity)?;
+        let as_of = body.as_of_unix.map(required_time_from_unix).transpose()?;
+        let traversal_as_of = as_of.unwrap_or_else(OffsetDateTime::now_utc);
+        let mut request = GraphTraversalRequest::new(start_entity, body.max_hops.unwrap_or(1));
+
+        if let Some(relation_types) = body.relation_types {
+            request = request.with_relation_types(relation_types);
+        }
+        if let Some(as_of) = as_of {
+            request = request.as_of(as_of);
+        }
+
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let Some(start) = engine
+            .graph_entity(start_entity)
+            .map_err(ServerError::internal)?
+        else {
+            return Err(ServerError::not_found(format!(
+                "graph entity {start_entity} not found"
+            )));
+        };
+        if !graph_entity_in_namespace(&start, &context.namespace) {
+            return Err(ServerError::not_found(format!(
+                "graph entity {start_entity} not found in namespace {}",
+                context.namespace
+            )));
+        }
+        let traversal = filter_graph_traversal_for_namespace(
+            engine
+                .traverse_graph(&request)
+                .map_err(ServerError::internal)?,
+            &context.namespace,
+            traversal_as_of,
+        );
+        let entity_count = traversal.entities.len();
+        let relation_count = traversal.relations.len();
+
+        Ok((
+            Json(traversal),
+            json!({
+                "request_units": 1,
+                "entities_returned": entity_count,
+                "relations_returned": relation_count,
+            }),
+        ))
+    })();
+
+    server_json_result("POST", "/graph/traverse", &context, result)
 }
 
 async fn server_tideline_snapshot(
@@ -2906,6 +3580,44 @@ impl From<WhyTrace> for WhyTraceDto {
                     )
                 })
                 .collect(),
+        }
+    }
+}
+
+impl From<Entity> for GraphEntityDto {
+    fn from(value: Entity) -> Self {
+        Self {
+            id: value.id.to_string(),
+            entity_type: value.entity_type,
+            label: value.label,
+            stable_key: value.stable_key,
+            attributes: value.attributes,
+            valid_from_unix: value.timestamps.valid_from.unix_timestamp(),
+            valid_to_unix: value
+                .timestamps
+                .valid_to
+                .map(OffsetDateTime::unix_timestamp),
+            ingested_at_unix: value.timestamps.ingested_at.unix_timestamp(),
+        }
+    }
+}
+
+impl From<Relation> for GraphRelationDto {
+    fn from(value: Relation) -> Self {
+        Self {
+            id: value.id.to_string(),
+            relation_type: value.relation_type,
+            from_entity: value.from_entity.to_string(),
+            to_entity: value.to_entity.to_string(),
+            memory_id: value.memory_id.map(|id| id.to_string()),
+            supersedes: value.supersedes.map(|id| id.to_string()),
+            attributes: value.attributes,
+            valid_from_unix: value.timestamps.valid_from.unix_timestamp(),
+            valid_to_unix: value
+                .timestamps
+                .valid_to
+                .map(OffsetDateTime::unix_timestamp),
+            ingested_at_unix: value.timestamps.ingested_at.unix_timestamp(),
         }
     }
 }

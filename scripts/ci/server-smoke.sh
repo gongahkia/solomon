@@ -60,9 +60,19 @@ request() {
   fi
 }
 
-item_json="$(request POST /write '{"content":"Server smoke memory","vector":[1,0],"source_kind":"user","source_ref":"server-smoke","valid_from_unix":0,"ingested_at_unix":0}')"
-memory_id="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"$item_json")"
+json_field() {
+  local field="$1"
+  python3 -c 'import json,sys
+value = json.load(sys.stdin)
+for part in sys.argv[1].split("."):
+    value = value[part]
+print(value)' "$field"
+}
 
+item_json="$(request POST /write '{"content":"Server smoke memory","vector":[1,0],"source_kind":"user","source_ref":"server-smoke","valid_from_unix":0,"ingested_at_unix":0}')"
+memory_id="$(json_field id <<<"$item_json")"
+
+request POST /timeline '{"query_vector":[1,0],"top_k":1,"as_of_unix":0}' >/dev/null
 request POST /reinforce "{\"memory_id\":\"${memory_id}\",\"outcome\":\"cited\"}" >/dev/null
 request POST /challenge "{\"memory_id\":\"${memory_id}\",\"reason\":\"server smoke challenge\"}" >/dev/null
 request POST /affirm "{\"memory_id\":\"${memory_id}\"}" >/dev/null
@@ -73,5 +83,19 @@ request POST /consolidate '{"now_unix":86400}' >/dev/null
 request GET /events >/dev/null
 request GET "/audit/${memory_id}" >/dev/null
 request GET /tideline/snapshot >/dev/null
+
+project_json="$(request POST /graph/entities '{"entity_type":"Project","label":"Server Smoke Project","stable_key":"project:server-smoke","attributes":{"scope":"server-smoke"},"valid_from_unix":0,"ingested_at_unix":0}')"
+project_id="$(json_field id <<<"$project_json")"
+claim_json="$(request POST /graph/entities '{"entity_type":"Claim","label":"Server Smoke Claim","stable_key":"claim:server-smoke","attributes":{"scope":"server-smoke"},"valid_from_unix":0,"ingested_at_unix":0}')"
+claim_id="$(json_field id <<<"$claim_json")"
+relation_json="$(request POST /graph/relations "{\"relation_type\":\"supports\",\"from_entity\":\"${project_id}\",\"to_entity\":\"${claim_id}\",\"memory_id\":\"${memory_id}\",\"attributes\":{\"scope\":\"server-smoke\"},\"valid_from_unix\":0,\"ingested_at_unix\":0}")"
+relation_id="$(json_field id <<<"$relation_json")"
+
+request GET "/graph/entities/${project_id}" >/dev/null
+request GET "/graph/relations/${relation_id}" >/dev/null
+request GET /graph?as_of_unix=0 >/dev/null
+request POST /graph/traverse "{\"start_entity\":\"${project_id}\",\"max_hops\":1,\"as_of_unix\":0}" >/dev/null
+request DELETE "/graph/relations/${relation_id}?valid_to_unix=10" >/dev/null
+request DELETE "/graph/entities/${claim_id}?valid_to_unix=10" >/dev/null
 
 echo "server smoke passed"

@@ -95,8 +95,23 @@ split is 160 coding-agent tasks and 40 general tasks. Its current canonical
 dataset hash is
 `sha256:a68d3f55a21b3ad0799f4c10e28e02a53b4cac2e39e5679df214323ad961bfaa`.
 
-There are no ContinuityBench result claims yet. The runner, metrics, baselines,
-and result manifests are tracked by the remaining Phase B TODO items.
+The checked-in result files live under `benchmarks/results/continuity/`. The
+current local summary is:
+
+| System | Stale Rate | Contradiction Acc | Credence Rho | Credence n | Mean Tokens | Stable Acc |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| shibahama | 0.375 | 1.000 | 1.000 | 40 | 10.620 | 1.000 |
+| warehouse | 0.825 | 0.000 | n/a | 0 | 11.820 | 1.000 |
+| full-context | 0.375 | 1.000 | n/a | 0 | 13.425 | 1.000 |
+| mem0-oss-exact | 0.812 | 0.140 | n/a | 0 | 13.425 | 1.000 |
+| engram-exact | 0.475 | 0.680 | n/a | 0 | 12.290 | 1.000 |
+
+Interpretation boundary: Mem0 OSS and Engram are exact-event retrieval
+baselines here. They store the dataset event text directly with `infer=False`,
+so this is a local retrieval/continuity slice, not a hosted extraction-quality
+comparison. Shibahama ties full-context on stale rate and contradiction accuracy,
+uses fewer returned tokens, and beats the exact-event Mem0/Engram baselines on
+stale rate and contradiction accuracy for this slice.
 
 ### Coding-Agent Memory Task
 

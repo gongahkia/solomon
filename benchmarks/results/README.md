@@ -8,3 +8,6 @@ Generated benchmark summaries live here.
   approaches, superseded backlog ideas, and moved files.
 - `ablation-local.md` is the local feature-isolation result for significance,
   reconstruction/supersession, and graph expansion toggles.
+- `continuity/SUMMARY.md` is the ContinuityBench v0 baseline comparison for
+  Shibahama, warehouse, full-context, Mem0 OSS exact-event retrieval, and Engram
+  exact-event retrieval.

@@ -92,14 +92,6 @@ artifact proves a stale-rate, auditability, or token-cost win on a matching
 continuity slice.** This phase is where that artifact gets produced — or where we
 honestly report that it doesn't beat Engram and adjust the claim.
 
-30. [ ] (P1) Report HONEST baselines: flat/warehouse retrieval, full-context where
-    reproducible, and at least one real external system (Mem0 OSS self-hosted,
-    and Engram if runnable). Report cases where the flat baseline wins on plain
-    one-shot accuracy — owning that is more credible than hiding it, and it's the
-    point of `docs/null-hypothesis.md`.
-31. [ ] (P1) Every result file carries: dataset hash, model, seed, exact command,
-    and the baseline configs. Commit JSON + generated Markdown under
-    `benchmarks/results/continuity/`.
 32. [ ] (P2) Tideline integration: a view that *shows* a stale answer being
     avoided — the superseded item, the current item, the credence/valid-time that
     decided it, with the `why` trace. This is the headline DX moment for the

@@ -10,7 +10,7 @@ use crate::read_safety::{
     sanitize_memory_for_read_with_gateway,
 };
 use crate::significance::SignificanceConfig;
-use crate::storage::{RedbMemoryStore, StorageError};
+use crate::storage::{GraphSnapshot, RedbMemoryStore, StorageError};
 use crate::vector::{VectorIndex, VectorIndexError};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
@@ -377,39 +377,38 @@ fn timeline_inner(
         ));
     }
 
-    if let Some(provider) = request.related_memory_provider {
-        let anchors = candidates
-            .iter()
-            .map(|candidate| candidate.id)
-            .collect::<Vec<_>>();
-        let mut expanded_candidates = Vec::new();
+    let anchors = candidates
+        .iter()
+        .map(|candidate| candidate.id)
+        .collect::<Vec<_>>();
+    let related_ids_by_anchor = collect_related_memory_ids(store, &anchors, request)?;
+    let mut expanded_candidates = Vec::new();
 
-        for anchor in anchors {
-            for related_id in provider.related_memory_ids(anchor)? {
-                if !seen_ids.insert(related_id) {
-                    continue;
-                }
-
-                let Some(item) = historical_items.remove(&related_id) else {
-                    continue;
-                };
-
-                if !is_recallable_item(&item, request) {
-                    continue;
-                }
-
-                expanded_candidates.push(candidate_from_item(
-                    related_id,
-                    item,
-                    f32::INFINITY,
-                    RecallCandidateSource::GraphExpansion { anchor },
-                    &candidate_context,
-                ));
+    for (anchor, related_ids) in related_ids_by_anchor {
+        for related_id in related_ids {
+            if !seen_ids.insert(related_id) {
+                continue;
             }
-        }
 
-        candidates.extend(expanded_candidates);
+            let Some(item) = historical_items.remove(&related_id) else {
+                continue;
+            };
+
+            if !is_recallable_item(&item, request) {
+                continue;
+            }
+
+            expanded_candidates.push(candidate_from_item(
+                related_id,
+                item,
+                f32::INFINITY,
+                RecallCandidateSource::GraphExpansion { anchor },
+                &candidate_context,
+            ));
+        }
     }
+
+    candidates.extend(expanded_candidates);
 
     for (id, item) in historical_items {
         if candidates.len() >= request.top_k {
@@ -500,44 +499,42 @@ fn recall_inner(
         seen_ids.insert(candidate.id);
     }
 
-    if let Some(provider) = request.related_memory_provider {
-        let anchors = candidates
-            .iter()
-            .map(|candidate| candidate.id)
-            .collect::<Vec<_>>();
-        let mut expanded_candidates = Vec::new();
+    let anchors = candidates
+        .iter()
+        .map(|candidate| candidate.id)
+        .collect::<Vec<_>>();
+    let related_ids_by_anchor = collect_related_memory_ids(store, &anchors, request)?;
+    let mut expanded_candidates = Vec::new();
 
-        for anchor in anchors {
-            let related_ids = provider.related_memory_ids(anchor)?;
-            let related_items = store.get_many(&related_ids)?;
+    for (anchor, related_ids) in related_ids_by_anchor {
+        let related_items = store.get_many(&related_ids)?;
 
-            for (related_id, related_item) in related_ids.into_iter().zip(related_items) {
-                if !seen_ids.insert(related_id) {
-                    continue;
-                }
-
-                let Some(item) = related_item else {
-                    continue;
-                };
-
-                let item = refresh_item_for_recall(store, item, request, record_surface_access)?;
-
-                if !is_recallable_item(&item, request) {
-                    continue;
-                }
-
-                expanded_candidates.push(candidate_from_item(
-                    related_id,
-                    item,
-                    f32::INFINITY,
-                    RecallCandidateSource::GraphExpansion { anchor },
-                    &candidate_context,
-                ));
+        for (related_id, related_item) in related_ids.into_iter().zip(related_items) {
+            if !seen_ids.insert(related_id) {
+                continue;
             }
-        }
 
-        candidates.extend(expanded_candidates);
+            let Some(item) = related_item else {
+                continue;
+            };
+
+            let item = refresh_item_for_recall(store, item, request, record_surface_access)?;
+
+            if !is_recallable_item(&item, request) {
+                continue;
+            }
+
+            expanded_candidates.push(candidate_from_item(
+                related_id,
+                item,
+                f32::INFINITY,
+                RecallCandidateSource::GraphExpansion { anchor },
+                &candidate_context,
+            ));
+        }
     }
+
+    candidates.extend(expanded_candidates);
 
     candidates.sort_by(|left, right| {
         right
@@ -594,6 +591,87 @@ fn refresh_item_for_recall(
     Ok(store
         .refresh_significance(item.id, &request.significance, request.now)?
         .unwrap_or(item))
+}
+
+fn collect_related_memory_ids(
+    store: &RedbMemoryStore,
+    anchors: &[MemoryId],
+    request: &RecallRequest<'_>,
+) -> Result<BTreeMap<MemoryId, Vec<MemoryId>>, RecallError> {
+    if anchors.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let mut related_ids_by_anchor = BTreeMap::<MemoryId, BTreeSet<MemoryId>>::new();
+
+    if request.ranking.graph_weight > 0.0 {
+        let snapshot = store.graph_snapshot(request.now)?;
+
+        for (anchor, related_ids) in stored_graph_related_memory_ids(&snapshot, anchors) {
+            related_ids_by_anchor
+                .entry(anchor)
+                .or_default()
+                .extend(related_ids);
+        }
+    }
+
+    if let Some(provider) = request.related_memory_provider {
+        for anchor in anchors {
+            related_ids_by_anchor
+                .entry(*anchor)
+                .or_default()
+                .extend(provider.related_memory_ids(*anchor)?);
+        }
+    }
+
+    Ok(related_ids_by_anchor
+        .into_iter()
+        .map(|(anchor, related_ids)| (anchor, related_ids.into_iter().collect()))
+        .collect())
+}
+
+fn stored_graph_related_memory_ids(
+    snapshot: &GraphSnapshot,
+    anchors: &[MemoryId],
+) -> BTreeMap<MemoryId, Vec<MemoryId>> {
+    let anchor_ids = anchors.iter().copied().collect::<BTreeSet<_>>();
+    let mut entity_ids_by_anchor = BTreeMap::<MemoryId, BTreeSet<_>>::new();
+
+    for relation in &snapshot.relations {
+        let Some(memory_id) = relation.memory_id else {
+            continue;
+        };
+
+        if !anchor_ids.contains(&memory_id) {
+            continue;
+        }
+
+        let entity_ids = entity_ids_by_anchor.entry(memory_id).or_default();
+
+        entity_ids.insert(relation.from_entity);
+        entity_ids.insert(relation.to_entity);
+    }
+
+    entity_ids_by_anchor
+        .into_iter()
+        .map(|(anchor, entity_ids)| {
+            let related_ids = snapshot
+                .relations
+                .iter()
+                .filter(|relation| {
+                    entity_ids.contains(&relation.from_entity)
+                        || entity_ids.contains(&relation.to_entity)
+                })
+                .filter_map(|relation| relation.memory_id)
+                .filter(|related_id| *related_id != anchor)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+
+            (anchor, related_ids)
+        })
+        .filter(|(_, related_ids)| !related_ids.is_empty())
+        .collect()
 }
 
 fn apply_context_token_budget(
@@ -827,7 +905,8 @@ fn similarity_from_distance(distance: f32) -> f64 {
 mod tests {
     use super::*;
     use crate::model::{
-        CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, Provenance, SourceKind, TemporalBounds, Tier,
+        CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, Entity, Provenance, Relation, SourceKind,
+        TemporalBounds, Tier,
     };
     use crate::storage::MemoryEvent;
     use crate::vector::HnswVectorIndex;
@@ -1663,6 +1742,91 @@ mod tests {
             .iter()
             .find(|candidate| candidate.id == related.id)
             .expect("related candidate should be present");
+        let stored_related = store
+            .get(related.id)
+            .expect("related should read")
+            .expect("related should exist");
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(
+            related_candidate.source,
+            RecallCandidateSource::GraphExpansion { anchor: anchor.id }
+        );
+        assert_eq!(
+            stored_related.access_events[0].outcome,
+            AccessOutcome::Surfaced
+        );
+    }
+
+    #[test]
+    fn recall_expands_stored_graph_related_memories() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let ingested_at = OffsetDateTime::UNIX_EPOCH;
+        let now = ingested_at + Duration::days(1);
+        let mut anchor = test_item("file alpha imports beta", ingested_at);
+        let related = test_item("beta owns the parser symbol", ingested_at);
+        let file_entity = Entity::new(
+            "File",
+            "alpha.rs",
+            "file:alpha.rs",
+            TemporalBounds::open_from(ingested_at, ingested_at),
+        );
+        let symbol_entity = Entity::new(
+            "Symbol",
+            "Parser",
+            "symbol:parser",
+            TemporalBounds::open_from(ingested_at, ingested_at),
+        );
+        let owner_entity = Entity::new(
+            "File",
+            "beta.rs",
+            "file:beta.rs",
+            TemporalBounds::open_from(ingested_at, ingested_at),
+        );
+        let anchor_relation = Relation::new(
+            "imports",
+            file_entity.id,
+            symbol_entity.id,
+            anchor.id,
+            TemporalBounds::open_from(ingested_at, ingested_at),
+        );
+        let related_relation = Relation::new(
+            "defined_in",
+            symbol_entity.id,
+            owner_entity.id,
+            related.id,
+            TemporalBounds::open_from(ingested_at, ingested_at),
+        );
+
+        store
+            .write_embedded(
+                &mut anchor,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "hnsw-test",
+                "embedding-model",
+                "v1",
+            )
+            .expect("anchor should write");
+        store.write(&related).expect("related should write");
+
+        for entity in [&file_entity, &symbol_entity, &owner_entity] {
+            store.put_entity(entity).expect("entity should write");
+        }
+
+        for relation in [&anchor_relation, &related_relation] {
+            store.put_relation(relation).expect("relation should write");
+        }
+
+        let query = [0.0, 0.0];
+        let request = RecallRequest::new(&query, 1, now);
+        let candidates = recall(&store, &vector_index, &request).expect("recall should work");
+        let related_candidate = candidates
+            .iter()
+            .find(|candidate| candidate.id == related.id)
+            .expect("stored graph related candidate should be present");
         let stored_related = store
             .get(related.id)
             .expect("related should read")

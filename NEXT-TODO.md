@@ -55,14 +55,6 @@ touch the exact mechanisms Phase B will benchmark. The epistemic eval cannot be
 credible while the significance engine has a known double-penalty bug. Close this
 gate before Phase A.
 
-20. [ ] (P1) Resolve the staged graph-in-recall claim. Recall does not use the
-    stored graph; it only expands through a caller-supplied `RelatedMemoryProvider`
-    and the bench feeds it a hand-built map — `core/src/retrieval.rs:503-539`,
-    `benchmarks/shibahama_bench/adapters.py:86-124`. Either wire stored-graph
-    traversal into recall (honest fix, preferred for the coding-agent story where
-    "files/symbols relate to each other" is the use case) or stop claiming
-    graph-aware recall in README/docs. Phase B's contradiction/relatedness slice
-    needs the real graph.
 21. [ ] (P1) Replace the one production `expect()` that can panic if the action
     list drifts — `core/src/learned_policy.rs:469-481`. Convert to a recoverable
     error; add a test for the drift case.

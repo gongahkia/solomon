@@ -93,7 +93,7 @@ The current recall hot path is id-bounded:
 3. Filter to facts believed at the request time: `ingested_at <= now` and
    `valid_from <= now < valid_to` when `valid_to` is present.
 4. Exclude cold-tier memories and instruction memories unless requested.
-5. Optionally expand through a caller-provided related-memory provider.
+5. Optionally expand through stored graph relations and caller-provided related ids.
 6. Build candidates with provenance, tier, currency, staleness flags, scoring
    components, and read-safety findings.
 7. Rank by credence first, then weighted score, then id.

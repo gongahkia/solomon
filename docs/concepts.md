@@ -231,9 +231,9 @@ bi-temporal model as memory items. Relations can support recall expansion,
 contradiction detection, supersession links, scoped subgraphs, and graph
 centrality input for significance.
 
-Graph expansion is optional at recall time through a related-memory provider.
-The default vector recall path remains bounded to vector candidate ids unless
-the caller supplies graph-related ids.
+Graph expansion is optional at recall time through stored graph relations and
+caller-supplied related-memory providers. Setting graph ranking weight to zero
+keeps default vector recall bounded to vector candidate ids.
 
 ## Error Posture
 

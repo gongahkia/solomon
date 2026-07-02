@@ -162,7 +162,7 @@ impl BenchStore {
     ///
     /// Returns an error when recall fails.
     pub fn recall(&self, query: &[f32], top_k: usize) -> BenchResult<Vec<RecallCandidate>> {
-        let request = RecallRequest::new(query, top_k, benchmark_now());
+        let request = RecallRequest::new(query, top_k, benchmark_now()).include_cold();
 
         Ok(self.engine.recall(&request)?)
     }

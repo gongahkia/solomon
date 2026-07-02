@@ -5,9 +5,13 @@
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use shibahama_core::api::{Shibahama, WriteEmbedding};
+use shibahama_core::model::{CURRENT_MEMORY_SCHEMA_VERSION, EmbeddingRef};
 use shibahama_core::model::{CredenceTier, MemoryId, MemoryItem, Provenance, SourceKind, Tier};
 use shibahama_core::retrieval::{RecallCandidate, RecallRequest};
-use shibahama_core::storage::MemoryWriteEvent;
+use shibahama_core::storage::{
+    EventRecord, IngestCredencePolicy, MemoryEvent, MemoryWriteEvent, RedbMemoryStore,
+    StoreSnapshot, StoredEmbedding,
+};
 use shibahama_core::vector::HnswVectorIndex;
 use std::path::PathBuf;
 use std::time::{Duration as StdDuration, Instant};
@@ -97,10 +101,24 @@ impl BenchStore {
     ///
     /// Returns an error when setup writes or indexing fail.
     pub fn populated(scale: usize) -> BenchResult<Self> {
-        let mut store = Self::empty(scale.saturating_add(1024))?;
-        store.ingest_range(0, scale)?;
+        let tempdir = TempDir::new()?;
+        let path = tempdir.path().join("shibahama-perf.redb");
+        let snapshot_path = tempdir.path().join("shibahama-perf-snapshot.json");
+        let snapshot = snapshot_for_range(0, scale);
+        let snapshot_bytes = serde_json::to_vec(&snapshot)?;
 
-        Ok(store)
+        std::fs::write(&snapshot_path, snapshot_bytes)?;
+        RedbMemoryStore::restore_from_snapshot(&path, &snapshot_path)?;
+
+        let vector_index =
+            HnswVectorIndex::with_capacity(EMBEDDING_DIMENSIONS, scale.saturating_add(1024));
+        let engine = Shibahama::open(&path, vector_index)?;
+
+        Ok(Self {
+            _tempdir: tempdir,
+            path,
+            engine,
+        })
     }
 
     /// Writes `count` deterministic items beginning at `start_index`.
@@ -188,6 +206,74 @@ impl BenchStore {
             recall_latency,
         })
     }
+}
+
+fn snapshot_for_range(start_index: usize, count: usize) -> StoreSnapshot {
+    let mut events = Vec::with_capacity(count);
+    let mut materialized_items = Vec::with_capacity(count);
+    let mut embeddings = Vec::with_capacity(count);
+
+    for offset in 0..count {
+        let index = start_index.saturating_add(offset);
+        let generated = generated_item(index, DEFAULT_SEED);
+        let mut item = memory_item_for_generated(index, &generated);
+        let sequence = u64::try_from(offset).unwrap_or(u64::MAX);
+
+        item.embedding_ref = Some(EmbeddingRef {
+            index: INDEX_NAME.to_owned(),
+            vector_id: item.id.to_string(),
+            model: EMBEDDING_MODEL.to_owned(),
+            model_version: EMBEDDING_MODEL_VERSION.to_owned(),
+            dimensions: EMBEDDING_DIMENSIONS,
+        });
+
+        events.push(EventRecord {
+            sequence,
+            recorded_at: item.timestamps.ingested_at,
+            event: MemoryEvent::MemoryWritten {
+                item: Box::new(item.clone()),
+            },
+        });
+        embeddings.push(StoredEmbedding {
+            memory_id: item.id,
+            vector: generated.vector,
+            index_name: INDEX_NAME.to_owned(),
+            model: EMBEDDING_MODEL.to_owned(),
+            model_version: EMBEDDING_MODEL_VERSION.to_owned(),
+        });
+        materialized_items.push(item);
+    }
+
+    StoreSnapshot {
+        schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+        events,
+        materialized_items,
+        embeddings,
+        cold_contents: Vec::new(),
+        graph_entities: Vec::new(),
+        graph_relations: Vec::new(),
+    }
+}
+
+fn memory_item_for_generated(source_index: usize, item: &GeneratedItem) -> MemoryItem {
+    let now = timestamp_for(source_index);
+    let provenance = Provenance::new(
+        item.source_kind,
+        Some(format!("perf:item:{source_index:08}")),
+        "shibahama-perf",
+    );
+    let mut event = MemoryWriteEvent::with_explicit_credence(
+        item.content.clone(),
+        provenance,
+        now,
+        now,
+        item.tier,
+        item.credence,
+        Tier::Cold,
+    );
+
+    event.significance = 1.0;
+    event.into_item_with_policy(IngestCredencePolicy::default())
 }
 
 /// Generates one deterministic synthetic item.

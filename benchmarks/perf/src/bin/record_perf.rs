@@ -6,6 +6,7 @@
 use serde::Serialize;
 use shibahama_perf::harness::{
     BenchResult, BenchStore, DEFAULT_SEED, EMBEDDING_DIMENSIONS, TOP_K, generated_item,
+    hnsw_recall_at_10,
 };
 use std::env;
 use std::fs;
@@ -22,6 +23,8 @@ const CONTENT_BYTES: usize = "item_00000000".len();
 struct Args {
     tiers: Vec<ScaleTier>,
     queries: usize,
+    quality_tiers: Vec<ScaleTier>,
+    quality_queries: usize,
     output_dir: PathBuf,
     omit_1m: Option<String>,
 }
@@ -80,6 +83,7 @@ struct Manifest {
     scale: String,
     item_count: usize,
     query_count: usize,
+    quality_query_count: usize,
     command: String,
     timestamp_utc: String,
 }
@@ -87,6 +91,7 @@ struct Manifest {
 #[derive(Debug, Serialize)]
 struct PerfResults {
     recall_latency_ns: Option<LatencyStats>,
+    hnsw_recall_at_10: Option<f64>,
     resident_memory_bytes: Option<u64>,
     omitted: Option<String>,
 }
@@ -108,10 +113,10 @@ fn main() -> BenchResult<()> {
             if let Some(reason) = &args.omit_1m {
                 omitted_artifact(tier, args.queries, reason.clone())?
             } else {
-                measure_tier(tier, args.queries)?
+                measure_tier(tier, &args)?
             }
         } else {
-            measure_tier(tier, args.queries)?
+            measure_tier(tier, &args)?
         };
 
         write_artifacts(&args.output_dir, &artifact)?;
@@ -130,6 +135,8 @@ fn main() -> BenchResult<()> {
 fn parse_args() -> BenchResult<Args> {
     let mut tiers = vec![ScaleTier::ONE_K];
     let mut queries = 30_usize;
+    let mut quality_tiers = Vec::new();
+    let mut quality_queries = 10_usize;
     let mut output_dir = PathBuf::from("benchmarks/results/perf");
     let mut omit_1m = None;
     let mut raw_args = env::args().skip(1);
@@ -150,6 +157,21 @@ fn parse_args() -> BenchResult<Args> {
                     .next()
                     .ok_or_else(|| invalid_input("--queries requires a value".to_owned()))?;
                 queries = value.parse()?;
+            }
+            "--quality-tiers" => {
+                let value = raw_args.next().ok_or_else(|| {
+                    invalid_input("--quality-tiers requires a comma-separated value".to_owned())
+                })?;
+                quality_tiers = value
+                    .split(',')
+                    .map(ScaleTier::parse)
+                    .collect::<BenchResult<Vec<_>>>()?;
+            }
+            "--quality-queries" => {
+                let value = raw_args.next().ok_or_else(|| {
+                    invalid_input("--quality-queries requires a value".to_owned())
+                })?;
+                quality_queries = value.parse()?;
             }
             "--output-dir" => {
                 let value = raw_args
@@ -178,9 +200,17 @@ fn parse_args() -> BenchResult<Args> {
         ));
     }
 
+    if quality_queries == 0 {
+        return Err(invalid_input(
+            "--quality-queries must be greater than zero".to_owned(),
+        ));
+    }
+
     Ok(Args {
         tiers,
         queries,
+        quality_tiers,
+        quality_queries,
         output_dir,
         omit_1m,
     })
@@ -192,12 +222,12 @@ fn print_help() {
     );
 }
 
-fn measure_tier(tier: ScaleTier, queries: usize) -> BenchResult<PerfArtifact> {
+fn measure_tier(tier: ScaleTier, args: &Args) -> BenchResult<PerfArtifact> {
     let store = BenchStore::populated(tier.items)?;
     let resident_memory_bytes = current_rss_bytes();
-    let mut latencies = Vec::with_capacity(queries);
+    let mut latencies = Vec::with_capacity(args.queries);
 
-    for query_index in 0..queries {
+    for query_index in 0..args.queries {
         let query = generated_item(tier.items.saturating_add(query_index), DEFAULT_SEED).vector;
         let started_at = Instant::now();
         let candidates = store.recall(&query, TOP_K)?;
@@ -212,11 +242,17 @@ fn measure_tier(tier: ScaleTier, queries: usize) -> BenchResult<PerfArtifact> {
 
         latencies.push(latency);
     }
+    let hnsw_recall_at_10 = if args.quality_tiers.contains(&tier) {
+        Some(hnsw_recall_at_10(tier.items, args.quality_queries)?)
+    } else {
+        None
+    };
 
     Ok(PerfArtifact {
-        manifest: manifest(tier, queries)?,
+        manifest: manifest(tier, args.queries, args.quality_queries)?,
         results: PerfResults {
             recall_latency_ns: Some(latency_stats(&mut latencies)),
+            hnsw_recall_at_10,
             resident_memory_bytes,
             omitted: None,
         },
@@ -225,16 +261,17 @@ fn measure_tier(tier: ScaleTier, queries: usize) -> BenchResult<PerfArtifact> {
 
 fn omitted_artifact(tier: ScaleTier, queries: usize, reason: String) -> BenchResult<PerfArtifact> {
     Ok(PerfArtifact {
-        manifest: manifest(tier, queries)?,
+        manifest: manifest(tier, queries, 0)?,
         results: PerfResults {
             recall_latency_ns: None,
+            hnsw_recall_at_10: None,
             resident_memory_bytes: None,
             omitted: Some(reason),
         },
     })
 }
 
-fn manifest(tier: ScaleTier, queries: usize) -> BenchResult<Manifest> {
+fn manifest(tier: ScaleTier, queries: usize, quality_queries: usize) -> BenchResult<Manifest> {
     Ok(Manifest {
         commit: command_output("git", &["rev-parse", "HEAD"])?,
         rustc: command_output("rustc", &["--version"])?,
@@ -247,6 +284,7 @@ fn manifest(tier: ScaleTier, queries: usize) -> BenchResult<Manifest> {
         scale: tier.label.to_owned(),
         item_count: tier.items,
         query_count: queries,
+        quality_query_count: quality_queries,
         command: env::args().collect::<Vec<_>>().join(" "),
         timestamp_utc: OffsetDateTime::now_utc().format(&Rfc3339)?,
     })
@@ -284,33 +322,39 @@ fn write_artifacts(output_dir: &Path, artifact: &PerfArtifact) -> BenchResult<()
 }
 
 fn markdown_table(artifact: &PerfArtifact) -> String {
-    let (p50, p95, p99, rss, status) = if let Some(latency) = artifact.results.recall_latency_ns {
-        (
-            latency.p50.to_string(),
-            latency.p95.to_string(),
-            latency.p99.to_string(),
-            artifact
-                .results
-                .resident_memory_bytes
-                .map_or_else(|| "n/a".to_owned(), |bytes| bytes.to_string()),
-            "measured".to_owned(),
-        )
-    } else {
-        (
-            "n/a".to_owned(),
-            "n/a".to_owned(),
-            "n/a".to_owned(),
-            "n/a".to_owned(),
-            artifact
-                .results
-                .omitted
-                .clone()
-                .unwrap_or_else(|| "omitted".to_owned()),
-        )
-    };
+    let (p50, p95, p99, hnsw_recall, rss, status) =
+        if let Some(latency) = artifact.results.recall_latency_ns {
+            (
+                latency.p50.to_string(),
+                latency.p95.to_string(),
+                latency.p99.to_string(),
+                artifact
+                    .results
+                    .hnsw_recall_at_10
+                    .map_or_else(|| "n/a".to_owned(), |value| format!("{value:.4}")),
+                artifact
+                    .results
+                    .resident_memory_bytes
+                    .map_or_else(|| "n/a".to_owned(), |bytes| bytes.to_string()),
+                "measured".to_owned(),
+            )
+        } else {
+            (
+                "n/a".to_owned(),
+                "n/a".to_owned(),
+                "n/a".to_owned(),
+                "n/a".to_owned(),
+                "n/a".to_owned(),
+                artifact
+                    .results
+                    .omitted
+                    .clone()
+                    .unwrap_or_else(|| "omitted".to_owned()),
+            )
+        };
 
     format!(
-        "# Perf Scale {scale}\n\n| scale | items | queries | recall p50 ns | recall p95 ns | recall p99 ns | rss bytes | status |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n| {scale} | {items} | {queries} | {p50} | {p95} | {p99} | {rss} | {status} |\n",
+        "# Perf Scale {scale}\n\n| scale | items | queries | recall p50 ns | recall p95 ns | recall p99 ns | hnsw recall@10 | rss bytes | status |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n| {scale} | {items} | {queries} | {p50} | {p95} | {p99} | {hnsw_recall} | {rss} | {status} |\n",
         scale = artifact.manifest.scale,
         items = artifact.manifest.item_count,
         queries = artifact.manifest.query_count,

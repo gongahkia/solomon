@@ -12,7 +12,8 @@ use shibahama_core::storage::{
     EventRecord, IngestCredencePolicy, MemoryEvent, MemoryWriteEvent, RedbMemoryStore,
     StoreSnapshot, StoredEmbedding,
 };
-use shibahama_core::vector::HnswVectorIndex;
+use shibahama_core::vector::{HnswVectorIndex, VectorIndex};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::{Duration as StdDuration, Instant};
 use tempfile::TempDir;
@@ -295,10 +296,77 @@ pub fn held_out_query(seed: u64) -> Vec<f32> {
     unit_vector(seed ^ QUERY_SEED_OFFSET)
 }
 
+/// Computes average HNSW recall@10 against exact linear-scan ground truth.
+///
+/// # Errors
+///
+/// Returns an error when the vector index rejects a generated vector.
+pub fn hnsw_recall_at_10(item_count: usize, query_count: usize) -> BenchResult<f64> {
+    let mut index =
+        HnswVectorIndex::with_capacity(EMBEDDING_DIMENSIONS, item_count.saturating_add(1024));
+    let mut corpus = Vec::with_capacity(item_count);
+    let mut hits = 0_u32;
+
+    for item_index in 0..item_count {
+        let id = MemoryId::new_v7();
+        let vector = generated_item(item_index, DEFAULT_SEED).vector;
+
+        index.add(id, &vector)?;
+        corpus.push((id, vector));
+    }
+
+    for query_index in 0..query_count {
+        let query = generated_item(item_count.saturating_add(query_index), DEFAULT_SEED).vector;
+        let exact_ids = exact_top_k(&corpus, &query, TOP_K);
+        let hnsw_ids = index
+            .search(&query, TOP_K)?
+            .into_iter()
+            .map(|result| result.id)
+            .collect::<BTreeSet<_>>();
+        let query_hits = exact_ids.iter().filter(|id| hnsw_ids.contains(id)).count();
+
+        hits = hits.saturating_add(u32::try_from(query_hits).unwrap_or(u32::MAX));
+    }
+
+    let denominator = query_count.saturating_mul(TOP_K);
+    let denominator = u32::try_from(denominator).unwrap_or(u32::MAX);
+
+    Ok(f64::from(hits) / f64::from(denominator))
+}
+
 /// Returns the fixed timestamp used for benchmark recall.
 #[must_use]
 pub fn benchmark_now() -> OffsetDateTime {
     OffsetDateTime::UNIX_EPOCH + TimeDuration::days(30)
+}
+
+fn exact_top_k(corpus: &[(MemoryId, Vec<f32>)], query: &[f32], top_k: usize) -> BTreeSet<MemoryId> {
+    let mut distances = corpus
+        .iter()
+        .map(|(id, vector)| (*id, squared_distance(vector, query)))
+        .collect::<Vec<_>>();
+
+    distances.sort_by(|left, right| {
+        left.1
+            .total_cmp(&right.1)
+            .then_with(|| left.0.cmp(&right.0))
+    });
+
+    distances
+        .into_iter()
+        .take(top_k)
+        .map(|(id, _)| id)
+        .collect()
+}
+
+fn squared_distance(left: &[f32], right: &[f32]) -> f32 {
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| {
+            let delta = left - right;
+            delta * delta
+        })
+        .sum()
 }
 
 fn timestamp_for(index: usize) -> OffsetDateTime {

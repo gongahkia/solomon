@@ -20,6 +20,8 @@ Generate recall-latency/RSS result artifacts for selected scale tiers:
 cargo run -p shibahama-perf --release --bin record_perf -- \
   --tiers 1k,10k,100k \
   --queries 30 \
+  --quality-tiers 10k,100k \
+  --quality-queries 10 \
   --output-dir benchmarks/results/perf \
   --omit-1m "1M local run omitted; immediate-durability ingest exceeded the available session budget"
 ```

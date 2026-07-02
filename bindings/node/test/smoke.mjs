@@ -35,6 +35,13 @@ try {
     validFromUnix: 0,
     ingestedAtUnix: 0,
   });
+  const stale = engine.write("Node binding stale memory", {
+    vector: [1, 0],
+    sourceKind: "file",
+    sourceRef: "smoke-stale",
+    validFromUnix: 0,
+    ingestedAtUnix: 0,
+  });
   const recalled = engine.recall([0, 0], 1, { nowUnix: 0 });
   const budgeted = engine.recall([0, 0], 2, { nowUnix: 0, maxContextTokens: 3 });
   const streamed = engine.streamRecall([0, 0], 1, { nowUnix: 0 });
@@ -55,6 +62,8 @@ try {
   assert.equal(streamed.remaining(), 0);
   assert.equal(timeline[0].id, item.id);
   assert.equal(timelineStream.next().id, item.id);
+  assert.equal(engine.invalidate(stale.id, 10), true);
+  assert.equal(engine.why(stale.id, 10).currencyState, "invalidated");
   assert.equal(engine.reinforce(item.id, "cited"), true);
   assert.equal(why.item.id, item.id);
   assert.ok(items.some((memory) => memory.id === item.id));

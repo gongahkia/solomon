@@ -29,6 +29,14 @@ export declare class Shibahama {
    */
   write(content: string, options?: WriteOptions | undefined | null): MemoryItem
   /**
+   * Soft-invalidates a memory at a valid-time end.
+   *
+   * # Errors
+   *
+   * Returns an error when the memory id is invalid or persistence fails.
+   */
+  invalidate(memoryId: string, validToUnix: number): boolean
+  /**
    * Recalls current fact memories for a query embedding.
    *
    * # Errors

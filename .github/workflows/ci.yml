@@ -59,6 +59,9 @@ jobs:
       - name: Node binding smoke test
         run: scripts/ci/node-binding-smoke.sh
 
+      - name: Golden parity suite
+        run: scripts/ci/golden-parity.sh
+
   perf-smoke:
     name: perf smoke (ubuntu)
     runs-on: ubuntu-latest

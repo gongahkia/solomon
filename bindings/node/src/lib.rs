@@ -231,6 +231,20 @@ impl Shibahama {
         Ok(MemoryItem::from(item))
     }
 
+    /// Soft-invalidates a memory at a valid-time end.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the memory id is invalid or persistence fails.
+    #[napi]
+    pub fn invalidate(&self, memory_id: String, valid_to_unix: f64) -> Result<bool> {
+        let id = parse_memory_id(&memory_id)?;
+        let valid_to = time_from_optional_unix(Some(valid_to_unix))?;
+        let mut inner = self.inner.lock().map_err(lock_error)?;
+
+        inner.invalidate(id, valid_to).map_err(js_error)
+    }
+
     /// Recalls current fact memories for a query embedding.
     ///
     /// # Errors

@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "dimensions": 3,
+  "capacity": 16,
+  "steps": [
+    {
+      "op": "write",
+      "content": "Decision: keep per-test temporary stores.",
+      "vector": [1.0, 0.0, 0.0],
+      "source_kind": "user",
+      "source_ref": "decision:temp-stores",
+      "ingested_by": "golden-parity",
+      "valid_from_unix": 0,
+      "ingested_at_unix": 0
+    },
+    {
+      "op": "write",
+      "content": "API: use Memory(path, dims).",
+      "vector": [0.0, 1.0, 0.0],
+      "source_kind": "file",
+      "source_ref": "api:constructor-old",
+      "ingested_by": "golden-parity",
+      "valid_from_unix": 10,
+      "ingested_at_unix": 10
+    },
+    {
+      "op": "write",
+      "content": "Idea: add a singleton global store.",
+      "vector": [0.98, 0.0, 0.0],
+      "source_kind": "agent",
+      "source_ref": "idea:singleton",
+      "ingested_by": "golden-parity",
+      "valid_from_unix": 20,
+      "ingested_at_unix": 20
+    },
+    {
+      "op": "invalidate",
+      "source_ref": "api:constructor-old",
+      "valid_to_unix": 40
+    },
+    {
+      "op": "write",
+      "content": "API: use Shibahama(path, dimensions, capacity=1024).",
+      "vector": [0.0, 1.0, 0.0],
+      "source_kind": "file",
+      "source_ref": "api:constructor-current",
+      "ingested_by": "golden-parity",
+      "valid_from_unix": 40,
+      "ingested_at_unix": 40
+    }
+  ],
+  "queries": [
+    {
+      "name": "decision-query",
+      "vector": [1.0, 0.0, 0.0],
+      "top_k": 3,
+      "now_unix": 50,
+      "raw_query_context": "Should tests use temp stores or singleton?",
+      "include_cold": true
+    },
+    {
+      "name": "api-query",
+      "vector": [0.0, 1.0, 0.0],
+      "top_k": 3,
+      "now_unix": 50,
+      "raw_query_context": "Which constructor opens memory store?",
+      "include_cold": true
+    }
+  ],
+  "why_now_unix": 50,
+  "expected": {
+    "queries": [
+      {
+        "name": "decision-query",
+        "recall": [
+          {
+            "source_ref": "decision:temp-stores",
+            "tier": "warm",
+            "credence": "firm_authoritative",
+            "currency": "current",
+            "significance_score": "0.999987",
+            "rank_score": "2.249842"
+          },
+          {
+            "source_ref": "api:constructor-current",
+            "tier": "warm",
+            "credence": "verified_source",
+            "currency": "current",
+            "significance_score": "0.999997",
+            "rank_score": "1.664182"
+          },
+          {
+            "source_ref": "idea:singleton",
+            "tier": "cold",
+            "credence": "model_inferred",
+            "currency": "current",
+            "significance_score": "0.999992",
+            "rank_score": "2.230297"
+          }
+        ]
+      },
+      {
+        "name": "api-query",
+        "recall": [
+          {
+            "source_ref": "decision:temp-stores",
+            "tier": "warm",
+            "credence": "firm_authoritative",
+            "currency": "current",
+            "significance_score": "1.793147",
+            "rank_score": "2.457361"
+          },
+          {
+            "source_ref": "api:constructor-current",
+            "tier": "warm",
+            "credence": "verified_source",
+            "currency": "current",
+            "significance_score": "1.793147",
+            "rank_score": "3.043147"
+          },
+          {
+            "source_ref": "idea:singleton",
+            "tier": "warm",
+            "credence": "model_inferred",
+            "currency": "current",
+            "significance_score": "1.793147",
+            "rank_score": "2.459789"
+          }
+        ]
+      }
+    ],
+    "memories": [
+      {
+        "source_ref": "api:constructor-current",
+        "tier": "hot",
+        "credence": "verified_source",
+        "significance": "2.298612",
+        "valid_to_unix": null
+      },
+      {
+        "source_ref": "api:constructor-old",
+        "tier": "warm",
+        "credence": "verified_source",
+        "significance": "1.000000",
+        "valid_to_unix": 40
+      },
+      {
+        "source_ref": "decision:temp-stores",
+        "tier": "hot",
+        "credence": "firm_authoritative",
+        "significance": "2.298612",
+        "valid_to_unix": null
+      },
+      {
+        "source_ref": "idea:singleton",
+        "tier": "hot",
+        "credence": "model_inferred",
+        "significance": "2.298612",
+        "valid_to_unix": null
+      }
+    ],
+    "why": [
+      {
+        "source_ref": "api:constructor-current",
+        "currency_state": "current",
+        "tier_current": "hot",
+        "tier_credence": "verified_source",
+        "final_score": "2.298612",
+        "valid_to_unix": null
+      },
+      {
+        "source_ref": "api:constructor-old",
+        "currency_state": "invalidated",
+        "tier_current": "warm",
+        "tier_credence": "verified_source",
+        "final_score": "0.999989",
+        "valid_to_unix": 40
+      },
+      {
+        "source_ref": "decision:temp-stores",
+        "currency_state": "current",
+        "tier_current": "hot",
+        "tier_credence": "firm_authoritative",
+        "final_score": "2.298612",
+        "valid_to_unix": null
+      },
+      {
+        "source_ref": "idea:singleton",
+        "currency_state": "current",
+        "tier_current": "hot",
+        "tier_credence": "model_inferred",
+        "final_score": "2.298612",
+        "valid_to_unix": null
+      }
+    ]
+  }
+}

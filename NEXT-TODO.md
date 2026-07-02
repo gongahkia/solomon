@@ -121,13 +121,6 @@ The bindings are real (PyO3 / napi-rs) but parity is smoke-level only and the
 binding crates have 0 Rust tests — a reviewer comparing "Python/Node bindings"
 the claim against the tests will find this fast.
 
-36. [ ] (P1) Build a golden-vector parity suite: a fixed set of write+recall
-    sequences with committed expected outputs, run identically against the Rust
-    core, the Python binding, and the Node binding, asserting identical recall
-    ordering and significance/credence values. This is a strong correctness
-    signal and closes the "are the bindings actually equivalent" gap.
-    Current state: Python↔Node smoke only at
-    `scripts/ci/correctness-smoke.py:123-170`; no Rust-core↔binding parity suite.
 37. [ ] (P2) Add the missing HTTP endpoints for a complete surface: a standalone
     `/timeline` route and graph CRUD, so the server mirrors the full
     write/recall/why/timeline/audit/graph API rather than most of it

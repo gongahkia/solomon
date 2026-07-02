@@ -117,9 +117,9 @@ pending.
 
 ## Bindings & API surface hardening
 
-The bindings are real (PyO3 / napi-rs) but parity is smoke-level only and the
-binding crates have 0 Rust tests — a reviewer comparing "Python/Node bindings"
-the claim against the tests will find this fast.
+The bindings are real (PyO3 / napi-rs), have smoke coverage, parity coverage,
+and minimal Rust wrapper integration tests. Future work here is parity breadth,
+not zero-coverage cleanup.
 
 ## External release blockers (carried forward — blocked on external auth/account)
 

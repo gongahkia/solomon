@@ -486,6 +486,38 @@ Explains why a memory currently has its state.
 
 Returns all current materialized memory rows.
 
+### `eventRecordsJson(): string`
+
+Returns durable event-log records as JSON.
+
+### `auditJson(memoryId: string, nowUnix?: number | undefined | null): string`
+
+Returns one memory's why trace and related events as JSON.
+
+### `consolidateJson(nowUnix?: number | undefined | null): string`
+
+Runs the offline consolidation pass and returns its report as JSON.
+
+### `challengeJson(memoryId: string, reason: string, actor?: string | undefined | null, timestampUnix?: number | undefined | null): string`
+
+Challenges a memory and returns the mutation report as JSON.
+
+### `affirmJson(memoryId: string, reason?: string | undefined | null, actor?: string | undefined | null, timestampUnix?: number | undefined | null): string`
+
+Affirms a memory and returns the mutation report as JSON.
+
+### `pinJson(memoryId: string, reason?: string | undefined | null, actor?: string | undefined | null, timestampUnix?: number | undefined | null): string`
+
+Pins a memory and returns the mutation report as JSON.
+
+### `unpinJson(memoryId: string, reason?: string | undefined | null, actor?: string | undefined | null, timestampUnix?: number | undefined | null): string`
+
+Unpins a memory and returns the mutation report as JSON.
+
+### `correctJson(memoryId: string, proposedContent: string, reason?: string | undefined | null, actor?: string | undefined | null, timestampUnix?: number | undefined | null): string`
+
+Corrects a memory and returns the mutation report as JSON.
+
 ### `export declare function version(): string`
 
 Returns the Shibahama core crate version.
@@ -516,7 +548,7 @@ Invalidate a memory at a Unix timestamp without deleting its history.
 
 Async wrapper for `invalidate` using a worker thread.
 
-### `def recall( self, query_vector, top_k: int, now_unix: int | None = None, raw_query_context: str | None = None, include_cold: bool = False, include_instructions: bool = False, max_context_tokens: int | None = None, similarity_weight: float = 1.0, significance_weight: float = 1.0, recency_weight: float = 0.0, graph_weight: float = 0.0, related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None, ) -> list[RecallCandidate]:`
+### `def recall( self, query_vector, top_k: int, now_unix: int | None = None, raw_query_context: str | None = None, include_cold: bool = False, include_instructions: bool = False, max_context_tokens: int | None = None, similarity_weight: float = 1.0, significance_weight: float = 1.0, recency_weight: float = 0.25, graph_weight: float = 0.25, related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None, ) -> list[RecallCandidate]:`
 
 Recall current memories for a query embedding.
 
@@ -564,7 +596,7 @@ Return current memory rows as a pandas DataFrame.
 
 Return current memory rows as a PyArrow table.
 
-### `def stream_recall( self, query_vector, top_k: int, now_unix: int | None = None, raw_query_context: str | None = None, include_cold: bool = False, include_instructions: bool = False, max_context_tokens: int | None = None, similarity_weight: float = 1.0, significance_weight: float = 1.0, recency_weight: float = 0.0, graph_weight: float = 0.0, related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None, ) -> RecallStream:`
+### `def stream_recall( self, query_vector, top_k: int, now_unix: int | None = None, raw_query_context: str | None = None, include_cold: bool = False, include_instructions: bool = False, max_context_tokens: int | None = None, similarity_weight: float = 1.0, significance_weight: float = 1.0, recency_weight: float = 0.25, graph_weight: float = 0.25, related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None, ) -> RecallStream:`
 
 Return an iterator over current recall candidates.
 

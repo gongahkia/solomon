@@ -197,8 +197,8 @@ impl Default for RecallRankingConfig {
         Self {
             similarity_weight: 1.0,
             significance_weight: 1.0,
-            recency_weight: 0.0,
-            graph_weight: 0.0,
+            recency_weight: 0.25,
+            graph_weight: 0.25,
         }
     }
 }
@@ -845,6 +845,16 @@ mod tests {
         fn related_memory_ids(&self, id: MemoryId) -> Result<Vec<MemoryId>, StorageError> {
             Ok(self.related.get(&id).cloned().unwrap_or_default())
         }
+    }
+
+    #[test]
+    fn recall_ranking_defaults_use_recency_and_graph() {
+        let ranking = RecallRankingConfig::default();
+
+        assert!((ranking.similarity_weight - 1.0).abs() < f64::EPSILON);
+        assert!((ranking.significance_weight - 1.0).abs() < f64::EPSILON);
+        assert!((ranking.recency_weight - 0.25).abs() < f64::EPSILON);
+        assert!((ranking.graph_weight - 0.25).abs() < f64::EPSILON);
     }
 
     fn test_item(content: &str, now: OffsetDateTime) -> MemoryItem {

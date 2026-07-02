@@ -81,8 +81,8 @@ class Shibahama:
         max_context_tokens: int | None = None,
         similarity_weight: float = 1.0,
         significance_weight: float = 1.0,
-        recency_weight: float = 0.0,
-        graph_weight: float = 0.0,
+        recency_weight: float = 0.25,
+        graph_weight: float = 0.25,
         related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None,
     ) -> list[RecallCandidate]:
         """Recall current memories for a query embedding."""
@@ -177,8 +177,8 @@ class Shibahama:
         max_context_tokens: int | None = None,
         similarity_weight: float = 1.0,
         significance_weight: float = 1.0,
-        recency_weight: float = 0.0,
-        graph_weight: float = 0.0,
+        recency_weight: float = 0.25,
+        graph_weight: float = 0.25,
         related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None,
     ) -> RecallStream:
         """Return an iterator over current recall candidates."""

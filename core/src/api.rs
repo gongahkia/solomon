@@ -2874,6 +2874,8 @@ mod tests {
             (config.recall_staleness.load_bearing_significance_threshold - 2.0).abs()
                 < f64::EPSILON
         );
+        assert!((config.recall_ranking.recency_weight - 0.25).abs() < f64::EPSILON);
+        assert!((config.recall_ranking.graph_weight - 0.25).abs() < f64::EPSILON);
         assert_eq!(config.tier_capacity.hot_capacity, None);
         assert_eq!(config.reconstruction_budget.max_revalidations_per_window, 8);
         assert!(!config.background_reconstruction.validate_on_idle);

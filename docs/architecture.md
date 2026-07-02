@@ -100,8 +100,8 @@ The current recall hot path is id-bounded:
 8. Diversify near-duplicate content.
 9. Record a `Surfaced` access event for returned candidates.
 
-Ranking combines vector similarity, materialized significance, optional recency,
-and optional graph-expansion weight. Low-credence memories cannot outrank higher
+Ranking combines vector similarity, materialized significance, recency, and
+graph-expansion weight by default. Low-credence memories cannot outrank higher
 credence memories on otherwise comparable retrieval because credence is the
 first sort key.
 

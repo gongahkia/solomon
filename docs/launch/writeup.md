@@ -38,7 +38,7 @@ Recall starts with vector search, then applies deterministic policy:
 
 - valid-now filtering by default;
 - significance-aware ranking;
-- recency and optional graph signals;
+- recency and graph-expansion signals;
 - credence floors;
 - cold-tier opt-in;
 - read-safety sanitization;

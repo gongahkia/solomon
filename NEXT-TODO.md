@@ -55,12 +55,6 @@ touch the exact mechanisms Phase B will benchmark. The epistemic eval cannot be
 credible while the significance engine has a known double-penalty bug. Close this
 gate before Phase A.
 
-19. [ ] (P1) Decide and document the recall-scoring defaults. Recency weight and
-    graph weight both default to `0.0` — `core/src/retrieval.rs:182-203` — so the
-    two mechanisms that make Shibahama distinct contribute nothing to ranking by
-    default. Either flip them on (preferred, makes the thesis true by default) or
-    write an ADR explaining why they ship off. Phase B depends on this being
-    resolved.
 20. [ ] (P1) Resolve the staged graph-in-recall claim. Recall does not use the
     stored graph; it only expands through a caller-supplied `RelatedMemoryProvider`
     and the bench feeds it a hand-built map — `core/src/retrieval.rs:503-539`,

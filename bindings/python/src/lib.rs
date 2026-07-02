@@ -344,8 +344,8 @@ impl PyShibahama {
         max_context_tokens = None,
         similarity_weight = 1.0,
         significance_weight = 1.0,
-        recency_weight = 0.0,
-        graph_weight = 0.0,
+        recency_weight = 0.25,
+        graph_weight = 0.25,
         related_memory_ids_by_anchor = None
     ))]
     fn recall(
@@ -462,8 +462,8 @@ impl PyShibahama {
         max_context_tokens = None,
         similarity_weight = 1.0,
         significance_weight = 1.0,
-        recency_weight = 0.0,
-        graph_weight = 0.0,
+        recency_weight = 0.25,
+        graph_weight = 0.25,
         related_memory_ids_by_anchor = None
     ))]
     fn stream_recall(

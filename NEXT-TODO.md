@@ -111,10 +111,6 @@ pending.
       model, seed, and exact command.
       (Carried forward; loaders exist at `docs/benchmarks.md:119-125`, artifacts
       pending per `NEXT-TODO.md:36-40` of the prior file.)
-34. [ ] (P1) Add at least one real external system to the comparison rather than
-    only the strawman warehouse baseline (which scores 0 and reads as rigged). A
-    self-hosted Mem0 OSS run on the same continuity slice is the minimum credible
-    external anchor.
 35. [ ] (P2) Cross-reference Phase C results against Phase B: explicitly state
     where Shibahama is competitive on standard recall and where it wins on
     stale-rate/economics. The pair is the honest story.

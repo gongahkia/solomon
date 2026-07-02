@@ -13,6 +13,7 @@ use crate::significance::SignificanceConfig;
 use crate::storage::{EventRecord, MemoryEvent};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use thiserror::Error;
 use time::OffsetDateTime;
 
 /// Public names of every allowed Stage 1 learned-policy action.
@@ -371,14 +372,28 @@ pub struct OfflinePolicyEvaluationReport {
     pub recommendation: PolicyEvaluationRecommendation,
 }
 
+/// Error returned by offline learned-policy evaluation.
+#[derive(Clone, Debug, Deserialize, Error, Eq, PartialEq, Serialize)]
+pub enum PolicyEvaluationError {
+    /// A candidate action was missing from the summary action list.
+    #[error("candidate action `{action_name}` is not represented in policy action summaries")]
+    MissingActionSummary {
+        /// Action name returned by `PolicyAction::name`.
+        action_name: String,
+    },
+}
+
 /// Evaluates offline candidate actions against logged human signals and a deterministic baseline.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns an error when a candidate action is not represented in the policy action summary list.
 pub fn evaluate_offline_policy(
     decisions: &[OfflinePolicyDecision],
     memories: &[MemoryItem],
     events: &[EventRecord],
     config: OfflinePolicyEvaluationConfig,
-) -> OfflinePolicyEvaluationReport {
+) -> Result<OfflinePolicyEvaluationReport, PolicyEvaluationError> {
     let memories_by_id = memories
         .iter()
         .map(|item| (item.id, item))
@@ -443,7 +458,7 @@ pub fn evaluate_offline_policy(
         score_margin,
         config,
     );
-    let action_summaries = summarize_decisions_by_action(&evaluations);
+    let action_summaries = summarize_decisions_by_action(&evaluations)?;
     let null_result = null_result(
         recommendation,
         labeled_decision_count,
@@ -452,7 +467,7 @@ pub fn evaluate_offline_policy(
         config,
     );
 
-    OfflinePolicyEvaluationReport {
+    Ok(OfflinePolicyEvaluationReport {
         decisions: evaluations,
         labeled_decision_count,
         labeled_signal_count,
@@ -463,22 +478,34 @@ pub fn evaluate_offline_policy(
         invariant_violations: all_violations,
         null_result,
         recommendation,
-    }
+    })
 }
 
-#[must_use]
-fn summarize_decisions_by_action(evaluations: &[DecisionEvaluation]) -> Vec<PolicyActionSummary> {
-    let mut summaries = ALLOWED_POLICY_ACTION_NAMES
+fn summarize_decisions_by_action(
+    evaluations: &[DecisionEvaluation],
+) -> Result<Vec<PolicyActionSummary>, PolicyEvaluationError> {
+    summarize_decisions_by_action_with_names(evaluations, &ALLOWED_POLICY_ACTION_NAMES)
+}
+
+fn summarize_decisions_by_action_with_names(
+    evaluations: &[DecisionEvaluation],
+    action_names: &[&str],
+) -> Result<Vec<PolicyActionSummary>, PolicyEvaluationError> {
+    let mut summaries = action_names
         .iter()
         .map(|name| PolicyActionSummary::empty(name))
         .collect::<Vec<_>>();
 
     for evaluation in evaluations {
         let action_name = evaluation.candidate_action.name();
-        let summary = summaries
+        let Some(summary) = summaries
             .iter_mut()
             .find(|summary| summary.action_name == action_name)
-            .expect("all candidate actions must be represented in summaries");
+        else {
+            return Err(PolicyEvaluationError::MissingActionSummary {
+                action_name: action_name.to_owned(),
+            });
+        };
         let positive = evaluation
             .human_signals
             .affirmations
@@ -512,7 +539,7 @@ fn summarize_decisions_by_action(evaluations: &[DecisionEvaluation]) -> Vec<Poli
         }
     }
 
-    summaries
+    Ok(summaries)
 }
 
 #[must_use]
@@ -1183,6 +1210,7 @@ mod tests {
             &events,
             single_label_config(),
         )
+        .expect("evaluation should succeed")
     }
 
     #[test]
@@ -1206,6 +1234,29 @@ mod tests {
     }
 
     #[test]
+    fn action_summary_drift_returns_recoverable_error() {
+        let item = memory("review this", Tier::Warm, Tier::Cold, 1.0);
+        let evaluation = DecisionEvaluation {
+            memory_id: item.id,
+            candidate_action: PolicyAction::FlagForReview,
+            baseline_action: PolicyAction::Noop,
+            human_signals: HumanSignalSummary::default(),
+            candidate_score: 0.0,
+            baseline_score: 0.0,
+            invariant_violations: Vec::new(),
+        };
+        let error = summarize_decisions_by_action_with_names(&[evaluation], &["noop"])
+            .expect_err("stale action list should return an error");
+
+        assert_eq!(
+            error,
+            PolicyEvaluationError::MissingActionSummary {
+                action_name: "flag_for_review".to_owned()
+            }
+        );
+    }
+
+    #[test]
     fn floor_violations_stop_the_evaluation() {
         let item = memory("pinned deployment rule", Tier::Hot, Tier::Warm, 0.3);
         let decision = OfflinePolicyDecision::new(
@@ -1219,7 +1270,8 @@ mod tests {
             HumanSignalAction::Challenge,
             OffsetDateTime::UNIX_EPOCH + Duration::hours(1),
         )];
-        let report = evaluate_offline_policy(&[decision], &[item], &events, single_label_config());
+        let report = evaluate_offline_policy(&[decision], &[item], &events, single_label_config())
+            .expect("evaluation should succeed");
 
         assert_eq!(
             report.recommendation,
@@ -1245,7 +1297,8 @@ mod tests {
             &[item],
             &[],
             OfflinePolicyEvaluationConfig::default(),
-        );
+        )
+        .expect("evaluation should succeed");
 
         assert_eq!(
             report.recommendation,
@@ -1292,7 +1345,8 @@ mod tests {
                 decided_at + Duration::minutes(2),
             ),
         ];
-        let report = evaluate_offline_policy(&[decision], &[item], &events, single_label_config());
+        let report = evaluate_offline_policy(&[decision], &[item], &events, single_label_config())
+            .expect("evaluation should succeed");
         let labels = report.decisions[0].human_signals;
 
         assert_eq!(labels.affirmations, 0);
@@ -1336,7 +1390,8 @@ mod tests {
             &[first.clone(), second.clone()],
             &events,
             single_label_config(),
-        );
+        )
+        .expect("evaluation should succeed");
         assert!(valid_report.invariant_violations.is_empty());
 
         let invalid_report = evaluate_offline_policy(
@@ -1344,7 +1399,8 @@ mod tests {
             &[first, second],
             &events,
             single_label_config(),
-        );
+        )
+        .expect("evaluation should succeed");
         assert!(
             invalid_report
                 .invariant_violations
@@ -1374,7 +1430,8 @@ mod tests {
             HumanSignalAction::Challenge,
             OffsetDateTime::UNIX_EPOCH + Duration::hours(1),
         )];
-        let report = evaluate_offline_policy(&[decision], &[item], &events, single_label_config());
+        let report = evaluate_offline_policy(&[decision], &[item], &events, single_label_config())
+            .expect("evaluation should succeed");
 
         assert_eq!(
             report.recommendation,
@@ -1425,7 +1482,8 @@ mod tests {
             &[item],
             &[],
             OfflinePolicyEvaluationConfig::default(),
-        );
+        )
+        .expect("evaluation should succeed");
         let stage2 = plan_contextual_bandit_experiment(
             &report,
             SignificanceConfig::default(),

@@ -9,9 +9,9 @@ use crate::consolidation::{
 };
 use crate::learned_policy::{
     ContextualBanditExperimentConfig, ContextualBanditExperimentReport, OfflinePolicyDecision,
-    OfflinePolicyEvaluationConfig, OfflinePolicyEvaluationReport, Stage3TrainingReadinessConfig,
-    Stage3TrainingReadinessReport, assess_stage3_training_readiness, evaluate_offline_policy,
-    plan_contextual_bandit_experiment,
+    OfflinePolicyEvaluationConfig, OfflinePolicyEvaluationReport, PolicyEvaluationError,
+    Stage3TrainingReadinessConfig, Stage3TrainingReadinessReport, assess_stage3_training_readiness,
+    evaluate_offline_policy, plan_contextual_bandit_experiment,
 };
 use crate::model::{
     AccessOutcome, CredenceTier, HumanSignal, HumanSignalAction, MemoryId, MemoryItem, Provenance,
@@ -97,6 +97,12 @@ impl From<RecallError> for ShibahamaError {
 impl From<VectorIndexError> for ShibahamaError {
     fn from(error: VectorIndexError) -> Self {
         Self::Vector(error)
+    }
+}
+
+impl From<PolicyEvaluationError> for ShibahamaError {
+    fn from(error: PolicyEvaluationError) -> Self {
+        Self::InvalidRequest(error.to_string())
     }
 }
 
@@ -923,7 +929,8 @@ impl<V: VectorIndex> Shibahama<V> {
     ///
     /// # Errors
     ///
-    /// Returns an error when current item state or event-log records cannot be read.
+    /// Returns an error when current item state or event-log records cannot be read, or when the
+    /// policy action summary list is inconsistent with candidate actions.
     pub fn evaluate_offline_policy(
         &self,
         decisions: &[OfflinePolicyDecision],
@@ -934,7 +941,7 @@ impl<V: VectorIndex> Shibahama<V> {
 
         Ok(evaluate_offline_policy(
             decisions, &memories, &events, config,
-        ))
+        )?)
     }
 
     /// Plans a disabled-by-default Stage 2 contextual-bandit shadow experiment.

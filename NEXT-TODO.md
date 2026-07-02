@@ -55,10 +55,6 @@ touch the exact mechanisms Phase B will benchmark. The epistemic eval cannot be
 credible while the significance engine has a known double-penalty bug. Close this
 gate before Phase A.
 
-21. [ ] (P1) Replace the one production `expect()` that can panic if the action
-    list drifts — `core/src/learned_policy.rs:469-481`. Convert to a recoverable
-    error; add a test for the drift case.
-
 ## Phase A — Performance proof (Rust strength, no LLM, fully under our control)
 
 > **Spec: `docs/specs/PHASE-A-performance.md`** — read before starting. Items

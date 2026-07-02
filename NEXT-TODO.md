@@ -92,10 +92,6 @@ artifact proves a stale-rate, auditability, or token-cost win on a matching
 continuity slice.** This phase is where that artifact gets produced — or where we
 honestly report that it doesn't beat Engram and adjust the claim.
 
-32. [ ] (P2) Tideline integration: a view that *shows* a stale answer being
-    avoided — the superseded item, the current item, the credence/valid-time that
-    decided it, with the `why` trace. This is the headline DX moment for the
-    wedge; the legible version of contradiction resolution nobody else has.
 33. [ ] (P2) Add a small "epistemic governance" coding-agent demo script under
     `examples/` that an interviewer can run in under a minute and watch a stale
     API fact get correctly superseded.

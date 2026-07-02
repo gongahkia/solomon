@@ -8,6 +8,7 @@ import {
   Play,
   RefreshCcw,
   ShieldAlert,
+  ShieldCheck,
   SquareMousePointer,
   Waypoints,
 } from "lucide-react";
@@ -143,8 +144,14 @@ type AuditDetail = {
   events: EventRecordDetail[];
 };
 
-type ViewName = "moment" | "consolidation" | "poisoning" | "bitemporal" | "graph" | "diff";
+type ViewName = "moment" | "staleness" | "consolidation" | "poisoning" | "bitemporal" | "graph" | "diff";
 type ChallengeNote = { actor: string; reason: string };
+type StalenessDecision = {
+  event: TidelineEvent;
+  superseded: MemoryItem;
+  current: MemoryItem | null;
+  cutoffUnix: number | null;
+};
 
 const API_BASE = "http://127.0.0.1:8765";
 const tierOrder: Record<string, number> = { hot: 0, warm: 1, cold: 2 };
@@ -299,6 +306,10 @@ function App() {
     const first = firstSeen.get(memory.id) ?? 0;
     return first <= sequence;
   });
+  const stalenessDecisions = useMemo(
+    () => buildStalenessDecisions(visibleEvents, visibleMemories),
+    [visibleEvents, visibleMemories],
+  );
   const selectedMemory = visibleMemories.find((memory) => memory.id === selectedId) ?? null;
   const lowCredence = visibleMemories.filter((memory) =>
     ["unverified", "model_inferred"].includes(memory.credence),
@@ -329,6 +340,23 @@ function App() {
   }, [visibleEvents]);
   const contestedIds = useMemo(() => new Set(challengeReasons.keys()), [challengeReasons]);
   const selectedChallenge = selectedId ? challengeReasons.get(selectedId) ?? null : null;
+
+  useEffect(() => {
+    if (activeView !== "staleness" || stalenessDecisions.length === 0) {
+      return;
+    }
+
+    const ids = new Set(
+      stalenessDecisions.flatMap((decision) => [
+        decision.superseded.id,
+        ...(decision.current ? [decision.current.id] : []),
+      ]),
+    );
+
+    if (!selectedId || !ids.has(selectedId)) {
+      setSelectedId(stalenessDecisions[0].current?.id ?? stalenessDecisions[0].superseded.id);
+    }
+  }, [activeView, selectedId, stalenessDecisions]);
 
   async function downloadRecording() {
     const asOfParam = asOf ? `?as_of_unix=${Math.floor(new Date(asOf).getTime() / 1000)}` : "";
@@ -487,6 +515,12 @@ function App() {
             <Activity size={16} /> Moment
           </button>
           <button
+            className={activeView === "staleness" ? "active" : ""}
+            onClick={() => setActiveView("staleness")}
+          >
+            <ShieldCheck size={16} /> Staleness
+          </button>
+          <button
             className={activeView === "consolidation" ? "active" : ""}
             onClick={() => setActiveView("consolidation")}
           >
@@ -506,6 +540,14 @@ function App() {
           </button>
         </nav>
         {activeView === "moment" && <MomentView events={momentEvents} memories={visibleMemories} />}
+        {activeView === "staleness" && (
+          <StalenessView
+            decisions={stalenessDecisions}
+            selectedId={selectedId}
+            trace={whyTrace}
+            onSelect={setSelectedId}
+          />
+        )}
         {activeView === "consolidation" && (
           <ConsolidationView events={consolidationEvents} memories={visibleMemories} />
         )}
@@ -764,6 +806,130 @@ function MomentView({ events, memories }: { events: TidelineEvent[]; memories: M
         ))}
       </div>
     </section>
+  );
+}
+
+function StalenessView({
+  decisions,
+  selectedId,
+  trace,
+  onSelect,
+}: {
+  decisions: StalenessDecision[];
+  selectedId: string | null;
+  trace: WhyTrace | null;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <section className="panel wide-panel staleness-panel">
+      <div className="panel-title">
+        <h2>Stale Answer Avoided</h2>
+        <span>{decisions.length}</span>
+      </div>
+      {decisions.length === 0 ? <p className="empty">No supersession decisions</p> : null}
+      <div className="staleness-list">
+        {decisions.map((decision) => {
+          const rowIds = new Set(
+            [decision.superseded.id, decision.current?.id].filter((id): id is string => Boolean(id)),
+          );
+          const rowTrace = trace && rowIds.has(trace.item.id) ? trace : null;
+
+          return (
+            <article key={`${decision.event.sequence}-${decision.superseded.id}`} className="staleness-row">
+              <div className="staleness-head">
+                <strong>{decision.event.kind}</strong>
+                <span>#{decision.event.sequence}</span>
+                <span>{formatUnix(decision.event.recorded_at_unix)}</span>
+              </div>
+              <div className="staleness-compare">
+                <StalenessMemoryCard
+                  label="Superseded"
+                  memory={decision.superseded}
+                  selected={selectedId === decision.superseded.id}
+                  onSelect={onSelect}
+                />
+                <div className="decision-arrow">{"->"}</div>
+                {decision.current ? (
+                  <StalenessMemoryCard
+                    label="Current"
+                    memory={decision.current}
+                    selected={selectedId === decision.current.id}
+                    onSelect={onSelect}
+                  />
+                ) : (
+                  <div className="staleness-memory missing">
+                    <span className="staleness-memory-label">Current</span>
+                    <span className="staleness-memory-content">No replacement in snapshot</span>
+                  </div>
+                )}
+              </div>
+              <div className="staleness-facts">
+                <span>
+                  <b>cutoff</b>
+                  {formatUnixMaybe(decision.cutoffUnix)}
+                </span>
+                <span>
+                  <b>stale credence</b>
+                  {decision.superseded.credence}
+                </span>
+                <span>
+                  <b>current credence</b>
+                  {decision.current?.credence ?? "n/a"}
+                </span>
+                <span>
+                  <b>current valid</b>
+                  {decision.current ? validWindow(decision.current) : "n/a"}
+                </span>
+              </div>
+              {rowTrace ? (
+                <div className="staleness-why">
+                  <div>
+                    <b>why trace</b>
+                    <span>{rowTrace.currency_state}</span>
+                    <span>{rowTrace.significance.final_score.toFixed(3)}</span>
+                    <span>{validWindow(rowTrace.item)}</span>
+                  </div>
+                  {rowTrace.audit_trail.length > 0 ? (
+                    <ol>
+                      {rowTrace.audit_trail.slice(-3).map((entry) => (
+                        <li key={entry}>{entry}</li>
+                      ))}
+                    </ol>
+                  ) : null}
+                </div>
+              ) : null}
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function StalenessMemoryCard({
+  label,
+  memory,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  memory: MemoryItem;
+  selected: boolean;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={selected ? "staleness-memory selected" : "staleness-memory"}
+      onClick={() => onSelect(memory.id)}
+    >
+      <span className="staleness-memory-label">{label}</span>
+      <span className="staleness-memory-content">{memory.content}</span>
+      <span className="staleness-memory-meta">
+        {memory.credence} / {memory.tier} / {memory.significance.toFixed(3)}
+      </span>
+      <span className="staleness-memory-meta">{validWindow(memory)}</span>
+    </button>
   );
 }
 
@@ -1294,6 +1460,75 @@ function memoryLabel(content: string) {
   return normalized.length > 28 ? `${normalized.slice(0, 25)}...` : normalized;
 }
 
+function buildStalenessDecisions(events: TidelineEvent[], memories: MemoryItem[]) {
+  const byId = new Map(memories.map((memory) => [memory.id, memory]));
+  const decisions: StalenessDecision[] = [];
+  const reconstructedSupersededIds = new Set<string>();
+
+  for (const event of events) {
+    if (event.kind !== "reconstruction_applied") {
+      continue;
+    }
+
+    const superseded = byId.get(event.memory_ids[0] ?? "");
+
+    if (!superseded) {
+      continue;
+    }
+
+    const current = byId.get(event.memory_ids[1] ?? "") ?? findCurrentReplacement(superseded, event, memories);
+    reconstructedSupersededIds.add(superseded.id);
+    decisions.push({
+      event,
+      superseded,
+      current,
+      cutoffUnix: event.valid_to_unix ?? superseded.valid_to_unix,
+    });
+  }
+
+  for (const event of events) {
+    if (event.kind !== "memory_invalidated") {
+      continue;
+    }
+
+    const superseded = byId.get(event.memory_ids[0] ?? "");
+
+    if (!superseded || reconstructedSupersededIds.has(superseded.id)) {
+      continue;
+    }
+
+    decisions.push({
+      event,
+      superseded,
+      current: findCurrentReplacement(superseded, event, memories),
+      cutoffUnix: event.valid_to_unix ?? superseded.valid_to_unix,
+    });
+  }
+
+  return decisions.sort((left, right) => right.event.sequence - left.event.sequence);
+}
+
+function findCurrentReplacement(
+  superseded: MemoryItem,
+  event: TidelineEvent,
+  memories: MemoryItem[],
+) {
+  const cutoffUnix = event.valid_to_unix ?? superseded.valid_to_unix ?? event.recorded_at_unix;
+  const candidates = memories
+    .filter((memory) => memory.id !== superseded.id)
+    .filter((memory) => memory.valid_to_unix === null)
+    .filter((memory) => memory.valid_from_unix >= cutoffUnix)
+    .sort((left, right) => left.valid_from_unix - right.valid_from_unix);
+  const sameSource = candidates.filter(
+    (memory) =>
+      superseded.provenance.source_ref !== null &&
+      memory.provenance.source_kind === superseded.provenance.source_kind &&
+      memory.provenance.source_ref === superseded.provenance.source_ref,
+  );
+
+  return sameSource[0] ?? candidates[0] ?? null;
+}
+
 function buildSessionDiff(snapshot: TidelineSnapshot | null, fromSequence: number, toSequence: number) {
   const events = snapshot?.events ?? [];
   const memories = snapshot?.memories ?? [];
@@ -1398,6 +1633,14 @@ function shortId(id: string) {
 
 function formatUnix(unix: number) {
   return new Date(unix * 1000).toLocaleString();
+}
+
+function formatUnixMaybe(unix: number | null | undefined) {
+  return unix === null || unix === undefined ? "open" : formatUnix(unix);
+}
+
+function validWindow(memory: MemoryItem) {
+  return `${formatUnix(memory.valid_from_unix)} -> ${formatUnixMaybe(memory.valid_to_unix)}`;
 }
 
 function humanSignalSummary(record: EventRecordDetail) {

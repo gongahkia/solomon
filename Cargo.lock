@@ -1542,6 +1542,7 @@ dependencies = [
  "napi-derive",
  "serde_json",
  "shibahama-core",
+ "tempfile",
  "time",
  "uuid",
 ]
@@ -1566,6 +1567,7 @@ dependencies = [
  "pyo3",
  "serde_json",
  "shibahama-core",
+ "tempfile",
  "time",
  "uuid",
 ]

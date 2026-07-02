@@ -249,9 +249,13 @@ pub struct PyShibahama {
 #[pymethods]
 impl PyShibahama {
     /// Opens a Shibahama store.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the durable store cannot be opened.
     #[new]
     #[pyo3(signature = (path, dimensions, capacity = 1024))]
-    fn new(path: &str, dimensions: usize, capacity: usize) -> PyResult<Self> {
+    pub fn new(path: &str, dimensions: usize, capacity: usize) -> PyResult<Self> {
         let vector_index = HnswVectorIndex::with_capacity(dimensions, capacity);
         let inner = Shibahama::open(path, vector_index).map_err(py_error)?;
 
@@ -261,6 +265,10 @@ impl PyShibahama {
     }
 
     /// Writes a memory, optionally indexing an embedding vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when input validation, persistence, or vector indexing fails.
     #[pyo3(signature = (
         content,
         vector = None,
@@ -274,7 +282,7 @@ impl PyShibahama {
         model = "unknown",
         model_version = "unknown"
     ))]
-    fn write(
+    pub fn write(
         &self,
         content: String,
         vector: Option<Vec<f32>>,
@@ -324,8 +332,12 @@ impl PyShibahama {
     }
 
     /// Soft-invalidates a memory at a valid-time end.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the memory id is invalid or persistence fails.
     #[pyo3(signature = (memory_id, valid_to_unix))]
-    fn invalidate(&self, memory_id: &str, valid_to_unix: i64) -> PyResult<bool> {
+    pub fn invalidate(&self, memory_id: &str, valid_to_unix: i64) -> PyResult<bool> {
         let id = parse_memory_id(memory_id)?;
         let valid_to = time_from_optional_unix(Some(valid_to_unix))?;
         let mut inner = self.inner.lock().map_err(lock_error)?;
@@ -334,6 +346,10 @@ impl PyShibahama {
     }
 
     /// Recalls current fact memories for a query embedding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when vector search, storage reads, or access recording fail.
     #[pyo3(signature = (
         query_vector,
         top_k,
@@ -348,7 +364,7 @@ impl PyShibahama {
         graph_weight = 0.25,
         related_memory_ids_by_anchor = None
     ))]
-    fn recall(
+    pub fn recall(
         &self,
         query_vector: Vec<f32>,
         top_k: usize,
@@ -394,7 +410,11 @@ impl PyShibahama {
     }
 
     /// Returns all current materialized memory rows.
-    fn memory_items(&self) -> PyResult<Vec<PyMemoryItem>> {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when current item state cannot be read.
+    pub fn memory_items(&self) -> PyResult<Vec<PyMemoryItem>> {
         let inner = self.inner.lock().map_err(lock_error)?;
         let items = inner.memory_items().map_err(py_error)?;
 
@@ -502,6 +522,10 @@ impl PyShibahama {
     }
 
     /// Replays recalled memories as they were believed at a historical instant.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when vector search or storage reads fail.
     #[pyo3(signature = (
         query_vector,
         top_k,
@@ -510,7 +534,7 @@ impl PyShibahama {
         include_instructions = false,
         max_context_tokens = None
     ))]
-    fn timeline(
+    pub fn timeline(
         &self,
         query_vector: Vec<f32>,
         top_k: usize,
@@ -682,8 +706,12 @@ impl PyShibahama {
     }
 
     /// Explains why a memory currently has its state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the memory id is invalid or state cannot be read.
     #[pyo3(signature = (memory_id, now_unix = None))]
-    fn why(&self, memory_id: &str, now_unix: Option<i64>) -> PyResult<Option<PyWhyTrace>> {
+    pub fn why(&self, memory_id: &str, now_unix: Option<i64>) -> PyResult<Option<PyWhyTrace>> {
         let id = parse_memory_id(memory_id)?;
         let now = time_from_optional_unix(now_unix)?;
         let inner = self.inner.lock().map_err(lock_error)?;

@@ -121,9 +121,6 @@ The bindings are real (PyO3 / napi-rs) but parity is smoke-level only and the
 binding crates have 0 Rust tests — a reviewer comparing "Python/Node bindings"
 the claim against the tests will find this fast.
 
-38. [ ] (P3) Add a minimal Rust integration test per binding crate so they are not
-    at zero coverage.
-
 ## External release blockers (carried forward — blocked on external auth/account)
 
 - [!] Publish a working `pip install shibahama` from TestPyPI, then PyPI —

@@ -128,7 +128,7 @@ impl SignificanceConfig {
             AccessOutcome::LedSomewhere => self.led_somewhere_weight,
             AccessOutcome::Cited => self.cited_weight,
             AccessOutcome::Ignored => self.ignored_weight,
-            AccessOutcome::Contradicted => self.contradicted_weight,
+            AccessOutcome::Contradicted => 0.0,
         }
     }
 
@@ -321,7 +321,7 @@ mod tests {
                 > config.outcome_weight(AccessOutcome::Surfaced)
         );
         assert!(config.outcome_bonus(&events) > config.outcome_weight(AccessOutcome::Surfaced));
-        assert!(config.outcome_weight(AccessOutcome::Contradicted) < 0.0);
+        assert!(config.outcome_weight(AccessOutcome::Contradicted).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -337,6 +337,41 @@ mod tests {
         let expected = config.contradicted_weight.abs() * 2.0;
 
         assert!((config.contradiction_penalty(&events) - expected).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn contradicted_access_applies_one_penalty() {
+        let config = SignificanceConfig::default();
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let item = MemoryItem {
+            schema_version: crate::model::CURRENT_MEMORY_SCHEMA_VERSION,
+            id: crate::model::MemoryId::new_v7(),
+            content: "contradicted".to_owned(),
+            kind: crate::model::MemoryKind::Fact,
+            compaction: None,
+            consolidation: None,
+            embedding_ref: None,
+            provenance: crate::model::Provenance::new(
+                crate::model::SourceKind::User,
+                None,
+                "significance-test",
+            ),
+            timestamps: crate::model::TemporalBounds::open_from(now, now),
+            tier: crate::model::Tier::Warm,
+            credence: crate::model::CredenceTier::VerifiedSource,
+            significance: 10.0,
+            base_significance: 10.0,
+            credence_floor: crate::model::Tier::Cold,
+            access_events: vec![AccessEvent::new(now, None, AccessOutcome::Contradicted)],
+        };
+
+        let breakdown = config.explain(&item, now);
+        let expected_penalty = config.contradicted_weight.abs();
+        let expected_score = breakdown.decayed_base + breakdown.reinforcement - expected_penalty;
+
+        assert!(breakdown.outcome_bonus.abs() < f64::EPSILON);
+        assert!((breakdown.contradiction_penalty - expected_penalty).abs() < f64::EPSILON);
+        assert!((breakdown.final_score - expected_score).abs() < f64::EPSILON);
     }
 
     #[test]

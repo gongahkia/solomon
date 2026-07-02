@@ -55,12 +55,6 @@ touch the exact mechanisms Phase B will benchmark. The epistemic eval cannot be
 credible while the significance engine has a known double-penalty bug. Close this
 gate before Phase A.
 
-15. [ ] (P0) Fix the contradiction double-penalty in the significance function.
-    Contradicted events currently subtract via `outcome_bonus` (-2) AND via
-    `contradiction_penalty` (-2) — `core/src/significance.rs:125-188`. Decide the
-    intended single penalty, remove the duplication, and add a regression test
-    asserting a single contradiction lowers significance by the intended amount,
-    not double.
 16. [ ] (P0) Add a schema-version guard on recovery. Version is stored but never
     validated/migrated — `core/src/storage.rs:1226-1243`. For a never-delete /
     audit-everything engine, silently mis-decoding an old record contradicts the

@@ -2,7 +2,7 @@
 
 Decorum is a Manifest V3 browser extension that adds restrained, Community-Notes-style context cards under LinkedIn posts.
 
-The implementation follows the product constraints in [IDEA.md](./IDEA.md): no overlay, one note per post, high confidence before rendering, and an audit trail for every shown note.
+The implementation keeps the core product constraints in the code and docs: no overlay, one note per post, high confidence before rendering, and an audit trail for every shown note. Open roadmap items are tracked in GitHub issues.
 
 ## Development
 

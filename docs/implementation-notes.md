@@ -2,7 +2,7 @@
 
 ## Product Shape
 
-`IDEA.md` is the source of truth. Decorum is a LinkedIn feed browser extension, not a general LinkedIn automation tool. The primary surface is a single restrained context card inserted under a post after the detector has enough signal.
+Decorum is a LinkedIn feed browser extension, not a general LinkedIn automation tool. The primary surface is a single restrained context card inserted under a post after the detector has enough signal. Open roadmap items are tracked in GitHub issues.
 
 Current implementation status:
 

@@ -55,11 +55,6 @@ touch the exact mechanisms Phase B will benchmark. The epistemic eval cannot be
 credible while the significance engine has a known double-penalty bug. Close this
 gate before Phase A.
 
-16. [ ] (P0) Add a schema-version guard on recovery. Version is stored but never
-    validated/migrated — `core/src/storage.rs:1226-1243`. For a never-delete /
-    audit-everything engine, silently mis-decoding an old record contradicts the
-    entire pitch. Minimum viable: on mismatch, fail-closed with a clear error
-    (`expected v{N}, found v{M}`); leave a documented migration hook for v2.
 17. [ ] (P0) Make `cargo build --all` succeed from a fresh clone. It currently
     fails at the `shibahama-python` cdylib link (missing Python symbols like
     `_PyBaseObject_Type`). Either gate the python crate out of the default

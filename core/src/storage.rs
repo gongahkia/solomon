@@ -82,6 +82,16 @@ pub enum StorageError {
     /// Durable store invariants were violated.
     #[error("storage invariant violated: {0}")]
     InvariantViolation(String),
+    /// A persisted record uses an unsupported schema version.
+    #[error("schema version mismatch in {record}: expected v{expected}, found v{found}")]
+    SchemaVersionMismatch {
+        /// Persisted record label.
+        record: String,
+        /// Schema version supported by this crate.
+        expected: u16,
+        /// Schema version decoded from storage.
+        found: u16,
+    },
     /// Snapshot export would write decrypted data from an encrypted store.
     #[error("plaintext snapshot export is disabled for encrypted stores")]
     EncryptedSnapshotExportDisabled,
@@ -1134,12 +1144,11 @@ impl RedbMemoryStore {
         for row in table.iter().map_err(embed)? {
             let (sequence, value) = row.map_err(embed)?;
             let event_key = Self::event_key(sequence.value());
+            let record: EventRecord =
+                self.decode_json(StorageTableName::EventLog, &event_key, value.value())?;
 
-            records.push(self.decode_json(
-                StorageTableName::EventLog,
-                &event_key,
-                value.value(),
-            )?);
+            validate_event_schema_version(&record)?;
+            records.push(record);
         }
 
         Ok(records)
@@ -1440,7 +1449,7 @@ impl RedbMemoryStore {
         }
 
         let snapshot = StoreSnapshot {
-            schema_version: 1,
+            schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             events: self.events()?,
             materialized_items: self.materialized_items()?,
             embeddings: self.stored_embeddings()?,
@@ -1488,7 +1497,12 @@ impl RedbMemoryStore {
             .map(|value| {
                 let key = Self::event_key(sequence);
 
-                self.decode_json(StorageTableName::EventLog, &key, value.value())
+                let record: EventRecord =
+                    self.decode_json(StorageTableName::EventLog, &key, value.value())?;
+
+                validate_event_schema_version(&record)?;
+
+                Ok(record)
             })
             .transpose()
     }
@@ -1534,7 +1548,15 @@ impl RedbMemoryStore {
             .get(key.as_str())
             .map_err(embed)?
             .map(|value| {
-                self.decode_json(StorageTableName::MemoryItems, key.as_bytes(), value.value())
+                let item: MemoryItem =
+                    self.decode_json(StorageTableName::MemoryItems, key.as_bytes(), value.value())?;
+
+                validate_memory_schema_version(
+                    &format!("materialized memory {}", item.id),
+                    item.schema_version,
+                )?;
+
+                Ok(item)
             })
             .transpose()
     }
@@ -1561,11 +1583,14 @@ impl RedbMemoryStore {
             let (key, value) = row.map_err(embed)?;
             let key = key.value();
 
-            items.push(self.decode_json(
-                StorageTableName::MemoryItems,
-                key.as_bytes(),
-                value.value(),
-            )?);
+            let item: MemoryItem =
+                self.decode_json(StorageTableName::MemoryItems, key.as_bytes(), value.value())?;
+
+            validate_memory_schema_version(
+                &format!("materialized memory {}", item.id),
+                item.schema_version,
+            )?;
+            items.push(item);
         }
 
         Ok(items)
@@ -1642,6 +1667,8 @@ impl RedbMemoryStore {
     }
 
     fn restore(&self, snapshot: StoreSnapshot) -> Result<(), StorageError> {
+        validate_memory_schema_version("store snapshot", snapshot.schema_version)?;
+
         let mut write_txn = self.db.begin_write().map_err(embed)?;
         write_txn
             .set_durability(Durability::Immediate)
@@ -3720,6 +3747,30 @@ fn embed(error: impl std::error::Error) -> StorageError {
     StorageError::Embedded(error.to_string())
 }
 
+fn validate_event_schema_version(record: &EventRecord) -> Result<(), StorageError> {
+    if let MemoryEvent::MemoryWritten { item } = &record.event {
+        validate_memory_schema_version(
+            &format!("event {} memory {}", record.sequence, item.id),
+            item.schema_version,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn validate_memory_schema_version(record: &str, found: u16) -> Result<(), StorageError> {
+    // v2 migrations should branch here before decoded state is exposed.
+    if found == CURRENT_MEMORY_SCHEMA_VERSION {
+        return Ok(());
+    }
+
+    Err(StorageError::SchemaVersionMismatch {
+        record: record.to_owned(),
+        expected: CURRENT_MEMORY_SCHEMA_VERSION,
+        found,
+    })
+}
+
 fn compression(error: impl std::fmt::Display) -> StorageError {
     StorageError::Compression(error.to_string())
 }
@@ -5048,6 +5099,69 @@ mod tests {
                 materialized_item_count: 2
             }
         );
+    }
+
+    #[test]
+    fn recovery_fails_closed_on_schema_version_mismatch() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let path = file.path();
+
+        {
+            let store = RedbMemoryStore::open(path).expect("store should open");
+            let mut item = test_item("future schema");
+
+            item.schema_version = CURRENT_MEMORY_SCHEMA_VERSION + 1;
+            let record = EventRecord {
+                sequence: 0,
+                recorded_at: OffsetDateTime::UNIX_EPOCH,
+                event: MemoryEvent::MemoryWritten {
+                    item: Box::new(item.clone()),
+                },
+            };
+            let event_key = RedbMemoryStore::event_key(record.sequence);
+            let item_key = item.id.to_string();
+            let event_bytes = store
+                .encode_json(StorageTableName::EventLog, &event_key, &record)
+                .expect("event should encode");
+            let item_bytes = store
+                .encode_json(StorageTableName::MemoryItems, item_key.as_bytes(), &item)
+                .expect("item should encode");
+            let mut write_txn = store.db.begin_write().expect("write txn should begin");
+
+            write_txn
+                .set_durability(Durability::Immediate)
+                .expect("durability should set");
+            {
+                let mut event_table = write_txn
+                    .open_table(EVENT_LOG_TABLE)
+                    .expect("event table should open");
+                let mut item_table = write_txn
+                    .open_table(MEMORY_ITEMS_TABLE)
+                    .expect("item table should open");
+
+                event_table
+                    .insert(record.sequence, event_bytes.as_slice())
+                    .expect("event should insert");
+                item_table
+                    .insert(item_key.as_str(), item_bytes.as_slice())
+                    .expect("item should insert");
+            }
+            write_txn.commit().expect("txn should commit");
+        }
+
+        let Err(error) = RedbMemoryStore::open(path) else {
+            panic!("recovery should reject future schema");
+        };
+
+        assert!(matches!(
+            error,
+            StorageError::SchemaVersionMismatch {
+                expected: CURRENT_MEMORY_SCHEMA_VERSION,
+                found,
+                ..
+            } if found == CURRENT_MEMORY_SCHEMA_VERSION + 1
+        ));
+        assert!(error.to_string().contains("expected v1, found v2"));
     }
 
     #[test]

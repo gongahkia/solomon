@@ -1,6 +1,6 @@
 {
   "manifest": {
-    "commit": "6b8b9071261cf7ce2041a4ee3177c07e0eb3d8c0",
+    "commit": "9103998a7b29b551a5bd501a70b1ca3424d5e136",
     "rustc": "rustc 1.93.0 (254b59607 2026-01-19)",
     "os": "Darwin Gabriels-MacBook-Air.local 25.5.0 Darwin Kernel Version 25.5.0: Mon Apr 27 20:41:19 PDT 2026; root:xnu-12377.121.6~2/RELEASE_ARM64_T8122 arm64",
     "cpu": "Apple M3",
@@ -11,16 +11,18 @@
     "scale": "100k",
     "item_count": 100000,
     "query_count": 30,
-    "command": "target/release/record_perf --tiers 1k,10k,100k --queries 30 --output-dir benchmarks/results/perf --omit-1m 1M local run omitted; immediate-durability ingest exceeded the available session budget",
-    "timestamp_utc": "2026-07-02T03:48:29.066481Z"
+    "quality_query_count": 10,
+    "command": "target/release/record_perf --tiers 1k,10k,100k --queries 30 --quality-tiers 10k,100k --quality-queries 10 --output-dir benchmarks/results/perf --omit-1m 1M local run omitted; immediate-durability ingest exceeded the available session budget",
+    "timestamp_utc": "2026-07-02T04:29:32.282401Z"
   },
   "results": {
     "recall_latency_ns": {
-      "p50": 68567750,
-      "p95": 82027959,
-      "p99": 91084250
+      "p50": 83980041,
+      "p95": 95065791,
+      "p99": 134221209
     },
-    "resident_memory_bytes": 908836864,
+    "hnsw_recall_at_10": 0.08,
+    "resident_memory_bytes": 894959616,
     "omitted": null
   }
 }

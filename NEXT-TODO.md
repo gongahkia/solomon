@@ -68,9 +68,6 @@ agents specifically, **write-then-immediately-recallable at sub-millisecond loca
 latency** is the property they need — a coding agent that just learned a fact
 cannot wait for background graph processing. Make that property a number.
 
-24. [ ] (P1) Capture HNSW recall quality vs latency tradeoff (recall@k against an
-    exact-search ground truth) so the speed numbers are not divorced from
-    accuracy. A fast index that returns wrong neighbours is not a win.
 25. [ ] (P2) Add a "cold vs warm vs hot tier" latency breakdown — show that the
     tier model actually buys something (hot recall is faster than cold-content
     rehydration). This makes the tiering thesis measurable, not just asserted.

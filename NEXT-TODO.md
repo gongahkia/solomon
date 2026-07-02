@@ -68,18 +68,12 @@ agents specifically, **write-then-immediately-recallable at sub-millisecond loca
 latency** is the property they need — a coding agent that just learned a fact
 cannot wait for background graph processing. Make that property a number.
 
-23. [ ] (P1) Run the suite at scale tiers: 1k / 10k / 100k / 1M items. Report
-    recall p50/p99 and resident memory footprint at each tier. Commit the raw
-    output + a generated Markdown table under `benchmarks/results/perf/`.
 24. [ ] (P1) Capture HNSW recall quality vs latency tradeoff (recall@k against an
     exact-search ground truth) so the speed numbers are not divorced from
     accuracy. A fast index that returns wrong neighbours is not a win.
 25. [ ] (P2) Add a "cold vs warm vs hot tier" latency breakdown — show that the
     tier model actually buys something (hot recall is faster than cold-content
     rehydration). This makes the tiering thesis measurable, not just asserted.
-26. [ ] (P2) Document the bench environment (CPU, RAM, OS, rustc version, commit
-    hash, seed, exact command) alongside every result file. Numbers without a
-    reproduction recipe are not proof.
 27. [ ] (P3) Add a CI job that runs a small perf smoke (1k items) and fails on
     gross regression (e.g. p99 recall > threshold), so performance can't silently
     rot.

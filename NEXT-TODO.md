@@ -38,12 +38,12 @@ The phase items below are the checklist. The full buildable specs — dataset
 schemas, metric formulas, adapter interfaces, acceptance criteria — live in
 separate documents. When working a phase, read its spec first:
 
-- **Phase A** → `docs/specs/PHASE-A-performance.md` (perf harness, scale tiers,
+- **Phase A** → `PHASE-A.md` (perf harness, scale tiers,
   metric JSON shape, post-write-availability gate)
-- **Phase B** → `docs/specs/PHASE-B-continuity.md` (ContinuityBench dataset,
+- **Phase B** → `PHASE-B.md` (ContinuityBench dataset,
   exact metric definitions, adapter interface, Engram guardrail) — **the wedge;
   read this in full before touching item 28**
-- **Phase C** → `docs/specs/PHASE-C-standard-benchmarks.md` (LoCoMo/LongMemEval
+- **Phase C** → `PHASE-C.md` (LoCoMo/LongMemEval
   artifacts, honesty requirements, cross-reference to Phase B)
 
 ---
@@ -57,7 +57,7 @@ gate before Phase A.
 
 ## Phase A — Performance proof (Rust strength, no LLM, fully under our control)
 
-> **Spec: `docs/specs/PHASE-A-performance.md`** — read before starting. Items
+> **Spec: `PHASE-A.md`** — read before starting. Items
 > 22–27 below map to its deliverables and acceptance criteria.
 
 The Rust-first thesis is a performance claim that currently has zero committed
@@ -90,7 +90,7 @@ cannot wait for background graph processing. Make that property a number.
 
 ## Phase B — Differentiated continuity / epistemic-governance eval (THE WEDGE)
 
-> **Spec: `docs/specs/PHASE-B-continuity.md`** — read in full before item 28.
+> **Spec: `PHASE-B.md`** — read in full before item 28.
 > It holds the dataset schema, the exact metric definitions (stale-answer rate,
 > contradiction-resolution accuracy, credence-tracks-evidence ρ, token cost), the
 > system-agnostic adapter interface, and the Engram guardrail. This is the phase
@@ -142,7 +142,7 @@ honestly report that it doesn't beat Engram and adjust the claim.
 
 ## Phase C — Standard benchmarks (table-stakes hygiene, done honestly, LAST)
 
-> **Spec: `docs/specs/PHASE-C-standard-benchmarks.md`** — read before running.
+> **Spec: `PHASE-C.md`** — read before running.
 > It defines the required baselines, honesty requirements, the external-anchor
 > (Mem0 OSS) requirement, and the Phase-B cross-reference that tells the full
 > story.

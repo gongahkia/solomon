@@ -178,7 +178,7 @@ def write_summary(path: Path, payloads: list[dict[str, Any]]) -> None:
     lines = [
         "# ContinuityBench Summary",
         "",
-        "| System | Stale Rate | Contradiction Acc | Credence Rho | Credence n | Mean Tokens | Stable Acc | Where Shibahama Loses/Ties |",
+        "| System | Stale Rate | Contradiction Acc | Credence Rho | Credence n | Mean Tokens | Stable Acc | Where Baseline Beats Shibahama |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for payload in payloads:
@@ -198,6 +198,8 @@ def write_summary(path: Path, payloads: list[dict[str, Any]]) -> None:
     lines.extend(
         [
             "",
+            "The comparison column lists strict baseline wins only; ties are visible in the metric columns.",
+            "",
             "Mem0 OSS is run as an exact-event retrieval baseline: `mem0ai` stores the dataset event text directly with `infer=False`, FastEmbed embeddings, and local Qdrant. This avoids hosted LLM/API-key extraction and isolates retrieval behavior.",
             "",
             "Full-context returns every event for the task, ranked by valid-time and corroboration for deterministic scoring; its token cost is the relevant baseline cost.",
@@ -209,7 +211,7 @@ def write_summary(path: Path, payloads: list[dict[str, Any]]) -> None:
 
 def loss_column(shibahama: dict[str, Any] | None, payload: dict[str, Any]) -> str:
     if shibahama is None or payload is shibahama:
-        return "baseline row"
+        return "reference row"
     shib = shibahama["metrics"]
     other = payload["metrics"]
     losses = []

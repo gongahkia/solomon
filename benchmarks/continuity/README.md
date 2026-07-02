@@ -93,10 +93,15 @@ Run the checked-in baseline set:
 
 ```sh
 python3 benchmarks/continuity/run_baselines.py \
-  --systems shibahama,warehouse,full-context,mem0-oss-exact \
+  --systems shibahama,warehouse,full-context,mem0-oss-exact,engram-exact \
   --output-dir benchmarks/results/continuity
 ```
 
 The Mem0 OSS baseline requires `mem0ai` and `fastembed` installed in the Python
 environment running the script. It stores exact dataset event text with
 `infer=False`; this is a retrieval baseline, not a hosted LLM extraction run.
+
+The Engram baseline requires `engram-memory` installed. It uses Engram's offline
+`mock` LLM and `simple` embedder, stores exact dataset event text with
+`infer=False`, and disables EchoMem, rerank/category/echo boosts for
+deterministic local scoring.

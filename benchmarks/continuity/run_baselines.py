@@ -26,7 +26,7 @@ from shibahama_bench.embeddings import embed_text
 
 DEFAULT_DATASET = ROOT / "benchmarks" / "continuity" / "dataset" / "continuitybench-v0.json"
 DEFAULT_OUTPUT_DIR = ROOT / "benchmarks" / "results" / "continuity"
-DEFAULT_SYSTEMS = "shibahama,warehouse,full-context,mem0-oss-exact"
+DEFAULT_SYSTEMS = "shibahama,warehouse,full-context,mem0-oss-exact,engram-exact"
 TOP_K = 5
 SHIBAHAMA_DIMENSIONS = 16
 MEM0_EMBEDDER_MODEL = "BAAI/bge-small-en-v1.5"
@@ -82,6 +82,8 @@ def build_adapter(system: str, tmpdir: Path) -> BaselineAdapter:
         return FullContextAdapter()
     if system == "mem0-oss-exact":
         return Mem0OssExactAdapter(tmpdir / "mem0")
+    if system == "engram-exact":
+        return EngramExactAdapter(tmpdir / "engram")
     raise ValueError(f"unknown continuity baseline: {system}")
 
 
@@ -201,6 +203,8 @@ def write_summary(path: Path, payloads: list[dict[str, Any]]) -> None:
             "The comparison column lists strict baseline wins only; ties are visible in the metric columns.",
             "",
             "Mem0 OSS is run as an exact-event retrieval baseline: `mem0ai` stores the dataset event text directly with `infer=False`, FastEmbed embeddings, and local Qdrant. This avoids hosted LLM/API-key extraction and isolates retrieval behavior.",
+            "",
+            "Engram is run as an exact-event retrieval baseline with its offline `mock` LLM, `simple` embedder, and local Qdrant. It stores dataset event text directly with `infer=False`.",
             "",
             "Full-context returns every event for the task, ranked by valid-time and corroboration for deterministic scoring; its token cost is the relevant baseline cost.",
             "",
@@ -424,6 +428,92 @@ class Mem0OssExactAdapter:
             task["query"]["text"],
             filters={"user_id": self._task_id},
             top_k=top_k,
+        )
+        rows = result.get("results", result if isinstance(result, list) else [])
+        contexts = [str(row.get("memory", "")) for row in rows]
+        return {
+            "contexts": contexts,
+            "item_credences": [],
+            "token_count": whitespace_token_count("\n".join(contexts)),
+        }
+
+
+class EngramExactAdapter:
+    name = "engram-exact"
+    model = "engram-memory+simple-embedder"
+    tokenizer = "whitespace"
+
+    def __init__(self, tmpdir: Path) -> None:
+        from engram import Memory
+        import engram
+
+        self._memory_cls = Memory
+        self._engram_version = getattr(engram, "__version__", "unknown")
+        self._tmpdir = tmpdir
+        self._tmpdir.mkdir(parents=True, exist_ok=True)
+        self._memory = None
+        self._task_id = ""
+        self.config = {
+            "engram_version": self._engram_version,
+            "add_infer": False,
+            "llm": "mock",
+            "embedder": "simple",
+            "echo": False,
+            "embedding_dimensions": SHIBAHAMA_DIMENSIONS,
+            "vector_store": "qdrant-local",
+            "search": "keyword_search=True, rerank=False, echo/category boosts disabled",
+        }
+
+    def reset(self, task: dict[str, Any]) -> None:
+        self._task_id = str(task["task_id"])
+        path = self._tmpdir / self._task_id
+        path.mkdir(parents=True, exist_ok=True)
+        config = {
+            "llm": {"provider": "mock", "config": {}},
+            "embedder": {
+                "provider": "simple",
+                "config": {"embedding_dims": SHIBAHAMA_DIMENSIONS},
+            },
+            "vector_store": {
+                "provider": "qdrant",
+                "config": {
+                    "path": str(path / "qdrant"),
+                    "collection_name": f"continuity_{self._task_id.replace('-', '_')}",
+                },
+            },
+            "history_db_path": str(path / "history.db"),
+            "embedding_model_dims": SHIBAHAMA_DIMENSIONS,
+            "category": {
+                "enable_categories": False,
+                "auto_categorize": False,
+                "use_llm_categorization": False,
+            },
+            "echo": {"enable_echo": False, "auto_depth": False},
+            "scene": {"enable_scenes": False},
+            "profile": {"enable_profiles": False},
+            "graph": {"enable_graph": False},
+        }
+        self._memory = self._memory_cls.from_config(config)
+
+    def ingest(self, event: dict[str, Any]) -> None:
+        assert self._memory is not None
+        self._memory.add(
+            event["content"],
+            user_id=self._task_id,
+            metadata={"event_id": event["event_id"]},
+            infer=False,
+        )
+
+    def query(self, task: dict[str, Any], top_k: int) -> dict[str, Any]:
+        assert self._memory is not None
+        result = self._memory.search(
+            task["query"]["text"],
+            user_id=self._task_id,
+            limit=top_k,
+            rerank=False,
+            keyword_search=True,
+            use_echo_rerank=False,
+            use_category_boost=False,
         )
         rows = result.get("results", result if isinstance(result, list) else [])
         contexts = [str(row.get("memory", "")) for row in rows]

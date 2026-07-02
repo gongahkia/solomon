@@ -37,3 +37,4 @@ node examples/node/basic-memory.mjs
 ## Demos
 
 - `coding-agent/`: long-horizon coding-agent memory demo with a Tideline recording.
+- `epistemic-governance/`: under-minute stale API fact supersession demo.

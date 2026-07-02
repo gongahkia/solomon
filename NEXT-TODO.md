@@ -92,10 +92,6 @@ artifact proves a stale-rate, auditability, or token-cost win on a matching
 continuity slice.** This phase is where that artifact gets produced — or where we
 honestly report that it doesn't beat Engram and adjust the claim.
 
-33. [ ] (P2) Add a small "epistemic governance" coding-agent demo script under
-    `examples/` that an interviewer can run in under a minute and watch a stale
-    API fact get correctly superseded.
-
 ## Phase C — Standard benchmarks (table-stakes hygiene, done honestly, LAST)
 
 > **Spec: `PHASE-C.md`** — read before running.

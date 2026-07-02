@@ -49,6 +49,42 @@ compact separators) of the parsed dataset object. Result artifacts in
 
 ## Scope
 
-This commit is dataset design only. The system-agnostic ContinuityBench runner,
-metric computation, baselines, and result artifacts are tracked by subsequent
-Phase B items.
+The metric scorer accepts a system-output JSON file with ranked contexts:
+
+```json
+{
+  "system": "adapter-name",
+  "model": "none",
+  "seed": 0,
+  "tokenizer": "reported-by-adapter",
+  "results": [
+    {
+      "task_id": "stable-recall-0001",
+      "contexts": ["ranked memory text"],
+      "item_credences": [0.9],
+      "token_count": 4
+    }
+  ]
+}
+```
+
+Score it with:
+
+```sh
+python3 benchmarks/continuity/score.py \
+  --system-output path/to/system-output.json \
+  --output benchmarks/results/continuity/adapter.json \
+  --markdown benchmarks/results/continuity/adapter.md
+```
+
+Implemented metrics:
+
+- stale-answer rate over supersession tasks, using the Phase B ranked-context
+  rule;
+- contradiction-resolution accuracy over contradiction tasks;
+- Spearman rho for reported credence vs evidence-strength ordinal;
+- mean retrieval token cost from adapter-reported token counts;
+- stable-recall accuracy for the control category.
+
+Baseline adapters, external systems, and checked-in result artifacts are tracked
+by subsequent Phase B items.

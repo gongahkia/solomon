@@ -92,14 +92,6 @@ artifact proves a stale-rate, auditability, or token-cost win on a matching
 continuity slice.** This phase is where that artifact gets produced — or where we
 honestly report that it doesn't beat Engram and adjust the claim.
 
-29. [ ] (P1) Define and report the metrics the field doesn't:
-    - **stale-answer rate**: fraction of queries answered with a superseded fact.
-    - **contradiction-resolution accuracy**: when two memories conflict, does the
-      system surface the one with higher credence / more recent valid-time?
-    - **credence-tracks-evidence**: correlation between an item's credence and the
-      quality of its provenance/corroboration.
-    - **retrieval token cost** per query (the economics axis — a continuity win is
-      an economics win before a raw-accuracy win).
 30. [ ] (P1) Report HONEST baselines: flat/warehouse retrieval, full-context where
     reproducible, and at least one real external system (Mem0 OSS self-hosted,
     and Engram if runnable). Report cases where the flat baseline wins on plain

@@ -55,13 +55,6 @@ touch the exact mechanisms Phase B will benchmark. The epistemic eval cannot be
 credible while the significance engine has a known double-penalty bug. Close this
 gate before Phase A.
 
-18. [ ] (P0) Document the precise never-delete invariant in an ADR. Invalidation
-    currently deletes secondary vector/embedding rows but not memory rows —
-    `core/src/storage.rs:2974-2993`. This is defensible (embeddings are derived
-    and regenerable) but the gap between the "never delete" claim and the code
-    must be stated explicitly: "source/event data is immutable; derived indices
-    are regenerable." Either tombstone embeddings too, or write the ADR — do not
-    leave the claim broader than the implementation.
 19. [ ] (P1) Decide and document the recall-scoring defaults. Recency weight and
     graph weight both default to `0.0` — `core/src/retrieval.rs:182-203` — so the
     two mechanisms that make Shibahama distinct contribute nothing to ranking by

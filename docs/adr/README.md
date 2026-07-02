@@ -13,3 +13,4 @@ ADR is added, append it to this index with its status and date.
 | [0006: Credence Taxonomy and Floor](0006-credence-taxonomy.md) | Accepted | 2026-06-11 | Separate trust from usefulness with credence tiers and credence floors. |
 | [0007: Error Model and Graceful Degradation](0007-error-model.md) | Accepted | 2026-06-11 | Use typed, actionable errors; fail writes closed and make degradation visible. |
 | [0008: Cold-Tier Mmap](0008-cold-tier-mmap.md) | Accepted | 2026-06-12 | Keep v0.1 cold content in the compressed redb table; defer mmap to a future storage-backend redesign. |
+| [0009: Never-Delete Invariant Scope](0009-never-delete-invariant-scope.md) | Accepted | 2026-07-02 | Scope never-delete to source/event memory state while treating embeddings and vector indexes as regenerable derived state. |

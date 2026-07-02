@@ -30,7 +30,7 @@ is actively dangerous.
 
 The defensible difference is not "it uses memory signals." Current systems
 already claim multi-signal and temporal retrieval. Shibahama's narrower claim is
-that never-delete history, credence floors, append-only human signals
+that never-delete source/event history, credence floors, append-only human signals
 (`challenge`, `affirm`, `correct`, `pin`), and Tideline-visible
 reconstruction/consolidation make memory behavior easier to audit and contest.
 

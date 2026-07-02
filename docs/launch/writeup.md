@@ -11,9 +11,9 @@ source-backed decisions.
 
 Shibahama is an embeddable memory engine for that failure mode. It treats memory
 as a durable stream of claims instead of a bag of text chunks. Its narrow
-positioning is append-only, never-delete memory with credence floors, explicit
-human signal verbs, and a debugger that shows why reconstruction or
-consolidation happened.
+positioning is append-only, never-delete source/event memory with credence
+floors, explicit human signal verbs, and a debugger that shows why
+reconstruction or consolidation happened.
 
 ## What It Stores
 

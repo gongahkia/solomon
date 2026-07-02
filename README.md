@@ -20,9 +20,10 @@ safe to use. It keeps memory as durable state with history: every item carries
 provenance, valid time, ingestion time, credence, tier, significance, and an
 audit trail. Recall returns contextual candidates, not bare text.
 
-The defensible center is narrow: never-delete history with credence floors,
-append-only human signals, and Tideline-visible reconstruction/consolidation.
-Usage signals matter, but they are not the whole claim.
+The defensible center is narrow: never-delete source/event history with credence
+floors, append-only human signals, and Tideline-visible
+reconstruction/consolidation. Usage signals matter, but they are not the whole
+claim.
 
 The repository is pre-release. The Rust core, CLI, Python binding, Node binding,
 benchmark harness, examples, Tideline debugger, consolidation pass, human signal

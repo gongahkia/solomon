@@ -55,12 +55,6 @@ touch the exact mechanisms Phase B will benchmark. The epistemic eval cannot be
 credible while the significance engine has a known double-penalty bug. Close this
 gate before Phase A.
 
-17. [ ] (P0) Make `cargo build --all` succeed from a fresh clone. It currently
-    fails at the `shibahama-python` cdylib link (missing Python symbols like
-    `_PyBaseObject_Type`). Either gate the python crate out of the default
-    workspace build, add the PyO3 `extension-module` feature so it links
-    correctly, or document the exact build invocation as the canonical one. First
-    impression for anyone cloning the repo — non-negotiable.
 18. [ ] (P0) Document the precise never-delete invariant in an ADR. Invalidation
     currently deletes secondary vector/embedding rows but not memory rows —
     `core/src/storage.rs:2974-2993`. This is defensible (embeddings are derived

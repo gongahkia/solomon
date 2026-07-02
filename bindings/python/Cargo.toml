@@ -24,7 +24,7 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
-pyo3 = { version = "0.28.3", features = ["extension-module"] }
+pyo3 = "0.28.3"
 serde_json = "1.0.150"
 shibahama-core.workspace = true
 time = { version = "0.3.47", features = ["serde"] }

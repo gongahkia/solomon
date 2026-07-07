@@ -19,6 +19,12 @@ from stonks_cli.whalemirror.carry_audit import (
     render_carry_reconciliation_report,
     write_carry_ledger,
 )
+from stonks_cli.whalemirror.carry_health import (
+    CarryHealthCheck,
+    CarryHealthReport,
+    build_carry_health_report,
+    render_carry_health_report,
+)
 from stonks_cli.whalemirror.carry_paper import (
     PaperCarryConfig,
     PaperCarryEngine,
@@ -146,6 +152,8 @@ __all__ = [
     "CAPTURE_GATE",
     "CarryDecision",
     "CarryCostAssumptions",
+    "CarryHealthCheck",
+    "CarryHealthReport",
     "CarryInputCompleteness",
     "CarryOpportunity",
     "CarryPosition",
@@ -207,6 +215,7 @@ __all__ = [
     "build_active_asset_ctx_subscription",
     "build_all_mids_subscription",
     "build_carry_capture_subscriptions",
+    "build_carry_health_report",
     "build_live_capture_subscriptions",
     "build_open_orders_subscription",
     "build_order_updates_subscription",
@@ -242,6 +251,7 @@ __all__ = [
     "replay_paper_mirror_fixture",
     "render_decision_ledger",
     "render_carry_ledger",
+    "render_carry_health_report",
     "render_carry_reconciliation_report",
     "render_gate_report",
     "render_tearsheet",

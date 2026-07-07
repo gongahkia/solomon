@@ -176,6 +176,14 @@ class CarryMirrorConfig(BaseModel):
         ge=0.0,
         description="Research threshold only; not a profit claim.",
     )
+    alert_sink: Literal["disabled", "telegram", "email"] = "disabled"
+    alert_events: list[str] = Field(
+        default_factory=lambda: ["kill_switch", "stale_data", "ledger_mismatch", "service_restart"]
+    )
+    telegram_bot_token_env: str = "STONKS_CLI_CARRY_TELEGRAM_BOT_TOKEN"
+    telegram_chat_id_env: str = "STONKS_CLI_CARRY_TELEGRAM_CHAT_ID"
+    email_smtp_url_env: str = "STONKS_CLI_CARRY_EMAIL_SMTP_URL"
+    email_to_env: str = "STONKS_CLI_CARRY_EMAIL_TO"
 
 
 class TuiConfig(BaseModel):

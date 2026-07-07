@@ -1,0 +1,9 @@
+/var/log/stonks-cli/carrymirror-paper.log {
+    daily
+    rotate 14
+    compress
+    missingok
+    notifempty
+    copytruncate
+    maxsize 20M
+}

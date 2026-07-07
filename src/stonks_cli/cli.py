@@ -29,6 +29,7 @@ from stonks_cli.whalemirror.attribution import (
     render_wallet_ranking_markdown,
 )
 from stonks_cli.whalemirror.capture_analysis import analyze_capture_archive
+from stonks_cli.whalemirror.carry_health import build_carry_health_report, render_carry_health_report
 from stonks_cli.whalemirror.carry_paper import PaperCarryConfig, run_paper_carry, write_paper_carry_artifacts
 from stonks_cli.whalemirror.carry_scanner import (
     CarryCostAssumptions,
@@ -202,6 +203,36 @@ def config_validate() -> None:
 # --- CarryMirror commands ---
 
 
+@carry_app.command("health")
+def carry_health(
+    state_dir: Path = typer.Option(Path(".cache/carry-paper"), "--state-dir"),
+    ledger: Path = typer.Option(Path(".cache/carry-paper/ledger.md"), "--ledger"),
+    stream_heartbeat: Path | None = typer.Option(None, "--stream-heartbeat"),
+    reconciliation: Path | None = typer.Option(None, "--reconciliation"),
+    json_output: bool = typer.Option(False, "--json/--table"),
+    skip_network: bool = typer.Option(False, "--skip-network", help="Skip network and venue API checks"),
+    max_stream_age_seconds: float = typer.Option(120.0, "--max-stream-age-seconds", min=0.0),
+) -> None:
+    """Check CarryMirror Pi paper-run host and artifact health."""
+    try:
+        report = build_carry_health_report(
+            cfg=load_config(),
+            state_dir=state_dir,
+            ledger_path=ledger,
+            stream_heartbeat_path=stream_heartbeat,
+            reconciliation_path=reconciliation,
+            skip_network=skip_network,
+            max_stream_age_seconds=max_stream_age_seconds,
+        )
+        console = Console()
+        if json_output:
+            console.print_json(json.dumps(report.to_dict()))
+        else:
+            console.print(render_carry_health_report(report))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
 @carry_app.command("scan")
 def carry_scan(
     venue: str = typer.Option("hyperliquid", "--venue", help="Carry venue; currently hyperliquid only"),
@@ -298,7 +329,7 @@ def carry_paper_run(
     duration_hours: float = typer.Option(24.0, "--duration-hours", min=0.0),
     state_dir: Path = typer.Option(Path(".cache/carry-paper"), "--state-dir"),
     report: Path = typer.Option(Path(".cache/carry-paper/report.md"), "--report"),
-    ledger: Path = typer.Option(Path(".cache/carry-paper/ledger.jsonl"), "--ledger"),
+    ledger: Path = typer.Option(Path(".cache/carry-paper/ledger.md"), "--ledger"),
     bankroll_usd: float = typer.Option(1000.0, "--bankroll-usd", min=0.0),
     position_notional_usd: float = typer.Option(100.0, "--position-notional-usd", min=0.0),
     maker_fee_bps: float = typer.Option(2.0, "--maker-fee-bps", min=0.0),

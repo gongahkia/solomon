@@ -85,3 +85,5 @@ def test_carrymirror_defaults_keep_live_disabled(monkeypatch, tmp_path):
     assert cfg.carrymirror.live_armed is False
     assert cfg.carrymirror.max_total_live_usd == 0.0
     assert cfg.carrymirror.min_net_apr == 0.15
+    assert cfg.carrymirror.alert_sink == "disabled"
+    assert set(cfg.carrymirror.alert_events) == {"kill_switch", "ledger_mismatch", "service_restart", "stale_data"}

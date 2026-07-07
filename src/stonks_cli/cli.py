@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import platform
-import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -20,14 +20,21 @@ from stonks_cli.commands import (
     do_doctor,
     do_version,
 )
+from stonks_cli.config import load_config
 from stonks_cli.errors import ExitCodes, StonksError
-from stonks_cli.logging_utils import LoggingConfig, configure_logging, log_suppressed_exception
+from stonks_cli.logging_utils import LoggingConfig, configure_logging
 from stonks_cli.whalemirror.attribution import (
     DEFAULT_ATTRIBUTION_FIXTURE,
     rank_wallets_from_fixture,
     render_wallet_ranking_markdown,
 )
 from stonks_cli.whalemirror.capture_analysis import analyze_capture_archive
+from stonks_cli.whalemirror.carry_scanner import (
+    CarryCostAssumptions,
+    CarryScanRow,
+    load_carry_inputs_fixture,
+    scan_hyperliquid_carry,
+)
 from stonks_cli.whalemirror.hyperliquid import HYPERLIQUID_WS_URL
 from stonks_cli.whalemirror.ingestion import (
     DEFAULT_CAPTURE_FIXTURE,
@@ -68,6 +75,7 @@ from stonks_cli.whalemirror.validation_gates import (
 )
 
 app = typer.Typer(add_completion=True, help="WhaleMirror Hyperliquid paper-first observability CLI.")
+carry_app = typer.Typer(help="CarryMirror funding and basis scanner commands.")
 config_app = typer.Typer()
 whalemirror_app = typer.Typer(help="WhaleMirror Hyperliquid paper-first commands.")
 whalemirror_gates_app = typer.Typer(help="Restartable validation gate harnesses.")
@@ -75,6 +83,7 @@ whalemirror_ingest_app = typer.Typer(help="Hyperliquid ingestion fixture and cap
 whalemirror_paper_app = typer.Typer(help="Paper mirror replay and risk-control commands.")
 whalemirror_wallets_app = typer.Typer(help="Venue-neutral wallet attribution commands.")
 
+app.add_typer(carry_app, name="carry")
 app.add_typer(config_app, name="config")
 app.add_typer(whalemirror_app, name="whalemirror")
 whalemirror_app.add_typer(whalemirror_gates_app, name="gates")
@@ -185,6 +194,96 @@ def config_validate() -> None:
         Console().print_json(json.dumps(do_config_validate()))
     except Exception as e:
         raise _exit_for_error(e)
+
+
+# --- CarryMirror commands ---
+
+
+@carry_app.command("scan")
+def carry_scan(
+    venue: str = typer.Option("hyperliquid", "--venue", help="Carry venue; currently hyperliquid only"),
+    paper: bool = typer.Option(True, "--paper/--no-paper", help="Paper scanner mode; live scan is blocked"),
+    assets: list[str] = typer.Option(None, "--asset", help="Repeatable asset; defaults to BTC and ETH"),
+    fixture: Path | None = typer.Option(None, "--fixture", exists=True, readable=True),
+    json_output: bool = typer.Option(False, "--json/--table", help="Emit JSON instead of a rich table"),
+    now: str | None = typer.Option(None, "--now", help="UTC timestamp for deterministic fixture scans"),
+    fee_bps: float = typer.Option(4.0, "--fee-bps", min=0.0),
+    slippage_bps: float = typer.Option(5.0, "--slippage-bps", min=0.0),
+    rebalance_bps: float = typer.Option(5.0, "--rebalance-bps", min=0.0),
+    borrow_bps: float = typer.Option(0.0, "--borrow-bps", min=0.0),
+    volatility_buffer_bps: float = typer.Option(25.0, "--volatility-buffer-bps", min=0.0),
+) -> None:
+    """Scan BTC/ETH Hyperliquid carry opportunities without placing orders."""
+    try:
+        if venue != "hyperliquid":
+            raise ValueError("carry scan currently supports --venue hyperliquid only")
+        if not paper:
+            raise ValueError("carry scan is paper-only; --no-paper is not supported")
+        cfg = load_config()
+        assumptions = CarryCostAssumptions(
+            fee_bps=fee_bps,
+            slippage_bps=slippage_bps,
+            rebalance_bps=rebalance_bps,
+            borrow_bps=borrow_bps,
+            volatility_buffer_bps=volatility_buffer_bps,
+        )
+        source_inputs = load_carry_inputs_fixture(fixture) if fixture else None
+        rows = scan_hyperliquid_carry(
+            cfg=cfg,
+            inputs=source_inputs,
+            assets=tuple(assets or ("BTC", "ETH")),
+            assumptions=assumptions,
+            now=_parse_cli_time(now) if now else None,
+        )
+        payload = {
+            "venue": venue,
+            "paper": True,
+            "min_net_apr": cfg.carrymirror.min_net_apr,
+            "rows": [row.to_dict() for row in rows],
+        }
+        console = Console()
+        if json_output:
+            console.print_json(json.dumps(payload))
+        else:
+            console.print(_render_carry_scan_table(rows))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+def _render_carry_scan_table(rows: list[CarryScanRow]) -> Table:
+    table = Table(title="CarryMirror scan")
+    table.add_column("Asset", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Direction", no_wrap=True)
+    table.add_column("Gross APR", justify="right")
+    table.add_column("Net APR", justify="right")
+    table.add_column("Costs", justify="right")
+    table.add_column("Missing/Caveats")
+    table.add_column("Source Health")
+    for row in rows:
+        opportunity = row.opportunity
+        table.add_row(
+            opportunity.asset,
+            row.status,
+            opportunity.direction,
+            _pct(opportunity.gross_apr),
+            _pct(opportunity.net_apr),
+            _pct(row.cost_assumptions.total_cost_apr),
+            ", ".join(opportunity.required_fields_missing) or "-",
+            ", ".join(f"{k}={v}" for k, v in sorted(row.source_health.items())) or "-",
+        )
+    return table
+
+
+def _pct(value: float) -> str:
+    return f"{value * 100:.2f}%"
+
+
+def _parse_cli_time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 # --- WhaleMirror commands ---

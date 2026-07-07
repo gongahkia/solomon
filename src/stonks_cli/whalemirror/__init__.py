@@ -10,6 +10,13 @@ from stonks_cli.whalemirror.attribution import (
     render_wallet_ranking_markdown,
 )
 from stonks_cli.whalemirror.capture_analysis import analyze_capture_archive
+from stonks_cli.whalemirror.carry_scanner import (
+    CarryCostAssumptions,
+    CarryScanRow,
+    calculate_carry_scan_row,
+    load_carry_inputs_fixture,
+    scan_hyperliquid_carry,
+)
 from stonks_cli.whalemirror.carry_storage import (
     CarryRetentionResult,
     CarryStorage,
@@ -111,10 +118,12 @@ __all__ = [
     "BasisSnapshot",
     "CAPTURE_GATE",
     "CarryDecision",
+    "CarryCostAssumptions",
     "CarryInputCompleteness",
     "CarryOpportunity",
     "CarryPosition",
     "CarryRetentionResult",
+    "CarryScanRow",
     "CarryQuote",
     "CarryStorage",
     "CarryStorageRetentionPolicy",
@@ -166,6 +175,7 @@ __all__ = [
     "build_trades_subscription",
     "build_user_fills_subscription",
     "capture_hyperliquid_to_files",
+    "calculate_carry_scan_row",
     "decode_carry_ws_message",
     "decode_ws_message",
     "decision_journal_path",
@@ -173,6 +183,7 @@ __all__ = [
     "default_validation_dir",
     "evaluate_execution_guards",
     "load_attribution_fixture",
+    "load_carry_inputs_fixture",
     "load_replay_fixture",
     "live_arm_env",
     "live_execution_armed",
@@ -191,6 +202,7 @@ __all__ = [
     "render_tearsheet",
     "render_wallet_ranking_markdown",
     "runtime_host_metadata",
+    "scan_hyperliquid_carry",
     "validate_carry_input_completeness",
     "write_capture_jsonl",
     "write_fixture_artifacts",

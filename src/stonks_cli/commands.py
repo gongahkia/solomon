@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from stonks_cli import __version__
-from stonks_cli.config import AppConfig, config_path, load_config, save_config, save_default_config, update_config_field
+from stonks_cli.config import config_path, load_config, save_config, save_default_config, update_config_field
 
 
 def do_version() -> str:

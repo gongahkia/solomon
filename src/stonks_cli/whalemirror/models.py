@@ -145,12 +145,114 @@ class DecisionRecord:
         return _json_ready(asdict(self))
 
 
+@dataclass(frozen=True)
+class CarryQuote:
+    venue: Venue
+    asset: str
+    spot_mid: float | None
+    perp_mid: float | None
+    oracle_mid: float | None
+    mark_mid: float | None
+    timestamp: str
+    source_health: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "venue", coerce_venue(self.venue))
+
+    def to_dict(self) -> dict[str, Any]:
+        return _json_ready(asdict(self))
+
+
+@dataclass(frozen=True)
+class FundingSnapshot:
+    asset: str
+    venue: Venue
+    hourly_rate: float
+    annualized_rate: float
+    next_funding_time: str | None
+    premium_index: float | None
+    timestamp: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "venue", coerce_venue(self.venue))
+
+    def to_dict(self) -> dict[str, Any]:
+        return _json_ready(asdict(self))
+
+
+@dataclass(frozen=True)
+class BasisSnapshot:
+    asset: str
+    spot_mid: float
+    perp_mid: float
+    basis_abs: float
+    basis_pct: float
+    annualized_basis: float
+    timestamp: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return _json_ready(asdict(self))
+
+
+@dataclass(frozen=True)
+class CarryOpportunity:
+    asset: str
+    venue: Venue
+    direction: str
+    net_apr: float
+    gross_apr: float
+    fee_bps: float
+    slippage_bps: float
+    buffer_bps: float
+    required_fields_missing: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "venue", coerce_venue(self.venue))
+
+    def to_dict(self) -> dict[str, Any]:
+        return _json_ready(asdict(self))
+
+
+@dataclass(frozen=True)
+class CarryPosition:
+    asset: str
+    spot_qty: float
+    perp_qty: float
+    net_delta: float
+    entry_basis: float
+    accrued_funding: float
+    fees: float
+    margin_buffer: float
+    liquidation_distance: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return _json_ready(asdict(self))
+
+
+@dataclass(frozen=True)
+class CarryDecision:
+    decision_id: str
+    mode: MirrorMode
+    action: str
+    reason: str
+    inputs: dict[str, Any]
+    risk_checks: list[str]
+    expected_net_apr: float
+    exit_rule: str
+    timestamp: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mode", coerce_mode(self.mode))
+
+    def to_dict(self) -> dict[str, Any]:
+        return _json_ready(asdict(self))
+
+
 def _json_ready(value: Any) -> Any:
     if isinstance(value, StrEnum):
         return str(value)
     if isinstance(value, dict):
-        return {str(k): _json_ready(v) for k, v in value.items()}
+        return {str(k): _json_ready(value[k]) for k in sorted(value)}
     if isinstance(value, list):
         return [_json_ready(v) for v in value]
     return value
-

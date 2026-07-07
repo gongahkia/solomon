@@ -73,3 +73,15 @@ def test_config_accepts_akshare_provider(monkeypatch, tmp_path):
     cfg_path.write_text(json.dumps({"data": {"provider": "akshare"}}), encoding="utf-8")
 
     assert load_config().data.provider == "akshare"
+
+
+def test_carrymirror_defaults_keep_live_disabled(monkeypatch, tmp_path):
+    cfg_path = tmp_path / "config.json"
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
+
+    cfg = load_config()
+
+    assert cfg.carrymirror.paper is True
+    assert cfg.carrymirror.live_armed is False
+    assert cfg.carrymirror.max_total_live_usd == 0.0
+    assert cfg.carrymirror.min_net_apr == 0.15

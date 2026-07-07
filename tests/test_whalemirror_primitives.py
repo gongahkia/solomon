@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+import pytest
+
 from stonks_cli.config import AppConfig
 from stonks_cli.whalemirror.guards import evaluate_execution_guards, live_arm_env, live_execution_armed
 from stonks_cli.whalemirror.journal import append_decision, read_decisions
-from stonks_cli.whalemirror.models import DecisionRecord, MirrorMode, NormalizedTrade, Venue
+from stonks_cli.whalemirror.models import (
+    BasisSnapshot,
+    CarryDecision,
+    CarryOpportunity,
+    CarryPosition,
+    CarryQuote,
+    DecisionRecord,
+    FundingSnapshot,
+    MirrorMode,
+    NormalizedTrade,
+    Venue,
+)
 
 
 def test_hyperliquid_live_arm_gate_fails_closed(monkeypatch):
@@ -92,3 +105,95 @@ def test_config_exposes_whalemirror_hyperliquid_gate():
     assert cfg.whalemirror.venue == "hyperliquid"
     assert cfg.whalemirror.hyperliquid_live_armed_env == "STONKS_CLI_HYPERLIQUID_LIVE_ARMED"
     assert cfg.whalemirror.max_live_order_notional_usd == 50.0
+
+
+def test_carrymirror_models_serialize_deterministically():
+    quote = CarryQuote(
+        venue="hyperliquid",
+        asset="BTC",
+        spot_mid=100000.0,
+        perp_mid=100100.0,
+        oracle_mid=100050.0,
+        mark_mid=100090.0,
+        timestamp="2026-07-02T00:00:00Z",
+        source_health="ok",
+    )
+    funding = FundingSnapshot(
+        asset="BTC",
+        venue=Venue.HYPERLIQUID,
+        hourly_rate=0.0001,
+        annualized_rate=0.876,
+        next_funding_time="2026-07-02T01:00:00Z",
+        premium_index=0.001,
+        timestamp="2026-07-02T00:00:00Z",
+    )
+    basis = BasisSnapshot(
+        asset="BTC",
+        spot_mid=100000.0,
+        perp_mid=100100.0,
+        basis_abs=100.0,
+        basis_pct=0.001,
+        annualized_basis=0.365,
+        timestamp="2026-07-02T00:00:00Z",
+    )
+    opportunity = CarryOpportunity(
+        asset="BTC",
+        venue="hyperliquid",
+        direction="long_spot_short_perp",
+        net_apr=0.18,
+        gross_apr=0.21,
+        fee_bps=2.0,
+        slippage_bps=3.0,
+        buffer_bps=5.0,
+    )
+    position = CarryPosition(
+        asset="BTC",
+        spot_qty=0.01,
+        perp_qty=-0.01,
+        net_delta=0.0,
+        entry_basis=0.001,
+        accrued_funding=1.25,
+        fees=0.35,
+        margin_buffer=0.25,
+        liquidation_distance=0.40,
+    )
+    decision = CarryDecision(
+        decision_id="carry-001",
+        mode="paper",
+        action="open",
+        reason="net_apr_above_research_threshold",
+        inputs={"z": 1, "a": 2},
+        risk_checks=["paper_only", "delta_neutral"],
+        expected_net_apr=0.18,
+        exit_rule="net_apr_below_threshold",
+        timestamp="2026-07-02T00:00:00Z",
+    )
+
+    assert quote.to_dict()["venue"] == "hyperliquid"
+    assert funding.to_dict()["venue"] == "hyperliquid"
+    assert basis.to_dict()["basis_abs"] == 100.0
+    assert opportunity.to_dict()["required_fields_missing"] == []
+    assert position.to_dict()["net_delta"] == 0.0
+    assert list(decision.to_dict()["inputs"]) == ["a", "z"]
+    assert decision.to_dict()["mode"] == "paper"
+
+
+def test_carrymirror_models_report_missing_scanner_fields():
+    opportunity = CarryOpportunity(
+        asset="ETH",
+        venue="hyperliquid",
+        direction="skip",
+        net_apr=0.0,
+        gross_apr=0.0,
+        fee_bps=0.0,
+        slippage_bps=0.0,
+        buffer_bps=0.0,
+        required_fields_missing=["oracle_mid", "next_funding_time"],
+    )
+
+    assert opportunity.to_dict()["required_fields_missing"] == ["oracle_mid", "next_funding_time"]
+
+
+def test_carrymirror_required_fields_fail_fast():
+    with pytest.raises(TypeError):
+        CarryQuote(asset="BTC")  # type: ignore[call-arg]

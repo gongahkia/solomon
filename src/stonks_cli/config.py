@@ -7,8 +7,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from stonks_cli.logging_utils import log_suppressed_exception
-
 
 def default_config_path() -> Path:
     from stonks_cli.paths import default_config_path as _default_config_path
@@ -161,6 +159,18 @@ class WhaleMirrorConfig(BaseModel):
     scale_gate_green_weeks: int = Field(default=7, ge=1)
 
 
+class CarryMirrorConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    paper: bool = True
+    live_armed: bool = False
+    max_total_live_usd: float = Field(default=0.0, ge=0.0)
+    min_net_apr: float = Field(
+        default=0.15,
+        ge=0.0,
+        description="Research threshold only; not a profit claim.",
+    )
+
+
 class TuiConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     refresh_interval: int = Field(default=60, ge=5, le=3600)
@@ -197,6 +207,7 @@ class AppConfig(BaseModel):
     api_keys: ApiKeysConfig = Field(default_factory=ApiKeysConfig)
     polymarket: PolymarketConfig = Field(default_factory=PolymarketConfig)
     whalemirror: WhaleMirrorConfig = Field(default_factory=WhaleMirrorConfig)
+    carrymirror: CarryMirrorConfig = Field(default_factory=CarryMirrorConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
 
 

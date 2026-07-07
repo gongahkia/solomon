@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from stonks_cli.whalemirror.attribution import (
     DEFAULT_ATTRIBUTION_FIXTURE,
     load_attribution_fixture,
@@ -56,3 +58,13 @@ def test_rendered_ranking_uses_supported_metric_language_not_alpha_claims():
     assert "Survivorship-adjusted PnL" in markdown
     assert "manual_top_10_validation_pending:#15" in markdown
     assert "alpha" not in markdown.lower().replace("not an alpha claim", "")
+
+
+def test_wallet_sanity_check_doc_has_completed_public_source_notes():
+    text = Path("docs/whalemirror-wallet-sanity-checks.md").read_text(encoding="utf-8")
+
+    assert "TODO" not in text
+    assert "Hyperliquid public info endpoint" in text
+    assert "No marketing copy may claim unsupported alpha" in text
+    for caveat in ["Survivorship", "Leverage", "Funding", "Sample size", "Stale data"]:
+        assert caveat in text

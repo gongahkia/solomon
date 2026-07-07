@@ -1,105 +1,62 @@
 # WhaleMirror Wallet Sanity Checks (#15)
 
-Structured sanity checks for the 8 provisional wallets from the [May 2026 activity shortlist](whalemirror-wallet-activity-shortlist-2026-05.md). Each wallet must be classified before it can enter the top-5 set for #14.
+Status: checked on 2026-07-07.
 
-## Check Criteria
+This document is a validation note, not a profitability claim. It combines the reproducible fixture ranking with public-source checks for the top activity wallets from the May 2026 shortlist.
 
-For each wallet:
+## Reproducible Ranking Output
 
-1. **Public profile**: Is the wallet visible on `hyperdash.info` or `hyperliquid.xyz` leaderboards?
-2. **Activity type**: directional / market-making / liquidation-driven / unclear
-3. **Market concentration**: single-market or multi-market?
-4. **Continued activity**: evidence of activity after the capture window (May 19–23)?
-5. **Unsupported fields**: what data is missing that would change the classification?
+Command:
 
-## Wallet Checks
+```sh
+PYTHONPATH=src python3 -m stonks_cli whalemirror wallets rank \
+  --fixture tests/fixtures/whalemirror/wallet-attribution.jsonl \
+  --limit 100 \
+  --markdown
+```
 
-### 1. `0xf5d81a135f756ca16544e53c20fc20643ec3ad53`
+The current fixture contains 3 ranked wallets, not 100. Top-100 coverage cannot be claimed until a larger closed-outcome dataset is committed.
 
-- **Row count**: 123,862 | **Notional**: $367.8M
-- **Public profile**: TODO
-- **Activity type**: TODO
-- **Market concentration**: TODO
-- **Continued activity**: 2,000 fills returned (cap hit), $2.3M notional in ~15min window
-- **Caveats**: TODO
-- **Verdict**: TODO
+| Rank | Wallet | Fixture Result | Public Source Check |
+| ---: | --- | --- | --- |
+| 1 | `0xaaa0000000000000000000000000000000000001` | Sample size 3, funding included, small-sample caveat. | No indexed Hyperdash/Hyperliquid profile found in web search; fixture-style address likely synthetic. |
+| 2 | `0xbbb0000000000000000000000000000000000002` | Sample size 1, high-leverage 20x caveat. | No indexed Hyperdash/Hyperliquid profile found in web search; fixture-style address likely synthetic. |
+| 3 | `0xccc0000000000000000000000000000000000003` | Sample size 2, funding included, negative fixture expectancy. | No indexed Hyperdash/Hyperliquid profile found in web search; fixture-style address likely synthetic. |
 
-### 2. `0xd02928c445d780ea954fe0b6f0be0f6cb9727678`
+## Public Sources Checked
 
-- **Row count**: 37,937 | **Notional**: $185.8M
-- **Public profile**: TODO
-- **Activity type**: TODO
-- **Market concentration**: TODO
-- **Continued activity**: 2,000 fills returned (cap hit), $11.5M notional in ~10h window
-- **Caveats**: TODO
-- **Verdict**: TODO
+- [Hyperliquid leaderboard](https://app.hyperliquid.xyz/leaderboard)
+- [Hyperdash global traders](https://hyperdash.com/explore/global)
+- [Hyperliquid public info endpoint](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint), using `userFillsByTime`
 
-### 3. `0xf4b8a39b7b828d8e059a55ed697a3dec634b6488`
+Web search found Hyperdash and Hyperliquid leaderboard surfaces, but did not return indexed address-specific public profile pages for the wallets below. Continued activity was checked through the public Hyperliquid info endpoint.
 
-- **Row count**: 39,358 | **Notional**: $171.5M
-- **Public profile**: TODO
-- **Activity type**: TODO
-- **Market concentration**: TODO
-- **Continued activity**: 2,000 fills returned (cap hit), $2.7M notional in ~4.5h window
-- **Caveats**: TODO
-- **Verdict**: TODO
+## Top-10 Activity Wallet Checks
 
-### 4. `0x348e5365acfa48a26ada7da840ca611e29c950ef`
+Top-10 is selected from [May 2026 wallet activity shortlist](whalemirror-wallet-activity-shortlist-2026-05.md), not from profitability attribution.
 
-- **Row count**: 33,519 | **Notional**: $169.3M
-- **Public profile**: TODO
-- **Activity type**: TODO
-- **Market concentration**: TODO
-- **Continued activity**: 2,000 fills returned (cap hit), $11.1M notional in ~11h window
-- **Caveats**: TODO
-- **Verdict**: TODO
+| Rank | Wallet | Public Profile | 7-Day Public Fill Check | Classification | Caveats | Verdict |
+| ---: | --- | --- | --- | --- | --- | --- |
+| 1 | `0x2ca4927174ba283d8a57f60ef3589844035a2930` | No indexed address profile found; Hyperdash/global and Hyperliquid leaderboard remain manual search surfaces. | 2,000 fills, cap hit, 2026-07-06T17:39:01Z to 2026-07-06T18:04:08Z. | unclear high-frequency flow | survivorship, funding unknown, leverage unknown, sample cap, stale local capture | reject live target; allow paper-observation only |
+| 2 | `0x55f389689b39fdd29d063f8b1aa776666a2dd788` | No indexed address profile found. | 0 fills in 7-day query. | stale/unclear | stale data, no recent fills, survivorship, funding unknown, leverage unknown | reject |
+| 3 | `0xf5d81a135f756ca16544e53c20fc20643ec3ad53` | No indexed address profile found. | 2,000 fills, cap hit, 2026-07-06T23:15:31Z to 2026-07-06T23:41:05Z. | unclear high-frequency flow | sample cap, market-making/liquidation risk, funding unknown, leverage unknown | paper-observation candidate only |
+| 4 | `0xabfae5ef417fec83a63dcdbff5a13f71d09045c5` | No indexed address profile found. | May enrichment hit 2,000-fill cap; not re-queried in 7-day batch. | unclear | stale data, sample cap, funding unknown, leverage unknown | reject until refreshed |
+| 5 | `0xd4c1f7e8d876c4749228d515473d36f919583d1d` | No indexed address profile found. | May enrichment hit 2,000-fill cap; not re-queried in 7-day batch. | unclear | stale data, sample cap, funding unknown, leverage unknown | reject until refreshed |
+| 6 | `0xf4b8a39b7b828d8e059a55ed697a3dec634b6488` | No indexed address profile found. | 2,000 fills, cap hit, 2026-06-30T02:21:09Z to 2026-06-30T13:00:55Z. | unclear high-frequency flow | sample cap, stale since 2026-06-30 in 7-day query, funding unknown, leverage unknown | paper-observation candidate only |
+| 7 | `0xd02928c445d780ea954fe0b6f0be0f6cb9727678` | No indexed address profile found. | 0 fills in 7-day query. | stale/unclear | stale data, survivorship, funding unknown, leverage unknown | reject |
+| 8 | `0x348e5365acfa48a26ada7da840ca611e29c950ef` | No indexed address profile found. | 0 fills in 7-day query. | stale/unclear | stale data, survivorship, funding unknown, leverage unknown | reject |
+| 9 | `0x31dea2516beee92135b96f464eeec3cf292a13f2` | No indexed address profile found. | May enrichment hit 2,000-fill cap; not re-queried in 7-day batch. | unclear | stale data, sample cap, funding unknown, leverage unknown | reject until refreshed |
+| 10 | `0x5a7581618829f377a16be2338eabdd03fece0eaf` | No indexed address profile found. | May enrichment hit 2,000-fill cap; not re-queried in 7-day batch. | unclear | stale data, sample cap, funding unknown, leverage unknown | reject until refreshed |
 
-### 5. `0x57dd78cd36e76e2011e8f6dc25cabbaba994494b`
+## Required Caveats
 
-- **Row count**: 31,203 | **Notional**: $200.7M
-- **Public profile**: TODO
-- **Activity type**: TODO
-- **Market concentration**: TODO
-- **Continued activity**: not queried in enrichment batch
-- **Caveats**: TODO
-- **Verdict**: TODO
+- Survivorship: high activity screens can overrepresent wallets that survived the local capture window.
+- Leverage: complete leverage history is not available in the activity shortlist.
+- Funding: full wallet-level funding cost is not available for the top-10 activity wallets.
+- Sample size: fixture ranking has only 3 wallets; activity enrichment can cap at 2,000 fills.
+- Stale data: May 2026 local capture is stale as of 2026-07-07 unless refreshed by public API checks.
+- Behavior ambiguity: high activity can be market-making, liquidation flow, or passive flow, not directional skill.
 
-### 6. `0x7b7f72a28fe109fa703eeed7984f2a8a68fedee2`
+## Product Constraint
 
-- **Row count**: 21,851 | **Notional**: $303.1M
-- **Public profile**: TODO
-- **Activity type**: TODO
-- **Market concentration**: TODO
-- **Continued activity**: not queried in enrichment batch
-- **Caveats**: TODO
-- **Verdict**: TODO
-
-### 7. `0x0fd468a73084daa6ea77a9261e40fdec3e67e0c7`
-
-- **Row count**: 25,559 | **Notional**: $239.5M
-- **Public profile**: TODO
-- **Activity type**: TODO
-- **Market concentration**: TODO
-- **Continued activity**: not queried in enrichment batch
-- **Caveats**: TODO
-- **Verdict**: TODO
-
-### 8. `0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00`
-
-- **Row count**: 20,420 | **Notional**: $374.5M
-- **Public profile**: TODO
-- **Activity type**: TODO
-- **Market concentration**: TODO
-- **Continued activity**: not queried in enrichment batch
-- **Caveats**: TODO
-- **Verdict**: TODO
-
-## Selection for #14
-
-Once at least 5 wallets have a verdict of `directional_candidate` or stronger, select them as the top-5 set for the 30-day paper mirror gate (#14). Record the selection rationale in the [decision ledger](decision-ledger.md).
-
-## Hard Constraints
-
-- Do not claim profitability without closed-outcome attribution.
-- High activity can be market-making or liquidation flow, not necessarily directional skill.
-- The `userFillsByTime` API returns a max of 2,000 rows per query — all enrichment queries hit this cap.
+No marketing copy may claim unsupported alpha from these rankings. Wallet data can feed research and paper-observation queues only; it cannot feed live target selection.

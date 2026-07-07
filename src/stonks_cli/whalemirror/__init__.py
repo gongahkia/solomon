@@ -10,6 +10,12 @@ from stonks_cli.whalemirror.attribution import (
     render_wallet_ranking_markdown,
 )
 from stonks_cli.whalemirror.capture_analysis import analyze_capture_archive
+from stonks_cli.whalemirror.carry_storage import (
+    CarryRetentionResult,
+    CarryStorage,
+    CarryStorageRetentionPolicy,
+    default_carry_storage_path,
+)
 from stonks_cli.whalemirror.guards import (
     evaluate_execution_guards,
     live_arm_env,
@@ -99,7 +105,10 @@ __all__ = [
     "CarryDecision",
     "CarryOpportunity",
     "CarryPosition",
+    "CarryRetentionResult",
     "CarryQuote",
+    "CarryStorage",
+    "CarryStorageRetentionPolicy",
     "DecisionRecord",
     "ExecutionIntent",
     "FundingSnapshot",
@@ -146,6 +155,7 @@ __all__ = [
     "capture_hyperliquid_to_files",
     "decode_ws_message",
     "decision_journal_path",
+    "default_carry_storage_path",
     "default_validation_dir",
     "evaluate_execution_guards",
     "load_attribution_fixture",

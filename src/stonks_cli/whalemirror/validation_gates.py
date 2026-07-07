@@ -222,13 +222,32 @@ def record_paper_probe(
         state,
         kind="paper_tearsheet",
         payload={
+            "source": "fixture",
             "fixture_path": str(fixture_path),
             "rankings_fixture": str(rankings_fixture),
+            "selected_wallets": [ranking.metrics.wallet.lower() for ranking in rankings],
             "tearsheet": replay.tearsheet,
             "decision_count": len(decisions),
             "risk_controls": _decision_controls(decisions),
             "final_status": "sample_recorded",
         },
+        state_dir=state_dir,
+        now=now,
+    )
+
+
+def record_paper_evidence(
+    *,
+    state_dir: Path | str | None = None,
+    paper_payload: dict[str, Any],
+    reset: bool = False,
+    now: datetime | None = None,
+) -> ValidationGateState:
+    state = init_gate(PAPER_GATE, state_dir=state_dir, reset=reset, now=now)
+    return append_evidence(
+        state,
+        kind="paper_tearsheet",
+        payload=paper_payload,
         state_dir=state_dir,
         now=now,
     )
@@ -436,19 +455,74 @@ def _capture_blockers(
 
 def _paper_blockers(state: ValidationGateState) -> list[str]:
     blockers = _missing_evidence_blocker(state, "paper_tearsheet")
+    live_payload_blockers: list[str] = []
+    has_live_paper = False
+    has_completed_live_paper = False
     for item in state.evidence:
         if item.kind != "paper_tearsheet":
             continue
-        tearsheet = item.payload.get("tearsheet") or {}
-        controls = set(item.payload.get("risk_controls") or [])
-        if int(tearsheet.get("closed_trades") or 0) == 0:
-            blockers.append("paper_no_closed_trades")
-        if int(tearsheet.get("wins") or 0) == 0 or int(tearsheet.get("losses") or 0) == 0:
-            blockers.append("paper_tearsheet_missing_win_or_loss")
-        for required in {"paper_mirror_open", "stop_loss", "cooldown"}:
-            if required not in controls:
-                blockers.append(f"paper_missing_{required}_evidence")
+        if str(item.payload.get("source") or "fixture") != "live_paper":
+            continue
+        has_live_paper = True
+        item_blockers = _paper_live_payload_blockers(item.payload)
+        if item_blockers:
+            live_payload_blockers.extend(item_blockers)
+        else:
+            has_completed_live_paper = True
+    if not has_live_paper:
+        blockers.append("paper_missing_linux_live_paper_evidence")
+    elif not has_completed_live_paper:
+        blockers.extend(live_payload_blockers)
     return sorted(set(blockers))
+
+
+def _paper_live_payload_blockers(payload: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    tearsheet = payload.get("tearsheet") or {}
+    controls = set(payload.get("risk_controls") or [])
+    runtime = payload.get("runtime") or {}
+    runtime_os = str(runtime.get("os") or "")
+    selected_wallets = {str(wallet).lower() for wallet in payload.get("selected_wallets") or [] if str(wallet).strip()}
+    artifact_paths = payload.get("artifact_paths") or {}
+
+    if str(payload.get("final_status") or "") != "completed":
+        blockers.append("paper_live_run_not_completed")
+    if runtime_os.lower() != "linux":
+        blockers.append("paper_not_run_on_linux_operator_host")
+    if len(selected_wallets) < 5:
+        blockers.append("paper_selected_wallets_below_top5")
+    for required_path in ("ledger_path", "journal_path", "report_path"):
+        if not str(payload.get(required_path) or artifact_paths.get(required_path) or "").strip():
+            blockers.append(f"paper_missing_{required_path}")
+    required_metrics = {
+        "realized_pnl_usd",
+        "expectancy_usd",
+        "sharpe",
+        "max_drawdown_usd",
+        "risk_cap_skips",
+        "stop_loss_exits",
+        "cooldown_blocks",
+        "skipped_trades",
+    }
+    for metric in required_metrics:
+        if metric not in tearsheet:
+            blockers.append(f"paper_tearsheet_missing_{metric}")
+    if int(tearsheet.get("closed_trades") or 0) == 0:
+        blockers.append("paper_no_closed_trades")
+    if int(tearsheet.get("wins") or 0) == 0 or int(tearsheet.get("losses") or 0) == 0:
+        blockers.append("paper_tearsheet_missing_win_or_loss")
+    if int(tearsheet.get("risk_cap_skips") or 0) == 0:
+        blockers.append("paper_missing_risk_cap_skip_evidence")
+    if int(tearsheet.get("stop_loss_exits") or 0) == 0:
+        blockers.append("paper_missing_stop_loss_evidence")
+    if int(tearsheet.get("cooldown_blocks") or 0) == 0:
+        blockers.append("paper_missing_cooldown_evidence")
+    if int(tearsheet.get("skipped_trades") or 0) == 0:
+        blockers.append("paper_missing_skipped_trade_evidence")
+    for required in {"paper_mirror_open", "risk_cap", "stop_loss", "cooldown"}:
+        if required not in controls:
+            blockers.append(f"paper_missing_{required}_evidence")
+    return blockers
 
 
 def _live_blockers(state: ValidationGateState) -> list[str]:

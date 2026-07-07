@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from math import sqrt
 from pathlib import Path
 from typing import Any
 
@@ -290,8 +291,8 @@ class PaperMirrorEngine:
         )
         return PaperMirrorDecision(intent=None, ledger_record=record)
 
-    def tearsheet(self) -> dict[str, Any]:
-        return build_paper_mirror_tearsheet(self.state)
+    def tearsheet(self, decisions: list[PaperMirrorDecision] | None = None) -> dict[str, Any]:
+        return build_paper_mirror_tearsheet(self.state, decisions=decisions)
 
     def _record_skip(
         self,
@@ -314,11 +315,17 @@ class PaperMirrorEngine:
         )
 
 
-def build_paper_mirror_tearsheet(state: PaperMirrorState) -> dict[str, Any]:
+def build_paper_mirror_tearsheet(
+    state: PaperMirrorState,
+    *,
+    decisions: list[PaperMirrorDecision] | None = None,
+) -> dict[str, Any]:
     closed = state.closed_trades
     wins = [trade for trade in closed if trade.realized_pnl_usd > 0]
     losses = [trade for trade in closed if trade.realized_pnl_usd < 0]
     total = sum(trade.realized_pnl_usd for trade in closed)
+    returns = [_closed_return(trade) for trade in closed]
+    records = [decision.ledger_record for decision in decisions or []]
     return {
         "closed_trades": len(closed),
         "open_positions": len(state.positions),
@@ -326,6 +333,12 @@ def build_paper_mirror_tearsheet(state: PaperMirrorState) -> dict[str, Any]:
         "losses": len(losses),
         "realized_pnl_usd": round(total, 6),
         "expectancy_usd": round(total / len(closed), 6) if closed else 0.0,
+        "sharpe": _sharpe(returns),
+        "max_drawdown_usd": _max_drawdown_usd(closed),
+        "risk_cap_skips": _count_decisions(records, "skip_risk_cap"),
+        "stop_loss_exits": _count_decisions(records, "paper_stop_loss"),
+        "cooldown_blocks": _count_decisions(records, "skip_cooldown"),
+        "skipped_trades": sum(1 for record in records if record.decision.startswith("skip_")),
         "cooldowns_active": len(state.cooldown_until),
         "closed": [trade.__dict__ for trade in closed],
     }
@@ -363,7 +376,7 @@ def replay_paper_mirror_fixture(
             )
         else:
             raise ValueError(f"unsupported paper mirror fixture row: {row_type!r}")
-    return PaperMirrorReplay(decisions=decisions, tearsheet=engine.tearsheet(), state=engine.state)
+    return PaperMirrorReplay(decisions=decisions, tearsheet=engine.tearsheet(decisions), state=engine.state)
 
 
 def _load_fixture_rows(path: Path | str) -> list[dict[str, Any]]:
@@ -407,6 +420,35 @@ def _stop_loss_triggered(position: PaperPosition, mark_px: float, stop_loss_pct:
 def _position_pnl(position: PaperPosition, exit_px: float) -> float:
     direction = 1.0 if position.side in {TradeSide.BUY, TradeSide.LONG} else -1.0
     return (exit_px - position.entry_px) * position.size * direction
+
+
+def _closed_return(trade: PaperClosedTrade) -> float:
+    notional = trade.entry_px * trade.size
+    return trade.realized_pnl_usd / notional if notional > 0 else 0.0
+
+
+def _count_decisions(records: list[DecisionRecord], decision: str) -> int:
+    return sum(1 for record in records if record.decision == decision)
+
+
+def _max_drawdown_usd(closed: list[PaperClosedTrade]) -> float:
+    equity = 0.0
+    peak = 0.0
+    max_drawdown = 0.0
+    for trade in sorted(closed, key=lambda row: _parse_ts(row.closed_at)):
+        equity += trade.realized_pnl_usd
+        peak = max(peak, equity)
+        max_drawdown = max(max_drawdown, peak - equity)
+    return round(max_drawdown, 6)
+
+
+def _sharpe(returns: list[float]) -> float:
+    if len(returns) < 2:
+        return 0.0
+    mean = sum(returns) / len(returns)
+    variance = sum((value - mean) ** 2 for value in returns) / (len(returns) - 1)
+    std = sqrt(variance)
+    return round(mean / std, 6) if std > 1e-12 else 0.0
 
 
 def _parse_ts(value: str) -> datetime:

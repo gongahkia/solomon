@@ -13,7 +13,7 @@ The MacBook can still run fixture smoke tests, edit code, and inspect reports. I
 | Gate | GitHub issue | Minimum elapsed time | Status | Command |
 | --- | ---: | ---: | --- | --- |
 | Hyperliquid clean capture | #13 | ~~7 days~~ waived | **passed** | `scripts/whalemirror_linux_capture_7d.sh` |
-| Top-5 paper mirror | #14 | 30 days | open | `stonks-cli whalemirror gates paper-sample` |
+| Top-5 paper mirror | #14 | 30 days | open | `scripts/whalemirror_linux_paper_30d.sh` |
 | Live latency / slippage / scale | #10 | 60 days | open | `stonks-cli whalemirror gates live-sample` |
 
 ## Fixture Smoke Run
@@ -75,6 +75,19 @@ $ stonks-cli whalemirror ingest run \
 ```
 
 The #13 gate cannot pass from fixture samples. It requires a `live_capture` evidence entry with `final_status: clean_capture`, Linux runtime metadata, zero malformed messages, and zero dropped messages after the 7-day elapsed window.
+
+## Linux 30-Day Paper Mirror
+
+Run #14 on the always-on Linux machine after a top-5 eligible wallet set exists:
+
+```console
+$ cd /opt/stonks-cli
+$ scripts/whalemirror_linux_paper_30d.sh
+```
+
+The script refuses to run on non-Linux hosts and records operator-produced `live_paper` evidence from `${WHALEMIRROR_GATE_ROOT:-$XDG_STATE_HOME/stonks-cli/whalemirror-gates}/reports/paper-evidence.json`. See [30-day paper gate runbook](whalemirror-paper-30d-runbook.md).
+
+The #14 gate cannot pass from fixture samples. It requires `live_paper` evidence with `final_status: completed`, Linux runtime metadata, five selected wallets, ledger/journal/report paths, win/loss outcomes, PnL, expectancy, Sharpe, drawdown, risk-cap skips, stop-loss exits, cooldown blocks, and skipped trades after the 30-day elapsed window.
 
 ### Partial Capture Policy
 
@@ -153,6 +166,11 @@ $ stonks-cli whalemirror gates capture-sample \
 $ stonks-cli whalemirror gates paper-sample \
     --state-dir .cache/whalemirror-gates/state \
     --report .cache/whalemirror-gates/reports/paper-gate.md
+
+$ stonks-cli whalemirror gates paper-record \
+    --evidence /var/lib/stonks-cli/whalemirror-gates/reports/paper-evidence.json \
+    --state-dir /var/lib/stonks-cli/whalemirror-gates/state \
+    --report /var/lib/stonks-cli/whalemirror-gates/reports/paper-gate.md
 
 $ stonks-cli whalemirror gates live-sample \
     --state-dir .cache/whalemirror-gates/state \

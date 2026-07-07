@@ -11,6 +11,7 @@ from stonks_cli.whalemirror.validation_gates import (
     record_capture_health,
     record_capture_probe,
     record_live_probe,
+    record_paper_evidence,
     record_paper_probe,
     render_gate_report,
     scale_gate_report,
@@ -114,8 +115,40 @@ def test_paper_gate_probe_records_tearsheet_and_risk_controls(tmp_path):
     assert "paper_mirror_open" in payload["risk_controls"]
     assert "stop_loss" in payload["risk_controls"]
     assert "cooldown" in payload["risk_controls"]
+    assert payload["source"] == "fixture"
     assert assessment.status == "running"
     assert any("elapsed_days_below_target" in blocker for blocker in assessment.blockers)
+    assert "paper_missing_linux_live_paper_evidence" in assessment.blockers
+
+
+def test_paper_gate_can_pass_after_completed_linux_live_evidence(tmp_path):
+    state = record_paper_evidence(
+        state_dir=tmp_path,
+        reset=True,
+        now=NOW,
+        paper_payload=_live_paper_payload(),
+    )
+
+    assessment = assess_gate(state, now=NOW + timedelta(days=30, minutes=1))
+
+    assert assessment.status == "passed"
+    assert assessment.blockers == []
+
+
+def test_paper_gate_blocks_incomplete_or_non_linux_live_evidence(tmp_path):
+    payload = _live_paper_payload()
+    payload["runtime"] = {"os": "Darwin"}
+    payload["final_status"] = "running"
+    payload["selected_wallets"] = payload["selected_wallets"][:4]
+    payload["tearsheet"]["risk_cap_skips"] = 0
+
+    state = record_paper_evidence(state_dir=tmp_path, reset=True, now=NOW, paper_payload=payload)
+    assessment = assess_gate(state, now=NOW + timedelta(days=31))
+
+    assert "paper_live_run_not_completed" in assessment.blockers
+    assert "paper_not_run_on_linux_operator_host" in assessment.blockers
+    assert "paper_selected_wallets_below_top5" in assessment.blockers
+    assert "paper_missing_risk_cap_skip_evidence" in assessment.blockers
 
 
 def test_live_gate_probe_reports_latency_slippage_and_scale_gate(tmp_path):
@@ -166,3 +199,36 @@ def test_metric_helpers_are_deterministic():
     assert slippage["avg_slippage_bps"] == 100
     assert scale["effective_max_live_order_notional_usd"] == 50
     assert scale["auto_raise_blocked"] is True
+
+
+def _live_paper_payload():
+    return {
+        "source": "live_paper",
+        "final_status": "completed",
+        "runtime": {"os": "Linux"},
+        "selected_wallets": [
+            "0x0000000000000000000000000000000000000001",
+            "0x0000000000000000000000000000000000000002",
+            "0x0000000000000000000000000000000000000003",
+            "0x0000000000000000000000000000000000000004",
+            "0x0000000000000000000000000000000000000005",
+        ],
+        "ledger_path": "/var/lib/stonks-cli/whalemirror-gates/reports/paper-ledger.md",
+        "journal_path": "/var/lib/stonks-cli/whalemirror-gates/reports/paper-journal.jsonl",
+        "report_path": "/var/lib/stonks-cli/whalemirror-gates/reports/paper-gate.md",
+        "risk_controls": ["paper_mirror_open", "risk_cap", "stop_loss", "cooldown"],
+        "tearsheet": {
+            "closed_trades": 2,
+            "open_positions": 0,
+            "wins": 1,
+            "losses": 1,
+            "realized_pnl_usd": -1.5,
+            "expectancy_usd": -0.75,
+            "sharpe": -0.2,
+            "max_drawdown_usd": 5.0,
+            "risk_cap_skips": 1,
+            "stop_loss_exits": 1,
+            "cooldown_blocks": 1,
+            "skipped_trades": 2,
+        },
+    }

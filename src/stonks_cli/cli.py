@@ -73,6 +73,7 @@ from stonks_cli.whalemirror.validation_gates import (
     record_capture_health,
     record_capture_probe,
     record_live_probe,
+    record_paper_evidence,
     record_paper_probe,
     render_gate_report,
     write_gate_report,
@@ -715,6 +716,34 @@ def whalemirror_gates_paper_sample(
             ),
             reset=reset,
         )
+        write_gate_report(state, report_path=report)
+        Console().print_json(
+            json.dumps(
+                {
+                    "state_path": str(gate_state_path(PAPER_GATE, state_dir=state_dir)),
+                    "report_path": str(report),
+                    "assessment": assess_gate(state).to_dict(),
+                    "latest_evidence": state.evidence[-1].to_dict(),
+                }
+            )
+        )
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@whalemirror_gates_app.command("paper-record")
+def whalemirror_gates_paper_record(
+    evidence: Path = typer.Option(..., "--evidence", exists=True, dir_okay=False, readable=True),
+    state_dir: Path = typer.Option(default_validation_dir(), "--state-dir"),
+    report: Path = typer.Option(Path(".cache/whalemirror-gates/paper-gate.md"), "--report"),
+    reset: bool = typer.Option(False, "--reset", help="Start a fresh #14 gate state before recording evidence"),
+) -> None:
+    """Record operator-produced #14 Linux paper-run evidence."""
+    try:
+        payload = json.loads(evidence.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("paper evidence must be a JSON object")
+        state = record_paper_evidence(state_dir=state_dir, paper_payload=payload, reset=reset)
         write_gate_report(state, report_path=report)
         Console().print_json(
             json.dumps(

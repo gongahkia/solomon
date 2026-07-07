@@ -5,6 +5,7 @@ from collections.abc import Mapping
 
 from stonks_cli.whalemirror.models import (
     SG_BLOCKED_EXECUTION_VENUES,
+    SG_BLOCKED_STRATEGY_CLASSES,
     MirrorMode,
     Venue,
     coerce_venue,
@@ -38,6 +39,7 @@ def evaluate_execution_guards(
     heartbeat_ok: bool | None = None,
     emergency_stop_active: bool = False,
     consensus_approved: bool | None = None,
+    strategy_class: str | None = None,
     env: Mapping[str, str] | None = None,
 ) -> list[str]:
     resolved_venue = coerce_venue(venue)
@@ -49,6 +51,10 @@ def evaluate_execution_guards(
 
     if sg_resident and resolved_venue in SG_BLOCKED_EXECUTION_VENUES:
         reasons.append(f"venue_blocked_for_sg:{resolved_venue}")
+
+    normalized_strategy = (strategy_class or "").strip().lower().replace("-", "_")
+    if sg_resident and normalized_strategy in SG_BLOCKED_STRATEGY_CLASSES:
+        reasons.append(f"strategy_blocked_for_sg:{normalized_strategy}")
 
     if require_arm and not live_execution_armed(resolved_venue, env=env):
         reasons.append(f"live_trading_not_armed:{live_arm_env(resolved_venue)}")

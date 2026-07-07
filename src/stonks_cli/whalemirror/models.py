@@ -29,7 +29,10 @@ class MirrorMode(StrEnum):
     LIVE = "live"
 
 
-SG_BLOCKED_EXECUTION_VENUES = frozenset({Venue.POLYMARKET, Venue.KALSHI, Venue.SPORTSBOOK})
+SG_BLOCKED_EXECUTION_VENUES = frozenset({Venue.BYBIT, Venue.POLYMARKET, Venue.KALSHI, Venue.SPORTSBOOK})
+SG_BLOCKED_STRATEGY_CLASSES = frozenset(
+    {"circumvention", "prediction_market", "sports_betting", "sportsbook", "whalemirror_live_target_selection"}
+)
 
 
 def coerce_venue(value: Venue | str) -> Venue:

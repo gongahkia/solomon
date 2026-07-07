@@ -41,6 +41,19 @@ def test_sg_blocked_venues_cannot_be_live_executed(monkeypatch):
     assert "venue_blocked_for_sg:polymarket" in reasons
 
 
+def test_bybit_and_wallet_live_target_strategy_are_sg_blocked(monkeypatch):
+    monkeypatch.setenv("STONKS_CLI_BYBIT_LIVE_ARMED", "armed")
+
+    reasons = evaluate_execution_guards(
+        venue=Venue.BYBIT,
+        mode=MirrorMode.LIVE,
+        strategy_class="whalemirror-live-target-selection",
+    )
+
+    assert "venue_blocked_for_sg:bybit" in reasons
+    assert "strategy_blocked_for_sg:whalemirror_live_target_selection" in reasons
+
+
 def test_paper_mode_does_not_require_live_arm():
     assert evaluate_execution_guards(venue=Venue.HYPERLIQUID, mode=MirrorMode.PAPER) == []
 

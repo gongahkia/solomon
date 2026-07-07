@@ -1,5 +1,8 @@
 # Polymarket Reddit And Trade-Engine Audit
 
+> [!WARNING]
+> Archived research only. This is not active CarryMirror or WhaleMirror execution guidance. SG policy blocks Polymarket execution and prediction-market strategy classes.
+
 Date: 2026-04-24
 
 ## Source Structure

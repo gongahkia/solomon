@@ -186,6 +186,28 @@ class CarryMirrorConfig(BaseModel):
     email_to_env: str = "STONKS_CLI_CARRY_EMAIL_TO"
 
 
+class LegalPolicyConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    sg_resident: bool = True
+    paper_first_venues: list[str] = Field(default_factory=lambda: ["hyperliquid"])
+    allowed_spot_fiat_rails: list[str] = Field(
+        default_factory=lambda: [
+            "anchorage_digital_singapore",
+            "bitgo_singapore",
+            "bitstamp_asia",
+            "blockchain_com_singapore",
+            "circle_internet_singapore",
+            "coinbase_singapore",
+            "dbs_vickers",
+            "digital_treasures_center",
+        ]
+    )
+    blocked_venue_ids: list[str] = Field(default_factory=lambda: ["bybit", "kalshi", "polymarket", "sportsbook", "sportsbooks"])
+    blocked_strategy_classes: list[str] = Field(
+        default_factory=lambda: ["circumvention", "prediction_market", "sportsbook", "sports_betting", "whalemirror_live_target_selection"]
+    )
+
+
 class TuiConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     refresh_interval: int = Field(default=60, ge=5, le=3600)
@@ -223,6 +245,7 @@ class AppConfig(BaseModel):
     polymarket: PolymarketConfig = Field(default_factory=PolymarketConfig)
     whalemirror: WhaleMirrorConfig = Field(default_factory=WhaleMirrorConfig)
     carrymirror: CarryMirrorConfig = Field(default_factory=CarryMirrorConfig)
+    legal_policy: LegalPolicyConfig = Field(default_factory=LegalPolicyConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
 
 

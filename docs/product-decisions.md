@@ -13,7 +13,7 @@ This document resolves the pre-Phase 1 decisions from the pivot plan so WhaleMir
 | Long-running validation host | Any validation gate or roadmap task that requires uninterrupted operation runs on the always-on Linux validation machine, not on the MacBook. | GitHub issues and runbooks for uninterrupted capture, paper, live, or future scanner runs specify Linux-hosted operation and do not accept MacBook sleep-prone runs as completion evidence. |
 | Live-armed Phase 1 capital | Paper mode is the default. The initial live-armed Phase 1 budget is capped at USD 200, with sub-USD 50 per-order notional until the scale gate is met. | No code or doc path raises notional automatically before the 60-day live gate and 7 consecutive green weeks are satisfied. |
 | License | MIT license plus visible no-financial-advice and venue-legality disclaimers. | Reuse is simple, and the project is not positioned as investment, gambling, legal, or tax advice. |
-| SG legal posture | Dogfooding and execution are constrained to SG-legal venues. The project does not execute on Polymarket, Kalshi, sportsbooks, or circumvention-based venues from Singapore. | README and runbooks cannot be read as instructions to open or execute restricted prediction-market or sportsbook positions from SG. |
+| SG legal posture | CarryMirror funding/basis carry is the first live-candidate path. WhaleMirror copy-trading remains research-only. Dogfooding and execution are constrained by [CarryMirror SG venue policy](carrymirror-sg-venue-policy.md). | Runtime policy blocks Polymarket, Kalshi, sportsbooks, Bybit, prediction-market strategy classes, and WhaleMirror wallet rankings as live target selection input. |
 
 ## Out-of-Scope Framing
 

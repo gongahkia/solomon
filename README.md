@@ -155,14 +155,15 @@ Current and candidate venues:
 
 | Venue | Status |
 | --- | --- |
-| Hyperliquid | Phase 1 target. |
+| Hyperliquid | CarryMirror paper-first venue; tiny-live requires paper gate and legal review. |
 | Solana / EVM DEXes | Candidate Phase 2 venues. |
-| OKX / Bybit | Candidate later venues after accepting API-key custody risk. |
+| OKX | Candidate later venue after API-key custody/security review. |
+| Bybit | Blocked until reviewed. |
 | Polymarket | Out of scope for SG execution. Historical material only. |
 | Kalshi | Out of scope. |
 | Sportsbooks | Out of scope. |
 
-No README, runbook, or command example should be read as instructions to open Polymarket, Kalshi, sportsbook, or circumvention-based positions from Singapore.
+No README, runbook, or command example should be read as instructions to open Polymarket, Kalshi, sportsbook, Bybit, or circumvention-based positions from Singapore. See [CarryMirror SG venue policy](docs/carrymirror-sg-venue-policy.md).
 
 ## Architecture
 

@@ -1,5 +1,8 @@
 # Polymarket Migration Research For `stonks-cli`
 
+> [!WARNING]
+> Archived research only. This is not active CarryMirror or WhaleMirror execution guidance. SG policy blocks Polymarket execution and prediction-market strategy classes.
+
 ## Purpose
 
 This document translates the supplied Polymarket tutorial post into an implementation plan for this repository.

@@ -22,6 +22,7 @@ from stonks_cli.commands import (
 )
 from stonks_cli.config import load_config
 from stonks_cli.errors import ExitCodes, StonksError
+from stonks_cli.legal_policy import enforce_legal_policy
 from stonks_cli.logging_utils import LoggingConfig, configure_logging
 from stonks_cli.whalemirror.attribution import (
     DEFAULT_ATTRIBUTION_FIXTURE,
@@ -249,11 +250,12 @@ def carry_scan(
 ) -> None:
     """Scan BTC/ETH Hyperliquid carry opportunities without placing orders."""
     try:
+        cfg = load_config()
+        enforce_legal_policy(cfg, venue_id=venue, strategy_class="carry_funding_basis")
         if venue != "hyperliquid":
             raise ValueError("carry scan currently supports --venue hyperliquid only")
         if not paper:
             raise ValueError("carry scan is paper-only; --no-paper is not supported")
-        cfg = load_config()
         assumptions = CarryCostAssumptions(
             fee_bps=fee_bps,
             slippage_bps=slippage_bps,
@@ -339,11 +341,12 @@ def carry_paper_run(
 ) -> None:
     """Run a paper-only delta-neutral carry simulation."""
     try:
+        cfg = load_config()
+        enforce_legal_policy(cfg, venue_id=venue, strategy_class="carry_funding_basis")
         if venue != "hyperliquid":
             raise ValueError("carry paper currently supports --venue hyperliquid only")
         if not paper:
             raise ValueError("carry paper is paper-only; --no-paper is not supported")
-        cfg = load_config()
         source_inputs = (
             load_carry_inputs_fixture(fixture)
             if fixture

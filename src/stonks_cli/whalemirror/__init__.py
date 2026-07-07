@@ -10,6 +10,17 @@ from stonks_cli.whalemirror.attribution import (
     render_wallet_ranking_markdown,
 )
 from stonks_cli.whalemirror.capture_analysis import analyze_capture_archive
+from stonks_cli.whalemirror.carry_paper import (
+    PaperCarryConfig,
+    PaperCarryEngine,
+    PaperCarryFill,
+    PaperCarryPosition,
+    PaperCarryRunResult,
+    PaperCarryState,
+    render_paper_carry_report,
+    run_paper_carry,
+    write_paper_carry_artifacts,
+)
 from stonks_cli.whalemirror.carry_scanner import (
     CarryCostAssumptions,
     CarryScanRow,
@@ -147,6 +158,12 @@ __all__ = [
     "MirrorMode",
     "NormalizedTrade",
     "PAPER_GATE",
+    "PaperCarryConfig",
+    "PaperCarryEngine",
+    "PaperCarryFill",
+    "PaperCarryPosition",
+    "PaperCarryRunResult",
+    "PaperCarryState",
     "PaperClosedTrade",
     "PaperMirrorConfig",
     "PaperMirrorDecision",
@@ -195,6 +212,7 @@ __all__ = [
     "record_capture_probe",
     "record_live_probe",
     "record_paper_probe",
+    "render_paper_carry_report",
     "replay_capture_fixture",
     "replay_paper_mirror_fixture",
     "render_decision_ledger",
@@ -202,8 +220,10 @@ __all__ = [
     "render_tearsheet",
     "render_wallet_ranking_markdown",
     "runtime_host_metadata",
+    "run_paper_carry",
     "scan_hyperliquid_carry",
     "validate_carry_input_completeness",
     "write_capture_jsonl",
     "write_fixture_artifacts",
+    "write_paper_carry_artifacts",
 ]

@@ -29,13 +29,14 @@ from stonks_cli.whalemirror.attribution import (
     render_wallet_ranking_markdown,
 )
 from stonks_cli.whalemirror.capture_analysis import analyze_capture_archive
+from stonks_cli.whalemirror.carry_paper import PaperCarryConfig, run_paper_carry, write_paper_carry_artifacts
 from stonks_cli.whalemirror.carry_scanner import (
     CarryCostAssumptions,
     CarryScanRow,
     load_carry_inputs_fixture,
     scan_hyperliquid_carry,
 )
-from stonks_cli.whalemirror.hyperliquid import HYPERLIQUID_WS_URL
+from stonks_cli.whalemirror.hyperliquid import HYPERLIQUID_WS_URL, HyperliquidOrderClient
 from stonks_cli.whalemirror.ingestion import (
     DEFAULT_CAPTURE_FIXTURE,
     DEFAULT_LIVE_CAPTURE_COINS,
@@ -76,6 +77,7 @@ from stonks_cli.whalemirror.validation_gates import (
 
 app = typer.Typer(add_completion=True, help="WhaleMirror Hyperliquid paper-first observability CLI.")
 carry_app = typer.Typer(help="CarryMirror funding and basis scanner commands.")
+carry_paper_app = typer.Typer(help="CarryMirror paper carry simulation commands.")
 config_app = typer.Typer()
 whalemirror_app = typer.Typer(help="WhaleMirror Hyperliquid paper-first commands.")
 whalemirror_gates_app = typer.Typer(help="Restartable validation gate harnesses.")
@@ -84,6 +86,7 @@ whalemirror_paper_app = typer.Typer(help="Paper mirror replay and risk-control c
 whalemirror_wallets_app = typer.Typer(help="Venue-neutral wallet attribution commands.")
 
 app.add_typer(carry_app, name="carry")
+carry_app.add_typer(carry_paper_app, name="paper")
 app.add_typer(config_app, name="config")
 app.add_typer(whalemirror_app, name="whalemirror")
 whalemirror_app.add_typer(whalemirror_gates_app, name="gates")
@@ -284,6 +287,67 @@ def _parse_cli_time(value: str) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+
+
+@carry_paper_app.command("run")
+def carry_paper_run(
+    venue: str = typer.Option("hyperliquid", "--venue", help="Carry venue; currently hyperliquid only"),
+    paper: bool = typer.Option(True, "--paper/--no-paper", help="Paper mode; live execution is blocked"),
+    assets: list[str] = typer.Option(None, "--asset", help="Repeatable asset; defaults to BTC and ETH"),
+    fixture: Path | None = typer.Option(None, "--fixture", exists=True, readable=True),
+    duration_hours: float = typer.Option(24.0, "--duration-hours", min=0.0),
+    state_dir: Path = typer.Option(Path(".cache/carry-paper"), "--state-dir"),
+    report: Path = typer.Option(Path(".cache/carry-paper/report.md"), "--report"),
+    ledger: Path = typer.Option(Path(".cache/carry-paper/ledger.jsonl"), "--ledger"),
+    bankroll_usd: float = typer.Option(1000.0, "--bankroll-usd", min=0.0),
+    position_notional_usd: float = typer.Option(100.0, "--position-notional-usd", min=0.0),
+    maker_fee_bps: float = typer.Option(2.0, "--maker-fee-bps", min=0.0),
+    taker_fee_bps: float = typer.Option(5.0, "--taker-fee-bps", min=0.0),
+    slippage_bps: float = typer.Option(3.0, "--slippage-bps", min=0.0),
+    missed_fill_probability: float = typer.Option(0.0, "--missed-fill-probability", min=0.0, max=1.0),
+) -> None:
+    """Run a paper-only delta-neutral carry simulation."""
+    try:
+        if venue != "hyperliquid":
+            raise ValueError("carry paper currently supports --venue hyperliquid only")
+        if not paper:
+            raise ValueError("carry paper is paper-only; --no-paper is not supported")
+        cfg = load_config()
+        source_inputs = (
+            load_carry_inputs_fixture(fixture)
+            if fixture
+            else HyperliquidOrderClient().fetch_carry_inputs(assets=tuple(assets or ("BTC", "ETH")))
+        )
+        result = run_paper_carry(
+            inputs=source_inputs,
+            min_net_apr=cfg.carrymirror.min_net_apr,
+            config=PaperCarryConfig(
+                bankroll_usd=bankroll_usd,
+                position_notional_usd=position_notional_usd,
+                maker_fee_bps=maker_fee_bps,
+                taker_fee_bps=taker_fee_bps,
+                slippage_bps=slippage_bps,
+                missed_fill_probability=missed_fill_probability,
+            ),
+        )
+        paths = write_paper_carry_artifacts(result=result, state_dir=state_dir, report_path=report, ledger_path=ledger)
+        Console().print_json(
+            json.dumps(
+                {
+                    "duration_hours": duration_hours,
+                    "paper": True,
+                    "venue": venue,
+                    **paths,
+                    "summary": {
+                        "open_positions": len(result.state.positions),
+                        "closed_positions": len(result.state.closed_positions),
+                        "decisions": len(result.state.decisions),
+                    },
+                }
+            )
+        )
+    except Exception as e:
+        raise _exit_for_error(e)
 
 
 # --- WhaleMirror commands ---

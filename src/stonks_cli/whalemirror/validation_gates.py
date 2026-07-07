@@ -269,12 +269,30 @@ def record_live_probe(
         state,
         kind="live_validation",
         payload={
+            "source": "fixture",
             "fixture_path": str(fixture_path),
             "latency_report": latency,
             "slippage_report": slippage,
             "scale_gate": scale_gate,
             "final_status": "sample_recorded",
         },
+        state_dir=state_dir,
+        now=now,
+    )
+
+
+def record_live_evidence(
+    *,
+    state_dir: Path | str | None = None,
+    live_payload: dict[str, Any],
+    reset: bool = False,
+    now: datetime | None = None,
+) -> ValidationGateState:
+    state = init_gate(LIVE_GATE, state_dir=state_dir, reset=reset, now=now)
+    return append_evidence(
+        state,
+        kind="live_validation",
+        payload=live_payload,
         state_dir=state_dir,
         now=now,
     )
@@ -527,19 +545,66 @@ def _paper_live_payload_blockers(payload: dict[str, Any]) -> list[str]:
 
 def _live_blockers(state: ValidationGateState) -> list[str]:
     blockers = _missing_evidence_blocker(state, "live_validation")
+    live_payload_blockers: list[str] = []
+    has_live_validation = False
+    has_completed_live_validation = False
     for item in state.evidence:
         if item.kind != "live_validation":
             continue
-        latency = item.payload.get("latency_report") or {}
-        slippage = item.payload.get("slippage_report") or {}
-        scale = item.payload.get("scale_gate") or {}
-        if int(latency.get("sample_count") or 0) == 0:
-            blockers.append("live_missing_latency_samples")
-        if int(slippage.get("sample_count") or 0) == 0:
-            blockers.append("live_missing_slippage_samples")
-        if scale.get("auto_raise_blocked") is not True and scale.get("scale_gate_satisfied") is not True:
-            blockers.append("live_scale_gate_guard_not_proven")
+        if str(item.payload.get("source") or "fixture") != "live_armed":
+            continue
+        has_live_validation = True
+        item_blockers = _live_payload_blockers(item.payload)
+        if item_blockers:
+            live_payload_blockers.extend(item_blockers)
+        else:
+            has_completed_live_validation = True
+    if not has_live_validation:
+        blockers.append("live_missing_linux_live_validation_evidence")
+    elif not has_completed_live_validation:
+        blockers.extend(live_payload_blockers)
     return sorted(set(blockers))
+
+
+def _live_payload_blockers(payload: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    latency = payload.get("latency_report") or {}
+    slippage = payload.get("slippage_report") or {}
+    scale = payload.get("scale_gate") or {}
+    runtime = payload.get("runtime") or {}
+    runtime_os = str(runtime.get("os") or "")
+    artifact_paths = payload.get("artifact_paths") or {}
+    live_cap = _optional_float(
+        payload.get("max_live_order_notional_usd")
+        or scale.get("effective_max_live_order_notional_usd")
+        or scale.get("current_max_live_order_notional_usd")
+    )
+
+    if str(payload.get("final_status") or "") != "completed":
+        blockers.append("live_validation_not_completed")
+    if runtime_os.lower() != "linux":
+        blockers.append("live_not_run_on_linux_operator_host")
+    if live_cap is None:
+        blockers.append("live_missing_notional_cap")
+    elif live_cap > 50:
+        blockers.append("live_notional_cap_above_50_usd")
+    for required_path in ("latency_report_path", "slippage_report_path", "ledger_path"):
+        if not str(payload.get(required_path) or artifact_paths.get(required_path) or "").strip():
+            blockers.append(f"live_missing_{required_path}")
+    for metric in ("sample_count", "p50_ms", "p95_ms", "failure_count", "drop_context"):
+        if metric not in latency:
+            blockers.append(f"live_latency_missing_{metric}")
+    if int(latency.get("sample_count") or 0) == 0:
+        blockers.append("live_missing_latency_samples")
+    if float(latency.get("p95_ms") or 0.0) > 800 and not str(payload.get("latency_reframe_path") or "").strip():
+        blockers.append("live_latency_reframe_missing")
+    if int(slippage.get("sample_count") or 0) == 0:
+        blockers.append("live_missing_slippage_samples")
+    if "avg_slippage_bps" not in slippage or "max_slippage_bps" not in slippage:
+        blockers.append("live_slippage_summary_missing")
+    if scale.get("auto_raise_blocked") is not True and scale.get("scale_gate_satisfied") is not True:
+        blockers.append("live_scale_gate_guard_not_proven")
+    return blockers
 
 
 def _missing_evidence_blocker(state: ValidationGateState, kind: str) -> list[str]:
@@ -569,6 +634,12 @@ def _decision_controls(decisions: list[dict[str, Any]]) -> list[str]:
         if risk_controls:
             controls.add("risk_cap")
     return sorted(controls)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    return float(value)
 
 
 def _percentile(values: list[float], percentile: float) -> float:

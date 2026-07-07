@@ -72,6 +72,7 @@ from stonks_cli.whalemirror.validation_gates import (
     load_gate_state,
     record_capture_health,
     record_capture_probe,
+    record_live_evidence,
     record_live_probe,
     record_paper_evidence,
     record_paper_probe,
@@ -769,6 +770,34 @@ def whalemirror_gates_live_sample(
     """Record a restartable #10 latency, slippage, and scale-gate sample."""
     try:
         state = record_live_probe(state_dir=state_dir, fixture_path=fixture, reset=reset)
+        write_gate_report(state, report_path=report)
+        Console().print_json(
+            json.dumps(
+                {
+                    "state_path": str(gate_state_path(LIVE_GATE, state_dir=state_dir)),
+                    "report_path": str(report),
+                    "assessment": assess_gate(state).to_dict(),
+                    "latest_evidence": state.evidence[-1].to_dict(),
+                }
+            )
+        )
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@whalemirror_gates_app.command("live-record")
+def whalemirror_gates_live_record(
+    evidence: Path = typer.Option(..., "--evidence", exists=True, dir_okay=False, readable=True),
+    state_dir: Path = typer.Option(default_validation_dir(), "--state-dir"),
+    report: Path = typer.Option(Path(".cache/whalemirror-gates/live-gate.md"), "--report"),
+    reset: bool = typer.Option(False, "--reset", help="Start a fresh #10 gate state before recording evidence"),
+) -> None:
+    """Record operator-produced #10 Linux live validation evidence."""
+    try:
+        payload = json.loads(evidence.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("live evidence must be a JSON object")
+        state = record_live_evidence(state_dir=state_dir, live_payload=payload, reset=reset)
         write_gate_report(state, report_path=report)
         Console().print_json(
             json.dumps(

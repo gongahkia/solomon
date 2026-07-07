@@ -14,7 +14,7 @@ The MacBook can still run fixture smoke tests, edit code, and inspect reports. I
 | --- | ---: | ---: | --- | --- |
 | Hyperliquid clean capture | #13 | ~~7 days~~ waived | **passed** | `scripts/whalemirror_linux_capture_7d.sh` |
 | Top-5 paper mirror | #14 | 30 days | open | `scripts/whalemirror_linux_paper_30d.sh` |
-| Live latency / slippage / scale | #10 | 60 days | open | `stonks-cli whalemirror gates live-sample` |
+| Live latency / slippage / scale | #10 | 60 days | open | `scripts/whalemirror_linux_live_60d.sh` |
 
 ## Fixture Smoke Run
 
@@ -88,6 +88,19 @@ $ scripts/whalemirror_linux_paper_30d.sh
 The script refuses to run on non-Linux hosts and records operator-produced `live_paper` evidence from `${WHALEMIRROR_GATE_ROOT:-$XDG_STATE_HOME/stonks-cli/whalemirror-gates}/reports/paper-evidence.json`. See [30-day paper gate runbook](whalemirror-paper-30d-runbook.md).
 
 The #14 gate cannot pass from fixture samples. It requires `live_paper` evidence with `final_status: completed`, Linux runtime metadata, five selected wallets, ledger/journal/report paths, win/loss outcomes, PnL, expectancy, Sharpe, drawdown, risk-cap skips, stop-loss exits, cooldown blocks, and skipped trades after the 30-day elapsed window.
+
+## Linux 60-Day Live Validation
+
+Run #10 on the always-on Linux machine after #14 passes and live execution is explicitly armed:
+
+```console
+$ cd /opt/stonks-cli
+$ scripts/whalemirror_linux_live_60d.sh
+```
+
+The script refuses to run on non-Linux hosts and records operator-produced `live_armed` evidence from `${WHALEMIRROR_GATE_ROOT:-$XDG_STATE_HOME/stonks-cli/whalemirror-gates}/reports/live-evidence.json`. See [60-day live gate runbook](whalemirror-live-60d-runbook.md).
+
+The #10 gate cannot pass from fixture samples. It requires `live_armed` evidence with `final_status: completed`, Linux runtime metadata, sub-$50 notional caps, latency p50/p95/failure/drop context, live-vs-paper slippage evidence, scale-gate guard proof, and ledger/report paths after the 60-day elapsed window.
 
 ### Partial Capture Policy
 
@@ -175,6 +188,11 @@ $ stonks-cli whalemirror gates paper-record \
 $ stonks-cli whalemirror gates live-sample \
     --state-dir .cache/whalemirror-gates/state \
     --report .cache/whalemirror-gates/reports/live-gate.md
+
+$ stonks-cli whalemirror gates live-record \
+    --evidence /var/lib/stonks-cli/whalemirror-gates/reports/live-evidence.json \
+    --state-dir /var/lib/stonks-cli/whalemirror-gates/state \
+    --report /var/lib/stonks-cli/whalemirror-gates/reports/live-gate.md
 
 $ stonks-cli whalemirror gates status \
     --state-dir .cache/whalemirror-gates/state

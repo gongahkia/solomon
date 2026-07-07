@@ -10,6 +10,7 @@ from stonks_cli.whalemirror.validation_gates import (
     latency_report,
     record_capture_health,
     record_capture_probe,
+    record_live_evidence,
     record_live_probe,
     record_paper_evidence,
     record_paper_probe,
@@ -158,6 +159,7 @@ def test_live_gate_probe_reports_latency_slippage_and_scale_gate(tmp_path):
     payload = state.evidence[-1].payload
     assert state.gate_id == LIVE_GATE
     assert payload["latency_report"]["p50_ms"] == 710
+    assert payload["source"] == "fixture"
     assert payload["latency_report"]["p95_ms"] == 926
     assert payload["latency_report"]["failure_count"] == 1
     assert payload["slippage_report"]["sample_count"] == 2
@@ -165,6 +167,41 @@ def test_live_gate_probe_reports_latency_slippage_and_scale_gate(tmp_path):
     assert payload["scale_gate"]["auto_raise_blocked"] is True
     assert assessment.status == "running"
     assert any("elapsed_days_below_target" in blocker for blocker in assessment.blockers)
+    assert "live_missing_linux_live_validation_evidence" in assessment.blockers
+
+
+def test_live_gate_can_pass_after_completed_linux_live_evidence(tmp_path):
+    state = record_live_evidence(
+        state_dir=tmp_path,
+        reset=True,
+        now=NOW,
+        live_payload=_live_validation_payload(),
+    )
+
+    assessment = assess_gate(state, now=NOW + timedelta(days=60, minutes=1))
+
+    assert assessment.status == "passed"
+    assert assessment.blockers == []
+
+
+def test_live_gate_blocks_incomplete_or_unsafe_live_evidence(tmp_path):
+    payload = _live_validation_payload()
+    payload["runtime"] = {"os": "Darwin"}
+    payload["final_status"] = "running"
+    payload["max_live_order_notional_usd"] = 75
+    payload["latency_report"]["p95_ms"] = 850
+    payload["latency_reframe_path"] = ""
+    payload["scale_gate"]["auto_raise_blocked"] = False
+    payload["scale_gate"]["scale_gate_satisfied"] = False
+
+    state = record_live_evidence(state_dir=tmp_path, reset=True, now=NOW, live_payload=payload)
+    assessment = assess_gate(state, now=NOW + timedelta(days=61))
+
+    assert "live_validation_not_completed" in assessment.blockers
+    assert "live_not_run_on_linux_operator_host" in assessment.blockers
+    assert "live_notional_cap_above_50_usd" in assessment.blockers
+    assert "live_latency_reframe_missing" in assessment.blockers
+    assert "live_scale_gate_guard_not_proven" in assessment.blockers
 
 
 def test_gate_report_renders_blockers_and_evidence(tmp_path):
@@ -230,5 +267,38 @@ def _live_paper_payload():
             "stop_loss_exits": 1,
             "cooldown_blocks": 1,
             "skipped_trades": 2,
+        },
+    }
+
+
+def _live_validation_payload():
+    return {
+        "source": "live_armed",
+        "final_status": "completed",
+        "runtime": {"os": "Linux"},
+        "max_live_order_notional_usd": 49.0,
+        "latency_report_path": "/var/lib/stonks-cli/whalemirror-gates/reports/live-latency.md",
+        "slippage_report_path": "/var/lib/stonks-cli/whalemirror-gates/reports/live-vs-paper-slippage.md",
+        "ledger_path": "/var/lib/stonks-cli/whalemirror-gates/reports/live-ledger.md",
+        "latency_report": {
+            "sample_count": 12,
+            "p50_ms": 410.0,
+            "p95_ms": 790.0,
+            "failure_count": 1,
+            "drop_context": ["ws_reconnect"],
+        },
+        "slippage_report": {
+            "sample_count": 12,
+            "avg_slippage_bps": 3.2,
+            "max_slippage_bps": 9.1,
+        },
+        "scale_gate": {
+            "current_max_live_order_notional_usd": 49.0,
+            "requested_max_live_order_notional_usd": 100.0,
+            "effective_max_live_order_notional_usd": 49.0,
+            "green_weeks": 6,
+            "required_green_weeks": 7,
+            "scale_gate_satisfied": False,
+            "auto_raise_blocked": True,
         },
     }

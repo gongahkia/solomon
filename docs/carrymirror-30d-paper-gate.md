@@ -15,3 +15,5 @@ CarryMirror cannot progress to tiny live execution until a continuous 30-day pap
 | Operation | Run duration is 30 days without manual state edits or hidden restarts. |
 
 Passing this paper gate is necessary, not sufficient, for live use. Legal, venue, custody, tax, and operational review still block live progression until separately cleared.
+
+Post-gate broker-basis and cross-exchange research is governed by [CarryMirror post-gate research](carrymirror-post-gate-research.md).

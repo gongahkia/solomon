@@ -26,6 +26,7 @@ See:
 - [May 2026 wallet activity shortlist](docs/whalemirror-wallet-activity-shortlist-2026-05.md)
 - [CarryMirror SG venue policy](docs/carrymirror-sg-venue-policy.md)
 - [CarryMirror tiny-live runbook](docs/carrymirror-tiny-live-runbook.md)
+- [CarryMirror post-gate research](docs/carrymirror-post-gate-research.md)
 - [CarryMirror research](RESEARCH.md)
 - [Open roadmap issues](https://github.com/gongahkia/stonks-cli/issues)
 

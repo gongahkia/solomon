@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from stonks_cli.whalemirror.carry_audit import write_carry_ledger
 from stonks_cli.whalemirror.carry_risk import CarryRiskLimits, CarryRiskState, evaluate_carry_risk
 from stonks_cli.whalemirror.carry_scanner import CarryCostAssumptions, calculate_carry_scan_row
 from stonks_cli.whalemirror.hyperliquid import HyperliquidCarryInput
@@ -238,6 +239,7 @@ class PaperCarryEngine:
         extra: dict[str, Any] | None = None,
     ) -> CarryDecision:
         payload = {
+            "audit": _audit_payload(inputs=inputs, reason=reason, extra=extra or {}),
             "asset": inputs.asset,
             "source_health": inputs.source_health,
             **(extra or {}),
@@ -286,7 +288,7 @@ def write_paper_carry_artifacts(
     state_path = state_dir / "carry-paper-state.json"
     state_path.write_text(json.dumps(result.state.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
     report_path.write_text(result.report, encoding="utf-8")
-    ledger_path.write_text("\n".join(json.dumps(decision.to_dict(), sort_keys=True) for decision in result.state.decisions) + "\n", encoding="utf-8")
+    write_carry_ledger(result.state.decisions, ledger_path)
     return {"ledger_path": str(ledger_path), "report_path": str(report_path), "state_path": str(state_path)}
 
 
@@ -322,6 +324,20 @@ def _fill(leg: str, side: str, mid: float, quantity: float, fee_bps: float, slip
         fee_usd=notional * fee_bps / 10000,
         slippage_usd=abs(price - mid) * quantity,
     )
+
+
+def _audit_payload(*, inputs: HyperliquidCarryInput, reason: str, extra: dict[str, Any]) -> dict[str, Any]:
+    position = extra.get("closed_position") or extra.get("position") or {}
+    return {
+        "basis": inputs.basis.basis_abs if inputs.basis is not None else None,
+        "exit_reason": reason
+        if reason in {"funding_flip", "net_apr_below_threshold", "stale_data", "kill_switch", "kill_switch_active"}
+        else None,
+        "expected_funding_apr": inputs.funding.annualized_rate if inputs.funding is not None else None,
+        "fees_usd": position.get("fees"),
+        "margin_buffer": position.get("margin_buffer"),
+        "slippage_usd": position.get("slippage"),
+    }
 
 
 def _exit_reason(

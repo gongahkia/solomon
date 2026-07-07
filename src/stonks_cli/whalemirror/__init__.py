@@ -10,6 +10,15 @@ from stonks_cli.whalemirror.attribution import (
     render_wallet_ranking_markdown,
 )
 from stonks_cli.whalemirror.capture_analysis import analyze_capture_archive
+from stonks_cli.whalemirror.carry_audit import (
+    CarryReconciliationMismatch,
+    CarryReconciliationReport,
+    carry_ledger_row,
+    reconcile_carry_state,
+    render_carry_ledger,
+    render_carry_reconciliation_report,
+    write_carry_ledger,
+)
 from stonks_cli.whalemirror.carry_paper import (
     PaperCarryConfig,
     PaperCarryEngine,
@@ -147,6 +156,8 @@ __all__ = [
     "CarryRiskState",
     "CarryScanRow",
     "CarryQuote",
+    "CarryReconciliationMismatch",
+    "CarryReconciliationReport",
     "CarryStorage",
     "CarryStorageRetentionPolicy",
     "DecisionRecord",
@@ -203,6 +214,7 @@ __all__ = [
     "build_trades_subscription",
     "build_user_fills_subscription",
     "capture_hyperliquid_to_files",
+    "carry_ledger_row",
     "calculate_carry_scan_row",
     "decode_carry_ws_message",
     "decode_ws_message",
@@ -217,6 +229,7 @@ __all__ = [
     "live_arm_env",
     "live_execution_armed",
     "read_decisions",
+    "reconcile_carry_state",
     "record_carry_ws_message",
     "rank_wallets",
     "rank_wallets_from_fixture",
@@ -228,6 +241,8 @@ __all__ = [
     "replay_capture_fixture",
     "replay_paper_mirror_fixture",
     "render_decision_ledger",
+    "render_carry_ledger",
+    "render_carry_reconciliation_report",
     "render_gate_report",
     "render_tearsheet",
     "render_wallet_ranking_markdown",
@@ -236,6 +251,7 @@ __all__ = [
     "scan_hyperliquid_carry",
     "validate_carry_input_completeness",
     "write_capture_jsonl",
+    "write_carry_ledger",
     "write_fixture_artifacts",
     "write_paper_carry_artifacts",
 ]

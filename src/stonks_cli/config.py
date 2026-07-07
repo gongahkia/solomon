@@ -164,6 +164,13 @@ class CarryMirrorConfig(BaseModel):
     paper: bool = True
     live_armed: bool = False
     max_total_live_usd: float = Field(default=0.0, ge=0.0)
+    max_delta_abs: float = Field(default=0.000001, ge=0.0)
+    min_margin_buffer: float = Field(default=0.20, ge=0.0)
+    min_liquidation_distance: float = Field(default=0.15, ge=0.0)
+    max_data_age_seconds: float = Field(default=30.0, ge=0.0)
+    daily_drawdown_limit_pct: float = Field(default=0.005, ge=0.0)
+    weekly_drawdown_limit_pct: float = Field(default=0.015, ge=0.0)
+    global_drawdown_limit_pct: float = Field(default=0.03, ge=0.0)
     min_net_apr: float = Field(
         default=0.15,
         ge=0.0,

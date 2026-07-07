@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from stonks_cli.whalemirror.carry_risk import CarryRiskLimits, CarryRiskState, evaluate_carry_risk
 from stonks_cli.whalemirror.carry_scanner import CarryCostAssumptions, calculate_carry_scan_row
 from stonks_cli.whalemirror.hyperliquid import HyperliquidCarryInput
 from stonks_cli.whalemirror.models import CarryDecision, CarryPosition, MirrorMode
@@ -24,6 +25,7 @@ class PaperCarryConfig:
     min_liquidation_distance: float = 0.15
     max_delta_abs: float = 0.000001
     kill_switch_active: bool = False
+    risk_limits: CarryRiskLimits = field(default_factory=CarryRiskLimits)
 
 
 @dataclass(frozen=True)
@@ -131,6 +133,29 @@ class PaperCarryEngine:
         assert inputs.quote.perp_mid is not None
         notional = min(self.config.position_notional_usd, self.config.bankroll_usd)
         quantity = notional / ((inputs.quote.spot_mid + inputs.quote.perp_mid) / 2)
+        risk = evaluate_carry_risk(
+            CarryRiskState(
+                asset=inputs.asset,
+                notional_usd=notional,
+                net_delta=0.0,
+                spot_qty=quantity,
+                perp_qty=-quantity,
+                margin_buffer=0.35,
+                liquidation_distance=0.50,
+                websocket_age_seconds=0.0,
+                rest_age_seconds=0.0,
+            ),
+            limits=self.config.risk_limits,
+        )
+        if not risk.ok:
+            return self._record(
+                inputs,
+                action="skip_risk_firewall",
+                reason=",".join(risk.risk_checks),
+                expected_net_apr=scan.opportunity.net_apr,
+                risk_checks=risk.risk_checks,
+                extra={"risk_assessment": risk.to_dict()},
+            )
         spot_fill = _fill("spot", "buy", inputs.quote.spot_mid, quantity, self.config.maker_fee_bps, self.config.slippage_bps)
         perp_fill = _fill("perp", "sell", inputs.quote.perp_mid, quantity, self.config.maker_fee_bps, self.config.slippage_bps)
         position = PaperCarryPosition(

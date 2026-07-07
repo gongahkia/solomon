@@ -21,6 +21,13 @@ from stonks_cli.whalemirror.carry_paper import (
     run_paper_carry,
     write_paper_carry_artifacts,
 )
+from stonks_cli.whalemirror.carry_risk import (
+    CarryRiskAssessment,
+    CarryRiskBreach,
+    CarryRiskLimits,
+    CarryRiskState,
+    evaluate_carry_risk,
+)
 from stonks_cli.whalemirror.carry_scanner import (
     CarryCostAssumptions,
     CarryScanRow,
@@ -134,6 +141,10 @@ __all__ = [
     "CarryOpportunity",
     "CarryPosition",
     "CarryRetentionResult",
+    "CarryRiskAssessment",
+    "CarryRiskBreach",
+    "CarryRiskLimits",
+    "CarryRiskState",
     "CarryScanRow",
     "CarryQuote",
     "CarryStorage",
@@ -199,6 +210,7 @@ __all__ = [
     "default_carry_storage_path",
     "default_validation_dir",
     "evaluate_execution_guards",
+    "evaluate_carry_risk",
     "load_attribution_fixture",
     "load_carry_inputs_fixture",
     "load_replay_fixture",

@@ -24,6 +24,8 @@ See:
 - [Validation gates](docs/whalemirror-validation-gates.md)
 - [May 2026 partial capture evidence](docs/whalemirror-partial-capture-2026-05.md)
 - [May 2026 wallet activity shortlist](docs/whalemirror-wallet-activity-shortlist-2026-05.md)
+- [CarryMirror SG venue policy](docs/carrymirror-sg-venue-policy.md)
+- [CarryMirror tiny-live runbook](docs/carrymirror-tiny-live-runbook.md)
 - [CarryMirror research](RESEARCH.md)
 - [Open roadmap issues](https://github.com/gongahkia/stonks-cli/issues)
 

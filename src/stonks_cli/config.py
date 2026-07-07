@@ -163,6 +163,10 @@ class CarryMirrorConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     paper: bool = True
     live_armed: bool = False
+    live_armed_env: str = "STONKS_CLI_CARRY_LIVE_ARMED"
+    live_secrets_path: str = "~/.config/stonks-cli/carry-live.env"
+    tiny_live_min_usd: float = Field(default=50.0, ge=0.0)
+    tiny_live_max_usd: float = Field(default=200.0, ge=0.0)
     max_total_live_usd: float = Field(default=0.0, ge=0.0)
     max_delta_abs: float = Field(default=0.000001, ge=0.0)
     min_margin_buffer: float = Field(default=0.20, ge=0.0)

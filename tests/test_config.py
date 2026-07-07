@@ -83,6 +83,10 @@ def test_carrymirror_defaults_keep_live_disabled(monkeypatch, tmp_path):
 
     assert cfg.carrymirror.paper is True
     assert cfg.carrymirror.live_armed is False
+    assert cfg.carrymirror.live_armed_env == "STONKS_CLI_CARRY_LIVE_ARMED"
+    assert cfg.carrymirror.live_secrets_path == "~/.config/stonks-cli/carry-live.env"
+    assert cfg.carrymirror.tiny_live_min_usd == 50.0
+    assert cfg.carrymirror.tiny_live_max_usd == 200.0
     assert cfg.carrymirror.max_total_live_usd == 0.0
     assert cfg.carrymirror.min_net_apr == 0.15
     assert cfg.carrymirror.alert_sink == "disabled"

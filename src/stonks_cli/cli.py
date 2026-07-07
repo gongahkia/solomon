@@ -31,6 +31,7 @@ from stonks_cli.whalemirror.attribution import (
 )
 from stonks_cli.whalemirror.capture_analysis import analyze_capture_archive
 from stonks_cli.whalemirror.carry_health import build_carry_health_report, render_carry_health_report
+from stonks_cli.whalemirror.carry_live import CarryLivePreflightEvidence, evaluate_carry_live_preflight
 from stonks_cli.whalemirror.carry_paper import PaperCarryConfig, run_paper_carry, write_paper_carry_artifacts
 from stonks_cli.whalemirror.carry_scanner import (
     CarryCostAssumptions,
@@ -79,6 +80,7 @@ from stonks_cli.whalemirror.validation_gates import (
 
 app = typer.Typer(add_completion=True, help="WhaleMirror Hyperliquid paper-first observability CLI.")
 carry_app = typer.Typer(help="CarryMirror funding and basis scanner commands.")
+carry_live_app = typer.Typer(help="CarryMirror fail-closed tiny-live safety commands.")
 carry_paper_app = typer.Typer(help="CarryMirror paper carry simulation commands.")
 config_app = typer.Typer()
 whalemirror_app = typer.Typer(help="WhaleMirror Hyperliquid paper-first commands.")
@@ -88,6 +90,7 @@ whalemirror_paper_app = typer.Typer(help="Paper mirror replay and risk-control c
 whalemirror_wallets_app = typer.Typer(help="Venue-neutral wallet attribution commands.")
 
 app.add_typer(carry_app, name="carry")
+carry_app.add_typer(carry_live_app, name="live")
 carry_app.add_typer(carry_paper_app, name="paper")
 app.add_typer(config_app, name="config")
 app.add_typer(whalemirror_app, name="whalemirror")
@@ -282,6 +285,35 @@ def carry_scan(
             console.print_json(json.dumps(payload))
         else:
             console.print(_render_carry_scan_table(rows))
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@carry_live_app.command("preflight")
+def carry_live_preflight(
+    paper_gate_passed: bool = typer.Option(False, "--paper-gate-passed"),
+    legal_review_recorded: bool = typer.Option(False, "--legal-review-recorded"),
+    venue_health_ok: bool = typer.Option(False, "--venue-health-ok"),
+    manual_cap_confirmed: bool = typer.Option(False, "--manual-cap-confirmed"),
+    requested_notional_usd: float = typer.Option(0.0, "--requested-notional-usd", min=0.0),
+    cap_usd: float = typer.Option(0.0, "--cap-usd", min=0.0),
+    secrets_path: Path | None = typer.Option(None, "--secrets-path"),
+) -> None:
+    """Report tiny-live preflight blockers without placing orders."""
+    try:
+        result = evaluate_carry_live_preflight(
+            cfg=load_config(),
+            evidence=CarryLivePreflightEvidence(
+                paper_gate_passed=paper_gate_passed,
+                legal_review_recorded=legal_review_recorded,
+                venue_health_ok=venue_health_ok,
+                manual_cap_confirmed=manual_cap_confirmed,
+                requested_notional_usd=requested_notional_usd,
+                cap_usd=cap_usd,
+                secrets_path=str(secrets_path) if secrets_path else None,
+            ),
+        )
+        Console().print_json(json.dumps(result.to_dict()))
     except Exception as e:
         raise _exit_for_error(e)
 

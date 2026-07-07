@@ -10,8 +10,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from stonks_cli.whalemirror.carry_storage import CarryStorage
 from stonks_cli.whalemirror.hyperliquid import HYPERLIQUID_WS_URL
-from stonks_cli.whalemirror.models import NormalizedTrade, TradeSide, Venue
+from stonks_cli.whalemirror.models import CarryQuote, FundingSnapshot, NormalizedTrade, TradeSide, Venue
 
 DEFAULT_CAPTURE_FIXTURE = Path("tests/fixtures/whalemirror/hyperliquid-ws.jsonl")
 DEFAULT_LIVE_CAPTURE_COINS = ("BTC", "ETH", "SOL")
@@ -72,6 +73,10 @@ def build_user_fundings_subscription(*, user: str) -> dict[str, Any]:
     return {"method": "subscribe", "subscription": {"type": "userFundings", "user": user.lower()}}
 
 
+def build_active_asset_ctx_subscription(*, coin: str) -> dict[str, Any]:
+    return {"method": "subscribe", "subscription": {"type": "activeAssetCtx", "coin": coin}}
+
+
 def build_unsubscribe(subscription: dict[str, Any]) -> dict[str, Any]:
     if subscription.get("method") == "subscribe":
         subscription = dict(subscription["subscription"])
@@ -106,6 +111,20 @@ def build_live_capture_subscriptions(
     return subscriptions
 
 
+def build_carry_capture_subscriptions(
+    *,
+    assets: list[str] | tuple[str, ...] = ("BTC", "ETH"),
+    include_all_mids: bool = True,
+    all_mids_dex: str | None = None,
+) -> list[dict[str, Any]]:
+    subscriptions = [build_active_asset_ctx_subscription(coin=asset.strip().upper()) for asset in assets if asset.strip()]
+    if include_all_mids:
+        subscriptions.insert(0, build_all_mids_subscription(dex=all_mids_dex))
+    if not subscriptions:
+        raise HyperliquidIngestionError("at least one CarryMirror websocket subscription is required")
+    return subscriptions
+
+
 def decode_ws_message(message: str | dict[str, Any]) -> list[NormalizedTrade]:
     payload = json.loads(message) if isinstance(message, str) else message
     if not isinstance(payload, dict):
@@ -133,6 +152,42 @@ def replay_capture_fixture(path: Path | str = DEFAULT_CAPTURE_FIXTURE) -> tuple[
             continue
         trades.extend(monitor.record_message(line))
     return trades, monitor.health
+
+
+def decode_carry_ws_message(
+    message: str | dict[str, Any],
+    *,
+    assets: tuple[str, ...] = ("BTC", "ETH"),
+    received_at_utc: str | None = None,
+) -> list[CarryQuote | FundingSnapshot]:
+    payload = json.loads(message) if isinstance(message, str) else message
+    if not isinstance(payload, dict):
+        raise HyperliquidIngestionError("websocket message must be a JSON object")
+    timestamp = received_at_utc or _iso(_now())
+    channel = str(payload.get("channel") or "")
+    data = payload.get("data")
+    if channel == "allMids":
+        mids = data.get("mids") if isinstance(data, dict) and isinstance(data.get("mids"), dict) else {}
+        return _carry_quotes_from_all_mids(mids, assets=assets, timestamp=timestamp)
+    if channel in {"activeAssetCtx", "activeSpotAssetCtx"} and isinstance(data, dict):
+        return _carry_snapshots_from_asset_ctx(data, assets=assets, timestamp=timestamp)
+    return []
+
+
+def record_carry_ws_message(
+    message: str | dict[str, Any],
+    *,
+    storage: CarryStorage,
+    assets: tuple[str, ...] = ("BTC", "ETH"),
+    received_at_utc: str | None = None,
+) -> int:
+    snapshots = decode_carry_ws_message(message, assets=assets, received_at_utc=received_at_utc)
+    for snapshot in snapshots:
+        if isinstance(snapshot, CarryQuote):
+            storage.write_quote(snapshot)
+        elif isinstance(snapshot, FundingSnapshot):
+            storage.write_funding(snapshot)
+    return len(snapshots)
 
 
 def write_capture_jsonl(trades: list[NormalizedTrade], path: Path | str) -> None:
@@ -270,6 +325,7 @@ async def capture_hyperliquid_to_files(
     health_interval_seconds: float = 60.0,
     max_reconnects: int | None = None,
     stop_after_messages: int | None = None,
+    carry_storage: CarryStorage | None = None,
     progress_handler: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     raw_path = Path(raw_out_path)
@@ -311,8 +367,11 @@ async def capture_hyperliquid_to_files(
             await write_health("running")
 
     async def record_raw(raw: str) -> None:
-        row = {"received_at_utc": _iso(_now()), "raw": _json_or_text(raw)}
+        received_at_utc = _iso(_now())
+        row = {"received_at_utc": received_at_utc, "raw": _json_or_text(raw)}
         raw_handle.write(json.dumps(row, sort_keys=True) + "\n")
+        if carry_storage is not None:
+            record_carry_ws_message(raw, storage=carry_storage, received_at_utc=received_at_utc)
 
     async def record_trade(trade: NormalizedTrade) -> None:
         trades_handle.write(json.dumps(trade.to_dict(), sort_keys=True) + "\n")
@@ -470,6 +529,7 @@ def _decoded_event_count(payload: dict[str, Any], trades: list[NormalizedTrade])
     known_channels = {
         "allMids",
         "activeAssetCtx",
+        "activeSpotAssetCtx",
         "bbo",
         "candle",
         "l2Book",
@@ -481,6 +541,82 @@ def _decoded_event_count(payload: dict[str, Any], trades: list[NormalizedTrade])
         "userNonFundingLedgerUpdates",
     }
     return 1 if channel in known_channels else 0
+
+
+def _carry_quotes_from_all_mids(mids: dict[str, Any], *, assets: tuple[str, ...], timestamp: str) -> list[CarryQuote]:
+    quotes = []
+    for asset in assets:
+        normalized = asset.upper()
+        spot_mid = _mid_for(mids, f"{normalized}/USDC", f"U{normalized}/USDC")
+        perp_mid = _mid_for(mids, normalized)
+        if spot_mid is None and perp_mid is None:
+            continue
+        missing = []
+        if spot_mid is None:
+            missing.append("spot_mid")
+        if perp_mid is None:
+            missing.append("perp_mid")
+        quotes.append(
+            CarryQuote(
+                venue=Venue.HYPERLIQUID,
+                asset=normalized,
+                spot_mid=spot_mid,
+                perp_mid=perp_mid,
+                oracle_mid=None,
+                mark_mid=None,
+                timestamp=timestamp,
+                source_health="ws_allMids" if not missing else f"ws_allMids_missing:{','.join(missing)}",
+            )
+        )
+    return quotes
+
+
+def _carry_snapshots_from_asset_ctx(data: dict[str, Any], *, assets: tuple[str, ...], timestamp: str) -> list[CarryQuote | FundingSnapshot]:
+    coin = str(data.get("coin") or "").upper()
+    ctx = data.get("ctx") if isinstance(data.get("ctx"), dict) else data
+    if coin not in {asset.upper() for asset in assets}:
+        return []
+    mark_mid = _maybe_float(ctx.get("markPx"))
+    oracle_mid = _maybe_float(ctx.get("oraclePx"))
+    funding_rate = _maybe_float(ctx.get("funding"))
+    snapshots: list[CarryQuote | FundingSnapshot] = [
+        CarryQuote(
+            venue=Venue.HYPERLIQUID,
+            asset=coin,
+            spot_mid=None,
+            perp_mid=None,
+            oracle_mid=oracle_mid,
+            mark_mid=mark_mid,
+            timestamp=timestamp,
+            source_health="ws_activeAssetCtx",
+        )
+    ]
+    if funding_rate is not None:
+        snapshots.append(
+            FundingSnapshot(
+                asset=coin,
+                venue=Venue.HYPERLIQUID,
+                hourly_rate=funding_rate,
+                annualized_rate=funding_rate * 24 * 365,
+                next_funding_time=None,
+                premium_index=_maybe_float(ctx.get("premium")),
+                timestamp=timestamp,
+            )
+        )
+    return snapshots
+
+
+def _mid_for(mids: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        if key in mids:
+            return _maybe_float(mids[key])
+    return None
+
+
+def _maybe_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(str(value))
 
 
 def _capture_final_status(health: IngestionHealth) -> str:

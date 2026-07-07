@@ -1,20 +1,25 @@
 from __future__ import annotations
 
+from stonks_cli.whalemirror.carry_storage import CarryStorage
 from stonks_cli.whalemirror.ingestion import (
     DEFAULT_CAPTURE_FIXTURE,
     BackoffPolicy,
     IngestionMonitor,
+    build_active_asset_ctx_subscription,
     build_all_mids_subscription,
+    build_carry_capture_subscriptions,
     build_live_capture_subscriptions,
     build_trades_subscription,
     build_unsubscribe,
     build_user_fills_subscription,
     build_user_fundings_subscription,
+    decode_carry_ws_message,
     decode_ws_message,
+    record_carry_ws_message,
     replay_capture_fixture,
     write_capture_jsonl,
 )
-from stonks_cli.whalemirror.models import TradeSide
+from stonks_cli.whalemirror.models import FundingSnapshot, TradeSide
 
 
 def test_subscription_builders_match_hyperliquid_shapes():
@@ -30,6 +35,10 @@ def test_subscription_builders_match_hyperliquid_shapes():
         "method": "subscribe",
         "subscription": {"type": "userFundings", "user": "0xabc"},
     }
+    assert build_active_asset_ctx_subscription(coin="BTC") == {
+        "method": "subscribe",
+        "subscription": {"type": "activeAssetCtx", "coin": "BTC"},
+    }
     assert build_unsubscribe(trades) == {"method": "unsubscribe", "subscription": {"type": "trades", "coin": "BTC"}}
 
 
@@ -44,6 +53,16 @@ def test_live_capture_subscription_builder_defaults_to_perps_and_all_mids():
             "method": "subscribe",
             "subscription": {"type": "userFills", "user": "0xabc", "aggregateByTime": False},
         },
+    ]
+
+
+def test_carry_capture_subscription_builder_includes_mids_and_asset_contexts():
+    subscriptions = build_carry_capture_subscriptions(assets=("BTC", "ETH"))
+
+    assert subscriptions == [
+        {"method": "subscribe", "subscription": {"type": "allMids"}},
+        {"method": "subscribe", "subscription": {"type": "activeAssetCtx", "coin": "BTC"}},
+        {"method": "subscribe", "subscription": {"type": "activeAssetCtx", "coin": "ETH"}},
     ]
 
 
@@ -162,6 +181,47 @@ def test_ingestion_monitor_counts_non_trade_events():
     assert monitor.health.messages_received == 1
     assert monitor.health.decoded_events == 1
     assert monitor.health.decoded_trades == 0
+
+
+def test_decode_carry_ws_message_builds_quotes_from_all_mids():
+    snapshots = decode_carry_ws_message(
+        {"channel": "allMids", "data": {"mids": {"BTC": "100100", "BTC/USDC": "100000", "ETH": "3100"}}},
+        received_at_utc="2026-07-02T00:00:00Z",
+    )
+
+    assert len(snapshots) == 2
+    assert snapshots[0].asset == "BTC"
+    assert snapshots[0].spot_mid == 100000.0
+    assert snapshots[0].perp_mid == 100100.0
+    assert snapshots[1].source_health == "ws_allMids_missing:spot_mid"
+
+
+def test_record_carry_ws_message_persists_asset_ctx_quote_and_funding(tmp_path):
+    storage = CarryStorage(tmp_path / "carry.sqlite3")
+
+    count = record_carry_ws_message(
+        {
+            "channel": "activeAssetCtx",
+            "data": {
+                "coin": "BTC",
+                "ctx": {"markPx": "100090", "oraclePx": "100050", "funding": "0.0001", "premium": "0.001"},
+            },
+        },
+        storage=storage,
+        received_at_utc="2026-07-02T00:00:00Z",
+    )
+    decoded = decode_carry_ws_message(
+        {
+            "channel": "activeAssetCtx",
+            "data": {"coin": "BTC", "ctx": {"markPx": "100090", "oraclePx": "100050", "funding": "0.0001"}},
+        },
+        received_at_utc="2026-07-02T00:00:00Z",
+    )
+
+    assert count == 2
+    assert any(isinstance(row, FundingSnapshot) for row in decoded)
+    assert storage.count_rows("carry_quotes") == 1
+    assert storage.count_rows("carry_funding_snapshots") == 1
 
 
 def test_replay_fixture_produces_capture_output_for_attribution(tmp_path):

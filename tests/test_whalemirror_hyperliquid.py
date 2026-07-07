@@ -1,21 +1,26 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 
 from stonks_cli.whalemirror.hyperliquid import (
     HyperliquidCancelIntent,
+    HyperliquidCarryInput,
     HyperliquidOrderClient,
     HyperliquidOrderIntent,
     HyperliquidSignature,
     LiveExecutionBlocked,
+    blocked_carry_opportunity,
     build_cancel_action,
     build_open_orders_subscription,
     build_order_action,
     build_order_updates_subscription,
     build_ws_action_post_request,
     entry_price_guard_reasons,
+    validate_carry_input_completeness,
 )
 from stonks_cli.whalemirror.models import MirrorMode
 
@@ -37,6 +42,16 @@ class _Session:
     def post(self, url, *, json, timeout):
         self.calls.append({"url": url, "json": json, "timeout": timeout})
         return _Response(self.response)
+
+
+class _SequenceSession:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def post(self, url, *, json, timeout):
+        self.calls.append({"url": url, "json": json, "timeout": timeout})
+        return _Response(self.responses.pop(0))
 
 
 def _order() -> HyperliquidOrderIntent:
@@ -239,7 +254,132 @@ def test_sync_open_orders_parses_fixture_payload():
     assert session.calls[0]["json"] == {"type": "openOrders", "user": "0xabcdef"}
 
 
+def test_fetch_hyperliquid_carry_inputs_includes_btc_eth_sources():
+    session = _SequenceSession(_carry_source_responses())
+    client = HyperliquidOrderClient(session=session, info_url="https://example.test/info")
+
+    inputs = client.fetch_carry_inputs(timestamp_utc="2026-07-02T00:00:00Z")
+
+    assert [call["json"]["type"] for call in session.calls] == [
+        "allMids",
+        "metaAndAssetCtxs",
+        "spotMetaAndAssetCtxs",
+        "predictedFundings",
+    ]
+    assert [row.asset for row in inputs] == ["BTC", "ETH"]
+    assert inputs[0].quote.spot_mid == 100000.0
+    assert inputs[0].quote.perp_mid == 100100.0
+    assert inputs[0].quote.mark_mid == 100090.0
+    assert inputs[0].quote.oracle_mid == 100050.0
+    assert inputs[0].funding is not None
+    assert inputs[0].funding.hourly_rate == 0.0001
+    assert inputs[0].basis is not None
+    assert inputs[0].metadata["perp"]["maxLeverage"] == 50
+    assert inputs[0].metadata["spot"]["name"] == "BTC/USDC"
+    assert inputs[0].source_health["predicted_funding"] == "ok"
+
+
+def test_fetch_funding_history_uses_official_info_request_shape():
+    session = _Session([{"coin": "BTC", "fundingRate": "0.0001", "time": 1770000000000}])
+    client = HyperliquidOrderClient(session=session, info_url="https://example.test/info")
+
+    rows = client.fetch_funding_history(coin="BTC", start_time=1770000000000, end_time=1770003600000)
+
+    assert rows[0]["coin"] == "BTC"
+    assert session.calls[0]["json"] == {
+        "type": "fundingHistory",
+        "coin": "BTC",
+        "startTime": 1770000000000,
+        "endTime": 1770003600000,
+    }
+
+
+def test_carry_input_completeness_reports_missing_fields_as_opportunity_caveats():
+    inputs = _complete_carry_input()
+    broken = replace(inputs, quote=replace(inputs.quote, spot_mid=None), basis=None)
+
+    validation = validate_carry_input_completeness(
+        broken,
+        now=datetime(2026, 7, 2, 0, 0, 10, tzinfo=UTC),
+    )
+    blocked = blocked_carry_opportunity(broken, validation)
+
+    assert validation.ok is False
+    assert "quote.spot_mid" in validation.required_fields_missing
+    assert "basis" in blocked.required_fields_missing
+    assert blocked.direction == "blocked"
+
+
+def test_carry_input_completeness_rejects_stale_inputs():
+    inputs = _complete_carry_input(timestamp="2026-07-02T00:00:00Z")
+
+    validation = validate_carry_input_completeness(
+        inputs,
+        now=datetime(2026, 7, 2, 0, 2, 0, tzinfo=UTC),
+        max_age_seconds=30,
+    )
+
+    assert validation.ok is False
+    assert "stale:quote:120s>30s" in validation.stale_fields
+    assert "stale:funding:120s>30s" in validation.stale_fields
+
+
+def test_carry_input_completeness_rejects_cross_timestamp_inputs():
+    inputs = _complete_carry_input(timestamp="2026-07-02T00:00:00Z")
+    assert inputs.funding is not None
+    skewed = replace(inputs, funding=replace(inputs.funding, timestamp="2026-07-02T00:01:00Z"))
+
+    validation = validate_carry_input_completeness(
+        skewed,
+        now=datetime(2026, 7, 2, 0, 1, 5, tzinfo=UTC),
+        max_age_seconds=120,
+        max_timestamp_skew_seconds=10,
+    )
+
+    assert validation.ok is False
+    assert validation.cross_timestamp_fields == ["cross_timestamp:basis,funding,quote:60s>10s"]
+
+
 def test_entry_price_guard_blocks_aggressive_orders():
     reasons = entry_price_guard_reasons(order=_order(), mark_px=Decimal("60000"), max_slippage_bps=Decimal("100"))
 
     assert reasons == ["entry_price_above_mark_guard:65000>60600"]
+
+
+def _carry_source_responses():
+    return [
+        {"mids": {"BTC": "100100", "ETH": "3100", "BTC/USDC": "100000", "ETH/USDC": "3000"}},
+        [
+            {
+                "universe": [
+                    {"name": "BTC", "szDecimals": 5, "maxLeverage": 50},
+                    {"name": "ETH", "szDecimals": 4, "maxLeverage": 50},
+                ]
+            },
+            [
+                {"markPx": "100090", "oraclePx": "100050", "funding": "0.0001", "premium": "0.001"},
+                {"markPx": "3090", "oraclePx": "3050", "funding": "0.0002", "premium": "0.002"},
+            ],
+        ],
+        [
+            {
+                "tokens": [
+                    {"name": "USDC", "index": 0},
+                    {"name": "BTC", "index": 1},
+                    {"name": "ETH", "index": 2},
+                ],
+                "universe": [
+                    {"name": "BTC/USDC", "tokens": [1, 0], "index": 0},
+                    {"name": "ETH/USDC", "tokens": [2, 0], "index": 1},
+                ],
+            },
+            [{"midPx": "100000"}, {"midPx": "3000"}],
+        ],
+        [["BTC", [["HlPerp", {"fundingRate": "0.00011"}]]], ["ETH", [["HlPerp", {"fundingRate": "0.00021"}]]]],
+    ]
+
+
+def _complete_carry_input(timestamp: str = "2026-07-02T00:00:00Z") -> HyperliquidCarryInput:
+    session = _SequenceSession(_carry_source_responses())
+    client = HyperliquidOrderClient(session=session, info_url="https://example.test/info")
+    return client.fetch_carry_inputs(assets=("BTC",), timestamp_utc=timestamp)[0]

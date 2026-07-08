@@ -12,6 +12,7 @@ const cli_pin = @import("cli/pin.zig");
 const cli_plugin = @import("cli/plugin.zig");
 const cli_stack = @import("cli/stack.zig");
 const cli_theme = @import("cli/theme.zig");
+const cli_uninstall = @import("cli/uninstall.zig");
 const cli_update = @import("cli/update.zig");
 const cli_util = @import("cli/util.zig");
 const cli_vouch = @import("cli/vouch.zig");
@@ -138,6 +139,11 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[1], "uninstall")) {
+        try cli_uninstall.command(allocator, args[2..]);
+        return;
+    }
+
     if (std.mem.eql(u8, args[1], "update")) {
         try cli_update.updateCmd(allocator, args[2..]);
         return;
@@ -196,6 +202,7 @@ const help_text =
     \\  supervisor    run shisad under a crash-restart supervisor
     \\  theme         validate theme files
     \\  trace         render once with module timing trace on stderr
+    \\  uninstall     remove shell hooks and optionally purge local state
     \\  update        fetch, verify, and install a release artifact
     \\  vouch         verify VOUCHES governance file
     \\

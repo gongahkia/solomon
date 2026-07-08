@@ -67,6 +67,7 @@ mkdir -p "$xdg/shisa"
 cat >"$xdg/shisa/shisa.toml" <<'EOF'
 version = 1
 theme = "plain"
+transient_prompt = "%~ \u276f"
 
 [prompt]
 modules = ["cwd"]
@@ -92,3 +93,5 @@ bell_bytes="$(SHISA_CMD_COMPLETE_BELL=1 SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS=100
 [[ "$bell_bytes" == 07 ]]
 long_output="$(SHISA_LONG_RUNNING=1 SHISA_LONG_RUNNING_THRESHOLD_SECONDS=0 zsh -fc 'source init/shisa.zsh; shisa_long_running_start; sleep 0.1; shisa_long_running_stop')"
 grep -F 'shisa: command still running' <<<"$long_output" >/dev/null
+transient="$(HOME=/tmp SHISA_BIN="$root/zig-out/bin/shisa" XDG_CONFIG_HOME="$xdg" SHISA_INIT_FILE="$root/init/shisa.zsh" zsh -fc 'cd /tmp; source "$SHISA_INIT_FILE"; shisa_transient_prompt_render')"
+[[ "$transient" == "~ ❯" ]]

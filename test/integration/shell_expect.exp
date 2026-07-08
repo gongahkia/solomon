@@ -57,20 +57,38 @@ proc run_zsh {root} {
 
 proc run_zsh_transient_history {root} {
     global spawn_id
+    global env
     if {[auto_execok zsh] eq ""} {
         puts stderr "skip expect zsh transient: zsh not found"
         return
     }
+    set tmp "/tmp/shisa-transient-expect-[pid]"
+    file mkdir [file join $tmp shisa]
+    set config [open [file join $tmp shisa shisa.toml] w]
+    puts $config {version = 1}
+    puts $config {transient_prompt = "%~ \u276f"}
+    close $config
+    set had_xdg [info exists env(XDG_CONFIG_HOME)]
+    if {$had_xdg} { set old_xdg $env(XDG_CONFIG_HOME) }
+    set env(XDG_CONFIG_HOME) $tmp
     set init [shell_quote [file join $root init shisa.zsh]]
     spawn -noecho zsh -f
     send -- "cd /tmp\r"
     send -- "source $init\r"
     send -- "echo SHISA_TRANSIENT_OK\r"
-    set transient_pattern [format {%c\[2K/tmp> } 27]
+    set transient_pattern [format {%c} 27]
+    append transient_pattern {\[2K/tmp }
+    append transient_pattern [format {%c} 0x276f]
     require_output zsh $transient_pattern
     require_output zsh {SHISA_TRANSIENT_OK}
     send -- "exit\r"
     finish zsh
+    if {$had_xdg} {
+        set env(XDG_CONFIG_HOME) $old_xdg
+    } else {
+        unset env(XDG_CONFIG_HOME)
+    }
+    file delete -force $tmp
 }
 
 proc run_bash {root} {

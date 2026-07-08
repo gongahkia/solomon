@@ -3875,6 +3875,7 @@ const PromptConfig = struct {
     rtl: bool = false,
     rtl_reverse: bool = false,
     right: bool = false,
+    transient: bool = false,
     trace: bool = false,
     shell: []const u8 = "zsh",
     cols: u16 = 80,
@@ -3893,10 +3894,16 @@ fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try std.fs.File.stdout().writeAll(output);
         return;
     }
-    const socket_path = if (config.socket_path) |path| path else try paths.defaultSocketPath(allocator);
-    defer if (config.socket_path == null) allocator.free(socket_path);
     const cwd = if (config.cwd) |path| path else try std.fs.cwd().realpathAlloc(allocator, ".");
     defer if (config.cwd == null) allocator.free(cwd);
+    if (config.transient) {
+        const transient = try transientPromptAlloc(allocator, cwd);
+        defer allocator.free(transient);
+        try std.fs.File.stdout().writeAll(transient);
+        return;
+    }
+    const socket_path = if (config.socket_path) |path| path else try paths.defaultSocketPath(allocator);
+    defer if (config.socket_path == null) allocator.free(socket_path);
 
     const payload = try buildPromptPayload(allocator, config, cwd);
     defer allocator.free(payload);
@@ -4016,6 +4023,8 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
             config.rtl_reverse = true;
         } else if (std.mem.eql(u8, arg, "--right")) {
             config.right = true;
+        } else if (std.mem.eql(u8, arg, "--transient")) {
+            config.transient = true;
         } else if (std.mem.eql(u8, arg, "--shell")) {
             config.shell = try cli_util.nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--cols")) {
@@ -4028,6 +4037,70 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
     }
 
     return config;
+}
+
+fn transientPromptAlloc(allocator: std.mem.Allocator, cwd: []const u8) ![]u8 {
+    const path = try cli_util.defaultConfigPath(allocator);
+    defer allocator.free(path);
+    const source = try cli_util.readConfigOrDefault(allocator, path);
+    defer allocator.free(source);
+    var diagnostic: shisa_config.Diagnostic = .{};
+    var parsed = shisa_config.parse(allocator, source, &diagnostic) catch |err| switch (err) {
+        error.InvalidConfig => {
+            const message = try std.fmt.allocPrint(allocator, "{s}:{d}:{d}: {s}\n", .{ path, diagnostic.line, diagnostic.column, diagnostic.message });
+            defer allocator.free(message);
+            try std.fs.File.stderr().writeAll(message);
+            return err;
+        },
+        else => return err,
+    };
+    defer parsed.deinit(allocator);
+    const format = parsed.transient_prompt orelse return allocator.dupe(u8, "");
+    const home = std.process.getEnvVarOwned(allocator, "HOME") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    defer if (home) |value| allocator.free(value);
+    return renderTransientFormatAlloc(allocator, format, cwd, home);
+}
+
+fn renderTransientFormatAlloc(allocator: std.mem.Allocator, format: []const u8, cwd: []const u8, home: ?[]const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    var index: usize = 0;
+    while (index < format.len) : (index += 1) {
+        if (format[index] != '%' or index + 1 >= format.len) {
+            try out.append(allocator, format[index]);
+            continue;
+        }
+        index += 1;
+        switch (format[index]) {
+            '%' => try out.append(allocator, '%'),
+            '~' => {
+                const display = try transientCwdAlloc(allocator, cwd, home);
+                defer allocator.free(display);
+                try out.appendSlice(allocator, display);
+            },
+            'd' => try out.appendSlice(allocator, cwd),
+            else => {
+                try out.append(allocator, '%');
+                try out.append(allocator, format[index]);
+            },
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn transientCwdAlloc(allocator: std.mem.Allocator, cwd: []const u8, home: ?[]const u8) ![]u8 {
+    if (home) |home_path| {
+        if (home_path.len > 0 and std.mem.startsWith(u8, cwd, home_path)) {
+            if (cwd.len == home_path.len) return allocator.dupe(u8, "~");
+            if (cwd.len > home_path.len and cwd[home_path.len] == '/') {
+                return std.fmt.allocPrint(allocator, "~{s}", .{cwd[home_path.len..]});
+            }
+        }
+    }
+    return allocator.dupe(u8, cwd);
 }
 
 fn promptA11yExplanationAlloc(allocator: std.mem.Allocator) ![]u8 {
@@ -4728,6 +4801,17 @@ test "prompt args parse right flag" {
     try std.testing.expect(config.right);
 }
 
+test "prompt args parse transient flag" {
+    const config = try parsePrompt(&.{"--transient"});
+    try std.testing.expect(config.transient);
+}
+
+test "transient format renders cwd escapes" {
+    const output = try renderTransientFormatAlloc(std.testing.allocator, "%~ %% %d> ", "/Users/me/src/shisa", "/Users/me");
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("~/src/shisa % /Users/me/src/shisa> ", output);
+}
+
 test "prompt payload carries rtl flags" {
     const payload = try buildPromptPayload(std.testing.allocator, .{ .rtl = true, .rtl_reverse = true }, "/tmp");
     defer std.testing.allocator.free(payload);
@@ -4859,7 +4943,7 @@ const help_text =
     \\  init          first-run wizard; --defaults writes without prompting
     \\  pin           mark a path as never-evicted
     \\  plugin        new, lint, doctor, verify, search, pack, install, list, enable, disable, or trust plugins
-    \\  prompt        render prompt through shisad; --right prints configured right prompt
+    \\  prompt        render prompt through shisad; --right or --transient select variants
     \\  render        alias for prompt; --explain-a11y dumps segment labels
     \\  report        write a redacted support bundle .tar.gz
     \\  supervisor    run shisad under a crash-restart supervisor

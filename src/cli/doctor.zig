@@ -8,6 +8,7 @@ const paths = @import("../daemon/paths.zig");
 const plugin_lua = @import("../plugin/lua.zig");
 const plugin_manifest = @import("../plugin/manifest.zig");
 const redact = @import("../redact.zig");
+const shisa_config = @import("../config.zig");
 
 const DoctorConfig = struct {
     socket_path: ?[]const u8 = null,
@@ -87,6 +88,8 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u
     defer allocator.free(config_dir_permissions);
     const shell_hook_status = shellHookStatus(allocator);
     const nerd_font_status = nerdFontStatus();
+    const transient_status = try transientStatusAlloc(allocator, config_path, shell_hook_status);
+    defer allocator.free(transient_status);
     const context = DoctorContext{
         .socket_path = socket_path,
         .socket_status = socket_status,
@@ -104,6 +107,7 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u
     try cli_util.appendFmt(allocator, &out, "config_dir: {s} {s}\n", .{ pathAccessStatus(config_dir), config_dir });
     try cli_util.appendFmt(allocator, &out, "config_dir_permissions: {s}\n", .{config_dir_permissions});
     try cli_util.appendFmt(allocator, &out, "shell_hook: {s}\n", .{shell_hook_status});
+    try cli_util.appendFmt(allocator, &out, "transient: {s}\n", .{transient_status});
     try cli_util.appendFmt(allocator, &out, "nerd_font: {s}\n", .{nerd_font_status});
     try cli_util.appendFmt(allocator, &out, "plugins_dir: {s} {s}\n", .{ pathAccessStatus(plugins_dir), plugins_dir });
     const plugins_status = try doctorPluginsStatusAlloc(allocator, plugins_dir);
@@ -229,6 +233,17 @@ fn doctorPluginsStatusAlloc(allocator: std.mem.Allocator, plugins_dir: []const u
         try out.appendSlice(allocator, name);
     }
     return out.toOwnedSlice(allocator);
+}
+
+fn transientStatusAlloc(allocator: std.mem.Allocator, config_path: []const u8, shell_hook_status: []const u8) ![]u8 {
+    const source = cli_util.readConfigOrDefault(allocator, config_path) catch return allocator.dupe(u8, "unknown");
+    defer allocator.free(source);
+    var diagnostic: shisa_config.Diagnostic = .{};
+    var parsed = shisa_config.parse(allocator, source, &diagnostic) catch return allocator.dupe(u8, "unknown");
+    defer parsed.deinit(allocator);
+    if (parsed.transient_prompt == null) return allocator.dupe(u8, "off");
+    if (std.mem.eql(u8, shell_hook_status, "present")) return allocator.dupe(u8, "on");
+    return allocator.dupe(u8, "config-only");
 }
 
 fn appendDoctorDeprecations(allocator: std.mem.Allocator, out: *std.ArrayList(u8), config_path: []const u8) !void {
@@ -713,6 +728,34 @@ test "doctor reports installed plugins" {
     const output = try doctorPluginsStatusAlloc(std.testing.allocator, dir_path);
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("alpha,beta", output);
+}
+
+test "doctor transient status follows config and hook" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(.{ .sub_path = "off.toml", .data = shisa_config.default_config_text });
+    try tmp.dir.writeFile(.{
+        .sub_path = "on.toml",
+        .data =
+        \\version = 1
+        \\transient_prompt = "%~ >"
+        \\
+        ,
+    });
+    const off_path = try tmp.dir.realpathAlloc(std.testing.allocator, "off.toml");
+    defer std.testing.allocator.free(off_path);
+    const on_path = try tmp.dir.realpathAlloc(std.testing.allocator, "on.toml");
+    defer std.testing.allocator.free(on_path);
+
+    const off = try transientStatusAlloc(std.testing.allocator, off_path, "present");
+    defer std.testing.allocator.free(off);
+    const on = try transientStatusAlloc(std.testing.allocator, on_path, "present");
+    defer std.testing.allocator.free(on);
+    const config_only = try transientStatusAlloc(std.testing.allocator, on_path, "missing");
+    defer std.testing.allocator.free(config_only);
+    try std.testing.expectEqualStrings("off", off);
+    try std.testing.expectEqualStrings("on", on);
+    try std.testing.expectEqualStrings("config-only", config_only);
 }
 
 test "doctor reports missing daemon socket clearly" {

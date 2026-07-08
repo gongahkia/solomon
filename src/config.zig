@@ -242,6 +242,7 @@ pub const Config = struct {
     version: u32,
     theme: []u8,
     locale: []u8,
+    transient_prompt: ?[]u8 = null,
     prompt_modules: []ModuleId,
     right_prompt_modules: []ModuleId,
     prompt: PromptOptions = .{},
@@ -250,6 +251,7 @@ pub const Config = struct {
     pub fn deinit(self: *Config, allocator: std.mem.Allocator) void {
         allocator.free(self.theme);
         allocator.free(self.locale);
+        if (self.transient_prompt) |value| allocator.free(value);
         allocator.free(self.prompt_modules);
         allocator.free(self.right_prompt_modules);
         self.* = undefined;
@@ -278,6 +280,7 @@ const Seen = struct {
     version: bool = false,
     theme: bool = false,
     locale: bool = false,
+    transient_prompt: bool = false,
     prompt_modules: bool = false,
     prompt_right_modules: bool = false,
     prompt_rtl_reverse: bool = false,
@@ -333,6 +336,7 @@ const Parser = struct {
     seen: Seen = .{},
     theme: ?[]u8 = null,
     locale: ?[]u8 = null,
+    transient_prompt: ?[]u8 = null,
     prompt_modules: std.ArrayList(ModuleId) = .empty,
     right_prompt_modules: std.ArrayList(ModuleId) = .empty,
     prompt: PromptOptions = .{},
@@ -359,6 +363,9 @@ const Parser = struct {
         const locale = if (self.locale) |value| value else try self.allocator.dupe(u8, "auto");
         self.locale = null;
         errdefer self.allocator.free(locale);
+        const transient_prompt = self.transient_prompt;
+        self.transient_prompt = null;
+        errdefer if (transient_prompt) |value| self.allocator.free(value);
         const modules = if (self.seen.prompt_modules)
             try self.prompt_modules.toOwnedSlice(self.allocator)
         else
@@ -373,6 +380,7 @@ const Parser = struct {
             .version = 1,
             .theme = theme,
             .locale = locale,
+            .transient_prompt = transient_prompt,
             .prompt_modules = modules,
             .right_prompt_modules = right_modules,
             .prompt = self.prompt,
@@ -383,6 +391,7 @@ const Parser = struct {
     fn deinitWorking(self: *Parser) void {
         if (self.theme) |value| self.allocator.free(value);
         if (self.locale) |value| self.allocator.free(value);
+        if (self.transient_prompt) |value| self.allocator.free(value);
         self.prompt_modules.deinit(self.allocator);
         self.right_prompt_modules.deinit(self.allocator);
     }
@@ -451,6 +460,9 @@ const Parser = struct {
             errdefer self.allocator.free(locale);
             if (!isValidLocaleOverride(locale)) return self.fail(line_no, value.column, "invalid locale");
             self.locale = locale;
+        } else if (std.mem.eql(u8, key.text, "transient_prompt")) {
+            try self.markUnseen(&self.seen.transient_prompt, line_no, key.column);
+            self.transient_prompt = try self.parseStringAlloc(value, line_no);
         } else {
             return self.fail(line_no, key.column, "unknown key");
         }
@@ -716,6 +728,15 @@ const Parser = struct {
                     'n' => try out.append(self.allocator, '\n'),
                     'r' => try out.append(self.allocator, '\r'),
                     't' => try out.append(self.allocator, '\t'),
+                    'u' => {
+                        if (index + 4 >= value.text.len - 1) return self.fail(line_no, value.column + index, "invalid unicode escape");
+                        const hex = value.text[index + 1 .. index + 5];
+                        const codepoint = std.fmt.parseInt(u21, hex, 16) catch return self.fail(line_no, value.column + index, "invalid unicode escape");
+                        var encoded: [4]u8 = undefined;
+                        const encoded_len = std.unicode.utf8Encode(codepoint, &encoded) catch return self.fail(line_no, value.column + index, "invalid unicode escape");
+                        try out.appendSlice(self.allocator, encoded[0..encoded_len]);
+                        index += 4;
+                    },
                     else => return self.fail(line_no, value.column + index, "invalid escape"),
                 }
             } else {
@@ -962,6 +983,7 @@ test "default config parses" {
 
     try std.testing.expectEqualStrings("plain", config.theme);
     try std.testing.expectEqualStrings("auto", config.locale);
+    try std.testing.expect(config.transient_prompt == null);
     try std.testing.expectEqualSlices(ModuleId, default_modules[0..], config.prompt_modules);
     try std.testing.expectEqual(@as(usize, 0), config.right_prompt_modules.len);
 }
@@ -982,6 +1004,7 @@ test "parses per-module options" {
         \\version = 1
         \\theme = "minimal"
         \\locale = "en-US"
+        \\transient_prompt = "%~ \u276f"
         \\
         \\[prompt]
         \\modules = ["cwd", "time"]
@@ -1040,6 +1063,7 @@ test "parses per-module options" {
 
     try std.testing.expectEqualStrings("minimal", config.theme);
     try std.testing.expectEqualStrings("en-US", config.locale);
+    try std.testing.expectEqualStrings("%~ ❯", config.transient_prompt.?);
     try std.testing.expectEqualSlices(ModuleId, &.{ .cwd, .time }, config.prompt_modules);
     try std.testing.expectEqualSlices(ModuleId, &.{.cmd_duration}, config.right_prompt_modules);
     try std.testing.expect(config.prompt.rtl_reverse);

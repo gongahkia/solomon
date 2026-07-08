@@ -318,7 +318,9 @@ shisa_async_self_pipe_setup
 
 shisa_accept_line() {
   emulate -L zsh
-  print -Pnr -- $'\r\e[2K%~> '
+  local transient
+  transient=$(shisa_transient_prompt_render)
+  [[ -n ${transient} ]] && print -nr -- $'\r\e[2K'"${transient}"
   zle .accept-line
 }
 
@@ -421,6 +423,12 @@ shisa_prompt_render() {
   [[ ${SHISA_A11Y:-0} == 1 ]] && args+=(--a11y)
   [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)
   "${SHISA_BIN}" "${args[@]}"
+}
+
+shisa_transient_prompt_render() {
+  emulate -L zsh
+  [[ ${SHISA_TRANSIENT_PROMPT:-1} == 1 ]] || return 0
+  "${SHISA_BIN}" prompt --transient --shell zsh --cwd "${PWD}" 2>/dev/null || true
 }
 
 shisa_right_prompt_render() {

@@ -5,7 +5,7 @@
 | Shell | Init file | Prompt hook | Exit/jobs/duration | Async redraw | Transient prompt | Instant prompt | Integration test |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | zsh | `init/shisa.zsh` | `precmd` + `preexec` | yes | self-pipe `zle -F` + `zle reset-prompt` | yes | CLI supports `--instant`; hook does not enable by default | `test/integration/zsh_fake_socket.sh` |
-| bash | `init/shisa.bash` | `PROMPT_COMMAND` + `DEBUG` trap | yes | `bind -x` on `\C-x\C-s` | no | CLI supports `--instant`; hook does not enable by default | `test/integration/bash_fake_socket.sh` |
+| bash | `init/shisa.bash` | `PROMPT_COMMAND` + `DEBUG` trap | yes | `bind -x` on `\C-x\C-s` | best effort | CLI supports `--instant`; hook does not enable by default | `test/integration/bash_fake_socket.sh` |
 | fish | `init/shisa.fish` | `fish_prompt` + `fish_preexec` | yes | `emit shisa_async_redraw` + `commandline -f repaint` | no | enabled by default via `--instant` | `test/integration/fish_fake_socket.sh` |
 | nushell | `init/shisa.nu` | `$env.PROMPT_COMMAND` | exit/jobs yes; duration 0 | documented limitation | no | CLI supports `--instant`; hook off by default | `test/integration/nu_fake_socket.sh` |
 | PowerShell | `init/shisa.ps1` | `prompt` | exit/jobs yes; duration 0 | `Register-EngineEvent` via `Shisa.AsyncFill`; host-limited | no | CLI supports `--instant`; hook off by default | `test/integration/pwsh_fake_socket.sh` |
@@ -50,7 +50,7 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 - Captures duration with `zsh/datetime` and `$EPOCHREALTIME`.
 - Uses `%~> ` as fallback when the daemon socket is missing.
 - Redraw path is signal-driven: `TRAPUSR1` writes to a self-pipe when available; `zle -F` drains it and calls `zle reset-prompt`.
-- Transient prompt replaces accepted lines with `%~> `.
+- Transient prompt replaces accepted lines with `shisa prompt --transient` output when `transient_prompt` is configured.
 - Shisa sets `PROMPT` and `RPROMPT`; `RPROMPT` calls `shisa prompt --right` and renders `[prompt].right_modules`.
 - Async redraw calls `zle reset-prompt`, so zsh recalculates both `PROMPT` and `RPROMPT`.
 - If another plugin owns `RPROMPT`, source that plugin after Shisa if it should win.
@@ -66,6 +66,7 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 - Uses a Readline binding (`SHISA_ASYNC_KEYSEQ`, default `\C-x\C-s`) for async redraw.
 - Bash redraw limitation: an external notifier must inject the bound key sequence into the active tty. Redraw only works while Readline is active, not while a foreground command is running.
 - Bash has no native right prompt; set `SHISA_BASH_RIGHT_PROMPT=1` to draw `[prompt].right_modules` before `PS1` as a best-effort shim.
+- Bash transient prompt is best effort: the DEBUG trap rewrites the previous single-line prompt before command execution in interactive Readline sessions. Multi-line prompts, wrapped commands, and ble.sh-managed accept-line flows are not rewritten.
 - When `SHISA_PROD_GUARD=1`, the `DEBUG` trap sends `shisa cloud preexec --socket <socket> --shell bash -- <command>` to the daemon.
 
 ## fish

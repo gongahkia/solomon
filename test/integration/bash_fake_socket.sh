@@ -66,6 +66,13 @@ fi
 grep -F 'fake-bash> ' "$out" >/dev/null
 
 mkdir -p "$xdg/shisa"
+cat >"$xdg/shisa/shisa.toml" <<'EOF'
+version = 1
+transient_prompt = "%~ \u276f"
+
+[prompt]
+modules = ["cwd"]
+EOF
 cat >"$xdg/shisa/shell.env" <<'EOF'
 SHISA_CMD_COMPLETE_BELL=1
 SHISA_CMD_COMPLETE_BELL_MODE=osc9
@@ -84,4 +91,6 @@ if ((BASH_VERSINFO[0] >= 4)); then
   bash --noprofile --norc -c 'source init/shisa.bash; SHISA_BASH_RIGHT_PROMPT=1; COLUMNS=12; shisa_bash_right_prompt_render() { printf rb; }; bytes=$(shisa_bash_right_prompt_draw | od -An -tx1 | tr -d " \n"); [[ ${bytes} == 2020202020202020202072620d ]]'
   long_output="$(SHISA_LONG_RUNNING=1 SHISA_LONG_RUNNING_THRESHOLD_SECONDS=0 bash --noprofile --norc -c 'source init/shisa.bash; shisa_long_running_start; sleep 0.1; shisa_long_running_stop')"
   grep -F 'shisa: command still running' <<<"$long_output" >/dev/null
+  transient="$(HOME=/tmp SHISA_BIN="$root/zig-out/bin/shisa" XDG_CONFIG_HOME="$xdg" SHISA_INIT_FILE="$root/init/shisa.bash" bash --noprofile --norc -c 'cd /tmp; source "$SHISA_INIT_FILE"; shisa_transient_prompt_render')"
+  [[ "$transient" == "~ ❯" ]]
 fi

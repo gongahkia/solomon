@@ -42,7 +42,7 @@ msgid ""
 msgstr ""
 "shisa bench: hyperfine not found in PATH\n"
 
-#: src/main.zig:4839
+#: src/main.zig:4923
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
@@ -67,7 +67,7 @@ msgid ""
 "  init          first-run wizard; --defaults writes without prompting\n"
 "  pin           mark a path as never-evicted\n"
 "  plugin        new, lint, doctor, verify, search, pack, install, list, enable, disable, or trust plugins\n"
-"  prompt        render prompt through shisad; --right prints configured right prompt\n"
+"  prompt        render prompt through shisad; --right or --transient select variants\n"
 "  render        alias for prompt; --explain-a11y dumps segment labels\n"
 "  report        write a redacted support bundle .tar.gz\n"
 "  supervisor    run shisad under a crash-restart supervisor\n"
@@ -103,7 +103,7 @@ msgstr ""
 "  init          first-run wizard; --defaults writes without prompting\n"
 "  pin           mark a path as never-evicted\n"
 "  plugin        new, lint, doctor, verify, search, pack, install, list, enable, disable, or trust plugins\n"
-"  prompt        render prompt through shisad; --right prints configured right prompt\n"
+"  prompt        render prompt through shisad; --right or --transient select variants\n"
 "  render        alias for prompt; --explain-a11y dumps segment labels\n"
 "  report        write a redacted support bundle .tar.gz\n"
 "  supervisor    run shisad under a crash-restart supervisor\n"
@@ -116,7 +116,7 @@ msgstr ""
 "      --version print version\n"
 "\n"
 
-#: src/main.zig:4877
+#: src/main.zig:4961
 msgid ""
 "usage: shisa trace [--cwd DIR] [--exit N] [--jobs N]\n"
 "\n"
@@ -142,7 +142,7 @@ msgstr ""
 "trace output is written to stderr; prompt output remains on stdout.\n"
 "\n"
 
-#: src/main.zig:4891
+#: src/main.zig:4975
 msgid ""
 "usage: shisa vouch verify [path]\n"
 "\n"
@@ -156,7 +156,7 @@ msgstr ""
 "  verify [path] validate VOUCHES format; defaults to ./VOUCHES\n"
 "\n"
 
-#: src/main.zig:4899
+#: src/main.zig:4983
 msgid ""
 "usage: shisa font check\n"
 "\n"
@@ -170,7 +170,7 @@ msgstr ""
 "  check         render Nerd Font, Unicode, and ASCII glyph probes\n"
 "\n"
 
-#: src/cli/doctor.zig:267
+#: src/cli/doctor.zig:282
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -184,7 +184,7 @@ msgstr ""
 "  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
 "\n"
 
-#: src/cli/doctor.zig:438
+#: src/cli/doctor.zig:453
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""

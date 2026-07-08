@@ -6,6 +6,7 @@
 - config directory status
 - config directory permissions
 - shell hook install status
+- transient prompt status
 - Nerd Font detection status
 - plugin directory status
 - Lua runtime availability
@@ -51,6 +52,8 @@ Statuses:
 | `unreachable` | Socket exists or was requested, but daemon health check failed. |
 | `bad-response` | Daemon responded with unexpected health output. |
 | `ok` | Daemon health check returned `ok`. |
+
+`transient: on` means `transient_prompt` is configured and the shell hook is installed. `transient: config-only` means the config key exists but the current shell hook is missing.
 
 Deprecation output is either `deprecations: none` or one line per deprecated interface in use.
 

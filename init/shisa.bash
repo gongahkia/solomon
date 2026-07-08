@@ -123,6 +123,7 @@ SHISA_NEXTCMD_SUGGESTION=
 SHISA_EXPLAIN_KEYSEQ=${SHISA_EXPLAIN_KEYSEQ:-'\C-x\C-e'}
 SHISA_EXPLAIN_LAST_COMMAND=
 SHISA_EXPLAIN_LAST_OUTPUT=
+SHISA_TRANSIENT_PROMPT=${SHISA_TRANSIENT_PROMPT:-1}
 SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
 SHISA_AI_RISK_GUARD=${SHISA_AI_RISK_GUARD:-0}
@@ -208,6 +209,7 @@ shisa_debug_trap() {
   esac
   [[ ${SHISA_COMMAND_STARTED:-0} == 0 ]] || return 0
   SHISA_LAST_COMMAND=${command}
+  shisa_bash_transient_rewrite
   shisa_ai_risk_preexec "${command}" || return $?
   shisa_preexec_guard bash "${command}" || return $?
   local now_us
@@ -299,6 +301,20 @@ shisa_bash_right_prompt_render() {
   [[ ${SHISA_A11Y:-0} == 1 ]] && args+=(--a11y)
   [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)
   "${SHISA_BIN}" "${args[@]}" 2>/dev/null || true
+}
+
+shisa_transient_prompt_render() {
+  [[ ${SHISA_TRANSIENT_PROMPT:-1} == 1 ]] || return 0
+  "${SHISA_BIN}" prompt --transient --shell bash --cwd "${PWD}" 2>/dev/null || true
+}
+
+shisa_bash_transient_rewrite() {
+  [[ ${SHISA_TRANSIENT_PROMPT:-1} == 1 ]] || return 0
+  [[ $- == *i* ]] || return 0
+  local transient
+  transient=$(shisa_transient_prompt_render) || return 0
+  [[ -n ${transient} ]] || return 0
+  printf '\r\033[1A\033[2K%s\n' "${transient}"
 }
 
 shisa_bash_right_prompt_draw() {

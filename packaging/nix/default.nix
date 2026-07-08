@@ -20,11 +20,30 @@ stdenv.mkDerivation {
     zigForBuild
   ];
 
-  dontSetZigDefaultFlags = true;
-  zigBuildFlags = [
-    "-Dcpu=baseline"
-    "-Doptimize=ReleaseFast"
-  ];
+  buildPhase = ''
+    runHook preBuild
+    export HOME="$TMPDIR"
+    zig build release \
+      --prefix "$TMPDIR/install" \
+      --cache-dir "$TMPDIR/zig-cache" \
+      --global-cache-dir "$TMPDIR/zig-global-cache" \
+      --summary all
+    runHook postBuild
+  '';
+
+  installPhase = ''
+    runHook preInstall
+    mkdir -p "$out"
+    cp -R "$TMPDIR/install/"* "$out/"
+    install -Dm644 init/shisa.zsh "$out/share/shisa/init/shisa.zsh"
+    install -Dm644 init/shisa.bash "$out/share/shisa/init/shisa.bash"
+    install -Dm644 init/shisa.fish "$out/share/shisa/init/shisa.fish"
+    install -Dm644 init/shisa.nu "$out/share/shisa/init/shisa.nu"
+    install -Dm644 init/shisa.ps1 "$out/share/shisa/init/shisa.ps1"
+    cp -R themes "$out/share/shisa/themes"
+    cp -R examples "$out/share/shisa/examples"
+    runHook postInstall
+  '';
 
   doCheck = false;
 

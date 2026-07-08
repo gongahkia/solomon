@@ -50,6 +50,23 @@ zig build release
 zig build bench
 ```
 
+## Install
+
+Arch AUR package recipes are staged under `packaging/aur/`:
+
+```sh
+yay -S shisa-bin
+yay -S shisa-git
+```
+
+Nix packaging is staged under `packaging/nix/`:
+
+```sh
+nix-build -E 'let pkgs = import <nixpkgs> {}; in pkgs.callPackage ./packaging/nix {}'
+nix build ./packaging/nix#default
+nix-shell -p shisa
+```
+
 ## Roadmap
 
 The roadmap lives in [todo.md](todo.md). The product target lives in [north-star.md](north-star.md).

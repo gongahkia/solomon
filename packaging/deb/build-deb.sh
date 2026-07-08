@@ -46,6 +46,7 @@ zig build release --prefix "$install_prefix"
 
 install -Dm755 "$install_prefix/bin/shisa" "$pkgroot/usr/bin/shisa"
 install -Dm755 "$install_prefix/bin/shisad" "$pkgroot/usr/bin/shisad"
+install -Dm755 "$install_prefix/bin/shisa-supervisor" "$pkgroot/usr/bin/shisa-supervisor"
 install -Dm644 "$repo_root/README.md" "$pkgroot/usr/share/doc/shisa/README.md"
 install -Dm644 "$repo_root/LICENSE" "$pkgroot/usr/share/doc/shisa/copyright"
 install -Dm644 "$repo_root/init/shisa.zsh" "$pkgroot/usr/share/shisa/init/shisa.zsh"

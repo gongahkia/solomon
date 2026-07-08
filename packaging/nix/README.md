@@ -6,6 +6,7 @@ Build locally with:
 
 ```sh
 nix-build -E 'let pkgs = import <nixpkgs> {}; in pkgs.callPackage ./packaging/nix {}'
+nix build ./packaging/nix#default
 ```
 
 Notes:

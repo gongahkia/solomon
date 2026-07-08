@@ -24,6 +24,7 @@ zig build release --prefix "$PWD/zig-out/rpm"
 %install
 install -Dm755 zig-out/rpm/bin/shisa %{buildroot}%{_bindir}/shisa
 install -Dm755 zig-out/rpm/bin/shisad %{buildroot}%{_bindir}/shisad
+install -Dm755 zig-out/rpm/bin/shisa-supervisor %{buildroot}%{_bindir}/shisa-supervisor
 install -Dm644 init/shisa.zsh %{buildroot}%{_datadir}/shisa/init/shisa.zsh
 install -Dm644 init/shisa.bash %{buildroot}%{_datadir}/shisa/init/shisa.bash
 install -Dm644 init/shisa.fish %{buildroot}%{_datadir}/shisa/init/shisa.fish
@@ -38,6 +39,7 @@ cp -R examples %{buildroot}%{_datadir}/shisa/examples
 %doc README.md
 %{_bindir}/shisa
 %{_bindir}/shisad
+%{_bindir}/shisa-supervisor
 %{_datadir}/shisa
 
 %changelog

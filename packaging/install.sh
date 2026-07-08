@@ -134,5 +134,6 @@ tar -xzf "$work/$archive" -C "$work"
 mkdir -p "$install_dir"
 install -m 0755 "$work/$name/shisa" "$install_dir/shisa"
 install -m 0755 "$work/$name/shisad" "$install_dir/shisad"
+install -m 0755 "$work/$name/shisa-supervisor" "$install_dir/shisa-supervisor"
 
 printf 'installed shisa %s to %s\n' "$tag" "$install_dir"

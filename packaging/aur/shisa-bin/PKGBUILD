@@ -29,6 +29,15 @@ prepare() {
 package() {
   install -Dm755 "$srcdir/${_release_name}/shisa" "$pkgdir/usr/bin/shisa"
   install -Dm755 "$srcdir/${_release_name}/shisad" "$pkgdir/usr/bin/shisad"
+  install -Dm755 "$srcdir/${_release_name}/shisa-supervisor" "$pkgdir/usr/bin/shisa-supervisor"
   install -Dm644 "$srcdir/${_release_name}/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "$srcdir/${_release_name}/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 "$srcdir/${_release_name}/init/shisa.zsh" "$pkgdir/usr/share/shisa/init/shisa.zsh"
+  install -Dm644 "$srcdir/${_release_name}/init/shisa.bash" "$pkgdir/usr/share/shisa/init/shisa.bash"
+  install -Dm644 "$srcdir/${_release_name}/init/shisa.fish" "$pkgdir/usr/share/shisa/init/shisa.fish"
+  install -Dm644 "$srcdir/${_release_name}/init/shisa.nu" "$pkgdir/usr/share/shisa/init/shisa.nu"
+  install -Dm644 "$srcdir/${_release_name}/init/shisa.ps1" "$pkgdir/usr/share/shisa/init/shisa.ps1"
+  install -d "$pkgdir/usr/share/shisa"
+  cp -R "$srcdir/${_release_name}/themes" "$pkgdir/usr/share/shisa/themes"
+  cp -R "$srcdir/${_release_name}/examples" "$pkgdir/usr/share/shisa/examples"
 }

@@ -10,5 +10,6 @@ Start with:
 - [Shells](shells.md)
 - [Troubleshooting](troubleshooting.md)
 - [Migrate From Starship](migrate-from-starship.md)
+- [Uninstall](uninstall.md)
 
 The roadmap lives in [`todo.md`](../todo.md).

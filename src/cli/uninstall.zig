@@ -30,6 +30,10 @@ const legacy_hook_marker_start = "# >>> shisa hook >>>";
 const legacy_hook_marker_end = "# <<< shisa hook <<<";
 
 pub fn command(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len == 0 or std.mem.eql(u8, args[0], "--help") or std.mem.eql(u8, args[0], "-h")) {
+        try std.fs.File.stdout().writeAll(help_text);
+        return;
+    }
     const config = try parseArgs(args);
     if (config.purge and !config.yes and !config.dry_run) return error.PurgeRequiresYes;
 
@@ -59,10 +63,7 @@ fn parseArgs(args: []const []const u8) !Config {
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
-        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
-            try std.fs.File.stdout().writeAll(help_text);
-            std.process.exit(0);
-        } else if (std.mem.eql(u8, arg, "--shell")) {
+        if (std.mem.eql(u8, arg, "--shell")) {
             i += 1;
             if (i >= args.len) return error.MissingValue;
             if (!validShell(args[i])) return error.InvalidShell;
@@ -145,7 +146,7 @@ fn removeBlockOnceAlloc(allocator: std.mem.Allocator, source: []const u8, start_
     errdefer out.deinit(allocator);
     try out.appendSlice(allocator, source[0..remove_start]);
     try out.appendSlice(allocator, source[remove_end..]);
-    return out.toOwnedSlice(allocator);
+    return try out.toOwnedSlice(allocator);
 }
 
 fn ensureStarshipInitAlloc(allocator: std.mem.Allocator, source: []const u8, shell_name: []const u8) ![]u8 {

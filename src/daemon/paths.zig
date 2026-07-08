@@ -1,6 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+/// builds the daemon Unix-socket path for the current platform.
+/// caller owns the returned slice and must free it with allocator.
+/// environment: macOS reads HOME; Linux reads XDG_RUNTIME_DIR when set.
+/// errors: UnsupportedSocketPlatform for non-macOS/non-Linux targets; EnvironmentVariableNotFound when HOME is required and missing; OutOfMemory on allocation failure.
 pub fn defaultSocketPath(allocator: std.mem.Allocator) ![]u8 {
     return switch (builtin.os.tag) {
         .macos => macosSocketPath(allocator),
@@ -9,6 +13,10 @@ pub fn defaultSocketPath(allocator: std.mem.Allocator) ![]u8 {
     };
 }
 
+/// builds the daemon log-file path for the current platform.
+/// caller owns the returned slice and must free it with allocator.
+/// environment: macOS reads HOME; Linux reads XDG_STATE_HOME when set, then HOME.
+/// errors: UnsupportedLogPlatform for non-macOS/non-Linux targets; EnvironmentVariableNotFound when HOME is required and missing; OutOfMemory on allocation failure.
 pub fn defaultLogPath(allocator: std.mem.Allocator) ![]u8 {
     return switch (builtin.os.tag) {
         .macos => macosLogPath(allocator),

@@ -2,6 +2,7 @@ const std = @import("std");
 const cli_util = @import("util.zig");
 const shisa_config = @import("../config.zig");
 
+/// static help text printed by shisa config set --help.
 pub const help_text =
     \\usage: shisa config set locale=<locale|auto>
     \\
@@ -10,18 +11,32 @@ pub const help_text =
     \\
 ;
 
+/// parsed options for shisa init.
+/// shell_preferences is null unless a shell preference flag was supplied.
 pub const InitConfig = struct {
+    /// writes the accessibility-first default config when true.
     a11y: bool = false,
+    /// optional shell.env preferences to write next to shisa.toml.
     shell_preferences: ?ShellPreferences = null,
 };
 
+/// shell.env preferences emitted by shisa init shell flags.
+/// string fields are borrowed from CLI args or static defaults.
 pub const ShellPreferences = struct {
+    /// enables command-completion bell output when true.
     cmd_complete_bell: bool = false,
+    /// selects bell, terminal, osc9, notify-send, or macos completion signaling.
     cmd_complete_bell_mode: []const u8 = "bell",
+    /// minimum command duration before completion signaling.
     cmd_complete_bell_threshold_ms: u64 = 10000,
+    /// message emitted by completion signaling; must not contain newlines.
     cmd_complete_bell_message: []const u8 = "shisa: command complete",
 };
 
+/// handles shisa init and writes default config and optional shell preferences.
+/// args is borrowed for the duration of the call; stdout receives written paths.
+/// ownership: all temporary allocations are freed before return.
+/// errors: UnknownInitArgument, InvalidCmdCompleteBellMode, InvalidCmdCompleteBellMessage, PathAlreadyExists, filesystem write errors, parseInt errors, and allocation errors.
 pub fn initCmd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const config = try parseInitArgs(args);
 
@@ -135,10 +150,17 @@ fn renderShellPreferencesAlloc(allocator: std.mem.Allocator, preferences: ShellP
     );
 }
 
+/// parsed locale assignment for shisa config set.
+/// locale aliases the CLI argument and must not be freed.
 pub const Set = struct {
+    /// locale override accepted by config validation.
     locale: []const u8,
 };
 
+/// handles shisa config subcommands.
+/// args is borrowed for the duration of the call; stdout/stderr receive command output.
+/// ownership: all temporary allocations are freed before return.
+/// errors: UnknownConfigCommand, UnknownConfigSetArgument, InvalidLocale, InvalidConfig, filesystem write errors, and allocation errors.
 pub fn setCmd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (args.len == 0 or std.mem.eql(u8, args[0], "--help") or std.mem.eql(u8, args[0], "-h")) {
         try std.fs.File.stdout().writeAll(help_text);
@@ -265,6 +287,10 @@ fn topLevelKeyMatches(trimmed: []const u8, key: []const u8) bool {
     return std.mem.eql(u8, lhs, key);
 }
 
+/// explains the effective config as a stable text summary.
+/// args must be empty; stdout receives the rendered explanation.
+/// ownership: all temporary allocations are freed before return.
+/// errors: UnknownExplainArgument, InvalidConfig, config read errors, and allocation errors.
 pub fn explainCmd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (args.len != 0) return error.UnknownExplainArgument;
 

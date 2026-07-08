@@ -194,6 +194,25 @@ pub fn shellSingleQuoteAlloc(allocator: std.mem.Allocator, value: []const u8) ![
     return out.toOwnedSlice(allocator);
 }
 
+pub fn siblingExecutablePath(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
+    const self_path = try std.fs.selfExePathAlloc(allocator);
+    defer allocator.free(self_path);
+    const dir = std.fs.path.dirname(self_path) orelse ".";
+    return std.fs.path.join(allocator, &.{ dir, name });
+}
+
+pub fn waitForPath(path: []const u8, timeout_ms: i64) !void {
+    const start = std.time.milliTimestamp();
+    while (std.time.milliTimestamp() - start < timeout_ms) {
+        std.fs.cwd().access(path, .{}) catch {
+            std.Thread.sleep(10 * std.time.ns_per_ms);
+            continue;
+        };
+        return;
+    }
+    return error.Timeout;
+}
+
 test "shell single quote escapes metacharacters" {
     inline for (.{
         .{ "", "''" },

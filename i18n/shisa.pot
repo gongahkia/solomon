@@ -15,28 +15,12 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/main.zig:163
+#: src/main.zig:155
 msgid ""
 "shisa: unknown command; run `shisa --help`\n"
 msgstr ""
 
-#: src/main.zig:222
-msgid ""
-"shisa vouch: unknown command; run `shisa vouch --help`\n"
-msgstr ""
-
-#: src/main.zig:930
-msgid ""
-"\n"
-"# Migration warnings\n"
-msgstr ""
-
-#: src/main.zig:3552
-msgid ""
-"shisa bench: hyperfine not found in PATH\n"
-msgstr ""
-
-#: src/main.zig:4923
+#: src/main.zig:164
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
@@ -75,37 +59,9 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/main.zig:4961
+#: src/cli/bench.zig:60
 msgid ""
-"usage: shisa trace [--cwd DIR] [--exit N] [--jobs N]\n"
-"\n"
-"options:\n"
-"  --cwd DIR        render as if current directory is DIR\n"
-"  --exit N         render with last exit code N\n"
-"  --jobs N         render with running job count N\n"
-"  --duration-ms N  render with command duration N\n"
-"  --shell NAME     render for zsh, bash, fish, nu, or pwsh\n"
-"\n"
-"trace output is written to stderr; prompt output remains on stdout.\n"
-"\n"
-msgstr ""
-
-#: src/main.zig:4975
-msgid ""
-"usage: shisa vouch verify [path]\n"
-"\n"
-"commands:\n"
-"  verify [path] validate VOUCHES format; defaults to ./VOUCHES\n"
-"\n"
-msgstr ""
-
-#: src/main.zig:4983
-msgid ""
-"usage: shisa font check\n"
-"\n"
-"commands:\n"
-"  check         render Nerd Font, Unicode, and ASCII glyph probes\n"
-"\n"
+"shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 
 #: src/cli/doctor.zig:282
@@ -120,6 +76,50 @@ msgstr ""
 #: src/cli/doctor.zig:453
 msgid ""
 "shisa report: tar not found in PATH\n"
+msgstr ""
+
+#: src/cli/font.zig:34
+msgid ""
+"usage: shisa font check\n"
+"\n"
+"commands:\n"
+"  check         render Nerd Font, Unicode, and ASCII glyph probes\n"
+"\n"
+msgstr ""
+
+#: src/cli/import/common.zig:144
+msgid ""
+"\n"
+"# Migration warnings\n"
+msgstr ""
+
+#: src/cli/prompt.zig:809
+msgid ""
+"usage: shisa trace [--cwd DIR] [--exit N] [--jobs N]\n"
+"\n"
+"options:\n"
+"  --cwd DIR        render as if current directory is DIR\n"
+"  --exit N         render with last exit code N\n"
+"  --jobs N         render with running job count N\n"
+"  --duration-ms N  render with command duration N\n"
+"  --shell NAME     render for zsh, bash, fish, nu, or pwsh\n"
+"\n"
+"trace output is written to stderr; prompt output remains on stdout.\n"
+"\n"
+msgstr ""
+
+#: src/cli/vouch.zig:26
+msgid ""
+"shisa vouch: unknown command; run `shisa vouch --help`\n"
+msgstr ""
+
+#: src/cli/vouch.zig:273
+msgid ""
+"usage: shisa vouch verify [path]\n"
+"\n"
+"commands:\n"
+"  verify [path] validate VOUCHES format; defaults to ./VOUCHES\n"
+"\n"
 msgstr ""
 
 #: src/shisad.zig:22

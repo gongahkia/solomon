@@ -5,6 +5,7 @@ const client = @import("../shisa-client.zig");
 const fsnotify = @import("../daemon/fsnotify.zig");
 const paths = @import("../daemon/paths.zig");
 const plugin_lua = @import("../plugin/lua.zig");
+const plugin_manifest = @import("../plugin/manifest.zig");
 const redact = @import("../redact.zig");
 
 const DoctorConfig = struct {
@@ -62,6 +63,9 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u
     try cli_util.appendFmt(allocator, &out, "daemon: {s}\n", .{daemon_status});
     try cli_util.appendFmt(allocator, &out, "config_dir: {s} {s}\n", .{ pathAccessStatus(config_dir), config_dir });
     try cli_util.appendFmt(allocator, &out, "plugins_dir: {s} {s}\n", .{ pathAccessStatus(plugins_dir), plugins_dir });
+    const plugins_status = try doctorPluginsStatusAlloc(allocator, plugins_dir);
+    defer allocator.free(plugins_status);
+    try cli_util.appendFmt(allocator, &out, "plugins: {s}\n", .{plugins_status});
     try cli_util.appendFmt(allocator, &out, "lua: {s}\n", .{luaRuntimeStatus(allocator)});
     try cli_util.appendFmt(allocator, &out, "fsnotify: {s}\n", .{fsnotifyBackendName(fsnotify.selectBackend(builtin.os.tag))});
     try appendDoctorDeprecations(allocator, &out, config_path);
@@ -75,6 +79,37 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u
         }
     }
 
+    return out.toOwnedSlice(allocator);
+}
+
+fn doctorPluginsStatusAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8) ![]u8 {
+    var dir = std.fs.openDirAbsolute(plugins_dir, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => return allocator.dupe(u8, "none"),
+        else => return std.fmt.allocPrint(allocator, "unreadable ({s})", .{@errorName(err)}),
+    };
+    defer dir.close();
+
+    var names: std.ArrayList([]u8) = .empty;
+    defer {
+        for (names.items) |name| allocator.free(name);
+        names.deinit(allocator);
+    }
+
+    var it = dir.iterate();
+    while (try it.next()) |entry| {
+        if (entry.kind != .directory) continue;
+        if (!plugin_manifest.isValidPluginName(entry.name)) continue;
+        try names.append(allocator, try allocator.dupe(u8, entry.name));
+    }
+    if (names.items.len == 0) return allocator.dupe(u8, "none");
+
+    std.mem.sort([]u8, names.items, {}, lessThanString);
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    for (names.items, 0..) |name, i| {
+        if (i != 0) try out.appendSlice(allocator, ",");
+        try out.appendSlice(allocator, name);
+    }
     return out.toOwnedSlice(allocator);
 }
 
@@ -377,6 +412,10 @@ fn fsnotifyBackendName(backend: fsnotify.Backend) []const u8 {
     };
 }
 
+fn lessThanString(_: void, lhs: []const u8, rhs: []const u8) bool {
+    return std.mem.lessThan(u8, lhs, rhs);
+}
+
 test "doctor args parse socket override" {
     const config = try parseDoctorArgs(&.{ "--socket", "/tmp/shisa.sock" });
     try std.testing.expectEqualStrings("/tmp/shisa.sock", config.socket_path.?);
@@ -386,6 +425,21 @@ test "doctor reports path and backend statuses" {
     try std.testing.expectEqualStrings("missing", pathAccessStatus("/tmp/shisa-doctor-missing"));
     try std.testing.expectEqualStrings("fsevents", fsnotifyBackendName(.fsevents));
     try std.testing.expectEqualStrings("inotify", fsnotifyBackendName(.inotify));
+}
+
+test "doctor reports installed plugins" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir_path = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(dir_path);
+    try tmp.dir.makePath("beta");
+    try tmp.dir.makePath("alpha");
+    try tmp.dir.makePath("Bad");
+
+    const output = try doctorPluginsStatusAlloc(std.testing.allocator, dir_path);
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("alpha,beta", output);
 }
 
 test "doctor reports missing daemon socket clearly" {

@@ -1,0 +1,35 @@
+name: Documentation
+description: Report missing, stale, unclear, or incorrect Shisa documentation.
+title: "docs: "
+labels:
+  - kind/docs
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Where is the documentation issue?
+    validations:
+      required: true
+  - type: textarea
+    id: missing-wrong
+    attributes:
+      label: What is missing or wrong?
+      description: Describe the gap, stale content, or confusing wording.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-change
+    attributes:
+      label: Proposed change
+      description: What should the documentation say or link to instead?
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: Docs build or link check expected to pass.
+      render: shell
+    validations:
+      required: true

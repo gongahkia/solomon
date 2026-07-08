@@ -3,9 +3,11 @@
 Shisa release artifacts are signed in the tag-driven release workflow with Sigstore keyless signing. The workflow publishes:
 
 - release archives
+- stapled macOS DMGs
 - SHA-256 checksum files
 - SPDX SBOM files
 - cosign bundle files
+- detached `.sig`, `.pem`, and `.crt` files for archive verification
 - `rekor-links.txt`
 
 The same workflow publishes GitHub artifact attestations for every release asset.
@@ -34,6 +36,18 @@ Verify GitHub provenance with:
 ```sh
 gh attestation verify "$artifact" -R gongahkia/shisa
 ```
+
+Detached verification for `shisa update --verify` uses:
+
+```sh
+cosign verify-blob "$artifact" \
+  --certificate "$artifact.pem" \
+  --signature "$artifact.sig" \
+  --certificate-identity "https://github.com/gongahkia/shisa/.github/workflows/release.yml@refs/tags/$tag" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
+macOS binaries in the archive are Developer ID signed and notarized. macOS DMGs are notarized and stapled. Setup and validation details live in [Release Security](release-security.md).
 
 ## Installer Policy
 

@@ -13,8 +13,7 @@ Shisa keeps slow prompt work out of the shell. A per-user daemon watches filesys
 Known gaps before a first release:
 - Synthetic cold-big-repo CI is guarded; local nixpkgs and sparse Chromium numbers are recorded; full Chromium checkout numbers are still missing.
 - Warm end-to-end p99 is guarded at 10 ms; the north-star <2 ms hot-path target still needs client/socket overhead work.
-- `main.zig` split is partial (~4.4K lines remaining). Zig pre-1.0 churn risk concentrates here.
-- Packaging (Homebrew / AUR / nixpkgs / scoop), code signing, and supply-chain attestation are not done.
+- Packaging (Homebrew / scoop), first signed release execution, and full release verification are not done.
 
 To try it locally:
 
@@ -66,6 +65,15 @@ nix-build -E 'let pkgs = import <nixpkgs> {}; in pkgs.callPackage ./packaging/ni
 nix build ./packaging/nix#default
 nix-shell -p shisa
 ```
+
+Direct release archives are verified by default:
+
+```sh
+shisa update --verify --dry-run
+shisa update --verify
+```
+
+Release signing and notarization policy is documented in [`docs/release-security.md`](docs/release-security.md).
 
 ## Roadmap
 

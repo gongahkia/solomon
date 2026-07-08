@@ -293,6 +293,7 @@ pub fn build(b: *std.Build) void {
     i18n_extract_run.addFileArg(b.path("src/cli/font.zig"));
     i18n_extract_run.addFileArg(b.path("src/cli/import/common.zig"));
     i18n_extract_run.addFileArg(b.path("src/cli/prompt.zig"));
+    i18n_extract_run.addFileArg(b.path("src/cli/update.zig"));
     i18n_extract_run.addFileArg(b.path("src/cli/vouch.zig"));
     i18n_extract_run.addFileArg(b.path("src/shisad.zig"));
     i18n_extract_run.addFileArg(b.path("src/shisa-supervisor.zig"));
@@ -812,6 +813,7 @@ pub fn build(b: *std.Build) void {
     i18n_extract_check_run.addFileArg(b.path("src/cli/font.zig"));
     i18n_extract_check_run.addFileArg(b.path("src/cli/import/common.zig"));
     i18n_extract_check_run.addFileArg(b.path("src/cli/prompt.zig"));
+    i18n_extract_check_run.addFileArg(b.path("src/cli/update.zig"));
     i18n_extract_check_run.addFileArg(b.path("src/cli/vouch.zig"));
     i18n_extract_check_run.addFileArg(b.path("src/shisad.zig"));
     i18n_extract_check_run.addFileArg(b.path("src/shisa-supervisor.zig"));

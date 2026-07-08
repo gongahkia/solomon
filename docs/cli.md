@@ -34,6 +34,7 @@ commands:
   supervisor    run shisad under a crash-restart supervisor
   theme         validate theme files
   trace         render once with module timing trace on stderr
+  update        fetch, verify, and install a release artifact
   vouch         verify VOUCHES governance file
 
 options:
@@ -108,6 +109,21 @@ options:
   --shell NAME     render for zsh, bash, fish, nu, or pwsh
 
 trace output is written to stderr; prompt output remains on stdout.
+```
+
+### `shisa update`
+
+```text
+usage: shisa update [--verify|--no-verify] [--dry-run] [--rollback]
+
+options:
+  --verify             verify release signature before applying (default)
+  --no-verify          skip cosign verification
+  --dry-run            print update plan without downloading artifacts
+  --rollback           restore shisa.previous over the current binary
+  --repo OWNER/REPO    GitHub repo; default gongahkia/shisa
+  --tag TAG            install an explicit release tag instead of latest
+  --install-dir DIR    install directory; default current binary directory
 ```
 
 ### `shisa vouch`

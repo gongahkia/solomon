@@ -39,6 +39,38 @@ jobs:
 
       - run: zig build release
 
+      - name: Import Developer ID certificate
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          set -eu
+          test -n "$MACOS_CERTIFICATE_P12"
+          test -n "$MACOS_CERTIFICATE_PASSWORD"
+          keychain="$RUNNER_TEMP/shisa-signing.keychain-db"
+          cert="$RUNNER_TEMP/shisa-developer-id.p12"
+          printf '%s' "$MACOS_CERTIFICATE_P12" | base64 --decode > "$cert"
+          security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$keychain"
+          security import "$cert" -P "$MACOS_CERTIFICATE_PASSWORD" -A -T /usr/bin/codesign -f pkcs12 -k "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$MACOS_KEYCHAIN_PASSWORD" "$keychain"
+
+      - name: Codesign macOS binaries
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+        run: |
+          set -eu
+          identity="${MACOS_CODESIGN_IDENTITY:-Developer ID Application}"
+          for bin in zig-out/bin/shisa zig-out/bin/shisad zig-out/bin/shisa-supervisor; do
+            codesign --force --timestamp --deep --options runtime --sign "$identity" "$bin"
+            codesign --verify --strict --verbose=2 "$bin"
+          done
+
       - name: Package artifact
         run: |
           set -eu
@@ -61,6 +93,30 @@ jobs:
           cp LICENSE README.md "dist/$name/"
           tar -czf "dist/$name.tar.gz" -C dist "$name"
           shasum -a 256 "dist/$name.tar.gz" > "dist/$name.tar.gz.sha256"
+
+      - name: Notarize and staple macOS artifact
+        if: runner.os == 'macOS'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -eu
+          test -n "$APPLE_ID"
+          test -n "$APPLE_TEAM_ID"
+          test -n "$APPLE_APP_SPECIFIC_PASSWORD"
+          xcrun notarytool store-credentials shisa-notary \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD"
+          ditto -c -k --keepParent "dist/$SHISA_PACKAGE_NAME" "dist/$SHISA_PACKAGE_NAME.notary.zip"
+          xcrun notarytool submit "dist/$SHISA_PACKAGE_NAME.notary.zip" --wait --keychain-profile shisa-notary
+          hdiutil create -fs HFS+ -format UDZO -srcfolder "dist/$SHISA_PACKAGE_NAME" -volname "shisa-$GITHUB_REF_NAME" "dist/$SHISA_PACKAGE_NAME.dmg"
+          xcrun notarytool submit "dist/$SHISA_PACKAGE_NAME.dmg" --wait --keychain-profile shisa-notary
+          xcrun stapler staple "dist/$SHISA_PACKAGE_NAME.dmg"
+          xcrun stapler validate "dist/$SHISA_PACKAGE_NAME.dmg"
+          shasum -a 256 "dist/$SHISA_PACKAGE_NAME.dmg" > "dist/$SHISA_PACKAGE_NAME.dmg.sha256"
+          rm -f "dist/$SHISA_PACKAGE_NAME.notary.zip"
 
       - name: Install Syft
         id: syft
@@ -85,9 +141,16 @@ jobs:
           for artifact in \
             "dist/$SHISA_PACKAGE_NAME.tar.gz" \
             "dist/$SHISA_PACKAGE_NAME.tar.gz.sha256" \
-            "dist/$SHISA_PACKAGE_NAME.spdx.json"
+            "dist/$SHISA_PACKAGE_NAME.spdx.json" \
+            "dist/$SHISA_PACKAGE_NAME.dmg" \
+            "dist/$SHISA_PACKAGE_NAME.dmg.sha256"
           do
-            cosign sign-blob --yes "$artifact" --bundle "$artifact.sigstore.json"
+            test -f "$artifact" || continue
+            cosign sign-blob --yes "$artifact" \
+              --bundle "$artifact.sigstore.json" \
+              --output-signature "$artifact.sig" \
+              --output-certificate "$artifact.pem"
+            cp "$artifact.pem" "$artifact.crt"
           done
 
       - name: Generate provenance attestations
@@ -100,6 +163,9 @@ jobs:
             dist/${{ env.SHISA_PACKAGE_NAME }}.tar.gz.sigstore.json
             dist/${{ env.SHISA_PACKAGE_NAME }}.tar.gz.sha256.sigstore.json
             dist/${{ env.SHISA_PACKAGE_NAME }}.spdx.json.sigstore.json
+            dist/${{ env.SHISA_PACKAGE_NAME }}.tar.gz.sig
+            dist/${{ env.SHISA_PACKAGE_NAME }}.tar.gz.pem
+            dist/${{ env.SHISA_PACKAGE_NAME }}.tar.gz.crt
 
       - uses: actions/upload-artifact@v4
         with:
@@ -107,8 +173,12 @@ jobs:
           path: |
             dist/*.tar.gz
             dist/*.sha256
+            dist/*.dmg
             dist/*.spdx.json
             dist/*.sigstore.json
+            dist/*.sig
+            dist/*.pem
+            dist/*.crt
           if-no-files-found: error
 
   reproducibility:
@@ -206,6 +276,11 @@ jobs:
             --notes "Manual v0 release. Artifacts, SHA-256 checksums, SPDX SBOMs, cosign bundles, and Rekor links are attached." \
             dist/*.tar.gz \
             dist/*.tar.gz.sha256 \
+            dist/*.dmg \
+            dist/*.dmg.sha256 \
             dist/*.spdx.json \
             dist/*.sigstore.json \
+            dist/*.sig \
+            dist/*.pem \
+            dist/*.crt \
             dist/rekor-links.txt

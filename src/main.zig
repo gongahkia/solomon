@@ -790,6 +790,218 @@ fn copyFixtureToPath(allocator: std.mem.Allocator, source_path: []const u8, dest
     try file.writeAll(source);
 }
 
+const ImportArgs = struct {
+    source_path: ?[]const u8 = null,
+    output_path: ?[]const u8 = null,
+    dry_run: bool = false,
+    diff: bool = false,
+    warn_unmapped: bool = true,
+};
+
+const ImportSidecar = struct {
+    name: []const u8,
+    data: []u8,
+};
+
+const ImportPlan = struct {
+    target_toml: []u8,
+    source_name: []const u8,
+    docs_path: []const u8,
+    sidecars: std.ArrayList(ImportSidecar) = .empty,
+    unmapped_keys: std.ArrayList([]u8) = .empty,
+
+    fn deinit(self: *ImportPlan, allocator: std.mem.Allocator) void {
+        allocator.free(self.target_toml);
+        for (self.sidecars.items) |sidecar| allocator.free(sidecar.data);
+        self.sidecars.deinit(allocator);
+        for (self.unmapped_keys.items) |key| allocator.free(key);
+        self.unmapped_keys.deinit(allocator);
+        self.* = undefined;
+    }
+};
+
+fn parseImportArgs(args: []const []const u8, source_required: bool) !ImportArgs {
+    var parsed = ImportArgs{};
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "--dry-run")) {
+            parsed.dry_run = true;
+        } else if (std.mem.eql(u8, arg, "--diff")) {
+            parsed.diff = true;
+        } else if (std.mem.eql(u8, arg, "--warn-unmapped")) {
+            parsed.warn_unmapped = true;
+        } else if (std.mem.eql(u8, arg, "--no-warn-unmapped")) {
+            parsed.warn_unmapped = false;
+        } else if (std.mem.eql(u8, arg, "--output")) {
+            parsed.output_path = try cli_util.nextValue(args, &i);
+        } else if (std.mem.startsWith(u8, arg, "--")) {
+            return error.UnknownImportArgument;
+        } else if (source_required and parsed.source_path == null) {
+            parsed.source_path = arg;
+        } else {
+            return error.UnknownImportArgument;
+        }
+    }
+    if (source_required and parsed.source_path == null) return error.MissingImportSource;
+    if (parsed.dry_run and parsed.diff) return error.ConflictingImportModes;
+    return parsed;
+}
+
+fn applyImportPlan(allocator: std.mem.Allocator, plan: *ImportPlan, options: ImportArgs) !void {
+    if (options.dry_run) {
+        try std.fs.File.stdout().writeAll(plan.target_toml);
+        if (options.warn_unmapped) try writeUnmappedWarnings(allocator, plan.*);
+        return;
+    }
+
+    const target_path = if (options.output_path) |path| try allocator.dupe(u8, path) else try cli_util.defaultConfigPath(allocator);
+    defer allocator.free(target_path);
+
+    if (options.diff) {
+        const current = try readFileIfPresentAlloc(allocator, target_path);
+        defer allocator.free(current);
+        try writeUnifiedDiff(allocator, target_path, current, "imported", plan.target_toml);
+        if (options.warn_unmapped) try writeUnmappedWarnings(allocator, plan.*);
+        return;
+    }
+
+    try writeFilePath(target_path, plan.target_toml);
+    for (plan.sidecars.items) |sidecar| {
+        const sidecar_path = try sidecarPathAlloc(allocator, target_path, sidecar.name);
+        defer allocator.free(sidecar_path);
+        try writeFilePath(sidecar_path, sidecar.data);
+    }
+    if (options.warn_unmapped) try writeUnmappedWarnings(allocator, plan.*);
+}
+
+fn addSidecarOwned(allocator: std.mem.Allocator, plan: *ImportPlan, name: []const u8, data: []u8) !void {
+    errdefer allocator.free(data);
+    try plan.sidecars.append(allocator, .{ .name = name, .data = data });
+}
+
+fn collectUnmappedKeys(allocator: std.mem.Allocator, plan: *ImportPlan) !void {
+    try collectUnsupportedCommentKeys(allocator, plan, plan.target_toml);
+    for (plan.sidecars.items) |sidecar| {
+        if (std.mem.eql(u8, sidecar.name, "migration-notes.md")) try collectMigrationNoteKeys(allocator, plan, sidecar.data);
+    }
+    std.mem.sort([]u8, plan.unmapped_keys.items, {}, stringLessThan);
+}
+
+fn collectUnsupportedCommentKeys(allocator: std.mem.Allocator, plan: *ImportPlan, text: []const u8) !void {
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        if (!std.mem.startsWith(u8, line, "# Unsupported ")) continue;
+        const colon = std.mem.indexOfScalar(u8, line, ':') orelse continue;
+        var names = std.mem.splitScalar(u8, line[colon + 1 ..], ',');
+        while (names.next()) |raw_name| {
+            const name = std.mem.trim(u8, raw_name, " \t\r");
+            if (name.len != 0) try appendUniqueString(allocator, &plan.unmapped_keys, name);
+        }
+    }
+}
+
+fn collectMigrationNoteKeys(allocator: std.mem.Allocator, plan: *ImportPlan, text: []const u8) !void {
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        if (!std.mem.startsWith(u8, line, "- `")) continue;
+        const rest = line[3..];
+        const end = std.mem.indexOfScalar(u8, rest, '`') orelse continue;
+        const key = std.mem.trim(u8, rest[0..end], " \t\r");
+        if (key.len != 0) try appendUniqueString(allocator, &plan.unmapped_keys, key);
+    }
+}
+
+fn appendUniqueString(allocator: std.mem.Allocator, list: *std.ArrayList([]u8), value: []const u8) !void {
+    for (list.items) |existing| {
+        if (std.mem.eql(u8, existing, value)) return;
+    }
+    const owned = try allocator.dupe(u8, value);
+    errdefer allocator.free(owned);
+    try list.append(allocator, owned);
+}
+
+fn stringLessThan(_: void, lhs: []u8, rhs: []u8) bool {
+    return std.mem.lessThan(u8, lhs, rhs);
+}
+
+fn writeUnmappedWarnings(allocator: std.mem.Allocator, plan: ImportPlan) !void {
+    if (plan.unmapped_keys.items.len == 0) return;
+    try std.fs.File.stdout().writeAll("\n# Migration warnings\n");
+    for (plan.unmapped_keys.items) |key| {
+        try stdoutFmt(allocator, "# - `{s}` unmapped from {s}; preserve with a custom module or plugin.\n", .{ key, plan.source_name });
+    }
+    try stdoutFmt(allocator, "# See {s}\n", .{plan.docs_path});
+}
+
+fn readFileIfPresentAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    var file = if (std.fs.path.isAbsolute(path))
+        std.fs.openFileAbsolute(path, .{}) catch |err| switch (err) {
+            error.FileNotFound => return allocator.dupe(u8, ""),
+            else => return err,
+        }
+    else
+        std.fs.cwd().openFile(path, .{}) catch |err| switch (err) {
+            error.FileNotFound => return allocator.dupe(u8, ""),
+            else => return err,
+        };
+    defer file.close();
+    return file.readToEndAlloc(allocator, max_config_bytes);
+}
+
+fn writeFilePath(path: []const u8, data: []const u8) !void {
+    if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
+    var file = if (std.fs.path.isAbsolute(path))
+        try std.fs.createFileAbsolute(path, .{ .truncate = true, .mode = 0o600 })
+    else
+        try std.fs.cwd().createFile(path, .{ .truncate = true, .mode = 0o600 });
+    defer file.close();
+    try file.writeAll(data);
+}
+
+fn sidecarPathAlloc(allocator: std.mem.Allocator, target_path: []const u8, name: []const u8) ![]u8 {
+    if (std.fs.path.dirname(target_path)) |parent| return std.fs.path.join(allocator, &.{ parent, name });
+    return allocator.dupe(u8, name);
+}
+
+fn writeUnifiedDiff(allocator: std.mem.Allocator, old_label: []const u8, old_text: []const u8, new_label: []const u8, new_text: []const u8) !void {
+    if (std.mem.eql(u8, old_text, new_text)) return;
+    try stdoutFmt(allocator, "--- {s}\n+++ {s}\n@@ -1,{d} +1,{d} @@\n", .{
+        old_label,
+        new_label,
+        diffLineCount(old_text),
+        diffLineCount(new_text),
+    });
+    try writeDiffLines(allocator, '-', old_text);
+    try writeDiffLines(allocator, '+', new_text);
+}
+
+fn diffLineCount(text: []const u8) usize {
+    if (text.len == 0) return 0;
+    var count: usize = 0;
+    for (text) |byte| {
+        if (byte == '\n') count += 1;
+    }
+    if (text[text.len - 1] != '\n') count += 1;
+    return count;
+}
+
+fn writeDiffLines(allocator: std.mem.Allocator, prefix: u8, text: []const u8) !void {
+    var offset: usize = 0;
+    while (offset < text.len) {
+        const rest = text[offset..];
+        const line_len = std.mem.indexOfScalar(u8, rest, '\n') orelse rest.len;
+        try stdoutFmt(allocator, "{c}{s}\n", .{ prefix, rest[0..line_len] });
+        offset += line_len + @intFromBool(line_len < rest.len);
+    }
+}
+
+fn stdoutFmt(allocator: std.mem.Allocator, comptime format: []const u8, args: anytype) !void {
+    const text = try std.fmt.allocPrint(allocator, format, args);
+    defer allocator.free(text);
+    try std.fs.File.stdout().writeAll(text);
+}
+
 const P10kSetting = struct {
     name: []u8,
     values: std.ArrayList([]u8) = .empty,
@@ -948,23 +1160,33 @@ const P10kImportResult = struct {
 };
 
 fn importP10k(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    if (args.len != 1) return error.UnknownImportP10kArgument;
+    const options = try parseImportArgs(args, true);
 
-    const source = try std.fs.cwd().readFileAlloc(allocator, args[0], max_config_bytes);
+    const source = try std.fs.cwd().readFileAlloc(allocator, options.source_path.?, max_config_bytes);
     defer allocator.free(source);
 
-    const result = try importP10kResultAlloc(allocator, source);
-    defer result.deinit(allocator);
-    try std.fs.File.stdout().writeAll(result.config);
-    if (result.notes) |notes| {
-        try std.fs.cwd().writeFile(.{ .sub_path = "migration-notes.md", .data = notes });
-    }
+    var plan = try importP10kPlanAlloc(allocator, source);
+    defer plan.deinit(allocator);
+    try applyImportPlan(allocator, &plan, options);
 }
 
 fn importP10kAlloc(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
     const result = try importP10kResultAlloc(allocator, source);
     if (result.notes) |notes| allocator.free(notes);
     return result.config;
+}
+
+fn importP10kPlanAlloc(allocator: std.mem.Allocator, source: []const u8) !ImportPlan {
+    const result = try importP10kResultAlloc(allocator, source);
+    var plan = ImportPlan{
+        .target_toml = result.config,
+        .source_name = "Powerlevel10k",
+        .docs_path = "docs/migration-p10k.md",
+    };
+    errdefer plan.deinit(allocator);
+    if (result.notes) |notes| try addSidecarOwned(allocator, &plan, "migration-notes.md", notes);
+    try collectUnmappedKeys(allocator, &plan);
+    return plan;
 }
 
 fn importP10kResultAlloc(allocator: std.mem.Allocator, source: []const u8) !P10kImportResult {
@@ -1439,20 +1661,28 @@ const OmpImportResult = struct {
 };
 
 fn importOhMyPosh(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    if (args.len != 1) return error.UnknownImportOhMyPoshArgument;
+    const options = try parseImportArgs(args, true);
 
-    const source = try std.fs.cwd().readFileAlloc(allocator, args[0], max_config_bytes);
+    const source = try std.fs.cwd().readFileAlloc(allocator, options.source_path.?, max_config_bytes);
     defer allocator.free(source);
 
+    var plan = try importOhMyPoshPlanAlloc(allocator, source);
+    defer plan.deinit(allocator);
+    try applyImportPlan(allocator, &plan, options);
+}
+
+fn importOhMyPoshPlanAlloc(allocator: std.mem.Allocator, source: []const u8) !ImportPlan {
     const result = try importOhMyPoshResultAlloc(allocator, source);
-    defer result.deinit(allocator);
-    try std.fs.File.stdout().writeAll(result.config);
-    if (result.theme) |theme| {
-        try std.fs.cwd().writeFile(.{ .sub_path = "oh-my-posh-theme.toml", .data = theme });
-    }
-    if (result.notes) |notes| {
-        try std.fs.cwd().writeFile(.{ .sub_path = "migration-notes.md", .data = notes });
-    }
+    var plan = ImportPlan{
+        .target_toml = result.config,
+        .source_name = "Oh My Posh",
+        .docs_path = "docs/migration-oh-my-posh.md",
+    };
+    errdefer plan.deinit(allocator);
+    if (result.theme) |theme| try addSidecarOwned(allocator, &plan, "oh-my-posh-theme.toml", theme);
+    if (result.notes) |notes| try addSidecarOwned(allocator, &plan, "migration-notes.md", notes);
+    try collectUnmappedKeys(allocator, &plan);
+    return plan;
 }
 
 fn importOhMyPoshResultAlloc(allocator: std.mem.Allocator, source: []const u8) !OmpImportResult {
@@ -2218,17 +2448,27 @@ const TideImportResult = struct {
 };
 
 fn importTide(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    if (args.len != 1) return error.UnknownImportTideArgument;
+    const options = try parseImportArgs(args, true);
 
-    const source = try std.fs.cwd().readFileAlloc(allocator, args[0], max_config_bytes);
+    const source = try std.fs.cwd().readFileAlloc(allocator, options.source_path.?, max_config_bytes);
     defer allocator.free(source);
 
+    var plan = try importTidePlanAlloc(allocator, source);
+    defer plan.deinit(allocator);
+    try applyImportPlan(allocator, &plan, options);
+}
+
+fn importTidePlanAlloc(allocator: std.mem.Allocator, source: []const u8) !ImportPlan {
     const result = try importTideResultAlloc(allocator, source);
-    defer result.deinit(allocator);
-    try std.fs.File.stdout().writeAll(result.config);
-    if (result.notes) |notes| {
-        try std.fs.cwd().writeFile(.{ .sub_path = "migration-notes.md", .data = notes });
-    }
+    var plan = ImportPlan{
+        .target_toml = result.config,
+        .source_name = "Tide",
+        .docs_path = "docs/migration-tide.md",
+    };
+    errdefer plan.deinit(allocator);
+    if (result.notes) |notes| try addSidecarOwned(allocator, &plan, "migration-notes.md", notes);
+    try collectUnmappedKeys(allocator, &plan);
+    return plan;
 }
 
 fn importTideResultAlloc(allocator: std.mem.Allocator, source: []const u8) !TideImportResult {
@@ -2400,10 +2640,22 @@ fn tideUnsupportedReason(name: []const u8) []const u8 {
 }
 
 fn importPure(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    if (args.len != 0) return error.UnknownImportPureArgument;
+    const options = try parseImportArgs(args, false);
+    var plan = try importPurePlanAlloc(allocator);
+    defer plan.deinit(allocator);
+    try applyImportPlan(allocator, &plan, options);
+}
+
+fn importPurePlanAlloc(allocator: std.mem.Allocator) !ImportPlan {
     const output = try pureConfigAlloc(allocator);
-    defer allocator.free(output);
-    try std.fs.File.stdout().writeAll(output);
+    var plan = ImportPlan{
+        .target_toml = output,
+        .source_name = "Pure",
+        .docs_path = "docs/migration-pure.md",
+    };
+    errdefer plan.deinit(allocator);
+    try collectUnmappedKeys(allocator, &plan);
+    return plan;
 }
 
 fn pureConfigAlloc(allocator: std.mem.Allocator) ![]u8 {
@@ -2441,14 +2693,14 @@ const StarshipImport = struct {
 };
 
 fn importStarship(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    if (args.len != 1) return error.UnknownImportStarshipArgument;
+    const options = try parseImportArgs(args, true);
 
-    const source = try std.fs.cwd().readFileAlloc(allocator, args[0], max_config_bytes);
+    const source = try std.fs.cwd().readFileAlloc(allocator, options.source_path.?, max_config_bytes);
     defer allocator.free(source);
 
-    const output = try importStarshipAlloc(allocator, source);
-    defer allocator.free(output);
-    try std.fs.File.stdout().writeAll(output);
+    var plan = try importStarshipPlanAlloc(allocator, source);
+    defer plan.deinit(allocator);
+    try applyImportPlan(allocator, &plan, options);
 }
 
 fn importStarshipAlloc(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
@@ -2469,6 +2721,18 @@ fn importStarshipAlloc(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
     }
 
     return renderImportedConfigAlloc(allocator, imported);
+}
+
+fn importStarshipPlanAlloc(allocator: std.mem.Allocator, source: []const u8) !ImportPlan {
+    const output = try importStarshipAlloc(allocator, source);
+    var plan = ImportPlan{
+        .target_toml = output,
+        .source_name = "Starship",
+        .docs_path = "docs/migration-starship.md",
+    };
+    errdefer plan.deinit(allocator);
+    try collectUnmappedKeys(allocator, &plan);
+    return plan;
 }
 
 fn starshipFormatAlloc(allocator: std.mem.Allocator, source: []const u8) !?[]u8 {
@@ -4582,15 +4846,15 @@ const help_text =
     \\  doctor        diagnose socket, config, plugins, lua, fsnotify
     \\  explain       print resolved module pipeline
     \\  font          render glyph fallback probes
-    \\  import-starship <path>
+    \\  import-starship <path> [--dry-run|--diff] [--output PATH]
     \\                translate starship.toml to shisa.toml
-    \\  import-p10k <path>
+    \\  import-p10k <path> [--dry-run|--diff] [--output PATH]
     \\                translate .p10k.zsh to shisa.toml
-    \\  import-oh-my-posh <path>
+    \\  import-oh-my-posh <path> [--dry-run|--diff] [--output PATH]
     \\                translate Oh My Posh JSON/YAML to shisa.toml
-    \\  import-tide <path>
+    \\  import-tide <path> [--dry-run|--diff] [--output PATH]
     \\                translate Tide fish settings to shisa.toml
-    \\  import-pure
+    \\  import-pure [--dry-run|--diff] [--output PATH]
     \\                print the minimal Pure-compatible preset
     \\  init          write default shisa.toml; --a11y and shell notification prefs supported
     \\  pin           mark a path as never-evicted

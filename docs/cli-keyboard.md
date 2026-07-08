@@ -21,11 +21,11 @@ No raw-mode, full-screen, readline, or ncurses UI path is present in the current
 | `doctor` | args/stdout/stderr only | no prompt |
 | `explain` | args/stdout/stderr only | no prompt |
 | `font` | args/stdout only | no prompt |
-| `import-starship` | path arg/stdout | no prompt |
-| `import-p10k` | path arg/stdout | no prompt |
-| `import-oh-my-posh` | path arg/stdout | no prompt |
-| `import-tide` | path arg/stdout | no prompt |
-| `import-pure` | stdout only | no prompt |
+| `import-starship` | path arg, `--dry-run`, `--diff`, `--output` | no prompt |
+| `import-p10k` | path arg, `--dry-run`, `--diff`, `--output` | no prompt |
+| `import-oh-my-posh` | path arg, `--dry-run`, `--diff`, `--output` | no prompt |
+| `import-tide` | path arg, `--dry-run`, `--diff`, `--output` | no prompt |
+| `import-pure` | `--dry-run`, `--diff`, `--output` | no prompt |
 | `init` | args/filesystem | no prompt |
 | `pin` | path arg/filesystem | no prompt |
 | `plugin install` | args/filesystem | y/N prompt unless `--yes` is passed |

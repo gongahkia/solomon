@@ -1,6 +1,6 @@
 # Pure Import
 
-`shisa import-pure` takes no path and prints the smallest Pure-compatible Shisa config.
+`shisa import-pure` takes no path and writes the smallest Pure-compatible Shisa config. Use `--dry-run` to print it instead.
 
 Pure stores behavior in Zsh variables and `zstyle`, not a portable config file. The Shisa importer therefore emits a fixed preset based on Pure's default prompt behavior: https://raw.githubusercontent.com/sindresorhus/pure/main/readme.md
 

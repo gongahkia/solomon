@@ -4,18 +4,18 @@ Use `shisa import-p10k` to translate Powerlevel10k prompt element lists into a S
 
 ## 1. Generate Shisa config
 
-Run the importer from the Shisa config directory so any migration notes land next to the generated config:
+Write the imported config to Shisa's config directory:
 
 ```sh
 mkdir -p ~/.config/shisa
-cd ~/.config/shisa
-shisa import-p10k ~/.p10k.zsh > shisa.toml
+shisa import-p10k ~/.p10k.zsh --output ~/.config/shisa/shisa.toml
 ```
 
-For a dry run, write somewhere else first:
+For review first:
 
 ```sh
-shisa import-p10k ~/.p10k.zsh > /tmp/shisa.p10k.toml
+shisa import-p10k ~/.p10k.zsh --dry-run > /tmp/shisa.p10k.toml
+shisa import-p10k ~/.p10k.zsh --diff
 ```
 
 ## 2. Read the generated comments
@@ -27,7 +27,7 @@ The output keeps source layout context as comments:
 # Powerlevel10k right elements: aws, kubecontext, time
 ```
 
-Unsupported elements are emitted in the config and, when present, written to `migration-notes.md` in the current directory.
+Unsupported elements are emitted in the config and, when present, written to `migration-notes.md` next to the output config.
 
 ## 3. Check mapped modules
 

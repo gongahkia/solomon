@@ -13,13 +13,13 @@ If you use `STARSHIP_CONFIG`, pass that path instead.
 ## 2. Generate Shisa config
 
 ```sh
-shisa import-starship ~/.config/starship.toml > /tmp/shisa.toml
+shisa import-starship ~/.config/starship.toml --dry-run > /tmp/shisa.toml
 ```
 
 Review unsupported module comments:
 
 ```sh
-grep 'Unsupported Starship modules' /tmp/shisa.toml
+grep 'Unsupported Starship modules\\|Migration warnings' /tmp/shisa.toml
 ```
 
 ## 3. Install config
@@ -27,6 +27,12 @@ grep 'Unsupported Starship modules' /tmp/shisa.toml
 ```sh
 mkdir -p ~/.config/shisa
 cp /tmp/shisa.toml ~/.config/shisa/shisa.toml
+```
+
+Or write directly after review:
+
+```sh
+shisa import-starship ~/.config/starship.toml --output ~/.config/shisa/shisa.toml
 ```
 
 ## 4. Install shell hook

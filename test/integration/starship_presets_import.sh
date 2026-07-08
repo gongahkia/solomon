@@ -21,6 +21,6 @@ while IFS= read -r preset; do
   output="$tmpdir/$preset.shisa.toml"
   expected="$snapshots/$preset.toml"
   starship preset "$preset" -o "$input"
-  "$root/zig-out/bin/shisa" import-starship "$input" >"$output"
+  "$root/zig-out/bin/shisa" import-starship "$input" --dry-run --no-warn-unmapped >"$output"
   diff -u "$expected" "$output"
 done < <(starship preset --list)

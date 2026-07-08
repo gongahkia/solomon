@@ -15,15 +15,15 @@ commands:
   doctor        diagnose socket, config, plugins, lua, fsnotify
   explain       print resolved module pipeline
   font          render glyph fallback probes
-  import-starship <path>
+  import-starship <path> [--dry-run|--diff] [--output PATH]
                 translate starship.toml to shisa.toml
-  import-p10k <path>
+  import-p10k <path> [--dry-run|--diff] [--output PATH]
                 translate .p10k.zsh to shisa.toml
-  import-oh-my-posh <path>
+  import-oh-my-posh <path> [--dry-run|--diff] [--output PATH]
                 translate Oh My Posh JSON/YAML to shisa.toml
-  import-tide <path>
+  import-tide <path> [--dry-run|--diff] [--output PATH]
                 translate Tide fish settings to shisa.toml
-  import-pure
+  import-pure [--dry-run|--diff] [--output PATH]
                 print the minimal Pure-compatible preset
   init          write default shisa.toml; --a11y and shell notification prefs supported
   pin           mark a path as never-evicted

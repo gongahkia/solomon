@@ -40,7 +40,7 @@ cleanup() {
 trap cleanup EXIT
 
 out="$tmpdir/shisa.toml"
-"$root/zig-out/bin/shisa" import-pure >"$out"
+"$root/zig-out/bin/shisa" import-pure --dry-run >"$out"
 grep -F 'theme = "pure"' "$out" >/dev/null
 grep -F 'modules = ["cwd", "git_branch", "exit_status", "cmd_duration", "jobs", "user_host"]' "$out" >/dev/null
 grep -F 'threshold_ms = 5000' "$out" >/dev/null

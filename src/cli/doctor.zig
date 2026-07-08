@@ -55,8 +55,11 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
 
+    const daemon_status = try daemonHealthStatusAlloc(allocator, socket_path);
+    defer allocator.free(daemon_status);
+
     try cli_util.appendFmt(allocator, &out, "socket: {s} {s}\n", .{ pathAccessStatus(socket_path), socket_path });
-    try cli_util.appendFmt(allocator, &out, "daemon: {s}\n", .{try daemonHealthStatus(allocator, socket_path)});
+    try cli_util.appendFmt(allocator, &out, "daemon: {s}\n", .{daemon_status});
     try cli_util.appendFmt(allocator, &out, "config_dir: {s} {s}\n", .{ pathAccessStatus(config_dir), config_dir });
     try cli_util.appendFmt(allocator, &out, "plugins_dir: {s} {s}\n", .{ pathAccessStatus(plugins_dir), plugins_dir });
     try cli_util.appendFmt(allocator, &out, "lua: {s}\n", .{luaRuntimeStatus(allocator)});
@@ -340,12 +343,21 @@ fn pathAccessStatus(path: []const u8) []const u8 {
     return "present";
 }
 
-fn daemonHealthStatus(allocator: std.mem.Allocator, socket_path: []const u8) ![]const u8 {
-    const response = client.requestAlloc(allocator, socket_path, "health\n") catch return "unreachable";
+fn daemonHealthStatusAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u8 {
+    const response = client.requestAlloc(allocator, socket_path, "health\n") catch |err| return daemonHealthErrorStatusAlloc(allocator, err);
     defer allocator.free(response);
     const trimmed = std.mem.trim(u8, response, " \t\r\n");
-    if (std.mem.eql(u8, trimmed, "ok")) return "ok";
-    return "bad-response";
+    if (std.mem.eql(u8, trimmed, "ok")) return allocator.dupe(u8, "ok");
+    return allocator.dupe(u8, "bad-response");
+}
+
+fn daemonHealthErrorStatusAlloc(allocator: std.mem.Allocator, err: anyerror) ![]u8 {
+    return switch (err) {
+        error.FileNotFound => allocator.dupe(u8, "socket-missing"),
+        error.ConnectionRefused => std.fmt.allocPrint(allocator, "not-reachable ({s})", .{@errorName(err)}),
+        error.WouldBlock, error.NetworkUnreachable => std.fmt.allocPrint(allocator, "not-reachable ({s})", .{@errorName(err)}),
+        else => std.fmt.allocPrint(allocator, "error ({s})", .{@errorName(err)}),
+    };
 }
 
 fn luaRuntimeStatus(allocator: std.mem.Allocator) []const u8 {
@@ -374,6 +386,16 @@ test "doctor reports path and backend statuses" {
     try std.testing.expectEqualStrings("missing", pathAccessStatus("/tmp/shisa-doctor-missing"));
     try std.testing.expectEqualStrings("fsevents", fsnotifyBackendName(.fsevents));
     try std.testing.expectEqualStrings("inotify", fsnotifyBackendName(.inotify));
+}
+
+test "doctor reports missing daemon socket clearly" {
+    const socket_path = try std.fmt.allocPrint(std.testing.allocator, "/tmp/shisa-doctor-missing-{x}.sock", .{std.crypto.random.int(u64)});
+    defer std.testing.allocator.free(socket_path);
+    std.fs.cwd().deleteFile(socket_path) catch {};
+
+    const status = try daemonHealthStatusAlloc(std.testing.allocator, socket_path);
+    defer std.testing.allocator.free(status);
+    try std.testing.expectEqualStrings("socket-missing", status);
 }
 
 test "doctor deprecation scanner reports matching rules" {

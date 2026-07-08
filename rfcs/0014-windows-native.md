@@ -26,18 +26,18 @@ Windows uses the same length-prefixed JSON frame as macOS/Linux, but transports 
 The implementation lands in phases:
 
 - Phase 1: cross-compile all binaries, derive the default pipe path, make the client open named pipes, report `ReadDirectoryChangesW` as the fsnotify backend, install `SetConsoleCtrlHandler`, keep PowerShell rendering via fallback when the daemon is unavailable, and add `windows-2022` CI.
-- Phase 2: replace the Windows daemon server stub with a full named-pipe listener that serves render, health, metrics, reload, and subscribe operations.
-- Phase 3: add Windows runtime e2e coverage for daemon startup, prompt render, health, and PowerShell hook behavior.
+- Phase 2: replace the Windows daemon server stub with a synchronous named-pipe listener that serves render, health, metrics, reload, version, and preexec operations. `subscribe` returns a framed unsupported response until overlapped streaming is designed.
+- Phase 3: expand Windows runtime e2e coverage beyond daemon startup, prompt render, health, doctor, and PowerShell hook path checks.
 
 The supervisor creates daemon children suspended, assigns them to a Windows Job Object, then resumes the main thread.
 
 ## Performance
 
-The frame format is unchanged. Named-pipe connection-per-request remains the baseline until Phase 2 measures whether persistent connections are needed.
+The frame format is unchanged. Named-pipe connection-per-request remains the baseline until runtime measurements show whether persistent connections are needed.
 
 ## Security
 
-The pipe name includes the user SID to prevent accidental cross-user endpoint reuse. Pipe ACL hardening is required before Phase 2 is accepted; default Windows named-pipe ACLs are not treated as the final security boundary.
+The pipe name includes the user SID to prevent accidental cross-user endpoint reuse. Pipe ACL hardening is still required before native Windows support leaves RFC status; default Windows named-pipe ACLs are not treated as the final security boundary.
 
 ## Compatibility
 

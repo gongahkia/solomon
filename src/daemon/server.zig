@@ -19,6 +19,11 @@ const daemon_cache = @import("cache.zig");
 const cost_refresh = @import("cost_refresh.zig");
 const subscribe = @import("subscribe.zig");
 const plugin_host = @import("plugin_host.zig");
+const win = std.os.windows;
+
+extern "kernel32" fn ConnectNamedPipe(hNamedPipe: win.HANDLE, lpOverlapped: ?*win.OVERLAPPED) callconv(.winapi) win.BOOL;
+extern "kernel32" fn DisconnectNamedPipe(hNamedPipe: win.HANDLE) callconv(.winapi) win.BOOL;
+extern "kernel32" fn SetNamedPipeHandleState(hNamedPipe: win.HANDLE, lpMode: ?*win.DWORD, lpMaxCollectionCount: ?*win.DWORD, lpCollectDataTimeout: ?*win.DWORD) callconv(.winapi) win.BOOL;
 
 const header_bytes = 4;
 const max_frame_bytes = 1024 * 1024;
@@ -224,7 +229,7 @@ const PosixServer = struct {
 
     fn consumeReloadSignal(self: *Server, reload_requested: *std.atomic.Value(bool)) !void {
         if (!reload_requested.swap(false, .seq_cst)) return;
-        self.reloadConfigAndPlugins() catch |err| {
+        PosixServer.reloadConfigAndPlugins(self) catch |err| {
             if (self.logger) |logger| {
                 try logger.warn("reload_failed", @errorName(err));
             }
@@ -318,14 +323,14 @@ const PosixServer = struct {
             );
         }
 
-        self.drainFsInvalidations(nowNs());
-        try self.registerGitInvalidation(parsed.value.cwd);
+        PosixServer.drainFsInvalidations(self, nowNs());
+        try PosixServer.registerGitInvalidation(self, parsed.value.cwd);
 
         const home = std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch null;
         defer if (home) |home_path| std.heap.page_allocator.free(home_path);
         const kubeconfig = std.process.getEnvVarOwned(std.heap.page_allocator, "KUBECONFIG") catch null;
         defer if (kubeconfig) |value| std.heap.page_allocator.free(value);
-        try self.registerCloudInvalidation(home, kubeconfig);
+        try PosixServer.registerCloudInvalidation(self, home, kubeconfig);
 
         const ssh = std.process.getEnvVarOwned(std.heap.page_allocator, "SSH_CONNECTION") catch null;
         defer if (ssh) |value| std.heap.page_allocator.free(value);
@@ -343,10 +348,11 @@ const PosixServer = struct {
         defer if (arm_location) |value| std.heap.page_allocator.free(value);
         const azure_default_location = std.process.getEnvVarOwned(std.heap.page_allocator, "AZURE_DEFAULT_LOCATION") catch null;
         defer if (azure_default_location) |value| std.heap.page_allocator.free(value);
-        const user = std.process.getEnvVarOwned(std.heap.page_allocator, "USER") catch try std.heap.page_allocator.dupe(u8, "unknown");
+        const user_env_name = if (builtin.os.tag == .windows) "USERNAME" else "USER";
+        const user = std.process.getEnvVarOwned(std.heap.page_allocator, user_env_name) catch try std.heap.page_allocator.dupe(u8, "unknown");
         defer std.heap.page_allocator.free(user);
-        var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
-        const host = std.posix.gethostname(&host_buffer) catch "unknown";
+        const host = try currentHostnameAlloc(std.heap.page_allocator);
+        defer std.heap.page_allocator.free(host);
         const timestamp = std.time.timestamp();
         const reload_snapshot = self.reload_state.snapshot();
         const cache_context = RenderCacheContext{
@@ -366,7 +372,7 @@ const PosixServer = struct {
             .config_generation = reload_snapshot.config_generation,
             .plugin_generation = reload_snapshot.plugin_generation,
             .cache_rev = self.cache_rev,
-            .snapshot = self.renderCacheSnapshot(),
+            .snapshot = PosixServer.renderCacheSnapshot(self),
         };
         const cache_key = try renderPromptCacheKeyAlloc(std.heap.page_allocator, parsed.value, cache_context);
         defer std.heap.page_allocator.free(cache_key);
@@ -380,7 +386,7 @@ const PosixServer = struct {
                 const escaped_prompt = try json.escapeAlloc(std.heap.page_allocator, cached.output);
                 defer std.heap.page_allocator.free(escaped_prompt);
                 const elapsed_us = (nowNs() - start_ns) / std.time.ns_per_us;
-                self.recordRender(elapsed_us);
+                PosixServer.recordRender(self, elapsed_us);
                 return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"right_prompt\":null,\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, elapsed_us });
             }
         }
@@ -437,7 +443,7 @@ const PosixServer = struct {
         else
             try dispatcher.renderDefault(std.heap.page_allocator, cache_set, render_input);
         defer rendered.deinit(std.heap.page_allocator);
-        try self.logSlowWarning(rendered.slow_warning);
+        try PosixServer.logSlowWarning(self, rendered.slow_warning);
         const right_pipeline = try renderPipelineFromModuleNamesAlloc(std.heap.page_allocator, parsed.value.right_modules);
         defer if (right_pipeline) |pipeline| std.heap.page_allocator.free(pipeline);
         var rendered_right = if (right_pipeline) |pipeline|
@@ -445,7 +451,7 @@ const PosixServer = struct {
         else
             dispatcher.RenderedPrompt{ .prompt = try std.heap.page_allocator.dupe(u8, "") };
         defer rendered_right.deinit(std.heap.page_allocator);
-        try self.logSlowWarning(rendered_right.slow_warning);
+        try PosixServer.logSlowWarning(self, rendered_right.slow_warning);
 
         const escaped_request_id = try json.escapeAlloc(std.heap.page_allocator, parsed.value.request_id);
         defer std.heap.page_allocator.free(escaped_request_id);
@@ -454,10 +460,10 @@ const PosixServer = struct {
         const escaped_right_prompt = try json.escapeAlloc(std.heap.page_allocator, rendered_right.prompt);
         defer std.heap.page_allocator.free(escaped_right_prompt);
         const elapsed_us = (nowNs() - start_ns) / std.time.ns_per_us;
-        self.recordRender(elapsed_us);
+        PosixServer.recordRender(self, elapsed_us);
         if (use_prompt_cache and rendered.redraw_token == null and rendered_right.redraw_token == null) {
             var store_context = cache_context;
-            store_context.snapshot = self.renderCacheSnapshot();
+            store_context.snapshot = PosixServer.renderCacheSnapshot(self);
             const store_key = try renderPromptCacheKeyAlloc(std.heap.page_allocator, parsed.value, store_context);
             defer std.heap.page_allocator.free(store_key);
             try self.prompt_cache.put(prompt_cache_module, store_key, rendered.prompt, 0);
@@ -503,7 +509,7 @@ const PosixServer = struct {
     fn preexecResponse(self: *Server, request_payload: []const u8) ![]u8 {
         var parsed = try std.json.parseFromSlice(PreexecRequest, std.heap.page_allocator, request_payload, .{ .ignore_unknown_fields = true });
         defer parsed.deinit();
-        try self.appendCloudRequestAudit(parsed.value);
+        try PosixServer.appendCloudRequestAudit(self, parsed.value);
         const reason = risk_tier_module.explain(parsed.value.command, null);
         const escaped_pattern = try json.escapeAlloc(std.heap.page_allocator, if (reason.pattern.len == 0) "-" else reason.pattern);
         defer std.heap.page_allocator.free(escaped_pattern);
@@ -516,8 +522,8 @@ const PosixServer = struct {
         defer std.heap.page_allocator.free(escaped_iac_warning);
         const allow = parsed.value.force or destructive == null or reason.tier != .prod;
         if (destructive) |pattern| {
-            try self.appendProdGuardAudit(reason.tier, allow, parsed.value.force, pattern, parsed.value.command);
-            if (parsed.value.force) try self.logProdGuardForce(reason.tier, pattern);
+            try PosixServer.appendProdGuardAudit(self, reason.tier, allow, parsed.value.force, pattern, parsed.value.command);
+            if (parsed.value.force) try PosixServer.logProdGuardForce(self, reason.tier, pattern);
         }
         return std.fmt.allocPrint(
             std.heap.page_allocator,
@@ -649,7 +655,7 @@ const PosixServer = struct {
 
         if (parsed) |value| {
             if (std.mem.eql(u8, value.value.format, "prometheus")) {
-                return self.metricsPrometheusAlloc(allocator, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid, reload_snapshot.plugin_count);
+                return PosixServer.metricsPrometheusAlloc(self, allocator, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid, reload_snapshot.plugin_count);
             }
         }
 
@@ -674,7 +680,7 @@ const PosixServer = struct {
         const escaped_request_id = try json.escapeAlloc(allocator, request_id);
         defer allocator.free(escaped_request_id);
 
-        self.reloadConfigAndPlugins() catch |err| {
+        PosixServer.reloadConfigAndPlugins(self) catch |err| {
             const escaped_detail = try json.escapeAlloc(allocator, @errorName(err));
             defer allocator.free(escaped_detail);
             return std.fmt.allocPrint(
@@ -694,9 +700,9 @@ const PosixServer = struct {
 
     fn reloadConfigAndPlugins(self: *Server) !void {
         const allocator = self.reloadAllocator();
-        const config_source = try self.loadConfigSourceAlloc(allocator);
+        const config_source = try PosixServer.loadConfigSourceAlloc(self, allocator);
         errdefer allocator.free(config_source);
-        const plugin_names = try self.loadPluginNamesAlloc(allocator);
+        const plugin_names = try PosixServer.loadPluginNamesAlloc(self, allocator);
         errdefer plugin_host.freeNames(allocator, plugin_names);
 
         self.reload_state.replace(allocator, config_source, plugin_names);
@@ -753,23 +759,23 @@ const PosixServer = struct {
             .paths = paths[0..],
             .debounce_ms = git_scope.debounce_ms,
         });
-        try self.logInotifyLimitWarning();
+        try PosixServer.logInotifyLimitWarning(self);
     }
 
     fn registerCloudInvalidation(self: *Server, home: ?[]const u8, kubeconfig: ?[]const u8) !void {
         if (home) |home_path| {
             var gcp_scope = try cloud_ctx_module.gcpWatchScope(std.heap.page_allocator, home_path);
             defer gcp_scope.deinit(std.heap.page_allocator);
-            try self.registerCloudScope(gcp_scope.scope());
+            try PosixServer.registerCloudScope(self, gcp_scope.scope());
 
             var azure_scope = try cloud_ctx_module.azureWatchScope(std.heap.page_allocator, home_path);
             defer azure_scope.deinit(std.heap.page_allocator);
-            try self.registerCloudScope(azure_scope.scope());
+            try PosixServer.registerCloudScope(self, azure_scope.scope());
         }
 
         var kube_scope = (try cloud_ctx_module.kubeWatchScope(std.heap.page_allocator, kubeconfig, home)) orelse return;
         defer kube_scope.deinit(std.heap.page_allocator);
-        try self.registerCloudScope(kube_scope.scope());
+        try PosixServer.registerCloudScope(self, kube_scope.scope());
     }
 
     fn registerCloudScope(self: *Server, cloud_scope: cloud_ctx_module.Scope) !void {
@@ -784,7 +790,7 @@ const PosixServer = struct {
             .paths = paths[0..],
             .debounce_ms = cloud_scope.debounce_ms,
         });
-        try self.logInotifyLimitWarning();
+        try PosixServer.logInotifyLimitWarning(self);
     }
 
     fn logInotifyLimitWarning(self: *Server) !void {
@@ -816,6 +822,25 @@ const PosixServer = struct {
 const WindowsServer = struct {
     socket_path: []const u8,
     logger: ?*daemon_log.Logger = null,
+    connections: u64 = 0,
+    render_count: u64 = 0,
+    render_total_us: u64 = 0,
+    render_max_us: u64 = 0,
+    render_histogram: [render_histogram_buckets]u64 = [_]u64{0} ** render_histogram_buckets,
+    prompt_cache: daemon_cache.Store,
+    prompt_cache_hits: u64 = 0,
+    prompt_cache_misses: u64 = 0,
+    cache_rev: u64 = 0,
+    git_branch_cache: git_branch_module.Cache = .{},
+    language_versions_cache: language_versions_module.Cache = .{},
+    cloud_ctx_cache: cloud_ctx_module.Cache = .{},
+    fs_watcher: fsnotify.Watcher,
+    prod_guard_audit_home: ?[]const u8 = null,
+    cost_refresh_state: cost_refresh.State = .{},
+    reload_gpa: std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }) = .{},
+    reload_state: plugin_host.ReloadState = .{},
+    config_path_override: ?[]const u8 = null,
+    plugins_dir_override: ?[]const u8 = null,
 
     pub fn init(socket_path: []const u8) !WindowsServer {
         return initWithLogger(socket_path, null);
@@ -825,19 +850,120 @@ const WindowsServer = struct {
         return .{
             .socket_path = socket_path,
             .logger = logger,
+            .prompt_cache = daemon_cache.Store.initWithOptions(std.heap.page_allocator, .{ .max_entries = 1024, .max_age_ns = 5 * std.time.ns_per_min }),
+            .fs_watcher = fsnotify.Watcher.init(std.heap.page_allocator),
         };
     }
 
     pub fn deinit(self: *WindowsServer) void {
+        self.cost_refresh_state.stop();
+        self.prompt_cache.deinit();
+        self.git_branch_cache.deinit(std.heap.page_allocator);
+        self.language_versions_cache.deinit(std.heap.page_allocator);
+        self.cloud_ctx_cache.deinit(std.heap.page_allocator);
+        self.fs_watcher.deinit();
+        self.reload_state.deinit(self.reloadAllocator());
+        _ = self.reload_gpa.deinit();
         self.* = undefined;
     }
 
+    fn reloadAllocator(self: *WindowsServer) std.mem.Allocator {
+        return self.reload_gpa.allocator();
+    }
+
     pub fn serve(self: *WindowsServer, shutdown_requested: *const std.atomic.Value(bool), reload_requested: *std.atomic.Value(bool), stack_dump_requested: *std.atomic.Value(bool)) !void {
-        _ = shutdown_requested;
-        _ = reload_requested;
-        _ = stack_dump_requested;
-        if (self.logger) |logger| try logger.warn("windows_server_unimplemented", self.socket_path);
-        return error.UnsupportedSocketPlatform;
+        if (builtin.os.tag != .windows) return error.UnsupportedSocketPlatform;
+
+        try PosixServer.warmupCaches(self, std.heap.page_allocator);
+        try self.cost_refresh_state.start(std.heap.page_allocator);
+        while (!shutdown_requested.load(.seq_cst)) {
+            try PosixServer.consumeReloadSignal(self, reload_requested);
+            try PosixServer.consumeStackDumpSignal(self, stack_dump_requested);
+
+            const pipe = try self.createPipe();
+            const connected = waitForPipeClient(pipe, shutdown_requested) catch |err| {
+                win.CloseHandle(pipe);
+                return err;
+            };
+            if (!connected) {
+                win.CloseHandle(pipe);
+                continue;
+            }
+            try setPipeBlocking(pipe);
+
+            self.connections += 1;
+            const pipe_file = std.fs.File{ .handle = pipe };
+            self.handlePipe(pipe_file, shutdown_requested) catch |err| {
+                _ = win.kernel32.FlushFileBuffers(pipe);
+                _ = DisconnectNamedPipe(pipe);
+                win.CloseHandle(pipe);
+                return err;
+            };
+            _ = win.kernel32.FlushFileBuffers(pipe);
+            _ = DisconnectNamedPipe(pipe);
+            win.CloseHandle(pipe);
+        }
+    }
+
+    fn createPipe(self: *WindowsServer) !win.HANDLE {
+        if (builtin.os.tag != .windows) return error.UnsupportedSocketPlatform;
+
+        const pipe_name = try std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, self.socket_path);
+        defer std.heap.page_allocator.free(pipe_name);
+        const pipe = win.kernel32.CreateNamedPipeW(
+            pipe_name.ptr,
+            win.PIPE_ACCESS_DUPLEX,
+            win.PIPE_TYPE_BYTE | win.PIPE_READMODE_BYTE | win.PIPE_NOWAIT,
+            255,
+            64 * 1024,
+            64 * 1024,
+            @intCast(shutdown_poll_ms),
+            null,
+        );
+        if (pipe == win.INVALID_HANDLE_VALUE) return error.CreateNamedPipeFailed;
+        return pipe;
+    }
+
+    fn handlePipe(self: *WindowsServer, pipe: std.fs.File, shutdown_requested: ?*const std.atomic.Value(bool)) !void {
+        const request = try readFrameFromFileAlloc(std.heap.page_allocator, pipe);
+        defer std.heap.page_allocator.free(request);
+
+        if (std.mem.startsWith(u8, request, "metrics")) {
+            var response: [128]u8 = undefined;
+            const line = try std.fmt.bufPrint(&response, "{{\"connections\":{d}}}\n", .{self.connections});
+            try writeFrameFile(pipe, line);
+        } else if (isOpRequest(request, "metrics")) {
+            const response = try PosixServer.metricsResponseAlloc(self, std.heap.page_allocator, request);
+            defer std.heap.page_allocator.free(response);
+            try writeFrameFile(pipe, response);
+        } else if (std.mem.startsWith(u8, request, "health")) {
+            try writeFrameFile(pipe, "ok\n");
+        } else if (isOpRequest(request, "health")) {
+            const response = try healthResponseAlloc(std.heap.page_allocator, request, true);
+            defer std.heap.page_allocator.free(response);
+            try writeFrameFile(pipe, response);
+        } else if (isOpRequest(request, "version")) {
+            const response = try versionResponseAlloc(std.heap.page_allocator, request);
+            defer std.heap.page_allocator.free(response);
+            try writeFrameFile(pipe, response);
+        } else if (isOpRequest(request, "reload")) {
+            const response = try PosixServer.reloadResponseAlloc(self, std.heap.page_allocator, request);
+            defer std.heap.page_allocator.free(response);
+            try writeFrameFile(pipe, response);
+        } else if (isOpRequest(request, "subscribe")) {
+            const response = try unsupportedSubscribeResponseAlloc(std.heap.page_allocator, request);
+            defer std.heap.page_allocator.free(response);
+            try writeFrameFile(pipe, response);
+        } else if (isPreexecRequest(request)) {
+            const response = try PosixServer.preexecResponse(self, request);
+            defer std.heap.page_allocator.free(response);
+            try writeFrameFile(pipe, response);
+        } else {
+            _ = shutdown_requested;
+            const response = try PosixServer.renderResponse(self, request);
+            defer std.heap.page_allocator.free(response);
+            try writeFrameFile(pipe, response);
+        }
     }
 };
 
@@ -849,12 +975,80 @@ fn writeFrame(fd: std.posix.fd_t, payload: []const u8) !void {
     try subscribe.writeAll(fd, encoded);
 }
 
+fn writeFrameFile(file: std.fs.File, payload: []const u8) !void {
+    const encoded = try encodeFrameAlloc(std.heap.page_allocator, payload);
+    defer std.heap.page_allocator.free(encoded);
+    try writeAllFile(file, encoded);
+}
+
+fn readFrameFromFileAlloc(allocator: std.mem.Allocator, file: std.fs.File) ![]u8 {
+    var header: [header_bytes]u8 = undefined;
+    try readExactFile(file, &header);
+    const payload_len = std.mem.readInt(u32, &header, .big);
+    if (payload_len > max_frame_bytes) return error.Oversize;
+    const payload = try allocator.alloc(u8, payload_len);
+    errdefer allocator.free(payload);
+    try readExactFile(file, payload);
+    return payload;
+}
+
+fn writeAllFile(file: std.fs.File, bytes: []const u8) !void {
+    var remaining = bytes;
+    while (remaining.len > 0) {
+        const written = try file.write(remaining);
+        remaining = remaining[written..];
+    }
+}
+
+fn readExactFile(file: std.fs.File, buffer: []u8) !void {
+    var offset: usize = 0;
+    while (offset < buffer.len) {
+        const n = try file.read(buffer[offset..]);
+        if (n == 0) return error.ConnectionClosed;
+        offset += n;
+    }
+}
+
 fn encodeFrameAlloc(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
     if (payload.len > max_frame_bytes) return error.Oversize;
     const encoded = try allocator.alloc(u8, header_bytes + payload.len);
     std.mem.writeInt(u32, encoded[0..header_bytes], @as(u32, @intCast(payload.len)), .big);
     @memcpy(encoded[header_bytes..], payload);
     return encoded;
+}
+
+fn waitForPipeClient(pipe: win.HANDLE, shutdown_requested: *const std.atomic.Value(bool)) !bool {
+    if (builtin.os.tag != .windows) return error.UnsupportedSocketPlatform;
+
+    while (!shutdown_requested.load(.seq_cst)) {
+        if (ConnectNamedPipe(pipe, null) != 0) return true;
+        switch (win.GetLastError()) {
+            .PIPE_CONNECTED => return true,
+            .PIPE_LISTENING => std.Thread.sleep(@as(u64, @intCast(shutdown_poll_ms)) * std.time.ns_per_ms),
+            .NO_DATA => {
+                _ = DisconnectNamedPipe(pipe);
+                std.Thread.sleep(@as(u64, @intCast(shutdown_poll_ms)) * std.time.ns_per_ms);
+            },
+            else => return error.ConnectNamedPipeFailed,
+        }
+    }
+    return false;
+}
+
+fn setPipeBlocking(pipe: win.HANDLE) !void {
+    if (builtin.os.tag != .windows) return error.UnsupportedSocketPlatform;
+
+    var mode: win.DWORD = win.PIPE_READMODE_BYTE | win.PIPE_WAIT;
+    if (SetNamedPipeHandleState(pipe, &mode, null, null) == 0) return error.SetNamedPipeHandleStateFailed;
+}
+
+fn currentHostnameAlloc(allocator: std.mem.Allocator) ![]u8 {
+    if (builtin.os.tag == .windows) {
+        return std.process.getEnvVarOwned(allocator, "COMPUTERNAME") catch allocator.dupe(u8, "unknown");
+    }
+    var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
+    const host = std.posix.gethostname(&host_buffer) catch "unknown";
+    return allocator.dupe(u8, host);
 }
 
 fn traceFragmentAlloc(allocator: std.mem.Allocator, trace: ?[]const dispatcher.TraceEntry, enabled: bool) ![]u8 {
@@ -1096,6 +1290,18 @@ pub fn versionResponseAlloc(allocator: std.mem.Allocator, request: []const u8) !
     const escaped_request_id = try json.escapeAlloc(allocator, request_id);
     defer allocator.free(escaped_request_id);
     return std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"daemon\":\"{s}\",\"protocol\":{d}}}", .{ escaped_request_id, daemon_version, protocol_version });
+}
+
+fn unsupportedSubscribeResponseAlloc(allocator: std.mem.Allocator, request: []const u8) ![]u8 {
+    const request_id = try requestIdAlloc(allocator, request);
+    defer allocator.free(request_id);
+    const escaped_request_id = try json.escapeAlloc(allocator, request_id);
+    defer allocator.free(escaped_request_id);
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"v\":1,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_UNSUPPORTED\",\"message\":\"subscribe is not supported on Windows named pipes yet\",\"context\":{{\"op\":\"subscribe\"}}}}}}",
+        .{escaped_request_id},
+    );
 }
 
 fn defaultConfigPathAlloc(allocator: std.mem.Allocator) ![]u8 {

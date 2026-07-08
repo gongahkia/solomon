@@ -89,7 +89,7 @@ These are data-source caches, not entries in `src/daemon/cache.zig`.
 
 `src/daemon/fsnotify.zig` stores debounced watch registrations. It selects a backend label from the OS (`fsevents`, `inotify`, or `unsupported`), owns registered paths, deduplicates by module/cwd, and emits invalidations after the scope debounce window.
 
-`src/daemon/windows_fsnotify.zig` is a Windows POC for `ReadDirectoryChangesW`. It currently covers request planning, `FILE_NOTIFY_INFORMATION` parsing, and a Windows-only synchronous `ReadDirectoryChangesW` call wrapper. It is not wired into the daemon backend selector yet.
+`src/daemon/windows_fsnotify.zig` covers request planning, `FILE_NOTIFY_INFORMATION` parsing, and a Windows-only synchronous `ReadDirectoryChangesW` call wrapper. The daemon reports the Windows fsnotify backend on Windows; broader runtime event-loop integration remains tracked by the Windows native RFC.
 
 Current registered scopes:
 

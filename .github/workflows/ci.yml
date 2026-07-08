@@ -91,12 +91,7 @@ jobs:
 
       - run: zig build -Dtarget=x86_64-windows
       - shell: pwsh
-        run: |
-          . .\init\shisa.ps1
-          $path = shisa_socket_path
-          if ($path -notmatch '^\\\\\.\\pipe\\shisa-S-') { throw "unexpected pipe path: $path" }
-      - shell: pwsh
-        run: .\zig-out\bin\shisa.exe doctor
+        run: .\test\e2e\windows-native.ps1
 
   tui-policy:
     name: no interactive TUI without flag

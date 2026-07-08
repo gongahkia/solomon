@@ -130,7 +130,7 @@ The daemon enforces capabilities. A plugin that asks for `net = true` requires e
 ## 9. Platform coverage
 
 **v1.0:** macOS (FSEvents), Linux (inotify).
-**v1.x:** native Windows via ReadDirectoryChangesW, per-user named pipe `\\.\pipe\shisa-<sid>`, Job Object supervisor containment, and PowerShell hook support. Windows users may still use WSL until the native daemon transport is runtime-complete.
+**v1.x:** native Windows via ReadDirectoryChangesW, per-user named pipe `\\.\pipe\shisa-<sid>`, Job Object supervisor containment, and PowerShell hook support. Windows users may still use WSL while native CI coverage matures.
 
 ## 10. Performance targets (publicly benchmarked)
 

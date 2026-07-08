@@ -19,6 +19,25 @@ function shisa_config_dir
     end
 end
 
+function shisa_shell_env_unquote
+    set -l value "$argv[1]"
+    set -l len (string length -- "$value")
+    if test "$len" -ge 2
+        set -l first (string sub -s 1 -l 1 -- "$value")
+        set -l last (string sub -s "$len" -l 1 -- "$value")
+        if test "$first" = "'"; and test "$last" = "'"
+            set -l inner_len (math "$len - 2")
+            if test "$inner_len" -gt 0
+                set value (string sub -s 2 -l "$inner_len" -- "$value")
+                set value (string replace -a "'\\''" "'" -- "$value")
+            else
+                set value ""
+            end
+        end
+    end
+    printf '%s' "$value"
+end
+
 function shisa_load_shell_prefs
     set -l path (shisa_config_dir)/shell.env
     test -r "$path"; or return 0
@@ -28,7 +47,7 @@ function shisa_load_shell_prefs
         string match -q '*=*' -- "$line"; or continue
         set -l parts (string split -m1 = -- "$line")
         set -l key $parts[1]
-        set -l value $parts[2]
+        set -l value (shisa_shell_env_unquote "$parts[2]")
         switch "$key"
             case SHISA_CMD_COMPLETE_BELL SHISA_CMD_COMPLETE_BELL_MODE SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS SHISA_CMD_COMPLETE_BELL_MESSAGE
                 set -g $key "$value"

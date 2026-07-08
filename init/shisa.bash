@@ -77,6 +77,17 @@ shisa_config_dir() {
   fi
 }
 
+shisa_shell_env_unquote() {
+  local value=${1}
+  local marker="'\\''"
+  local quote="'"
+  if [[ ${#value} -ge 2 && ${value:0:1} == "${quote}" && ${value: -1} == "${quote}" ]]; then
+    value=${value:1:${#value}-2}
+    value=${value//${marker}/${quote}}
+  fi
+  printf '%s' "${value}"
+}
+
 shisa_load_shell_prefs() {
   local path line key value
   path="$(shisa_config_dir)/shell.env"
@@ -84,7 +95,7 @@ shisa_load_shell_prefs() {
   while IFS= read -r line || [[ -n ${line} ]]; do
     [[ -n ${line} && ${line:0:1} != "#" && ${line} == *=* ]] || continue
     key=${line%%=*}
-    value=${line#*=}
+    value=$(shisa_shell_env_unquote "${line#*=}")
     case ${key} in
       SHISA_CMD_COMPLETE_BELL|SHISA_CMD_COMPLETE_BELL_MODE|SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS|SHISA_CMD_COMPLETE_BELL_MESSAGE)
         printf -v "${key}" '%s' "${value}"
@@ -117,7 +128,9 @@ SHISA_A11Y=${SHISA_A11Y:-0}
 SHISA_CMD_COMPLETE_BELL=${SHISA_CMD_COMPLETE_BELL:-0}
 SHISA_CMD_COMPLETE_BELL_MODE=${SHISA_CMD_COMPLETE_BELL_MODE:-bell}
 SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS=${SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS:-10000}
-SHISA_CMD_COMPLETE_BELL_MESSAGE=${SHISA_CMD_COMPLETE_BELL_MESSAGE:-shisa: command complete}
+if [[ ! ${SHISA_CMD_COMPLETE_BELL_MESSAGE+x} ]]; then
+  SHISA_CMD_COMPLETE_BELL_MESSAGE="shisa: command complete"
+fi
 SHISA_LONG_RUNNING=${SHISA_LONG_RUNNING:-0}
 SHISA_LONG_RUNNING_THRESHOLD_SECONDS=${SHISA_LONG_RUNNING_THRESHOLD_SECONDS:-30}
 SHISA_LONG_RUNNING_MESSAGE=${SHISA_LONG_RUNNING_MESSAGE:-shisa: command still running}

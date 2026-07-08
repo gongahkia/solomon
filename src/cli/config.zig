@@ -138,15 +138,22 @@ fn shellPreferencesPathAlloc(allocator: std.mem.Allocator, config_path: []const 
 }
 
 fn renderShellPreferencesAlloc(allocator: std.mem.Allocator, preferences: ShellPreferences) ![]u8 {
+    const bell_value = try std.fmt.allocPrint(allocator, "{d}", .{@intFromBool(preferences.cmd_complete_bell)});
+    defer allocator.free(bell_value);
+    const threshold_value = try std.fmt.allocPrint(allocator, "{d}", .{preferences.cmd_complete_bell_threshold_ms});
+    defer allocator.free(threshold_value);
+    const quoted_bell = try cli_util.shellSingleQuoteAlloc(allocator, bell_value);
+    defer allocator.free(quoted_bell);
+    const quoted_mode = try cli_util.shellSingleQuoteAlloc(allocator, preferences.cmd_complete_bell_mode);
+    defer allocator.free(quoted_mode);
+    const quoted_threshold = try cli_util.shellSingleQuoteAlloc(allocator, threshold_value);
+    defer allocator.free(quoted_threshold);
+    const quoted_message = try cli_util.shellSingleQuoteAlloc(allocator, preferences.cmd_complete_bell_message);
+    defer allocator.free(quoted_message);
     return std.fmt.allocPrint(
         allocator,
-        "SHISA_CMD_COMPLETE_BELL={d}\nSHISA_CMD_COMPLETE_BELL_MODE={s}\nSHISA_CMD_COMPLETE_BELL_THRESHOLD_MS={d}\nSHISA_CMD_COMPLETE_BELL_MESSAGE={s}\n",
-        .{
-            @intFromBool(preferences.cmd_complete_bell),
-            preferences.cmd_complete_bell_mode,
-            preferences.cmd_complete_bell_threshold_ms,
-            preferences.cmd_complete_bell_message,
-        },
+        "SHISA_CMD_COMPLETE_BELL={s}\nSHISA_CMD_COMPLETE_BELL_MODE={s}\nSHISA_CMD_COMPLETE_BELL_THRESHOLD_MS={s}\nSHISA_CMD_COMPLETE_BELL_MESSAGE={s}\n",
+        .{ quoted_bell, quoted_mode, quoted_threshold, quoted_message },
     );
 }
 
@@ -395,10 +402,22 @@ test "init args render shell notification preferences" {
     const source = try renderShellPreferencesAlloc(std.testing.allocator, prefs);
     defer std.testing.allocator.free(source);
     try std.testing.expectEqualStrings(
-        "SHISA_CMD_COMPLETE_BELL=1\nSHISA_CMD_COMPLETE_BELL_MODE=osc9\nSHISA_CMD_COMPLETE_BELL_THRESHOLD_MS=2500\nSHISA_CMD_COMPLETE_BELL_MESSAGE=done\n",
+        "SHISA_CMD_COMPLETE_BELL='1'\nSHISA_CMD_COMPLETE_BELL_MODE='osc9'\nSHISA_CMD_COMPLETE_BELL_THRESHOLD_MS='2500'\nSHISA_CMD_COMPLETE_BELL_MESSAGE='done'\n",
         source,
     );
     try std.testing.expectError(error.InvalidCmdCompleteBellMode, parseInitArgs(&.{ "--cmd-complete-bell-mode", "bad" }));
+}
+
+test "init shell preferences quote metacharacter messages" {
+    const prefs: ShellPreferences = .{
+        .cmd_complete_bell = true,
+        .cmd_complete_bell_mode = "terminal",
+        .cmd_complete_bell_threshold_ms = 1,
+        .cmd_complete_bell_message = "it's $(done); ok ✓",
+    };
+    const source = try renderShellPreferencesAlloc(std.testing.allocator, prefs);
+    defer std.testing.allocator.free(source);
+    try std.testing.expect(std.mem.indexOf(u8, source, "SHISA_CMD_COMPLETE_BELL_MESSAGE='it'\\''s $(done); ok ✓'\n") != null);
 }
 
 test "explain output dumps pipeline" {

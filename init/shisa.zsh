@@ -28,6 +28,22 @@ shisa_config_dir() {
   fi
 }
 
+shisa_shell_env_unquote() {
+  emulate -L zsh
+  local value=${1}
+  local marker="'\\''"
+  local quote="'"
+  if (( ${#value} >= 2 )) && [[ ${value[1]} == ${quote} && ${value[-1]} == ${quote} ]]; then
+    if (( ${#value} == 2 )); then
+      value=
+    else
+      value=${value[2,-2]}
+    fi
+    value=${value//$marker/$quote}
+  fi
+  print -rn -- "${value}"
+}
+
 shisa_load_shell_prefs() {
   emulate -L zsh
   local path
@@ -37,7 +53,7 @@ shisa_load_shell_prefs() {
   while IFS= read -r line || [[ -n ${line} ]]; do
     [[ -n ${line} && ${line[1]} != '#' && ${line} == *=* ]] || continue
     key=${line%%=*}
-    value=${line#*=}
+    value=$(shisa_shell_env_unquote "${line#*=}")
     case ${key} in
       SHISA_CMD_COMPLETE_BELL|SHISA_CMD_COMPLETE_BELL_MODE|SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS|SHISA_CMD_COMPLETE_BELL_MESSAGE)
         typeset -g "${key}=${value}"
@@ -65,7 +81,9 @@ typeset -g SHISA_A11Y=${SHISA_A11Y:-0}
 typeset -g SHISA_CMD_COMPLETE_BELL=${SHISA_CMD_COMPLETE_BELL:-0}
 typeset -g SHISA_CMD_COMPLETE_BELL_MODE=${SHISA_CMD_COMPLETE_BELL_MODE:-bell}
 typeset -g SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS=${SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS:-10000}
-typeset -g SHISA_CMD_COMPLETE_BELL_MESSAGE=${SHISA_CMD_COMPLETE_BELL_MESSAGE:-shisa: command complete}
+if (( ! ${+SHISA_CMD_COMPLETE_BELL_MESSAGE} )); then
+  typeset -g SHISA_CMD_COMPLETE_BELL_MESSAGE="shisa: command complete"
+fi
 typeset -g SHISA_LONG_RUNNING=${SHISA_LONG_RUNNING:-0}
 typeset -g SHISA_LONG_RUNNING_THRESHOLD_SECONDS=${SHISA_LONG_RUNNING_THRESHOLD_SECONDS:-30}
 typeset -g SHISA_LONG_RUNNING_MESSAGE=${SHISA_LONG_RUNNING_MESSAGE:-shisa: command still running}

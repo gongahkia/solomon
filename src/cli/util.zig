@@ -139,3 +139,36 @@ pub fn gitOutputAlloc(allocator: std.mem.Allocator, cwd_path: []const u8, argv: 
     }
     return result.stdout;
 }
+
+/// quotes a byte slice as one POSIX shell single-quoted word.
+/// value is borrowed; caller owns the returned slice and must free it with allocator.
+/// errors: OutOfMemory on allocation failure.
+pub fn shellSingleQuoteAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try out.append(allocator, '\'');
+    for (value) |byte| {
+        if (byte == '\'') {
+            try out.appendSlice(allocator, "'\\''");
+        } else {
+            try out.append(allocator, byte);
+        }
+    }
+    try out.append(allocator, '\'');
+    return out.toOwnedSlice(allocator);
+}
+
+test "shell single quote escapes metacharacters" {
+    inline for (.{
+        .{ "", "''" },
+        .{ "`date`", "'`date`'" },
+        .{ "$(touch /tmp/pwned)", "'$(touch /tmp/pwned)'" },
+        .{ "a&b|c;d>e<f", "'a&b|c;d>e<f'" },
+        .{ "it's done", "'it'\\''s done'" },
+        .{ "Done ✓", "'Done ✓'" },
+    }) |case| {
+        const quoted = try shellSingleQuoteAlloc(std.testing.allocator, case[0]);
+        defer std.testing.allocator.free(quoted);
+        try std.testing.expectEqualStrings(case[1], quoted);
+    }
+}

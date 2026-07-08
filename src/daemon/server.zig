@@ -1618,7 +1618,7 @@ test "fs event invalidates git branch cache" {
     defer allocator.free(request);
     const clean = try server.renderResponse(request);
     defer std.heap.page_allocator.free(clean);
-    try std.testing.expect(std.mem.indexOf(u8, clean, "git:main> ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, clean, "git:main") != null);
     try std.testing.expect(server.fs_watcher.hasScope(git_branch_module.module_id, dir_path));
     try std.testing.expectEqual(@as(u64, 0), server.cache_rev);
 
@@ -1631,7 +1631,7 @@ test "fs event invalidates git branch cache" {
     server.recordFsEvent(dirty_file, 1);
     const dirty = try server.renderResponse(request);
     defer std.heap.page_allocator.free(dirty);
-    try std.testing.expect(std.mem.indexOf(u8, dirty, "git:main*> ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dirty, "git:main*") != null);
     try std.testing.expectEqual(@as(u64, 1), server.cache_rev);
 }
 

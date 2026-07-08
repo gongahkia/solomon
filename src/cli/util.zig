@@ -139,24 +139,3 @@ pub fn gitOutputAlloc(allocator: std.mem.Allocator, cwd_path: []const u8, argv: 
     }
     return result.stdout;
 }
-
-/// escapes a UTF-8 byte slice for JSON string content.
-/// value is borrowed; caller owns the returned slice and must free it with allocator.
-/// errors: OutOfMemory on allocation failure.
-pub fn jsonEscapeAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(allocator);
-
-    for (value) |byte| {
-        switch (byte) {
-            '"' => try out.appendSlice(allocator, "\\\""),
-            '\\' => try out.appendSlice(allocator, "\\\\"),
-            '\n' => try out.appendSlice(allocator, "\\n"),
-            '\r' => try out.appendSlice(allocator, "\\r"),
-            '\t' => try out.appendSlice(allocator, "\\t"),
-            else => try out.append(allocator, byte),
-        }
-    }
-
-    return out.toOwnedSlice(allocator);
-}

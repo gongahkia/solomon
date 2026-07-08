@@ -1,5 +1,6 @@
 const std = @import("std");
 const cli_util = @import("util.zig");
+const daemon_json = @import("../daemon/json.zig");
 const plugin_lua = @import("../plugin/lua.zig");
 const plugin_manifest = @import("../plugin/manifest.zig");
 
@@ -418,16 +419,16 @@ fn signedPluginBundleMetadataAlloc(allocator: std.mem.Allocator, manifest: plugi
 
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
-    const escaped_name = try cli_util.jsonEscapeAlloc(allocator, manifest.name);
+    const escaped_name = try daemon_json.escapeAlloc(allocator, manifest.name);
     defer allocator.free(escaped_name);
-    const escaped_version = try cli_util.jsonEscapeAlloc(allocator, manifest.version);
+    const escaped_version = try daemon_json.escapeAlloc(allocator, manifest.version);
     defer allocator.free(escaped_version);
     try cli_util.appendFmt(allocator, &out,
         \\{{"format":"shisa-plugin-bundle-v1","name":"{s}","version":"{s}","files":[
     , .{ escaped_name, escaped_version });
     for (files, 0..) |file, index| {
         if (index != 0) try out.append(allocator, ',');
-        const escaped_path = try cli_util.jsonEscapeAlloc(allocator, file.path);
+        const escaped_path = try daemon_json.escapeAlloc(allocator, file.path);
         defer allocator.free(escaped_path);
         try cli_util.appendFmt(allocator, &out, "{{\"path\":\"{s}\",\"size\":{d},\"sha256\":\"{s}\"}}", .{ escaped_path, file.size, file.sha256_hex[0..] });
     }

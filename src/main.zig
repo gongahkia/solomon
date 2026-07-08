@@ -9,6 +9,7 @@ const cli_theme = @import("cli/theme.zig");
 const cli_util = @import("cli/util.zig");
 const cli_worktree = @import("cli/worktree.zig");
 const daemon_cache = @import("daemon/cache.zig");
+const daemon_json = @import("daemon/json.zig");
 const dispatcher = @import("daemon/dispatcher.zig");
 const client = @import("shisa-client.zig");
 const cloud_ctx_module = @import("daemon/modules/cloud_ctx.zig");
@@ -639,11 +640,11 @@ fn cloudPreexec(allocator: std.mem.Allocator, config: CloudPreexec) !void {
 fn buildCloudPreexecPayload(allocator: std.mem.Allocator, config: CloudPreexec) ![]u8 {
     const cwd = try std.fs.cwd().realpathAlloc(allocator, ".");
     defer allocator.free(cwd);
-    const escaped_cwd = try cli_util.jsonEscapeAlloc(allocator, cwd);
+    const escaped_cwd = try daemon_json.escapeAlloc(allocator, cwd);
     defer allocator.free(escaped_cwd);
-    const escaped_shell = try cli_util.jsonEscapeAlloc(allocator, config.shell);
+    const escaped_shell = try daemon_json.escapeAlloc(allocator, config.shell);
     defer allocator.free(escaped_shell);
-    const escaped_command = try cli_util.jsonEscapeAlloc(allocator, config.command);
+    const escaped_command = try daemon_json.escapeAlloc(allocator, config.command);
     defer allocator.free(escaped_command);
     return std.fmt.allocPrint(
         allocator,
@@ -3444,7 +3445,7 @@ fn cacheClearOutputAlloc(allocator: std.mem.Allocator, path: []const u8, module:
         } else {
             try store.saveToFile(path);
         }
-        const escaped_module = try cli_util.jsonEscapeAlloc(allocator, module_id);
+        const escaped_module = try daemon_json.escapeAlloc(allocator, module_id);
         defer allocator.free(escaped_module);
         return std.fmt.allocPrint(allocator, "{{\"cleared\":true,\"module\":\"{s}\",\"entries_before\":{d},\"entries_after\":{d}}}\n", .{ escaped_module, before, store.count() });
     }
@@ -4074,9 +4075,9 @@ fn buildPromptPayload(allocator: std.mem.Allocator, config: PromptConfig, cwd: [
 }
 
 fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config: PromptConfig, cwd: []const u8, module_options: PromptModuleOptions) ![]u8 {
-    const escaped_cwd = try cli_util.jsonEscapeAlloc(allocator, cwd);
+    const escaped_cwd = try daemon_json.escapeAlloc(allocator, cwd);
     defer allocator.free(escaped_cwd);
-    const escaped_shell = try cli_util.jsonEscapeAlloc(allocator, config.shell);
+    const escaped_shell = try daemon_json.escapeAlloc(allocator, config.shell);
     defer allocator.free(escaped_shell);
     const modules_json = try promptModulesJsonAlloc(allocator, module_options.modules);
     defer allocator.free(modules_json);
@@ -4084,7 +4085,7 @@ fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config: Pro
     defer allocator.free(right_modules_json);
     const tmux_pane = std.process.getEnvVarOwned(allocator, "TMUX_PANE") catch null;
     defer if (tmux_pane) |value| allocator.free(value);
-    const escaped_tmux_pane = try cli_util.jsonEscapeAlloc(allocator, tmux_pane orelse "");
+    const escaped_tmux_pane = try daemon_json.escapeAlloc(allocator, tmux_pane orelse "");
     defer allocator.free(escaped_tmux_pane);
     const request_id = try std.fmt.allocPrint(allocator, "cli-{x}", .{std.crypto.random.int(u64)});
     defer allocator.free(request_id);

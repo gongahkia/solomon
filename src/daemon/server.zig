@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 const cdhint_module = @import("modules/cdhint.zig");
 const cloud_ctx_module = @import("modules/cloud_ctx.zig");
 const dispatcher = @import("dispatcher.zig");
-const cost_glance_module = @import("modules/cost_glance.zig");
 const cwd_module = @import("modules/cwd.zig");
 const git_branch_module = @import("modules/git_branch.zig");
 const iac_workspace_module = @import("modules/iac_workspace.zig");
@@ -17,20 +16,17 @@ const warmup = @import("warmup.zig");
 const json = @import("json.zig");
 const fsnotify = @import("fsnotify.zig");
 const daemon_cache = @import("cache.zig");
-const plugin_lua = @import("plugin_lua");
-const plugin_capability = plugin_lua.capability;
-const plugin_manifest = plugin_lua.manifest;
+const cost_refresh = @import("cost_refresh.zig");
+const subscribe = @import("subscribe.zig");
+const plugin_host = @import("plugin_host.zig");
 
 const header_bytes = 4;
 const max_frame_bytes = 1024 * 1024;
 const max_config_bytes = 1024 * 1024;
-const default_subscribe_backpressure_limit = 16;
-const max_subscribe_backpressure_limit = 1024;
 pub const graceful_shutdown_timeout_ms: i64 = 5000;
 const shutdown_poll_ms: i32 = 100;
 const render_histogram_buckets = 5;
 const prompt_cache_module = "render_prompt";
-const plugin_slow_strike_limit: u8 = 3;
 pub const daemon_version = "0.1.0-dev";
 pub const protocol_version: u32 = 1;
 const default_config_text =
@@ -87,19 +83,6 @@ const MetricsRequest = struct {
     format: []const u8 = "json",
 };
 
-const SubscribeRequest = struct {
-    v: u32 = 1,
-    op: []const u8 = "subscribe",
-    request_id: []const u8 = "",
-    topics: []const []const u8 = &.{},
-    backpressure_limit: u16 = default_subscribe_backpressure_limit,
-};
-
-const SubscribeCommand = struct {
-    op: []const u8 = "",
-    kind: []const u8 = "",
-};
-
 const RenderCacheSnapshot = struct {
     git_valid: bool = false,
     git_in_flight: bool = false,
@@ -134,115 +117,6 @@ const RenderCacheContext = struct {
     snapshot: RenderCacheSnapshot = .{},
 };
 
-const TopicRef = struct {
-    topic: []u8,
-    count: usize,
-};
-
-const SubscriptionQueue = struct {
-    allocator: std.mem.Allocator,
-    max_events: usize,
-    events: std.ArrayList([]u8) = .empty,
-    dropped: u64 = 0,
-
-    fn init(allocator: std.mem.Allocator, max_events: usize) SubscriptionQueue {
-        return .{
-            .allocator = allocator,
-            .max_events = @max(max_events, 1),
-        };
-    }
-
-    fn deinit(self: *SubscriptionQueue) void {
-        for (self.events.items) |event| self.allocator.free(event);
-        self.events.deinit(self.allocator);
-        self.* = undefined;
-    }
-
-    fn pushOwned(self: *SubscriptionQueue, event: []u8) !bool {
-        if (self.events.items.len >= self.max_events) {
-            self.allocator.free(event);
-            self.dropped += 1;
-            return false;
-        }
-        errdefer self.allocator.free(event);
-        try self.events.append(self.allocator, event);
-        return true;
-    }
-
-    fn flush(self: *SubscriptionQueue, fd: std.posix.fd_t) !void {
-        for (self.events.items) |event| {
-            try writeAll(fd, event);
-            self.allocator.free(event);
-        }
-        self.events.clearRetainingCapacity();
-    }
-};
-
-const ReloadState = struct {
-    mutex: std.Thread.Mutex = .{},
-    config_generation: u64 = 0,
-    plugin_generation: u64 = 0,
-    config_source: []u8 = &.{},
-    plugin_names: [][]u8 = &.{},
-
-    const Snapshot = struct {
-        config_generation: u64 = 0,
-        plugin_generation: u64 = 0,
-        plugin_count: usize = 0,
-    };
-
-    fn deinit(self: *ReloadState, allocator: std.mem.Allocator) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        allocator.free(self.config_source);
-        freeStringList(allocator, self.plugin_names);
-        self.config_source = &.{};
-        self.plugin_names = &.{};
-        self.config_generation = 0;
-        self.plugin_generation = 0;
-    }
-
-    fn snapshot(self: *ReloadState) Snapshot {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        return .{
-            .config_generation = self.config_generation,
-            .plugin_generation = self.plugin_generation,
-            .plugin_count = self.plugin_names.len,
-        };
-    }
-
-    fn replace(self: *ReloadState, allocator: std.mem.Allocator, config_source: []u8, plugin_names: [][]u8) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        allocator.free(self.config_source);
-        freeStringList(allocator, self.plugin_names);
-        self.config_source = config_source;
-        self.plugin_names = plugin_names;
-        self.config_generation += 1;
-        self.plugin_generation += 1;
-    }
-
-    fn replacePluginNames(self: *ReloadState, allocator: std.mem.Allocator, plugin_names: [][]u8) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        freeStringList(allocator, self.plugin_names);
-        self.plugin_names = plugin_names;
-    }
-
-    fn copyConfigSourceAlloc(self: *ReloadState, allocator: std.mem.Allocator) ![]u8 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        return allocator.dupe(u8, self.config_source);
-    }
-
-    fn copyPluginNamesAlloc(self: *ReloadState, allocator: std.mem.Allocator) ![][]u8 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        return dupeStringList(allocator, self.plugin_names);
-    }
-};
-
 const PosixServer = struct {
     socket_path: []const u8,
     listener: std.net.Server,
@@ -261,11 +135,9 @@ const PosixServer = struct {
     cloud_ctx_cache: cloud_ctx_module.Cache = .{},
     fs_watcher: fsnotify.Watcher,
     prod_guard_audit_home: ?[]const u8 = null,
-    cost_refresh_shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    cost_refresh_thread: ?std.Thread = null,
-    cost_refresh_home: ?[]u8 = null,
+    cost_refresh_state: cost_refresh.State = .{},
     reload_gpa: std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }) = .{},
-    reload_state: ReloadState = .{},
+    reload_state: plugin_host.ReloadState = .{},
     config_path_override: ?[]const u8 = null,
     plugins_dir_override: ?[]const u8 = null,
 
@@ -300,7 +172,7 @@ const PosixServer = struct {
     }
 
     pub fn deinit(self: *Server) void {
-        self.stopCostRefresh();
+        self.cost_refresh_state.stop();
         self.prompt_cache.deinit();
         self.git_branch_cache.deinit(std.heap.page_allocator);
         self.language_versions_cache.deinit(std.heap.page_allocator);
@@ -319,7 +191,7 @@ const PosixServer = struct {
 
     pub fn serve(self: *Server, shutdown_requested: *const std.atomic.Value(bool), reload_requested: *std.atomic.Value(bool), stack_dump_requested: *std.atomic.Value(bool)) !void {
         try self.warmupCaches(std.heap.page_allocator);
-        try self.startCostRefresh(std.heap.page_allocator);
+        try self.cost_refresh_state.start(std.heap.page_allocator);
         while (!shutdown_requested.load(.seq_cst)) {
             try self.consumeReloadSignal(reload_requested);
             try self.consumeStackDumpSignal(stack_dump_requested);
@@ -360,43 +232,6 @@ const PosixServer = struct {
         };
         if (self.logger) |logger| {
             try logger.info("reloaded", "config and plugins reloaded");
-        }
-    }
-
-    fn startCostRefresh(self: *Server, allocator: std.mem.Allocator) !void {
-        if (self.cost_refresh_thread != null) return;
-        const home = std.process.getEnvVarOwned(allocator, "HOME") catch |err| switch (err) {
-            error.EnvironmentVariableNotFound => null,
-            else => return err,
-        };
-        self.cost_refresh_home = home;
-        self.cost_refresh_shutdown.store(false, .seq_cst);
-        self.cost_refresh_thread = try std.Thread.spawn(.{}, costRefreshThreadMain, .{self});
-    }
-
-    fn stopCostRefresh(self: *Server) void {
-        self.cost_refresh_shutdown.store(true, .seq_cst);
-        if (self.cost_refresh_thread) |thread| {
-            thread.join();
-            self.cost_refresh_thread = null;
-        }
-        if (self.cost_refresh_home) |home| {
-            std.heap.page_allocator.free(home);
-            self.cost_refresh_home = null;
-        }
-    }
-
-    fn costRefreshLoop(self: *Server) void {
-        var next_refresh_ns: u64 = 0;
-        const refresh_interval_ns = costRefreshIntervalNs();
-        const sleep_ns = @min(refresh_interval_ns, 250 * std.time.ns_per_ms);
-        while (!self.cost_refresh_shutdown.load(.seq_cst)) {
-            const now_ns = nowNs();
-            if (now_ns >= next_refresh_ns) {
-                _ = cost_glance_module.refreshCacheFromEnvironment(std.heap.page_allocator, self.cost_refresh_home, std.time.timestamp()) catch {};
-                next_refresh_ns = now_ns + refresh_interval_ns;
-            }
-            std.Thread.sleep(sleep_ns);
         }
     }
 
@@ -457,7 +292,7 @@ const PosixServer = struct {
             defer std.heap.page_allocator.free(response);
             try writeFrame(connection.stream.handle, response);
         } else if (isOpRequest(request, "subscribe")) {
-            try self.handleSubscribeConnection(connection.stream.handle, request, shutdown_requested);
+            try subscribe.handleConnection(std.heap.page_allocator, connection.stream.handle, request, shutdown_requested);
         } else if (isPreexecRequest(request)) {
             const response = try self.preexecResponse(request);
             defer std.heap.page_allocator.free(response);
@@ -857,67 +692,20 @@ const PosixServer = struct {
         );
     }
 
-    fn handleSubscribeConnection(self: *Server, fd: std.posix.fd_t, request: []const u8, shutdown_requested: ?*const std.atomic.Value(bool)) !void {
-        _ = self;
-        var parsed = try std.json.parseFromSlice(SubscribeRequest, std.heap.page_allocator, request, .{ .ignore_unknown_fields = true });
-        defer parsed.deinit();
-
-        const topic_refs = try topicRefsAlloc(std.heap.page_allocator, parsed.value.topics);
-        defer freeTopicRefs(std.heap.page_allocator, topic_refs);
-        const snapshot = try subscribeSnapshotAlloc(std.heap.page_allocator, parsed.value.request_id, topic_refs);
-        defer std.heap.page_allocator.free(snapshot);
-        try writeAll(fd, snapshot);
-
-        var queue = SubscriptionQueue.init(std.heap.page_allocator, subscribeBackpressureLimit(parsed.value.backpressure_limit));
-        defer queue.deinit();
-        var sequence: u64 = 0;
-        while (true) {
-            const maybe_line = line: {
-                if (shutdown_requested) |flag| {
-                    break :line readNdjsonLineUntilShutdownAlloc(std.heap.page_allocator, fd, 64 * 1024, flag) catch |err| switch (err) {
-                        error.ConnectionClosed => return,
-                        else => return err,
-                    };
-                }
-                break :line @as(?[]u8, readNdjsonLineAlloc(std.heap.page_allocator, fd, 64 * 1024) catch |err| switch (err) {
-                    error.ConnectionClosed => return,
-                    else => return err,
-                });
-            };
-            const line = maybe_line orelse return;
-            errdefer std.heap.page_allocator.free(line);
-            defer std.heap.page_allocator.free(line);
-            if (std.mem.trim(u8, line, " \t\r\n").len == 0) continue;
-            if (!subscribeCommandAllowed(line)) {
-                const readonly = try subscribeReadonlyErrorAlloc(std.heap.page_allocator, parsed.value.request_id, line);
-                defer std.heap.page_allocator.free(readonly);
-                try writeAll(fd, readonly);
-                continue;
-            }
-            sequence += 1;
-            const delta_topic = if (topic_refs.len == 0) "subscription" else topic_refs[0].topic;
-            const delta = try subscribeDeltaAlloc(std.heap.page_allocator, parsed.value.request_id, delta_topic, sequence);
-            _ = try queue.pushOwned(delta);
-            const heartbeat = try subscribeHeartbeatAlloc(std.heap.page_allocator, parsed.value.request_id);
-            _ = try queue.pushOwned(heartbeat);
-            try queue.flush(fd);
-        }
-    }
-
     fn reloadConfigAndPlugins(self: *Server) !void {
         const allocator = self.reloadAllocator();
         const config_source = try self.loadConfigSourceAlloc(allocator);
         errdefer allocator.free(config_source);
         const plugin_names = try self.loadPluginNamesAlloc(allocator);
-        errdefer freeStringList(allocator, plugin_names);
+        errdefer plugin_host.freeNames(allocator, plugin_names);
 
         self.reload_state.replace(allocator, config_source, plugin_names);
     }
 
     fn setReloadPluginNamesForTest(self: *Server, names: []const []const u8) !void {
         const allocator = self.reloadAllocator();
-        const plugin_names = try dupeStringList(allocator, names);
-        errdefer freeStringList(allocator, plugin_names);
+        const plugin_names = try plugin_host.dupeNames(allocator, names);
+        errdefer plugin_host.freeNames(allocator, plugin_names);
         self.reload_state.replacePluginNames(allocator, plugin_names);
     }
 
@@ -930,54 +718,7 @@ const PosixServer = struct {
     fn loadPluginNamesAlloc(self: *Server, allocator: std.mem.Allocator) ![][]u8 {
         const plugins_dir = if (self.plugins_dir_override) |override| try allocator.dupe(u8, override) else try defaultPluginsDirPathAlloc(allocator);
         defer allocator.free(plugins_dir);
-        const disabled_path = try pluginStatePathForPluginsDirAlloc(allocator, plugins_dir, "plugins.disabled");
-        defer allocator.free(disabled_path);
-        const strikes_path = try pluginStatePathForPluginsDirAlloc(allocator, plugins_dir, "plugins.slow-strikes");
-        defer allocator.free(strikes_path);
-
-        var dir = std.fs.openDirAbsolute(plugins_dir, .{ .iterate = true }) catch |err| switch (err) {
-            error.FileNotFound => return allocator.alloc([]u8, 0),
-            else => return err,
-        };
-        defer dir.close();
-
-        var names: std.ArrayList([]u8) = .empty;
-        errdefer deinitStringArrayList(allocator, &names);
-        var it = dir.iterate();
-        while (try it.next()) |entry| {
-            if (entry.kind != .directory) continue;
-            if (!plugin_manifest.isValidPluginName(entry.name)) continue;
-            if (try pluginNameListed(allocator, disabled_path, entry.name)) continue;
-            const plugin_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ plugins_dir, entry.name });
-            defer allocator.free(plugin_dir);
-            const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{plugin_dir});
-            defer allocator.free(manifest_path);
-            const source = std.fs.cwd().readFileAlloc(allocator, manifest_path, max_config_bytes) catch |err| switch (err) {
-                error.FileNotFound => continue,
-                else => return err,
-            };
-            defer allocator.free(source);
-
-            var runtime = try plugin_lua.Runtime.initSandboxedWithOptions(allocator, .{ .require_root = plugin_dir });
-            defer runtime.deinit();
-            var loaded = runtime.loadManifestStrict(source) catch |err| switch (err) {
-                error.LuaCpuBudgetExceeded => {
-                    try recordPluginSlowStrike(allocator, strikes_path, disabled_path, entry.name);
-                    continue;
-                },
-                else => return err,
-            };
-            defer loaded.deinit(allocator);
-            try clearPluginSlowStrike(allocator, strikes_path, loaded.manifest.name);
-            if (try pluginNameListed(allocator, disabled_path, loaded.manifest.name)) continue;
-            try names.append(allocator, try allocator.dupe(u8, loaded.manifest.name));
-        }
-
-        return names.toOwnedSlice(allocator);
-    }
-
-    fn checkPluginHostApiCall(capabilities: plugin_manifest.Capabilities, context: plugin_capability.Context, call: plugin_capability.HostApiCall) plugin_capability.Error!void {
-        try plugin_capability.Gate.init(capabilities, context).checkCall(call);
+        return plugin_host.loadNamesAlloc(allocator, plugins_dir);
     }
 
     pub fn recordFsEvent(self: *Server, path: []const u8, timestamp_ns: u64) void {
@@ -1105,7 +846,7 @@ pub const Server = if (builtin.os.tag == .windows) WindowsServer else PosixServe
 fn writeFrame(fd: std.posix.fd_t, payload: []const u8) !void {
     const encoded = try encodeFrameAlloc(std.heap.page_allocator, payload);
     defer std.heap.page_allocator.free(encoded);
-    try writeAll(fd, encoded);
+    try subscribe.writeAll(fd, encoded);
 }
 
 fn encodeFrameAlloc(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
@@ -1163,60 +904,6 @@ fn readFrameAlloc(allocator: std.mem.Allocator, fd: std.posix.fd_t) ![]u8 {
     return payload;
 }
 
-fn readNdjsonLineAlloc(allocator: std.mem.Allocator, fd: std.posix.fd_t, max_line_bytes: usize) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    while (out.items.len < max_line_bytes) {
-        var byte: [1]u8 = undefined;
-        const n = try std.posix.read(fd, &byte);
-        if (n == 0) {
-            if (out.items.len == 0) return error.ConnectionClosed;
-            break;
-        }
-        try out.append(allocator, byte[0]);
-        if (byte[0] == '\n') break;
-    } else {
-        return error.Oversize;
-    }
-    return out.toOwnedSlice(allocator);
-}
-
-fn readNdjsonLineUntilShutdownAlloc(allocator: std.mem.Allocator, fd: std.posix.fd_t, max_line_bytes: usize, shutdown_requested: *const std.atomic.Value(bool)) !?[]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    while (out.items.len < max_line_bytes) {
-        if (shutdown_requested.load(.seq_cst)) {
-            if (out.items.len == 0) return null;
-            break;
-        }
-        var poll_fds = [_]std.posix.pollfd{.{
-            .fd = fd,
-            .events = std.posix.POLL.IN,
-            .revents = 0,
-        }};
-        const ready = try std.posix.poll(&poll_fds, shutdown_poll_ms);
-        if (ready == 0) continue;
-        if ((poll_fds[0].revents & std.posix.POLL.IN) == 0) {
-            if ((poll_fds[0].revents & (std.posix.POLL.HUP | std.posix.POLL.ERR | std.posix.POLL.NVAL)) != 0) {
-                if (out.items.len == 0) return error.ConnectionClosed;
-                break;
-            }
-            continue;
-        }
-        var byte: [1]u8 = undefined;
-        const n = try std.posix.read(fd, &byte);
-        if (n == 0) {
-            if (out.items.len == 0) return error.ConnectionClosed;
-            break;
-        }
-        try out.append(allocator, byte[0]);
-        if (byte[0] == '\n') break;
-    } else {
-        return error.Oversize;
-    }
-    return try out.toOwnedSlice(allocator);
-}
-
 fn readExact(fd: std.posix.fd_t, buffer: []u8) !void {
     var offset: usize = 0;
     while (offset < buffer.len) {
@@ -1226,27 +913,8 @@ fn readExact(fd: std.posix.fd_t, buffer: []u8) !void {
     }
 }
 
-fn writeAll(fd: std.posix.fd_t, bytes: []const u8) !void {
-    var remaining = bytes;
-    while (remaining.len > 0) {
-        const written = try std.posix.write(fd, remaining);
-        remaining = remaining[written..];
-    }
-}
-
 fn nowNs() u64 {
     return @intCast(std.time.nanoTimestamp());
-}
-
-fn costRefreshIntervalNs() u64 {
-    const raw = std.process.getEnvVarOwned(std.heap.page_allocator, "SHISA_COST_REFRESH_INTERVAL_MS") catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => return std.time.ns_per_hour,
-        else => return std.time.ns_per_hour,
-    };
-    defer std.heap.page_allocator.free(raw);
-    const ms = std.fmt.parseUnsigned(u64, raw, 10) catch return std.time.ns_per_hour;
-    if (ms == 0) return std.time.ns_per_hour;
-    return std.math.mul(u64, ms, std.time.ns_per_ms) catch std.time.ns_per_hour;
 }
 
 fn renderHistogramIndex(elapsed_us: u64) usize {
@@ -1414,7 +1082,7 @@ fn isOpRequest(request: []const u8, op: []const u8) bool {
     return std.mem.eql(u8, parsed.value.op, op);
 }
 
-fn healthResponseAlloc(allocator: std.mem.Allocator, request: []const u8, ok: bool) ![]u8 {
+pub fn healthResponseAlloc(allocator: std.mem.Allocator, request: []const u8, ok: bool) ![]u8 {
     const request_id = try requestIdAlloc(allocator, request);
     defer allocator.free(request_id);
     const escaped_request_id = try json.escapeAlloc(allocator, request_id);
@@ -1422,133 +1090,12 @@ fn healthResponseAlloc(allocator: std.mem.Allocator, request: []const u8, ok: bo
     return std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"ok\":{}}}", .{ escaped_request_id, ok });
 }
 
-fn versionResponseAlloc(allocator: std.mem.Allocator, request: []const u8) ![]u8 {
+pub fn versionResponseAlloc(allocator: std.mem.Allocator, request: []const u8) ![]u8 {
     const request_id = try requestIdAlloc(allocator, request);
     defer allocator.free(request_id);
     const escaped_request_id = try json.escapeAlloc(allocator, request_id);
     defer allocator.free(escaped_request_id);
     return std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"daemon\":\"{s}\",\"protocol\":{d}}}", .{ escaped_request_id, daemon_version, protocol_version });
-}
-
-fn topicRefsAlloc(allocator: std.mem.Allocator, topics: []const []const u8) ![]TopicRef {
-    var refs: std.ArrayList(TopicRef) = .empty;
-    errdefer {
-        for (refs.items) |*ref| allocator.free(ref.topic);
-        refs.deinit(allocator);
-    }
-
-    for (topics) |topic| {
-        var found = false;
-        for (refs.items) |*ref| {
-            if (std.mem.eql(u8, ref.topic, topic)) {
-                ref.count += 1;
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            try refs.append(allocator, .{
-                .topic = try allocator.dupe(u8, topic),
-                .count = 1,
-            });
-        }
-    }
-
-    return refs.toOwnedSlice(allocator);
-}
-
-fn subscribeBackpressureLimit(value: u16) usize {
-    if (value == 0) return default_subscribe_backpressure_limit;
-    return @min(@as(usize, value), max_subscribe_backpressure_limit);
-}
-
-fn subscribeCommandAllowed(line: []const u8) bool {
-    var parsed = std.json.parseFromSlice(SubscribeCommand, std.heap.page_allocator, line, .{ .ignore_unknown_fields = true }) catch return false;
-    defer parsed.deinit();
-    return isSubscribeReadOnlyOp(parsed.value.op);
-}
-
-fn isSubscribeReadOnlyOp(op: []const u8) bool {
-    return std.mem.eql(u8, op, "ping") or
-        std.mem.eql(u8, op, "subscribe") or
-        std.mem.eql(u8, op, "unsubscribe") or
-        std.mem.eql(u8, op, "health") or
-        std.mem.eql(u8, op, "metrics") or
-        std.mem.eql(u8, op, "version");
-}
-
-fn subscribeCommandName(command: SubscribeCommand) []const u8 {
-    if (command.op.len != 0) return command.op;
-    if (command.kind.len != 0) return command.kind;
-    return "unknown";
-}
-
-fn freeTopicRefs(allocator: std.mem.Allocator, refs: []TopicRef) void {
-    for (refs) |ref| allocator.free(ref.topic);
-    allocator.free(refs);
-}
-
-fn topicRefsJsonAlloc(allocator: std.mem.Allocator, refs: []const TopicRef) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    try out.append(allocator, '{');
-    for (refs, 0..) |ref, index| {
-        if (index != 0) try out.append(allocator, ',');
-        const escaped_topic = try json.escapeAlloc(allocator, ref.topic);
-        defer allocator.free(escaped_topic);
-        try std.fmt.format(out.writer(allocator), "\"{s}\":{d}", .{ escaped_topic, ref.count });
-    }
-    try out.append(allocator, '}');
-    return out.toOwnedSlice(allocator);
-}
-
-fn subscribeSnapshotAlloc(allocator: std.mem.Allocator, request_id: []const u8, refs: []const TopicRef) ![]u8 {
-    const escaped_request_id = try json.escapeAlloc(allocator, request_id);
-    defer allocator.free(escaped_request_id);
-    const refs_json = try topicRefsJsonAlloc(allocator, refs);
-    defer allocator.free(refs_json);
-    return std.fmt.allocPrint(
-        allocator,
-        "{{\"v\":1,\"request_id\":\"{s}\",\"topic\":\"subscription\",\"kind\":\"snapshot\",\"data\":{{\"topics\":{d},\"refs\":{s}}}}}\n",
-        .{ escaped_request_id, refs.len, refs_json },
-    );
-}
-
-fn subscribeHeartbeatAlloc(allocator: std.mem.Allocator, request_id: []const u8) ![]u8 {
-    const escaped_request_id = try json.escapeAlloc(allocator, request_id);
-    defer allocator.free(escaped_request_id);
-    return std.fmt.allocPrint(
-        allocator,
-        "{{\"v\":1,\"request_id\":\"{s}\",\"topic\":\"subscription\",\"kind\":\"heartbeat\",\"data\":{{}}}}\n",
-        .{escaped_request_id},
-    );
-}
-
-fn subscribeDeltaAlloc(allocator: std.mem.Allocator, request_id: []const u8, topic: []const u8, sequence: u64) ![]u8 {
-    const escaped_request_id = try json.escapeAlloc(allocator, request_id);
-    defer allocator.free(escaped_request_id);
-    const escaped_topic = try json.escapeAlloc(allocator, topic);
-    defer allocator.free(escaped_topic);
-    return std.fmt.allocPrint(
-        allocator,
-        "{{\"v\":1,\"request_id\":\"{s}\",\"topic\":\"{s}\",\"kind\":\"delta\",\"data\":{{\"sequence\":{d}}}}}\n",
-        .{ escaped_request_id, escaped_topic, sequence },
-    );
-}
-
-fn subscribeReadonlyErrorAlloc(allocator: std.mem.Allocator, request_id: []const u8, line: []const u8) ![]u8 {
-    const escaped_request_id = try json.escapeAlloc(allocator, request_id);
-    defer allocator.free(escaped_request_id);
-    var parsed = std.json.parseFromSlice(SubscribeCommand, allocator, line, .{ .ignore_unknown_fields = true }) catch null;
-    defer if (parsed) |*value| value.deinit();
-    const op = if (parsed) |value| subscribeCommandName(value.value) else "unknown";
-    const escaped_op = try json.escapeAlloc(allocator, op);
-    defer allocator.free(escaped_op);
-    return std.fmt.allocPrint(
-        allocator,
-        "{{\"v\":1,\"request_id\":\"{s}\",\"topic\":\"subscription\",\"kind\":\"error\",\"data\":{{\"error\":{{\"code\":\"E_READONLY\",\"message\":\"subscribe connection is read-only\",\"context\":{{\"op\":\"{s}\"}}}}}}}}\n",
-        .{ escaped_request_id, escaped_op },
-    );
 }
 
 fn defaultConfigPathAlloc(allocator: std.mem.Allocator) ![]u8 {
@@ -1576,164 +1123,6 @@ fn defaultPluginsDirPathAlloc(allocator: std.mem.Allocator) ![]u8 {
     return std.fmt.allocPrint(allocator, "{s}/plugins", .{dir});
 }
 
-fn pluginStatePathForPluginsDirAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, basename: []const u8) ![]u8 {
-    const dir = std.fs.path.dirname(plugins_dir) orelse return error.MissingConfigDir;
-    return std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir, basename });
-}
-
-fn recordPluginSlowStrike(allocator: std.mem.Allocator, strikes_path: []const u8, disabled_path: []const u8, name: []const u8) !void {
-    const count = try incrementPluginSlowStrike(allocator, strikes_path, name);
-    if (count >= plugin_slow_strike_limit) try setPluginNameListed(allocator, disabled_path, name, true);
-}
-
-fn clearPluginSlowStrike(allocator: std.mem.Allocator, strikes_path: []const u8, name: []const u8) !void {
-    try setPluginSlowStrikeCount(allocator, strikes_path, name, 0);
-}
-
-fn incrementPluginSlowStrike(allocator: std.mem.Allocator, strikes_path: []const u8, name: []const u8) !u8 {
-    var strikes = try readPluginSlowStrikes(allocator, strikes_path);
-    defer deinitPluginSlowStrikes(allocator, &strikes);
-    const index = indexOfPluginSlowStrike(strikes.items, name);
-    const count = if (index) |i| @min(strikes.items[i].count +| 1, plugin_slow_strike_limit) else 1;
-    try setPluginSlowStrikeCountLoaded(allocator, strikes_path, &strikes, name, count);
-    return count;
-}
-
-fn setPluginSlowStrikeCount(allocator: std.mem.Allocator, strikes_path: []const u8, name: []const u8, count: u8) !void {
-    var strikes = try readPluginSlowStrikes(allocator, strikes_path);
-    defer deinitPluginSlowStrikes(allocator, &strikes);
-    try setPluginSlowStrikeCountLoaded(allocator, strikes_path, &strikes, name, count);
-}
-
-fn setPluginSlowStrikeCountLoaded(allocator: std.mem.Allocator, strikes_path: []const u8, strikes: *std.ArrayList(PluginSlowStrike), name: []const u8, count: u8) !void {
-    if (!plugin_manifest.isValidPluginName(name)) return error.InvalidPluginName;
-    if (indexOfPluginSlowStrike(strikes.items, name)) |index| {
-        if (count == 0) {
-            const removed = strikes.orderedRemove(index);
-            allocator.free(removed.name);
-        } else {
-            strikes.items[index].count = count;
-        }
-    } else if (count != 0) {
-        try strikes.append(allocator, .{ .name = try allocator.dupe(u8, name), .count = count });
-    }
-    std.mem.sort(PluginSlowStrike, strikes.items, {}, lessThanPluginSlowStrike);
-    try writePluginSlowStrikes(allocator, strikes_path, strikes.items);
-}
-
-const PluginSlowStrike = struct {
-    name: []u8,
-    count: u8,
-};
-
-fn readPluginSlowStrikes(allocator: std.mem.Allocator, path: []const u8) !std.ArrayList(PluginSlowStrike) {
-    var strikes: std.ArrayList(PluginSlowStrike) = .empty;
-    const contents = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
-        error.FileNotFound => return strikes,
-        else => return err,
-    };
-    defer allocator.free(contents);
-
-    var lines = std.mem.tokenizeScalar(u8, contents, '\n');
-    while (lines.next()) |line| {
-        var fields = std.mem.tokenizeAny(u8, std.mem.trim(u8, line, " \t\r"), " \t\r");
-        const name = fields.next() orelse continue;
-        const count_text = fields.next() orelse continue;
-        if (fields.next() != null or !plugin_manifest.isValidPluginName(name)) continue;
-        const count = std.fmt.parseInt(u8, count_text, 10) catch continue;
-        if (count == 0 or indexOfPluginSlowStrike(strikes.items, name) != null) continue;
-        try strikes.append(allocator, .{ .name = try allocator.dupe(u8, name), .count = @min(count, plugin_slow_strike_limit) });
-    }
-    return strikes;
-}
-
-fn writePluginSlowStrikes(allocator: std.mem.Allocator, path: []const u8, strikes: []const PluginSlowStrike) !void {
-    if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
-    var file = try std.fs.createFileAbsolute(path, .{ .truncate = true, .mode = 0o600 });
-    defer file.close();
-    for (strikes) |strike| {
-        const line = try std.fmt.allocPrint(allocator, "{s} {d}\n", .{ strike.name, strike.count });
-        defer allocator.free(line);
-        try file.writeAll(line);
-    }
-}
-
-fn deinitPluginSlowStrikes(allocator: std.mem.Allocator, strikes: *std.ArrayList(PluginSlowStrike)) void {
-    for (strikes.items) |strike| allocator.free(strike.name);
-    strikes.deinit(allocator);
-}
-
-fn indexOfPluginSlowStrike(strikes: []const PluginSlowStrike, name: []const u8) ?usize {
-    for (strikes, 0..) |strike, index| {
-        if (std.mem.eql(u8, strike.name, name)) return index;
-    }
-    return null;
-}
-
-fn lessThanPluginSlowStrike(_: void, lhs: PluginSlowStrike, rhs: PluginSlowStrike) bool {
-    return std.mem.lessThan(u8, lhs.name, rhs.name);
-}
-
-fn pluginNameListed(allocator: std.mem.Allocator, path: []const u8, name: []const u8) !bool {
-    var names = try readPluginNames(allocator, path);
-    defer deinitStringArrayList(allocator, &names);
-    return indexOfString(names.items, name) != null;
-}
-
-fn setPluginNameListed(allocator: std.mem.Allocator, path: []const u8, name: []const u8, listed: bool) !void {
-    if (!plugin_manifest.isValidPluginName(name)) return error.InvalidPluginName;
-    var names = try readPluginNames(allocator, path);
-    defer deinitStringArrayList(allocator, &names);
-
-    const index = indexOfString(names.items, name);
-    if (listed and index == null) {
-        try names.append(allocator, try allocator.dupe(u8, name));
-    } else if (!listed and index != null) {
-        const removed = names.orderedRemove(index.?);
-        allocator.free(removed);
-    }
-    std.mem.sort([]u8, names.items, {}, lessThanString);
-    try writePluginNames(path, names.items);
-}
-
-fn readPluginNames(allocator: std.mem.Allocator, path: []const u8) !std.ArrayList([]u8) {
-    var names: std.ArrayList([]u8) = .empty;
-    const contents = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
-        error.FileNotFound => return names,
-        else => return err,
-    };
-    defer allocator.free(contents);
-
-    var lines = std.mem.tokenizeScalar(u8, contents, '\n');
-    while (lines.next()) |line| {
-        const trimmed = std.mem.trim(u8, line, " \t\r");
-        if (trimmed.len == 0 or !plugin_manifest.isValidPluginName(trimmed)) continue;
-        if (indexOfString(names.items, trimmed) == null) try names.append(allocator, try allocator.dupe(u8, trimmed));
-    }
-    return names;
-}
-
-fn writePluginNames(path: []const u8, names: []const []const u8) !void {
-    if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
-    var file = try std.fs.createFileAbsolute(path, .{ .truncate = true, .mode = 0o600 });
-    defer file.close();
-    for (names) |name| {
-        try file.writeAll(name);
-        try file.writeAll("\n");
-    }
-}
-
-fn indexOfString(items: []const []const u8, name: []const u8) ?usize {
-    for (items, 0..) |item, index| {
-        if (std.mem.eql(u8, item, name)) return index;
-    }
-    return null;
-}
-
-fn lessThanString(_: void, lhs: []const u8, rhs: []const u8) bool {
-    return std.mem.lessThan(u8, lhs, rhs);
-}
-
 fn readConfigOrDefaultAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     var file = std.fs.openFileAbsolute(path, .{}) catch |err| switch (err) {
         error.FileNotFound => return allocator.dupe(u8, default_config_text),
@@ -1741,30 +1130,6 @@ fn readConfigOrDefaultAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u
     };
     defer file.close();
     return file.readToEndAlloc(allocator, max_config_bytes);
-}
-
-fn freeStringList(allocator: std.mem.Allocator, items: [][]u8) void {
-    for (items) |item| allocator.free(item);
-    allocator.free(items);
-}
-
-fn dupeStringList(allocator: std.mem.Allocator, items: []const []const u8) ![][]u8 {
-    const out = try allocator.alloc([]u8, items.len);
-    var filled: usize = 0;
-    errdefer {
-        for (out[0..filled]) |item| allocator.free(item);
-        allocator.free(out);
-    }
-    for (items) |item| {
-        out[filled] = try allocator.dupe(u8, item);
-        filled += 1;
-    }
-    return out;
-}
-
-fn deinitStringArrayList(allocator: std.mem.Allocator, items: *std.ArrayList([]u8)) void {
-    for (items.items) |item| allocator.free(item);
-    items.deinit(allocator);
 }
 
 fn requestIdAlloc(allocator: std.mem.Allocator, request: []const u8) ![]u8 {
@@ -1785,140 +1150,6 @@ fn sha256Hex(value: []const u8) [std.crypto.hash.sha2.Sha256.digest_length * 2]u
     var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(value, &digest, .{});
     return std.fmt.bytesToHex(digest, .lower);
-}
-
-fn acceptOneThread(server: *Server) !void {
-    try server.acceptOne();
-}
-
-fn serveThread(server: *Server, shutdown_requested: *const std.atomic.Value(bool), reload_requested: *std.atomic.Value(bool), stack_dump_requested: *std.atomic.Value(bool)) !void {
-    try server.serve(shutdown_requested, reload_requested, stack_dump_requested);
-}
-
-fn costRefreshThreadMain(server: *Server) void {
-    server.costRefreshLoop();
-}
-
-test "accepts one unix socket connection" {
-    const allocator = std.testing.allocator;
-    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-{x}", .{std.crypto.random.int(u64)});
-    defer allocator.free(dir_path);
-    defer std.fs.cwd().deleteTree(dir_path) catch {};
-
-    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
-    defer allocator.free(socket_path);
-
-    var server = try Server.init(socket_path);
-    defer server.deinit();
-
-    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
-
-    var client_stream = try std.net.connectUnixSocket(socket_path);
-    defer client_stream.close();
-    try writeFrame(client_stream.handle, "health");
-    const response = try readFrameAlloc(allocator, client_stream.handle);
-    defer allocator.free(response);
-    try std.testing.expectEqualStrings("ok\n", response);
-
-    thread.join();
-}
-
-test "returns metrics response" {
-    const allocator = std.testing.allocator;
-    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-{x}", .{std.crypto.random.int(u64)});
-    defer allocator.free(dir_path);
-    defer std.fs.cwd().deleteTree(dir_path) catch {};
-
-    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
-    defer allocator.free(socket_path);
-
-    var server = try Server.init(socket_path);
-    defer server.deinit();
-
-    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
-
-    var client_stream = try std.net.connectUnixSocket(socket_path);
-    defer client_stream.close();
-    try writeFrame(client_stream.handle, "metrics");
-    const response = try readFrameAlloc(allocator, client_stream.handle);
-    defer allocator.free(response);
-    try std.testing.expectEqualStrings("{\"connections\":1}\n", response);
-
-    thread.join();
-}
-
-test "renders cwd prompt response" {
-    const allocator = std.testing.allocator;
-    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-{x}", .{std.crypto.random.int(u64)});
-    defer allocator.free(dir_path);
-    defer std.fs.cwd().deleteTree(dir_path) catch {};
-
-    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
-    defer allocator.free(socket_path);
-
-    var server = try Server.init(socket_path);
-    defer server.deinit();
-
-    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
-
-    var client_stream = try std.net.connectUnixSocket(socket_path);
-    defer client_stream.close();
-    try writeFrame(client_stream.handle, "{\"v\":1,\"cwd\":\"/tmp/project\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24}");
-    const response = try readFrameAlloc(allocator, client_stream.handle);
-    defer allocator.free(response);
-    try std.testing.expect(std.mem.indexOf(u8, response, "\"prompt\":\"/tmp/project> \"") != null);
-
-    thread.join();
-}
-
-test "render response includes trace when requested" {
-    const allocator = std.testing.allocator;
-    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-{x}", .{std.crypto.random.int(u64)});
-    defer allocator.free(dir_path);
-    defer std.fs.cwd().deleteTree(dir_path) catch {};
-
-    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
-    defer allocator.free(socket_path);
-
-    var server = try Server.init(socket_path);
-    defer server.deinit();
-
-    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
-
-    var client_stream = try std.net.connectUnixSocket(socket_path);
-    defer client_stream.close();
-    try writeFrame(client_stream.handle, "{\"v\":1,\"cwd\":\"/tmp/project\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"trace\":true,\"modules\":[\"cwd\",\"git_branch\",\"language_versions\"]}");
-    const response = try readFrameAlloc(allocator, client_stream.handle);
-    defer allocator.free(response);
-    try std.testing.expect(std.mem.indexOf(u8, response, "\"trace\":[") != null);
-    try std.testing.expect(std.mem.indexOf(u8, response, "\"module\":\"cwd\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, response, "\"cache_state\":\"miss\"") != null);
-
-    thread.join();
-}
-
-test "renders optional time segment" {
-    const allocator = std.testing.allocator;
-    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-{x}", .{std.crypto.random.int(u64)});
-    defer allocator.free(dir_path);
-    defer std.fs.cwd().deleteTree(dir_path) catch {};
-
-    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
-    defer allocator.free(socket_path);
-
-    var server = try Server.init(socket_path);
-    defer server.deinit();
-
-    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
-
-    var client_stream = try std.net.connectUnixSocket(socket_path);
-    defer client_stream.close();
-    try writeFrame(client_stream.handle, "{\"v\":1,\"cwd\":\"/tmp/project\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"time\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24}");
-    const response = try readFrameAlloc(allocator, client_stream.handle);
-    defer allocator.free(response);
-    try std.testing.expect(std.mem.indexOf(u8, response, "\"prompt\":\"/tmp/project time:") != null);
-
-    thread.join();
 }
 
 test "preexec response classifies command tier" {
@@ -2431,42 +1662,6 @@ test "render_continue fills async git segment from cache within 1000 ms" {
     return error.AsyncFillDeadlineExceeded;
 }
 
-test "health op returns minimal ok response" {
-    const allocator = std.testing.allocator;
-    const response = try healthResponseAlloc(allocator, "{\"v\":1,\"op\":\"health\",\"request_id\":\"health-1\"}", true);
-    defer allocator.free(response);
-
-    const HealthResponse = struct {
-        v: u32 = 1,
-        request_id: []const u8 = "",
-        ok: bool,
-    };
-    var parsed = try std.json.parseFromSlice(HealthResponse, allocator, response, .{ .ignore_unknown_fields = true });
-    defer parsed.deinit();
-    try std.testing.expectEqual(@as(u32, 1), parsed.value.v);
-    try std.testing.expectEqualStrings("health-1", parsed.value.request_id);
-    try std.testing.expect(parsed.value.ok);
-}
-
-test "version op returns daemon and protocol version" {
-    const allocator = std.testing.allocator;
-    const response = try versionResponseAlloc(allocator, "{\"v\":1,\"op\":\"version\",\"request_id\":\"version-1\"}");
-    defer allocator.free(response);
-
-    const VersionResponse = struct {
-        v: u32 = 1,
-        request_id: []const u8 = "",
-        daemon: []const u8,
-        protocol: u32,
-    };
-    var parsed = try std.json.parseFromSlice(VersionResponse, allocator, response, .{ .ignore_unknown_fields = true });
-    defer parsed.deinit();
-    try std.testing.expectEqual(@as(u32, 1), parsed.value.v);
-    try std.testing.expectEqualStrings("version-1", parsed.value.request_id);
-    try std.testing.expectEqualStrings(daemon_version, parsed.value.daemon);
-    try std.testing.expectEqual(protocol_version, parsed.value.protocol);
-}
-
 test "reload op rereads config and bumps generations" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-reload-{x}", .{std.crypto.random.int(u64)});
@@ -2600,7 +1795,7 @@ test "stack dump signal logs frames and clears flag" {
 
 test "reload op rereads plugin manifests" {
     const allocator = std.testing.allocator;
-    var runtime = plugin_lua.Runtime.initSandboxed(allocator) catch |err| switch (err) {
+    var runtime = plugin_host.Runtime.initSandboxed(allocator) catch |err| switch (err) {
         error.LuaUnavailable => return error.SkipZigTest,
         else => return err,
     };
@@ -2655,40 +1850,14 @@ test "reload op rereads plugin manifests" {
     defer allocator.free(response);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"plugins\":1") != null);
     const plugin_names = try server.reload_state.copyPluginNamesAlloc(allocator);
-    defer freeStringList(allocator, plugin_names);
+    defer plugin_host.freeNames(allocator, plugin_names);
     try std.testing.expectEqual(@as(usize, 1), plugin_names.len);
     try std.testing.expectEqualStrings("demo-plugin", plugin_names[0]);
 }
 
-test "slow plugin strikes disable after third strike" {
-    const allocator = std.testing.allocator;
-    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-strikes-{x}", .{std.crypto.random.int(u64)});
-    defer allocator.free(dir_path);
-    defer std.fs.cwd().deleteTree(dir_path) catch {};
-    try std.fs.cwd().makePath(dir_path);
-
-    const plugins_dir = try std.fmt.allocPrint(allocator, "{s}/plugins", .{dir_path});
-    defer allocator.free(plugins_dir);
-    const strikes_path = try pluginStatePathForPluginsDirAlloc(allocator, plugins_dir, "plugins.slow-strikes");
-    defer allocator.free(strikes_path);
-    const disabled_path = try pluginStatePathForPluginsDirAlloc(allocator, plugins_dir, "plugins.disabled");
-    defer allocator.free(disabled_path);
-
-    try recordPluginSlowStrike(allocator, strikes_path, disabled_path, "slow-plugin");
-    try std.testing.expect(!(try pluginNameListed(allocator, disabled_path, "slow-plugin")));
-    try recordPluginSlowStrike(allocator, strikes_path, disabled_path, "slow-plugin");
-    try std.testing.expect(!(try pluginNameListed(allocator, disabled_path, "slow-plugin")));
-    try recordPluginSlowStrike(allocator, strikes_path, disabled_path, "slow-plugin");
-    try std.testing.expect(try pluginNameListed(allocator, disabled_path, "slow-plugin"));
-
-    const strikes = try std.fs.cwd().readFileAlloc(allocator, strikes_path, 4096);
-    defer allocator.free(strikes);
-    try std.testing.expectEqualStrings("slow-plugin 3\n", strikes);
-}
-
 test "reload disables slow plugin after three cpu strikes" {
     const allocator = std.testing.allocator;
-    var runtime = plugin_lua.Runtime.initSandboxed(allocator) catch |err| switch (err) {
+    var runtime = plugin_host.Runtime.initSandboxed(allocator) catch |err| switch (err) {
         error.LuaUnavailable => return error.SkipZigTest,
         else => return err,
     };
@@ -2709,7 +1878,7 @@ test "reload disables slow plugin after three cpu strikes" {
     defer allocator.free(plugins_dir);
     const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{plugin_path});
     defer allocator.free(manifest_path);
-    const disabled_path = try pluginStatePathForPluginsDirAlloc(allocator, plugins_dir, "plugins.disabled");
+    const disabled_path = try plugin_host.statePathForPluginsDirAlloc(allocator, plugins_dir, "plugins.disabled");
     defer allocator.free(disabled_path);
 
     try std.fs.cwd().writeFile(.{
@@ -2740,226 +1909,7 @@ test "reload disables slow plugin after three cpu strikes" {
         defer allocator.free(response);
         try std.testing.expect(std.mem.indexOf(u8, response, "\"plugins\":0") != null);
     }
-    try std.testing.expect(try pluginNameListed(allocator, disabled_path, "slow-plugin"));
-}
-
-test "daemon checks plugin host api calls through capability gate" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.makePath("repo/.git");
-    try tmp.dir.writeFile(.{ .sub_path = "repo/config.toml", .data = "" });
-    try tmp.dir.writeFile(.{ .sub_path = "repo/.git/HEAD", .data = "ref: refs/heads/main\n" });
-
-    const allocator = std.testing.allocator;
-    const repo = try tmp.dir.realpathAlloc(allocator, "repo");
-    defer allocator.free(repo);
-    const repo_git = try tmp.dir.realpathAlloc(allocator, "repo/.git");
-    defer allocator.free(repo_git);
-    const config_path = try tmp.dir.realpathAlloc(allocator, "repo/config.toml");
-    defer allocator.free(config_path);
-    const git_head = try tmp.dir.realpathAlloc(allocator, "repo/.git/HEAD");
-    defer allocator.free(git_head);
-    const read_pattern = try std.fmt.allocPrint(allocator, "{s}/**", .{repo});
-    defer allocator.free(read_pattern);
-    const watch_pattern = try std.fmt.allocPrint(allocator, "{s}/**", .{repo_git});
-    defer allocator.free(watch_pattern);
-    const read_patterns = [_][]const u8{read_pattern};
-    const watch_patterns = [_][]const u8{watch_pattern};
-    const capabilities = plugin_manifest.Capabilities{
-        .fs_read = read_patterns[0..],
-        .fs_watch = watch_patterns[0..],
-        .exec = .{ .allow = &.{"git"} },
-        .net = .{ .allow = &.{"api.example.com"} },
-        .env_read = &.{"AWS_PROFILE"},
-        .secrets = true,
-        .pre_exec = true,
-    };
-    const context = plugin_capability.Context{};
-
-    try Server.checkPluginHostApiCall(capabilities, context, .{ .fs_read = config_path });
-    try Server.checkPluginHostApiCall(capabilities, context, .{ .fs_watch = git_head });
-    try Server.checkPluginHostApiCall(capabilities, context, .{ .exec = "git" });
-    try Server.checkPluginHostApiCall(capabilities, context, .{ .net = "api.example.com" });
-    try Server.checkPluginHostApiCall(capabilities, context, .{ .env_read = "AWS_PROFILE" });
-    try Server.checkPluginHostApiCall(capabilities, context, .secrets);
-    try Server.checkPluginHostApiCall(capabilities, context, .pre_exec);
-    try std.testing.expectError(error.CapabilityDenied, Server.checkPluginHostApiCall(capabilities, context, .{ .exec = "sh" }));
-}
-
-test "subscribe op switches connection to bidirectional ndjson" {
-    const allocator = std.testing.allocator;
-    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-subscribe-{x}", .{std.crypto.random.int(u64)});
-    defer allocator.free(dir_path);
-    defer std.fs.cwd().deleteTree(dir_path) catch {};
-
-    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
-    defer allocator.free(socket_path);
-
-    var server = try Server.init(socket_path);
-    defer server.deinit();
-
-    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
-
-    var client_stream = try std.net.connectUnixSocket(socket_path);
-    try writeFrame(client_stream.handle, "{\"v\":1,\"op\":\"subscribe\",\"request_id\":\"subscribe-1\",\"topics\":[\"vcs.summary\",\"vcs.summary\"]}");
-
-    const snapshot = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
-    defer allocator.free(snapshot);
-    try std.testing.expect(std.mem.endsWith(u8, snapshot, "\n"));
-    try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"kind\":\"snapshot\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"topics\":1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"refs\":{\"vcs.summary\":2}") != null);
-
-    try writeAll(client_stream.handle, "{\"op\":\"ping\"}\n");
-    const delta = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
-    defer allocator.free(delta);
-    try std.testing.expect(std.mem.endsWith(u8, delta, "\n"));
-    try std.testing.expect(std.mem.indexOf(u8, delta, "\"kind\":\"delta\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, delta, "\"topic\":\"vcs.summary\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, delta, "\"sequence\":1") != null);
-
-    const heartbeat = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
-    defer allocator.free(heartbeat);
-    try std.testing.expect(std.mem.endsWith(u8, heartbeat, "\n"));
-    try std.testing.expect(std.mem.indexOf(u8, heartbeat, "\"kind\":\"heartbeat\"") != null);
-
-    client_stream.close();
-    thread.join();
-}
-
-test "subscribe backpressure queue drops over limit" {
-    const allocator = std.testing.allocator;
-    var queue = SubscriptionQueue.init(allocator, 1);
-    defer queue.deinit();
-
-    try std.testing.expect(try queue.pushOwned(try allocator.dupe(u8, "first\n")));
-    try std.testing.expect(!(try queue.pushOwned(try allocator.dupe(u8, "second\n"))));
-    try std.testing.expectEqual(@as(u64, 1), queue.dropped);
-    try std.testing.expectEqual(@as(usize, 1), queue.events.items.len);
-    try std.testing.expectEqual(@as(usize, default_subscribe_backpressure_limit), subscribeBackpressureLimit(0));
-    try std.testing.expectEqual(@as(usize, max_subscribe_backpressure_limit), subscribeBackpressureLimit(max_subscribe_backpressure_limit + 1));
-}
-
-test "subscribe op exits cleanly on client disconnect" {
-    const allocator = std.testing.allocator;
-    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-subscribe-close-{x}", .{std.crypto.random.int(u64)});
-    defer allocator.free(dir_path);
-    defer std.fs.cwd().deleteTree(dir_path) catch {};
-
-    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
-    defer allocator.free(socket_path);
-
-    var server = try Server.init(socket_path);
-    defer server.deinit();
-
-    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
-
-    var client_stream = try std.net.connectUnixSocket(socket_path);
-    try writeFrame(client_stream.handle, "{\"v\":1,\"op\":\"subscribe\",\"request_id\":\"subscribe-close\",\"topics\":[\"vcs.summary\"]}");
-    const snapshot = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
-    defer allocator.free(snapshot);
-    try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"kind\":\"snapshot\"") != null);
-
-    client_stream.close();
-    thread.join();
-}
-
-test "serve drains subscribe shutdown and unlinks socket" {
-    const allocator = std.testing.allocator;
-    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-shutdown-{x}", .{std.crypto.random.int(u64)});
-    defer allocator.free(dir_path);
-    defer std.fs.cwd().deleteTree(dir_path) catch {};
-
-    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
-    defer allocator.free(socket_path);
-
-    var server = try Server.init(socket_path);
-    var shutdown_requested = std.atomic.Value(bool).init(false);
-    var reload_requested = std.atomic.Value(bool).init(false);
-    var stack_dump_requested = std.atomic.Value(bool).init(false);
-    const thread = try std.Thread.spawn(.{}, serveThread, .{ &server, &shutdown_requested, &reload_requested, &stack_dump_requested });
-
-    var client_stream = try std.net.connectUnixSocket(socket_path);
-    defer client_stream.close();
-    try writeFrame(client_stream.handle, "{\"v\":1,\"op\":\"subscribe\",\"request_id\":\"shutdown\",\"topics\":[\"vcs.summary\"]}");
-    const snapshot = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
-    defer allocator.free(snapshot);
-    try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"kind\":\"snapshot\"") != null);
-
-    const start_ms = std.time.milliTimestamp();
-    shutdown_requested.store(true, .seq_cst);
-    thread.join();
-    const elapsed_ms = std.time.milliTimestamp() - start_ms;
-    try std.testing.expect(elapsed_ms < graceful_shutdown_timeout_ms);
-
-    server.deinit();
-    try std.testing.expectError(error.FileNotFound, std.fs.cwd().access(socket_path, .{}));
-}
-
-test "subscribe rejects mutating commands as readonly" {
-    const allocator = std.testing.allocator;
-    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-subscribe-readonly-{x}", .{std.crypto.random.int(u64)});
-    defer allocator.free(dir_path);
-    defer std.fs.cwd().deleteTree(dir_path) catch {};
-
-    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
-    defer allocator.free(socket_path);
-
-    var server = try Server.init(socket_path);
-    defer server.deinit();
-
-    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
-
-    var client_stream = try std.net.connectUnixSocket(socket_path);
-    try writeFrame(client_stream.handle, "{\"v\":1,\"op\":\"subscribe\",\"request_id\":\"subscribe-readonly\",\"topics\":[\"vcs.summary\"]}");
-    const snapshot = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
-    defer allocator.free(snapshot);
-    try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"kind\":\"snapshot\"") != null);
-
-    try writeAll(client_stream.handle, "{\"op\":\"reload\"}\n");
-    const readonly = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
-    defer allocator.free(readonly);
-    try std.testing.expect(std.mem.indexOf(u8, readonly, "\"kind\":\"error\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, readonly, "\"code\":\"E_READONLY\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, readonly, "\"op\":\"reload\"") != null);
-
-    client_stream.close();
-    thread.join();
-}
-
-test "subscribe cannot bypass prod guard preexec" {
-    const allocator = std.testing.allocator;
-    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-subscribe-prodguard-{x}", .{std.crypto.random.int(u64)});
-    defer allocator.free(dir_path);
-    defer std.fs.cwd().deleteTree(dir_path) catch {};
-
-    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
-    defer allocator.free(socket_path);
-
-    var server = try Server.init(socket_path);
-    defer server.deinit();
-    server.prod_guard_audit_home = dir_path;
-
-    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
-
-    var client_stream = try std.net.connectUnixSocket(socket_path);
-    try writeFrame(client_stream.handle, "{\"v\":1,\"op\":\"subscribe\",\"request_id\":\"subscribe-prodguard\",\"topics\":[\"risk_tier\"]}");
-    const snapshot = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
-    defer allocator.free(snapshot);
-    try std.testing.expect(std.mem.indexOf(u8, snapshot, "\"kind\":\"snapshot\"") != null);
-
-    try writeAll(client_stream.handle, "{\"v\":1,\"kind\":\"preexec\",\"shell\":\"zsh\",\"command\":\"kubectl delete pod x --context api-prd-use1\"}\n");
-    const readonly = try readNdjsonLineAlloc(allocator, client_stream.handle, 4096);
-    defer allocator.free(readonly);
-    try std.testing.expect(std.mem.indexOf(u8, readonly, "\"code\":\"E_READONLY\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, readonly, "\"op\":\"preexec\"") != null);
-
-    const audit_path = try prodGuardAuditPathAlloc(allocator, dir_path);
-    defer allocator.free(audit_path);
-    try std.testing.expectError(error.FileNotFound, std.fs.cwd().access(audit_path, .{}));
-
-    client_stream.close();
-    thread.join();
+    try std.testing.expect(try plugin_host.nameListed(allocator, disabled_path, "slow-plugin"));
 }
 
 test "metrics op returns JSON metrics dump" {

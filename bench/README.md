@@ -97,3 +97,26 @@ Tuning:
 - `SHISA_GIT_1M_COLD_RUNS=10`
 - `SHISA_GIT_1M_WARM_RUNS=50`
 - `SHISA_GIT_1M_KEEP_REPO=1`
+
+## Chromium Full-Checkout Harness
+
+Run against an existing full Chromium checkout:
+
+```sh
+bench/chromium-full-bench.sh --repo /path/to/chromium/src
+```
+
+Outputs:
+
+- `bench-results/chromium-full-cold.json`
+- `bench-results/chromium-full-cold.md`
+- `bench-results/chromium-full-warm.json`
+- `bench-results/chromium-full-warm.md`
+
+The harness records host spec, Zig version, Shisa commit, Chromium commit, checkout size, tracked file count, hyperfine tables, and raw hyperfine JSON. It is manual-only and not wired into per-push CI.
+
+Tuning:
+
+- `SHISA_CHROMIUM_COLD_RUNS=10`
+- `SHISA_CHROMIUM_WARM_RUNS=50`
+- `SHISA_CHROMIUM_WARMUP=5`

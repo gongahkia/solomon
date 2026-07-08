@@ -115,6 +115,8 @@ Outputs:
 
 The harness records host spec, Zig version, Shisa commit, Chromium commit, checkout size, tracked file count, hyperfine tables, and raw hyperfine JSON. It is manual-only and not wired into per-push CI.
 
+`bench/infra/hetzner/` contains manual Terraform/OpenTofu scaffolding for a throwaway Hetzner Cloud runner with a large attached volume.
+
 Tuning:
 
 - `SHISA_CHROMIUM_COLD_RUNS=10`

@@ -3,3 +3,9 @@ CLAUDE.md
 zig-out/
 .playwright-cli/
 output/
+
+bench/infra/**/.terraform/
+bench/infra/**/.terraform.lock.hcl
+bench/infra/**/*.tfstate
+bench/infra/**/*.tfstate.*
+bench/infra/**/*.tfvars

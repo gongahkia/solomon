@@ -34,6 +34,7 @@ commands:
   supervisor    run shisad under a crash-restart supervisor
   theme         validate theme files
   trace         render once with module timing trace on stderr
+  uninstall     remove shell hooks and optionally purge local state
   update        fetch, verify, and install a release artifact
   vouch         verify VOUCHES governance file
 
@@ -129,6 +130,20 @@ options:
   --shell NAME     render for zsh, bash, fish, nu, or pwsh
 
 trace output is written to stderr; prompt output remains on stdout.
+```
+
+### `shisa uninstall`
+
+```text
+usage: shisa uninstall [--shell NAME|--all-shells] [--restore-starship] [--purge --yes] [--dry-run]
+
+options:
+  --shell NAME        remove the hook from zsh, bash, fish, nu, or pwsh startup
+  --all-shells        remove known shisa hook blocks from all supported startup files
+  --restore-starship  add a Starship init line when the target startup file has none
+  --purge             remove shisa config, cache, state, logs, socket, and lock files
+  --yes               confirm --purge
+  --dry-run           print planned removals without writing
 ```
 
 ### `shisa update`

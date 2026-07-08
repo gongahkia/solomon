@@ -15,12 +15,12 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/main.zig:161
+#: src/main.zig:167
 msgid ""
 "shisa: unknown command; run `shisa --help`\n"
 msgstr ""
 
-#: src/main.zig:170
+#: src/main.zig:176
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
@@ -51,6 +51,7 @@ msgid ""
 "  supervisor    run shisad under a crash-restart supervisor\n"
 "  theme         validate theme files\n"
 "  trace         render once with module timing trace on stderr\n"
+"  uninstall     remove shell hooks and optionally purge local state\n"
 "  update        fetch, verify, and install a release artifact\n"
 "  vouch         verify VOUCHES governance file\n"
 "\n"

@@ -1,10 +1,12 @@
 const std = @import("std");
+const build_options = @import("build_options");
 const cli_util = @import("util.zig");
 const daemon_json = @import("../daemon/json.zig");
 const plugin_lua = @import("../plugin/lua.zig");
 const plugin_manifest = @import("../plugin/manifest.zig");
 
 const plugin_slow_strike_limit: u8 = 3;
+const bundled_marketplace_index = build_options.marketplace_index;
 
 pub fn command(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (args.len == 0) return error.UnknownPluginArgument;
@@ -35,11 +37,20 @@ pub fn command(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[0], "verify")) {
+        if (args.len != 2) return error.UnknownPluginArgument;
+        const output = try pluginVerifyAlloc(allocator, args[1]);
+        defer allocator.free(output);
+        try std.fs.File.stdout().writeAll(output);
+        return;
+    }
+
     if (std.mem.eql(u8, args[0], "search")) {
         const config = try parsePluginSearchArgs(args[1..]);
-        const index_path = if (config.index_path) |path| try allocator.dupe(u8, path) else try marketplaceIndexPath(allocator);
-        defer allocator.free(index_path);
-        const output = try pluginSearchAlloc(allocator, index_path, config.query);
+        const output = if (config.index_path) |path|
+            try pluginSearchPathAlloc(allocator, path, config.query)
+        else
+            try pluginSearchAlloc(allocator, bundled_marketplace_index, config.query);
         defer allocator.free(output);
         try std.fs.File.stdout().writeAll(output);
         return;
@@ -298,6 +309,28 @@ fn pluginDoctorAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     defer allocator.free(lint);
     const status: []const u8 = if (std.mem.indexOf(u8, lint, "warning:") == null) "doctor ok\n" else "doctor warnings\n";
     return std.fmt.allocPrint(allocator, "{s}{s}", .{ status, lint });
+}
+
+fn pluginVerifyAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const manifest_path = try pluginManifestPathAlloc(allocator, path);
+    defer allocator.free(manifest_path);
+    const plugin_dir = std.fs.path.dirname(manifest_path) orelse ".";
+    const source = try std.fs.cwd().readFileAlloc(allocator, manifest_path, 1024 * 1024);
+    defer allocator.free(source);
+
+    try verifyPluginSourceStatic(source);
+    var runtime = try plugin_lua.Runtime.initSandboxedWithOptions(allocator, .{ .require_root = plugin_dir });
+    defer runtime.deinit();
+    var loaded = try runtime.loadManifestStrict(source);
+    defer loaded.deinit(allocator);
+    try loaded.manifest.validate();
+
+    return std.fmt.allocPrint(allocator, "verified {s} {s}\n", .{ loaded.manifest.name, loaded.manifest.version });
+}
+
+fn verifyPluginSourceStatic(source: []const u8) !void {
+    if (std.mem.indexOf(u8, source, "os.execute") != null) return error.PluginStaticAnalysisFailed;
+    if (std.mem.indexOf(u8, source, "io.popen") != null) return error.PluginStaticAnalysisFailed;
 }
 
 fn pluginManifestPathAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
@@ -582,9 +615,12 @@ fn pluginInstall(allocator: std.mem.Allocator, plugins_dir: []const u8, trusted_
 
 fn pluginInstallSourceUrlAlloc(allocator: std.mem.Allocator, config: PluginInstallConfig) ![]u8 {
     if (!pluginInstallSourceNeedsMarketplace(config.url)) return allocator.dupe(u8, config.url);
-    const index_path = if (config.index_path) |path| try allocator.dupe(u8, path) else try marketplaceIndexPath(allocator);
-    defer allocator.free(index_path);
-    return marketplacePluginUrlAlloc(allocator, index_path, config.url);
+    if (config.index_path) |path| {
+        const source = try std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024);
+        defer allocator.free(source);
+        return marketplacePluginUrlAlloc(allocator, source, config.url);
+    }
+    return marketplacePluginUrlAlloc(allocator, bundled_marketplace_index, config.url);
 }
 
 fn pluginInstallSourceNeedsMarketplace(source: []const u8) bool {
@@ -594,18 +630,6 @@ fn pluginInstallSourceNeedsMarketplace(source: []const u8) bool {
     if (std.mem.indexOfScalar(u8, source, ':') != null) return false;
     if (std.mem.endsWith(u8, source, ".git")) return false;
     return true;
-}
-
-fn marketplacePluginUrlAlloc(allocator: std.mem.Allocator, index_path: []const u8, name: []const u8) ![]u8 {
-    const source = try std.fs.cwd().readFileAlloc(allocator, index_path, 1024 * 1024);
-    defer allocator.free(source);
-    var parsed = try std.json.parseFromSlice(PluginMarketplaceIndex, allocator, source, .{ .ignore_unknown_fields = true });
-    defer parsed.deinit();
-    for (parsed.value.plugins) |entry| {
-        if (!plugin_manifest.isValidPluginName(entry.name)) continue;
-        if (std.mem.eql(u8, entry.name, name)) return allocator.dupe(u8, entry.url);
-    }
-    return error.PluginMarketplaceEntryNotFound;
 }
 
 fn runGitClone(allocator: std.mem.Allocator, url: []const u8, target_path: []const u8) !void {
@@ -658,13 +682,6 @@ fn verifiedPluginsPath(allocator: std.mem.Allocator) ![]u8 {
     return std.fmt.allocPrint(allocator, "{s}/plugins.verified", .{dir});
 }
 
-fn marketplaceIndexPath(allocator: std.mem.Allocator) ![]u8 {
-    const config_path = try cli_util.defaultConfigPath(allocator);
-    defer allocator.free(config_path);
-    const dir = std.fs.path.dirname(config_path) orelse return error.MissingConfigDir;
-    return std.fmt.allocPrint(allocator, "{s}/plugins.index.json", .{dir});
-}
-
 fn pluginListAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, disabled_path: []const u8, slow_strikes_path: []const u8, verified_path: []const u8) ![]u8 {
     var names: std.ArrayList([]u8) = .empty;
     defer {
@@ -706,77 +723,269 @@ fn pluginListAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, disabl
     return out.toOwnedSlice(allocator);
 }
 
-const PluginMarketplaceIndex = struct {
-    plugins: []PluginMarketplaceEntry,
-};
-
 const PluginMarketplaceEntry = struct {
     name: []const u8,
-    url: []const u8,
-    description: []const u8 = "",
-    verified: bool = false,
-    manifest_sha256: []const u8 = "",
-    signatures: []PluginMarketplaceSignature = &.{},
+    repo: []const u8,
+    homepage: []const u8,
+    version: []const u8,
+    capabilities: []const []const u8,
+    sigstore_key: ?[]const u8 = null,
+    status: []const u8,
+    description: ?[]const u8 = null,
+    keywords: []const []const u8 = &.{},
 };
 
-const PluginMarketplaceSignature = struct {
-    scheme: []const u8 = "",
-    public_key: ?[]const u8 = null,
-    signature_url: ?[]const u8 = null,
-    trusted_comment: ?[]const u8 = null,
-    bundle_url: ?[]const u8 = null,
-    certificate_identity: ?[]const u8 = null,
-    certificate_issuer: ?[]const u8 = null,
+const PluginMarketplaceIndex = struct {
+    plugins: []PluginMarketplaceEntry,
+
+    fn deinit(self: PluginMarketplaceIndex, allocator: std.mem.Allocator) void {
+        for (self.plugins) |entry| {
+            allocator.free(entry.capabilities);
+            allocator.free(entry.keywords);
+        }
+        allocator.free(self.plugins);
+    }
 };
 
-fn pluginSearchAlloc(allocator: std.mem.Allocator, index_path: []const u8, query: []const u8) ![]u8 {
+const PluginMarketplaceEntryBuilder = struct {
+    name: ?[]const u8 = null,
+    repo: ?[]const u8 = null,
+    homepage: ?[]const u8 = null,
+    version: ?[]const u8 = null,
+    capabilities: ?[]const []const u8 = null,
+    sigstore_key: ?[]const u8 = null,
+    status: ?[]const u8 = null,
+    description: ?[]const u8 = null,
+    keywords: ?[]const []const u8 = null,
+
+    fn deinit(self: *PluginMarketplaceEntryBuilder, allocator: std.mem.Allocator) void {
+        if (self.capabilities) |items| allocator.free(items);
+        if (self.keywords) |items| allocator.free(items);
+    }
+};
+
+fn pluginSearchPathAlloc(allocator: std.mem.Allocator, index_path: []const u8, query: []const u8) ![]u8 {
     const source = try std.fs.cwd().readFileAlloc(allocator, index_path, 1024 * 1024);
     defer allocator.free(source);
-    var parsed = try std.json.parseFromSlice(PluginMarketplaceIndex, allocator, source, .{ .ignore_unknown_fields = true });
-    defer parsed.deinit();
+    return pluginSearchAlloc(allocator, source, query);
+}
+
+fn pluginSearchAlloc(allocator: std.mem.Allocator, source: []const u8, query: []const u8) ![]u8 {
+    var parsed = try parseMarketplaceIndexAlloc(allocator, source);
+    defer parsed.deinit(allocator);
 
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
-    for (parsed.value.plugins) |entry| {
-        if (!plugin_manifest.isValidPluginName(entry.name)) continue;
-        if (!containsIgnoreAsciiCase(entry.name, query) and !containsIgnoreAsciiCase(entry.description, query)) continue;
-        const verified_badge = if (entry.verified) " verified" else "";
-        const signed_badge = if (pluginMarketplaceEntrySigned(entry)) " signed" else "";
-        if (entry.description.len != 0) {
-            try cli_util.appendFmt(allocator, &out, "{s}{s}{s} {s} - {s}\n", .{ entry.name, verified_badge, signed_badge, entry.url, entry.description });
-        } else {
-            try cli_util.appendFmt(allocator, &out, "{s}{s}{s} {s}\n", .{ entry.name, verified_badge, signed_badge, entry.url });
+    for (parsed.plugins) |entry| {
+        if (!marketplaceEntryMatches(entry, query)) continue;
+        const sigstore_badge = if (entry.sigstore_key != null) " sigstore" else "";
+        try cli_util.appendFmt(allocator, &out, "{s} {s}{s} {s} {s}", .{ entry.name, entry.status, sigstore_badge, entry.version, entry.homepage });
+        if (entry.description) |description| try cli_util.appendFmt(allocator, &out, " - {s}", .{description});
+        if (entry.capabilities.len != 0) {
+            try out.appendSlice(allocator, " [");
+            for (entry.capabilities, 0..) |capability, i| {
+                if (i != 0) try out.append(allocator, ',');
+                try out.appendSlice(allocator, capability);
+            }
+            try out.append(allocator, ']');
         }
+        try out.append(allocator, '\n');
     }
     return out.toOwnedSlice(allocator);
 }
 
-fn pluginMarketplaceEntrySigned(entry: PluginMarketplaceEntry) bool {
-    if (!isLowerHexSha256(entry.manifest_sha256) or entry.signatures.len == 0) return false;
-    for (entry.signatures) |signature| {
-        if (pluginMarketplaceSignatureValid(signature)) return true;
+fn marketplacePluginUrlAlloc(allocator: std.mem.Allocator, source: []const u8, name: []const u8) ![]u8 {
+    var parsed = try parseMarketplaceIndexAlloc(allocator, source);
+    defer parsed.deinit(allocator);
+    for (parsed.plugins) |entry| {
+        if (std.mem.eql(u8, entry.name, name)) return std.fmt.allocPrint(allocator, "https://github.com/{s}.git", .{entry.repo});
+    }
+    return error.PluginMarketplaceEntryNotFound;
+}
+
+fn marketplaceEntryMatches(entry: PluginMarketplaceEntry, query: []const u8) bool {
+    if (containsIgnoreAsciiCase(entry.name, query)) return true;
+    if (containsIgnoreAsciiCase(entry.repo, query)) return true;
+    if (containsIgnoreAsciiCase(entry.homepage, query)) return true;
+    if (containsIgnoreAsciiCase(entry.status, query)) return true;
+    if (containsIgnoreAsciiCase(entry.version, query)) return true;
+    if (entry.description) |description| if (containsIgnoreAsciiCase(description, query)) return true;
+    for (entry.capabilities) |capability| if (containsIgnoreAsciiCase(capability, query)) return true;
+    for (entry.keywords) |keyword| if (containsIgnoreAsciiCase(keyword, query)) return true;
+    return false;
+}
+
+fn parseMarketplaceIndexAlloc(allocator: std.mem.Allocator, source: []const u8) !PluginMarketplaceIndex {
+    var entries: std.ArrayList(PluginMarketplaceEntry) = .empty;
+    errdefer {
+        for (entries.items) |entry| {
+            allocator.free(entry.capabilities);
+            allocator.free(entry.keywords);
+        }
+        entries.deinit(allocator);
+    }
+
+    var builder = PluginMarketplaceEntryBuilder{};
+    var have_entry = false;
+    defer builder.deinit(allocator);
+
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |raw_line| {
+        const line = stripTomlComment(std.mem.trim(u8, raw_line, " \t\r"));
+        if (line.len == 0) continue;
+        if (std.mem.eql(u8, line, "[[plugins]]")) {
+            if (have_entry) {
+                try entries.append(allocator, try finishMarketplaceEntryAlloc(allocator, &builder));
+                builder = .{};
+            }
+            have_entry = true;
+            continue;
+        }
+        if (!have_entry) return error.InvalidMarketplaceIndex;
+        const eq = std.mem.indexOfScalar(u8, line, '=') orelse return error.InvalidMarketplaceIndex;
+        const key = std.mem.trim(u8, line[0..eq], " \t");
+        const value = std.mem.trim(u8, line[eq + 1 ..], " \t");
+        try setMarketplaceEntryField(allocator, &builder, key, value);
+    }
+    if (have_entry) try entries.append(allocator, try finishMarketplaceEntryAlloc(allocator, &builder));
+    return .{ .plugins = try entries.toOwnedSlice(allocator) };
+}
+
+fn setMarketplaceEntryField(allocator: std.mem.Allocator, builder: *PluginMarketplaceEntryBuilder, key: []const u8, value: []const u8) !void {
+    if (std.mem.eql(u8, key, "name")) {
+        if (builder.name != null) return error.InvalidMarketplaceIndex;
+        builder.name = try parseTomlString(value);
+    } else if (std.mem.eql(u8, key, "repo")) {
+        if (builder.repo != null) return error.InvalidMarketplaceIndex;
+        builder.repo = try parseTomlString(value);
+    } else if (std.mem.eql(u8, key, "homepage")) {
+        if (builder.homepage != null) return error.InvalidMarketplaceIndex;
+        builder.homepage = try parseTomlString(value);
+    } else if (std.mem.eql(u8, key, "version")) {
+        if (builder.version != null) return error.InvalidMarketplaceIndex;
+        builder.version = try parseTomlString(value);
+    } else if (std.mem.eql(u8, key, "capabilities")) {
+        if (builder.capabilities != null) return error.InvalidMarketplaceIndex;
+        builder.capabilities = try parseTomlStringArrayAlloc(allocator, value);
+    } else if (std.mem.eql(u8, key, "sigstore_key")) {
+        if (builder.sigstore_key != null) return error.InvalidMarketplaceIndex;
+        builder.sigstore_key = try parseTomlString(value);
+    } else if (std.mem.eql(u8, key, "status")) {
+        if (builder.status != null) return error.InvalidMarketplaceIndex;
+        builder.status = try parseTomlString(value);
+    } else if (std.mem.eql(u8, key, "description")) {
+        if (builder.description != null) return error.InvalidMarketplaceIndex;
+        builder.description = try parseTomlString(value);
+    } else if (std.mem.eql(u8, key, "keywords")) {
+        if (builder.keywords != null) return error.InvalidMarketplaceIndex;
+        builder.keywords = try parseTomlStringArrayAlloc(allocator, value);
+    } else {
+        return error.InvalidMarketplaceIndex;
+    }
+}
+
+fn finishMarketplaceEntryAlloc(allocator: std.mem.Allocator, builder: *PluginMarketplaceEntryBuilder) !PluginMarketplaceEntry {
+    const capabilities = builder.capabilities orelse return error.InvalidMarketplaceIndex;
+    builder.capabilities = null;
+    errdefer allocator.free(capabilities);
+    const keywords = builder.keywords orelse try allocator.alloc([]const u8, 0);
+    builder.keywords = null;
+    errdefer allocator.free(keywords);
+
+    const entry = PluginMarketplaceEntry{
+        .name = builder.name orelse return error.InvalidMarketplaceIndex,
+        .repo = builder.repo orelse return error.InvalidMarketplaceIndex,
+        .homepage = builder.homepage orelse return error.InvalidMarketplaceIndex,
+        .version = builder.version orelse return error.InvalidMarketplaceIndex,
+        .capabilities = capabilities,
+        .sigstore_key = builder.sigstore_key,
+        .status = builder.status orelse return error.InvalidMarketplaceIndex,
+        .description = builder.description,
+        .keywords = keywords,
+    };
+    try validateMarketplaceEntry(entry);
+    return entry;
+}
+
+fn validateMarketplaceEntry(entry: PluginMarketplaceEntry) !void {
+    if (!plugin_manifest.isValidPluginName(entry.name)) return error.InvalidMarketplaceIndex;
+    if (!validGithubRepo(entry.repo)) return error.InvalidMarketplaceIndex;
+    if (!std.mem.startsWith(u8, entry.homepage, "https://")) return error.InvalidMarketplaceIndex;
+    if (!validMarketplaceStatus(entry.status)) return error.InvalidMarketplaceIndex;
+    if (entry.capabilities.len == 0) return error.InvalidMarketplaceIndex;
+    for (entry.capabilities) |capability| {
+        if (!validMarketplaceCapability(capability)) return error.InvalidMarketplaceIndex;
+    }
+}
+
+fn validGithubRepo(repo: []const u8) bool {
+    const slash = std.mem.indexOfScalar(u8, repo, '/') orelse return false;
+    if (slash == 0 or slash + 1 >= repo.len) return false;
+    return std.mem.indexOfAny(u8, repo, " \t\r\n") == null;
+}
+
+fn validMarketplaceStatus(status: []const u8) bool {
+    return std.mem.eql(u8, status, "community") or std.mem.eql(u8, status, "official") or std.mem.eql(u8, status, "archived");
+}
+
+fn validMarketplaceCapability(capability: []const u8) bool {
+    inline for (.{
+        "fs_read",
+        "fs_watch",
+        "exec",
+        "net",
+        "secrets",
+        "env_read",
+        "pre_exec",
+    }) |known| {
+        if (std.mem.eql(u8, capability, known)) return true;
     }
     return false;
 }
 
-fn pluginMarketplaceSignatureValid(signature: PluginMarketplaceSignature) bool {
-    if (std.mem.eql(u8, signature.scheme, "minisign")) {
-        const public_key = signature.public_key orelse return false;
-        if (!std.mem.startsWith(u8, public_key, "RW")) return false;
-        return signature.signature_url != null and signature.trusted_comment != null;
+fn stripTomlComment(line: []const u8) []const u8 {
+    var in_string = false;
+    var escaped = false;
+    for (line, 0..) |byte, i| {
+        if (escaped) {
+            escaped = false;
+        } else if (byte == '\\' and in_string) {
+            escaped = true;
+        } else if (byte == '"') {
+            in_string = !in_string;
+        } else if (byte == '#' and !in_string) {
+            return std.mem.trim(u8, line[0..i], " \t");
+        }
     }
-    if (std.mem.eql(u8, signature.scheme, "sigstore")) {
-        return signature.bundle_url != null and signature.certificate_identity != null and signature.certificate_issuer != null;
-    }
-    return false;
+    return std.mem.trim(u8, line, " \t");
 }
 
-fn isLowerHexSha256(value: []const u8) bool {
-    if (value.len != std.crypto.hash.sha2.Sha256.digest_length * 2) return false;
-    for (value) |byte| {
-        if (!std.ascii.isHex(byte) or std.ascii.isUpper(byte)) return false;
+fn parseTomlString(value: []const u8) ![]const u8 {
+    const trimmed = std.mem.trim(u8, value, " \t");
+    if (trimmed.len < 2 or trimmed[0] != '"' or trimmed[trimmed.len - 1] != '"') return error.InvalidMarketplaceIndex;
+    const inner = trimmed[1 .. trimmed.len - 1];
+    if (std.mem.indexOfScalar(u8, inner, '\\') != null) return error.InvalidMarketplaceIndex;
+    return inner;
+}
+
+fn parseTomlStringArrayAlloc(allocator: std.mem.Allocator, value: []const u8) ![]const []const u8 {
+    const trimmed = std.mem.trim(u8, value, " \t");
+    if (trimmed.len < 2 or trimmed[0] != '[' or trimmed[trimmed.len - 1] != ']') return error.InvalidMarketplaceIndex;
+    var rest = std.mem.trim(u8, trimmed[1 .. trimmed.len - 1], " \t");
+    var items: std.ArrayList([]const u8) = .empty;
+    errdefer items.deinit(allocator);
+    while (rest.len != 0) {
+        if (rest[0] != '"') return error.InvalidMarketplaceIndex;
+        const close = std.mem.indexOfScalar(u8, rest[1..], '"') orelse return error.InvalidMarketplaceIndex;
+        const item = rest[1 .. close + 1];
+        if (std.mem.indexOfScalar(u8, item, '\\') != null) return error.InvalidMarketplaceIndex;
+        try items.append(allocator, item);
+        rest = std.mem.trim(u8, rest[close + 2 ..], " \t");
+        if (rest.len == 0) break;
+        if (rest[0] != ',') return error.InvalidMarketplaceIndex;
+        rest = std.mem.trim(u8, rest[1..], " \t");
     }
-    return true;
+    return items.toOwnedSlice(allocator);
 }
 
 fn containsIgnoreAsciiCase(haystack: []const u8, needle: []const u8) bool {
@@ -1255,11 +1464,11 @@ test "plugin list reports enabled disabled and slow plugins" {
 }
 
 test "parses plugin install args" {
-    const config = try parsePluginInstallArgs(&.{ "https://example.com/plugin.git", "--yes", "--plugin-sandbox-strict", "--index", "/tmp/plugins.index.json" });
+    const config = try parsePluginInstallArgs(&.{ "https://example.com/plugin.git", "--yes", "--plugin-sandbox-strict", "--index", "/tmp/plugins.index.toml" });
     try std.testing.expectEqualStrings("https://example.com/plugin.git", config.url);
     try std.testing.expect(config.yes);
     try std.testing.expect(config.strict);
-    try std.testing.expectEqualStrings("/tmp/plugins.index.json", config.index_path.?);
+    try std.testing.expectEqualStrings("/tmp/plugins.index.toml", config.index_path.?);
     try std.testing.expectError(error.UnknownPluginArgument, parsePluginInstallArgs(&.{"--yes"}));
 }
 
@@ -1270,22 +1479,34 @@ test "plugin search filters marketplace index" {
     defer std.fs.cwd().deleteTree(dir_path) catch {};
     try std.fs.cwd().makePath(dir_path);
 
-    const index_path = try std.fmt.allocPrint(allocator, "{s}/plugins.index.json", .{dir_path});
+    const index_path = try std.fmt.allocPrint(allocator, "{s}/plugins.index.toml", .{dir_path});
     defer allocator.free(index_path);
     try std.fs.cwd().writeFile(.{
         .sub_path = index_path,
         .data =
-        \\{"plugins":[
-        \\  {"name":"git-tools","url":"https://example.com/git-tools.git","description":"Git prompt helpers","verified":true,"manifest_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","signatures":[{"scheme":"minisign","public_key":"RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3","signature_url":"https://example.com/plugin.lua.minisig","trusted_comment":"shisa-plugin:git-tools:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]},
-        \\  {"name":"cloud-risk","url":"https://example.com/cloud-risk.git","description":"Kubernetes and AWS risk"},
-        \\  {"name":"Bad","url":"https://example.com/bad.git","description":"invalid"}
-        \\]}
+        \\[[plugins]]
+        \\name = "git-tools"
+        \\repo = "example/git-tools"
+        \\homepage = "https://example.com/git-tools"
+        \\version = "0.1.0"
+        \\capabilities = ["fs_read"]
+        \\status = "community"
+        \\description = "Git prompt helpers"
+        \\
+        \\[[plugins]]
+        \\name = "cloud-risk"
+        \\repo = "example/cloud-risk"
+        \\homepage = "https://example.com/cloud-risk"
+        \\version = "0.2.0"
+        \\capabilities = ["fs_read", "env_read"]
+        \\status = "community"
+        \\description = "Kubernetes and AWS risk"
         ,
     });
 
-    const output = try pluginSearchAlloc(allocator, index_path, "git");
+    const output = try pluginSearchPathAlloc(allocator, index_path, "git");
     defer allocator.free(output);
-    try std.testing.expectEqualStrings("git-tools verified signed https://example.com/git-tools.git - Git prompt helpers\n", output);
+    try std.testing.expectEqualStrings("git-tools community 0.1.0 https://example.com/git-tools - Git prompt helpers [fs_read]\n", output);
 
     const config = try parsePluginSearchArgs(&.{ "risk", "--index", index_path });
     try std.testing.expectEqualStrings("risk", config.query);
@@ -1294,18 +1515,29 @@ test "plugin search filters marketplace index" {
     const install_config = try parsePluginInstallArgs(&.{ "cloud-risk", "--index", index_path, "--yes" });
     const resolved_url = try pluginInstallSourceUrlAlloc(allocator, install_config);
     defer allocator.free(resolved_url);
-    try std.testing.expectEqualStrings("https://example.com/cloud-risk.git", resolved_url);
+    try std.testing.expectEqualStrings("https://github.com/example/cloud-risk.git", resolved_url);
     try std.testing.expect(pluginInstallSourceNeedsMarketplace("cloud-risk"));
     try std.testing.expect(!pluginInstallSourceNeedsMarketplace("https://example.com/cloud-risk.git"));
 }
 
 test "checked-in marketplace index parses" {
     const allocator = std.testing.allocator;
-    const source = try std.fs.cwd().readFileAlloc(allocator, "docs/plugins/index.json", 64 * 1024);
+    const source = try std.fs.cwd().readFileAlloc(allocator, "marketplace/index.toml", 64 * 1024);
     defer allocator.free(source);
-    var parsed = try std.json.parseFromSlice(PluginMarketplaceIndex, allocator, source, .{ .ignore_unknown_fields = true });
-    defer parsed.deinit();
-    try std.testing.expectEqual(@as(usize, 0), parsed.value.plugins.len);
+    var parsed = try parseMarketplaceIndexAlloc(allocator, source);
+    defer parsed.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 1), parsed.plugins.len);
+    try std.testing.expectEqualStrings("kubectx", parsed.plugins[0].name);
+
+    const output = try pluginSearchAlloc(allocator, bundled_marketplace_index, "k8s");
+    defer allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "kubectx community 0.1.0") != null);
+}
+
+test "plugin verify rejects direct shell execution" {
+    try verifyPluginSourceStatic("return { name = \"ok\" }\n");
+    try std.testing.expectError(error.PluginStaticAnalysisFailed, verifyPluginSourceStatic("os.execute('id')\n"));
+    try std.testing.expectError(error.PluginStaticAnalysisFailed, verifyPluginSourceStatic("io.popen('id')\n"));
 }
 
 test "plugin new scaffolds valid strict manifest" {

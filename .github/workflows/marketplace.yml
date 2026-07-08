@@ -1,0 +1,34 @@
+name: Marketplace
+
+on:
+  pull_request:
+    paths:
+      - marketplace/index.toml
+      - scripts/marketplace-validate.sh
+      - src/cli/plugin.zig
+      - .github/workflows/marketplace.yml
+  push:
+    branches:
+      - main
+    paths:
+      - marketplace/index.toml
+      - scripts/marketplace-validate.sh
+      - src/cli/plugin.zig
+      - .github/workflows/marketplace.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.15.2
+          use-cache: true
+          cache-key: shisa-marketplace-${{ hashFiles('build.zig.zon') }}
+      - run: zig build debug
+      - run: bash scripts/marketplace-validate.sh

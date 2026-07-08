@@ -14,7 +14,7 @@ else
     echo "user docs gate: no base ref; skipping"
     exit 0
   fi
-  changed_files="$(git diff --name-only "$base_ref"... "$head_ref")"
+  changed_files="$(git diff --name-only "$base_ref...$head_ref")"
 fi
 
 user_facing_changed=0
@@ -23,7 +23,7 @@ docs_changed=0
 while IFS= read -r path; do
   [ -n "$path" ] || continue
   case "$path" in
-    src/main.zig|src/config.zig|src/daemon/modules/*|src/theme/*|themes/*.toml|init/*|src/ai/*|src/plugin/*|examples/plugins/*|docs/plugins/index.json)
+    src/main.zig|src/config.zig|src/daemon/modules/*|src/theme/*|themes/*.toml|init/*|src/ai/*|src/plugin/*|examples/plugins/*|marketplace/index.toml)
       user_facing_changed=1
       ;;
   esac

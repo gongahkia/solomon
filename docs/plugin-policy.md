@@ -15,7 +15,7 @@ Marketplace entries must:
 
 Plugins that handle secrets, cloud accounts, kubeconfigs, SSH config, or production context must describe their local data flow in the README.
 
-The marketplace index is checked in at `docs/plugins/index.json`. Entries stay out of the index until the repository URL, manifest hash, and signature metadata can be reviewed.
+The marketplace index is checked in at `marketplace/index.toml`. Entries stay out of the index until the repository URL, manifest, capability list, and optional signing metadata can be reviewed.
 
 ## Verified Badge
 

@@ -1,6 +1,6 @@
 # Plugin Signing
 
-Marketplace entries must pin the submitted `plugin.lua` with `manifest_sha256` and at least one signature record.
+Marketplace entries may include `sigstore_key` metadata while signing remains review-only. The TOML index does not enforce signatures during install yet.
 
 ## Minisign
 
@@ -10,7 +10,7 @@ Use Minisign's prehashed signature format:
 minisign -Sm plugin.lua -t 'shisa-plugin:<plugin-id>:<manifest-sha256>'
 ```
 
-The marketplace entry records:
+Historical Minisign review metadata used:
 
 - `scheme`: `minisign`
 - `public_key`: the `RW...` Minisign public key
@@ -19,13 +19,8 @@ The marketplace entry records:
 
 ## Sigstore
 
-Use a Sigstore bundle for `plugin.lua` or its digest. The marketplace entry records:
+Use a Sigstore bundle for `plugin.lua` or its digest. During review, `sigstore_key` may record the expected identity or key reference while bundle URLs remain in the plugin repository.
 
-- `scheme`: `sigstore`
-- `bundle_url`: URL for the Sigstore bundle JSON
-- `certificate_identity`: expected signing identity
-- `certificate_issuer`: expected OIDC issuer
-
-Shisa treats signatures as listing metadata until a verifier is wired into install. Maintainers must verify signatures before adding or updating marketplace entries.
+Shisa treats signatures as listing metadata until a verifier is wired into install. Maintainers must verify signatures before adding or updating signed marketplace entries.
 
 Sources: [Minisign](https://jedisct1.github.io/minisign/), [Sigstore Bundle Format](https://docs.sigstore.dev/about/bundle/).

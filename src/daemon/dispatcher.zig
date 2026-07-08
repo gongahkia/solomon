@@ -57,10 +57,13 @@ pub const RenderedPrompt = struct {
     prompt: []u8,
     redraw_token: ?[]u8 = null,
     slow_warning: ?SlowWarning = null,
+    trace: ?[]TraceEntry = null,
+    total_ns: u64 = 0,
 
     pub fn deinit(self: *RenderedPrompt, allocator: std.mem.Allocator) void {
         allocator.free(self.prompt);
         if (self.redraw_token) |token| allocator.free(token);
+        if (self.trace) |trace| allocator.free(trace);
         self.* = undefined;
     }
 };
@@ -68,6 +71,14 @@ pub const RenderedPrompt = struct {
 pub const SlowWarning = struct {
     module_id: ModuleId,
     elapsed_ns: u64,
+};
+
+pub const TraceEntry = struct {
+    module_id: ModuleId,
+    execution_class: ExecutionClass,
+    duration_ns: u64,
+    cache_state: []const u8,
+    placeholder: bool = false,
 };
 
 pub const LayoutLineInput = struct {
@@ -156,8 +167,16 @@ pub fn renderDefault(allocator: std.mem.Allocator, caches: CacheSet, input: Rend
     return renderPipeline(allocator, caches, input, default_pipeline[0..]);
 }
 
+pub fn renderDefaultTraced(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput) !RenderedPrompt {
+    return renderPipelineTraced(allocator, caches, input, default_pipeline[0..]);
+}
+
 pub fn renderPipeline(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec) !RenderedPrompt {
     return renderPipelineWithTerminator(allocator, caches, input, pipeline, "> ");
+}
+
+pub fn renderPipelineTraced(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec) !RenderedPrompt {
+    return renderPipelineWithOptions(allocator, caches, input, pipeline, "> ", true);
 }
 
 pub fn renderSegments(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec) !RenderedPrompt {
@@ -165,29 +184,40 @@ pub fn renderSegments(allocator: std.mem.Allocator, caches: CacheSet, input: Ren
 }
 
 fn renderPipelineWithTerminator(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec, terminator: []const u8) !RenderedPrompt {
+    return renderPipelineWithOptions(allocator, caches, input, pipeline, terminator, false);
+}
+
+fn renderPipelineWithOptions(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec, terminator: []const u8, trace_enabled: bool) !RenderedPrompt {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
     var wrote_segment = false;
     var has_async = false;
     var slow_warning: ?SlowWarning = null;
+    var trace_entries: std.ArrayList(TraceEntry) = .empty;
+    defer if (!trace_enabled) trace_entries.deinit(allocator);
+    errdefer if (trace_enabled) trace_entries.deinit(allocator);
+    const total_start_ns = std.time.nanoTimestamp();
 
     if (input.rtl and input.rtl_reverse) {
         var index = pipeline.len;
         while (index > 0) {
             index -= 1;
-            try appendPipelineSegment(allocator, caches, input, pipeline[index], &out, &wrote_segment, &has_async, &slow_warning);
+            try appendPipelineSegment(allocator, caches, input, pipeline[index], &out, &wrote_segment, &has_async, &slow_warning, if (trace_enabled) &trace_entries else null);
         }
     } else {
         for (pipeline) |spec| {
-            try appendPipelineSegment(allocator, caches, input, spec, &out, &wrote_segment, &has_async, &slow_warning);
+            try appendPipelineSegment(allocator, caches, input, spec, &out, &wrote_segment, &has_async, &slow_warning, if (trace_enabled) &trace_entries else null);
         }
     }
 
     try out.appendSlice(allocator, terminator);
+    const trace = if (trace_enabled) try trace_entries.toOwnedSlice(allocator) else null;
     return .{
         .prompt = try out.toOwnedSlice(allocator),
         .redraw_token = if (has_async) try allocator.dupe(u8, "pending") else null,
         .slow_warning = slow_warning,
+        .trace = trace,
+        .total_ns = @intCast(std.time.nanoTimestamp() - total_start_ns),
     };
 }
 
@@ -200,6 +230,7 @@ fn appendPipelineSegment(
     wrote_segment: *bool,
     has_async: *bool,
     slow_warning: *?SlowWarning,
+    trace_entries: ?*std.ArrayList(TraceEntry),
 ) !void {
     var async_result: ?AsyncRender = null;
     defer if (async_result) |*value| value.deinit(allocator);
@@ -216,12 +247,31 @@ fn appendPipelineSegment(
     if (slow_warning.* == null and elapsed_ns > slow_warning_ns) {
         slow_warning.* = .{ .module_id = spec.id, .elapsed_ns = elapsed_ns };
     }
+    if (trace_entries) |entries| {
+        try entries.append(allocator, .{
+            .module_id = spec.id,
+            .execution_class = spec.execution_class,
+            .duration_ns = elapsed_ns,
+            .cache_state = traceCacheState(spec, input, async_result),
+            .placeholder = async_result != null and async_result.?.pending and async_result.?.segment == null,
+        });
+    }
     defer if (segment) |value| allocator.free(value);
     if (segment) |value| {
         if (wrote_segment.*) try out.append(allocator, ' ');
         try out.appendSlice(allocator, value);
         wrote_segment.* = true;
     }
+}
+
+fn traceCacheState(spec: ModuleSpec, input: RenderInput, async_result: ?AsyncRender) []const u8 {
+    if (spec.execution_class != .async) return "none";
+    if (input.no_async) return "bypass";
+    if (async_result) |result| {
+        if (result.segment != null) return "hit";
+        if (result.pending) return "miss";
+    }
+    return "miss";
 }
 
 pub fn fillerWidth(left: []const u8, right: []const u8, cols: u16) usize {

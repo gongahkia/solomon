@@ -23,3 +23,4 @@ Accepted RFCs must also have a matching `docs/internals/rfc-NNNN-*.md` decision 
 | [0012](0012-self-observability-exporter.md) | Local Self-Observability Exporter | Draft | daemon observability, security |
 | [0013](0013-reactive-updates.md) | Reactive Prompt Updates | Draft | daemon lifecycle, shell integration |
 | [0014](0014-windows-native.md) | Windows Native Transport | Draft | Windows, daemon IPC, shell integration |
+| [0015](0015-render-trace-debug.md) | Render Trace Debugging | Draft | daemon protocol, debugging |

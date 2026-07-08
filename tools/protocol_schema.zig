@@ -140,6 +140,9 @@ const schema_json =
     \\        "glyph_caps": { "$ref": "#/$defs/glyphCaps" },
     \\        "user_id": { "type": "integer", "minimum": 0 },
     \\        "session": { "type": "string" },
+    \\        "env_hash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+    \\        "path_env": { "type": ["string", "null"] },
+    \\        "trace": { "type": "boolean" },
     \\        "modules": {
     \\          "type": "array",
     \\          "items": { "type": "string" }
@@ -177,6 +180,9 @@ const schema_json =
     \\        "glyph_caps": { "$ref": "#/$defs/glyphCaps" },
     \\        "user_id": { "type": "integer", "minimum": 0 },
     \\        "session": { "type": "string" },
+    \\        "env_hash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+    \\        "path_env": { "type": ["string", "null"] },
+    \\        "trace": { "type": "boolean" },
     \\        "modules": {
     \\          "type": "array",
     \\          "items": { "type": "string" }
@@ -245,6 +251,18 @@ const schema_json =
     \\        "message": { "type": "string" }
     \\      }
     \\    },
+    \\    "traceEntry": {
+    \\      "type": "object",
+    \\      "required": ["module", "class", "duration_ns", "cache_state"],
+    \\      "additionalProperties": true,
+    \\      "properties": {
+    \\        "module": { "type": "string" },
+    \\        "class": { "type": "string", "enum": ["sync", "cached", "async"] },
+    \\        "duration_ns": { "type": "integer", "minimum": 0 },
+    \\        "cache_state": { "type": "string" },
+    \\        "placeholder": { "type": "boolean" }
+    \\      }
+    \\    },
     \\    "promptResponse": {
     \\      "type": "object",
     \\      "required": ["v", "request_id", "prompt", "diagnostics", "elapsed_us"],
@@ -259,7 +277,11 @@ const schema_json =
     \\          "type": "array",
     \\          "items": { "$ref": "#/$defs/diagnostic" }
     \\        },
-    \\        "elapsed_us": { "type": "integer", "minimum": 0 }
+    \\        "elapsed_us": { "type": "integer", "minimum": 0 },
+    \\        "trace": {
+    \\          "type": ["array", "null"],
+    \\          "items": { "$ref": "#/$defs/traceEntry" }
+    \\        }
     \\      }
     \\    },
     \\    "healthResponse": {

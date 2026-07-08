@@ -33,6 +33,7 @@ commands:
   report        write a redacted support bundle .tar.gz
   supervisor    run shisad under a crash-restart supervisor
   theme         validate theme files
+  trace         render once with module timing trace on stderr
   vouch         verify VOUCHES governance file
 
 options:
@@ -77,6 +78,21 @@ usage: shisa theme <command> [args]
 commands:
   validate <path>   validate a theme file
   preview <theme>   render a stub prompt from a built-in id or theme file
+```
+
+### `shisa trace`
+
+```text
+usage: shisa trace [--cwd DIR] [--exit N] [--jobs N]
+
+options:
+  --cwd DIR        render as if current directory is DIR
+  --exit N         render with last exit code N
+  --jobs N         render with running job count N
+  --duration-ms N  render with command duration N
+  --shell NAME     render for zsh, bash, fish, nu, or pwsh
+
+trace output is written to stderr; prompt output remains on stdout.
 ```
 
 ### `shisa vouch`

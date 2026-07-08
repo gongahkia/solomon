@@ -70,6 +70,11 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, args[1], "trace")) {
+        try traceCommand(allocator, args[2..]);
+        return;
+    }
+
     if (std.mem.eql(u8, args[1], "report")) {
         try cli_doctor.reportCommand(allocator, args[2..], .{ .version = version, .iteration = reportPromptPayloadBenchIterationAlloc });
         return;
@@ -3606,6 +3611,7 @@ const PromptConfig = struct {
     rtl: bool = false,
     rtl_reverse: bool = false,
     right: bool = false,
+    trace: bool = false,
     shell: []const u8 = "zsh",
     cols: u16 = 80,
     rows: u16 = 24,
@@ -3614,7 +3620,9 @@ const PromptConfig = struct {
 const prompt_auto_spawn_grace_ms: i64 = 100;
 
 fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const config = try parsePrompt(args);
+    var config = try parsePrompt(args);
+    const debug_level = try shisaDebugLevel(allocator);
+    if (debug_level > 0) config.trace = true;
     if (config.explain_a11y) {
         const output = try promptA11yExplanationAlloc(allocator);
         defer allocator.free(output);
@@ -3632,6 +3640,7 @@ fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (config.instant) {
         if (try readInstantPrompt(allocator)) |cached| {
             defer allocator.free(cached);
+            try writePromptTraceIfEnabled(allocator, config, cwd, debug_level);
             try writePromptText(allocator, cached, config.a11y, cwd);
             return;
         }
@@ -3646,6 +3655,7 @@ fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
         if (config.instant) {
             try writeInstantPrompt(allocator, prompt_text);
         }
+        try writePromptTraceIfEnabled(allocator, config, cwd, debug_level);
         try writePromptText(allocator, prompt_text, config.a11y, cwd);
         return;
     };
@@ -3656,11 +3666,56 @@ fn prompt(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (config.instant) {
         try writeInstantPrompt(allocator, parsed.value.prompt);
     }
+    if (debug_level > 0) {
+        if (parsed.value.trace) |trace| {
+            try writeProtoTraceReport(allocator, cwd, trace, parsed.value.elapsed_us * 1000, debug_level);
+        } else {
+            try writePromptTraceIfEnabled(allocator, config, cwd, debug_level);
+        }
+    }
     if (config.right) {
         if (parsed.value.right_prompt) |right_prompt| try std.fs.File.stdout().writeAll(right_prompt);
         return;
     }
     try writePromptText(allocator, parsed.value.prompt, config.a11y, cwd);
+}
+
+fn traceCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len == 1 and (std.mem.eql(u8, args[0], "--help") or std.mem.eql(u8, args[0], "-h"))) {
+        try std.fs.File.stdout().writeAll(trace_help_text);
+        return;
+    }
+    var config = try parsePrompt(args);
+    config.trace = true;
+    const cwd = if (config.cwd) |path| path else try std.fs.cwd().realpathAlloc(allocator, ".");
+    defer if (config.cwd == null) allocator.free(cwd);
+    var rendered = try renderLocalPrompt(allocator, config, cwd, true);
+    defer rendered.deinit(allocator);
+    try writeTraceReport(allocator, cwd, rendered.trace orelse &.{}, rendered.total_ns, 2);
+    if (!config.right) try writePromptText(allocator, rendered.prompt, config.a11y, cwd);
+}
+
+fn shisaDebugLevel(allocator: std.mem.Allocator) !u8 {
+    const raw = std.process.getEnvVarOwned(allocator, "SHISA_DEBUG") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => return 0,
+        else => return err,
+    };
+    defer allocator.free(raw);
+    if (std.mem.eql(u8, raw, "2")) return 2;
+    if (std.mem.eql(u8, raw, "1") or std.mem.eql(u8, raw, "true") or std.mem.eql(u8, raw, "yes")) return 1;
+    return 0;
+}
+
+fn writePromptTraceIfEnabled(allocator: std.mem.Allocator, config: PromptConfig, cwd: []const u8, debug_level: u8) !void {
+    if (debug_level == 0) return;
+    var rendered = renderLocalPrompt(allocator, config, cwd, true) catch |err| {
+        const line = try std.fmt.allocPrint(allocator, "[shisa] trace_error={s}\n", .{@errorName(err)});
+        defer allocator.free(line);
+        try std.fs.File.stderr().writeAll(line);
+        return;
+    };
+    defer rendered.deinit(allocator);
+    try writeTraceReport(allocator, cwd, rendered.trace orelse &.{}, rendered.total_ns, debug_level);
 }
 
 fn parsePrompt(args: []const []const u8) !PromptConfig {
@@ -3802,7 +3857,25 @@ fn autoSpawnPromptRequestAlloc(allocator: std.mem.Allocator, socket_path: []cons
     return client.requestAlloc(allocator, socket_path, payload) catch null;
 }
 
+const LocalPromptRender = struct {
+    prompt: []u8,
+    trace: ?[]dispatcher.TraceEntry = null,
+    total_ns: u64 = 0,
+
+    fn deinit(self: *LocalPromptRender, allocator: std.mem.Allocator) void {
+        allocator.free(self.prompt);
+        if (self.trace) |trace| allocator.free(trace);
+        self.* = undefined;
+    }
+};
+
 fn renderSyncPromptAlloc(allocator: std.mem.Allocator, config: PromptConfig, cwd: []const u8) ![]u8 {
+    const rendered = try renderLocalPrompt(allocator, config, cwd, false);
+    if (rendered.trace) |trace| allocator.free(trace);
+    return rendered.prompt;
+}
+
+fn renderLocalPrompt(allocator: std.mem.Allocator, config: PromptConfig, cwd: []const u8, trace_enabled: bool) !LocalPromptRender {
     var git_cache = git_branch_module.Cache{};
     defer git_cache.deinit(allocator);
     var language_cache = language_versions_module.Cache{};
@@ -3841,18 +3914,19 @@ fn renderSyncPromptAlloc(allocator: std.mem.Allocator, config: PromptConfig, cwd
     const host = try currentHostAlloc(allocator);
     defer allocator.free(host);
 
-    var rendered = try dispatcher.renderPipeline(allocator, .{
+    const cache_set = dispatcher.CacheSet{
         .git_branch = &git_cache,
         .language_versions = &language_cache,
         .cloud_ctx = &cloud_cache,
-    }, .{
+    };
+    const render_input = dispatcher.RenderInput{
         .cwd = cwd,
         .home = home,
         .exit = config.exit,
         .jobs = config.jobs,
         .duration_ms = config.duration_ms,
         .time = config.time,
-        .no_async = true,
+        .no_async = if (trace_enabled) config.no_async else true,
         .timestamp = std.time.timestamp(),
         .ssh = ssh,
         .user = user,
@@ -3878,9 +3952,75 @@ fn renderSyncPromptAlloc(allocator: std.mem.Allocator, config: PromptConfig, cwd
         .rtl_reverse = promptRtlReverse(config, module_options),
         .risk_tier = module_options.risk_tier,
         .sso_expiry = module_options.sso_expiry,
-    }, pipeline);
-    defer rendered.deinit(allocator);
-    return allocator.dupe(u8, rendered.prompt);
+    };
+    const rendered = if (trace_enabled)
+        try dispatcher.renderPipelineTraced(allocator, cache_set, render_input, pipeline)
+    else
+        try dispatcher.renderPipeline(allocator, cache_set, render_input, pipeline);
+    const prompt_text = rendered.prompt;
+    const trace = rendered.trace;
+    const total_ns = rendered.total_ns;
+    if (rendered.redraw_token) |token| allocator.free(token);
+    return .{
+        .prompt = prompt_text,
+        .trace = trace,
+        .total_ns = total_ns,
+    };
+}
+
+fn writeTraceReport(allocator: std.mem.Allocator, cwd: []const u8, trace: []const dispatcher.TraceEntry, total_ns: u64, debug_level: u8) !void {
+    try traceLine(allocator, "[shisa] cwd={s}\n", .{cwd});
+    for (trace) |entry| {
+        const ms = durationMs(entry.duration_ns);
+        try traceLine(allocator, "[shisa] module={s} {s} {d:.2}ms cache={s}", .{
+            dispatcher.moduleIdName(entry.module_id),
+            executionClassName(entry.execution_class),
+            ms,
+            entry.cache_state,
+        });
+        if (entry.placeholder) try std.fs.File.stderr().writeAll(" placeholder=true");
+        if (debug_level >= 2) {
+            try traceLine(allocator, " key=module:{s} age_ms=0 hit_rate=n/a", .{dispatcher.moduleIdName(entry.module_id)});
+        }
+        try std.fs.File.stderr().writeAll("\n");
+    }
+    try traceLine(allocator, "[shisa] total {d:.2}ms modules={d}\n", .{ durationMs(total_ns), trace.len });
+}
+
+fn writeProtoTraceReport(allocator: std.mem.Allocator, cwd: []const u8, trace: []const proto.TraceEntry, total_ns: u64, debug_level: u8) !void {
+    try traceLine(allocator, "[shisa] cwd={s}\n", .{cwd});
+    for (trace) |entry| {
+        try traceLine(allocator, "[shisa] module={s} {s} {d:.2}ms cache={s}", .{
+            entry.module,
+            entry.class,
+            durationMs(entry.duration_ns),
+            entry.cache_state,
+        });
+        if (entry.placeholder) try std.fs.File.stderr().writeAll(" placeholder=true");
+        if (debug_level >= 2) {
+            try traceLine(allocator, " key=module:{s} age_ms=0 hit_rate=n/a", .{entry.module});
+        }
+        try std.fs.File.stderr().writeAll("\n");
+    }
+    try traceLine(allocator, "[shisa] total {d:.2}ms modules={d}\n", .{ durationMs(total_ns), trace.len });
+}
+
+fn traceLine(allocator: std.mem.Allocator, comptime format: []const u8, args: anytype) !void {
+    const line = try std.fmt.allocPrint(allocator, format, args);
+    defer allocator.free(line);
+    try std.fs.File.stderr().writeAll(line);
+}
+
+fn durationMs(duration_ns: u64) f64 {
+    return @as(f64, @floatFromInt(duration_ns)) / @as(f64, @floatFromInt(std.time.ns_per_ms));
+}
+
+fn executionClassName(class: dispatcher.ExecutionClass) []const u8 {
+    return switch (class) {
+        .sync => "sync",
+        .cached => "cached",
+        .async => "async",
+    };
 }
 
 fn currentUserAlloc(allocator: std.mem.Allocator) ![]u8 {
@@ -4120,8 +4260,8 @@ fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config: Pro
     defer allocator.free(head);
     const tail = try std.fmt.allocPrint(
         allocator,
-        "\"modules\":[{s}],\"right_modules\":[{s}],\"tmux_pane\":\"{s}\",\"rtl\":{},\"rtl_reverse\":{},\"cwd_options\":{{\"truncate_to\":{d},\"home_tilde\":{},\"max_width\":{d}}},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"cdhint\":{{\"enabled\":{}}},\"tmux_pane_options\":{{\"enabled\":{}}},\"risk_tier\":{{\"unknown_bg\":\"{s}\",\"dev_bg\":\"{s}\",\"staging_bg\":\"{s}\",\"prod_bg\":\"{s}\"}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
-        .{ modules_json, right_modules_json, escaped_tmux_pane, rtl, rtl_reverse, module_options.cwd.truncate_to, module_options.cwd.home_tilde, module_options.cwd.max_width, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, module_options.cdhint.enabled, module_options.tmux_pane.enabled, risk_tier_module.colorSlotName(module_options.risk_tier.unknown_bg), risk_tier_module.colorSlotName(module_options.risk_tier.dev_bg), risk_tier_module.colorSlotName(module_options.risk_tier.staging_bg), risk_tier_module.colorSlotName(module_options.risk_tier.prod_bg), module_options.sso_expiry.warning_minutes },
+        "\"modules\":[{s}],\"right_modules\":[{s}],\"tmux_pane\":\"{s}\",\"trace\":{},\"rtl\":{},\"rtl_reverse\":{},\"cwd_options\":{{\"truncate_to\":{d},\"home_tilde\":{},\"max_width\":{d}}},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"cdhint\":{{\"enabled\":{}}},\"tmux_pane_options\":{{\"enabled\":{}}},\"risk_tier\":{{\"unknown_bg\":\"{s}\",\"dev_bg\":\"{s}\",\"staging_bg\":\"{s}\",\"prod_bg\":\"{s}\"}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
+        .{ modules_json, right_modules_json, escaped_tmux_pane, config.trace, rtl, rtl_reverse, module_options.cwd.truncate_to, module_options.cwd.home_tilde, module_options.cwd.max_width, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, module_options.cdhint.enabled, module_options.tmux_pane.enabled, risk_tier_module.colorSlotName(module_options.risk_tier.unknown_bg), risk_tier_module.colorSlotName(module_options.risk_tier.dev_bg), risk_tier_module.colorSlotName(module_options.risk_tier.staging_bg), risk_tier_module.colorSlotName(module_options.risk_tier.prod_bg), module_options.sso_expiry.warning_minutes },
     );
     defer allocator.free(tail);
     return std.fmt.allocPrint(
@@ -4460,11 +4600,26 @@ const help_text =
     \\  report        write a redacted support bundle .tar.gz
     \\  supervisor    run shisad under a crash-restart supervisor
     \\  theme         validate theme files
+    \\  trace         render once with module timing trace on stderr
     \\  vouch         verify VOUCHES governance file
     \\
     \\options:
     \\  -h, --help    print help
     \\      --version print version
+    \\
+;
+
+const trace_help_text =
+    \\usage: shisa trace [--cwd DIR] [--exit N] [--jobs N]
+    \\
+    \\options:
+    \\  --cwd DIR        render as if current directory is DIR
+    \\  --exit N         render with last exit code N
+    \\  --jobs N         render with running job count N
+    \\  --duration-ms N  render with command duration N
+    \\  --shell NAME     render for zsh, bash, fish, nu, or pwsh
+    \\
+    \\trace output is written to stderr; prompt output remains on stdout.
     \\
 ;
 

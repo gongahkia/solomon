@@ -91,6 +91,7 @@ pub const Request = struct {
     request_id: []const u8 = "",
     env_hash: ?[]const u8 = null,
     path_env: ?[]const u8 = null,
+    trace: bool = false,
     modules: []const []const u8 = &.{},
     right_modules: []const []const u8 = &.{},
     tmux_pane: ?[]const u8 = null,
@@ -108,6 +109,14 @@ pub const Diagnostic = struct {
     message: []const u8,
 };
 
+pub const TraceEntry = struct {
+    module: []const u8,
+    class: []const u8,
+    duration_ns: u64,
+    cache_state: []const u8,
+    placeholder: bool = false,
+};
+
 pub const Response = struct {
     v: u32 = version,
     request_id: []const u8 = "",
@@ -117,6 +126,7 @@ pub const Response = struct {
     trailer: ?[]const u8 = null,
     diagnostics: []const Diagnostic = &.{},
     elapsed_us: u64 = 0,
+    trace: ?[]const TraceEntry = null,
 };
 
 pub const ErrorCode = enum {
@@ -247,6 +257,7 @@ test "request type carries v1 render inputs" {
         .request_id = "request-1",
         .env_hash = "abc123",
         .path_env = "/nix/store/bin:/usr/bin",
+        .trace = true,
         .modules = &.{ "cwd", "cdhint" },
         .right_modules = &.{"time"},
         .tmux_pane = "%1",
@@ -273,6 +284,7 @@ test "request type carries v1 render inputs" {
     try std.testing.expectEqualStrings("request-1", request.request_id);
     try std.testing.expectEqualStrings("abc123", request.env_hash.?);
     try std.testing.expectEqualStrings("/nix/store/bin:/usr/bin", request.path_env.?);
+    try std.testing.expect(request.trace);
     try std.testing.expectEqualStrings("cwd", request.modules[0]);
     try std.testing.expectEqualStrings("cdhint", request.modules[1]);
     try std.testing.expectEqualStrings("time", request.right_modules[0]);
@@ -285,6 +297,12 @@ test "request type carries v1 render inputs" {
 
 test "response type carries prompt metadata and optional redraw token" {
     const diagnostics = [_]Diagnostic{.{ .code = "slow_module", .message = "git exceeded budget" }};
+    const trace = [_]TraceEntry{.{
+        .module = "git_branch",
+        .class = "async",
+        .duration_ns = 340_000,
+        .cache_state = "hit",
+    }};
     const response = Response{
         .request_id = "request-1",
         .prompt = "shisa> ",
@@ -293,6 +311,7 @@ test "response type carries prompt metadata and optional redraw token" {
         .trailer = "right prompt",
         .diagnostics = &diagnostics,
         .elapsed_us = 1234,
+        .trace = &trace,
     };
 
     try std.testing.expectEqual(@as(u32, 1), response.v);
@@ -303,6 +322,8 @@ test "response type carries prompt metadata and optional redraw token" {
     try std.testing.expectEqualStrings("right prompt", response.trailer.?);
     try std.testing.expectEqualStrings("slow_module", response.diagnostics[0].code);
     try std.testing.expectEqual(@as(u64, 1234), response.elapsed_us);
+    try std.testing.expectEqualStrings("git_branch", response.trace.?[0].module);
+    try std.testing.expectEqual(@as(u64, 340_000), response.trace.?[0].duration_ns);
 }
 
 test "error envelope carries explicit code and structured context" {
@@ -522,7 +543,7 @@ test "snapshots every op and protocol shape" {
         };
         const request_json = try encodeAlloc(allocator, request);
         defer allocator.free(request_json);
-        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"modules\":[],\"right_modules\":[],\"rtl\":false,\"rtl_reverse\":false,\"cwd_options\":{{\"truncate_to\":3,\"home_tilde\":true,\"max_width\":0}},\"cloud_ctx\":{{\"aws\":true,\"gcp\":true,\"azure\":true,\"kubernetes\":true}},\"cdhint\":{{\"enabled\":true}},\"tmux_pane_options\":{{\"enabled\":true}},\"risk_tier\":{{\"unknown_bg\":\"muted\",\"dev_bg\":\"success\",\"staging_bg\":\"warning\",\"prod_bg\":\"danger\"}}}}", .{ op_name, request_id });
+        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"trace\":false,\"modules\":[],\"right_modules\":[],\"rtl\":false,\"rtl_reverse\":false,\"cwd_options\":{{\"truncate_to\":3,\"home_tilde\":true,\"max_width\":0}},\"cloud_ctx\":{{\"aws\":true,\"gcp\":true,\"azure\":true,\"kubernetes\":true}},\"cdhint\":{{\"enabled\":true}},\"tmux_pane_options\":{{\"enabled\":true}},\"risk_tier\":{{\"unknown_bg\":\"muted\",\"dev_bg\":\"success\",\"staging_bg\":\"warning\",\"prod_bg\":\"danger\"}}}}", .{ op_name, request_id });
         defer allocator.free(expected_request);
         try std.testing.expectEqualStrings(expected_request, request_json);
 

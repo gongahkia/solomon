@@ -57,6 +57,7 @@ const RenderRequest = struct {
     request_id: []const u8 = "",
     env_hash: ?[]const u8 = null,
     path_env: ?[]const u8 = null,
+    trace: bool = false,
     modules: []const []const u8 = &.{},
     right_modules: []const []const u8 = &.{},
     tmux_pane: ?[]const u8 = null,
@@ -535,7 +536,7 @@ const PosixServer = struct {
         const cache_key = try renderPromptCacheKeyAlloc(std.heap.page_allocator, parsed.value, cache_context);
         defer std.heap.page_allocator.free(cache_key);
 
-        const use_prompt_cache = parsed.value.right_modules.len == 0;
+        const use_prompt_cache = parsed.value.right_modules.len == 0 and !parsed.value.trace;
         if (use_prompt_cache) {
             if (try self.prompt_cache.get(prompt_cache_module, cache_key)) |cached| {
                 self.prompt_cache_hits += 1;
@@ -592,7 +593,12 @@ const PosixServer = struct {
         const request_pipeline = try renderPipelineFromModuleNamesAlloc(std.heap.page_allocator, parsed.value.modules);
         defer if (request_pipeline) |pipeline| std.heap.page_allocator.free(pipeline);
         var rendered = if (request_pipeline) |pipeline|
-            try dispatcher.renderPipeline(std.heap.page_allocator, cache_set, render_input, pipeline)
+            if (parsed.value.trace)
+                try dispatcher.renderPipelineTraced(std.heap.page_allocator, cache_set, render_input, pipeline)
+            else
+                try dispatcher.renderPipeline(std.heap.page_allocator, cache_set, render_input, pipeline)
+        else if (parsed.value.trace)
+            try dispatcher.renderDefaultTraced(std.heap.page_allocator, cache_set, render_input)
         else
             try dispatcher.renderDefault(std.heap.page_allocator, cache_set, render_input);
         defer rendered.deinit(std.heap.page_allocator);
@@ -623,12 +629,14 @@ const PosixServer = struct {
         }
 
         const redraw_token = rendered.redraw_token orelse rendered_right.redraw_token;
+        const trace_fragment = try traceFragmentAlloc(std.heap.page_allocator, rendered.trace, parsed.value.trace);
+        defer std.heap.page_allocator.free(trace_fragment);
         if (redraw_token) |token| {
             const escaped_token = try json.escapeAlloc(std.heap.page_allocator, token);
             defer std.heap.page_allocator.free(escaped_token);
-            return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"right_prompt\":\"{s}\",\"redraw_token\":\"{s}\",\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, escaped_right_prompt, escaped_token, elapsed_us });
+            return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"right_prompt\":\"{s}\",\"redraw_token\":\"{s}\",\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}{s}}}", .{ escaped_request_id, escaped_prompt, escaped_right_prompt, escaped_token, elapsed_us, trace_fragment });
         }
-        return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"right_prompt\":\"{s}\",\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, escaped_right_prompt, elapsed_us });
+        return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"right_prompt\":\"{s}\",\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}{s}}}", .{ escaped_request_id, escaped_prompt, escaped_right_prompt, elapsed_us, trace_fragment });
     }
 
     fn renderCacheSnapshot(self: *Server) RenderCacheSnapshot {
@@ -1106,6 +1114,42 @@ fn encodeFrameAlloc(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
     std.mem.writeInt(u32, encoded[0..header_bytes], @as(u32, @intCast(payload.len)), .big);
     @memcpy(encoded[header_bytes..], payload);
     return encoded;
+}
+
+fn traceFragmentAlloc(allocator: std.mem.Allocator, trace: ?[]const dispatcher.TraceEntry, enabled: bool) ![]u8 {
+    if (!enabled) return allocator.dupe(u8, "");
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try out.appendSlice(allocator, ",\"trace\":[");
+    if (trace) |entries| {
+        for (entries, 0..) |entry, index| {
+            if (index != 0) try out.append(allocator, ',');
+            const module_name = dispatcher.moduleIdName(entry.module_id);
+            const escaped_module = try json.escapeAlloc(allocator, module_name);
+            defer allocator.free(escaped_module);
+            const escaped_class = try json.escapeAlloc(allocator, executionClassName(entry.execution_class));
+            defer allocator.free(escaped_class);
+            const escaped_cache = try json.escapeAlloc(allocator, entry.cache_state);
+            defer allocator.free(escaped_cache);
+            const line = try std.fmt.allocPrint(
+                allocator,
+                "{{\"module\":\"{s}\",\"class\":\"{s}\",\"duration_ns\":{d},\"cache_state\":\"{s}\",\"placeholder\":{}}}",
+                .{ escaped_module, escaped_class, entry.duration_ns, escaped_cache, entry.placeholder },
+            );
+            defer allocator.free(line);
+            try out.appendSlice(allocator, line);
+        }
+    }
+    try out.append(allocator, ']');
+    return out.toOwnedSlice(allocator);
+}
+
+fn executionClassName(class: dispatcher.ExecutionClass) []const u8 {
+    return switch (class) {
+        .sync => "sync",
+        .cached => "cached",
+        .async => "async",
+    };
 }
 
 fn readFrameAlloc(allocator: std.mem.Allocator, fd: std.posix.fd_t) ![]u8 {
@@ -1823,6 +1867,32 @@ test "renders cwd prompt response" {
     const response = try readFrameAlloc(allocator, client_stream.handle);
     defer allocator.free(response);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"prompt\":\"/tmp/project> \"") != null);
+
+    thread.join();
+}
+
+test "render response includes trace when requested" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    const thread = try std.Thread.spawn(.{}, acceptOneThread, .{&server});
+
+    var client_stream = try std.net.connectUnixSocket(socket_path);
+    defer client_stream.close();
+    try writeFrame(client_stream.handle, "{\"v\":1,\"cwd\":\"/tmp/project\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"trace\":true,\"modules\":[\"cwd\",\"git_branch\",\"language_versions\"]}");
+    const response = try readFrameAlloc(allocator, client_stream.handle);
+    defer allocator.free(response);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"trace\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"module\":\"cwd\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"cache_state\":\"miss\"") != null);
 
     thread.join();
 }

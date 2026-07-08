@@ -849,6 +849,7 @@ pub fn build(b: *std.Build) void {
     starship_presets_import.step.dependOn(&debug_install.step);
     const pure_import_smoke = b.addSystemCommand(&.{ "bash", "test/integration/pure_import_smoke.sh" });
     pure_import_smoke.step.dependOn(&debug_install.step);
+    const plugin_capability_traversal = b.addSystemCommand(&.{ "bash", "test/integration/plugin_capability_traversal.sh" });
     const migration_snapshot_gate = b.addSystemCommand(&.{ "bash", "test/integration/migration_snapshot_gate.sh" });
     migration_snapshot_gate.step.dependOn(&debug_install.step);
     const prompt_snapshot = b.addSystemCommand(&.{ "bash", "test/integration/prompt_snapshot.sh" });
@@ -936,6 +937,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&tmux_expect_integration.step);
     test_step.dependOn(&starship_presets_import.step);
     test_step.dependOn(&pure_import_smoke.step);
+    test_step.dependOn(&plugin_capability_traversal.step);
     test_step.dependOn(&migration_snapshot_gate.step);
     test_step.dependOn(&prompt_snapshot.step);
     test_step.dependOn(&editor_bridge_integration.step);

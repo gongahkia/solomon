@@ -2520,9 +2520,30 @@ test "reload disables slow plugin after three cpu strikes" {
 }
 
 test "daemon checks plugin host api calls through capability gate" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("repo/.git");
+    try tmp.dir.writeFile(.{ .sub_path = "repo/config.toml", .data = "" });
+    try tmp.dir.writeFile(.{ .sub_path = "repo/.git/HEAD", .data = "ref: refs/heads/main\n" });
+
+    const allocator = std.testing.allocator;
+    const repo = try tmp.dir.realpathAlloc(allocator, "repo");
+    defer allocator.free(repo);
+    const repo_git = try tmp.dir.realpathAlloc(allocator, "repo/.git");
+    defer allocator.free(repo_git);
+    const config_path = try tmp.dir.realpathAlloc(allocator, "repo/config.toml");
+    defer allocator.free(config_path);
+    const git_head = try tmp.dir.realpathAlloc(allocator, "repo/.git/HEAD");
+    defer allocator.free(git_head);
+    const read_pattern = try std.fmt.allocPrint(allocator, "{s}/**", .{repo});
+    defer allocator.free(read_pattern);
+    const watch_pattern = try std.fmt.allocPrint(allocator, "{s}/**", .{repo_git});
+    defer allocator.free(watch_pattern);
+    const read_patterns = [_][]const u8{read_pattern};
+    const watch_patterns = [_][]const u8{watch_pattern};
     const capabilities = plugin_manifest.Capabilities{
-        .fs_read = &.{"/repo/**"},
-        .fs_watch = &.{"/repo/.git/**"},
+        .fs_read = read_patterns[0..],
+        .fs_watch = watch_patterns[0..],
         .exec = .{ .allow = &.{"git"} },
         .net = .{ .allow = &.{"api.example.com"} },
         .env_read = &.{"AWS_PROFILE"},
@@ -2531,8 +2552,8 @@ test "daemon checks plugin host api calls through capability gate" {
     };
     const context = plugin_capability.Context{};
 
-    try Server.checkPluginHostApiCall(capabilities, context, .{ .fs_read = "/repo/config.toml" });
-    try Server.checkPluginHostApiCall(capabilities, context, .{ .fs_watch = "/repo/.git/HEAD" });
+    try Server.checkPluginHostApiCall(capabilities, context, .{ .fs_read = config_path });
+    try Server.checkPluginHostApiCall(capabilities, context, .{ .fs_watch = git_head });
     try Server.checkPluginHostApiCall(capabilities, context, .{ .exec = "git" });
     try Server.checkPluginHostApiCall(capabilities, context, .{ .net = "api.example.com" });
     try Server.checkPluginHostApiCall(capabilities, context, .{ .env_read = "AWS_PROFILE" });

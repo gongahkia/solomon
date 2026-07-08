@@ -1,7 +1,7 @@
 const std = @import("std");
 const manifest = @import("manifest.zig");
 
-pub const Error = error{CapabilityDenied};
+pub const Error = error{ CapabilityDenied, OutOfMemory };
 
 /// plugin-api: gate | fs_read | path | denied by default | `checkFsRead` accepts exact matches, recursive scopes ending in `/**`, `~/`, and relative plugin-dir scopes.
 /// plugin-api: gate | fs_watch | path | denied by default | `checkFsWatch` uses the same path matching rules as `fs_read`.
@@ -46,11 +46,11 @@ pub const Gate = struct {
     }
 
     pub fn checkFsRead(self: Gate, path: []const u8) Error!void {
-        if (!pathAllowed(self.capabilities.fs_read, self.context, path)) return error.CapabilityDenied;
+        try resolveAndCheck(self.capabilities.fs_read, self.context, path);
     }
 
     pub fn checkFsWatch(self: Gate, path: []const u8) Error!void {
-        if (!pathAllowed(self.capabilities.fs_watch, self.context, path)) return error.CapabilityDenied;
+        try resolveAndCheck(self.capabilities.fs_watch, self.context, path);
     }
 
     pub fn checkExec(self: Gate, command: []const u8) Error!void {
@@ -95,6 +95,15 @@ fn pathAllowed(patterns: []const []const u8, context: Context, path: []const u8)
     return false;
 }
 
+fn resolveAndCheck(patterns: []const []const u8, context: Context, path: []const u8) Error!void {
+    const real = std.fs.cwd().realpathAlloc(std.heap.page_allocator, path) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.CapabilityDenied,
+    };
+    defer std.heap.page_allocator.free(real);
+    if (!pathAllowed(patterns, context, real)) return error.CapabilityDenied;
+}
+
 fn pathPatternMatches(pattern: []const u8, context: Context, path: []const u8) bool {
     if (std.mem.startsWith(u8, pattern, "~/")) {
         const home = context.home orelse return false;
@@ -125,6 +134,14 @@ fn isPathSeparator(byte: u8) bool {
     return byte == '/' or byte == '\\';
 }
 
+fn recursivePatternAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/**", .{path});
+}
+
+fn makeSymlink(dir: std.fs.Dir, target_path: []const u8, link_path: []const u8) !void {
+    try dir.symLink(target_path, link_path, .{});
+}
+
 test "denies omitted capabilities" {
     const gate = Gate.init(.{}, .{});
 
@@ -153,19 +170,52 @@ test "host api dispatcher rejects undeclared capabilities" {
 }
 
 test "allows scoped fs read and watch paths" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("home/project");
+    try tmp.dir.makePath("plugin/assets");
+    try tmp.dir.makePath("repo/.git");
+    try tmp.dir.writeFile(.{ .sub_path = "home/project/config.json", .data = "{}" });
+    try tmp.dir.writeFile(.{ .sub_path = "plugin/assets/icon.png", .data = "icon" });
+    try tmp.dir.writeFile(.{ .sub_path = "repo/.git/HEAD", .data = "ref: refs/heads/main\n" });
+
+    const allocator = std.testing.allocator;
+    const home = try tmp.dir.realpathAlloc(allocator, "home");
+    defer allocator.free(home);
+    const plugin_dir = try tmp.dir.realpathAlloc(allocator, "plugin");
+    defer allocator.free(plugin_dir);
+    const repo_git = try tmp.dir.realpathAlloc(allocator, "repo/.git");
+    defer allocator.free(repo_git);
+    const home_config = try tmp.dir.realpathAlloc(allocator, "home/project/config.json");
+    defer allocator.free(home_config);
+    const plugin_asset = try tmp.dir.realpathAlloc(allocator, "plugin/assets/icon.png");
+    defer allocator.free(plugin_asset);
+    const git_head = try tmp.dir.realpathAlloc(allocator, "repo/.git/HEAD");
+    defer allocator.free(git_head);
+    const denied_home = try std.fs.path.join(allocator, &.{ home, ".ssh/id_ed25519" });
+    defer allocator.free(denied_home);
+    const denied_repo = try tmp.dir.realpathAlloc(allocator, "repo");
+    defer allocator.free(denied_repo);
+    const denied_repo_file = try std.fs.path.join(allocator, &.{ denied_repo, "src/main.zig" });
+    defer allocator.free(denied_repo_file);
+    const watch_pattern = try recursivePatternAlloc(allocator, repo_git);
+    defer allocator.free(watch_pattern);
+    const read_patterns = [_][]const u8{ "~/project/config.json", "assets/**" };
+    const watch_patterns = [_][]const u8{watch_pattern};
+
     const gate = Gate.init(.{
-        .fs_read = &.{ "~/project/config.json", "assets/**" },
-        .fs_watch = &.{"/repo/.git/**"},
+        .fs_read = read_patterns[0..],
+        .fs_watch = watch_patterns[0..],
     }, .{
-        .home = "/Users/alice",
-        .plugin_dir = "/Users/alice/.config/shisa/plugins/kube",
+        .home = home,
+        .plugin_dir = plugin_dir,
     });
 
-    try gate.checkFsRead("/Users/alice/project/config.json");
-    try gate.checkFsRead("/Users/alice/.config/shisa/plugins/kube/assets/icon.png");
-    try gate.checkFsWatch("/repo/.git/HEAD");
-    try std.testing.expectError(error.CapabilityDenied, gate.checkFsRead("/Users/alice/.ssh/id_ed25519"));
-    try std.testing.expectError(error.CapabilityDenied, gate.checkFsWatch("/repo/src/main.zig"));
+    try gate.checkFsRead(home_config);
+    try gate.checkFsRead(plugin_asset);
+    try gate.checkFsWatch(git_head);
+    try std.testing.expectError(error.CapabilityDenied, gate.checkFsRead(denied_home));
+    try std.testing.expectError(error.CapabilityDenied, gate.checkFsWatch(denied_repo_file));
 }
 
 test "allows listed exec net env and hooks" {
@@ -188,10 +238,131 @@ test "allows listed exec net env and hooks" {
 }
 
 test "recursive fs scopes do not match sibling prefixes" {
-    const gate = Gate.init(.{
-        .fs_read = &.{"/repo/**"},
-    }, .{});
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("repo/src");
+    try tmp.dir.makePath("repo-other/src");
+    try tmp.dir.writeFile(.{ .sub_path = "repo/src/main.zig", .data = "" });
+    try tmp.dir.writeFile(.{ .sub_path = "repo-other/src/main.zig", .data = "" });
 
-    try gate.checkFsRead("/repo/src/main.zig");
-    try std.testing.expectError(error.CapabilityDenied, gate.checkFsRead("/repo-other/src/main.zig"));
+    const allocator = std.testing.allocator;
+    const repo = try tmp.dir.realpathAlloc(allocator, "repo");
+    defer allocator.free(repo);
+    const allowed = try tmp.dir.realpathAlloc(allocator, "repo/src/main.zig");
+    defer allocator.free(allowed);
+    const sibling = try tmp.dir.realpathAlloc(allocator, "repo-other/src/main.zig");
+    defer allocator.free(sibling);
+    const pattern = try recursivePatternAlloc(allocator, repo);
+    defer allocator.free(pattern);
+    const read_patterns = [_][]const u8{pattern};
+    const gate = Gate.init(.{ .fs_read = read_patterns[0..] }, .{});
+
+    try gate.checkFsRead(allowed);
+    try std.testing.expectError(error.CapabilityDenied, gate.checkFsRead(sibling));
+}
+
+test "symlink pointing outside scope is denied" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("scope");
+    try tmp.dir.writeFile(.{ .sub_path = "outside.txt", .data = "secret" });
+    try makeSymlink(tmp.dir, "../outside.txt", "scope/link_out");
+
+    const allocator = std.testing.allocator;
+    const scope = try tmp.dir.realpathAlloc(allocator, "scope");
+    defer allocator.free(scope);
+    const request = try std.fs.path.join(allocator, &.{ scope, "link_out" });
+    defer allocator.free(request);
+    const pattern = try recursivePatternAlloc(allocator, scope);
+    defer allocator.free(pattern);
+    const read_patterns = [_][]const u8{pattern};
+    const gate = Gate.init(.{ .fs_read = read_patterns[0..] }, .{});
+
+    try std.testing.expectError(error.CapabilityDenied, gate.checkFsRead(request));
+}
+
+test "dot-dot traversal is denied" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("scope");
+    try tmp.dir.writeFile(.{ .sub_path = "outside.txt", .data = "secret" });
+
+    const allocator = std.testing.allocator;
+    const root = try tmp.dir.realpathAlloc(allocator, ".");
+    defer allocator.free(root);
+    const scope = try tmp.dir.realpathAlloc(allocator, "scope");
+    defer allocator.free(scope);
+    const request = try std.fs.path.join(allocator, &.{ root, "scope", "..", "outside.txt" });
+    defer allocator.free(request);
+    const pattern = try recursivePatternAlloc(allocator, scope);
+    defer allocator.free(pattern);
+    const read_patterns = [_][]const u8{pattern};
+    const gate = Gate.init(.{ .fs_read = read_patterns[0..] }, .{});
+
+    try std.testing.expectError(error.CapabilityDenied, gate.checkFsRead(request));
+}
+
+test "nested symlink chain outside scope is denied" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("scope");
+    try tmp.dir.writeFile(.{ .sub_path = "outside.txt", .data = "secret" });
+    try makeSymlink(tmp.dir, "../outside.txt", "scope/link_b");
+    try makeSymlink(tmp.dir, "link_b", "scope/link_a");
+
+    const allocator = std.testing.allocator;
+    const scope = try tmp.dir.realpathAlloc(allocator, "scope");
+    defer allocator.free(scope);
+    const request = try std.fs.path.join(allocator, &.{ scope, "link_a" });
+    defer allocator.free(request);
+    const pattern = try recursivePatternAlloc(allocator, scope);
+    defer allocator.free(pattern);
+    const read_patterns = [_][]const u8{pattern};
+    const gate = Gate.init(.{ .fs_read = read_patterns[0..] }, .{});
+
+    try std.testing.expectError(error.CapabilityDenied, gate.checkFsRead(request));
+}
+
+test "symlink to allowed file inside scope is permitted" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("scope");
+    try tmp.dir.writeFile(.{ .sub_path = "scope/allowed.txt", .data = "ok" });
+    try makeSymlink(tmp.dir, "allowed.txt", "scope/link_in");
+
+    const allocator = std.testing.allocator;
+    const scope = try tmp.dir.realpathAlloc(allocator, "scope");
+    defer allocator.free(scope);
+    const request = try std.fs.path.join(allocator, &.{ scope, "link_in" });
+    defer allocator.free(request);
+    const pattern = try recursivePatternAlloc(allocator, scope);
+    defer allocator.free(pattern);
+    const read_patterns = [_][]const u8{pattern};
+    const gate = Gate.init(.{ .fs_read = read_patterns[0..] }, .{});
+
+    try gate.checkFsRead(request);
+}
+
+test "hostile plugin traversal requests are denied without side effects" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("scope");
+    try tmp.dir.writeFile(.{ .sub_path = "outside.txt", .data = "clean" });
+
+    const allocator = std.testing.allocator;
+    const root = try tmp.dir.realpathAlloc(allocator, ".");
+    defer allocator.free(root);
+    const scope = try tmp.dir.realpathAlloc(allocator, "scope");
+    defer allocator.free(scope);
+    const request = try std.fs.path.join(allocator, &.{ root, "scope", "..", "outside.txt" });
+    defer allocator.free(request);
+    const pattern = try recursivePatternAlloc(allocator, scope);
+    defer allocator.free(pattern);
+    const read_patterns = [_][]const u8{pattern};
+    const gate = Gate.init(.{ .fs_read = read_patterns[0..] }, .{});
+
+    try std.testing.expectError(error.CapabilityDenied, gate.checkFsRead(request));
+    const contents = try tmp.dir.readFileAlloc(allocator, "outside.txt", 64);
+    defer allocator.free(contents);
+    try std.testing.expectEqualStrings("clean", contents);
 }

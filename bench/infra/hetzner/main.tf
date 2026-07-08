@@ -19,11 +19,11 @@ resource "hcloud_ssh_key" "bench" {
 }
 
 resource "hcloud_volume" "chromium" {
-  name      = "${var.name}-chromium"
-  size      = var.volume_size_gb
-  location  = var.location
-  format    = "ext4"
-  labels    = var.labels
+  name     = "${var.name}-chromium"
+  size     = var.volume_size_gb
+  location = var.location
+  format   = "ext4"
+  labels   = var.labels
 }
 
 resource "hcloud_server" "bench" {
@@ -32,8 +32,8 @@ resource "hcloud_server" "bench" {
   server_type = var.server_type
   location    = var.location
   ssh_keys    = [hcloud_ssh_key.bench.id]
-  user_data   = templatefile("${path.module}/user-data.yaml.tftpl", {
-    mountpoint = var.mountpoint
+  user_data = templatefile("${path.module}/user-data.yaml.tftpl", {
+    mountpoint  = var.mountpoint
     zig_version = var.zig_version
   })
   labels = var.labels

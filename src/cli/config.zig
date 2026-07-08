@@ -344,13 +344,7 @@ fn writeFmt(allocator: std.mem.Allocator, file: std.fs.File, comptime format: []
 }
 
 fn detectTerminalAlloc(allocator: std.mem.Allocator) ![]u8 {
-    if (std.process.getEnvVarOwned(allocator, "TERM_PROGRAM")) |value| return value else |_| {}
-    if (std.process.hasEnvVarConstant("KITTY_WINDOW_ID")) return allocator.dupe(u8, "kitty");
-    if (std.process.hasEnvVarConstant("WT_SESSION")) return allocator.dupe(u8, "Windows Terminal");
-    if (std.process.hasEnvVarConstant("WEZTERM_EXECUTABLE")) return allocator.dupe(u8, "WezTerm");
-    if (std.process.hasEnvVarConstant("ALACRITTY_LOG")) return allocator.dupe(u8, "Alacritty");
-    if (std.process.getEnvVarOwned(allocator, "TERM")) |value| return value else |_| {}
-    return allocator.dupe(u8, "unknown");
+    return cli_util.detectTerminalAlloc(allocator);
 }
 
 fn nerdFontMayNotRender(terminal: []const u8) bool {
@@ -464,14 +458,7 @@ pub fn shellHookInstalled(allocator: std.mem.Allocator) bool {
 }
 
 fn currentShellNameAlloc(allocator: std.mem.Allocator) ![]u8 {
-    if (builtin.os.tag == .windows) return allocator.dupe(u8, "pwsh");
-    const shell_path = std.process.getEnvVarOwned(allocator, "SHELL") catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => return passwdShellNameAlloc(allocator) catch allocator.dupe(u8, "zsh"),
-        else => return err,
-    };
-    defer allocator.free(shell_path);
-    const base = std.fs.path.basename(shell_path);
-    return allocator.dupe(u8, base);
+    return cli_util.currentShellNameAlloc(allocator);
 }
 
 fn passwdShellNameAlloc(allocator: std.mem.Allocator) ![]u8 {

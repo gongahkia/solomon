@@ -65,7 +65,7 @@ msgid ""
 "shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 
-#: src/cli/doctor.zig:282
+#: src/cli/doctor.zig:631
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -74,7 +74,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/cli/doctor.zig:453
+#: src/cli/doctor.zig:802
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""

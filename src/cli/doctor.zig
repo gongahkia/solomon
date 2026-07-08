@@ -3,17 +3,24 @@ const builtin = @import("builtin");
 const cli_config = @import("config.zig");
 const cli_util = @import("util.zig");
 const client = @import("../shisa-client.zig");
+const daemon_json = @import("../daemon/json.zig");
 const fsnotify = @import("../daemon/fsnotify.zig");
+const prompt_payload = @import("prompt_payload.zig");
 const paths = @import("../daemon/paths.zig");
 const plugin_lua = @import("../plugin/lua.zig");
 const plugin_manifest = @import("../plugin/manifest.zig");
+const proto = @import("../proto/types.zig");
 const redact = @import("../redact.zig");
 const shisa_config = @import("../config.zig");
+const vpn_status_module = @import("../daemon/modules/vpn_status.zig");
 
 const DoctorConfig = struct {
     socket_path: ?[]const u8 = null,
     fix: bool = false,
     yes: bool = false,
+    lint: bool = false,
+    json: bool = false,
+    severity_min: Severity = .warning,
 };
 
 const DoctorContext = struct {
@@ -32,6 +39,25 @@ const DoctorIssue = struct {
     fix: *const fn (std.mem.Allocator, DoctorContext) anyerror!void,
 };
 
+const Severity = enum(u8) {
+    info = 0,
+    warning = 1,
+    @"error" = 2,
+};
+
+const DoctorFinding = struct {
+    id: []const u8,
+    severity: Severity,
+    message: []const u8,
+    path: ?[]const u8 = null,
+    fix_hint: ?[]const u8 = null,
+};
+
+const DoctorLintResult = struct {
+    output: []u8,
+    finding_count: usize,
+};
+
 const DeprecationRule = struct {
     kind: []const u8,
     pattern: []const u8,
@@ -43,9 +69,24 @@ const DeprecationRule = struct {
 const active_deprecation_rules = [_]DeprecationRule{};
 
 pub fn command(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    commandInner(allocator, args) catch |err| {
+        try doctorStderrFmt(allocator, "shisa doctor: {s}\n", .{@errorName(err)});
+        std.process.exit(2);
+    };
+}
+
+fn commandInner(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const config = try parseDoctorArgs(args);
     const socket_path = if (config.socket_path) |path| path else try paths.defaultSocketPath(allocator);
     defer if (config.socket_path == null) allocator.free(socket_path);
+
+    if (config.lint or config.json) {
+        const result = try doctorLintOutputAlloc(allocator, socket_path, config.json, config.severity_min);
+        defer allocator.free(result.output);
+        try std.fs.File.stdout().writeAll(result.output);
+        if (result.finding_count != 0) std.process.exit(1);
+        return;
+    }
 
     const output = try doctorOutputAlloc(allocator, socket_path);
     defer allocator.free(output);
@@ -63,6 +104,13 @@ fn parseDoctorArgs(args: []const []const u8) !DoctorConfig {
             config.fix = true;
         } else if (std.mem.eql(u8, args[i], "--yes") or std.mem.eql(u8, args[i], "-y")) {
             config.yes = true;
+        } else if (std.mem.eql(u8, args[i], "--lint")) {
+            config.lint = true;
+        } else if (std.mem.eql(u8, args[i], "--json")) {
+            config.json = true;
+            config.lint = true;
+        } else if (std.mem.eql(u8, args[i], "--severity-min")) {
+            config.severity_min = parseSeverity(try cli_util.nextValue(args, &i)) orelse return error.InvalidSeverity;
         } else {
             return error.UnknownDoctorArgument;
         }
@@ -90,6 +138,26 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u
     const nerd_font_status = nerdFontStatus();
     const transient_status = try transientStatusAlloc(allocator, config_path, shell_hook_status);
     defer allocator.free(transient_status);
+    const shell_name = try cli_util.currentShellNameAlloc(allocator);
+    defer allocator.free(shell_name);
+    const terminal = try cli_util.detectTerminalAlloc(allocator);
+    defer allocator.free(terminal);
+    const shell_hook_target = cli_config.shellHookTargetPathAlloc(allocator) catch null;
+    defer if (shell_hook_target) |path| allocator.free(path);
+    const shisa_bin = try shisaBinPathAlloc(allocator);
+    defer allocator.free(shisa_bin);
+    const shisa_bin_status = try shisaBinStatusAlloc(allocator, shisa_bin);
+    defer allocator.free(shisa_bin_status);
+    const default_socket = paths.defaultSocketPath(allocator) catch null;
+    defer if (default_socket) |path| allocator.free(path);
+    const env_socket = std.process.getEnvVarOwned(allocator, "SHISA_SOCKET") catch null;
+    defer if (env_socket) |path| allocator.free(path);
+    const socket_owner = try socketOwnerStatusAlloc(allocator, socket_path);
+    defer allocator.free(socket_owner);
+    const prompt_sample = try samplePromptAlloc(allocator, socket_path, shell_name, daemon_status);
+    defer if (prompt_sample) |prompt| allocator.free(prompt);
+    const vpn_segment = try activeConfiguredVpnSegmentAlloc(allocator, config_path);
+    defer if (vpn_segment) |segment| allocator.free(segment);
     const context = DoctorContext{
         .socket_path = socket_path,
         .socket_status = socket_status,
@@ -103,10 +171,17 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u
     defer allocator.free(issues);
 
     try cli_util.appendFmt(allocator, &out, "socket: {s} {s}\n", .{ socket_status, socket_path });
+    if (default_socket) |path| try cli_util.appendFmt(allocator, &out, "socket_default: {s}\n", .{path});
+    if (env_socket) |path| try cli_util.appendFmt(allocator, &out, "socket_env: {s}\n", .{path});
+    try cli_util.appendFmt(allocator, &out, "socket_owner: {s}\n", .{socket_owner});
     try cli_util.appendFmt(allocator, &out, "daemon: {s}\n", .{daemon_status});
     try cli_util.appendFmt(allocator, &out, "config_dir: {s} {s}\n", .{ pathAccessStatus(config_dir), config_dir });
     try cli_util.appendFmt(allocator, &out, "config_dir_permissions: {s}\n", .{config_dir_permissions});
+    try cli_util.appendFmt(allocator, &out, "detected_shell: {s}\n", .{shell_name});
+    try cli_util.appendFmt(allocator, &out, "detected_terminal: {s}\n", .{terminal});
+    if (shell_hook_target) |path| try cli_util.appendFmt(allocator, &out, "shell_hook_target: {s}\n", .{path});
     try cli_util.appendFmt(allocator, &out, "shell_hook: {s}\n", .{shell_hook_status});
+    try cli_util.appendFmt(allocator, &out, "shisa_bin: {s} {s}\n", .{ shisa_bin_status, shisa_bin });
     try cli_util.appendFmt(allocator, &out, "transient: {s}\n", .{transient_status});
     try cli_util.appendFmt(allocator, &out, "nerd_font: {s}\n", .{nerd_font_status});
     try cli_util.appendFmt(allocator, &out, "plugins_dir: {s} {s}\n", .{ pathAccessStatus(plugins_dir), plugins_dir });
@@ -128,8 +203,289 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u
     for (issues) |issue| {
         try cli_util.appendFmt(allocator, &out, "issue: {s}: {s} [fix available]\n", .{ issue.id, issue.message });
     }
+    if (std.mem.eql(u8, daemon_status, "ok")) {
+        try out.appendSlice(allocator, "hint: daemon is already running; starting another default daemon prints AlreadyRunning\n");
+    }
+    if (prompt_sample) |prompt| {
+        if (std.mem.indexOf(u8, prompt, "[pending:") != null) {
+            try out.appendSlice(allocator, "hint: [pending:<module>] is normal on first async render; rerender after cache fill\n");
+        }
+    }
+    if (vpn_segment) |segment| {
+        try cli_util.appendFmt(allocator, &out, "hint: active VPN segment detected ({s}); remove \"vpn_status\" from [prompt].modules to hide it\n", .{segment});
+    }
 
     return out.toOwnedSlice(allocator);
+}
+
+fn doctorLintOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8, json: bool, severity_min: Severity) !DoctorLintResult {
+    var findings = try doctorFindingsAlloc(allocator, socket_path);
+    defer deinitDoctorFindings(allocator, findings.items);
+    defer findings.deinit(allocator);
+    if (json) {
+        const output = try doctorFindingsJsonAlloc(allocator, findings.items, severity_min);
+        return .{ .output = output, .finding_count = countFindingsAtLeast(findings.items, severity_min) };
+    }
+    const output = try doctorFindingsTextAlloc(allocator, findings.items, severity_min);
+    return .{ .output = output, .finding_count = countFindingsAtLeast(findings.items, severity_min) };
+}
+
+fn doctorFindingsAlloc(allocator: std.mem.Allocator, socket_path: []const u8) !std.ArrayList(DoctorFinding) {
+    var findings: std.ArrayList(DoctorFinding) = .empty;
+    errdefer deinitDoctorFindings(allocator, findings.items);
+    errdefer findings.deinit(allocator);
+
+    const config_path = try cli_util.defaultConfigPath(allocator);
+    defer allocator.free(config_path);
+    const config_dir = try cli_util.configDirPath(allocator);
+    defer allocator.free(config_dir);
+    const socket_status = pathAccessStatus(socket_path);
+    const daemon_status = try daemonHealthStatusAlloc(allocator, socket_path);
+    defer allocator.free(daemon_status);
+    const shell_hook_status = shellHookStatus(allocator);
+    const config_dir_permissions = try configDirPermissionsStatusAlloc(allocator, config_dir);
+    defer allocator.free(config_dir_permissions);
+    const nerd_font_status = nerdFontStatus();
+    const shell_name = try cli_util.currentShellNameAlloc(allocator);
+    defer allocator.free(shell_name);
+    const terminal = try cli_util.detectTerminalAlloc(allocator);
+    defer allocator.free(terminal);
+    const shisa_bin = try shisaBinPathAlloc(allocator);
+    defer allocator.free(shisa_bin);
+    const shisa_bin_status = try shisaBinStatusAlloc(allocator, shisa_bin);
+    defer allocator.free(shisa_bin_status);
+    const default_socket = paths.defaultSocketPath(allocator) catch null;
+    defer if (default_socket) |path| allocator.free(path);
+    const env_socket = std.process.getEnvVarOwned(allocator, "SHISA_SOCKET") catch null;
+    defer if (env_socket) |path| allocator.free(path);
+
+    try appendConfigFindings(allocator, &findings, config_path);
+    if (std.mem.eql(u8, socket_status, "present") and !std.mem.eql(u8, daemon_status, "ok")) {
+        try appendFinding(allocator, &findings, .{ .id = "daemon/stale-socket", .severity = .warning, .message = "socket exists but daemon is not reachable", .path = socket_path, .fix_hint = "run `shisa doctor --fix` or remove the stale socket after confirming no owner" });
+    }
+    if (!std.mem.eql(u8, daemon_status, "ok")) {
+        try appendFinding(allocator, &findings, .{ .id = "daemon/not-running", .severity = .@"error", .message = "daemon is not reachable", .path = socket_path, .fix_hint = "start `shisad --foreground &` or run `shisa doctor --fix`" });
+    } else {
+        try appendFinding(allocator, &findings, .{ .id = "daemon/already-running", .severity = .info, .message = "daemon is already running; starting another daemon for this socket prints AlreadyRunning", .path = socket_path, .fix_hint = "reuse the running daemon or choose a different `--socket`" });
+    }
+    if (env_socket) |path| {
+        if (!std.mem.eql(u8, path, socket_path)) {
+            try appendFinding(allocator, &findings, .{ .id = "daemon/socket-mismatch", .severity = .warning, .message = "SHISA_SOCKET differs from the socket being checked", .path = path, .fix_hint = "unset SHISA_SOCKET or pass the same --socket to shisa and shisad" });
+        }
+    }
+    if (default_socket) |path| {
+        if (!std.mem.eql(u8, path, socket_path)) {
+            try appendFinding(allocator, &findings, .{ .id = "daemon/non-default-socket", .severity = .info, .message = "doctor is checking a non-default daemon socket", .path = socket_path, .fix_hint = "this is expected for isolated tests" });
+        }
+    }
+    if (std.mem.eql(u8, shell_hook_status, "missing")) {
+        try appendFinding(allocator, &findings, .{ .id = "shell/hook-missing", .severity = .warning, .message = "shell hook is not installed or not active", .fix_hint = "run `shisa init --defaults --write-hook` then restart the shell" });
+    }
+    if (!std.mem.eql(u8, shisa_bin_status, "ok")) {
+        try appendFinding(allocator, &findings, .{ .id = "shell/bin-missing", .severity = .@"error", .message = "SHISA_BIN is not executable", .path = shisa_bin, .fix_hint = "set SHISA_BIN to zig-out/bin/shisa or install shisa on PATH" });
+    }
+    if (std.mem.startsWith(u8, config_dir_permissions, "wrong")) {
+        try appendFinding(allocator, &findings, .{ .id = "config/dir-permissions", .severity = .warning, .message = "config directory permissions are too broad", .path = config_dir, .fix_hint = "run `shisa doctor --fix`" });
+    }
+    if (std.mem.eql(u8, nerd_font_status, "missing")) {
+        try appendFinding(allocator, &findings, .{ .id = "terminal/nerd-font", .severity = .warning, .message = "Nerd Font is not detected", .fix_hint = "run `shisa font check` and install a Nerd Font if glyphs are broken" });
+    }
+    if (std.mem.eql(u8, terminal, "unknown") or std.mem.eql(u8, terminal, "dumb")) {
+        try appendFinding(allocator, &findings, .{ .id = "terminal/unknown", .severity = .info, .message = "terminal could not be identified", .fix_hint = "set TERM_PROGRAM or use SHISA_GLYPH_CAPS/SHISA_NERD_FONT overrides" });
+    }
+    if (try samplePromptAlloc(allocator, socket_path, shell_name, daemon_status)) |prompt| {
+        defer allocator.free(prompt);
+        if (std.mem.indexOf(u8, prompt, "[pending:") != null) {
+            try appendFinding(allocator, &findings, .{ .id = "prompt/async-pending", .severity = .info, .message = "prompt contains an async placeholder", .fix_hint = "rerender after the daemon fills the cache; this is normal on first render" });
+        }
+    }
+    if (try activeConfiguredVpnSegmentAlloc(allocator, config_path)) |segment| {
+        defer allocator.free(segment);
+        try appendFinding(allocator, &findings, .{ .id = "modules/vpn-active", .severity = .info, .message = "vpn_status is enabled and an active VPN was detected", .path = segment, .fix_hint = "remove \"vpn_status\" from [prompt].modules to hide this segment" });
+    }
+    return findings;
+}
+
+fn deinitDoctorFindings(allocator: std.mem.Allocator, findings: []DoctorFinding) void {
+    for (findings) |finding| {
+        allocator.free(finding.id);
+        allocator.free(finding.message);
+        if (finding.path) |path| allocator.free(path);
+        if (finding.fix_hint) |hint| allocator.free(hint);
+    }
+}
+
+fn appendFinding(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), finding: DoctorFinding) !void {
+    const id = try allocator.dupe(u8, finding.id);
+    errdefer allocator.free(id);
+    const message = try allocator.dupe(u8, finding.message);
+    errdefer allocator.free(message);
+    const path = if (finding.path) |value| try allocator.dupe(u8, value) else null;
+    errdefer if (path) |value| allocator.free(value);
+    const fix_hint = if (finding.fix_hint) |value| try allocator.dupe(u8, value) else null;
+    errdefer if (fix_hint) |value| allocator.free(value);
+    try findings.append(allocator, .{
+        .id = id,
+        .severity = finding.severity,
+        .message = message,
+        .path = path,
+        .fix_hint = fix_hint,
+    });
+}
+
+fn appendConfigFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config_path: []const u8) !void {
+    const source = cli_util.readConfigOrDefault(allocator, config_path) catch |err| {
+        const message = try std.fmt.allocPrint(allocator, "config is unreadable ({s})", .{@errorName(err)});
+        defer allocator.free(message);
+        try appendFinding(allocator, findings, .{ .id = "config/unreadable", .severity = .@"error", .message = message, .path = config_path, .fix_hint = "fix file permissions or recreate the config with `shisa init --defaults`" });
+        return;
+    };
+    defer allocator.free(source);
+    var diagnostic: shisa_config.Diagnostic = .{};
+    var parsed = shisa_config.parse(allocator, source, &diagnostic) catch |err| switch (err) {
+        error.InvalidConfig => {
+            const message = try std.fmt.allocPrint(allocator, "config is invalid at {d}:{d}: {s}", .{ diagnostic.line, diagnostic.column, diagnostic.message });
+            defer allocator.free(message);
+            try appendFinding(allocator, findings, .{ .id = "config/invalid", .severity = .@"error", .message = message, .path = config_path, .fix_hint = "edit shisa.toml or regenerate it with `shisa init --defaults`" });
+            return;
+        },
+        else => return err,
+    };
+    parsed.deinit(allocator);
+}
+
+fn doctorFindingsTextAlloc(allocator: std.mem.Allocator, findings: []const DoctorFinding, severity_min: Severity) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    const count = countFindingsAtLeast(findings, severity_min);
+    try cli_util.appendFmt(allocator, &out, "doctor lint: {s} ({d} findings at >= {s})\n", .{ if (count == 0) "ok" else "findings", count, severityName(severity_min) });
+    for (findings) |finding| {
+        if (!severityAtLeast(finding.severity, severity_min)) continue;
+        try cli_util.appendFmt(allocator, &out, "{s}: {s}: {s}", .{ severityName(finding.severity), finding.id, finding.message });
+        if (finding.path) |path| try cli_util.appendFmt(allocator, &out, " [{s}]", .{path});
+        if (finding.fix_hint) |hint| try cli_util.appendFmt(allocator, &out, " fix: {s}", .{hint});
+        try out.append(allocator, '\n');
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn doctorFindingsJsonAlloc(allocator: std.mem.Allocator, findings: []const DoctorFinding, severity_min: Severity) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    const count = countFindingsAtLeast(findings, severity_min);
+    try cli_util.appendFmt(allocator, &out, "{{\"status\":\"{s}\",\"severity_min\":\"{s}\",\"findings\":[", .{ if (count == 0) "ok" else "findings", severityName(severity_min) });
+    var emitted: usize = 0;
+    for (findings) |finding| {
+        if (!severityAtLeast(finding.severity, severity_min)) continue;
+        if (emitted != 0) try out.append(allocator, ',');
+        emitted += 1;
+        try appendJsonFinding(allocator, &out, finding);
+    }
+    try cli_util.appendFmt(allocator, &out, "],\"count\":{d}}}\n", .{count});
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendJsonFinding(allocator: std.mem.Allocator, out: *std.ArrayList(u8), finding: DoctorFinding) !void {
+    try out.appendSlice(allocator, "{\"id\":");
+    try appendJsonString(allocator, out, finding.id);
+    try out.appendSlice(allocator, ",\"severity\":");
+    try appendJsonString(allocator, out, severityName(finding.severity));
+    try out.appendSlice(allocator, ",\"message\":");
+    try appendJsonString(allocator, out, finding.message);
+    try out.appendSlice(allocator, ",\"path\":");
+    if (finding.path) |path| try appendJsonString(allocator, out, path) else try out.appendSlice(allocator, "null");
+    try out.appendSlice(allocator, ",\"fix_hint\":");
+    if (finding.fix_hint) |hint| try appendJsonString(allocator, out, hint) else try out.appendSlice(allocator, "null");
+    try out.append(allocator, '}');
+}
+
+fn appendJsonString(allocator: std.mem.Allocator, out: *std.ArrayList(u8), value: []const u8) !void {
+    const escaped = try daemon_json.escapeAlloc(allocator, value);
+    defer allocator.free(escaped);
+    try out.append(allocator, '"');
+    try out.appendSlice(allocator, escaped);
+    try out.append(allocator, '"');
+}
+
+fn countFindingsAtLeast(findings: []const DoctorFinding, severity_min: Severity) usize {
+    var count: usize = 0;
+    for (findings) |finding| {
+        if (severityAtLeast(finding.severity, severity_min)) count += 1;
+    }
+    return count;
+}
+
+fn severityAtLeast(severity: Severity, severity_min: Severity) bool {
+    return @intFromEnum(severity) >= @intFromEnum(severity_min);
+}
+
+fn severityName(severity: Severity) []const u8 {
+    return switch (severity) {
+        .info => "info",
+        .warning => "warning",
+        .@"error" => "error",
+    };
+}
+
+fn parseSeverity(value: []const u8) ?Severity {
+    if (std.mem.eql(u8, value, "info")) return .info;
+    if (std.mem.eql(u8, value, "warning")) return .warning;
+    if (std.mem.eql(u8, value, "error")) return .@"error";
+    return null;
+}
+
+fn shisaBinPathAlloc(allocator: std.mem.Allocator) ![]u8 {
+    const env = std.process.getEnvVarOwned(allocator, "SHISA_BIN") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    if (env) |path| return path;
+    return std.fs.selfExePathAlloc(allocator);
+}
+
+fn shisaBinStatusAlloc(allocator: std.mem.Allocator, shisa_bin: []const u8) ![]u8 {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ shisa_bin, "--version" },
+        .max_output_bytes = 64 * 1024,
+        .expand_arg0 = .expand,
+    }) catch |err| switch (err) {
+        error.FileNotFound => return allocator.dupe(u8, "missing"),
+        else => return std.fmt.allocPrint(allocator, "error ({s})", .{@errorName(err)}),
+    };
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    return allocator.dupe(u8, if (cli_util.exitedZero(result.term)) "ok" else "error");
+}
+
+fn samplePromptAlloc(allocator: std.mem.Allocator, socket_path: []const u8, shell_name: []const u8, daemon_status: []const u8) !?[]u8 {
+    if (!std.mem.eql(u8, daemon_status, "ok")) return null;
+    const cwd = std.fs.cwd().realpathAlloc(allocator, ".") catch return null;
+    defer allocator.free(cwd);
+    const payload = prompt_payload.buildPromptPayload(allocator, .{ .shell = shell_name }, cwd) catch return null;
+    defer allocator.free(payload);
+    const response = client.requestAlloc(allocator, socket_path, payload) catch return null;
+    defer allocator.free(response);
+    var parsed = std.json.parseFromSlice(proto.Response, allocator, response, .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+    return @as(?[]u8, try allocator.dupe(u8, parsed.value.prompt));
+}
+
+fn activeConfiguredVpnSegmentAlloc(allocator: std.mem.Allocator, config_path: []const u8) !?[]u8 {
+    const source = cli_util.readConfigOrDefault(allocator, config_path) catch return null;
+    defer allocator.free(source);
+    var diagnostic: shisa_config.Diagnostic = .{};
+    var parsed = shisa_config.parse(allocator, source, &diagnostic) catch return null;
+    defer parsed.deinit(allocator);
+    if (!configHasModule(parsed.prompt_modules, .vpn_status) and !configHasModule(parsed.right_prompt_modules, .vpn_status)) return null;
+    return vpn_status_module.render(allocator) catch null;
+}
+
+fn configHasModule(modules: []const shisa_config.ModuleId, module_id: shisa_config.ModuleId) bool {
+    for (modules) |candidate| {
+        if (candidate == module_id) return true;
+    }
+    return false;
 }
 
 fn applyDoctorFixes(allocator: std.mem.Allocator, socket_path: []const u8, yes: bool) !void {
@@ -609,6 +965,33 @@ fn socketHasOwner(allocator: std.mem.Allocator, socket_path: []const u8) !bool {
     }
 }
 
+fn socketOwnerStatusAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u8 {
+    if (!std.mem.eql(u8, pathAccessStatus(socket_path), "present")) return allocator.dupe(u8, "none");
+    if (runOwnerProbeTextAlloc(allocator, &.{ "lsof", "-t", socket_path })) |owned| return owned else |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    }
+    if (runOwnerProbeTextAlloc(allocator, &.{ "fuser", socket_path })) |owned| return owned else |err| switch (err) {
+        error.FileNotFound => return allocator.dupe(u8, "unknown"),
+        else => return err,
+    }
+}
+
+fn runOwnerProbeTextAlloc(allocator: std.mem.Allocator, argv: []const []const u8) ![]u8 {
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .max_output_bytes = 64 * 1024,
+        .expand_arg0 = .expand,
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!cli_util.exitedZero(result.term)) return allocator.dupe(u8, "none");
+    const trimmed = std.mem.trim(u8, if (result.stdout.len != 0) result.stdout else result.stderr, " \t\r\n");
+    if (trimmed.len == 0) return allocator.dupe(u8, "none");
+    return std.fmt.allocPrint(allocator, "pid:{s}", .{trimmed});
+}
+
 fn runOwnerProbe(allocator: std.mem.Allocator, argv: []const []const u8) !bool {
     const result = try std.process.Child.run(.{
         .allocator = allocator,
@@ -687,6 +1070,29 @@ test "doctor args parse fix mode" {
     const config = try parseDoctorArgs(&.{ "--fix", "--yes" });
     try std.testing.expect(config.fix);
     try std.testing.expect(config.yes);
+}
+
+test "doctor args parse lint json severity" {
+    const config = try parseDoctorArgs(&.{ "--lint", "--json", "--severity-min", "info" });
+    try std.testing.expect(config.lint);
+    try std.testing.expect(config.json);
+    try std.testing.expectEqual(Severity.info, config.severity_min);
+}
+
+test "doctor finding serializers filter severity" {
+    const findings = [_]DoctorFinding{
+        .{ .id = "prompt/async-pending", .severity = .info, .message = "pending" },
+        .{ .id = "daemon/not-running", .severity = .@"error", .message = "daemon down", .path = "/tmp/shisa.sock", .fix_hint = "start daemon" },
+    };
+    const text = try doctorFindingsTextAlloc(std.testing.allocator, findings[0..], .warning);
+    defer std.testing.allocator.free(text);
+    try std.testing.expect(std.mem.indexOf(u8, text, "daemon/not-running") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "prompt/async-pending") == null);
+
+    const json = try doctorFindingsJsonAlloc(std.testing.allocator, findings[0..], .info);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"count\":2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"fix_hint\":\"start daemon\"") != null);
 }
 
 test "doctor issue registry marks fixable failures" {

@@ -1489,7 +1489,7 @@ test "fs event invalidates git branch cache" {
     var server = try Server.init(socket_path);
     defer server.deinit();
 
-    const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24}}", .{dir_path});
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"modules\":[\"cwd\",\"git_branch\"]}}", .{dir_path});
     defer allocator.free(request);
     const clean = try server.renderResponse(request);
     defer std.heap.page_allocator.free(clean);

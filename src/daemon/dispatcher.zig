@@ -449,14 +449,21 @@ test "classifies module execution" {
     try std.testing.expectEqual(ExecutionClass.async, executionClass(.language_versions));
 }
 
-test "renders default pipeline" {
+test "renders stable sync pipeline" {
     var git_cache = git_branch_module.Cache{};
     defer git_cache.deinit(std.testing.allocator);
     var language_cache = language_versions_module.Cache{};
     defer language_cache.deinit(std.testing.allocator);
     var cloud_cache = cloud_ctx_module.Cache{ .gcp_valid = true, .azure_valid = true, .kube_valid = true };
     defer cloud_cache.deinit(std.testing.allocator);
-    var rendered = try renderDefault(std.testing.allocator, .{
+    const pipeline = [_]ModuleSpec{
+        .{ .id = .cwd, .execution_class = .sync },
+        .{ .id = .time, .execution_class = .sync },
+        .{ .id = .exit_status, .execution_class = .sync },
+        .{ .id = .jobs, .execution_class = .sync },
+        .{ .id = .cmd_duration, .execution_class = .sync },
+    };
+    var rendered = try renderPipeline(std.testing.allocator, .{
         .git_branch = &git_cache,
         .language_versions = &language_cache,
         .cloud_ctx = &cloud_cache,
@@ -472,7 +479,7 @@ test "renders default pipeline" {
         .ssh = null,
         .user = "u",
         .host = "h",
-    });
+    }, pipeline[0..]);
     defer rendered.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("/tmp/project time:01:01 \x1b[31mexit:2\x1b[0m jobs:1 took:1.2s> ", rendered.prompt);
     try std.testing.expect(rendered.redraw_token == null);
@@ -675,7 +682,11 @@ test "no async renders git synchronously" {
     defer language_cache.deinit(std.testing.allocator);
     var cloud_cache = cloud_ctx_module.Cache{ .gcp_valid = true, .azure_valid = true, .kube_valid = true };
     defer cloud_cache.deinit(std.testing.allocator);
-    var rendered = try renderDefault(std.testing.allocator, .{
+    const pipeline = [_]ModuleSpec{
+        .{ .id = .cwd, .execution_class = .sync },
+        .{ .id = .git_branch, .execution_class = .async },
+    };
+    var rendered = try renderPipeline(std.testing.allocator, .{
         .git_branch = &git_cache,
         .language_versions = &language_cache,
         .cloud_ctx = &cloud_cache,
@@ -691,7 +702,7 @@ test "no async renders git synchronously" {
         .ssh = null,
         .user = "u",
         .host = "h",
-    });
+    }, pipeline[0..]);
     defer rendered.deinit(std.testing.allocator);
     const expected = try std.fmt.allocPrint(std.testing.allocator, "{s} git:main> ", .{dir_path});
     defer std.testing.allocator.free(expected);

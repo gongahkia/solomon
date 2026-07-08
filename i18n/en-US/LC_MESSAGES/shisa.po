@@ -104,7 +104,7 @@ msgid ""
 msgstr ""
 "shisa bench: hyperfine not found in PATH\n"
 
-#: src/cli/doctor.zig:282
+#: src/cli/doctor.zig:631
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -118,7 +118,7 @@ msgstr ""
 "  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
 "\n"
 
-#: src/cli/doctor.zig:453
+#: src/cli/doctor.zig:802
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""

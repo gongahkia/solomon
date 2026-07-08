@@ -20,6 +20,11 @@ const DoctorConfig = struct {
     yes: bool = false,
     lint: bool = false,
     json: bool = false,
+    list_checks: bool = false,
+    online: bool = false,
+    only: ?[]const u8 = null,
+    skip: ?[]const u8 = null,
+    report_path: ?[]const u8 = null,
     severity_min: Severity = .warning,
 };
 
@@ -48,14 +53,33 @@ const Severity = enum(u8) {
 const DoctorFinding = struct {
     id: []const u8,
     severity: Severity,
+    category: []const u8 = "general",
     message: []const u8,
+    detail: ?[]const u8 = null,
+    evidence: ?[]const u8 = null,
     path: ?[]const u8 = null,
+    command: ?[]const u8 = null,
     fix_hint: ?[]const u8 = null,
+    fixable: bool = false,
+    docs_url: ?[]const u8 = null,
 };
 
 const DoctorLintResult = struct {
     output: []u8,
     finding_count: usize,
+};
+
+const DoctorSummary = struct {
+    info: usize = 0,
+    warning: usize = 0,
+    @"error": usize = 0,
+};
+
+const DoctorCheck = struct {
+    id: []const u8,
+    category: []const u8,
+    online: bool = false,
+    docs_url: []const u8,
 };
 
 const DeprecationRule = struct {
@@ -68,8 +92,47 @@ const DeprecationRule = struct {
 
 const active_deprecation_rules = [_]DeprecationRule{};
 
+const doctor_checks = [_]DoctorCheck{
+    .{ .id = "install/zig-version", .category = "install", .docs_url = "docs/doctor.md#install" },
+    .{ .id = "install/binary-set", .category = "install", .docs_url = "docs/doctor.md#install" },
+    .{ .id = "install/path-shadowing", .category = "install", .docs_url = "docs/doctor.md#install" },
+    .{ .id = "config/unreadable", .category = "config", .docs_url = "docs/doctor.md#config" },
+    .{ .id = "config/invalid", .category = "config", .docs_url = "docs/doctor.md#config" },
+    .{ .id = "config/dir-permissions", .category = "config", .docs_url = "docs/doctor.md#config" },
+    .{ .id = "config/deprecations", .category = "config", .docs_url = "docs/doctor.md#config" },
+    .{ .id = "daemon/not-running", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
+    .{ .id = "daemon/stale-socket", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
+    .{ .id = "daemon/already-running", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
+    .{ .id = "daemon/socket-mismatch", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
+    .{ .id = "daemon/non-default-socket", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
+    .{ .id = "daemon/protocol", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
+    .{ .id = "daemon/metrics", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
+    .{ .id = "daemon/log-warnings", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
+    .{ .id = "shell/hook-missing", .category = "shell", .docs_url = "docs/doctor.md#shell" },
+    .{ .id = "shell/hook-duplicates", .category = "shell", .docs_url = "docs/doctor.md#shell" },
+    .{ .id = "shell/bin-missing", .category = "shell", .docs_url = "docs/doctor.md#shell" },
+    .{ .id = "terminal/nerd-font", .category = "terminal", .docs_url = "docs/doctor.md#terminal" },
+    .{ .id = "terminal/unknown", .category = "terminal", .docs_url = "docs/doctor.md#terminal" },
+    .{ .id = "prompt/async-pending", .category = "prompt", .docs_url = "docs/doctor.md#prompt" },
+    .{ .id = "prompt/render-sample", .category = "prompt", .docs_url = "docs/doctor.md#prompt" },
+    .{ .id = "modules/vpn-active", .category = "modules", .docs_url = "docs/doctor.md#modules" },
+    .{ .id = "modules/git", .category = "modules", .docs_url = "docs/doctor.md#modules" },
+    .{ .id = "modules/language-tools", .category = "modules", .docs_url = "docs/doctor.md#modules" },
+    .{ .id = "modules/cloud-cache", .category = "modules", .docs_url = "docs/doctor.md#modules" },
+    .{ .id = "plugins/runtime", .category = "plugins", .docs_url = "docs/doctor.md#plugins" },
+    .{ .id = "plugins/manifests", .category = "plugins", .docs_url = "docs/doctor.md#plugins" },
+    .{ .id = "platform/runtime-dir", .category = "platform", .docs_url = "docs/doctor.md#platform" },
+    .{ .id = "platform/fsnotify", .category = "platform", .docs_url = "docs/doctor.md#platform" },
+    .{ .id = "performance/prompt-budget", .category = "performance", .docs_url = "docs/doctor.md#performance" },
+    .{ .id = "security/permissions", .category = "security", .docs_url = "docs/doctor.md#security" },
+    .{ .id = "tests/optional-prereqs", .category = "tests", .docs_url = "docs/doctor.md#tests" },
+    .{ .id = "release/packaging", .category = "release", .docs_url = "docs/doctor.md#release" },
+    .{ .id = "release/online", .category = "release", .online = true, .docs_url = "docs/doctor.md#release" },
+};
+
 const doctor_help_text =
     \\usage: shisa doctor [--socket PATH] [--fix [--yes]] [--lint] [--json] [--severity-min LEVEL]
+    \\                    [--list-checks] [--only IDS] [--skip IDS] [--online] [--report PATH]
     \\
     \\options:
     \\  --socket <path>        check a non-default daemon socket
@@ -78,6 +141,11 @@ const doctor_help_text =
     \\  --lint                 read-only diagnostics with stable finding ids
     \\  --json                 emit lint findings as JSON; implies --lint
     \\  --severity-min LEVEL   info, warning, or error; default warning
+    \\  --list-checks          list doctor checks and exit
+    \\  --only IDS             comma-separated finding/check ids to run
+    \\  --skip IDS             comma-separated finding/check ids to skip
+    \\  --online               include explicit network/release checks
+    \\  --report PATH          write a redacted doctor report JSON
     \\
 ;
 
@@ -97,17 +165,26 @@ fn commandInner(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const socket_path = if (config.socket_path) |path| path else try paths.defaultSocketPath(allocator);
     defer if (config.socket_path == null) allocator.free(socket_path);
 
+    if (config.list_checks) {
+        const output = try doctorChecksListAlloc(allocator, config);
+        defer allocator.free(output);
+        try std.fs.File.stdout().writeAll(output);
+        return;
+    }
+
     if (config.lint or config.json) {
-        const result = try doctorLintOutputAlloc(allocator, socket_path, config.json, config.severity_min);
+        const result = try doctorLintOutputAlloc(allocator, socket_path, config);
         defer allocator.free(result.output);
         try std.fs.File.stdout().writeAll(result.output);
+        if (config.report_path) |path| try writeDoctorReport(allocator, path, socket_path, config);
         if (result.finding_count != 0) std.process.exit(1);
         return;
     }
 
-    const output = try doctorOutputAlloc(allocator, socket_path);
+    const output = try doctorOutputAlloc(allocator, socket_path, config);
     defer allocator.free(output);
     try std.fs.File.stdout().writeAll(output);
+    if (config.report_path) |path| try writeDoctorReport(allocator, path, socket_path, config);
     if (config.fix) try applyDoctorFixes(allocator, socket_path, config.yes);
 }
 
@@ -128,6 +205,16 @@ fn parseDoctorArgs(args: []const []const u8) !DoctorConfig {
             config.lint = true;
         } else if (std.mem.eql(u8, args[i], "--severity-min")) {
             config.severity_min = parseSeverity(try cli_util.nextValue(args, &i)) orelse return error.InvalidSeverity;
+        } else if (std.mem.eql(u8, args[i], "--list-checks")) {
+            config.list_checks = true;
+        } else if (std.mem.eql(u8, args[i], "--online")) {
+            config.online = true;
+        } else if (std.mem.eql(u8, args[i], "--only")) {
+            config.only = try cli_util.nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--skip")) {
+            config.skip = try cli_util.nextValue(args, &i);
+        } else if (std.mem.eql(u8, args[i], "--report")) {
+            config.report_path = try cli_util.nextValue(args, &i);
         } else {
             return error.UnknownDoctorArgument;
         }
@@ -135,7 +222,37 @@ fn parseDoctorArgs(args: []const []const u8) !DoctorConfig {
     return config;
 }
 
-fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u8 {
+fn doctorChecksListAlloc(allocator: std.mem.Allocator, config: DoctorConfig) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try out.appendSlice(allocator, "id\tcategory\tmode\tdocs\n");
+    for (doctor_checks) |check| {
+        if (!checkAllowed(config, check.id)) continue;
+        try cli_util.appendFmt(allocator, &out, "{s}\t{s}\t{s}\t{s}\n", .{ check.id, check.category, if (check.online) "online" else "local", check.docs_url });
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn checkAllowed(config: DoctorConfig, id: []const u8) bool {
+    if (config.only) |ids| {
+        if (!csvContains(ids, id)) return false;
+    }
+    if (config.skip) |ids| {
+        if (csvContains(ids, id)) return false;
+    }
+    return true;
+}
+
+fn csvContains(csv: []const u8, needle: []const u8) bool {
+    var it = std.mem.splitScalar(u8, csv, ',');
+    while (it.next()) |raw| {
+        const value = std.mem.trim(u8, raw, " \t\r\n");
+        if (std.mem.eql(u8, value, needle)) return true;
+    }
+    return false;
+}
+
+fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8, config: DoctorConfig) ![]u8 {
     const config_path = try cli_util.defaultConfigPath(allocator);
     defer allocator.free(config_path);
     const config_dir = try cli_util.configDirPath(allocator);
@@ -208,6 +325,16 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u
     try cli_util.appendFmt(allocator, &out, "lua: {s}\n", .{luaRuntimeStatus(allocator)});
     try cli_util.appendFmt(allocator, &out, "fsnotify: {s}\n", .{fsnotifyBackendName(fsnotify.selectBackend(builtin.os.tag))});
     try appendDoctorDeprecations(allocator, &out, config_path);
+
+    var findings = try doctorFindingsAlloc(allocator, socket_path, config);
+    defer findings.deinit(allocator);
+    defer deinitDoctorFindings(allocator, findings.items);
+    const finding_count = countFindingsAtLeast(findings.items, config.severity_min);
+    try cli_util.appendFmt(allocator, &out, "findings: {d} at >= {s}\n", .{ finding_count, severityName(config.severity_min) });
+    for (findings.items) |finding| {
+        if (!severityAtLeast(finding.severity, config.severity_min)) continue;
+        try cli_util.appendFmt(allocator, &out, "finding: {s}: {s}: {s}\n", .{ severityName(finding.severity), finding.id, finding.message });
+    }
 
     if (builtin.os.tag == .linux) {
         const limit = fsnotify.readLinuxMaxUserWatches(allocator) catch null;

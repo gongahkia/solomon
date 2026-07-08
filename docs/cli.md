@@ -53,6 +53,20 @@ commands:
   set locale=<locale|auto> set locale override; auto uses LC_ALL, LC_CTYPE, then LANG
 ```
 
+### `shisa doctor`
+
+```text
+usage: shisa doctor [--socket PATH] [--fix [--yes]] [--lint] [--json] [--severity-min LEVEL]
+
+options:
+  --socket <path>        check a non-default daemon socket
+  --fix                  apply available fixes interactively
+  --yes, -y              apply fixes without prompting
+  --lint                 read-only diagnostics with stable finding ids
+  --json                 emit lint findings as JSON; implies --lint
+  --severity-min LEVEL   info, warning, or error; default warning
+```
+
 ### `shisa font`
 
 ```text

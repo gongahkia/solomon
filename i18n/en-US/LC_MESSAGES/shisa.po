@@ -104,7 +104,31 @@ msgid ""
 msgstr ""
 "shisa bench: hyperfine not found in PATH\n"
 
-#: src/cli/doctor.zig:631
+#: src/cli/doctor.zig:72
+msgid ""
+"usage: shisa doctor [--socket PATH] [--fix [--yes]] [--lint] [--json] [--severity-min LEVEL]\n"
+"\n"
+"options:\n"
+"  --socket <path>        check a non-default daemon socket\n"
+"  --fix                  apply available fixes interactively\n"
+"  --yes, -y              apply fixes without prompting\n"
+"  --lint                 read-only diagnostics with stable finding ids\n"
+"  --json                 emit lint findings as JSON; implies --lint\n"
+"  --severity-min LEVEL   info, warning, or error; default warning\n"
+"\n"
+msgstr ""
+"usage: shisa doctor [--socket PATH] [--fix [--yes]] [--lint] [--json] [--severity-min LEVEL]\n"
+"\n"
+"options:\n"
+"  --socket <path>        check a non-default daemon socket\n"
+"  --fix                  apply available fixes interactively\n"
+"  --yes, -y              apply fixes without prompting\n"
+"  --lint                 read-only diagnostics with stable finding ids\n"
+"  --json                 emit lint findings as JSON; implies --lint\n"
+"  --severity-min LEVEL   info, warning, or error; default warning\n"
+"\n"
+
+#: src/cli/doctor.zig:655
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -118,7 +142,7 @@ msgstr ""
 "  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
 "\n"
 
-#: src/cli/doctor.zig:802
+#: src/cli/doctor.zig:826
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""

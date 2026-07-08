@@ -237,8 +237,8 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8) ![]u
 
 fn doctorLintOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8, json: bool, severity_min: Severity) !DoctorLintResult {
     var findings = try doctorFindingsAlloc(allocator, socket_path);
-    defer deinitDoctorFindings(allocator, findings.items);
     defer findings.deinit(allocator);
+    defer deinitDoctorFindings(allocator, findings.items);
     if (json) {
         const output = try doctorFindingsJsonAlloc(allocator, findings.items, severity_min);
         return .{ .output = output, .finding_count = countFindingsAtLeast(findings.items, severity_min) };
@@ -249,8 +249,8 @@ fn doctorLintOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8, 
 
 fn doctorFindingsAlloc(allocator: std.mem.Allocator, socket_path: []const u8) !std.ArrayList(DoctorFinding) {
     var findings: std.ArrayList(DoctorFinding) = .empty;
-    errdefer deinitDoctorFindings(allocator, findings.items);
     errdefer findings.deinit(allocator);
+    errdefer deinitDoctorFindings(allocator, findings.items);
 
     const config_path = try cli_util.defaultConfigPath(allocator);
     defer allocator.free(config_path);

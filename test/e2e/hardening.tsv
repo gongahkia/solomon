@@ -1,7 +1,4 @@
 # distro	image	dockerfile	shells	platform	scenario
-ubuntu-24.04	shisa-e2e:ubuntu-24.04	test/e2e/docker/ubuntu-24.04.Dockerfile	bash,zsh,fish		standard
-fedora-40	shisa-e2e:fedora-40	test/e2e/docker/fedora-40.Dockerfile	bash,zsh,fish		standard
-arch-rolling	shisa-e2e:arch-rolling	test/e2e/docker/arch-rolling.Dockerfile	bash,zsh,fish	linux/amd64	standard
 systemd-nspawn-fedora	shisa-e2e:systemd-nspawn-fedora	test/e2e/docker/fedora-hardening.Dockerfile	bash,zsh,fish		systemd-nspawn
 rootless-podman-fedora	shisa-e2e:rootless-podman-fedora	test/e2e/docker/fedora-hardening.Dockerfile	bash,zsh,fish		rootless-podman
 rootless-podman-rhel	shisa-e2e:rootless-podman-rhel	test/e2e/docker/ubi9-hardening.Dockerfile	bash,zsh		rootless-podman

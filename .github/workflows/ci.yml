@@ -68,6 +68,15 @@ jobs:
       - run: zig build release
       - run: zig build bench
 
+  hardening-e2e:
+    name: hardening e2e
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'area/ci'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: bash test/e2e/docker-shells.sh --matrix test/e2e/hardening.tsv --require-hardening
+
   tui-policy:
     name: no interactive TUI without flag
     runs-on: ubuntu-24.04

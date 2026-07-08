@@ -101,6 +101,7 @@ Put the matching block in the shell startup file:
 
 ```sh
 ./zig-out/bin/shisa doctor
+./zig-out/bin/shisa doctor --lint
 ./zig-out/bin/shisa explain
 ```
 
@@ -110,9 +111,14 @@ Put the matching block in the shell startup file:
 | Symptom | Check |
 | --- | --- |
 | Prompt falls back to the current directory | `shisad --foreground` is running and the socket path matches `shisa doctor`. |
+| `shisad` prints `AlreadyRunning` | A daemon already owns that socket; reuse it or pass a different `--socket`. |
+| Prompt shows `[pending:<module>]` | First async render is filling the cache; render again. |
+| Prompt shows `vpn:Tailscale` | `vpn_status` detected active Tailscale; remove `"vpn_status"` from `[prompt].modules` to hide it. |
 | Shell startup errors on `source` | `SHISA_BIN` points to an executable `zig-out/bin/shisa`. |
 | Fish prompt shows stale output | Remove `~/.config/shisa/last-prompt` and run `fish_prompt` again. |
 | Async fields do not update | Run the shell integration test listed in [Shells](shells.md) for that shell. |
 | Config changes do not show | Run `shisa explain` and confirm the expected module pipeline. |
+
+See [Troubleshooting](troubleshooting.md) for full daemon, socket, hook, VPN, and local test notes.
 
 </details>

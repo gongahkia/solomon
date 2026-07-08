@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const client = @import("shisa-client.zig");
 const paths = @import("daemon/paths.zig");
+const win = std.os.windows;
 
 const Config = struct {
     daemon_path: ?[]const u8 = null,
@@ -25,6 +26,11 @@ const heartbeat_miss_limit = 3;
 const heartbeat_request = "{\"v\":1,\"op\":\"health\",\"request_id\":\"supervisor-heartbeat\"}";
 const self_disable_window_seconds: i64 = 60;
 const self_disable_crash_limit: u32 = 3;
+var windows_job_handle: ?win.HANDLE = null;
+
+extern "kernel32" fn CreateJobObjectW(lpJobAttributes: ?*const win.SECURITY_ATTRIBUTES, lpName: ?win.LPCWSTR) callconv(.winapi) win.HANDLE;
+extern "kernel32" fn AssignProcessToJobObject(hJob: win.HANDLE, hProcess: win.HANDLE) callconv(.winapi) win.BOOL;
+extern "kernel32" fn ResumeThread(hThread: win.HANDLE) callconv(.winapi) win.DWORD;
 
 pub fn run(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const config = try parse(args);
@@ -101,9 +107,36 @@ fn spawnDaemon(allocator: std.mem.Allocator, daemon_path: []const u8, socket_pat
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
+    prepareWindowsSpawn(&child);
     try child.spawn();
+    errdefer _ = child.kill() catch {};
     try child.waitForSpawn();
+    try finishWindowsSpawn(&child);
     return child;
+}
+
+fn prepareWindowsSpawn(child: *std.process.Child) void {
+    if (builtin.os.tag == .windows) child.start_suspended = true;
+}
+
+fn finishWindowsSpawn(child: *std.process.Child) !void {
+    if (builtin.os.tag != .windows) return;
+    try assignChildToWindowsJob(child.id);
+    try resumeWindowsThread(child.thread_handle);
+}
+
+fn assignChildToWindowsJob(process_handle: win.HANDLE) !void {
+    const job = if (windows_job_handle) |handle| handle else job: {
+        const handle = CreateJobObjectW(null, null);
+        if (@intFromPtr(handle) == 0) return error.CreateJobObjectFailed;
+        windows_job_handle = handle;
+        break :job handle;
+    };
+    if (AssignProcessToJobObject(job, process_handle) == 0) return error.AssignProcessToJobObjectFailed;
+}
+
+fn resumeWindowsThread(thread_handle: win.HANDLE) !void {
+    if (ResumeThread(thread_handle) == std.math.maxInt(win.DWORD)) return error.ResumeThreadFailed;
 }
 
 fn monitorDaemon(allocator: std.mem.Allocator, child: *std.process.Child, socket_path: []const u8, heartbeat_ms: u64) !std.process.Child.Term {
@@ -144,9 +177,19 @@ fn heartbeatResponseOk(allocator: std.mem.Allocator, response: []const u8) !bool
 
 fn pollChildTerm(child: *std.process.Child) ?std.process.Child.Term {
     return switch (builtin.os.tag) {
+        .windows => pollChildTermWindows(child),
         .linux, .macos => pollChildTermPosix(child),
         else => null,
     };
+}
+
+fn pollChildTermWindows(child: *std.process.Child) ?std.process.Child.Term {
+    if (builtin.os.tag != .windows) unreachable;
+    std.os.windows.WaitForSingleObject(child.id, 0) catch |err| switch (err) {
+        error.WaitTimeOut => return null,
+        else => return .{ .Unknown = 1 },
+    };
+    return child.wait() catch .{ .Unknown = 1 };
 }
 
 fn pollChildTermPosix(child: *std.process.Child) ?std.process.Child.Term {

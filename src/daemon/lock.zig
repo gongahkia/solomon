@@ -14,17 +14,17 @@ pub const InstanceLock = struct {
             try std.fs.cwd().makePath(parent);
         }
 
-        const file = try std.fs.createFileAbsolute(lock_path, .{
+        const file = std.fs.createFileAbsolute(lock_path, .{
             .read = true,
             .truncate = false,
+            .lock = .exclusive,
+            .lock_nonblocking = true,
             .mode = 0o600,
-        });
-        errdefer file.close();
-
-        std.posix.flock(file.handle, std.posix.LOCK.EX | std.posix.LOCK.NB) catch |err| switch (err) {
+        }) catch |err| switch (err) {
             error.WouldBlock => return error.AlreadyRunning,
             else => return err,
         };
+        errdefer file.close();
 
         return .{
             .allocator = allocator,
@@ -34,7 +34,6 @@ pub const InstanceLock = struct {
     }
 
     pub fn deinit(self: *InstanceLock) void {
-        std.posix.flock(self.file.handle, std.posix.LOCK.UN) catch {};
         self.file.close();
         self.allocator.free(self.path);
         self.* = undefined;

@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 pub const Backend = enum {
     fsevents,
     inotify,
+    windows,
     unsupported,
 };
 
@@ -154,6 +155,7 @@ pub fn selectBackend(os_tag: std.Target.Os.Tag) Backend {
     return switch (os_tag) {
         .macos => .fsevents,
         .linux => .inotify,
+        .windows => .windows,
         else => .unsupported,
     };
 }
@@ -212,6 +214,7 @@ fn isPathSeparator(byte: u8) bool {
 test "selects platform backends" {
     try std.testing.expectEqual(Backend.fsevents, selectBackend(.macos));
     try std.testing.expectEqual(Backend.inotify, selectBackend(.linux));
+    try std.testing.expectEqual(Backend.windows, selectBackend(.windows));
     try std.testing.expectEqual(Backend.unsupported, selectBackend(.freebsd));
 }
 

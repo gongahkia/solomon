@@ -129,8 +129,8 @@ The daemon enforces capabilities. A plugin that asks for `net = true` requires e
 
 ## 9. Platform coverage
 
-**v1.0:** macOS (FSEvents), Linux (inotify). Windows users use WSL.
-**v1.x:** native Windows via ReadDirectoryChangesW (community PRs welcome).
+**v1.0:** macOS (FSEvents), Linux (inotify).
+**v1.x:** native Windows via ReadDirectoryChangesW, per-user named pipe `\\.\pipe\shisa-<sid>`, Job Object supervisor containment, and PowerShell hook support. Windows users may still use WSL until the native daemon transport is runtime-complete.
 
 ## 10. Performance targets (publicly benchmarked)
 
@@ -406,7 +406,7 @@ Sections 26+ are concrete specs that pin down what the abstractions in §5–§2
 
 ### 26.1 Framing
 
-Length-prefixed JSON over `SOCK_STREAM` Unix-domain socket:
+Length-prefixed JSON over `SOCK_STREAM` Unix-domain socket on macOS/Linux and the same frame over a per-user Windows named pipe:
 
 ```
 +-----------+----------------------------+
@@ -417,6 +417,7 @@ Length-prefixed JSON over `SOCK_STREAM` Unix-domain socket:
 - Max payload: 1 MiB (rejected with `E_OVERSIZE` over the same frame format).
 - One request per frame; one response per frame.
 - No keep-alive multiplexing in v1 (defer to v2). Connection-per-request keeps the model trivial.
+- Windows pipe name: `\\.\pipe\shisa-<sid>`, where `<sid>` is the current user's Windows SID.
 
 ### 26.2 Request schema
 

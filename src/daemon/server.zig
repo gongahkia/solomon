@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const cdhint_module = @import("modules/cdhint.zig");
 const cloud_ctx_module = @import("modules/cloud_ctx.zig");
 const dispatcher = @import("dispatcher.zig");
@@ -241,7 +242,7 @@ const ReloadState = struct {
     }
 };
 
-pub const Server = struct {
+const PosixServer = struct {
     socket_path: []const u8,
     listener: std.net.Server,
     logger: ?*daemon_log.Logger = null,
@@ -1062,6 +1063,36 @@ pub const Server = struct {
         }
     }
 };
+
+const WindowsServer = struct {
+    socket_path: []const u8,
+    logger: ?*daemon_log.Logger = null,
+
+    pub fn init(socket_path: []const u8) !WindowsServer {
+        return initWithLogger(socket_path, null);
+    }
+
+    pub fn initWithLogger(socket_path: []const u8, logger: ?*daemon_log.Logger) !WindowsServer {
+        return .{
+            .socket_path = socket_path,
+            .logger = logger,
+        };
+    }
+
+    pub fn deinit(self: *WindowsServer) void {
+        self.* = undefined;
+    }
+
+    pub fn serve(self: *WindowsServer, shutdown_requested: *const std.atomic.Value(bool), reload_requested: *std.atomic.Value(bool), stack_dump_requested: *std.atomic.Value(bool)) !void {
+        _ = shutdown_requested;
+        _ = reload_requested;
+        _ = stack_dump_requested;
+        if (self.logger) |logger| try logger.warn("windows_server_unimplemented", self.socket_path);
+        return error.UnsupportedSocketPlatform;
+    }
+};
+
+pub const Server = if (builtin.os.tag == .windows) WindowsServer else PosixServer;
 
 fn writeFrame(fd: std.posix.fd_t, payload: []const u8) !void {
     const encoded = try encodeFrameAlloc(std.heap.page_allocator, payload);

@@ -3836,10 +3836,10 @@ fn renderSyncPromptAlloc(allocator: std.mem.Allocator, config: PromptConfig, cwd
     defer if (azure_default_location) |value| allocator.free(value);
     const tmux_pane = std.process.getEnvVarOwned(allocator, "TMUX_PANE") catch null;
     defer if (tmux_pane) |value| allocator.free(value);
-    const user = std.process.getEnvVarOwned(allocator, "USER") catch try allocator.dupe(u8, "unknown");
+    const user = try currentUserAlloc(allocator);
     defer allocator.free(user);
-    var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
-    const host = std.posix.gethostname(&host_buffer) catch "unknown";
+    const host = try currentHostAlloc(allocator);
+    defer allocator.free(host);
 
     var rendered = try dispatcher.renderPipeline(allocator, .{
         .git_branch = &git_cache,
@@ -3881,6 +3881,20 @@ fn renderSyncPromptAlloc(allocator: std.mem.Allocator, config: PromptConfig, cwd
     }, pipeline);
     defer rendered.deinit(allocator);
     return allocator.dupe(u8, rendered.prompt);
+}
+
+fn currentUserAlloc(allocator: std.mem.Allocator) ![]u8 {
+    const env_name = if (builtin.os.tag == .windows) "USERNAME" else "USER";
+    return std.process.getEnvVarOwned(allocator, env_name) catch try allocator.dupe(u8, "unknown");
+}
+
+fn currentHostAlloc(allocator: std.mem.Allocator) ![]u8 {
+    if (builtin.os.tag == .windows) {
+        return std.process.getEnvVarOwned(allocator, "COMPUTERNAME") catch try allocator.dupe(u8, "unknown");
+    }
+    var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
+    const host = std.posix.gethostname(&host_buffer) catch "unknown";
+    return allocator.dupe(u8, host);
 }
 
 fn promptPipelineAlloc(allocator: std.mem.Allocator, modules: []const shisa_config.ModuleId) ![]dispatcher.ModuleSpec {
@@ -4101,7 +4115,7 @@ fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config: Pro
     const head = try std.fmt.allocPrint(
         allocator,
         "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\"{s},",
-        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), std.posix.getuid(), request_id, env_json },
+        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), promptUserId(), request_id, env_json },
     );
     defer allocator.free(head);
     const tail = try std.fmt.allocPrint(
@@ -4115,6 +4129,13 @@ fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config: Pro
         "{s}{s}",
         .{ head, tail },
     );
+}
+
+fn promptUserId() u32 {
+    return switch (builtin.os.tag) {
+        .windows => 0,
+        else => std.posix.getuid(),
+    };
 }
 
 fn pathEnvJsonAlloc(allocator: std.mem.Allocator) ![]u8 {

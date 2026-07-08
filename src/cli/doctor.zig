@@ -408,6 +408,7 @@ fn fsnotifyBackendName(backend: fsnotify.Backend) []const u8 {
     return switch (backend) {
         .fsevents => "fsevents",
         .inotify => "inotify",
+        .windows => "ReadDirectoryChangesW",
         .unsupported => "unsupported",
     };
 }
@@ -425,6 +426,7 @@ test "doctor reports path and backend statuses" {
     try std.testing.expectEqualStrings("missing", pathAccessStatus("/tmp/shisa-doctor-missing"));
     try std.testing.expectEqualStrings("fsevents", fsnotifyBackendName(.fsevents));
     try std.testing.expectEqualStrings("inotify", fsnotifyBackendName(.inotify));
+    try std.testing.expectEqualStrings("ReadDirectoryChangesW", fsnotifyBackendName(.windows));
 }
 
 test "doctor reports installed plugins" {

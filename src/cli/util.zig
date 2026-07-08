@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const shisa_config = @import("../config.zig");
 
 /// maximum config bytes read by helpers that load shisa.toml.
@@ -9,6 +10,8 @@ pub const max_config_bytes = 1024 * 1024;
 /// environment: prefers XDG_CONFIG_HOME; falls back to HOME.
 /// errors: EnvironmentVariableNotFound when HOME is required and missing; OutOfMemory on allocation failure.
 pub fn defaultConfigPath(allocator: std.mem.Allocator) ![]u8 {
+    if (builtin.os.tag == .windows) return windowsDefaultConfigPath(allocator);
+
     const xdg = std.process.getEnvVarOwned(allocator, "XDG_CONFIG_HOME") catch |err| switch (err) {
         error.EnvironmentVariableNotFound => null,
         else => return err,
@@ -31,6 +34,27 @@ pub fn defaultConfigPathFromEnv(allocator: std.mem.Allocator, xdg_config_home: ?
     if (xdg_config_home) |base| return std.fmt.allocPrint(allocator, "{s}/shisa/shisa.toml", .{base});
     if (home) |base| return std.fmt.allocPrint(allocator, "{s}/.config/shisa/shisa.toml", .{base});
     return error.MissingHome;
+}
+
+fn windowsDefaultConfigPath(allocator: std.mem.Allocator) ![]u8 {
+    const app_data = std.process.getEnvVarOwned(allocator, "APPDATA") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    if (app_data) |base| {
+        defer allocator.free(base);
+        return windowsDefaultConfigPathFromEnv(allocator, base, null);
+    }
+
+    const user_profile = try std.process.getEnvVarOwned(allocator, "USERPROFILE");
+    defer allocator.free(user_profile);
+    return windowsDefaultConfigPathFromEnv(allocator, null, user_profile);
+}
+
+fn windowsDefaultConfigPathFromEnv(allocator: std.mem.Allocator, app_data: ?[]const u8, user_profile: ?[]const u8) ![]u8 {
+    if (app_data) |base| return std.fmt.allocPrint(allocator, "{s}\\shisa\\shisa.toml", .{base});
+    const base = user_profile orelse return error.MissingHome;
+    return std.fmt.allocPrint(allocator, "{s}\\AppData\\Roaming\\shisa\\shisa.toml", .{base});
 }
 
 /// reads a config file or returns the built-in default config when the file is absent.
@@ -88,6 +112,18 @@ test "default config path falls back to home" {
     const path = try defaultConfigPathFromEnv(std.testing.allocator, null, "/tmp/home");
     defer std.testing.allocator.free(path);
     try std.testing.expectEqualStrings("/tmp/home/.config/shisa/shisa.toml", path);
+}
+
+test "windows default config path prefers app data" {
+    const path = try windowsDefaultConfigPathFromEnv(std.testing.allocator, "C:\\Users\\me\\AppData\\Roaming", "C:\\Users\\me");
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("C:\\Users\\me\\AppData\\Roaming\\shisa\\shisa.toml", path);
+}
+
+test "windows default config path falls back to user profile" {
+    const path = try windowsDefaultConfigPathFromEnv(std.testing.allocator, null, "C:\\Users\\me");
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("C:\\Users\\me\\AppData\\Roaming\\shisa\\shisa.toml", path);
 }
 
 /// appends formatted text to an ArrayList.

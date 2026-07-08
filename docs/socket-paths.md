@@ -28,6 +28,16 @@ Primary path:
 
 The daemon creates `~/Library/Caches/shisa` with mode `0700` when missing.
 
+## Windows
+
+Primary path:
+
+```text
+\\.\pipe\shisa-<sid>
+```
+
+`<sid>` is the current user's Windows SID, for example `S-1-5-21-...-1001`.
+
 ## Lock File
 
 The single-instance lock sits next to the socket:

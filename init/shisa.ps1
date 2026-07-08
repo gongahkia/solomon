@@ -28,11 +28,23 @@ $script:SHISA_PWSH_ASYNC_SUBSCRIBER = $null
 
 function global:shisa_socket_path {
     if ($env:SHISA_SOCKET) { return $env:SHISA_SOCKET }
+    if ($IsWindows) {
+        try {
+            $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            if ($sid) { return "\\.\pipe\shisa-$sid" }
+        } catch {}
+    }
     if ($IsMacOS) { return (Join-Path $HOME "Library/Caches/shisa/shisa.sock") }
     if ($env:XDG_RUNTIME_DIR) { return (Join-Path $env:XDG_RUNTIME_DIR "shisa.sock") }
     $uid = (& id -u 2>$null)
     if ($uid) { return "/run/user/$uid/shisa.sock" }
     return (Join-Path $HOME ".cache/shisa/shisa.sock")
+}
+
+function global:shisa_socket_available {
+    param([string]$Path)
+    if ($IsWindows -and $Path.StartsWith("\\.\pipe\")) { return $true }
+    return (Test-Path -LiteralPath $Path)
 }
 
 function global:shisa_prompt_fallback {
@@ -45,7 +57,7 @@ function global:shisa_prompt_render {
     $exitCode = if ($lastCommandSucceeded) { 0 } elseif ($null -ne $lastNativeExitCode) { [int]$lastNativeExitCode } else { 1 }
     $socketPath = shisa_socket_path
     $instant = $env:SHISA_INSTANT -eq "1"
-    if (-not $instant -and -not (Test-Path -LiteralPath $socketPath)) {
+    if (-not $instant -and -not (shisa_socket_available $socketPath)) {
         return (shisa_prompt_fallback)
     }
 
@@ -86,7 +98,7 @@ function global:shisa_right_prompt_render {
     $lastCommandSucceeded = $?
     $lastNativeExitCode = $global:LASTEXITCODE
     $socketPath = shisa_socket_path
-    if (-not (Test-Path -LiteralPath $socketPath)) { return "" }
+    if (-not (shisa_socket_available $socketPath)) { return "" }
 
     $location = Get-Location
     $cwd = if ($location.ProviderPath) { $location.ProviderPath } else { $location.Path }

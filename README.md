@@ -4,11 +4,11 @@
 
 A daemon-backed, async-first, cross-shell prompt that never blocks.
 
-Shisa keeps slow prompt work out of the shell. A per-user daemon watches filesystem state, caches module output, and returns pre-rendered prompts over a Unix-domain socket so git status, language probes, and cloud context do not stall input.
+Shisa keeps slow prompt work out of the shell. A per-user daemon watches filesystem state, caches module output, and returns pre-rendered prompts over a Unix-domain socket on macOS/Linux or a named pipe on Windows so git status, language probes, and cloud context do not stall input.
 
 ## Status
 
-**Alpha — works on a developer machine, not yet packaged.** The daemon (`shisad`) renders prompts over a Unix-domain socket; the `shisa prompt` client returns a composed prompt with async-fill placeholders for slow modules. Warm renders measured at 2–4 ms mean on macOS / Apple Silicon. There is no released artifact, no installer, and no signed binary yet — see [todo.md](todo.md) for what's still in the way.
+**Alpha — works on a developer machine, not yet packaged.** The daemon (`shisad`) renders prompts over a local IPC endpoint; the `shisa prompt` client returns a composed prompt with async-fill placeholders for slow modules. Warm renders measured at 2–4 ms mean on macOS / Apple Silicon. There is no released artifact, no installer, and no signed binary yet — see [todo.md](todo.md) for what's still in the way.
 
 Known gaps before a first release:
 - Synthetic cold-big-repo CI is guarded; local nixpkgs and sparse Chromium numbers are recorded; full Chromium checkout numbers are still missing.

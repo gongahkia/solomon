@@ -56,7 +56,7 @@ shisa_load_shell_prefs() {
     key=${line%%=*}
     value=$(shisa_shell_env_unquote "${line#*=}")
     case ${key} in
-      SHISA_CMD_COMPLETE_BELL|SHISA_CMD_COMPLETE_BELL_MODE|SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS|SHISA_CMD_COMPLETE_BELL_MESSAGE)
+      SHISA_ASYNC_FILL|SHISA_CMD_COMPLETE_BELL|SHISA_CMD_COMPLETE_BELL_MODE|SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS|SHISA_CMD_COMPLETE_BELL_MESSAGE)
         typeset -g "${key}=${value}"
         ;;
     esac
@@ -70,8 +70,9 @@ typeset -g SHISA_LAST_JOBS=0
 typeset -g SHISA_LAST_DURATION_MS=0
 typeset -g SHISA_LAST_COMMAND=
 typeset -g SHISA_PREEXEC_REALTIME=
+typeset -g SHISA_ASYNC_FILL=${SHISA_ASYNC_FILL:-1}
 typeset -g SHISA_ASYNC_SIGNAL=${SHISA_ASYNC_SIGNAL:-USR1}
-typeset -g SHISA_ASYNC_SELF_PIPE=${SHISA_ASYNC_SELF_PIPE:-1}
+typeset -g SHISA_ASYNC_SELF_PIPE=${SHISA_ASYNC_SELF_PIPE:-${SHISA_ASYNC_FILL}}
 typeset -g SHISA_ASYNC_PIPE=
 typeset -g SHISA_ASYNC_FD=
 typeset -g SHISA_ASYNC_BYTE=${SHISA_ASYNC_BYTE:-A}
@@ -416,6 +417,7 @@ shisa_prompt_render() {
 
   local -a args
   args=(prompt --shell zsh --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
+  [[ ${SHISA_ASYNC_FILL:-1} == 0 ]] && args+=(--no-async)
   [[ ${SHISA_A11Y:-0} == 1 ]] && args+=(--a11y)
   [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)
   "${SHISA_BIN}" "${args[@]}"
@@ -429,6 +431,7 @@ shisa_right_prompt_render() {
 
   local -a args
   args=(prompt --right --shell zsh --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
+  [[ ${SHISA_ASYNC_FILL:-1} == 0 ]] && args+=(--no-async)
   [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)
   "${SHISA_BIN}" "${args[@]}" 2>/dev/null || true
 }

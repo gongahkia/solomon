@@ -8,7 +8,7 @@ Source check:
 rg -n "termios|raw mode|ncurses|readline|interactive|readUntilDelimiter|readLine" src init docs
 ```
 
-No raw-mode, full-screen, readline, or ncurses UI path is present in the current source tree. The only user confirmation prompt found in core CLI flow is `shisa plugin install` without `--yes`.
+No raw-mode, full-screen, readline, or ncurses UI path is present in the current source tree. Prompting paths are newline-based stdin/stdout flows: `shisa init` on first run or with `--interactive`, `shisa doctor --fix` without `--yes`, and `shisa plugin install` without `--yes`.
 
 ## Behavior Table
 
@@ -18,7 +18,7 @@ No raw-mode, full-screen, readline, or ncurses UI path is present in the current
 | `bench` | args/stdout/stderr only | no prompt |
 | `cache` | args/stdout/stderr only | no prompt |
 | `cloud` | args/stdout/stderr only | no prompt |
-| `doctor` | args/stdout/stderr only | no prompt |
+| `doctor` | args/stdout/stderr or y/N prompts | prompts only with `--fix` unless `--yes` is passed |
 | `explain` | args/stdout/stderr only | no prompt |
 | `font` | args/stdout only | no prompt |
 | `import-starship` | path arg, `--dry-run`, `--diff`, `--output` | no prompt |
@@ -26,7 +26,7 @@ No raw-mode, full-screen, readline, or ncurses UI path is present in the current
 | `import-oh-my-posh` | path arg, `--dry-run`, `--diff`, `--output` | no prompt |
 | `import-tide` | path arg, `--dry-run`, `--diff`, `--output` | no prompt |
 | `import-pure` | `--dry-run`, `--diff`, `--output` | no prompt |
-| `init` | args/filesystem | no prompt |
+| `init` | args/filesystem or newline prompts | fresh config launches wizard; `--defaults` and explicit flags do not prompt |
 | `pin` | path arg/filesystem | no prompt |
 | `plugin install` | args/filesystem | y/N prompt unless `--yes` is passed |
 | `plugin list` | stdout only | no prompt |

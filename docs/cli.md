@@ -25,7 +25,7 @@ commands:
                 translate Tide fish settings to shisa.toml
   import-pure [--dry-run|--diff] [--output PATH]
                 print the minimal Pure-compatible preset
-  init          write default shisa.toml; --a11y and shell notification prefs supported
+  init          first-run wizard; --defaults writes without prompting
   pin           mark a path as never-evicted
   plugin        new, lint, doctor, verify, search, pack, install, list, enable, disable, or trust plugins
   prompt        render prompt through shisad; --right prints configured right prompt
@@ -59,6 +59,21 @@ usage: shisa font check
 
 commands:
   check         render Nerd Font, Unicode, and ASCII glyph probes
+```
+
+### `shisa init`
+
+```text
+usage: shisa init [--defaults|--interactive] [--shell NAME] [--theme THEME] [--async on|off] [--write-hook]
+
+options:
+  --defaults      write default shisa.toml without prompting
+  --interactive   force first-run wizard
+  --shell NAME    target zsh, bash, fish, nu, or pwsh for hook install
+  --theme THEME   write a built-in theme id
+  --async on|off  enable or disable async fill in generated shell prefs
+  --write-hook    append an idempotent shell hook block
+  --a11y          write accessibility-first defaults
 ```
 
 ### `shisa report`

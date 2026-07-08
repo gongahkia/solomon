@@ -98,7 +98,7 @@ shisa_load_shell_prefs() {
     key=${line%%=*}
     value=$(shisa_shell_env_unquote "${line#*=}")
     case ${key} in
-      SHISA_CMD_COMPLETE_BELL|SHISA_CMD_COMPLETE_BELL_MODE|SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS|SHISA_CMD_COMPLETE_BELL_MESSAGE)
+      SHISA_ASYNC_FILL|SHISA_CMD_COMPLETE_BELL|SHISA_CMD_COMPLETE_BELL_MODE|SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS|SHISA_CMD_COMPLETE_BELL_MESSAGE)
         printf -v "${key}" '%s' "${value}"
         ;;
     esac
@@ -111,6 +111,7 @@ SHISA_LAST_EXIT=0
 SHISA_LAST_JOBS=0
 SHISA_LAST_DURATION_MS=0
 SHISA_LAST_COMMAND=
+SHISA_ASYNC_FILL=${SHISA_ASYNC_FILL:-1}
 SHISA_ASYNC_REDRAW=${SHISA_ASYNC_REDRAW:-1}
 SHISA_ASYNC_KEYSEQ=${SHISA_ASYNC_KEYSEQ:-'\C-x\C-s'}
 SHISA_BASH_RIGHT_PROMPT=${SHISA_BASH_RIGHT_PROMPT:-0}
@@ -281,6 +282,7 @@ shisa_prompt_render() {
 
   local -a args
   args=(prompt --shell bash --cwd "${PWD}" --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
+  [[ ${SHISA_ASYNC_FILL:-1} == 0 ]] && args+=(--no-async)
   [[ ${SHISA_A11Y:-0} == 1 ]] && args+=(--a11y)
   [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)
   "${SHISA_BIN}" "${args[@]}" || shisa_prompt_fallback
@@ -293,6 +295,7 @@ shisa_bash_right_prompt_render() {
 
   local -a args
   args=(prompt --right --shell bash --cwd "${PWD}" --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
+  [[ ${SHISA_ASYNC_FILL:-1} == 0 ]] && args+=(--no-async)
   [[ ${SHISA_A11Y:-0} == 1 ]] && args+=(--a11y)
   [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)
   "${SHISA_BIN}" "${args[@]}" 2>/dev/null || true

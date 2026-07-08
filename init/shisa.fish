@@ -50,7 +50,7 @@ function shisa_load_shell_prefs
         set -l key $parts[1]
         set -l value (shisa_shell_env_unquote "$parts[2]")
         switch "$key"
-            case SHISA_CMD_COMPLETE_BELL SHISA_CMD_COMPLETE_BELL_MODE SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS SHISA_CMD_COMPLETE_BELL_MESSAGE
+            case SHISA_ASYNC_FILL SHISA_CMD_COMPLETE_BELL SHISA_CMD_COMPLETE_BELL_MODE SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS SHISA_CMD_COMPLETE_BELL_MESSAGE
                 set -g $key "$value"
         end
     end <"$path"
@@ -62,6 +62,7 @@ set -q SHISA_PROD_GUARD; or set -g SHISA_PROD_GUARD 0
 set -q SHISA_PROD_GUARD_FORCE; or set -g SHISA_PROD_GUARD_FORCE 0
 set -q SHISA_AI_RISK_GUARD; or set -g SHISA_AI_RISK_GUARD 0
 set -q SHISA_A11Y; or set -g SHISA_A11Y 0
+set -q SHISA_ASYNC_FILL; or set -g SHISA_ASYNC_FILL 1
 set -q SHISA_CMD_COMPLETE_BELL; or set -g SHISA_CMD_COMPLETE_BELL 0
 set -q SHISA_CMD_COMPLETE_BELL_MODE; or set -g SHISA_CMD_COMPLETE_BELL_MODE bell
 set -q SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS; or set -g SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS 10000
@@ -150,6 +151,9 @@ function shisa_prompt_render
     if test "$SHISA_A11Y" = 1
         set args $args --a11y
     end
+    if test "$SHISA_ASYNC_FILL" = 0
+        set args $args --no-async
+    end
     if test "$SHISA_RTL" = 1
         set args $args --rtl
     end
@@ -170,6 +174,9 @@ function shisa_right_prompt_render
     set -l socket_path (shisa_socket_path)
     test -S "$socket_path"; or return 0
     set -l args prompt --right --shell fish --cwd "$PWD" --exit "$SHISA_LAST_STATUS" --jobs "$SHISA_LAST_JOBS" --duration-ms "$SHISA_LAST_DURATION_MS" --socket "$socket_path"
+    if test "$SHISA_ASYNC_FILL" = 0
+        set args $args --no-async
+    end
     if test "$SHISA_RTL" = 1
         set args $args --rtl
     end

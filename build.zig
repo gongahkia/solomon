@@ -841,6 +841,11 @@ pub fn build(b: *std.Build) void {
     pwsh_integration.step.dependOn(&debug_install.step);
     const render_a11y_integration = b.addSystemCommand(&.{ "bash", "test/integration/render_a11y_fake_socket.sh" });
     render_a11y_integration.step.dependOn(&debug_install.step);
+    const first_run_smoke = b.addSystemCommand(&.{ "bash", "test/integration/first_run_smoke.sh" });
+    first_run_smoke.step.dependOn(&debug_install.step);
+    first_run_smoke.step.dependOn(&debug_daemon_install.step);
+    const init_wizard_smoke = b.addSystemCommand(&.{ "bash", "test/integration/init_wizard_smoke.sh" });
+    init_wizard_smoke.step.dependOn(&debug_install.step);
     const rtl_locale_integration = b.addSystemCommand(&.{ "bash", "test/integration/rtl_locale_init.sh" });
     const preexec_expect_integration = b.addSystemCommand(&.{ "bash", "test/integration/preexec_expect.sh" });
     preexec_expect_integration.step.dependOn(&debug_install.step);
@@ -941,6 +946,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&nu_integration.step);
     test_step.dependOn(&pwsh_integration.step);
     test_step.dependOn(&render_a11y_integration.step);
+    test_step.dependOn(&first_run_smoke.step);
+    test_step.dependOn(&init_wizard_smoke.step);
     test_step.dependOn(&rtl_locale_integration.step);
     test_step.dependOn(&preexec_expect_integration.step);
     test_step.dependOn(&shell_expect_integration.step);

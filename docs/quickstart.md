@@ -10,7 +10,19 @@ cd shisa
 zig build debug
 ```
 
-## 2. Start the daemon
+## 2. Initialize
+
+```sh
+./zig-out/bin/shisa init
+```
+
+The first-run wizard previews built-in themes, writes `shisa.toml`, and can append the shell hook. For scripts, use:
+
+```sh
+./zig-out/bin/shisa init --defaults --shell zsh --theme nord-dark --async on --write-hook
+```
+
+## 3. Start the daemon
 
 ```sh
 ./zig-out/bin/shisad --foreground
@@ -18,9 +30,9 @@ zig build debug
 
 Keep that terminal open for a local smoke run. For regular use, run `shisad` from a user service.
 
-## 3. Add the shell hook
+## 4. Add the shell hook
 
-Replace `/path/to/shisa` with the cloned repo path.
+Skip this if `shisa init` already wrote your hook. Replace `/path/to/shisa` with the cloned repo path for manual setup.
 
 <div class="shisa-shell-tabs">
 <input type="radio" name="shell-tabs" id="tab-zsh" checked>
@@ -85,7 +97,7 @@ Put the matching block in the shell startup file:
 | nushell | `~/.config/nushell/config.nu` |
 | PowerShell | `$PROFILE` |
 
-## 4. Verify
+## 5. Verify
 
 ```sh
 ./zig-out/bin/shisa doctor

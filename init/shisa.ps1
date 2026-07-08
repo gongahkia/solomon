@@ -5,6 +5,7 @@ if (-not $env:SHISA_BIN) { $env:SHISA_BIN = "shisa" }
 if (-not $env:SHISA_SOCKET) { $env:SHISA_SOCKET = "" }
 if (-not $env:SHISA_INSTANT) { $env:SHISA_INSTANT = "0" }
 if (-not $env:SHISA_A11Y) { $env:SHISA_A11Y = "0" }
+if (-not $env:SHISA_ASYNC_FILL) { $env:SHISA_ASYNC_FILL = "1" }
 $env:SHISA_HOOK_ACTIVE = "1"
 
 function global:Get-ShisaRtlLocale {
@@ -76,6 +77,7 @@ function global:shisa_prompt_render {
     )
     if ($instant) { $args += "--instant" }
     if ($env:SHISA_A11Y -eq "1") { $args += "--a11y" }
+    if ($env:SHISA_ASYNC_FILL -eq "0") { $args += "--no-async" }
     if ($env:SHISA_RTL -eq "1") { $args += "--rtl" }
 
     try {
@@ -116,6 +118,7 @@ function global:shisa_right_prompt_render {
         "--socket", $socketPath
     )
     if ($env:SHISA_A11Y -eq "1") { $args += "--a11y" }
+    if ($env:SHISA_ASYNC_FILL -eq "0") { $args += "--no-async" }
     if ($env:SHISA_RTL -eq "1") { $args += "--rtl" }
 
     try {

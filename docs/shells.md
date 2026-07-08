@@ -28,6 +28,8 @@ Set `SHISA_CMD_COMPLETE_BELL=1` before sourcing zsh, bash, or fish init to emit 
 
 `shisa init --cmd-complete-bell --cmd-complete-bell-mode osc9 --cmd-complete-bell-threshold-ms 10000` writes these preferences to `shell.env` next to `shisa.toml`. The zsh, bash, and fish hooks read that file without sourcing it as shell code.
 
+`shisa init --async off` writes `SHISA_ASYNC_FILL=0`; hooks then pass `--no-async` when rendering prompts. `--async on` writes `SHISA_ASYNC_FILL=1`, which keeps the default async fill behavior.
+
 Set `SHISA_LONG_RUNNING=1` before sourcing zsh, bash, or fish init to print `shisa: command still running` after `SHISA_LONG_RUNNING_THRESHOLD_SECONDS` (default `30`) while a foreground command is still active. The default message does not include the command text.
 
 `shisa prompt` emits OSC-7 cwd metadata before the rendered prompt so terminals that support it can open new tabs in the current directory. The sequence uses `file://<host><cwd>` and percent-encodes path bytes.

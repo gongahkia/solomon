@@ -117,11 +117,15 @@ pub fn pathAlloc(allocator: std.mem.Allocator, theme_arg: []const u8) ![]u8 {
 }
 
 pub fn previewAlloc(allocator: std.mem.Allocator, theme: theme_loader.Theme, cols: u16) ![]u8 {
+    return previewAllocWithCwd(allocator, theme, cols, "~/work/shisa");
+}
+
+pub fn previewAllocWithCwd(allocator: std.mem.Allocator, theme: theme_loader.Theme, cols: u16, cwd: []const u8) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
 
     if (theme.layout.lines.len == 0) {
-        const left = try renderSegmentListAlloc(allocator, theme, default_preview_segments[0..]);
+        const left = try renderSegmentListAlloc(allocator, theme, default_preview_segments[0..], cwd);
         defer allocator.free(left);
         const line = try dispatcher.renderAlignedLineAlloc(allocator, left, "", cols);
         defer allocator.free(line);
@@ -129,9 +133,9 @@ pub fn previewAlloc(allocator: std.mem.Allocator, theme: theme_loader.Theme, col
         try out.append(allocator, '\n');
     } else {
         for (theme.layout.lines) |layout_line| {
-            const left = try renderSegmentListAlloc(allocator, theme, layout_line.left);
+            const left = try renderSegmentListAlloc(allocator, theme, layout_line.left, cwd);
             defer allocator.free(left);
-            const right = try renderSegmentListAlloc(allocator, theme, layout_line.right);
+            const right = try renderSegmentListAlloc(allocator, theme, layout_line.right, cwd);
             defer allocator.free(right);
             const line = try dispatcher.renderAlignedLineAlloc(allocator, left, right, cols);
             defer allocator.free(line);
@@ -143,20 +147,20 @@ pub fn previewAlloc(allocator: std.mem.Allocator, theme: theme_loader.Theme, col
     return out.toOwnedSlice(allocator);
 }
 
-fn renderSegmentListAlloc(allocator: std.mem.Allocator, theme: theme_loader.Theme, ids: anytype) ![]u8 {
+fn renderSegmentListAlloc(allocator: std.mem.Allocator, theme: theme_loader.Theme, ids: anytype, cwd: []const u8) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
     for (ids, 0..) |id, index| {
         if (index > 0) try out.appendSlice(allocator, theme.separators.segment);
-        const rendered = try renderSegmentAlloc(allocator, theme, id);
+        const rendered = try renderSegmentAlloc(allocator, theme, id, cwd);
         defer allocator.free(rendered);
         try out.appendSlice(allocator, rendered);
     }
     return out.toOwnedSlice(allocator);
 }
 
-fn renderSegmentAlloc(allocator: std.mem.Allocator, theme: theme_loader.Theme, id: []const u8) ![]u8 {
-    const segment = findSegment(theme, id) orelse return allocator.dupe(u8, previewValue(id));
+fn renderSegmentAlloc(allocator: std.mem.Allocator, theme: theme_loader.Theme, id: []const u8, cwd: []const u8) ![]u8 {
+    const segment = findSegment(theme, id) orelse return allocator.dupe(u8, previewValue(id, cwd));
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
     var styled = false;
@@ -168,7 +172,7 @@ fn renderSegmentAlloc(allocator: std.mem.Allocator, theme: theme_loader.Theme, i
     try out.appendSlice(allocator, theme.separators.left);
     try out.appendSlice(allocator, segment.prefix);
     try out.appendSlice(allocator, theme_loader.resolveSegmentGlyph(segment, glyphTierForTheme(theme)));
-    try out.appendSlice(allocator, previewValue(id));
+    try out.appendSlice(allocator, previewValue(id, cwd));
     try out.appendSlice(allocator, segment.suffix);
     try out.appendSlice(allocator, theme.separators.right);
     if (styled) try out.appendSlice(allocator, "\x1b[0m");
@@ -229,8 +233,8 @@ pub fn colorCapsForTheme(theme: theme_loader.Theme) theme_contrast.ColorCaps {
     };
 }
 
-fn previewValue(id: []const u8) []const u8 {
-    if (std.mem.eql(u8, id, "cwd")) return "~/work/shisa";
+fn previewValue(id: []const u8, cwd: []const u8) []const u8 {
+    if (std.mem.eql(u8, id, "cwd")) return cwd;
     if (std.mem.eql(u8, id, "git_branch")) return "main*";
     if (std.mem.eql(u8, id, "exit_status")) return "2";
     if (std.mem.eql(u8, id, "jobs")) return "2";
@@ -294,4 +298,25 @@ test "theme preview renders stub prompt" {
     try std.testing.expect(std.mem.indexOf(u8, preview, "exit:2") != null);
     try std.testing.expect(std.mem.indexOf(u8, preview, "jobs:2") != null);
     try std.testing.expect(std.mem.indexOf(u8, preview, "took:1.5s") != null);
+}
+
+test "theme preview can render supplied cwd" {
+    const source =
+        \\version = 1
+        \\name = "preview-cwd"
+        \\
+        \\[palette]
+        \\fg = "15"
+        \\
+        \\[segments.cwd]
+        \\fg = "@fg"
+        \\
+    ;
+    var diagnostic: theme_loader.Diagnostic = .{};
+    var theme = try theme_loader.parse(std.testing.allocator, source, &diagnostic);
+    defer theme.deinit(std.testing.allocator);
+    const preview = try previewAllocWithCwd(std.testing.allocator, theme, 80, "/tmp/shisa-wizard");
+    defer std.testing.allocator.free(preview);
+
+    try std.testing.expect(std.mem.indexOf(u8, preview, "/tmp/shisa-wizard") != null);
 }

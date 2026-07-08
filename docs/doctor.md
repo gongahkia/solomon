@@ -35,7 +35,7 @@ Fixable issues are annotated with `[fix available]`. Current fixes:
 
 | Issue | Fix |
 | --- | --- |
-| Missing shell hook | Runs `shisa init --write-hook`, which appends an idempotent marker block to the current shell startup file. |
+| Missing shell hook | Runs `shisa init --write-hook`, which appends an idempotent `# >>> shisa >>>` block to the current shell startup file. |
 | Stale socket file | Removes the socket only after `lsof`/`fuser` reports no owner. |
 | Daemon not running | Runs `shisad --daemonize`. |
 | Config dir permissions | Runs `chmod 0700 <config_dir>`. |

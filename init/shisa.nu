@@ -4,6 +4,7 @@ if not ("__SHISA_NU_INIT" in $env) {
     if not ("SHISA_SOCKET" in $env) { $env.SHISA_SOCKET = "" }
     if not ("SHISA_INSTANT" in $env) { $env.SHISA_INSTANT = "0" }
     if not ("SHISA_A11Y" in $env) { $env.SHISA_A11Y = "0" }
+    if not ("SHISA_ASYNC_FILL" in $env) { $env.SHISA_ASYNC_FILL = "1" }
     $env.SHISA_HOOK_ACTIVE = "1"
 
     def shisa-detect-rtl-locale [] {
@@ -62,6 +63,7 @@ if not ("__SHISA_NU_INIT" in $env) {
         ]
         let args = if $instant { $args | append "--instant" } else { $args }
         let args = if (($env.SHISA_A11Y? | default "0") == "1") { $args | append "--a11y" } else { $args }
+        let args = if (($env.SHISA_ASYNC_FILL? | default "1") == "0") { $args | append "--no-async" } else { $args }
         let args = if (($env.SHISA_RTL? | default "0") == "1") { $args | append "--rtl" } else { $args }
         let rendered = (try { run-external $env.SHISA_BIN ...$args e> /dev/null | complete } catch { { stdout: "", exit_code: 1 } })
         if $rendered.exit_code == 0 {
@@ -96,6 +98,7 @@ if not ("__SHISA_NU_INIT" in $env) {
             $socket_path
         ]
         let args = if (($env.SHISA_A11Y? | default "0") == "1") { $args | append "--a11y" } else { $args }
+        let args = if (($env.SHISA_ASYNC_FILL? | default "1") == "0") { $args | append "--no-async" } else { $args }
         let args = if (($env.SHISA_RTL? | default "0") == "1") { $args | append "--rtl" } else { $args }
         let rendered = (try { run-external $env.SHISA_BIN ...$args e> /dev/null | complete } catch { { stdout: "", exit_code: 1 } })
         if $rendered.exit_code == 0 {

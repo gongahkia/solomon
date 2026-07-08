@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # T19: first-run smoke. Starting from a fresh $HOME, the user should be able to
-# run `shisa init`, source no hook (we don't need an actual shell), boot shisad,
+# run `shisa init --defaults`, source no hook (we don't need an actual shell), boot shisad,
 # and get a real rendered prompt back from `shisa prompt`. This verifies the
 # new-user path that no other integration test currently covers.
 set -euo pipefail
@@ -39,11 +39,11 @@ export XDG_CONFIG_HOME="$xdg_config"
 export XDG_RUNTIME_DIR="$xdg_runtime"
 export XDG_CACHE_HOME="$xdg_cache"
 
-# 1. shisa init writes a default shisa.toml
-"$root/zig-out/bin/shisa" init >/dev/null
+# 1. shisa init --defaults writes a default shisa.toml
+"$root/zig-out/bin/shisa" init --defaults >/dev/null
 config_path="$xdg_config/shisa/shisa.toml"
 [[ -f "$config_path" ]] || {
-  printf 'first-run smoke: shisa init did not write %s\n' "$config_path" >&2
+  printf 'first-run smoke: shisa init --defaults did not write %s\n' "$config_path" >&2
   exit 1
 }
 

@@ -82,7 +82,11 @@ EOF
 SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" TMUX_PANE="%42" XDG_CONFIG_HOME="$xdg" zsh -fc 'source init/shisa.zsh; print -P "$PROMPT"; shisa_right_prompt_render' >"$out"
 grep -F 'fake> ' "$out" >/dev/null
 grep -F 'right-zsh' "$out" >/dev/null
-zsh -fc 'source init/shisa.zsh; whence shisa_async_self_pipe_setup >/dev/null; whence shisa_async_self_pipe_readable >/dev/null; whence shisa_async_self_pipe_notify >/dev/null'
+zsh -fc 'source init/shisa.zsh; whence shisa_async_self_pipe_setup >/dev/null; whence shisa_async_self_pipe_readable >/dev/null; whence shisa_async_self_pipe_notify >/dev/null; whence shisa_reactive_self_pipe_notify >/dev/null'
+fifo_bytes="$(SHISA_ASYNC_SELF_PIPE=0 zsh -fc 'source init/shisa.zsh; fifo=${TMPDIR:-/tmp}/shisa-zsh-fifo-$$; rm -f -- "$fifo"; mkfifo -m 600 -- "$fifo"; exec {SHISA_ASYNC_FD}<>"$fifo"; shisa_async_self_pipe_notify; read -r -k 1 -u ${SHISA_ASYNC_FD} async_byte; shisa_reactive_self_pipe_notify; read -r -k 1 -u ${SHISA_ASYNC_FD} reactive_byte; exec {SHISA_ASYNC_FD}>&-; SHISA_ASYNC_FD=; rm -f -- "$fifo"; printf "%s%s" "$async_byte" "$reactive_byte"')"
+[[ "$fifo_bytes" == AR ]]
+dispatch_byte="$(SHISA_ASYNC_SELF_PIPE=0 zsh -fc 'source init/shisa.zsh; fifo=${TMPDIR:-/tmp}/shisa-zsh-dispatch-$$; rm -f -- "$fifo"; mkfifo -m 600 -- "$fifo"; exec {SHISA_ASYNC_FD}<>"$fifo"; shisa_async_redraw() { print -rn -- A; }; shisa_reactive_redraw() { print -rn -- R; }; print -rn -- R >&${SHISA_ASYNC_FD}; shisa_async_self_pipe_readable ${SHISA_ASYNC_FD}; exec {SHISA_ASYNC_FD}>&-; SHISA_ASYNC_FD=; rm -f -- "$fifo"')"
+[[ "$dispatch_byte" == R ]]
 XDG_CONFIG_HOME="$xdg" zsh -fc 'source init/shisa.zsh; [[ ${SHISA_CMD_COMPLETE_BELL} == 1 ]]; [[ ${SHISA_CMD_COMPLETE_BELL_MODE} == osc9 ]]; [[ ${SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS} == 2500 ]]; [[ ${SHISA_CMD_COMPLETE_BELL_MESSAGE} == done ]]'
 bell_bytes="$(SHISA_CMD_COMPLETE_BELL=1 SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS=1000 zsh -fc 'source init/shisa.zsh; SHISA_LAST_COMMAND="sleep 1"; shisa_cmd_complete_bell 1200' | od -An -tx1 | tr -d ' \n')"
 [[ "$bell_bytes" == 07 ]]

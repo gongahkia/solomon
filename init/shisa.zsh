@@ -73,6 +73,8 @@ typeset -g SHISA_ASYNC_SIGNAL=${SHISA_ASYNC_SIGNAL:-USR1}
 typeset -g SHISA_ASYNC_SELF_PIPE=${SHISA_ASYNC_SELF_PIPE:-1}
 typeset -g SHISA_ASYNC_PIPE=
 typeset -g SHISA_ASYNC_FD=
+typeset -g SHISA_ASYNC_BYTE=${SHISA_ASYNC_BYTE:-A}
+typeset -g SHISA_REACTIVE_BYTE=${SHISA_REACTIVE_BYTE:-R}
 typeset -g SHISA_TRANSIENT_PROMPT=${SHISA_TRANSIENT_PROMPT:-1}
 typeset -g SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 typeset -g SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
@@ -235,23 +237,45 @@ shisa_async_redraw() {
   zle reset-prompt 2>/dev/null || true
 }
 
+shisa_reactive_redraw() {
+  emulate -L zsh
+  zle reset-prompt 2>/dev/null || true
+  zle -R 2>/dev/null || true
+}
+
 shisa_async_self_pipe_readable() {
   emulate -L zsh
   local fd=${1:-${SHISA_ASYNC_FD:-}}
   [[ -n ${fd} ]] || return 0
-  local byte
+  local byte reactive=0 redraw=0
   while read -r -k 1 -t 0 -u ${fd} byte 2>/dev/null; do
-    :
+    redraw=1
+    [[ ${byte} == ${SHISA_REACTIVE_BYTE:-R} ]] && reactive=1
   done
-  shisa_async_redraw
+  (( redraw )) || return 0
+  if (( reactive )); then
+    shisa_reactive_redraw
+  else
+    shisa_async_redraw
+  fi
 }
 
 shisa_async_self_pipe_notify() {
   emulate -L zsh
   if [[ -n ${SHISA_ASYNC_FD:-} ]]; then
-    print -rn -- . >&${SHISA_ASYNC_FD} 2>/dev/null && return 0
+    local byte=${SHISA_ASYNC_BYTE:-A}
+    print -rn -- "${byte[1]}" >&${SHISA_ASYNC_FD} 2>/dev/null && return 0
   fi
   shisa_async_redraw
+}
+
+shisa_reactive_self_pipe_notify() {
+  emulate -L zsh
+  if [[ -n ${SHISA_ASYNC_FD:-} ]]; then
+    local byte=${SHISA_REACTIVE_BYTE:-R}
+    print -rn -- "${byte[1]}" >&${SHISA_ASYNC_FD} 2>/dev/null && return 0
+  fi
+  shisa_reactive_redraw
 }
 
 shisa_async_self_pipe_cleanup() {

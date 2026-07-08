@@ -28,13 +28,13 @@ pub fn defaultLogPath(allocator: std.mem.Allocator) ![]u8 {
 fn macosSocketPath(allocator: std.mem.Allocator) ![]u8 {
     const home = try std.process.getEnvVarOwned(allocator, "HOME");
     defer allocator.free(home);
-    return std.fmt.allocPrint(allocator, "{s}/Library/Caches/shisa/shisa.sock", .{home});
+    return macosSocketPathFromEnv(allocator, home);
 }
 
 fn macosLogPath(allocator: std.mem.Allocator) ![]u8 {
     const home = try std.process.getEnvVarOwned(allocator, "HOME");
     defer allocator.free(home);
-    return std.fmt.allocPrint(allocator, "{s}/Library/Logs/shisa/shisad.log", .{home});
+    return macosLogPathFromEnv(allocator, home);
 }
 
 fn linuxSocketPath(allocator: std.mem.Allocator) ![]u8 {
@@ -44,10 +44,10 @@ fn linuxSocketPath(allocator: std.mem.Allocator) ![]u8 {
     };
     if (xdg) |runtime_dir| {
         defer allocator.free(runtime_dir);
-        return std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{runtime_dir});
+        return linuxSocketPathFromEnv(allocator, runtime_dir, std.posix.getuid());
     }
 
-    return std.fmt.allocPrint(allocator, "/run/user/{d}/shisa.sock", .{std.posix.getuid()});
+    return linuxSocketPathFromEnv(allocator, null, std.posix.getuid());
 }
 
 fn linuxLogPath(allocator: std.mem.Allocator) ![]u8 {
@@ -57,10 +57,76 @@ fn linuxLogPath(allocator: std.mem.Allocator) ![]u8 {
     };
     if (state_home) |path| {
         defer allocator.free(path);
-        return std.fmt.allocPrint(allocator, "{s}/shisa/shisad.log", .{path});
+        return linuxLogPathFromEnv(allocator, path, null);
     }
 
     const home = try std.process.getEnvVarOwned(allocator, "HOME");
     defer allocator.free(home);
-    return std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/shisad.log", .{home});
+    return linuxLogPathFromEnv(allocator, null, home);
+}
+
+fn macosSocketPathFromEnv(allocator: std.mem.Allocator, home: ?[]const u8) ![]u8 {
+    const base = home orelse return error.EnvironmentVariableNotFound;
+    return std.fmt.allocPrint(allocator, "{s}/Library/Caches/shisa/shisa.sock", .{base});
+}
+
+fn macosLogPathFromEnv(allocator: std.mem.Allocator, home: ?[]const u8) ![]u8 {
+    const base = home orelse return error.EnvironmentVariableNotFound;
+    return std.fmt.allocPrint(allocator, "{s}/Library/Logs/shisa/shisad.log", .{base});
+}
+
+fn linuxSocketPathFromEnv(allocator: std.mem.Allocator, xdg_runtime_dir: ?[]const u8, uid: u32) ![]u8 {
+    if (xdg_runtime_dir) |runtime_dir| return std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{runtime_dir});
+    return std.fmt.allocPrint(allocator, "/run/user/{d}/shisa.sock", .{uid});
+}
+
+fn linuxLogPathFromEnv(allocator: std.mem.Allocator, xdg_state_home: ?[]const u8, home: ?[]const u8) ![]u8 {
+    if (xdg_state_home) |path| return std.fmt.allocPrint(allocator, "{s}/shisa/shisad.log", .{path});
+    const base = home orelse return error.EnvironmentVariableNotFound;
+    return std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/shisad.log", .{base});
+}
+
+test "macos socket path uses home" {
+    const path = try macosSocketPathFromEnv(std.testing.allocator, "/tmp/home");
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/tmp/home/Library/Caches/shisa/shisa.sock", path);
+}
+
+test "macos log path uses home" {
+    const path = try macosLogPathFromEnv(std.testing.allocator, "/tmp/home");
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/tmp/home/Library/Logs/shisa/shisad.log", path);
+}
+
+test "macos paths require home" {
+    try std.testing.expectError(error.EnvironmentVariableNotFound, macosSocketPathFromEnv(std.testing.allocator, null));
+    try std.testing.expectError(error.EnvironmentVariableNotFound, macosLogPathFromEnv(std.testing.allocator, null));
+}
+
+test "linux socket path prefers runtime dir" {
+    const path = try linuxSocketPathFromEnv(std.testing.allocator, "/tmp/runtime", 42);
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/tmp/runtime/shisa.sock", path);
+}
+
+test "linux socket path falls back to uid" {
+    const path = try linuxSocketPathFromEnv(std.testing.allocator, null, 42);
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/run/user/42/shisa.sock", path);
+}
+
+test "linux log path prefers state home" {
+    const path = try linuxLogPathFromEnv(std.testing.allocator, "/tmp/state", "/tmp/home");
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/tmp/state/shisa/shisad.log", path);
+}
+
+test "linux log path falls back to home" {
+    const path = try linuxLogPathFromEnv(std.testing.allocator, null, "/tmp/home");
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/tmp/home/.local/state/shisa/shisad.log", path);
+}
+
+test "linux log path requires home without state home" {
+    try std.testing.expectError(error.EnvironmentVariableNotFound, linuxLogPathFromEnv(std.testing.allocator, null, null));
 }

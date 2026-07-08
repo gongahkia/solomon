@@ -84,6 +84,11 @@ fn nextBackoffMs(current: u64, cap: u64) u64 {
     return @min(current * 2, cap);
 }
 
+fn heartbeatKillDelayMs(heartbeat_ms: u64) u64 {
+    if (heartbeat_ms > std.math.maxInt(u64) / heartbeat_miss_limit) return std.math.maxInt(u64);
+    return heartbeat_ms * heartbeat_miss_limit;
+}
+
 fn spawnDaemon(allocator: std.mem.Allocator, daemon_path: []const u8, socket_path: ?[]const u8) !std.process.Child {
     var child = if (socket_path) |path| child: {
         const argv = [_][]const u8{ daemon_path, "--foreground", "--socket", path };
@@ -382,6 +387,27 @@ test "backoff doubles up to cap" {
     try std.testing.expectEqual(@as(u64, 200), nextBackoffMs(100, 5000));
     try std.testing.expectEqual(@as(u64, 5000), nextBackoffMs(4000, 5000));
     try std.testing.expectEqual(@as(u64, 5000), nextBackoffMs(std.math.maxInt(u64), 5000));
+}
+
+test "consecutive restart backoff increases and caps" {
+    var backoff_ms: u64 = 100;
+    backoff_ms = nextBackoffMs(backoff_ms, 250);
+    try std.testing.expectEqual(@as(u64, 200), backoff_ms);
+    backoff_ms = nextBackoffMs(backoff_ms, 250);
+    try std.testing.expectEqual(@as(u64, 250), backoff_ms);
+    backoff_ms = nextBackoffMs(backoff_ms, 250);
+    try std.testing.expectEqual(@as(u64, 250), backoff_ms);
+}
+
+test "heartbeat miss delay follows heartbeat interval" {
+    try std.testing.expectEqual(@as(u64, 150), heartbeatKillDelayMs(50));
+    try std.testing.expectEqual(@as(u64, 3000), heartbeatKillDelayMs(1000));
+}
+
+test "clean exit treats zero status as graceful" {
+    try std.testing.expect(cleanExit(.{ .Exited = 0 }));
+    try std.testing.expect(!cleanExit(.{ .Exited = 1 }));
+    try std.testing.expect(!cleanExit(.{ .Signal = 15 }));
 }
 
 test "heartbeat response accepts legacy and JSON health" {

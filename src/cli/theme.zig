@@ -1,7 +1,6 @@
 const std = @import("std");
 const dispatcher = @import("../daemon/dispatcher.zig");
-const theme_contrast = @import("../theme/contrast.zig");
-const theme_loader = @import("../theme/loader.zig");
+const theme_loader = @import("theme_loader");
 
 pub const max_config_bytes = 1024 * 1024;
 
@@ -68,10 +67,10 @@ fn validateCommand(allocator: std.mem.Allocator, path: []const u8) !void {
         try std.fs.File.stderr().writeAll(report);
         return error.InvalidTheme;
     }
-    const failures = try theme_contrast.validateThemeContrastAlloc(allocator, source);
+    const failures = try theme_loader.contrast.validateThemeContrastAlloc(allocator, source);
     defer allocator.free(failures);
     if (failures.len > 0) {
-        const report = try theme_contrast.formatContrastFailuresAlloc(allocator, failures);
+        const report = try theme_loader.contrast.formatContrastFailuresAlloc(allocator, failures);
         defer allocator.free(report);
         try std.fs.File.stderr().writeAll(report);
         return error.ThemeContrastFailed;
@@ -179,10 +178,10 @@ fn renderSegmentAlloc(allocator: std.mem.Allocator, theme: theme_loader.Theme, i
     return out.toOwnedSlice(allocator);
 }
 
-fn appendSegmentColorSgr(allocator: std.mem.Allocator, out: *std.ArrayList(u8), theme: theme_loader.Theme, ref: []const u8, role: theme_contrast.ColorRole) !bool {
+fn appendSegmentColorSgr(allocator: std.mem.Allocator, out: *std.ArrayList(u8), theme: theme_loader.Theme, ref: []const u8, role: theme_loader.contrast.ColorRole) !bool {
     if (ref.len == 0) return false;
     const rgb = theme_loader.resolvePaletteColor(theme, ref) orelse return false;
-    const sgr = try theme_contrast.formatSgrColorAlloc(allocator, role, rgb, colorCapsForTheme(theme));
+    const sgr = try theme_loader.contrast.formatSgrColorAlloc(allocator, role, rgb, colorCapsForTheme(theme));
     defer allocator.free(sgr);
     if (sgr.len == 0) return false;
     try out.appendSlice(allocator, sgr);
@@ -224,7 +223,7 @@ pub fn glyphTierForTheme(theme: theme_loader.Theme) theme_loader.GlyphTier {
     };
 }
 
-pub fn colorCapsForTheme(theme: theme_loader.Theme) theme_contrast.ColorCaps {
+pub fn colorCapsForTheme(theme: theme_loader.Theme) theme_loader.contrast.ColorCaps {
     return switch (theme.capabilities.color) {
         .truecolor => .truecolor,
         .ansi256 => .@"256",

@@ -37,6 +37,15 @@ ascii = "git:"
 a11y = "git branch"
 suffix = ""
 
+[segments.language_versions]
+fg = "@accent"
+bg = ""
+style = "dim"
+glyph = ""
+ascii = ""
+a11y = "language versions"
+suffix = ""
+
 [segments.exit_status]
 fg = "@danger"
 bg = ""
@@ -62,4 +71,112 @@ style = "dim"
 glyph = ""
 ascii = "took:"
 a11y = "command duration"
+suffix = ""
+
+[segments.user_host]
+fg = "@muted"
+bg = ""
+style = "dim"
+glyph = ""
+ascii = ""
+a11y = "user and host"
+suffix = ""
+
+[segments.risk_tier]
+fg = "@danger"
+bg = ""
+style = "bold"
+glyph = ""
+ascii = ""
+a11y = "risk tier"
+suffix = ""
+
+[segments.sso_expiry]
+fg = "@warning"
+bg = ""
+style = ""
+glyph = ""
+ascii = ""
+a11y = "SSO expiry"
+suffix = ""
+
+[segments.iac_workspace]
+fg = "@warning"
+bg = ""
+style = ""
+glyph = ""
+ascii = ""
+a11y = "infrastructure workspace"
+suffix = ""
+
+[segments.region_drift]
+fg = "@warning"
+bg = ""
+style = ""
+glyph = ""
+ascii = ""
+a11y = "region drift"
+suffix = ""
+
+[segments.cost_glance]
+fg = "@success"
+bg = ""
+style = ""
+glyph = ""
+ascii = ""
+a11y = "cost glance"
+suffix = ""
+
+[segments.vpn_status]
+fg = "@warning"
+bg = ""
+style = ""
+glyph = ""
+ascii = ""
+a11y = "VPN status"
+suffix = ""
+
+[segments.ssh_target]
+fg = "@warning"
+bg = ""
+style = "bold"
+glyph = ""
+ascii = ""
+a11y = "SSH target"
+suffix = ""
+
+[segments.container_provenance]
+fg = "@muted"
+bg = ""
+style = "dim"
+glyph = ""
+ascii = ""
+a11y = "container provenance"
+suffix = ""
+
+[segments.time]
+fg = "@muted"
+bg = ""
+style = "dim"
+glyph = ""
+ascii = ""
+a11y = "time"
+suffix = ""
+
+[segments.cdhint]
+fg = "@accent"
+bg = ""
+style = ""
+glyph = ""
+ascii = ""
+a11y = "cd hint"
+suffix = ""
+
+[segments.tmux_pane]
+fg = "@muted"
+bg = ""
+style = "dim"
+glyph = ""
+ascii = ""
+a11y = "tmux pane"
 suffix = ""

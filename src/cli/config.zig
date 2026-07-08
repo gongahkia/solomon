@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const cli_theme = @import("theme.zig");
 const cli_util = @import("util.zig");
 const shisa_config = @import("../config.zig");
-const theme_loader = @import("../theme/loader.zig");
+const theme_loader = @import("theme_loader");
 
 /// static help text printed by shisa config set --help.
 pub const help_text =

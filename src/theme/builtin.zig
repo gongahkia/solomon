@@ -19,6 +19,13 @@ const themes = [_]ThemeAsset{
     .{ .name = "a11y", .path = "themes/a11y.toml" },
 };
 
+pub fn pathForId(id: []const u8) ?[]const u8 {
+    for (themes) |theme| {
+        if (std.mem.eql(u8, theme.name, id)) return theme.path;
+    }
+    return null;
+}
+
 test "built-in themes include required schema fields" {
     for (themes) |theme| {
         const source = try std.fs.cwd().readFileAlloc(std.testing.allocator, theme.path, 1024 * 1024);

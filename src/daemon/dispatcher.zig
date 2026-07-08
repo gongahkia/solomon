@@ -14,6 +14,7 @@ const region_drift_module = @import("modules/region_drift.zig");
 const risk_tier_module = @import("modules/risk_tier.zig");
 const ssh_target_module = @import("modules/ssh_target.zig");
 const sso_expiry_module = @import("modules/sso_expiry.zig");
+const theme_loader = @import("theme_loader");
 const time_module = @import("modules/time.zig");
 const tmux_pane_module = @import("modules/tmux_pane.zig");
 const unicode_width = @import("modules/unicode_width.zig");
@@ -79,6 +80,12 @@ pub const TraceEntry = struct {
     duration_ns: u64,
     cache_state: []const u8,
     placeholder: bool = false,
+};
+
+pub const StyleConfig = struct {
+    theme: *const theme_loader.Theme,
+    color_caps: theme_loader.contrast.ColorCaps,
+    glyph_tier: theme_loader.GlyphTier,
 };
 
 pub const LayoutLineInput = struct {
@@ -171,47 +178,64 @@ pub fn renderDefaultTraced(allocator: std.mem.Allocator, caches: CacheSet, input
     return renderPipelineTraced(allocator, caches, input, default_pipeline[0..]);
 }
 
+pub fn renderDefaultStyled(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, style: StyleConfig) !RenderedPrompt {
+    return renderPipelineStyled(allocator, caches, input, default_pipeline[0..], style);
+}
+
 pub fn renderPipeline(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec) !RenderedPrompt {
     return renderPipelineWithTerminator(allocator, caches, input, pipeline, "> ");
 }
 
+pub fn renderPipelineStyled(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec, style: StyleConfig) !RenderedPrompt {
+    return renderPipelineWithOptions(allocator, caches, input, pipeline, "> ", .{ .style = style });
+}
+
 pub fn renderPipelineTraced(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec) !RenderedPrompt {
-    return renderPipelineWithOptions(allocator, caches, input, pipeline, "> ", true);
+    return renderPipelineWithOptions(allocator, caches, input, pipeline, "> ", .{ .trace_enabled = true });
 }
 
 pub fn renderSegments(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec) !RenderedPrompt {
     return renderPipelineWithTerminator(allocator, caches, input, pipeline, "");
 }
 
-fn renderPipelineWithTerminator(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec, terminator: []const u8) !RenderedPrompt {
-    return renderPipelineWithOptions(allocator, caches, input, pipeline, terminator, false);
+pub fn renderSegmentsStyled(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec, style: StyleConfig) !RenderedPrompt {
+    return renderPipelineWithOptions(allocator, caches, input, pipeline, "", .{ .style = style });
 }
 
-fn renderPipelineWithOptions(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec, terminator: []const u8, trace_enabled: bool) !RenderedPrompt {
+fn renderPipelineWithTerminator(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec, terminator: []const u8) !RenderedPrompt {
+    return renderPipelineWithOptions(allocator, caches, input, pipeline, terminator, .{});
+}
+
+const RenderOptions = struct {
+    trace_enabled: bool = false,
+    style: ?StyleConfig = null,
+};
+
+fn renderPipelineWithOptions(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec, terminator: []const u8, options: RenderOptions) !RenderedPrompt {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
     var wrote_segment = false;
     var has_async = false;
     var slow_warning: ?SlowWarning = null;
     var trace_entries: std.ArrayList(TraceEntry) = .empty;
-    defer if (!trace_enabled) trace_entries.deinit(allocator);
-    errdefer if (trace_enabled) trace_entries.deinit(allocator);
+    defer if (!options.trace_enabled) trace_entries.deinit(allocator);
+    errdefer if (options.trace_enabled) trace_entries.deinit(allocator);
     const total_start_ns = std.time.nanoTimestamp();
 
     if (input.rtl and input.rtl_reverse) {
         var index = pipeline.len;
         while (index > 0) {
             index -= 1;
-            try appendPipelineSegment(allocator, caches, input, pipeline[index], &out, &wrote_segment, &has_async, &slow_warning, if (trace_enabled) &trace_entries else null);
+            try appendPipelineSegment(allocator, caches, input, pipeline[index], &out, &wrote_segment, &has_async, &slow_warning, if (options.trace_enabled) &trace_entries else null, options.style);
         }
     } else {
         for (pipeline) |spec| {
-            try appendPipelineSegment(allocator, caches, input, spec, &out, &wrote_segment, &has_async, &slow_warning, if (trace_enabled) &trace_entries else null);
+            try appendPipelineSegment(allocator, caches, input, spec, &out, &wrote_segment, &has_async, &slow_warning, if (options.trace_enabled) &trace_entries else null, options.style);
         }
     }
 
     try out.appendSlice(allocator, terminator);
-    const trace = if (trace_enabled) try trace_entries.toOwnedSlice(allocator) else null;
+    const trace = if (options.trace_enabled) try trace_entries.toOwnedSlice(allocator) else null;
     return .{
         .prompt = try out.toOwnedSlice(allocator),
         .redraw_token = if (has_async) try allocator.dupe(u8, "pending") else null,
@@ -231,6 +255,7 @@ fn appendPipelineSegment(
     has_async: *bool,
     slow_warning: *?SlowWarning,
     trace_entries: ?*std.ArrayList(TraceEntry),
+    style: ?StyleConfig,
 ) !void {
     var async_result: ?AsyncRender = null;
     defer if (async_result) |*value| value.deinit(allocator);
@@ -258,10 +283,79 @@ fn appendPipelineSegment(
     }
     defer if (segment) |value| allocator.free(value);
     if (segment) |value| {
-        if (wrote_segment.*) try out.append(allocator, ' ');
-        try out.appendSlice(allocator, value);
+        if (wrote_segment.*) {
+            if (style) |style_config|
+                try out.appendSlice(allocator, style_config.theme.separators.segment)
+            else
+                try out.append(allocator, ' ');
+        }
+        if (style) |style_config|
+            try appendStyledSegment(allocator, out, style_config, spec.id, value)
+        else
+            try out.appendSlice(allocator, value);
         wrote_segment.* = true;
     }
+}
+
+fn appendStyledSegment(allocator: std.mem.Allocator, out: *std.ArrayList(u8), style: StyleConfig, module_id: ModuleId, value: []const u8) !void {
+    if (std.mem.indexOfScalar(u8, value, 0x1b) != null) {
+        try out.appendSlice(allocator, value);
+        return;
+    }
+    const segment = findThemeSegment(style.theme.*, moduleIdName(module_id)) orelse {
+        try out.appendSlice(allocator, value);
+        return;
+    };
+    var styled = false;
+    styled = try appendSegmentColorSgr(allocator, out, style.theme.*, segment.fg, .foreground, style.color_caps) or styled;
+    styled = try appendSegmentColorSgr(allocator, out, style.theme.*, segment.bg, .background, style.color_caps) or styled;
+    styled = try appendStyleSgr(allocator, out, segment.style) or styled;
+    try out.appendSlice(allocator, style.theme.separators.left);
+    try out.appendSlice(allocator, segment.prefix);
+    const glyph = theme_loader.resolveSegmentGlyph(segment, style.glyph_tier);
+    if (glyph.len > 0 and !std.mem.startsWith(u8, value, glyph)) try out.appendSlice(allocator, glyph);
+    try out.appendSlice(allocator, value);
+    try out.appendSlice(allocator, segment.suffix);
+    try out.appendSlice(allocator, style.theme.separators.right);
+    if (styled) try out.appendSlice(allocator, "\x1b[0m");
+}
+
+fn findThemeSegment(theme: theme_loader.Theme, id: []const u8) ?theme_loader.Segment {
+    for (theme.segments) |segment| {
+        if (std.mem.eql(u8, segment.id, id)) return segment;
+    }
+    return null;
+}
+
+fn appendSegmentColorSgr(allocator: std.mem.Allocator, out: *std.ArrayList(u8), theme: theme_loader.Theme, ref: []const u8, role: theme_loader.contrast.ColorRole, caps: theme_loader.contrast.ColorCaps) !bool {
+    if (ref.len == 0) return false;
+    const rgb = theme_loader.resolvePaletteColor(theme, ref) orelse return false;
+    const sgr = try theme_loader.contrast.formatSgrColorAlloc(allocator, role, rgb, caps);
+    defer allocator.free(sgr);
+    if (sgr.len == 0) return false;
+    try out.appendSlice(allocator, sgr);
+    return true;
+}
+
+fn appendStyleSgr(allocator: std.mem.Allocator, out: *std.ArrayList(u8), style: []const u8) !bool {
+    var wrote = false;
+    var parts = std.mem.tokenizeAny(u8, style, " \t\r\n");
+    while (parts.next()) |part| {
+        if (std.mem.eql(u8, part, "bold")) {
+            try out.appendSlice(allocator, "\x1b[1m");
+            wrote = true;
+        } else if (std.mem.eql(u8, part, "dim")) {
+            try out.appendSlice(allocator, "\x1b[2m");
+            wrote = true;
+        } else if (std.mem.eql(u8, part, "italic")) {
+            try out.appendSlice(allocator, "\x1b[3m");
+            wrote = true;
+        } else if (std.mem.eql(u8, part, "underline")) {
+            try out.appendSlice(allocator, "\x1b[4m");
+            wrote = true;
+        }
+    }
+    return wrote;
 }
 
 fn traceCacheState(spec: ModuleSpec, input: RenderInput, async_result: ?AsyncRender) []const u8 {

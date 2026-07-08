@@ -28,11 +28,13 @@ pub const Config = struct {
 };
 
 pub const ModuleOptions = struct {
+    theme: []const u8 = "plain",
     locale: []const u8 = "auto",
     rtl_reverse: bool = false,
     modules: []const shisa_config.ModuleId,
     right_modules: []const shisa_config.ModuleId,
     owns_modules: bool = false,
+    owns_theme: bool = false,
     owns_locale: bool = false,
     cwd: shisa_config.CwdOptions,
     cloud_ctx: shisa_config.CloudCtxOptions,
@@ -47,6 +49,7 @@ pub const ModuleOptions = struct {
             allocator.free(self.modules);
             allocator.free(self.right_modules);
         }
+        if (self.owns_theme) allocator.free(self.theme);
         if (self.owns_locale) allocator.free(self.locale);
         self.* = undefined;
     }
@@ -89,6 +92,8 @@ pub fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config:
     defer if (tmux_pane) |value| allocator.free(value);
     const escaped_tmux_pane = try daemon_json.escapeAlloc(allocator, tmux_pane orelse "");
     defer allocator.free(escaped_tmux_pane);
+    const escaped_theme = try daemon_json.escapeAlloc(allocator, module_options.theme);
+    defer allocator.free(escaped_theme);
     const request_id = try std.fmt.allocPrint(allocator, "cli-{x}", .{std.crypto.random.int(u64)});
     defer allocator.free(request_id);
     const rtl = promptRtl(config, module_options);
@@ -101,8 +106,8 @@ pub fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config:
 
     const head = try std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\"{s},",
-        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), promptUserId(), request_id, env_json },
+        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"theme\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\"{s},",
+        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), escaped_theme, promptUserId(), request_id, env_json },
     );
     defer allocator.free(head);
     const tail = try std.fmt.allocPrint(
@@ -174,6 +179,7 @@ fn promptGlyphCaps(config: Config) []const u8 {
 
 pub fn defaultPromptModuleOptions() ModuleOptions {
     return .{
+        .theme = "plain",
         .locale = "auto",
         .rtl_reverse = false,
         .modules = default_prompt_modules[0..],
@@ -208,14 +214,18 @@ pub fn promptModuleOptions(allocator: std.mem.Allocator) !ModuleOptions {
     errdefer allocator.free(modules);
     const right_modules = try allocator.dupe(shisa_config.ModuleId, parsed.right_prompt_modules);
     errdefer allocator.free(right_modules);
+    const theme = try allocator.dupe(u8, parsed.theme);
+    errdefer allocator.free(theme);
     const locale = try allocator.dupe(u8, parsed.locale);
     errdefer allocator.free(locale);
     return .{
+        .theme = theme,
         .locale = locale,
         .rtl_reverse = parsed.prompt.rtl_reverse,
         .modules = modules,
         .right_modules = right_modules,
         .owns_modules = true,
+        .owns_theme = true,
         .owns_locale = true,
         .cwd = parsed.modules.cwd,
         .cloud_ctx = parsed.modules.cloud_ctx,

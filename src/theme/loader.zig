@@ -1,5 +1,5 @@
 const std = @import("std");
-const contrast = @import("contrast.zig");
+pub const contrast = @import("contrast.zig");
 
 pub const Rgb = contrast.Rgb;
 

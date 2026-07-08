@@ -10,6 +10,7 @@ const language_versions_module = @import("modules/language_versions.zig");
 const prod_guard_module = @import("modules/prod_guard.zig");
 const risk_tier_module = @import("modules/risk_tier.zig");
 const sso_expiry_module = @import("modules/sso_expiry.zig");
+const theme_loader = @import("theme_loader");
 const tmux_pane_module = @import("modules/tmux_pane.zig");
 const daemon_log = @import("log.zig");
 const warmup = @import("warmup.zig");
@@ -55,6 +56,9 @@ const RenderRequest = struct {
     shell: []const u8 = "zsh",
     cols: u16 = 80,
     rows: u16 = 24,
+    color_caps: RequestColorCaps = .truecolor,
+    glyph_caps: RequestGlyphCaps = .unicode,
+    theme: []const u8 = "plain",
     request_id: []const u8 = "",
     env_hash: ?[]const u8 = null,
     path_env: ?[]const u8 = null,
@@ -70,6 +74,19 @@ const RenderRequest = struct {
     sso_expiry: sso_expiry_module.Options = .{},
     rtl: bool = false,
     rtl_reverse: bool = false,
+};
+
+const RequestColorCaps = enum {
+    truecolor,
+    @"256",
+    @"16",
+    none,
+};
+
+const RequestGlyphCaps = enum {
+    nerdfont,
+    unicode,
+    ascii,
 };
 
 const PreexecRequest = struct {
@@ -376,6 +393,8 @@ const PosixServer = struct {
         };
         const cache_key = try renderPromptCacheKeyAlloc(std.heap.page_allocator, parsed.value, cache_context);
         defer std.heap.page_allocator.free(cache_key);
+        var style_state = PosixServer.loadRenderStyleAlloc(std.heap.page_allocator, parsed.value.theme, parsed.value.color_caps, parsed.value.glyph_caps) catch null;
+        defer if (style_state) |*state| state.deinit(std.heap.page_allocator);
 
         const use_prompt_cache = parsed.value.right_modules.len == 0 and !parsed.value.trace;
         if (use_prompt_cache) {
@@ -436,10 +455,14 @@ const PosixServer = struct {
         var rendered = if (request_pipeline) |pipeline|
             if (parsed.value.trace)
                 try dispatcher.renderPipelineTraced(std.heap.page_allocator, cache_set, render_input, pipeline)
+            else if (style_state) |*state|
+                try dispatcher.renderPipelineStyled(std.heap.page_allocator, cache_set, render_input, pipeline, state.style())
             else
                 try dispatcher.renderPipeline(std.heap.page_allocator, cache_set, render_input, pipeline)
         else if (parsed.value.trace)
             try dispatcher.renderDefaultTraced(std.heap.page_allocator, cache_set, render_input)
+        else if (style_state) |*state|
+            try dispatcher.renderDefaultStyled(std.heap.page_allocator, cache_set, render_input, state.style())
         else
             try dispatcher.renderDefault(std.heap.page_allocator, cache_set, render_input);
         defer rendered.deinit(std.heap.page_allocator);
@@ -447,7 +470,10 @@ const PosixServer = struct {
         const right_pipeline = try renderPipelineFromModuleNamesAlloc(std.heap.page_allocator, parsed.value.right_modules);
         defer if (right_pipeline) |pipeline| std.heap.page_allocator.free(pipeline);
         var rendered_right = if (right_pipeline) |pipeline|
-            try dispatcher.renderSegments(std.heap.page_allocator, cache_set, render_input, pipeline)
+            if (style_state) |*state|
+                try dispatcher.renderSegmentsStyled(std.heap.page_allocator, cache_set, render_input, pipeline, state.style())
+            else
+                try dispatcher.renderSegments(std.heap.page_allocator, cache_set, render_input, pipeline)
         else
             dispatcher.RenderedPrompt{ .prompt = try std.heap.page_allocator.dupe(u8, "") };
         defer rendered_right.deinit(std.heap.page_allocator);
@@ -727,6 +753,21 @@ const PosixServer = struct {
         return plugin_host.loadNamesAlloc(allocator, plugins_dir);
     }
 
+    fn loadRenderStyleAlloc(allocator: std.mem.Allocator, theme_arg: []const u8, color_caps: RequestColorCaps, glyph_caps: RequestGlyphCaps) !RenderStyleState {
+        const theme_path = try themePathAlloc(allocator, theme_arg);
+        defer allocator.free(theme_path);
+        const theme_source = try std.fs.cwd().readFileAlloc(allocator, theme_path, max_config_bytes);
+        defer allocator.free(theme_source);
+        var diagnostic: theme_loader.Diagnostic = .{};
+        var theme = try theme_loader.parse(allocator, theme_source, &diagnostic);
+        errdefer theme.deinit(allocator);
+        return .{
+            .theme = theme,
+            .color_caps = effectiveThemeColorCaps(theme, color_caps),
+            .glyph_tier = effectiveThemeGlyphTier(theme, glyph_caps),
+        };
+    }
+
     pub fn recordFsEvent(self: *Server, path: []const u8, timestamp_ns: u64) void {
         self.fs_watcher.recordEvent(path, timestamp_ns);
     }
@@ -818,6 +859,87 @@ const PosixServer = struct {
         }
     }
 };
+
+const RenderStyleState = struct {
+    theme: theme_loader.Theme,
+    color_caps: theme_loader.contrast.ColorCaps,
+    glyph_tier: theme_loader.GlyphTier,
+
+    fn deinit(self: *RenderStyleState, allocator: std.mem.Allocator) void {
+        self.theme.deinit(allocator);
+        self.* = undefined;
+    }
+
+    fn style(self: *const RenderStyleState) dispatcher.StyleConfig {
+        return .{
+            .theme = &self.theme,
+            .color_caps = self.color_caps,
+            .glyph_tier = self.glyph_tier,
+        };
+    }
+};
+
+fn themePathAlloc(allocator: std.mem.Allocator, theme_arg: []const u8) ![]u8 {
+    if (themePathForBuiltInId(theme_arg)) |path| return allocator.dupe(u8, path);
+    if (std.mem.startsWith(u8, theme_arg, "~/")) {
+        const home = try std.process.getEnvVarOwned(allocator, "HOME");
+        defer allocator.free(home);
+        return std.fmt.allocPrint(allocator, "{s}/{s}", .{ home, theme_arg[2..] });
+    }
+    return allocator.dupe(u8, theme_arg);
+}
+
+fn themePathForBuiltInId(id: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, id, "plain")) return "themes/plain.toml";
+    if (std.mem.eql(u8, id, "minimal-monochrome")) return "themes/minimal-monochrome.toml";
+    if (std.mem.eql(u8, id, "okiya-night")) return "themes/okiya-night.toml";
+    if (std.mem.eql(u8, id, "okiya-day")) return "themes/okiya-day.toml";
+    if (std.mem.eql(u8, id, "nord-dark")) return "themes/nord-dark.toml";
+    if (std.mem.eql(u8, id, "gruvbox-rainbow")) return "themes/gruvbox-rainbow.toml";
+    if (std.mem.eql(u8, id, "tokyo-night")) return "themes/tokyo-night.toml";
+    if (std.mem.eql(u8, id, "pure")) return "themes/pure.toml";
+    if (std.mem.eql(u8, id, "a11y")) return "themes/a11y.toml";
+    return null;
+}
+
+fn effectiveThemeColorCaps(theme: theme_loader.Theme, request_caps: RequestColorCaps) theme_loader.contrast.ColorCaps {
+    const theme_caps = switch (theme.capabilities.color) {
+        .truecolor => theme_loader.contrast.ColorCaps.truecolor,
+        .ansi256 => theme_loader.contrast.ColorCaps.@"256",
+        .ansi => theme_loader.contrast.ColorCaps.@"16",
+        .none => theme_loader.contrast.ColorCaps.none,
+    };
+    const request_theme_caps = switch (request_caps) {
+        .truecolor => theme_loader.contrast.ColorCaps.truecolor,
+        .@"256" => theme_loader.contrast.ColorCaps.@"256",
+        .@"16" => theme_loader.contrast.ColorCaps.@"16",
+        .none => theme_loader.contrast.ColorCaps.none,
+    };
+    return if (colorCapRank(theme_caps) <= colorCapRank(request_theme_caps)) theme_caps else request_theme_caps;
+}
+
+fn colorCapRank(caps: theme_loader.contrast.ColorCaps) u8 {
+    return switch (caps) {
+        .none => 0,
+        .@"16" => 1,
+        .@"256" => 2,
+        .truecolor => 3,
+    };
+}
+
+fn effectiveThemeGlyphTier(theme: theme_loader.Theme, request_caps: RequestGlyphCaps) theme_loader.GlyphTier {
+    return switch (request_caps) {
+        .ascii => .ascii,
+        .unicode => switch (theme.capabilities.glyphs) {
+            .ascii => .ascii,
+            .nerd_font => .unicode,
+        },
+        .nerdfont => switch (theme.capabilities.glyphs) {
+            .ascii => .ascii,
+            .nerd_font => .nerdfont,
+        },
+    };
+}
 
 const WindowsServer = struct {
     socket_path: []const u8,
@@ -1154,6 +1276,9 @@ fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderReques
     try appendKeyString(allocator, &out, "shell", request.shell);
     try appendKeyInt(allocator, &out, "cols", request.cols);
     try appendKeyInt(allocator, &out, "rows", request.rows);
+    try appendKeyString(allocator, &out, "color_caps", @tagName(request.color_caps));
+    try appendKeyString(allocator, &out, "glyph_caps", @tagName(request.glyph_caps));
+    try appendKeyString(allocator, &out, "theme", request.theme);
     try appendKeyOptional(allocator, &out, "tmux_pane", request.tmux_pane);
     try appendKeyInt(allocator, &out, "modules_len", request.modules.len);
     for (request.modules, 0..) |module_name, index| {

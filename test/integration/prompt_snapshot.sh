@@ -41,7 +41,7 @@ done
 }
 
 actual="$(env HOSTNAME=localhost SSH_CONNECTION= XDG_CONFIG_HOME="$xdg" "$root/zig-out/bin/shisa" prompt --socket "$sock" --cwd /tmp/shisa-snapshot --exit 7 --jobs 2 --duration-ms 1500 --shell zsh --cols 80 --rows 24)"
-expected=$'\e]7;file://localhost/tmp/shisa-snapshot\a/tmp/shisa-snapshot \e[31mexit:7\e[0m jobs:2 took:1.5s> '
+expected=$'\e]7;file://localhost/tmp/shisa-snapshot\a\e[97m\e[1m/tmp/shisa-snapshot\e[0m \e[31mexit:7\e[0m \e[93mjobs:2\e[0m \e[90mtook:1.5s\e[0m> '
 
 if [[ "$actual" != "$expected" ]]; then
   printf 'snapshot mismatch\nexpected: %q\nactual:   %q\n' "$expected" "$actual" >&2

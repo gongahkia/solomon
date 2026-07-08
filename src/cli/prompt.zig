@@ -11,7 +11,7 @@ const paths = @import("../daemon/paths.zig");
 const proto = @import("../proto/types.zig");
 const prompt_payload = @import("prompt_payload.zig");
 const shisa_config = @import("../config.zig");
-const theme_loader = @import("../theme/loader.zig");
+const theme_loader = @import("theme_loader");
 
 const max_config_bytes = 1024 * 1024;
 
@@ -406,6 +406,8 @@ fn renderLocalPrompt(allocator: std.mem.Allocator, config: PromptConfig, cwd: []
         .language_versions = &language_cache,
         .cloud_ctx = &cloud_cache,
     };
+    var style_state = loadPromptStyleAlloc(allocator, module_options.theme, config) catch null;
+    defer if (style_state) |*state| state.deinit(allocator);
     const render_input = dispatcher.RenderInput{
         .cwd = cwd,
         .home = home,
@@ -442,6 +444,8 @@ fn renderLocalPrompt(allocator: std.mem.Allocator, config: PromptConfig, cwd: []
     };
     const rendered = if (trace_enabled)
         try dispatcher.renderPipelineTraced(allocator, cache_set, render_input, pipeline)
+    else if (style_state) |*state|
+        try dispatcher.renderPipelineStyled(allocator, cache_set, render_input, pipeline, state.style())
     else
         try dispatcher.renderPipeline(allocator, cache_set, render_input, pipeline);
     const prompt_text = rendered.prompt;
@@ -452,6 +456,53 @@ fn renderLocalPrompt(allocator: std.mem.Allocator, config: PromptConfig, cwd: []
         .prompt = prompt_text,
         .trace = trace,
         .total_ns = total_ns,
+    };
+}
+
+const PromptStyleState = struct {
+    theme: theme_loader.Theme,
+    color_caps: theme_loader.contrast.ColorCaps,
+    glyph_tier: theme_loader.GlyphTier,
+
+    fn deinit(self: *PromptStyleState, allocator: std.mem.Allocator) void {
+        self.theme.deinit(allocator);
+        self.* = undefined;
+    }
+
+    fn style(self: *const PromptStyleState) dispatcher.StyleConfig {
+        return .{
+            .theme = &self.theme,
+            .color_caps = self.color_caps,
+            .glyph_tier = self.glyph_tier,
+        };
+    }
+};
+
+fn loadPromptStyleAlloc(allocator: std.mem.Allocator, theme_arg: []const u8, config: PromptConfig) !PromptStyleState {
+    const theme_path = try cli_theme.pathAlloc(allocator, theme_arg);
+    defer allocator.free(theme_path);
+    const theme_source = try std.fs.cwd().readFileAlloc(allocator, theme_path, max_config_bytes);
+    defer allocator.free(theme_source);
+    var theme_diagnostic: theme_loader.Diagnostic = .{};
+    var theme = try theme_loader.parse(allocator, theme_source, &theme_diagnostic);
+    errdefer theme.deinit(allocator);
+    return .{
+        .theme = theme,
+        .color_caps = effectivePromptColorCaps(theme, config),
+        .glyph_tier = effectivePromptGlyphTier(theme, config),
+    };
+}
+
+fn effectivePromptColorCaps(theme: theme_loader.Theme, config: PromptConfig) theme_loader.contrast.ColorCaps {
+    if (config.a11y) return .none;
+    return cli_theme.colorCapsForTheme(theme);
+}
+
+fn effectivePromptGlyphTier(theme: theme_loader.Theme, config: PromptConfig) theme_loader.GlyphTier {
+    if (config.a11y) return .ascii;
+    return switch (theme.capabilities.glyphs) {
+        .ascii => .ascii,
+        .nerd_font => .unicode,
     };
 }
 

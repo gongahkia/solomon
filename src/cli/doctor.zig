@@ -68,6 +68,19 @@ const DeprecationRule = struct {
 
 const active_deprecation_rules = [_]DeprecationRule{};
 
+const doctor_help_text =
+    \\usage: shisa doctor [--socket PATH] [--fix [--yes]] [--lint] [--json] [--severity-min LEVEL]
+    \\
+    \\options:
+    \\  --socket <path>        check a non-default daemon socket
+    \\  --fix                  apply available fixes interactively
+    \\  --yes, -y              apply fixes without prompting
+    \\  --lint                 read-only diagnostics with stable finding ids
+    \\  --json                 emit lint findings as JSON; implies --lint
+    \\  --severity-min LEVEL   info, warning, or error; default warning
+    \\
+;
+
 pub fn command(allocator: std.mem.Allocator, args: []const []const u8) !void {
     commandInner(allocator, args) catch |err| {
         try doctorStderrFmt(allocator, "shisa doctor: {s}\n", .{@errorName(err)});
@@ -76,6 +89,10 @@ pub fn command(allocator: std.mem.Allocator, args: []const []const u8) !void {
 }
 
 fn commandInner(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len == 1 and (std.mem.eql(u8, args[0], "--help") or std.mem.eql(u8, args[0], "-h"))) {
+        try std.fs.File.stdout().writeAll(doctor_help_text);
+        return;
+    }
     const config = try parseDoctorArgs(args);
     const socket_path = if (config.socket_path) |path| path else try paths.defaultSocketPath(allocator);
     defer if (config.socket_path == null) allocator.free(socket_path);

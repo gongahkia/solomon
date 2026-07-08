@@ -82,4 +82,13 @@ esac
   exit 1
 }
 
+lint_out=$("$root/zig-out/bin/shisa" doctor --socket "$sock" --lint --json --severity-min error)
+case "$lint_out" in
+  *'"status":"ok"'*'"count":0'*) ;;
+  *)
+    printf 'first-run smoke: doctor lint json unexpected:\n%s\n' "$lint_out" >&2
+    exit 1
+    ;;
+esac
+
 printf 'first-run smoke: ok (config=%s prompt_bytes=%d)\n' "$config_path" "${#prompt_out}"

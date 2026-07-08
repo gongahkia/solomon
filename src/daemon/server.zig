@@ -175,15 +175,67 @@ const SubscriptionQueue = struct {
 };
 
 const ReloadState = struct {
+    mutex: std.Thread.Mutex = .{},
     config_generation: u64 = 0,
     plugin_generation: u64 = 0,
     config_source: []u8 = &.{},
     plugin_names: [][]u8 = &.{},
 
+    const Snapshot = struct {
+        config_generation: u64 = 0,
+        plugin_generation: u64 = 0,
+        plugin_count: usize = 0,
+    };
+
     fn deinit(self: *ReloadState, allocator: std.mem.Allocator) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         allocator.free(self.config_source);
         freeStringList(allocator, self.plugin_names);
-        self.* = .{};
+        self.config_source = &.{};
+        self.plugin_names = &.{};
+        self.config_generation = 0;
+        self.plugin_generation = 0;
+    }
+
+    fn snapshot(self: *ReloadState) Snapshot {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return .{
+            .config_generation = self.config_generation,
+            .plugin_generation = self.plugin_generation,
+            .plugin_count = self.plugin_names.len,
+        };
+    }
+
+    fn replace(self: *ReloadState, allocator: std.mem.Allocator, config_source: []u8, plugin_names: [][]u8) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        allocator.free(self.config_source);
+        freeStringList(allocator, self.plugin_names);
+        self.config_source = config_source;
+        self.plugin_names = plugin_names;
+        self.config_generation += 1;
+        self.plugin_generation += 1;
+    }
+
+    fn replacePluginNames(self: *ReloadState, allocator: std.mem.Allocator, plugin_names: [][]u8) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        freeStringList(allocator, self.plugin_names);
+        self.plugin_names = plugin_names;
+    }
+
+    fn copyConfigSourceAlloc(self: *ReloadState, allocator: std.mem.Allocator) ![]u8 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return allocator.dupe(u8, self.config_source);
+    }
+
+    fn copyPluginNamesAlloc(self: *ReloadState, allocator: std.mem.Allocator) ![][]u8 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return dupeStringList(allocator, self.plugin_names);
     }
 };
 
@@ -208,6 +260,7 @@ pub const Server = struct {
     cost_refresh_shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     cost_refresh_thread: ?std.Thread = null,
     cost_refresh_home: ?[]u8 = null,
+    reload_gpa: std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }) = .{},
     reload_state: ReloadState = .{},
     config_path_override: ?[]const u8 = null,
     plugins_dir_override: ?[]const u8 = null,
@@ -249,10 +302,15 @@ pub const Server = struct {
         self.language_versions_cache.deinit(std.heap.page_allocator);
         self.cloud_ctx_cache.deinit(std.heap.page_allocator);
         self.fs_watcher.deinit();
-        self.reload_state.deinit(std.heap.page_allocator);
+        self.reload_state.deinit(self.reloadAllocator());
+        _ = self.reload_gpa.deinit();
         self.listener.deinit();
         std.fs.deleteFileAbsolute(self.socket_path) catch {};
         self.* = undefined;
+    }
+
+    fn reloadAllocator(self: *Server) std.mem.Allocator {
+        return self.reload_gpa.allocator();
     }
 
     pub fn serve(self: *Server, shutdown_requested: *const std.atomic.Value(bool), reload_requested: *std.atomic.Value(bool), stack_dump_requested: *std.atomic.Value(bool)) !void {
@@ -290,7 +348,7 @@ pub const Server = struct {
 
     fn consumeReloadSignal(self: *Server, reload_requested: *std.atomic.Value(bool)) !void {
         if (!reload_requested.swap(false, .seq_cst)) return;
-        self.reloadConfigAndPlugins(std.heap.page_allocator) catch |err| {
+        self.reloadConfigAndPlugins() catch |err| {
             if (self.logger) |logger| {
                 try logger.warn("reload_failed", @errorName(err));
             }
@@ -326,13 +384,15 @@ pub const Server = struct {
 
     fn costRefreshLoop(self: *Server) void {
         var next_refresh_ns: u64 = 0;
+        const refresh_interval_ns = costRefreshIntervalNs();
+        const sleep_ns = @min(refresh_interval_ns, 250 * std.time.ns_per_ms);
         while (!self.cost_refresh_shutdown.load(.seq_cst)) {
             const now_ns = nowNs();
             if (now_ns >= next_refresh_ns) {
                 _ = cost_glance_module.refreshCacheFromEnvironment(std.heap.page_allocator, self.cost_refresh_home, std.time.timestamp()) catch {};
-                next_refresh_ns = now_ns + std.time.ns_per_hour;
+                next_refresh_ns = now_ns + refresh_interval_ns;
             }
-            std.Thread.sleep(250 * std.time.ns_per_ms);
+            std.Thread.sleep(sleep_ns);
         }
     }
 
@@ -449,6 +509,7 @@ pub const Server = struct {
         var host_buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
         const host = std.posix.gethostname(&host_buffer) catch "unknown";
         const timestamp = std.time.timestamp();
+        const reload_snapshot = self.reload_state.snapshot();
         const cache_context = RenderCacheContext{
             .timestamp_minute = if (parsed.value.time and timestamp >= 0) @divTrunc(timestamp, 60) else 0,
             .home = home,
@@ -463,8 +524,8 @@ pub const Server = struct {
             .azure_location = azure_location,
             .arm_location = arm_location,
             .azure_default_location = azure_default_location,
-            .config_generation = self.reload_state.config_generation,
-            .plugin_generation = self.reload_state.plugin_generation,
+            .config_generation = reload_snapshot.config_generation,
+            .plugin_generation = reload_snapshot.plugin_generation,
             .cache_rev = self.cache_rev,
             .snapshot = self.renderCacheSnapshot(),
         };
@@ -736,25 +797,26 @@ pub const Server = struct {
         self.cloud_ctx_cache.mutex.unlock();
         const prompt_cache_entries = self.prompt_cache.count();
         const prompt_cache_hit_rate_ppm = promptCacheHitRatePpm(self.prompt_cache_hits, self.prompt_cache_misses);
+        const reload_snapshot = self.reload_state.snapshot();
 
         if (parsed) |value| {
             if (std.mem.eql(u8, value.value.format, "prometheus")) {
-                return self.metricsPrometheusAlloc(allocator, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid);
+                return self.metricsPrometheusAlloc(allocator, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid, reload_snapshot.plugin_count);
             }
         }
 
         return std.fmt.allocPrint(
             allocator,
             "{{\"v\":1,\"request_id\":\"{s}\",\"connections\":{d},\"cache\":{{\"git_branch\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"language_versions\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"cloud_ctx\":{{\"gcp_valid\":{},\"azure_valid\":{},\"kube_valid\":{}}},\"prompt_l1\":{{\"entries\":{d},\"hits\":{d},\"misses\":{d},\"hit_rate_ppm\":{d}}}}},\"render\":{{\"count\":{d},\"total_us\":{d},\"max_us\":{d},\"histogram\":{{\"le_100us\":{d},\"le_500us\":{d},\"le_1000us\":{d},\"le_5000us\":{d},\"gt_5000us\":{d}}}}},\"plugins\":{d},\"fsnotify\":{{\"backend\":\"{s}\",\"registrations\":{d}}}}}",
-            .{ escaped_request_id, self.connections, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid, prompt_cache_entries, self.prompt_cache_hits, self.prompt_cache_misses, prompt_cache_hit_rate_ppm, self.render_count, self.render_total_us, self.render_max_us, self.render_histogram[0], self.render_histogram[1], self.render_histogram[2], self.render_histogram[3], self.render_histogram[4], self.reload_state.plugin_names.len, @tagName(self.fs_watcher.backend), self.fs_watcher.registrations.items.len },
+            .{ escaped_request_id, self.connections, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid, prompt_cache_entries, self.prompt_cache_hits, self.prompt_cache_misses, prompt_cache_hit_rate_ppm, self.render_count, self.render_total_us, self.render_max_us, self.render_histogram[0], self.render_histogram[1], self.render_histogram[2], self.render_histogram[3], self.render_histogram[4], reload_snapshot.plugin_count, @tagName(self.fs_watcher.backend), self.fs_watcher.registrations.items.len },
         );
     }
 
-    fn metricsPrometheusAlloc(self: *Server, allocator: std.mem.Allocator, git_valid: bool, git_in_flight: bool, git_generation: u64, language_valid: bool, language_in_flight: bool, language_generation: u64, gcp_valid: bool, azure_valid: bool, kube_valid: bool) ![]u8 {
+    fn metricsPrometheusAlloc(self: *Server, allocator: std.mem.Allocator, git_valid: bool, git_in_flight: bool, git_generation: u64, language_valid: bool, language_in_flight: bool, language_generation: u64, gcp_valid: bool, azure_valid: bool, kube_valid: bool, plugin_count: usize) ![]u8 {
         return std.fmt.allocPrint(
             allocator,
             "# HELP shisa_connections Active accepted connections.\n# TYPE shisa_connections gauge\nshisa_connections {d}\n# HELP shisa_render_count Render requests served.\n# TYPE shisa_render_count counter\nshisa_render_count {d}\n# HELP shisa_render_total_us Total render latency in microseconds.\n# TYPE shisa_render_total_us counter\nshisa_render_total_us {d}\n# HELP shisa_render_max_us Max observed render latency in microseconds.\n# TYPE shisa_render_max_us gauge\nshisa_render_max_us {d}\n# HELP shisa_render_latency_bucket Render latency buckets.\n# TYPE shisa_render_latency_bucket counter\nshisa_render_latency_bucket{{le=\"100\"}} {d}\nshisa_render_latency_bucket{{le=\"500\"}} {d}\nshisa_render_latency_bucket{{le=\"1000\"}} {d}\nshisa_render_latency_bucket{{le=\"5000\"}} {d}\nshisa_render_latency_bucket{{le=\"+Inf\"}} {d}\n# HELP shisa_prompt_cache_entries L1 rendered-prompt cache entries.\n# TYPE shisa_prompt_cache_entries gauge\nshisa_prompt_cache_entries {d}\n# HELP shisa_prompt_cache_hits L1 rendered-prompt cache hits.\n# TYPE shisa_prompt_cache_hits counter\nshisa_prompt_cache_hits {d}\n# HELP shisa_prompt_cache_misses L1 rendered-prompt cache misses.\n# TYPE shisa_prompt_cache_misses counter\nshisa_prompt_cache_misses {d}\n# HELP shisa_prompt_cache_hit_rate_ppm L1 rendered-prompt cache hit rate in parts per million.\n# TYPE shisa_prompt_cache_hit_rate_ppm gauge\nshisa_prompt_cache_hit_rate_ppm {d}\n# HELP shisa_plugins Loaded plugins.\n# TYPE shisa_plugins gauge\nshisa_plugins {d}\n# HELP shisa_cache_valid Cache validity by module.\n# TYPE shisa_cache_valid gauge\nshisa_cache_valid{{module=\"git_branch\"}} {d}\nshisa_cache_valid{{module=\"language_versions\"}} {d}\nshisa_cache_valid{{module=\"cloud_ctx_gcp\"}} {d}\nshisa_cache_valid{{module=\"cloud_ctx_azure\"}} {d}\nshisa_cache_valid{{module=\"cloud_ctx_kube\"}} {d}\n# HELP shisa_cache_in_flight Cache worker in-flight by module.\n# TYPE shisa_cache_in_flight gauge\nshisa_cache_in_flight{{module=\"git_branch\"}} {d}\nshisa_cache_in_flight{{module=\"language_versions\"}} {d}\n# HELP shisa_cache_generation Cache generation by module.\n# TYPE shisa_cache_generation counter\nshisa_cache_generation{{module=\"git_branch\"}} {d}\nshisa_cache_generation{{module=\"language_versions\"}} {d}\n",
-            .{ self.connections, self.render_count, self.render_total_us, self.render_max_us, self.render_histogram[0], self.render_histogram[1], self.render_histogram[2], self.render_histogram[3], self.render_histogram[4], self.prompt_cache.count(), self.prompt_cache_hits, self.prompt_cache_misses, promptCacheHitRatePpm(self.prompt_cache_hits, self.prompt_cache_misses), self.reload_state.plugin_names.len, @intFromBool(git_valid), @intFromBool(language_valid), @intFromBool(gcp_valid), @intFromBool(azure_valid), @intFromBool(kube_valid), @intFromBool(git_in_flight), @intFromBool(language_in_flight), git_generation, language_generation },
+            .{ self.connections, self.render_count, self.render_total_us, self.render_max_us, self.render_histogram[0], self.render_histogram[1], self.render_histogram[2], self.render_histogram[3], self.render_histogram[4], self.prompt_cache.count(), self.prompt_cache_hits, self.prompt_cache_misses, promptCacheHitRatePpm(self.prompt_cache_hits, self.prompt_cache_misses), plugin_count, @intFromBool(git_valid), @intFromBool(language_valid), @intFromBool(gcp_valid), @intFromBool(azure_valid), @intFromBool(kube_valid), @intFromBool(git_in_flight), @intFromBool(language_in_flight), git_generation, language_generation },
         );
     }
 
@@ -764,7 +826,7 @@ pub const Server = struct {
         const escaped_request_id = try json.escapeAlloc(allocator, request_id);
         defer allocator.free(escaped_request_id);
 
-        self.reloadConfigAndPlugins(std.heap.page_allocator) catch |err| {
+        self.reloadConfigAndPlugins() catch |err| {
             const escaped_detail = try json.escapeAlloc(allocator, @errorName(err));
             defer allocator.free(escaped_detail);
             return std.fmt.allocPrint(
@@ -773,11 +835,12 @@ pub const Server = struct {
                 .{ escaped_request_id, escaped_detail },
             );
         };
+        const reload_snapshot = self.reload_state.snapshot();
 
         return std.fmt.allocPrint(
             allocator,
             "{{\"v\":1,\"request_id\":\"{s}\",\"reloaded\":true,\"config_generation\":{d},\"plugin_generation\":{d},\"plugins\":{d}}}",
-            .{ escaped_request_id, self.reload_state.config_generation, self.reload_state.plugin_generation, self.reload_state.plugin_names.len },
+            .{ escaped_request_id, reload_snapshot.config_generation, reload_snapshot.plugin_generation, reload_snapshot.plugin_count },
         );
     }
 
@@ -828,18 +891,21 @@ pub const Server = struct {
         }
     }
 
-    fn reloadConfigAndPlugins(self: *Server, allocator: std.mem.Allocator) !void {
+    fn reloadConfigAndPlugins(self: *Server) !void {
+        const allocator = self.reloadAllocator();
         const config_source = try self.loadConfigSourceAlloc(allocator);
         errdefer allocator.free(config_source);
         const plugin_names = try self.loadPluginNamesAlloc(allocator);
         errdefer freeStringList(allocator, plugin_names);
 
-        allocator.free(self.reload_state.config_source);
-        freeStringList(allocator, self.reload_state.plugin_names);
-        self.reload_state.config_source = config_source;
-        self.reload_state.plugin_names = plugin_names;
-        self.reload_state.config_generation += 1;
-        self.reload_state.plugin_generation += 1;
+        self.reload_state.replace(allocator, config_source, plugin_names);
+    }
+
+    fn setReloadPluginNamesForTest(self: *Server, names: []const []const u8) !void {
+        const allocator = self.reloadAllocator();
+        const plugin_names = try dupeStringList(allocator, names);
+        errdefer freeStringList(allocator, plugin_names);
+        self.reload_state.replacePluginNames(allocator, plugin_names);
     }
 
     fn loadConfigSourceAlloc(self: *Server, allocator: std.mem.Allocator) ![]u8 {
@@ -1091,6 +1157,17 @@ fn writeAll(fd: std.posix.fd_t, bytes: []const u8) !void {
 
 fn nowNs() u64 {
     return @intCast(std.time.nanoTimestamp());
+}
+
+fn costRefreshIntervalNs() u64 {
+    const raw = std.process.getEnvVarOwned(std.heap.page_allocator, "SHISA_COST_REFRESH_INTERVAL_MS") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => return std.time.ns_per_hour,
+        else => return std.time.ns_per_hour,
+    };
+    defer std.heap.page_allocator.free(raw);
+    const ms = std.fmt.parseUnsigned(u64, raw, 10) catch return std.time.ns_per_hour;
+    if (ms == 0) return std.time.ns_per_hour;
+    return std.math.mul(u64, ms, std.time.ns_per_ms) catch std.time.ns_per_hour;
 }
 
 fn renderHistogramIndex(elapsed_us: u64) usize {
@@ -1589,6 +1666,20 @@ fn readConfigOrDefaultAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u
 fn freeStringList(allocator: std.mem.Allocator, items: [][]u8) void {
     for (items) |item| allocator.free(item);
     allocator.free(items);
+}
+
+fn dupeStringList(allocator: std.mem.Allocator, items: []const []const u8) ![][]u8 {
+    const out = try allocator.alloc([]u8, items.len);
+    var filled: usize = 0;
+    errdefer {
+        for (out[0..filled]) |item| allocator.free(item);
+        allocator.free(out);
+    }
+    for (items) |item| {
+        out[filled] = try allocator.dupe(u8, item);
+        filled += 1;
+    }
+    return out;
 }
 
 fn deinitStringArrayList(allocator: std.mem.Allocator, items: *std.ArrayList([]u8)) void {
@@ -2287,10 +2378,13 @@ test "reload op rereads config and bumps generations" {
     const first = try server.reloadResponseAlloc(allocator, "{\"v\":1,\"op\":\"reload\",\"request_id\":\"reload-1\"}");
     defer allocator.free(first);
     try std.testing.expect(std.mem.indexOf(u8, first, "\"reloaded\":true") != null);
-    try std.testing.expectEqual(@as(u64, 1), server.reload_state.config_generation);
-    try std.testing.expectEqual(@as(u64, 1), server.reload_state.plugin_generation);
-    try std.testing.expectEqual(@as(usize, 0), server.reload_state.plugin_names.len);
-    try std.testing.expect(std.mem.indexOf(u8, server.reload_state.config_source, "theme = \"plain\"") != null);
+    const first_snapshot = server.reload_state.snapshot();
+    try std.testing.expectEqual(@as(u64, 1), first_snapshot.config_generation);
+    try std.testing.expectEqual(@as(u64, 1), first_snapshot.plugin_generation);
+    try std.testing.expectEqual(@as(usize, 0), first_snapshot.plugin_count);
+    const first_source = try server.reload_state.copyConfigSourceAlloc(allocator);
+    defer allocator.free(first_source);
+    try std.testing.expect(std.mem.indexOf(u8, first_source, "theme = \"plain\"") != null);
 
     try std.fs.cwd().writeFile(.{
         .sub_path = config_path,
@@ -2307,8 +2401,10 @@ test "reload op rereads config and bumps generations" {
     const second = try server.reloadResponseAlloc(allocator, "{\"v\":1,\"op\":\"reload\",\"request_id\":\"reload-2\"}");
     defer allocator.free(second);
     try std.testing.expect(std.mem.indexOf(u8, second, "\"config_generation\":2") != null);
-    try std.testing.expect(std.mem.indexOf(u8, server.reload_state.config_source, "theme = \"minimal\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, server.reload_state.config_source, "modules = [\"cwd\", \"time\"]") != null);
+    const second_source = try server.reload_state.copyConfigSourceAlloc(allocator);
+    defer allocator.free(second_source);
+    try std.testing.expect(std.mem.indexOf(u8, second_source, "theme = \"minimal\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, second_source, "modules = [\"cwd\", \"time\"]") != null);
 }
 
 test "reload signal rereads config and clears flag" {
@@ -2345,8 +2441,11 @@ test "reload signal rereads config and clears flag" {
     var reload_requested = std.atomic.Value(bool).init(true);
     try server.consumeReloadSignal(&reload_requested);
     try std.testing.expect(!reload_requested.load(.seq_cst));
-    try std.testing.expectEqual(@as(u64, 1), server.reload_state.config_generation);
-    try std.testing.expect(std.mem.indexOf(u8, server.reload_state.config_source, "theme = \"signal\"") != null);
+    const reload_snapshot = server.reload_state.snapshot();
+    try std.testing.expectEqual(@as(u64, 1), reload_snapshot.config_generation);
+    const config_source = try server.reload_state.copyConfigSourceAlloc(allocator);
+    defer allocator.free(config_source);
+    try std.testing.expect(std.mem.indexOf(u8, config_source, "theme = \"signal\"") != null);
 }
 
 test "stack dump signal logs frames and clears flag" {
@@ -2432,8 +2531,10 @@ test "reload op rereads plugin manifests" {
     const response = try server.reloadResponseAlloc(allocator, "{\"v\":1,\"op\":\"reload\",\"request_id\":\"reload-plugin\"}");
     defer allocator.free(response);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"plugins\":1") != null);
-    try std.testing.expectEqual(@as(usize, 1), server.reload_state.plugin_names.len);
-    try std.testing.expectEqualStrings("demo-plugin", server.reload_state.plugin_names[0]);
+    const plugin_names = try server.reload_state.copyPluginNamesAlloc(allocator);
+    defer freeStringList(allocator, plugin_names);
+    try std.testing.expectEqual(@as(usize, 1), plugin_names.len);
+    try std.testing.expectEqualStrings("demo-plugin", plugin_names[0]);
 }
 
 test "slow plugin strikes disable after third strike" {
@@ -2755,8 +2856,7 @@ test "metrics op returns JSON metrics dump" {
     server.prompt_cache_hits = 3;
     server.prompt_cache_misses = 1;
     try server.prompt_cache.put(prompt_cache_module, "metrics-key", "cached> ", 0);
-    server.reload_state.plugin_names = try std.heap.page_allocator.alloc([]u8, 1);
-    server.reload_state.plugin_names[0] = try std.heap.page_allocator.dupe(u8, "demo-plugin");
+    try server.setReloadPluginNamesForTest(&.{"demo-plugin"});
 
     const response = try server.metricsResponseAlloc(allocator, "{\"v\":1,\"op\":\"metrics\",\"request_id\":\"metrics-1\"}");
     defer allocator.free(response);

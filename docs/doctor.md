@@ -1,152 +1,140 @@
 # Doctor
 
-`shisa doctor` prints local diagnostics and hints for expected first-run states:
+`shisa doctor` is the first command to run when onboarding, debugging a prompt, or collecting support data. It is local-only by default.
 
-- daemon socket path and health
-- default, environment, and owner socket details
-- config directory status
-- config directory permissions
-- detected shell and terminal
-- shell hook install status
-- `SHISA_BIN` executable status
-- transient prompt status
-- Nerd Font detection status
-- plugin directory status
-- Lua runtime availability
-- fsnotify backend
-- active deprecations found in config
-- Linux `fs.inotify.max_user_watches` when running on Linux
-- active async placeholder and VPN segment hints
+```sh
+shisa doctor
+shisa doctor --json --severity-min error
+shisa doctor --list-checks
+```
 
-Use a non-default socket:
+## Modes
+
+| Command | Use |
+| --- | --- |
+| `shisa doctor` | Human diagnostics, expected-state hints, and fixable issues. |
+| `shisa doctor --lint` | Stable text findings for scripts. |
+| `shisa doctor --json` | Machine-readable findings; implies `--lint`. |
+| `shisa doctor --list-checks` | List check ids, categories, local/online mode, and docs links. |
+| `shisa doctor --only id[,id]` | Run only selected checks. |
+| `shisa doctor --skip id[,id]` | Skip selected checks. |
+| `shisa doctor --online` | Add explicit network/release checks. |
+| `shisa doctor --report path.json` | Write a redacted JSON report with doctor output, check registry, config, log tail, and daemon metrics. |
+| `shisa doctor --fix [--yes]` | Apply only guarded local fixes. |
+
+Use `--socket <path>` for isolated daemons:
 
 ```sh
 shisa doctor --socket /tmp/shisa.sock
 ```
 
-Run read-only lint:
-
-```sh
-shisa doctor --lint
-shisa doctor --lint --severity-min info
-```
-
-Emit machine-readable lint:
-
-```sh
-shisa doctor --lint --json
-```
-
-Apply available fixes interactively:
-
-```sh
-shisa doctor --fix
-```
-
-Apply all fixes without prompting:
-
-```sh
-shisa doctor --fix --yes
-```
-
-Fixable issues are annotated with `[fix available]`. Current fixes:
-
-| Issue | Fix |
-| --- | --- |
-| Missing shell hook | Runs `shisa init --write-hook`, which appends an idempotent `# >>> shisa >>>` block to the current shell startup file. |
-| Stale socket file | Removes the socket only after `lsof`/`fuser` reports no owner. |
-| Daemon not running | Runs `shisad --daemonize`. |
-| Config dir permissions | Runs `chmod 0700 <config_dir>`. |
-| Nerd Font missing | Prints an install command only; it does not install packages. On macOS the command is `brew install --cask font-hack-nerd-font`. |
-
-## Lint
-
-`shisa doctor --lint` does not prompt, start daemons, remove sockets, or write files. It reports findings at `warning` and `error` severity by default.
-
-Exit codes:
+## Exit Codes
 
 | Code | Meaning |
 | --- | --- |
-| `0` | No findings at the selected severity. |
-| `1` | Findings were reported. |
-| `2` | Reserved for doctor runtime failures. |
+| `0` | No findings at the selected severity, or non-lint human mode completed. |
+| `1` | Findings were reported in lint/JSON mode. |
+| `2` | Doctor itself failed. |
 
-Severity filter:
-
-```sh
-shisa doctor --lint --severity-min info
-shisa doctor --lint --severity-min warning
-shisa doctor --lint --severity-min error
-```
-
-JSON shape:
+## JSON Shape
 
 ```json
 {
+  "version": 1,
   "status": "findings",
   "severity_min": "warning",
+  "online": false,
+  "checks_run": 34,
+  "summary": { "info": 2, "warning": 1, "error": 1 },
   "findings": [
     {
       "id": "daemon/not-running",
       "severity": "error",
+      "category": "daemon",
       "message": "daemon is not reachable",
+      "detail": null,
+      "evidence": "socket-missing",
       "path": "/tmp/shisa.sock",
-      "fix_hint": "start `shisad --foreground &` or run `shisa doctor --fix`"
+      "paths": ["/tmp/shisa.sock"],
+      "command": "shisad --foreground &",
+      "commands": ["shisad --foreground &"],
+      "fix_hint": "start `shisad --foreground &` or run `shisa doctor --fix`",
+      "fixable": true,
+      "docs_url": "docs/troubleshooting.md#daemon-and-socket"
     }
   ],
   "count": 1
 }
 ```
 
-Finding ids:
+## Fixes
 
-| Id | Severity | Meaning |
-| --- | --- | --- |
-| `config/unreadable` | error | Config could not be read. |
-| `config/invalid` | error | Config failed schema validation. |
-| `config/dir-permissions` | warning | Config directory permissions are too broad. |
-| `daemon/not-running` | error | Target daemon socket is not reachable. |
-| `daemon/stale-socket` | warning | Socket path exists but does not answer health checks. |
-| `daemon/already-running` | info | Daemon is already healthy; a second default daemon will print `AlreadyRunning`. |
-| `daemon/socket-mismatch` | warning | `SHISA_SOCKET` differs from the socket being checked. |
-| `daemon/non-default-socket` | info | Doctor is checking an isolated/non-default socket. |
-| `shell/hook-missing` | warning | Shell hook is not installed or active. |
-| `shell/bin-missing` | error | `SHISA_BIN` is not executable. |
-| `terminal/nerd-font` | warning | Nerd Font support was explicitly reported missing. |
-| `terminal/unknown` | info | Terminal could not be identified. |
-| `prompt/async-pending` | info | Prompt contains a normal first-render async placeholder. |
-| `modules/vpn-active` | info | `vpn_status` is enabled and a VPN segment is active. |
+`--fix` can:
 
-Statuses:
-
-| Status | Meaning |
+| Finding | Action |
 | --- | --- |
-| `present` | Path exists. |
-| `missing` | Path does not exist. |
-| `denied` | Path exists but is not accessible. |
-| `unreachable` | Socket exists or was requested, but daemon health check failed. |
-| `bad-response` | Daemon responded with unexpected health output. |
-| `ok` | Daemon health check returned `ok`. |
+| `shell/hook-missing` | Runs `shisa init --write-hook`. |
+| `daemon/stale-socket` | Removes the socket only after owner checks report no owner. |
+| `daemon/not-running` | Runs `shisad --daemonize --socket <path>`. |
+| `config/dir-permissions` | Runs `chmod 0700 <config_dir>`. |
+| `terminal/nerd-font` | Prints an install command only. |
 
-`transient: on` means `transient_prompt` is configured and the shell hook is installed. `transient: config-only` means the config key exists but the current shell hook is missing.
+## Check Map
 
-Deprecation output is either `deprecations: none` or one line per deprecated interface in use.
+| Id | Category | Signal |
+| --- | --- | --- |
+| `install/zig-version` | install | `zig version` differs from `build.zig.zon` or Zig is missing. |
+| `install/binary-set` | install | `shisad` or `shisa-supervisor` is missing beside `shisa`. |
+| `install/path-shadowing` | install | `which -a shisa` does not include the running binary. |
+| `config/unreadable` | config | Config cannot be read. |
+| `config/invalid` | config | Config parser rejects `shisa.toml`. |
+| `config/dir-permissions` | config | Config directory mode is broader than `0700`. |
+| `config/deprecations` | config | Config contains known deprecated keys. |
+| `daemon/not-running` | daemon | Socket health check fails. |
+| `daemon/stale-socket` | daemon | Socket exists but daemon does not respond. |
+| `daemon/already-running` | daemon | Healthy daemon exists; starting another default daemon prints `AlreadyRunning`. |
+| `daemon/socket-mismatch` | daemon | `SHISA_SOCKET` differs from the checked socket. |
+| `daemon/non-default-socket` | daemon | Doctor is checking an isolated socket. |
+| `daemon/protocol` | daemon | Version/protocol request fails or is malformed. |
+| `daemon/metrics` | daemon | Metrics request fails or lacks render metrics. |
+| `daemon/log-warnings` | daemon | Recent daemon log tail has warning entries. |
+| `shell/hook-missing` | shell | Hook marker is absent from the detected shell startup file. |
+| `shell/hook-duplicates` | shell | Startup file has multiple hook blocks. |
+| `shell/bin-missing` | shell | `SHISA_BIN` is not executable. |
+| `terminal/nerd-font` | terminal | Font override says Nerd Font support is missing. |
+| `terminal/unknown` | terminal | Terminal detection cannot identify capabilities. |
+| `prompt/async-pending` | prompt | Sample prompt contains `[pending:<module>]`. |
+| `prompt/render-sample` | prompt | Sample daemon render succeeded. |
+| `modules/vpn-active` | modules | `vpn_status` is enabled and active. |
+| `modules/git` | modules | Git module is enabled in a Git repo but `git` is missing. |
+| `modules/language-tools` | modules | Project markers exist but language tool binaries are missing. |
+| `modules/cloud-cache` | modules | `cloud_ctx` is enabled with all providers disabled. |
+| `plugins/runtime` | plugins | Lua runtime is unavailable. |
+| `plugins/manifests` | plugins | Plugin directory names are invalid and ignored. |
+| `platform/runtime-dir` | platform | Runtime/config directory signal is unusual for the OS. |
+| `platform/fsnotify` | platform | Watcher backend is unsupported or Linux watch limit is low. |
+| `performance/prompt-budget` | performance | Sample daemon render fails or exceeds 10 ms. |
+| `security/permissions` | security | Config file or directory permissions are broader than expected. |
+| `tests/optional-prereqs` | tests | Optional Pure/Nix integration prereqs are absent. |
+| `release/packaging` | release | Release binaries are missing. |
+| `release/online` | release | Explicit `--online` tag lookup fails or succeeds. |
+
+## Reports
+
+```sh
+shisa doctor --report /tmp/shisa-doctor.json --json --severity-min info
+```
+
+The report is JSON, not an archive. It embeds redacted config and log tail using the same redaction rules as `shisa report`.
 
 ## Adding Failure Modes
 
-Any new user-visible failure mode must update `shisa doctor` in the same change unless the failure is impossible to detect locally.
+Any new user-visible failure mode should update `shisa doctor` in the same change unless it cannot be detected locally.
 
 Required review notes:
 
-- failure symptom
-- local signal `doctor` checks
-- output status or warning text
+- symptom
+- local signal
+- finding id/category/severity
+- fixability and safety gate
 - test or reason detection cannot be tested
-
-Examples that should update `doctor`:
-
-- new socket path or daemon health failure
-- new config file location or permission rule
-- new plugin runtime dependency
-- new filesystem watcher backend or limit
-- deprecated interface that can be detected from config

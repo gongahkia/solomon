@@ -65,9 +65,10 @@ msgid ""
 "shisa bench: hyperfine not found in PATH\n"
 msgstr ""
 
-#: src/cli/doctor.zig:72
+#: src/cli/doctor.zig:134
 msgid ""
 "usage: shisa doctor [--socket PATH] [--fix [--yes]] [--lint] [--json] [--severity-min LEVEL]\n"
+"                    [--list-checks] [--only IDS] [--skip IDS] [--online] [--report PATH]\n"
 "\n"
 "options:\n"
 "  --socket <path>        check a non-default daemon socket\n"
@@ -76,10 +77,15 @@ msgid ""
 "  --lint                 read-only diagnostics with stable finding ids\n"
 "  --json                 emit lint findings as JSON; implies --lint\n"
 "  --severity-min LEVEL   info, warning, or error; default warning\n"
+"  --list-checks          list doctor checks and exit\n"
+"  --only IDS             comma-separated finding/check ids to run\n"
+"  --skip IDS             comma-separated finding/check ids to skip\n"
+"  --online               include explicit network/release checks\n"
+"  --report PATH          write a redacted doctor report JSON\n"
 "\n"
 msgstr ""
 
-#: src/cli/doctor.zig:655
+#: src/cli/doctor.zig:1310
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -88,7 +94,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/cli/doctor.zig:826
+#: src/cli/doctor.zig:1481
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""

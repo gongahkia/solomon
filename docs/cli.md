@@ -57,6 +57,7 @@ commands:
 
 ```text
 usage: shisa doctor [--socket PATH] [--fix [--yes]] [--lint] [--json] [--severity-min LEVEL]
+                    [--list-checks] [--only IDS] [--skip IDS] [--online] [--report PATH]
 
 options:
   --socket <path>        check a non-default daemon socket
@@ -65,6 +66,11 @@ options:
   --lint                 read-only diagnostics with stable finding ids
   --json                 emit lint findings as JSON; implies --lint
   --severity-min LEVEL   info, warning, or error; default warning
+  --list-checks          list doctor checks and exit
+  --only IDS             comma-separated finding/check ids to run
+  --skip IDS             comma-separated finding/check ids to skip
+  --online               include explicit network/release checks
+  --report PATH          write a redacted doctor report JSON
 ```
 
 ### `shisa font`

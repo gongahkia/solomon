@@ -362,19 +362,19 @@ fn doctorOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8, conf
     return out.toOwnedSlice(allocator);
 }
 
-fn doctorLintOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8, json: bool, severity_min: Severity) !DoctorLintResult {
-    var findings = try doctorFindingsAlloc(allocator, socket_path);
+fn doctorLintOutputAlloc(allocator: std.mem.Allocator, socket_path: []const u8, config: DoctorConfig) !DoctorLintResult {
+    var findings = try doctorFindingsAlloc(allocator, socket_path, config);
     defer findings.deinit(allocator);
     defer deinitDoctorFindings(allocator, findings.items);
-    if (json) {
-        const output = try doctorFindingsJsonAlloc(allocator, findings.items, severity_min);
-        return .{ .output = output, .finding_count = countFindingsAtLeast(findings.items, severity_min) };
+    if (config.json) {
+        const output = try doctorFindingsJsonAlloc(allocator, findings.items, config);
+        return .{ .output = output, .finding_count = countFindingsAtLeast(findings.items, config.severity_min) };
     }
-    const output = try doctorFindingsTextAlloc(allocator, findings.items, severity_min);
-    return .{ .output = output, .finding_count = countFindingsAtLeast(findings.items, severity_min) };
+    const output = try doctorFindingsTextAlloc(allocator, findings.items, config);
+    return .{ .output = output, .finding_count = countFindingsAtLeast(findings.items, config.severity_min) };
 }
 
-fn doctorFindingsAlloc(allocator: std.mem.Allocator, socket_path: []const u8) !std.ArrayList(DoctorFinding) {
+fn doctorFindingsAlloc(allocator: std.mem.Allocator, socket_path: []const u8, config: DoctorConfig) !std.ArrayList(DoctorFinding) {
     var findings: std.ArrayList(DoctorFinding) = .empty;
     errdefer findings.deinit(allocator);
     errdefer deinitDoctorFindings(allocator, findings.items);
@@ -403,85 +403,123 @@ fn doctorFindingsAlloc(allocator: std.mem.Allocator, socket_path: []const u8) !s
     const env_socket = std.process.getEnvVarOwned(allocator, "SHISA_SOCKET") catch null;
     defer if (env_socket) |path| allocator.free(path);
 
-    try appendConfigFindings(allocator, &findings, config_path);
+    try appendInstallFindings(allocator, &findings, config);
+    try appendConfigFindings(allocator, &findings, config_path, config);
+    try appendConfigDeprecationFindings(allocator, &findings, config_path, config);
     if (std.mem.eql(u8, socket_status, "present") and !std.mem.eql(u8, daemon_status, "ok")) {
-        try appendFinding(allocator, &findings, .{ .id = "daemon/stale-socket", .severity = .warning, .message = "socket exists but daemon is not reachable", .path = socket_path, .fix_hint = "run `shisa doctor --fix` or remove the stale socket after confirming no owner" });
+        try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "daemon/stale-socket", .severity = .warning, .category = "daemon", .message = "socket exists but daemon is not reachable", .detail = "A leftover socket file can survive a crash or manual daemon kill.", .evidence = daemon_status, .path = socket_path, .fix_hint = "run `shisa doctor --fix` or remove the stale socket after confirming no owner", .fixable = true, .docs_url = "docs/troubleshooting.md#daemon-and-socket" });
     }
     if (!std.mem.eql(u8, daemon_status, "ok")) {
-        try appendFinding(allocator, &findings, .{ .id = "daemon/not-running", .severity = .@"error", .message = "daemon is not reachable", .path = socket_path, .fix_hint = "start `shisad --foreground &` or run `shisa doctor --fix`" });
+        try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "daemon/not-running", .severity = .@"error", .category = "daemon", .message = "daemon is not reachable", .evidence = daemon_status, .path = socket_path, .command = "shisad --foreground &", .fix_hint = "start `shisad --foreground &` or run `shisa doctor --fix`", .fixable = true, .docs_url = "docs/troubleshooting.md#daemon-and-socket" });
     } else {
-        try appendFinding(allocator, &findings, .{ .id = "daemon/already-running", .severity = .info, .message = "daemon is already running; starting another daemon for this socket prints AlreadyRunning", .path = socket_path, .fix_hint = "reuse the running daemon or choose a different `--socket`" });
+        try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "daemon/already-running", .severity = .info, .category = "daemon", .message = "daemon is already running; starting another daemon for this socket prints AlreadyRunning", .evidence = daemon_status, .path = socket_path, .fix_hint = "reuse the running daemon or choose a different `--socket`", .docs_url = "docs/troubleshooting.md#expected-states" });
+        try appendDaemonOnlineFindings(allocator, &findings, socket_path, config);
     }
     if (env_socket) |path| {
         if (!std.mem.eql(u8, path, socket_path)) {
-            try appendFinding(allocator, &findings, .{ .id = "daemon/socket-mismatch", .severity = .warning, .message = "SHISA_SOCKET differs from the socket being checked", .path = path, .fix_hint = "unset SHISA_SOCKET or pass the same --socket to shisa and shisad" });
+            try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "daemon/socket-mismatch", .severity = .warning, .category = "daemon", .message = "SHISA_SOCKET differs from the socket being checked", .detail = "The shell hook and manual commands can talk to different daemons if socket paths differ.", .evidence = socket_path, .path = path, .fix_hint = "unset SHISA_SOCKET or pass the same --socket to shisa and shisad", .docs_url = "docs/troubleshooting.md#daemon-and-socket" });
         }
     }
     if (default_socket) |path| {
         if (!std.mem.eql(u8, path, socket_path)) {
-            try appendFinding(allocator, &findings, .{ .id = "daemon/non-default-socket", .severity = .info, .message = "doctor is checking a non-default daemon socket", .path = socket_path, .fix_hint = "this is expected for isolated tests" });
+            try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "daemon/non-default-socket", .severity = .info, .category = "daemon", .message = "doctor is checking a non-default daemon socket", .evidence = path, .path = socket_path, .fix_hint = "this is expected for isolated tests", .docs_url = "docs/troubleshooting.md#daemon-and-socket" });
         }
     }
+    try appendShellHookFindings(allocator, &findings, config);
     if (std.mem.eql(u8, shell_hook_status, "missing")) {
-        try appendFinding(allocator, &findings, .{ .id = "shell/hook-missing", .severity = .warning, .message = "shell hook is not installed or not active", .fix_hint = "run `shisa init --defaults --write-hook` then restart the shell" });
+        try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "shell/hook-missing", .severity = .warning, .category = "shell", .message = "shell hook is not installed or not active", .command = "shisa init --defaults --write-hook", .fix_hint = "run `shisa init --defaults --write-hook` then restart the shell", .fixable = true, .docs_url = "docs/troubleshooting.md#shell-hook" });
     }
     if (!std.mem.eql(u8, shisa_bin_status, "ok")) {
-        try appendFinding(allocator, &findings, .{ .id = "shell/bin-missing", .severity = .@"error", .message = "SHISA_BIN is not executable", .path = shisa_bin, .fix_hint = "set SHISA_BIN to zig-out/bin/shisa or install shisa on PATH" });
+        try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "shell/bin-missing", .severity = .@"error", .category = "shell", .message = "SHISA_BIN is not executable", .evidence = shisa_bin_status, .path = shisa_bin, .fix_hint = "set SHISA_BIN to zig-out/bin/shisa or install shisa on PATH", .docs_url = "docs/troubleshooting.md#shell-hook" });
     }
     if (std.mem.startsWith(u8, config_dir_permissions, "wrong")) {
-        try appendFinding(allocator, &findings, .{ .id = "config/dir-permissions", .severity = .warning, .message = "config directory permissions are too broad", .path = config_dir, .fix_hint = "run `shisa doctor --fix`" });
+        try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "config/dir-permissions", .severity = .warning, .category = "config", .message = "config directory permissions are too broad", .evidence = config_dir_permissions, .path = config_dir, .command = "chmod 0700 ~/.config/shisa", .fix_hint = "run `shisa doctor --fix`", .fixable = true, .docs_url = "docs/doctor.md#config" });
     }
     if (std.mem.eql(u8, nerd_font_status, "missing")) {
-        try appendFinding(allocator, &findings, .{ .id = "terminal/nerd-font", .severity = .warning, .message = "Nerd Font is not detected", .fix_hint = "run `shisa font check` and install a Nerd Font if glyphs are broken" });
+        try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "terminal/nerd-font", .severity = .warning, .category = "terminal", .message = "Nerd Font is not detected", .command = "shisa font check", .fix_hint = "run `shisa font check` and install a Nerd Font if glyphs are broken", .fixable = true, .docs_url = "docs/troubleshooting.md#prompt-output" });
     }
     if (std.mem.eql(u8, terminal, "unknown") or std.mem.eql(u8, terminal, "dumb")) {
-        try appendFinding(allocator, &findings, .{ .id = "terminal/unknown", .severity = .info, .message = "terminal could not be identified", .fix_hint = "set TERM_PROGRAM or use SHISA_GLYPH_CAPS/SHISA_NERD_FONT overrides" });
+        try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "terminal/unknown", .severity = .info, .category = "terminal", .message = "terminal could not be identified", .evidence = terminal, .fix_hint = "set TERM_PROGRAM or use SHISA_GLYPH_CAPS/SHISA_NERD_FONT overrides", .docs_url = "docs/troubleshooting.md#prompt-output" });
     }
     if (try samplePromptAlloc(allocator, socket_path, shell_name, daemon_status)) |prompt| {
         defer allocator.free(prompt);
         if (std.mem.indexOf(u8, prompt, "[pending:") != null) {
-            try appendFinding(allocator, &findings, .{ .id = "prompt/async-pending", .severity = .info, .message = "prompt contains an async placeholder", .fix_hint = "rerender after the daemon fills the cache; this is normal on first render" });
+            try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "prompt/async-pending", .severity = .info, .category = "prompt", .message = "prompt contains an async placeholder", .detail = "Async modules render a placeholder on the first prompt while the daemon fills cache.", .evidence = prompt, .fix_hint = "rerender after the daemon fills the cache; this is normal on first render", .docs_url = "docs/troubleshooting.md#expected-states" });
         }
+        try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "prompt/render-sample", .severity = .info, .category = "prompt", .message = "sample prompt rendered through the daemon", .evidence = prompt, .docs_url = "docs/doctor.md#prompt" });
     }
     if (try activeConfiguredVpnSegmentAlloc(allocator, config_path)) |segment| {
         defer allocator.free(segment);
-        try appendFinding(allocator, &findings, .{ .id = "modules/vpn-active", .severity = .info, .message = "vpn_status is enabled and an active VPN was detected", .path = segment, .fix_hint = "remove \"vpn_status\" from [prompt].modules to hide this segment" });
+        try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "modules/vpn-active", .severity = .info, .category = "modules", .message = "vpn_status is enabled and an active VPN was detected", .evidence = segment, .fix_hint = "remove \"vpn_status\" from [prompt].modules to hide this segment", .docs_url = "docs/troubleshooting.md#expected-states" });
     }
+    try appendModuleFindings(allocator, &findings, config, config_path);
+    try appendPluginFindings(allocator, &findings, config);
+    try appendPlatformFindings(allocator, &findings, config, config_dir);
+    try appendPerformanceFindings(allocator, &findings, config, socket_path, shell_name, daemon_status);
+    try appendSecurityFindings(allocator, &findings, config, config_path, config_dir);
+    try appendTestFindings(allocator, &findings, config);
+    try appendReleaseFindings(allocator, &findings, config);
     return findings;
 }
 
 fn deinitDoctorFindings(allocator: std.mem.Allocator, findings: []DoctorFinding) void {
     for (findings) |finding| {
         allocator.free(finding.id);
+        allocator.free(finding.category);
         allocator.free(finding.message);
+        if (finding.detail) |detail| allocator.free(detail);
+        if (finding.evidence) |evidence| allocator.free(evidence);
         if (finding.path) |path| allocator.free(path);
+        if (finding.command) |cmd| allocator.free(cmd);
         if (finding.fix_hint) |hint| allocator.free(hint);
+        if (finding.docs_url) |docs_url| allocator.free(docs_url);
     }
+}
+
+fn appendFindingIfAllowed(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config: DoctorConfig, finding: DoctorFinding) !void {
+    if (!checkAllowed(config, finding.id)) return;
+    try appendFinding(allocator, findings, finding);
 }
 
 fn appendFinding(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), finding: DoctorFinding) !void {
     const id = try allocator.dupe(u8, finding.id);
     errdefer allocator.free(id);
+    const category = try allocator.dupe(u8, finding.category);
+    errdefer allocator.free(category);
     const message = try allocator.dupe(u8, finding.message);
     errdefer allocator.free(message);
+    const detail = if (finding.detail) |value| try allocator.dupe(u8, value) else null;
+    errdefer if (detail) |value| allocator.free(value);
+    const evidence = if (finding.evidence) |value| try allocator.dupe(u8, value) else null;
+    errdefer if (evidence) |value| allocator.free(value);
     const path = if (finding.path) |value| try allocator.dupe(u8, value) else null;
     errdefer if (path) |value| allocator.free(value);
+    const cmd = if (finding.command) |value| try allocator.dupe(u8, value) else null;
+    errdefer if (cmd) |value| allocator.free(value);
     const fix_hint = if (finding.fix_hint) |value| try allocator.dupe(u8, value) else null;
     errdefer if (fix_hint) |value| allocator.free(value);
+    const docs_url = if (finding.docs_url) |value| try allocator.dupe(u8, value) else null;
+    errdefer if (docs_url) |value| allocator.free(value);
     try findings.append(allocator, .{
         .id = id,
         .severity = finding.severity,
+        .category = category,
         .message = message,
+        .detail = detail,
+        .evidence = evidence,
         .path = path,
+        .command = cmd,
         .fix_hint = fix_hint,
+        .fixable = finding.fixable,
+        .docs_url = docs_url,
     });
 }
 
-fn appendConfigFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config_path: []const u8) !void {
+fn appendConfigFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config_path: []const u8, config: DoctorConfig) !void {
     const source = cli_util.readConfigOrDefault(allocator, config_path) catch |err| {
         const message = try std.fmt.allocPrint(allocator, "config is unreadable ({s})", .{@errorName(err)});
         defer allocator.free(message);
-        try appendFinding(allocator, findings, .{ .id = "config/unreadable", .severity = .@"error", .message = message, .path = config_path, .fix_hint = "fix file permissions or recreate the config with `shisa init --defaults`" });
+        try appendFindingIfAllowed(allocator, findings, config, .{ .id = "config/unreadable", .severity = .@"error", .category = "config", .message = message, .path = config_path, .fix_hint = "fix file permissions or recreate the config with `shisa init --defaults`", .docs_url = "docs/doctor.md#config" });
         return;
     };
     defer allocator.free(source);
@@ -490,7 +528,7 @@ fn appendConfigFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(D
         error.InvalidConfig => {
             const message = try std.fmt.allocPrint(allocator, "config is invalid at {d}:{d}: {s}", .{ diagnostic.line, diagnostic.column, diagnostic.message });
             defer allocator.free(message);
-            try appendFinding(allocator, findings, .{ .id = "config/invalid", .severity = .@"error", .message = message, .path = config_path, .fix_hint = "edit shisa.toml or regenerate it with `shisa init --defaults`" });
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "config/invalid", .severity = .@"error", .category = "config", .message = message, .path = config_path, .fix_hint = "edit shisa.toml or regenerate it with `shisa init --defaults`", .docs_url = "docs/doctor.md#config" });
             return;
         },
         else => return err,
@@ -498,29 +536,331 @@ fn appendConfigFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(D
     parsed.deinit(allocator);
 }
 
-fn doctorFindingsTextAlloc(allocator: std.mem.Allocator, findings: []const DoctorFinding, severity_min: Severity) ![]u8 {
+fn appendInstallFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config: DoctorConfig) !void {
+    if (checkAllowed(config, "install/zig-version")) {
+        const required = try requiredZigVersionAlloc(allocator);
+        defer if (required) |value| allocator.free(value);
+        const actual = commandOutputTrimmedAlloc(allocator, &.{ "zig", "version" }) catch |err| switch (err) {
+            error.FileNotFound => {
+                try appendFindingIfAllowed(allocator, findings, config, .{ .id = "install/zig-version", .severity = .warning, .category = "install", .message = "zig was not found on PATH", .command = "brew install zig@0.15", .fix_hint = "install the Zig version listed in build.zig.zon", .docs_url = "docs/quickstart.md" });
+                return;
+            },
+            else => {
+                const evidence = try std.fmt.allocPrint(allocator, "{s}", .{@errorName(err)});
+                defer allocator.free(evidence);
+                try appendFindingIfAllowed(allocator, findings, config, .{ .id = "install/zig-version", .severity = .warning, .category = "install", .message = "zig version check failed", .evidence = evidence, .fix_hint = "run `zig version` manually and compare with build.zig.zon", .docs_url = "docs/doctor.md#install" });
+                return;
+            },
+        };
+        defer allocator.free(actual);
+        if (required) |value| {
+            if (!std.mem.eql(u8, actual, value)) {
+                const evidence = try std.fmt.allocPrint(allocator, "required={s} actual={s}", .{ value, actual });
+                defer allocator.free(evidence);
+                try appendFindingIfAllowed(allocator, findings, config, .{ .id = "install/zig-version", .severity = .warning, .category = "install", .message = "zig version differs from build.zig.zon", .evidence = evidence, .command = "zig version", .fix_hint = "use the repo-required Zig version before running the full test suite", .docs_url = "docs/quickstart.md" });
+            }
+        }
+    }
+
+    if (checkAllowed(config, "install/binary-set")) {
+        inline for (.{ "shisad", "shisa-supervisor" }) |name| {
+            const path = try cli_util.siblingExecutablePath(allocator, name);
+            defer allocator.free(path);
+            if (!pathExecutable(path)) {
+                const message = try std.fmt.allocPrint(allocator, "{s} is missing next to shisa", .{name});
+                defer allocator.free(message);
+                try appendFindingIfAllowed(allocator, findings, config, .{ .id = "install/binary-set", .severity = .warning, .category = "install", .message = message, .path = path, .command = "zig build release", .fix_hint = "run `zig build release` or install all shisa binaries together", .docs_url = "docs/quickstart.md" });
+            }
+        }
+    }
+
+    if (checkAllowed(config, "install/path-shadowing")) {
+        const self_path = try std.fs.selfExePathAlloc(allocator);
+        defer allocator.free(self_path);
+        const which = commandOutputTrimmedAlloc(allocator, &.{ "which", "-a", "shisa" }) catch return;
+        defer allocator.free(which);
+        if (which.len != 0 and std.mem.indexOf(u8, which, self_path) == null) {
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "install/path-shadowing", .severity = .info, .category = "install", .message = "PATH resolves a different shisa binary than the running executable", .evidence = which, .path = self_path, .command = "which -a shisa", .fix_hint = "put the intended shisa install dir first in PATH", .docs_url = "docs/doctor.md#install" });
+        }
+    }
+}
+
+fn appendConfigDeprecationFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config_path: []const u8, config: DoctorConfig) !void {
+    if (!checkAllowed(config, "config/deprecations")) return;
+    const source = cli_util.readConfigOrDefault(allocator, config_path) catch return;
+    defer allocator.free(source);
+    for (active_deprecation_rules) |rule| {
+        if (std.mem.indexOf(u8, source, rule.pattern) == null) continue;
+        const message = try std.fmt.allocPrint(allocator, "{s} `{s}` is deprecated", .{ rule.kind, rule.pattern });
+        defer allocator.free(message);
+        const detail = try std.fmt.allocPrint(allocator, "deprecated since {s}; remove before {s}", .{ rule.since, rule.remove_before });
+        defer allocator.free(detail);
+        try appendFindingIfAllowed(allocator, findings, config, .{ .id = "config/deprecations", .severity = .warning, .category = "config", .message = message, .detail = detail, .path = config_path, .fix_hint = rule.replacement, .docs_url = "docs/deprecations.md" });
+    }
+}
+
+fn appendDaemonOnlineFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), socket_path: []const u8, config: DoctorConfig) !void {
+    if (checkAllowed(config, "daemon/protocol")) {
+        const response = client.requestAlloc(allocator, socket_path, "{\"v\":1,\"op\":\"version\",\"request_id\":\"doctor-version\"}") catch |err| {
+            const evidence = try std.fmt.allocPrint(allocator, "{s}", .{@errorName(err)});
+            defer allocator.free(evidence);
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "daemon/protocol", .severity = .warning, .category = "daemon", .message = "daemon version request failed", .evidence = evidence, .docs_url = "docs/doctor.md#daemon" });
+            return;
+        };
+        defer allocator.free(response);
+        if (std.mem.indexOf(u8, response, "\"protocol\":") == null) {
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "daemon/protocol", .severity = .warning, .category = "daemon", .message = "daemon version response omitted protocol metadata", .evidence = response, .docs_url = "docs/doctor.md#daemon" });
+        } else {
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "daemon/protocol", .severity = .info, .category = "daemon", .message = "daemon protocol handshake succeeded", .evidence = response, .docs_url = "docs/doctor.md#daemon" });
+        }
+    }
+
+    if (checkAllowed(config, "daemon/metrics")) {
+        const response = client.requestAlloc(allocator, socket_path, "{\"v\":1,\"op\":\"metrics\",\"request_id\":\"doctor-metrics\"}") catch |err| {
+            const evidence = try std.fmt.allocPrint(allocator, "{s}", .{@errorName(err)});
+            defer allocator.free(evidence);
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "daemon/metrics", .severity = .warning, .category = "daemon", .message = "daemon metrics request failed", .evidence = evidence, .docs_url = "docs/doctor.md#daemon" });
+            return;
+        };
+        defer allocator.free(response);
+        if (std.mem.indexOf(u8, response, "\"render\":") == null) {
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "daemon/metrics", .severity = .warning, .category = "daemon", .message = "daemon metrics response omitted render metrics", .evidence = response, .docs_url = "docs/doctor.md#daemon" });
+        } else {
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "daemon/metrics", .severity = .info, .category = "daemon", .message = "daemon metrics endpoint responded", .evidence = response, .docs_url = "docs/doctor.md#daemon" });
+        }
+    }
+
+    if (checkAllowed(config, "daemon/log-warnings")) {
+        const log_path = paths.defaultLogPath(allocator) catch return;
+        defer allocator.free(log_path);
+        const tail = readFileTailAlloc(allocator, log_path, 64 * 1024) catch return;
+        defer allocator.free(tail);
+        if (std.mem.indexOf(u8, tail, "\"level\":\"warn\"") != null) {
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "daemon/log-warnings", .severity = .info, .category = "daemon", .message = "daemon log contains warning entries", .path = log_path, .fix_hint = "run `shisa report` if warnings repeat", .docs_url = "docs/report.md" });
+        }
+    }
+}
+
+fn appendShellHookFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config: DoctorConfig) !void {
+    if (!checkAllowed(config, "shell/hook-duplicates")) return;
+    const target = cli_config.shellHookTargetPathAlloc(allocator) catch return;
+    defer allocator.free(target);
+    const source = std.fs.cwd().readFileAlloc(allocator, target, 1024 * 1024) catch return;
+    defer allocator.free(source);
+    const count = countOccurrences(source, cli_config.shell_hook_marker_start);
+    if (count > 1) {
+        const evidence = try std.fmt.allocPrint(allocator, "marker_count={d}", .{count});
+        defer allocator.free(evidence);
+        try appendFindingIfAllowed(allocator, findings, config, .{ .id = "shell/hook-duplicates", .severity = .warning, .category = "shell", .message = "shell startup file contains multiple shisa hook blocks", .evidence = evidence, .path = target, .fix_hint = "remove older duplicated shisa blocks and rerun `shisa init --write-hook`", .docs_url = "docs/troubleshooting.md#shell-hook" });
+    }
+}
+
+fn appendModuleFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config: DoctorConfig, config_path: []const u8) !void {
+    const parsed = parsedConfigOrNull(allocator, config_path) orelse return;
+    var owned = parsed;
+    defer owned.deinit(allocator);
+    const cwd = std.fs.cwd().realpathAlloc(allocator, ".") catch return;
+    defer allocator.free(cwd);
+
+    if (checkAllowed(config, "modules/git") and (configHasModule(owned.prompt_modules, .git_branch) or configHasModule(owned.right_prompt_modules, .git_branch))) {
+        if (hasAncestorMarkerAlloc(allocator, cwd, ".git") catch false) {
+            const git_version = commandOutputTrimmedAlloc(allocator, &.{ "git", "--version" }) catch |err| switch (err) {
+                error.FileNotFound => {
+                    try appendFindingIfAllowed(allocator, findings, config, .{ .id = "modules/git", .severity = .warning, .category = "modules", .message = "git_branch is enabled in a Git worktree but git is not on PATH", .command = "git --version", .fix_hint = "install git or remove git_branch from prompt modules", .docs_url = "docs/troubleshooting.md#tests" });
+                    return;
+                },
+                else => return,
+            };
+            allocator.free(git_version);
+        }
+    }
+
+    if (checkAllowed(config, "modules/language-tools") and (configHasModule(owned.prompt_modules, .language_versions) or configHasModule(owned.right_prompt_modules, .language_versions))) {
+        try appendMissingLanguageTool(allocator, findings, config, cwd, "package.json", "node", owned.modules.language_versions.node);
+        try appendMissingLanguageTool(allocator, findings, config, cwd, "pyproject.toml", "python3", owned.modules.language_versions.python);
+        try appendMissingLanguageTool(allocator, findings, config, cwd, "requirements.txt", "python3", owned.modules.language_versions.python);
+        try appendMissingLanguageTool(allocator, findings, config, cwd, "Cargo.toml", "rustc", owned.modules.language_versions.rust);
+        try appendMissingLanguageTool(allocator, findings, config, cwd, "go.mod", "go", owned.modules.language_versions.go);
+    }
+
+    if (checkAllowed(config, "modules/cloud-cache") and (configHasModule(owned.prompt_modules, .cloud_ctx) or configHasModule(owned.right_prompt_modules, .cloud_ctx))) {
+        if (!owned.modules.cloud_ctx.aws and !owned.modules.cloud_ctx.gcp and !owned.modules.cloud_ctx.azure and !owned.modules.cloud_ctx.kubernetes) {
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "modules/cloud-cache", .severity = .info, .category = "modules", .message = "cloud_ctx is enabled but all cloud providers are disabled", .path = config_path, .fix_hint = "enable at least one [modules.cloud_ctx] provider or remove cloud_ctx", .docs_url = "docs/doctor.md#modules" });
+        }
+    }
+}
+
+fn appendMissingLanguageTool(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config: DoctorConfig, cwd: []const u8, marker: []const u8, tool: []const u8, enabled: bool) !void {
+    if (!enabled) return;
+    if (!(hasAncestorMarkerAlloc(allocator, cwd, marker) catch false)) return;
+    const version = commandOutputTrimmedAlloc(allocator, &.{ tool, "--version" }) catch |err| switch (err) {
+        error.FileNotFound => {
+            const message = try std.fmt.allocPrint(allocator, "{s} marker found but {s} is not on PATH", .{ marker, tool });
+            defer allocator.free(message);
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "modules/language-tools", .severity = .info, .category = "modules", .message = message, .command = tool, .fix_hint = "install the tool or disable that language in [modules.language_versions]", .docs_url = "docs/doctor.md#modules" });
+            return;
+        },
+        else => return,
+    };
+    allocator.free(version);
+}
+
+fn appendPluginFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config: DoctorConfig) !void {
+    if (checkAllowed(config, "plugins/runtime") and std.mem.eql(u8, luaRuntimeStatus(allocator), "unavailable")) {
+        try appendFindingIfAllowed(allocator, findings, config, .{ .id = "plugins/runtime", .severity = .warning, .category = "plugins", .message = "Lua runtime is unavailable; Lua plugins cannot load", .fix_hint = "build with Lua support or disable Lua plugins", .docs_url = "docs/plugins.md" });
+    }
+    if (!checkAllowed(config, "plugins/manifests")) return;
+    const plugins_dir = cli_util.pluginsDirPath(allocator) catch return;
+    defer allocator.free(plugins_dir);
+    var dir = std.fs.openDirAbsolute(plugins_dir, .{ .iterate = true }) catch return;
+    defer dir.close();
+    var it = dir.iterate();
+    while (try it.next()) |entry| {
+        if (entry.kind != .directory) continue;
+        if (plugin_manifest.isValidPluginName(entry.name)) continue;
+        const path = try std.fs.path.join(allocator, &.{ plugins_dir, entry.name });
+        defer allocator.free(path);
+        try appendFindingIfAllowed(allocator, findings, config, .{ .id = "plugins/manifests", .severity = .warning, .category = "plugins", .message = "plugin directory name is invalid and will be ignored", .path = path, .fix_hint = "rename the plugin directory to a lowercase manifest-safe name", .docs_url = "docs/plugins.md" });
+    }
+}
+
+fn appendPlatformFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config: DoctorConfig, config_dir: []const u8) !void {
+    if (checkAllowed(config, "platform/runtime-dir")) {
+        if (builtin.os.tag == .linux and !std.process.hasEnvVarConstant("XDG_RUNTIME_DIR")) {
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "platform/runtime-dir", .severity = .info, .category = "platform", .message = "XDG_RUNTIME_DIR is unset; socket path falls back to /run/user/<uid>", .fix_hint = "set XDG_RUNTIME_DIR in unusual non-login shells if /run/user/<uid> is unavailable", .docs_url = "docs/doctor.md#platform" });
+        }
+        if (builtin.os.tag == .macos and pathAccessStatus(config_dir).len != 0 and std.mem.eql(u8, pathAccessStatus(config_dir), "denied")) {
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "platform/runtime-dir", .severity = .warning, .category = "platform", .message = "config directory is not accessible", .path = config_dir, .docs_url = "docs/doctor.md#platform" });
+        }
+    }
+    if (checkAllowed(config, "platform/fsnotify")) {
+        if (builtin.os.tag == .linux) {
+            const limit = fsnotify.readLinuxMaxUserWatches(allocator) catch null;
+            if (limit) |value| {
+                if (value < 8192) {
+                    const evidence = try std.fmt.allocPrint(allocator, "fs.inotify.max_user_watches={d}", .{value});
+                    defer allocator.free(evidence);
+                    try appendFindingIfAllowed(allocator, findings, config, .{ .id = "platform/fsnotify", .severity = .warning, .category = "platform", .message = "Linux inotify watch limit is low", .evidence = evidence, .fix_hint = "raise fs.inotify.max_user_watches for large repos", .docs_url = "docs/doctor.md#platform" });
+                }
+            }
+        } else if (std.mem.eql(u8, fsnotifyBackendName(fsnotify.selectBackend(builtin.os.tag)), "unsupported")) {
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "platform/fsnotify", .severity = .warning, .category = "platform", .message = "filesystem watcher backend is unsupported on this platform", .docs_url = "docs/doctor.md#platform" });
+        }
+    }
+}
+
+fn appendPerformanceFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config: DoctorConfig, socket_path: []const u8, shell_name: []const u8, daemon_status: []const u8) !void {
+    if (!checkAllowed(config, "performance/prompt-budget")) return;
+    if (!std.mem.eql(u8, daemon_status, "ok")) return;
+    const start = std.time.nanoTimestamp();
+    const prompt = try samplePromptAlloc(allocator, socket_path, shell_name, daemon_status);
+    defer if (prompt) |value| allocator.free(value);
+    const elapsed_ns: u64 = @intCast(std.time.nanoTimestamp() - start);
+    const evidence = try std.fmt.allocPrint(allocator, "sample_render_ns={d}", .{elapsed_ns});
+    defer allocator.free(evidence);
+    if (prompt == null) {
+        try appendFindingIfAllowed(allocator, findings, config, .{ .id = "performance/prompt-budget", .severity = .warning, .category = "performance", .message = "sample prompt render failed during performance probe", .evidence = evidence, .docs_url = "docs/doctor.md#performance" });
+    } else if (elapsed_ns > 10 * std.time.ns_per_ms) {
+        try appendFindingIfAllowed(allocator, findings, config, .{ .id = "performance/prompt-budget", .severity = .warning, .category = "performance", .message = "sample prompt render exceeded 10ms budget", .evidence = evidence, .fix_hint = "check daemon metrics, slow module warnings, and active plugins", .docs_url = "docs/doctor.md#performance" });
+    } else {
+        try appendFindingIfAllowed(allocator, findings, config, .{ .id = "performance/prompt-budget", .severity = .info, .category = "performance", .message = "sample prompt render is within 10ms budget", .evidence = evidence, .docs_url = "docs/doctor.md#performance" });
+    }
+}
+
+fn appendSecurityFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config: DoctorConfig, config_path: []const u8, config_dir: []const u8) !void {
+    if (!checkAllowed(config, "security/permissions")) return;
+    if (builtin.os.tag == .windows) return;
+    try appendSensitivePathPermissionFinding(allocator, findings, config, config_path, 0o600, "config file permissions are broader than 0600");
+    try appendSensitivePathPermissionFinding(allocator, findings, config, config_dir, 0o700, "config directory permissions are broader than 0700");
+}
+
+fn appendSensitivePathPermissionFinding(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config: DoctorConfig, path: []const u8, max_mode: u32, message: []const u8) !void {
+    const stat = std.fs.cwd().statFile(path) catch return;
+    const mode = stat.mode & 0o777;
+    if ((mode | max_mode) == max_mode) return;
+    const evidence = try std.fmt.allocPrint(allocator, "mode={o}", .{mode});
+    defer allocator.free(evidence);
+    const hint = try std.fmt.allocPrint(allocator, "chmod {o} {s}", .{ max_mode, path });
+    defer allocator.free(hint);
+    try appendFindingIfAllowed(allocator, findings, config, .{ .id = "security/permissions", .severity = .warning, .category = "security", .message = message, .evidence = evidence, .path = path, .command = hint, .fix_hint = hint, .docs_url = "docs/doctor.md#security" });
+}
+
+fn appendTestFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config: DoctorConfig) !void {
+    if (!checkAllowed(config, "tests/optional-prereqs")) return;
+    if (!std.process.hasEnvVarConstant("SHISA_PURE_ZSH_DIR") or !std.process.hasEnvVarConstant("SHISA_PURE_FISH_DIR")) {
+        try appendFindingIfAllowed(allocator, findings, config, .{ .id = "tests/optional-prereqs", .severity = .info, .category = "tests", .message = "Pure import smoke fixtures are not configured", .fix_hint = "set SHISA_PURE_ZSH_DIR and SHISA_PURE_FISH_DIR only when testing Pure import", .docs_url = "docs/troubleshooting.md#tests" });
+    }
+    const nix_version = commandOutputTrimmedAlloc(allocator, &.{ "nix-shell", "--version" }) catch |err| switch (err) {
+        error.FileNotFound => {
+            try appendFindingIfAllowed(allocator, findings, config, .{ .id = "tests/optional-prereqs", .severity = .info, .category = "tests", .message = "nix-shell is not installed; nix-shell language integration smoke will skip", .fix_hint = "install Nix only if you need that integration test", .docs_url = "docs/troubleshooting.md#tests" });
+            return;
+        },
+        else => return,
+    };
+    allocator.free(nix_version);
+}
+
+fn appendReleaseFindings(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config: DoctorConfig) !void {
+    if (checkAllowed(config, "release/packaging")) {
+        inline for (.{ "shisa", "shisad", "shisa-supervisor" }) |name| {
+            const path = try cli_util.siblingExecutablePath(allocator, name);
+            defer allocator.free(path);
+            if (!pathExecutable(path)) {
+                const message = try std.fmt.allocPrint(allocator, "release binary {s} is missing", .{name});
+                defer allocator.free(message);
+                try appendFindingIfAllowed(allocator, findings, config, .{ .id = "release/packaging", .severity = .warning, .category = "release", .message = message, .path = path, .command = "zig build release", .fix_hint = "run `zig build release` before packaging", .docs_url = "docs/doctor.md#release" });
+            }
+        }
+    }
+    if (!config.online) return;
+    if (!checkAllowed(config, "release/online")) return;
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "git", "ls-remote", "--tags", "https://github.com/gongahkia/shisa" },
+        .max_output_bytes = 128 * 1024,
+        .expand_arg0 = .expand,
+    }) catch |err| {
+        const evidence = try std.fmt.allocPrint(allocator, "{s}", .{@errorName(err)});
+        defer allocator.free(evidence);
+        try appendFindingIfAllowed(allocator, findings, config, .{ .id = "release/online", .severity = .warning, .category = "release", .message = "online release check could not run", .evidence = evidence, .command = "git ls-remote --tags https://github.com/gongahkia/shisa", .docs_url = "docs/doctor.md#release" });
+        return;
+    };
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!cli_util.exitedZero(result.term)) {
+        try appendFindingIfAllowed(allocator, findings, config, .{ .id = "release/online", .severity = .warning, .category = "release", .message = "online release check failed", .evidence = result.stderr, .command = "git ls-remote --tags https://github.com/gongahkia/shisa", .docs_url = "docs/doctor.md#release" });
+    } else {
+        try appendFindingIfAllowed(allocator, findings, config, .{ .id = "release/online", .severity = .info, .category = "release", .message = "online release tag query succeeded", .evidence = "git ls-remote exited 0", .docs_url = "docs/doctor.md#release" });
+    }
+}
+
+fn doctorFindingsTextAlloc(allocator: std.mem.Allocator, findings: []const DoctorFinding, config: DoctorConfig) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
-    const count = countFindingsAtLeast(findings, severity_min);
-    try cli_util.appendFmt(allocator, &out, "doctor lint: {s} ({d} findings at >= {s})\n", .{ if (count == 0) "ok" else "findings", count, severityName(severity_min) });
+    const count = countFindingsAtLeast(findings, config.severity_min);
+    try cli_util.appendFmt(allocator, &out, "doctor lint: {s} ({d} findings at >= {s})\n", .{ if (count == 0) "ok" else "findings", count, severityName(config.severity_min) });
     for (findings) |finding| {
-        if (!severityAtLeast(finding.severity, severity_min)) continue;
-        try cli_util.appendFmt(allocator, &out, "{s}: {s}: {s}", .{ severityName(finding.severity), finding.id, finding.message });
+        if (!severityAtLeast(finding.severity, config.severity_min)) continue;
+        try cli_util.appendFmt(allocator, &out, "{s}: {s}: {s}: {s}", .{ severityName(finding.severity), finding.category, finding.id, finding.message });
+        if (finding.detail) |detail| try cli_util.appendFmt(allocator, &out, " detail: {s}", .{detail});
+        if (finding.evidence) |evidence| try cli_util.appendFmt(allocator, &out, " evidence: {s}", .{evidence});
         if (finding.path) |path| try cli_util.appendFmt(allocator, &out, " [{s}]", .{path});
+        if (finding.command) |cmd| try cli_util.appendFmt(allocator, &out, " command: {s}", .{cmd});
         if (finding.fix_hint) |hint| try cli_util.appendFmt(allocator, &out, " fix: {s}", .{hint});
         try out.append(allocator, '\n');
     }
     return out.toOwnedSlice(allocator);
 }
 
-fn doctorFindingsJsonAlloc(allocator: std.mem.Allocator, findings: []const DoctorFinding, severity_min: Severity) ![]u8 {
+fn doctorFindingsJsonAlloc(allocator: std.mem.Allocator, findings: []const DoctorFinding, config: DoctorConfig) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
-    const count = countFindingsAtLeast(findings, severity_min);
-    try cli_util.appendFmt(allocator, &out, "{{\"status\":\"{s}\",\"severity_min\":\"{s}\",\"findings\":[", .{ if (count == 0) "ok" else "findings", severityName(severity_min) });
+    const count = countFindingsAtLeast(findings, config.severity_min);
+    const summary = countSummary(findings);
+    try cli_util.appendFmt(allocator, &out, "{{\"version\":1,\"status\":\"{s}\",\"severity_min\":\"{s}\",\"online\":{},\"checks_run\":{d},\"summary\":{{\"info\":{d},\"warning\":{d},\"error\":{d}}},\"findings\":[", .{ if (count == 0) "ok" else "findings", severityName(config.severity_min), config.online, countChecksRun(config), summary.info, summary.warning, summary.@"error" });
     var emitted: usize = 0;
     for (findings) |finding| {
-        if (!severityAtLeast(finding.severity, severity_min)) continue;
+        if (!severityAtLeast(finding.severity, config.severity_min)) continue;
         if (emitted != 0) try out.append(allocator, ',');
         emitted += 1;
         try appendJsonFinding(allocator, &out, finding);
@@ -534,12 +874,39 @@ fn appendJsonFinding(allocator: std.mem.Allocator, out: *std.ArrayList(u8), find
     try appendJsonString(allocator, out, finding.id);
     try out.appendSlice(allocator, ",\"severity\":");
     try appendJsonString(allocator, out, severityName(finding.severity));
+    try out.appendSlice(allocator, ",\"category\":");
+    try appendJsonString(allocator, out, finding.category);
     try out.appendSlice(allocator, ",\"message\":");
     try appendJsonString(allocator, out, finding.message);
+    try out.appendSlice(allocator, ",\"detail\":");
+    if (finding.detail) |detail| try appendJsonString(allocator, out, detail) else try out.appendSlice(allocator, "null");
+    try out.appendSlice(allocator, ",\"evidence\":");
+    if (finding.evidence) |evidence| try appendJsonString(allocator, out, evidence) else try out.appendSlice(allocator, "null");
     try out.appendSlice(allocator, ",\"path\":");
     if (finding.path) |path| try appendJsonString(allocator, out, path) else try out.appendSlice(allocator, "null");
+    try out.appendSlice(allocator, ",\"paths\":");
+    if (finding.path) |path| {
+        try out.append(allocator, '[');
+        try appendJsonString(allocator, out, path);
+        try out.append(allocator, ']');
+    } else {
+        try out.appendSlice(allocator, "[]");
+    }
+    try out.appendSlice(allocator, ",\"command\":");
+    if (finding.command) |cmd| try appendJsonString(allocator, out, cmd) else try out.appendSlice(allocator, "null");
+    try out.appendSlice(allocator, ",\"commands\":");
+    if (finding.command) |cmd| {
+        try out.append(allocator, '[');
+        try appendJsonString(allocator, out, cmd);
+        try out.append(allocator, ']');
+    } else {
+        try out.appendSlice(allocator, "[]");
+    }
     try out.appendSlice(allocator, ",\"fix_hint\":");
     if (finding.fix_hint) |hint| try appendJsonString(allocator, out, hint) else try out.appendSlice(allocator, "null");
+    try cli_util.appendFmt(allocator, out, ",\"fixable\":{}", .{finding.fixable});
+    try out.appendSlice(allocator, ",\"docs_url\":");
+    if (finding.docs_url) |docs_url| try appendJsonString(allocator, out, docs_url) else try out.appendSlice(allocator, "null");
     try out.append(allocator, '}');
 }
 
@@ -551,10 +918,100 @@ fn appendJsonString(allocator: std.mem.Allocator, out: *std.ArrayList(u8), value
     try out.append(allocator, '"');
 }
 
+fn writeDoctorReport(allocator: std.mem.Allocator, output_path: []const u8, socket_path: []const u8, config: DoctorConfig) !void {
+    var report_config = config;
+    report_config.severity_min = .info;
+    report_config.json = true;
+    report_config.lint = true;
+
+    var findings = try doctorFindingsAlloc(allocator, socket_path, report_config);
+    defer findings.deinit(allocator);
+    defer deinitDoctorFindings(allocator, findings.items);
+    const doctor_json = try doctorFindingsJsonAlloc(allocator, findings.items, report_config);
+    defer allocator.free(doctor_json);
+    const doctor_json_trimmed = std.mem.trim(u8, doctor_json, " \t\r\n");
+
+    const config_path = try cli_util.defaultConfigPath(allocator);
+    defer allocator.free(config_path);
+    const log_path = paths.defaultLogPath(allocator) catch null;
+    defer if (log_path) |path| allocator.free(path);
+
+    const config_text = try reportConfigRedactedAlloc(allocator, config_path);
+    defer allocator.free(config_text);
+    const log_text = if (log_path) |path| try reportLogRedactedAlloc(allocator, path) else try allocator.dupe(u8, "status: unsupported log platform\n");
+    defer allocator.free(log_text);
+    const metrics = client.requestAlloc(allocator, socket_path, "{\"v\":1,\"op\":\"metrics\",\"request_id\":\"doctor-report-metrics\"}") catch try allocator.dupe(u8, "{}");
+    defer allocator.free(metrics);
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    try cli_util.appendFmt(allocator, &out, "{{\"version\":1,\"generated_at_unix\":{d},\"socket\":", .{std.time.timestamp()});
+    try appendJsonString(allocator, &out, socket_path);
+    try out.appendSlice(allocator, ",\"config_path\":");
+    try appendJsonString(allocator, &out, config_path);
+    try out.appendSlice(allocator, ",\"doctor\":");
+    try out.appendSlice(allocator, doctor_json_trimmed);
+    try out.appendSlice(allocator, ",\"checks\":");
+    try appendDoctorChecksJson(allocator, &out, report_config);
+    try out.appendSlice(allocator, ",\"config_redacted\":");
+    try appendJsonString(allocator, &out, config_text);
+    try out.appendSlice(allocator, ",\"log_tail_redacted\":");
+    try appendJsonString(allocator, &out, log_text);
+    try out.appendSlice(allocator, ",\"metrics\":");
+    try out.appendSlice(allocator, std.mem.trim(u8, metrics, " \t\r\n"));
+    try out.appendSlice(allocator, "}\n");
+
+    if (std.fs.path.dirname(output_path)) |parent| try std.fs.cwd().makePath(parent);
+    var file = try std.fs.cwd().createFile(output_path, .{ .truncate = true });
+    defer file.close();
+    try file.writeAll(out.items);
+}
+
+fn appendDoctorChecksJson(allocator: std.mem.Allocator, out: *std.ArrayList(u8), config: DoctorConfig) !void {
+    try out.append(allocator, '[');
+    var emitted: usize = 0;
+    for (doctor_checks) |check| {
+        if (!checkAllowed(config, check.id)) continue;
+        if (emitted != 0) try out.append(allocator, ',');
+        emitted += 1;
+        try out.appendSlice(allocator, "{\"id\":");
+        try appendJsonString(allocator, out, check.id);
+        try out.appendSlice(allocator, ",\"category\":");
+        try appendJsonString(allocator, out, check.category);
+        try cli_util.appendFmt(allocator, out, ",\"online\":{}", .{check.online});
+        try out.appendSlice(allocator, ",\"docs_url\":");
+        try appendJsonString(allocator, out, check.docs_url);
+        try out.append(allocator, '}');
+    }
+    try out.append(allocator, ']');
+}
+
 fn countFindingsAtLeast(findings: []const DoctorFinding, severity_min: Severity) usize {
     var count: usize = 0;
     for (findings) |finding| {
         if (severityAtLeast(finding.severity, severity_min)) count += 1;
+    }
+    return count;
+}
+
+fn countSummary(findings: []const DoctorFinding) DoctorSummary {
+    var summary = DoctorSummary{};
+    for (findings) |finding| {
+        switch (finding.severity) {
+            .info => summary.info += 1,
+            .warning => summary.warning += 1,
+            .@"error" => summary.@"error" += 1,
+        }
+    }
+    return summary;
+}
+
+fn countChecksRun(config: DoctorConfig) usize {
+    var count: usize = 0;
+    for (doctor_checks) |check| {
+        if (check.online and !config.online) continue;
+        if (!checkAllowed(config, check.id)) continue;
+        count += 1;
     }
     return count;
 }
@@ -576,6 +1033,77 @@ fn parseSeverity(value: []const u8) ?Severity {
     if (std.mem.eql(u8, value, "warning")) return .warning;
     if (std.mem.eql(u8, value, "error")) return .@"error";
     return null;
+}
+
+fn requiredZigVersionAlloc(allocator: std.mem.Allocator) !?[]u8 {
+    const source = std.fs.cwd().readFileAlloc(allocator, "build.zig.zon", 64 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer allocator.free(source);
+    const key_index = std.mem.indexOf(u8, source, ".minimum_zig_version") orelse return null;
+    const tail = source[key_index..];
+    const first_quote = std.mem.indexOfScalar(u8, tail, '"') orelse return null;
+    const rest = tail[first_quote + 1 ..];
+    const second_quote = std.mem.indexOfScalar(u8, rest, '"') orelse return null;
+    return @as(?[]u8, try allocator.dupe(u8, rest[0..second_quote]));
+}
+
+fn commandOutputTrimmedAlloc(allocator: std.mem.Allocator, argv: []const []const u8) ![]u8 {
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .max_output_bytes = 1024 * 1024,
+        .expand_arg0 = .expand,
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!cli_util.exitedZero(result.term)) return error.CommandFailed;
+    const raw = if (result.stdout.len != 0) result.stdout else result.stderr;
+    const trimmed = std.mem.trim(u8, raw, " \t\r\n");
+    return allocator.dupe(u8, trimmed);
+}
+
+fn pathExecutable(path: []const u8) bool {
+    const stat = std.fs.cwd().statFile(path) catch return false;
+    if (stat.kind != .file) return false;
+    if (builtin.os.tag == .windows) return true;
+    return (stat.mode & 0o111) != 0;
+}
+
+fn parsedConfigOrNull(allocator: std.mem.Allocator, config_path: []const u8) ?shisa_config.Config {
+    const source = cli_util.readConfigOrDefault(allocator, config_path) catch return null;
+    defer allocator.free(source);
+    var diagnostic: shisa_config.Diagnostic = .{};
+    return shisa_config.parse(allocator, source, &diagnostic) catch null;
+}
+
+fn hasAncestorMarkerAlloc(allocator: std.mem.Allocator, cwd: []const u8, marker: []const u8) !bool {
+    var current = try allocator.dupe(u8, cwd);
+    defer allocator.free(current);
+    while (true) {
+        const candidate = try std.fs.path.join(allocator, &.{ current, marker });
+        const present = std.mem.eql(u8, pathAccessStatus(candidate), "present");
+        allocator.free(candidate);
+        if (present) return true;
+        const parent = std.fs.path.dirname(current) orelse return false;
+        if (std.mem.eql(u8, parent, current)) return false;
+        const next = try allocator.dupe(u8, parent);
+        allocator.free(current);
+        current = next;
+    }
+}
+
+fn countOccurrences(haystack: []const u8, needle: []const u8) usize {
+    if (needle.len == 0) return 0;
+    var count: usize = 0;
+    var offset: usize = 0;
+    while (offset <= haystack.len) {
+        const found = std.mem.indexOf(u8, haystack[offset..], needle) orelse break;
+        count += 1;
+        offset += found + needle.len;
+    }
+    return count;
 }
 
 fn shisaBinPathAlloc(allocator: std.mem.Allocator) ![]u8 {
@@ -1217,25 +1745,45 @@ test "doctor args parse fix mode" {
 }
 
 test "doctor args parse lint json severity" {
-    const config = try parseDoctorArgs(&.{ "--lint", "--json", "--severity-min", "info" });
+    const config = try parseDoctorArgs(&.{ "--lint", "--json", "--severity-min", "info", "--list-checks", "--online", "--only", "daemon/not-running", "--skip", "tests/optional-prereqs", "--report", "/tmp/shisa-doctor.json" });
     try std.testing.expect(config.lint);
     try std.testing.expect(config.json);
+    try std.testing.expect(config.list_checks);
+    try std.testing.expect(config.online);
     try std.testing.expectEqual(Severity.info, config.severity_min);
+    try std.testing.expectEqualStrings("daemon/not-running", config.only.?);
+    try std.testing.expectEqualStrings("tests/optional-prereqs", config.skip.?);
+    try std.testing.expectEqualStrings("/tmp/shisa-doctor.json", config.report_path.?);
+}
+
+test "doctor check filters and registry list are stable" {
+    try std.testing.expect(checkAllowed(.{ .only = "daemon/not-running,config/invalid" }, "config/invalid"));
+    try std.testing.expect(!checkAllowed(.{ .only = "daemon/not-running" }, "config/invalid"));
+    try std.testing.expect(!checkAllowed(.{ .skip = "config/invalid" }, "config/invalid"));
+
+    const output = try doctorChecksListAlloc(std.testing.allocator, .{ .only = "daemon/not-running" });
+    defer std.testing.allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "daemon/not-running\tdaemon\tlocal") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "config/invalid") == null);
 }
 
 test "doctor finding serializers filter severity" {
     const findings = [_]DoctorFinding{
-        .{ .id = "prompt/async-pending", .severity = .info, .message = "pending" },
-        .{ .id = "daemon/not-running", .severity = .@"error", .message = "daemon down", .path = "/tmp/shisa.sock", .fix_hint = "start daemon" },
+        .{ .id = "prompt/async-pending", .severity = .info, .category = "prompt", .message = "pending" },
+        .{ .id = "daemon/not-running", .severity = .@"error", .category = "daemon", .message = "daemon down", .path = "/tmp/shisa.sock", .command = "shisad --foreground &", .fix_hint = "start daemon", .fixable = true, .docs_url = "docs/doctor.md#daemon" },
     };
-    const text = try doctorFindingsTextAlloc(std.testing.allocator, findings[0..], .warning);
+    const text = try doctorFindingsTextAlloc(std.testing.allocator, findings[0..], .{ .severity_min = .warning });
     defer std.testing.allocator.free(text);
     try std.testing.expect(std.mem.indexOf(u8, text, "daemon/not-running") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "prompt/async-pending") == null);
 
-    const json = try doctorFindingsJsonAlloc(std.testing.allocator, findings[0..], .info);
+    const json = try doctorFindingsJsonAlloc(std.testing.allocator, findings[0..], .{ .severity_min = .info });
     defer std.testing.allocator.free(json);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"count\":2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"version\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"category\":\"daemon\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"commands\":[\"shisad --foreground &\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"fixable\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"fix_hint\":\"start daemon\"") != null);
 }
 
@@ -1263,6 +1811,12 @@ test "doctor reports path and backend statuses" {
     try std.testing.expectEqualStrings("fsevents", fsnotifyBackendName(.fsevents));
     try std.testing.expectEqualStrings("inotify", fsnotifyBackendName(.inotify));
     try std.testing.expectEqualStrings("ReadDirectoryChangesW", fsnotifyBackendName(.windows));
+}
+
+test "doctor helper counts markers and checks" {
+    try std.testing.expectEqual(@as(usize, 2), countOccurrences("a # >>> shisa >>> b # >>> shisa >>>", cli_config.shell_hook_marker_start));
+    try std.testing.expect(countChecksRun(.{}) >= 30);
+    try std.testing.expectEqual(@as(usize, 1), countChecksRun(.{ .only = "daemon/not-running" }));
 }
 
 test "doctor reports installed plugins" {

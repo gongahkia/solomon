@@ -91,7 +91,8 @@ Common commands:
 
 ```sh
 shisa doctor
-shisa doctor --lint
+shisa doctor --json --severity-min warning
+shisa doctor --list-checks
 shisa explain
 shisa font check
 shisa theme preview nord-dark
@@ -100,6 +101,14 @@ shisa theme preview nord-dark
 Hide an active VPN segment by removing `"vpn_status"` from `[prompt].modules`.
 
 ## Troubleshooting
+
+Doctor can isolate one subsystem:
+
+```sh
+shisa doctor --only daemon/not-running,daemon/socket-mismatch
+shisa doctor --only modules/vpn-active,prompt/async-pending --severity-min info
+shisa doctor --report /tmp/shisa-doctor.json --json --severity-min info
+```
 
 Expected first-run states:
 

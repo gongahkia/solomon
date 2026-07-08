@@ -107,6 +107,7 @@ Per-module config lives under `[modules.<id>]`. Option tables may exist only for
 | Key | Type | Default | Constraints |
 | --- | --- | --- | --- |
 | `detect` | array of strings | `["python", "node", "rust", "go"]` | Schema v1 recognizes these four values. |
+| `path_hash_invalidate` | bool | `false` | Opt-in. Include a SHA-256 hash of `$PATH` plus the active PATH in render requests so the daemon can invalidate and probe the correct toolchain. |
 
 ### `[modules.exit_status]`
 

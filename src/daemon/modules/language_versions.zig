@@ -8,6 +8,7 @@ pub const Cache = struct {
     generation: u64 = 0,
     active_pid: ?std.process.Child.Id = null,
     cwd: ?[]u8 = null,
+    env_hash: ?[]u8 = null,
     segment: ?[]u8 = null,
     worker: ?std.Thread = null,
 
@@ -30,14 +31,14 @@ pub const Cache = struct {
         self.clear(allocator);
     }
 
-    pub fn renderAsync(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) !AsyncRender {
+    pub fn renderAsync(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8, env_hash: ?[]const u8, path_env: ?[]const u8) !AsyncRender {
         self.joinFinishedWorker();
 
-        const cancelled_worker = self.cancelForCwdChange(allocator, cwd_path);
+        const cancelled_worker = self.cancelForCwdOrEnvChange(allocator, cwd_path, env_hash);
         if (cancelled_worker) |thread| thread.join();
 
         self.mutex.lock();
-        if (self.valid and self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path)) {
+        if (self.valid and self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path) and optionalEql(self.env_hash, env_hash)) {
             const segment = if (self.segment) |value| try allocator.dupe(u8, value) else null;
             self.mutex.unlock();
             return .{ .segment = segment };
@@ -54,24 +55,29 @@ pub const Cache = struct {
             self.clear(allocator);
             self.valid = true;
             self.cwd = try allocator.dupe(u8, cwd_path);
+            self.env_hash = if (env_hash) |value| try allocator.dupe(u8, value) else null;
             return .{};
         }
 
         const worker_cwd = try allocator.dupe(u8, cwd_path);
         errdefer allocator.free(worker_cwd);
+        const worker_path_env = if (path_env) |value| try allocator.dupe(u8, value) else null;
+        errdefer if (worker_path_env) |value| allocator.free(value);
 
         self.mutex.lock();
         self.clear(allocator);
         self.cwd = try allocator.dupe(u8, cwd_path);
+        self.env_hash = if (env_hash) |value| try allocator.dupe(u8, value) else null;
         self.in_flight = true;
         self.generation += 1;
         const generation = self.generation;
         self.mutex.unlock();
 
-        const worker = std.Thread.spawn(.{}, asyncProbe, .{ self, allocator, worker_cwd, generation }) catch |err| {
+        const worker = std.Thread.spawn(.{}, asyncProbe, .{ self, allocator, worker_cwd, worker_path_env, generation }) catch |err| {
             self.mutex.lock();
             self.clear(allocator);
             self.mutex.unlock();
+            if (worker_path_env) |value| allocator.free(value);
             return err;
         };
         self.mutex.lock();
@@ -100,27 +106,31 @@ pub const Cache = struct {
 
     fn clear(self: *Cache, allocator: std.mem.Allocator) void {
         if (self.cwd) |value| allocator.free(value);
+        if (self.env_hash) |value| allocator.free(value);
         if (self.segment) |value| allocator.free(value);
         self.valid = false;
         self.in_flight = false;
         self.active_pid = null;
         self.cwd = null;
+        self.env_hash = null;
         self.segment = null;
     }
 
-    fn cancelForCwdChange(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) ?std.Thread {
+    fn cancelForCwdOrEnvChange(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8, env_hash: ?[]const u8) ?std.Thread {
         self.mutex.lock();
         defer self.mutex.unlock();
 
         if (!self.in_flight) return null;
-        if (self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path)) return null;
+        if (self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path) and optionalEql(self.env_hash, env_hash)) return null;
 
         self.generation += 1;
         if (self.active_pid) |pid| killProcessId(pid);
         self.active_pid = null;
         if (self.cwd) |value| allocator.free(value);
+        if (self.env_hash) |value| allocator.free(value);
         if (self.segment) |value| allocator.free(value);
         self.cwd = null;
+        self.env_hash = null;
         self.segment = null;
         self.valid = false;
         self.in_flight = false;
@@ -159,6 +169,13 @@ pub const Cache = struct {
     }
 };
 
+fn optionalEql(left: ?[]const u8, right: ?[]const u8) bool {
+    if (left) |left_value| {
+        return if (right) |right_value| std.mem.eql(u8, left_value, right_value) else false;
+    }
+    return right == null;
+}
+
 const Detection = struct {
     python: bool = false,
     node: bool = false,
@@ -181,9 +198,10 @@ const Versions = struct {
     }
 };
 
-fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8, generation: u64) void {
+fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8, path_env: ?[]u8, generation: u64) void {
     defer allocator.free(cwd_path);
-    const segment = probeCancellable(allocator, cache, generation, cwd_path) catch null;
+    defer if (path_env) |value| allocator.free(value);
+    const segment = probeCancellable(allocator, cache, generation, cwd_path, path_env) catch null;
 
     cache.mutex.lock();
     defer cache.mutex.unlock();
@@ -197,25 +215,25 @@ fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8, gener
     cache.in_flight = false;
 }
 
-pub fn probe(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
-    return probeCancellable(allocator, null, 0, cwd_path);
+pub fn probe(allocator: std.mem.Allocator, cwd_path: []const u8, path_env: ?[]const u8) !?[]u8 {
+    return probeCancellable(allocator, null, 0, cwd_path, path_env);
 }
 
-fn probeCancellable(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8) !?[]u8 {
+fn probeCancellable(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8, path_env: ?[]const u8) !?[]u8 {
     const detected = try detect(allocator, cwd_path);
     if (!detected.any()) return null;
 
     var versions = Versions{};
-    if (detected.python) versions.python = try commandVersion(allocator, cache, generation, cwd_path, &.{ "python3", "--version" }, .python);
+    if (detected.python) versions.python = try commandVersion(allocator, cache, generation, cwd_path, path_env, &.{ "python3", "--version" }, .python);
     defer if (versions.python) |value| allocator.free(value);
     if (cache) |value| if (value.cancelled(generation)) return null;
-    if (detected.node) versions.node = try commandVersion(allocator, cache, generation, cwd_path, &.{ "node", "--version" }, .node);
+    if (detected.node) versions.node = try commandVersion(allocator, cache, generation, cwd_path, path_env, &.{ "node", "--version" }, .node);
     defer if (versions.node) |value| allocator.free(value);
     if (cache) |value| if (value.cancelled(generation)) return null;
-    if (detected.rust) versions.rust = try commandVersion(allocator, cache, generation, cwd_path, &.{ "rustc", "--version" }, .rust);
+    if (detected.rust) versions.rust = try commandVersion(allocator, cache, generation, cwd_path, path_env, &.{ "rustc", "--version" }, .rust);
     defer if (versions.rust) |value| allocator.free(value);
     if (cache) |value| if (value.cancelled(generation)) return null;
-    if (detected.go) versions.go = try commandVersion(allocator, cache, generation, cwd_path, &.{ "go", "version" }, .go);
+    if (detected.go) versions.go = try commandVersion(allocator, cache, generation, cwd_path, path_env, &.{ "go", "version" }, .go);
     defer if (versions.go) |value| allocator.free(value);
 
     if (!versions.any()) return null;
@@ -269,8 +287,8 @@ const VersionKind = enum {
     go,
 };
 
-fn commandVersion(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8, argv: []const []const u8, kind: VersionKind) !?[]u8 {
-    const result = runCommand(allocator, cache, generation, cwd_path, argv, 4096) catch return null;
+fn commandVersion(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8, path_env: ?[]const u8, argv: []const []const u8, kind: VersionKind) !?[]u8 {
+    const result = runCommand(allocator, cache, generation, cwd_path, path_env, argv, 4096) catch return null;
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
     if (!exitedZero(result.term)) return null;
@@ -288,15 +306,34 @@ fn commandVersion(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64,
     };
 }
 
-fn runCommand(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8, argv: []const []const u8, max_output_bytes: usize) !std.process.Child.RunResult {
+fn runCommand(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8, path_env: ?[]const u8, argv: []const []const u8, max_output_bytes: usize) !std.process.Child.RunResult {
     if (cache) |value| if (value.cancelled(generation)) return error.Cancelled;
 
-    var child = std.process.Child.init(argv, allocator);
+    const resolved_arg0 = if (path_env) |value| try resolveArg0InPathAlloc(allocator, value, argv[0]) else null;
+    defer if (resolved_arg0) |value| allocator.free(value);
+    const child_argv = if (resolved_arg0) |value| argv: {
+        const copied = try allocator.alloc([]const u8, argv.len);
+        copied[0] = value;
+        @memcpy(copied[1..], argv[1..]);
+        break :argv copied;
+    } else argv;
+    defer if (resolved_arg0 != null) allocator.free(child_argv);
+
+    var child = std.process.Child.init(child_argv, allocator);
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
     child.cwd = cwd_path;
-    child.expand_arg0 = .expand;
+    child.expand_arg0 = if (resolved_arg0 == null) .expand else .no_expand;
+    var env_map_storage: std.process.EnvMap = undefined;
+    var has_env_map = false;
+    defer if (has_env_map) env_map_storage.deinit();
+    if (path_env) |value| {
+        env_map_storage = try std.process.getEnvMap(allocator);
+        has_env_map = true;
+        try env_map_storage.put("PATH", value);
+        child.env_map = &env_map_storage;
+    }
 
     var stdout: std.ArrayList(u8) = .empty;
     defer stdout.deinit(allocator);
@@ -317,6 +354,21 @@ fn runCommand(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd
         .stderr = try stderr.toOwnedSlice(allocator),
         .term = try child.wait(),
     };
+}
+
+fn resolveArg0InPathAlloc(allocator: std.mem.Allocator, path_env: []const u8, arg0: []const u8) !?[]u8 {
+    if (std.mem.indexOfScalar(u8, arg0, '/') != null) return null;
+    var paths = std.mem.splitScalar(u8, path_env, ':');
+    while (paths.next()) |dir| {
+        if (dir.len == 0) continue;
+        const candidate = try std.fs.path.join(allocator, &.{ dir, arg0 });
+        std.fs.cwd().access(candidate, .{}) catch {
+            allocator.free(candidate);
+            continue;
+        };
+        return candidate;
+    }
+    return null;
 }
 
 fn killProcessId(pid: std.process.Child.Id) void {
@@ -413,6 +465,40 @@ test "formats version segment" {
     try std.testing.expectEqualStrings("lang:py:3.11.0,node:v20.0.0,rust:1.75.0,go:1.22.0", rendered);
 }
 
+test "probe uses request path env for language commands" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-lang-path-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    const bin_path = try std.fmt.allocPrint(allocator, "{s}/bin", .{dir_path});
+    defer allocator.free(bin_path);
+    const repo_path = try std.fmt.allocPrint(allocator, "{s}/repo", .{dir_path});
+    defer allocator.free(repo_path);
+    try std.fs.cwd().makePath(bin_path);
+    try std.fs.cwd().makePath(repo_path);
+
+    const marker = try std.fmt.allocPrint(allocator, "{s}/pyproject.toml", .{repo_path});
+    defer allocator.free(marker);
+    {
+        var file = try std.fs.createFileAbsolute(marker, .{});
+        defer file.close();
+    }
+    const python_path = try std.fmt.allocPrint(allocator, "{s}/python3", .{bin_path});
+    defer allocator.free(python_path);
+    {
+        var file = try std.fs.createFileAbsolute(python_path, .{ .mode = 0o755 });
+        defer file.close();
+        try file.writeAll("#!/bin/sh\necho Python 9.9.9\n");
+        try file.chmod(0o755);
+    }
+
+    const rendered = (try probe(allocator, repo_path, bin_path)).?;
+    defer allocator.free(rendered);
+    try std.testing.expectEqualStrings("lang:py:9.9.9", rendered);
+}
+
 test "async render hides non project cwd without pending" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-lang-{x}", .{std.crypto.random.int(u64)});
@@ -422,14 +508,38 @@ test "async render hides non project cwd without pending" {
 
     var cache = Cache{};
     defer cache.deinit(allocator);
-    var rendered = try cache.renderAsync(allocator, dir_path);
+    var rendered = try cache.renderAsync(allocator, dir_path, null, null);
     defer rendered.deinit(allocator);
     try std.testing.expect(!rendered.pending);
     try std.testing.expect(rendered.segment == null);
 }
 
+test "async cache invalidates when env hash changes" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-lang-env-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    var cache = Cache{
+        .valid = true,
+        .cwd = try allocator.dupe(u8, dir_path),
+        .env_hash = try allocator.dupe(u8, "outer"),
+        .segment = try allocator.dupe(u8, "lang:py:3.10.0"),
+    };
+    defer cache.deinit(allocator);
+
+    var rendered = try cache.renderAsync(allocator, dir_path, "inner", null);
+    defer rendered.deinit(allocator);
+    try std.testing.expect(!rendered.pending);
+    try std.testing.expect(rendered.segment == null);
+    try std.testing.expect(cache.valid);
+    try std.testing.expectEqualStrings("inner", cache.env_hash.?);
+    try std.testing.expect(cache.segment == null);
+}
+
 fn runSleepForCancelTest(cache: *Cache, allocator: std.mem.Allocator, term_out: *?std.process.Child.Term) void {
-    const result = runCommand(allocator, cache, 1, "/tmp", &.{ "/bin/sleep", "10" }, 4096) catch return;
+    const result = runCommand(allocator, cache, 1, "/tmp", null, &.{ "/bin/sleep", "10" }, 4096) catch return;
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
     term_out.* = result.term;
@@ -459,7 +569,7 @@ test "cancels active language child when cwd changes" {
     var term: ?std.process.Child.Term = null;
     const thread = try std.Thread.spawn(.{}, runSleepForCancelTest, .{ &cache, allocator, &term });
     try waitForActivePid(&cache);
-    _ = cache.cancelForCwdChange(allocator, "/new");
+    _ = cache.cancelForCwdOrEnvChange(allocator, "/new", null);
     thread.join();
 
     try std.testing.expect(term != null);
@@ -483,17 +593,17 @@ test "async render fills python marker when python3 exists" {
     var file = try std.fs.createFileAbsolute(marker, .{});
     file.close();
 
-    const python = try commandVersion(allocator, null, 0, dir_path, &.{ "python3", "--version" }, .python);
+    const python = try commandVersion(allocator, null, 0, dir_path, null, &.{ "python3", "--version" }, .python);
     if (python) |value| allocator.free(value) else return;
 
     var cache = Cache{};
     defer cache.deinit(allocator);
-    var first = try cache.renderAsync(allocator, dir_path);
+    var first = try cache.renderAsync(allocator, dir_path, null, null);
     defer first.deinit(allocator);
     try std.testing.expect(first.pending);
 
     for (0..100) |_| {
-        var rendered = try cache.renderAsync(allocator, dir_path);
+        var rendered = try cache.renderAsync(allocator, dir_path, null, null);
         defer rendered.deinit(allocator);
         if (rendered.segment) |segment| {
             try std.testing.expect(std.mem.startsWith(u8, segment, "lang:py:"));

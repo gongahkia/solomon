@@ -853,6 +853,9 @@ pub fn build(b: *std.Build) void {
     const plugin_reload_stress = b.addSystemCommand(&.{ "bash", "test/integration/plugin_reload_stress.sh" });
     plugin_reload_stress.step.dependOn(&debug_install.step);
     plugin_reload_stress.step.dependOn(&debug_daemon_install.step);
+    const nix_shell_language_version = b.addSystemCommand(&.{ "bash", "test/integration/nix_shell_language_version.sh" });
+    nix_shell_language_version.step.dependOn(&debug_install.step);
+    nix_shell_language_version.step.dependOn(&debug_daemon_install.step);
     const migration_snapshot_gate = b.addSystemCommand(&.{ "bash", "test/integration/migration_snapshot_gate.sh" });
     migration_snapshot_gate.step.dependOn(&debug_install.step);
     const prompt_snapshot = b.addSystemCommand(&.{ "bash", "test/integration/prompt_snapshot.sh" });
@@ -942,6 +945,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&pure_import_smoke.step);
     test_step.dependOn(&plugin_capability_traversal.step);
     test_step.dependOn(&plugin_reload_stress.step);
+    test_step.dependOn(&nix_shell_language_version.step);
     test_step.dependOn(&migration_snapshot_gate.step);
     test_step.dependOn(&prompt_snapshot.step);
     test_step.dependOn(&editor_bridge_integration.step);

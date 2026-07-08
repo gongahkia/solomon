@@ -201,6 +201,7 @@ pub const LanguageVersionsOptions = struct {
     node: bool = true,
     rust: bool = true,
     go: bool = true,
+    path_hash_invalidate: bool = false,
 };
 
 pub const ExitStatusOptions = struct {
@@ -286,6 +287,7 @@ const Seen = struct {
     git_branch_show_dirty: bool = false,
     git_branch_cache_ttl_ms: bool = false,
     language_versions_detect: bool = false,
+    language_versions_path_hash_invalidate: bool = false,
     exit_status_show_zero: bool = false,
     jobs_show_zero: bool = false,
     cmd_duration_threshold_ms: bool = false,
@@ -497,9 +499,17 @@ const Parser = struct {
     }
 
     fn parseLanguageVersionsKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
-        if (!std.mem.eql(u8, key.text, "detect")) return self.fail(line_no, key.column, "unknown key");
-        try self.markUnseen(&self.seen.language_versions_detect, line_no, key.column);
-        self.modules.language_versions = try self.parseLanguageDetectArray(value, line_no);
+        if (std.mem.eql(u8, key.text, "detect")) {
+            try self.markUnseen(&self.seen.language_versions_detect, line_no, key.column);
+            const path_hash_invalidate = self.modules.language_versions.path_hash_invalidate;
+            self.modules.language_versions = try self.parseLanguageDetectArray(value, line_no);
+            self.modules.language_versions.path_hash_invalidate = path_hash_invalidate;
+        } else if (std.mem.eql(u8, key.text, "path_hash_invalidate")) {
+            try self.markUnseen(&self.seen.language_versions_path_hash_invalidate, line_no, key.column);
+            self.modules.language_versions.path_hash_invalidate = try self.parseBool(value, line_no);
+        } else {
+            return self.fail(line_no, key.column, "unknown key");
+        }
     }
 
     fn parseExitStatusKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
@@ -989,6 +999,7 @@ test "parses per-module options" {
         \\
         \\[modules.language_versions]
         \\detect = ["python", "go"]
+        \\path_hash_invalidate = true
         \\
         \\[modules.cmd_duration]
         \\threshold_ms = 42
@@ -1041,6 +1052,7 @@ test "parses per-module options" {
     try std.testing.expect(!config.modules.language_versions.node);
     try std.testing.expect(!config.modules.language_versions.rust);
     try std.testing.expect(config.modules.language_versions.go);
+    try std.testing.expect(config.modules.language_versions.path_hash_invalidate);
     try std.testing.expectEqual(@as(u64, 42), config.modules.cmd_duration.threshold_ms);
     try std.testing.expectEqual(UserHostMode.always, config.modules.user_host.mode);
     try std.testing.expect(!config.modules.cloud_ctx.aws);

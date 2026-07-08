@@ -122,6 +122,8 @@
         "glyph_caps": { "$ref": "#/$defs/glyphCaps" },
         "user_id": { "type": "integer", "minimum": 0 },
         "session": { "type": "string" },
+        "env_hash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "path_env": { "type": ["string", "null"] },
         "modules": {
           "type": "array",
           "items": { "type": "string" }
@@ -159,6 +161,8 @@
         "glyph_caps": { "$ref": "#/$defs/glyphCaps" },
         "user_id": { "type": "integer", "minimum": 0 },
         "session": { "type": "string" },
+        "env_hash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "path_env": { "type": ["string", "null"] },
         "modules": {
           "type": "array",
           "items": { "type": "string" }

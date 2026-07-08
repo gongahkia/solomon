@@ -89,6 +89,8 @@ pub const RenderInput = struct {
     ssh: ?[]const u8,
     user: []const u8,
     host: []const u8,
+    env_hash: ?[]const u8 = null,
+    path_env: ?[]const u8 = null,
     cwd_options: cwd_module.Options = .{},
     aws_profile: ?[]const u8 = null,
     aws_region: ?[]const u8 = null,
@@ -301,7 +303,7 @@ fn skipOsc(value: []const u8, start: usize) usize {
 fn dispatchAsync(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId, input: RenderInput) !AsyncRender {
     return switch (module_id) {
         .git_branch => fromGit(try caches.git_branch.renderAsync(allocator, input.cwd)),
-        .language_versions => fromLanguageVersions(try caches.language_versions.renderAsync(allocator, input.cwd)),
+        .language_versions => fromLanguageVersions(try caches.language_versions.renderAsync(allocator, input.cwd, input.env_hash, input.path_env)),
         else => .{ .pending = true },
     };
 }
@@ -318,7 +320,7 @@ fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId,
     return switch (module_id) {
         .cwd => try cwd_module.render(allocator, input.cwd, input.home, input.cwd_options),
         .git_branch => try caches.git_branch.render(allocator, input.cwd),
-        .language_versions => try language_versions_module.probe(allocator, input.cwd),
+        .language_versions => try language_versions_module.probe(allocator, input.cwd, input.path_env),
         .time => try time_module.render(allocator, input.time, input.timestamp),
         .exit_status => try exit_status_module.render(allocator, input.exit),
         .jobs => try jobs_module.render(allocator, input.jobs),

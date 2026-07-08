@@ -89,6 +89,8 @@ pub const Request = struct {
     user_id: ?u32 = null,
     session: ?[]const u8 = null,
     request_id: []const u8 = "",
+    env_hash: ?[]const u8 = null,
+    path_env: ?[]const u8 = null,
     modules: []const []const u8 = &.{},
     right_modules: []const []const u8 = &.{},
     tmux_pane: ?[]const u8 = null,
@@ -243,6 +245,8 @@ test "request type carries v1 render inputs" {
         .user_id = 501,
         .session = "session-1",
         .request_id = "request-1",
+        .env_hash = "abc123",
+        .path_env = "/nix/store/bin:/usr/bin",
         .modules = &.{ "cwd", "cdhint" },
         .right_modules = &.{"time"},
         .tmux_pane = "%1",
@@ -267,6 +271,8 @@ test "request type carries v1 render inputs" {
     try std.testing.expectEqual(@as(u32, 501), request.user_id.?);
     try std.testing.expectEqualStrings("session-1", request.session.?);
     try std.testing.expectEqualStrings("request-1", request.request_id);
+    try std.testing.expectEqualStrings("abc123", request.env_hash.?);
+    try std.testing.expectEqualStrings("/nix/store/bin:/usr/bin", request.path_env.?);
     try std.testing.expectEqualStrings("cwd", request.modules[0]);
     try std.testing.expectEqualStrings("cdhint", request.modules[1]);
     try std.testing.expectEqualStrings("time", request.right_modules[0]);

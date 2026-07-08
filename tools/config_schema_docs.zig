@@ -125,6 +125,7 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
     }, "");
     try writeOptionsSection(allocator, &out, "language_versions", &.{
         .{ .key = "detect", .type = "array of strings", .default_value = "`[\"python\", \"node\", \"rust\", \"go\"]`", .constraints = "Schema v1 recognizes these four values." },
+        .{ .key = "path_hash_invalidate", .type = "bool", .default_value = "`false`", .constraints = "Opt-in. Include a SHA-256 hash of `$PATH` plus the active PATH in render requests so the daemon can invalidate and probe the correct toolchain." },
     }, "");
     try writeOptionsSection(allocator, &out, "exit_status", &.{
         .{ .key = "show_zero", .type = "bool", .default_value = "`false`", .constraints = "Show `exit:0` when true." },

@@ -4037,6 +4037,7 @@ const PromptModuleOptions = struct {
     cloud_ctx: shisa_config.CloudCtxOptions,
     cdhint: shisa_config.CdhintOptions,
     tmux_pane: shisa_config.TmuxPaneOptions,
+    language_versions: shisa_config.LanguageVersionsOptions,
     risk_tier: shisa_config.RiskTierOptions,
     sso_expiry: shisa_config.SsoExpiryOptions,
 
@@ -4091,12 +4092,49 @@ fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config: Pro
     defer allocator.free(request_id);
     const rtl = promptRtl(config, module_options);
     const rtl_reverse = promptRtlReverse(config, module_options);
+    const env_json = if (module_options.language_versions.path_hash_invalidate)
+        try pathEnvJsonAlloc(allocator)
+    else
+        try allocator.dupe(u8, "");
+    defer allocator.free(env_json);
 
+    const head = try std.fmt.allocPrint(
+        allocator,
+        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\"{s},",
+        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), std.posix.getuid(), request_id, env_json },
+    );
+    defer allocator.free(head);
+    const tail = try std.fmt.allocPrint(
+        allocator,
+        "\"modules\":[{s}],\"right_modules\":[{s}],\"tmux_pane\":\"{s}\",\"rtl\":{},\"rtl_reverse\":{},\"cwd_options\":{{\"truncate_to\":{d},\"home_tilde\":{},\"max_width\":{d}}},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"cdhint\":{{\"enabled\":{}}},\"tmux_pane_options\":{{\"enabled\":{}}},\"risk_tier\":{{\"unknown_bg\":\"{s}\",\"dev_bg\":\"{s}\",\"staging_bg\":\"{s}\",\"prod_bg\":\"{s}\"}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
+        .{ modules_json, right_modules_json, escaped_tmux_pane, rtl, rtl_reverse, module_options.cwd.truncate_to, module_options.cwd.home_tilde, module_options.cwd.max_width, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, module_options.cdhint.enabled, module_options.tmux_pane.enabled, risk_tier_module.colorSlotName(module_options.risk_tier.unknown_bg), risk_tier_module.colorSlotName(module_options.risk_tier.dev_bg), risk_tier_module.colorSlotName(module_options.risk_tier.staging_bg), risk_tier_module.colorSlotName(module_options.risk_tier.prod_bg), module_options.sso_expiry.warning_minutes },
+    );
+    defer allocator.free(tail);
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\",\"modules\":[{s}],\"right_modules\":[{s}],\"tmux_pane\":\"{s}\",\"rtl\":{},\"rtl_reverse\":{},\"cwd_options\":{{\"truncate_to\":{d},\"home_tilde\":{},\"max_width\":{d}}},\"cloud_ctx\":{{\"aws\":{},\"gcp\":{},\"azure\":{},\"kubernetes\":{}}},\"cdhint\":{{\"enabled\":{}}},\"tmux_pane_options\":{{\"enabled\":{}}},\"risk_tier\":{{\"unknown_bg\":\"{s}\",\"dev_bg\":\"{s}\",\"staging_bg\":\"{s}\",\"prod_bg\":\"{s}\"}},\"sso_expiry\":{{\"warning_minutes\":{d}}}}}",
-        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), std.posix.getuid(), request_id, modules_json, right_modules_json, escaped_tmux_pane, rtl, rtl_reverse, module_options.cwd.truncate_to, module_options.cwd.home_tilde, module_options.cwd.max_width, module_options.cloud_ctx.aws, module_options.cloud_ctx.gcp, module_options.cloud_ctx.azure, module_options.cloud_ctx.kubernetes, module_options.cdhint.enabled, module_options.tmux_pane.enabled, risk_tier_module.colorSlotName(module_options.risk_tier.unknown_bg), risk_tier_module.colorSlotName(module_options.risk_tier.dev_bg), risk_tier_module.colorSlotName(module_options.risk_tier.staging_bg), risk_tier_module.colorSlotName(module_options.risk_tier.prod_bg), module_options.sso_expiry.warning_minutes },
+        "{s}{s}",
+        .{ head, tail },
     );
+}
+
+fn pathEnvJsonAlloc(allocator: std.mem.Allocator) ![]u8 {
+    const path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => return allocator.dupe(u8, ""),
+        else => return err,
+    };
+    defer allocator.free(path);
+    const hash = try sha256HexAlloc(allocator, path);
+    defer allocator.free(hash);
+    const escaped_path = try daemon_json.escapeAlloc(allocator, path);
+    defer allocator.free(escaped_path);
+    return std.fmt.allocPrint(allocator, ",\"env_hash\":\"{s}\",\"path_env\":\"{s}\"", .{ hash, escaped_path });
+}
+
+fn sha256HexAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
+    var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(value, &digest, .{});
+    const hex = std.fmt.bytesToHex(digest, .lower);
+    return allocator.dupe(u8, hex[0..]);
 }
 
 fn promptRtl(config: PromptConfig, module_options: PromptModuleOptions) bool {
@@ -4136,6 +4174,7 @@ fn defaultPromptModuleOptions() PromptModuleOptions {
         .cloud_ctx = .{},
         .cdhint = .{},
         .tmux_pane = .{},
+        .language_versions = .{},
         .risk_tier = .{},
         .sso_expiry = .{},
     };
@@ -4174,6 +4213,7 @@ fn promptModuleOptions(allocator: std.mem.Allocator) !PromptModuleOptions {
         .cloud_ctx = parsed.modules.cloud_ctx,
         .cdhint = parsed.modules.cdhint,
         .tmux_pane = parsed.modules.tmux_pane,
+        .language_versions = parsed.modules.language_versions,
         .risk_tier = parsed.modules.risk_tier,
         .sso_expiry = parsed.modules.sso_expiry,
     };
@@ -4290,6 +4330,34 @@ test "prompt payload carries right modules" {
     const payload = try buildPromptPayloadWithModuleOptions(std.testing.allocator, .{}, "/tmp", options);
     defer std.testing.allocator.free(payload);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"right_modules\":[\"time\"]") != null);
+}
+
+test "prompt payload carries env hash and path only when enabled" {
+    const digest = try sha256HexAlloc(std.testing.allocator, "");
+    defer std.testing.allocator.free(digest);
+    try std.testing.expectEqualStrings("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", digest);
+
+    const disabled = defaultPromptModuleOptions();
+    const disabled_payload = try buildPromptPayloadWithModuleOptions(std.testing.allocator, .{}, "/tmp", disabled);
+    defer std.testing.allocator.free(disabled_payload);
+    try std.testing.expect(std.mem.indexOf(u8, disabled_payload, "\"env_hash\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, disabled_payload, "\"path_env\"") == null);
+
+    const path = std.process.getEnvVarOwned(std.testing.allocator, "PATH") catch return error.SkipZigTest;
+    std.testing.allocator.free(path);
+    var enabled = defaultPromptModuleOptions();
+    enabled.language_versions.path_hash_invalidate = true;
+    const enabled_payload = try buildPromptPayloadWithModuleOptions(std.testing.allocator, .{}, "/tmp", enabled);
+    defer std.testing.allocator.free(enabled_payload);
+    const marker = "\"env_hash\":\"";
+    const start = std.mem.indexOf(u8, enabled_payload, marker) orelse return error.MissingEnvHash;
+    const hash_start = start + marker.len;
+    try std.testing.expect(enabled_payload.len >= hash_start + 65);
+    for (enabled_payload[hash_start .. hash_start + 64]) |byte| {
+        try std.testing.expect(std.ascii.isDigit(byte) or (byte >= 'a' and byte <= 'f'));
+    }
+    try std.testing.expectEqual(@as(u8, '"'), enabled_payload[hash_start + 64]);
+    try std.testing.expect(std.mem.indexOf(u8, enabled_payload, "\"path_env\":\"") != null);
 }
 
 test "prompt args parse auto spawn" {

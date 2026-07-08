@@ -54,6 +54,8 @@ const RenderRequest = struct {
     cols: u16 = 80,
     rows: u16 = 24,
     request_id: []const u8 = "",
+    env_hash: ?[]const u8 = null,
+    path_env: ?[]const u8 = null,
     modules: []const []const u8 = &.{},
     right_modules: []const []const u8 = &.{},
     tmux_pane: ?[]const u8 = null,
@@ -409,7 +411,7 @@ pub const Server = struct {
         for (dirs) |dir| {
             var git = self.git_branch_cache.renderAsync(allocator, dir) catch continue;
             git.deinit(allocator);
-            var lang = self.language_versions_cache.renderAsync(allocator, dir) catch continue;
+            var lang = self.language_versions_cache.renderAsync(allocator, dir, null, null) catch continue;
             lang.deinit(allocator);
         }
     }
@@ -566,6 +568,8 @@ pub const Server = struct {
             .ssh = ssh,
             .user = user,
             .host = host,
+            .env_hash = parsed.value.env_hash,
+            .path_env = parsed.value.path_env,
             .cwd_options = parsed.value.cwd_options,
             .aws_profile = aws_profile,
             .aws_region = aws_region,
@@ -1241,6 +1245,7 @@ fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderReques
     try appendKeyOptional(allocator, &out, "ssh", context.ssh);
     try appendKeyString(allocator, &out, "user", context.user);
     try appendKeyString(allocator, &out, "host", context.host);
+    try appendKeyOptional(allocator, &out, "env_hash", request.env_hash);
     try appendKeyOptional(allocator, &out, "aws_profile", context.aws_profile);
     try appendKeyOptional(allocator, &out, "aws_region", context.aws_region);
     try appendKeyOptional(allocator, &out, "aws_default_region", context.aws_default_region);
@@ -2174,6 +2179,22 @@ test "render prompt cache key ignores request id and includes tuple fields" {
         .host = "host",
     });
     defer allocator.free(different_tmux);
+    const different_env = try renderPromptCacheKeyAlloc(allocator, .{
+        .cwd = "/tmp/project",
+        .exit = 0,
+        .jobs = 1,
+        .duration_ms = 10,
+        .shell = "zsh",
+        .cols = 80,
+        .rows = 24,
+        .request_id = "first",
+        .env_hash = "abc123",
+    }, .{
+        .timestamp_minute = 123,
+        .user = "me",
+        .host = "host",
+    });
+    defer allocator.free(different_env);
 
     try std.testing.expectEqualStrings(first, second);
     try std.testing.expect(!std.mem.eql(u8, first, different_exit));
@@ -2181,6 +2202,7 @@ test "render prompt cache key ignores request id and includes tuple fields" {
     try std.testing.expect(!std.mem.eql(u8, first, different_modules));
     try std.testing.expect(!std.mem.eql(u8, first, different_cdhint));
     try std.testing.expect(!std.mem.eql(u8, first, different_tmux));
+    try std.testing.expect(!std.mem.eql(u8, first, different_env));
 }
 
 test "prompt cache hit rate uses ppm" {

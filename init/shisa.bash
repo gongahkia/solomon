@@ -4,6 +4,7 @@
 __SHISA_BASH_INIT=1
 SHISA_BIN=${SHISA_BIN:-shisa}
 SHISA_SOCKET=${SHISA_SOCKET:-}
+export SHISA_HOOK_ACTIVE=1
 
 shisa_detect_rtl_locale() {
   local locale=${LC_ALL:-${LC_CTYPE:-${LANG:-}}}

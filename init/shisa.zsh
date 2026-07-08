@@ -18,6 +18,7 @@ shisa_zsh_version_at_least_5 || return 0
 typeset -g __SHISA_ZSH_INIT=1
 typeset -g SHISA_BIN=${SHISA_BIN:-shisa}
 typeset -g SHISA_SOCKET=${SHISA_SOCKET:-}
+export SHISA_HOOK_ACTIVE=1
 
 shisa_config_dir() {
   emulate -L zsh

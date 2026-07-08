@@ -5,6 +5,7 @@ if (-not $env:SHISA_BIN) { $env:SHISA_BIN = "shisa" }
 if (-not $env:SHISA_SOCKET) { $env:SHISA_SOCKET = "" }
 if (-not $env:SHISA_INSTANT) { $env:SHISA_INSTANT = "0" }
 if (-not $env:SHISA_A11Y) { $env:SHISA_A11Y = "0" }
+$env:SHISA_HOOK_ACTIVE = "1"
 
 function global:Get-ShisaRtlLocale {
     $locale = if ($env:LC_ALL) { $env:LC_ALL } elseif ($env:LC_CTYPE) { $env:LC_CTYPE } elseif ($env:LANG) { $env:LANG } else { "" }

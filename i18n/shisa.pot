@@ -108,7 +108,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/cli/doctor.zig:149
+#: src/cli/doctor.zig:267
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -117,7 +117,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: src/cli/doctor.zig:320
+#: src/cli/doctor.zig:438
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""

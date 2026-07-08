@@ -4,6 +4,9 @@
 
 - daemon socket path and health
 - config directory status
+- config directory permissions
+- shell hook install status
+- Nerd Font detection status
 - plugin directory status
 - Lua runtime availability
 - fsnotify backend
@@ -15,6 +18,28 @@ Use a non-default socket:
 ```sh
 shisa doctor --socket /tmp/shisa.sock
 ```
+
+Apply available fixes interactively:
+
+```sh
+shisa doctor --fix
+```
+
+Apply all fixes without prompting:
+
+```sh
+shisa doctor --fix --yes
+```
+
+Fixable issues are annotated with `[fix available]`. Current fixes:
+
+| Issue | Fix |
+| --- | --- |
+| Missing shell hook | Runs `shisa init --write-hook`, which appends an idempotent marker block to the current shell startup file. |
+| Stale socket file | Removes the socket only after `lsof`/`fuser` reports no owner. |
+| Daemon not running | Runs `shisad --daemonize`. |
+| Config dir permissions | Runs `chmod 0700 <config_dir>`. |
+| Nerd Font missing | Prints an install command only; it does not install packages. On macOS the command is `brew install --cask font-hack-nerd-font`. |
 
 Statuses:
 

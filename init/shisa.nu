@@ -4,6 +4,7 @@ if not ("__SHISA_NU_INIT" in $env) {
     if not ("SHISA_SOCKET" in $env) { $env.SHISA_SOCKET = "" }
     if not ("SHISA_INSTANT" in $env) { $env.SHISA_INSTANT = "0" }
     if not ("SHISA_A11Y" in $env) { $env.SHISA_A11Y = "0" }
+    $env.SHISA_HOOK_ACTIVE = "1"
 
     def shisa-detect-rtl-locale [] {
         let locale = if (($env.LC_ALL? | default "") != "") {

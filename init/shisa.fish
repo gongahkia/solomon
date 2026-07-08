@@ -10,6 +10,7 @@ set -g __SHISA_FISH_INIT 1
 set -q SHISA_BIN; or set -g SHISA_BIN shisa
 set -q SHISA_SOCKET; or set -g SHISA_SOCKET ""
 set -q SHISA_INSTANT; or set -g SHISA_INSTANT 1
+set -gx SHISA_HOOK_ACTIVE 1
 
 function shisa_config_dir
     if set -q XDG_CONFIG_HOME; and test -n "$XDG_CONFIG_HOME"

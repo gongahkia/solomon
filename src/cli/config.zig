@@ -16,6 +16,8 @@ pub const help_text =
 pub const InitConfig = struct {
     /// writes the accessibility-first default config when true.
     a11y: bool = false,
+    /// appends an idempotent shell hook block to the current shell startup file.
+    write_hook: bool = false,
     /// optional shell.env preferences to write next to shisa.toml.
     shell_preferences: ?ShellPreferences = null,
 };
@@ -54,7 +56,8 @@ pub fn initCmd(allocator: std.mem.Allocator, args: []const []const u8) !void {
         wrote_config = true;
     } else |err| switch (err) {
         error.PathAlreadyExists => {
-            if (config.shell_preferences == null or config.a11y) return err;
+            if (config.shell_preferences == null and !config.write_hook) return err;
+            if (config.a11y) return err;
         },
         else => return err,
     }
@@ -74,10 +77,24 @@ pub fn initCmd(allocator: std.mem.Allocator, args: []const []const u8) !void {
         wrote_shell_preferences = true;
     }
 
+    var wrote_hook = false;
+    var hook_path_for_message: ?[]u8 = null;
+    defer if (hook_path_for_message) |hook_path| allocator.free(hook_path);
+    if (config.write_hook) {
+        hook_path_for_message = try writeShellHook(allocator);
+        wrote_hook = true;
+    }
+
     const message = if (wrote_config and wrote_shell_preferences)
         try std.fmt.allocPrint(allocator, "wrote {s}\nwrote {s}\n", .{ path, shell_path_for_message.? })
+    else if (wrote_config and wrote_hook)
+        try std.fmt.allocPrint(allocator, "wrote {s}\nwrote {s}\n", .{ path, hook_path_for_message.? })
+    else if (wrote_shell_preferences and wrote_hook)
+        try std.fmt.allocPrint(allocator, "wrote {s}\nwrote {s}\n", .{ shell_path_for_message.?, hook_path_for_message.? })
     else if (wrote_shell_preferences)
         try std.fmt.allocPrint(allocator, "wrote {s}\n", .{shell_path_for_message.?})
+    else if (wrote_hook)
+        try std.fmt.allocPrint(allocator, "wrote {s}\n", .{hook_path_for_message.?})
     else
         try std.fmt.allocPrint(allocator, "wrote {s}\n", .{path});
     defer allocator.free(message);
@@ -93,6 +110,8 @@ fn parseInitArgs(args: []const []const u8) !InitConfig {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "--a11y")) {
             config.a11y = true;
+        } else if (std.mem.eql(u8, arg, "--write-hook")) {
+            config.write_hook = true;
         } else if (std.mem.eql(u8, arg, "--cmd-complete-bell")) {
             prefs.cmd_complete_bell = true;
             seen_prefs = true;
@@ -122,6 +141,186 @@ fn parseInitArgs(args: []const []const u8) !InitConfig {
     }
     if (seen_prefs) config.shell_preferences = prefs;
     return config;
+}
+
+pub const shell_hook_marker_start = "# >>> shisa hook >>>";
+pub const shell_hook_marker_end = "# <<< shisa hook <<<";
+
+pub fn writeShellHook(allocator: std.mem.Allocator) ![]u8 {
+    const shell_name = try currentShellNameAlloc(allocator);
+    defer allocator.free(shell_name);
+    const target_path = try shellHookTargetPathForShellAlloc(allocator, shell_name);
+    errdefer allocator.free(target_path);
+    const shisa_bin = try std.fs.selfExePathAlloc(allocator);
+    defer allocator.free(shisa_bin);
+    const init_dir = try shisaInitDirAlloc(allocator, shisa_bin);
+    defer allocator.free(init_dir);
+    const block = try shellHookBlockAlloc(allocator, shell_name, shisa_bin, init_dir);
+    defer allocator.free(block);
+
+    if (std.fs.path.dirname(target_path)) |parent| try std.fs.cwd().makePath(parent);
+    const existing = readFileIfPresentAlloc(allocator, target_path) catch |err| switch (err) {
+        error.IsDir => return err,
+        else => return err,
+    };
+    defer allocator.free(existing);
+    if (std.mem.indexOf(u8, existing, shell_hook_marker_start) != null) return target_path;
+
+    var file = if (std.fs.path.isAbsolute(target_path))
+        try std.fs.createFileAbsolute(target_path, .{ .truncate = false, .read = true })
+    else
+        try std.fs.cwd().createFile(target_path, .{ .truncate = false, .read = true });
+    defer file.close();
+    try file.seekFromEnd(0);
+    if (existing.len != 0 and existing[existing.len - 1] != '\n') try file.writeAll("\n");
+    try file.writeAll(block);
+    return target_path;
+}
+
+pub fn shellHookTargetPathAlloc(allocator: std.mem.Allocator) ![]u8 {
+    const shell_name = try currentShellNameAlloc(allocator);
+    defer allocator.free(shell_name);
+    return shellHookTargetPathForShellAlloc(allocator, shell_name);
+}
+
+pub fn shellHookInstalled(allocator: std.mem.Allocator) bool {
+    const active = std.process.getEnvVarOwned(allocator, "SHISA_HOOK_ACTIVE") catch null;
+    if (active) |value| {
+        defer allocator.free(value);
+        if (value.len != 0) return true;
+    }
+    const target_path = shellHookTargetPathAlloc(allocator) catch return false;
+    defer allocator.free(target_path);
+    const source = readFileIfPresentAlloc(allocator, target_path) catch return false;
+    defer allocator.free(source);
+    return std.mem.indexOf(u8, source, shell_hook_marker_start) != null;
+}
+
+fn currentShellNameAlloc(allocator: std.mem.Allocator) ![]u8 {
+    if (@import("builtin").os.tag == .windows) return allocator.dupe(u8, "pwsh");
+    const shell_path = std.process.getEnvVarOwned(allocator, "SHELL") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => return allocator.dupe(u8, "zsh"),
+        else => return err,
+    };
+    defer allocator.free(shell_path);
+    const base = std.fs.path.basename(shell_path);
+    return allocator.dupe(u8, base);
+}
+
+fn shellHookTargetPathForShellAlloc(allocator: std.mem.Allocator, shell_name: []const u8) ![]u8 {
+    const home = try std.process.getEnvVarOwned(allocator, "HOME");
+    defer allocator.free(home);
+    if (std.mem.eql(u8, shell_name, "zsh")) return std.fmt.allocPrint(allocator, "{s}/.zshrc", .{home});
+    if (std.mem.eql(u8, shell_name, "bash")) return std.fmt.allocPrint(allocator, "{s}/.bashrc", .{home});
+    if (std.mem.eql(u8, shell_name, "fish")) {
+        const config_home = try xdgConfigHomeAlloc(allocator, home);
+        defer allocator.free(config_home);
+        return std.fmt.allocPrint(allocator, "{s}/fish/config.fish", .{config_home});
+    }
+    if (std.mem.eql(u8, shell_name, "nu") or std.mem.eql(u8, shell_name, "nushell")) {
+        const config_home = try xdgConfigHomeAlloc(allocator, home);
+        defer allocator.free(config_home);
+        return std.fmt.allocPrint(allocator, "{s}/nushell/config.nu", .{config_home});
+    }
+    if (std.mem.eql(u8, shell_name, "pwsh") or std.mem.eql(u8, shell_name, "powershell")) {
+        const profile = std.process.getEnvVarOwned(allocator, "PROFILE") catch |err| switch (err) {
+            error.EnvironmentVariableNotFound => return std.fmt.allocPrint(allocator, "{s}/Documents/PowerShell/Microsoft.PowerShell_profile.ps1", .{home}),
+            else => return err,
+        };
+        return profile;
+    }
+    return std.fmt.allocPrint(allocator, "{s}/.profile", .{home});
+}
+
+fn xdgConfigHomeAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8 {
+    return std.process.getEnvVarOwned(allocator, "XDG_CONFIG_HOME") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => std.fmt.allocPrint(allocator, "{s}/.config", .{home}),
+        else => return err,
+    };
+}
+
+fn shisaInitDirAlloc(allocator: std.mem.Allocator, shisa_bin: []const u8) ![]u8 {
+    if (std.process.getEnvVarOwned(allocator, "SHISA_INIT_DIR")) |dir| {
+        if (pathExists(dir)) return dir;
+        allocator.free(dir);
+    } else |_| {}
+    if (pathExists("init")) return try std.fs.cwd().realpathAlloc(allocator, "init");
+    const bin_dir = std.fs.path.dirname(shisa_bin) orelse return error.MissingInitDir;
+    const prefix_dir = std.fs.path.dirname(bin_dir) orelse return error.MissingInitDir;
+    const share_candidate = try std.fs.path.join(allocator, &.{ prefix_dir, "share", "shisa", "init" });
+    if (pathExists(share_candidate)) return share_candidate;
+    allocator.free(share_candidate);
+    const zig_out_dir = std.fs.path.dirname(bin_dir) orelse return error.MissingInitDir;
+    const repo_dir = std.fs.path.dirname(zig_out_dir) orelse return error.MissingInitDir;
+    const candidate = try std.fs.path.join(allocator, &.{ repo_dir, "init" });
+    errdefer allocator.free(candidate);
+    if (!pathExists(candidate)) return error.MissingInitDir;
+    return candidate;
+}
+
+fn pathExists(path: []const u8) bool {
+    std.fs.cwd().access(path, .{}) catch return false;
+    return true;
+}
+
+fn shellHookBlockAlloc(allocator: std.mem.Allocator, shell_name: []const u8, shisa_bin: []const u8, init_dir: []const u8) ![]u8 {
+    const quoted_bin = try cli_util.shellSingleQuoteAlloc(allocator, shisa_bin);
+    defer allocator.free(quoted_bin);
+    const hook_name: []const u8 = if (std.mem.eql(u8, shell_name, "fish"))
+        "shisa.fish"
+    else if (std.mem.eql(u8, shell_name, "nu") or std.mem.eql(u8, shell_name, "nushell"))
+        "shisa.nu"
+    else if (std.mem.eql(u8, shell_name, "pwsh") or std.mem.eql(u8, shell_name, "powershell"))
+        "shisa.ps1"
+    else if (std.mem.eql(u8, shell_name, "bash"))
+        "shisa.bash"
+    else
+        "shisa.zsh";
+    const hook_path = try std.fs.path.join(allocator, &.{ init_dir, hook_name });
+    defer allocator.free(hook_path);
+    const quoted_hook = try cli_util.shellSingleQuoteAlloc(allocator, hook_path);
+    defer allocator.free(quoted_hook);
+    if (std.mem.eql(u8, shell_name, "fish")) {
+        return std.fmt.allocPrint(
+            allocator,
+            "\n{s}\nset -gx SHISA_BIN {s}\nset -gx SHISA_HOOK_ACTIVE 1\nsource {s}\n{s}\n",
+            .{ shell_hook_marker_start, quoted_bin, quoted_hook, shell_hook_marker_end },
+        );
+    }
+    if (std.mem.eql(u8, shell_name, "nu") or std.mem.eql(u8, shell_name, "nushell")) {
+        return std.fmt.allocPrint(
+            allocator,
+            "\n{s}\n$env.SHISA_BIN = {s}\n$env.SHISA_HOOK_ACTIVE = \"1\"\nsource {s}\n{s}\n",
+            .{ shell_hook_marker_start, quoted_bin, quoted_hook, shell_hook_marker_end },
+        );
+    }
+    if (std.mem.eql(u8, shell_name, "pwsh") or std.mem.eql(u8, shell_name, "powershell")) {
+        return std.fmt.allocPrint(
+            allocator,
+            "\n{s}\n$env:SHISA_BIN = {s}\n$env:SHISA_HOOK_ACTIVE = \"1\"\n. {s}\n{s}\n",
+            .{ shell_hook_marker_start, quoted_bin, quoted_hook, shell_hook_marker_end },
+        );
+    }
+    return std.fmt.allocPrint(
+        allocator,
+        "\n{s}\nexport SHISA_BIN={s}\nexport SHISA_HOOK_ACTIVE=1\nsource {s}\n{s}\n",
+        .{ shell_hook_marker_start, quoted_bin, quoted_hook, shell_hook_marker_end },
+    );
+}
+
+fn readFileIfPresentAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    var file = if (std.fs.path.isAbsolute(path))
+        std.fs.openFileAbsolute(path, .{}) catch |err| switch (err) {
+            error.FileNotFound => return allocator.dupe(u8, ""),
+            else => return err,
+        }
+    else
+        std.fs.cwd().openFile(path, .{}) catch |err| switch (err) {
+            error.FileNotFound => return allocator.dupe(u8, ""),
+            else => return err,
+        };
+    defer file.close();
+    return file.readToEndAlloc(allocator, cli_util.max_config_bytes);
 }
 
 fn validCmdCompleteBellMode(mode: []const u8) bool {
@@ -406,6 +605,19 @@ test "init args render shell notification preferences" {
         source,
     );
     try std.testing.expectError(error.InvalidCmdCompleteBellMode, parseInitArgs(&.{ "--cmd-complete-bell-mode", "bad" }));
+}
+
+test "init args parse write hook" {
+    const config = try parseInitArgs(&.{"--write-hook"});
+    try std.testing.expect(config.write_hook);
+}
+
+test "shell hook block includes marker and active env" {
+    const block = try shellHookBlockAlloc(std.testing.allocator, "zsh", "/tmp/shisa", "/tmp/init");
+    defer std.testing.allocator.free(block);
+    try std.testing.expect(std.mem.indexOf(u8, block, shell_hook_marker_start) != null);
+    try std.testing.expect(std.mem.indexOf(u8, block, "SHISA_HOOK_ACTIVE=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, block, "shisa.zsh") != null);
 }
 
 test "init shell preferences quote metacharacter messages" {

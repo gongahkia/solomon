@@ -19,3 +19,4 @@ Accepted RFCs must also have a matching `docs/internals/rfc-NNNN-*.md` decision 
 | [0008](0008-daemon-lifecycle.md) | Daemon Lifecycle Across SSH/Containers/nix-shell/tmux/sudo | Accepted | daemon lifecycle |
 | [0010](0010-ai-plugin-capability.md) | Local AI Plugin Capability | Draft | AI, plugin security |
 | [0011](0011-right-prompt.md) | Right Prompt | Draft | shell integration, renderer |
+| [0012](0012-self-observability-exporter.md) | Local Self-Observability Exporter | Draft | daemon observability, security |

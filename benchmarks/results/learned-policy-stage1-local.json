@@ -1,0 +1,246 @@
+{
+  "issue": 11,
+  "stage": "stage1_offline_policy_eval",
+  "timestamp_utc": "2026-07-10T02:48:36Z",
+  "heldout_continuity": {
+    "dataset_path": "benchmarks/continuity/dataset/continuitybench-v0.json",
+    "dataset_hash": "sha256:a68d3f55a21b3ad0799f4c10e28e02a53b4cac2e39e5679df214323ad961bfaa",
+    "source_result_artifact": "benchmarks/results/continuity/shibahama.json",
+    "split": "fixed four-decision Stage 1 safety slice derived from held-out ContinuityBench task ids",
+    "task_ids": [
+      "rename-signature-0025",
+      "rename-signature-0001",
+      "contradiction-0015",
+      "evidence-quality-0008"
+    ]
+  },
+  "deterministic_baseline_config": {
+    "name": "significance-v0",
+    "baseline_promote_threshold": 2.0,
+    "baseline_demote_threshold": 0.5,
+    "promote_rule": "promote one tier when materialized significance is at least 2.0",
+    "demote_rule": "demote one tier when materialized significance is below 0.5, clamped to credence_floor",
+    "noop_rule": "noop otherwise"
+  },
+  "learned_policy_config": {
+    "name": "stage1-naive-candidate-v0",
+    "trained_model": null,
+    "training_ran": false,
+    "runtime_mutation_allowed": false,
+    "allowed_actions": [
+      "noop",
+      "promote",
+      "demote",
+      "merge_with_provenance",
+      "flag_for_review"
+    ],
+    "excluded_actions": [
+      "delete",
+      "overwrite",
+      "destructive_mutation"
+    ],
+    "selection_rule": "offline candidate trace only; no model weights and no storage mutation"
+  },
+  "evaluation_config": {
+    "min_labeled_decisions": 4,
+    "required_score_margin": 0.05,
+    "label_source": "append-only human-signal-style labels attached to the held-out trace",
+    "positive_labels": [
+      "affirm",
+      "pin"
+    ],
+    "negative_labels": [
+      "challenge",
+      "correct"
+    ]
+  },
+  "metrics": {
+    "labeled_decisions": 4,
+    "candidate_score": 0.0,
+    "baseline_score": 2.25,
+    "score_margin": -2.25,
+    "recommendation": "StopBaselineNotBeaten",
+    "rl_justified": false,
+    "invariant_violation_count": 0
+  },
+  "action_trace": [
+    {
+      "memory_id": "018fff40-0000-7000-8000-000000000001",
+      "task_id": "rename-signature-0025",
+      "candidate_action": {
+        "name": "noop"
+      },
+      "baseline_action": {
+        "name": "promote",
+        "to": "hot"
+      },
+      "human_signals": {
+        "affirm": 1,
+        "challenge": 0,
+        "correct": 0,
+        "pin": 0,
+        "unpin": 0
+      },
+      "candidate_score": 0.5,
+      "baseline_score": 1.0,
+      "invariant_violations": [],
+      "state_before": {
+        "memory_id": "018fff40-0000-7000-8000-000000000001",
+        "tier": "warm",
+        "credence": "verified_source",
+        "credence_floor": "cold",
+        "pinned": false,
+        "source_memory_ids": [
+          "018fff40-0000-7000-8000-000000000001"
+        ]
+      },
+      "state_after_candidate": {
+        "memory_id": "018fff40-0000-7000-8000-000000000001",
+        "tier": "warm",
+        "credence": "verified_source",
+        "credence_floor": "cold",
+        "pinned": false,
+        "deleted": false,
+        "overwritten": false,
+        "source_memory_ids": [
+          "018fff40-0000-7000-8000-000000000001"
+        ]
+      }
+    },
+    {
+      "memory_id": "018fff40-0000-7000-8000-000000000002",
+      "task_id": "rename-signature-0001",
+      "candidate_action": {
+        "name": "promote",
+        "to": "hot"
+      },
+      "baseline_action": {
+        "name": "noop"
+      },
+      "human_signals": {
+        "affirm": 0,
+        "challenge": 1,
+        "correct": 0,
+        "pin": 0,
+        "unpin": 0
+      },
+      "candidate_score": -1.0,
+      "baseline_score": 0.0,
+      "invariant_violations": [],
+      "state_before": {
+        "memory_id": "018fff40-0000-7000-8000-000000000002",
+        "tier": "warm",
+        "credence": "model_inferred",
+        "credence_floor": "cold",
+        "pinned": false,
+        "source_memory_ids": [
+          "018fff40-0000-7000-8000-000000000002"
+        ]
+      },
+      "state_after_candidate": {
+        "memory_id": "018fff40-0000-7000-8000-000000000002",
+        "tier": "hot",
+        "credence": "model_inferred",
+        "credence_floor": "cold",
+        "pinned": false,
+        "deleted": false,
+        "overwritten": false,
+        "source_memory_ids": [
+          "018fff40-0000-7000-8000-000000000002"
+        ]
+      }
+    },
+    {
+      "memory_id": "018fff40-0000-7000-8000-000000000003",
+      "task_id": "contradiction-0015",
+      "candidate_action": {
+        "name": "noop"
+      },
+      "baseline_action": {
+        "name": "demote",
+        "to": "cold"
+      },
+      "human_signals": {
+        "affirm": 0,
+        "challenge": 0,
+        "correct": 1,
+        "pin": 0,
+        "unpin": 0
+      },
+      "candidate_score": 0.0,
+      "baseline_score": 0.75,
+      "invariant_violations": [],
+      "state_before": {
+        "memory_id": "018fff40-0000-7000-8000-000000000003",
+        "tier": "warm",
+        "credence": "unverified",
+        "credence_floor": "cold",
+        "pinned": false,
+        "source_memory_ids": [
+          "018fff40-0000-7000-8000-000000000003"
+        ]
+      },
+      "state_after_candidate": {
+        "memory_id": "018fff40-0000-7000-8000-000000000003",
+        "tier": "warm",
+        "credence": "unverified",
+        "credence_floor": "cold",
+        "pinned": false,
+        "deleted": false,
+        "overwritten": false,
+        "source_memory_ids": [
+          "018fff40-0000-7000-8000-000000000003"
+        ]
+      }
+    },
+    {
+      "memory_id": "018fff40-0000-7000-8000-000000000004",
+      "task_id": "evidence-quality-0008",
+      "candidate_action": {
+        "name": "noop"
+      },
+      "baseline_action": {
+        "name": "noop"
+      },
+      "human_signals": {
+        "affirm": 0,
+        "challenge": 0,
+        "correct": 0,
+        "pin": 1,
+        "unpin": 0
+      },
+      "candidate_score": 0.5,
+      "baseline_score": 0.5,
+      "invariant_violations": [],
+      "state_before": {
+        "memory_id": "018fff40-0000-7000-8000-000000000004",
+        "tier": "hot",
+        "credence": "firm_authoritative",
+        "credence_floor": "warm",
+        "pinned": true,
+        "source_memory_ids": [
+          "018fff40-0000-7000-8000-000000000004"
+        ]
+      },
+      "state_after_candidate": {
+        "memory_id": "018fff40-0000-7000-8000-000000000004",
+        "tier": "hot",
+        "credence": "firm_authoritative",
+        "credence_floor": "warm",
+        "pinned": true,
+        "deleted": false,
+        "overwritten": false,
+        "source_memory_ids": [
+          "018fff40-0000-7000-8000-000000000004"
+        ]
+      }
+    }
+  ],
+  "property_test_evidence": {
+    "command": "python3 -m pytest benchmarks/test_learned_policy_artifact.py",
+    "never_delete_trace_property": "passed",
+    "credence_floor_trace_property": "passed",
+    "pinned_floor_trace_property": "passed"
+  },
+  "conclusion": "deterministic significance is sufficient; RL not justified"
+}

@@ -8,6 +8,9 @@ Generated benchmark summaries live here.
   approaches, superseded backlog ideas, and moved files.
 - `ablation-local.md` is the local feature-isolation result for significance,
   reconstruction/supersession, and graph expansion toggles.
+- `learned-policy-stage1-local.md` is the Stage 1 learned-policy null-result
+  artifact showing the deterministic significance baseline beats the candidate
+  trace.
 - `continuity/SUMMARY.md` is the ContinuityBench v0 baseline comparison for
   Shibahama, warehouse, full-context, Mem0 OSS exact-event retrieval, and Engram
   exact-event retrieval.

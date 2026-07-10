@@ -111,6 +111,26 @@ violating invariants, the correct conclusion is:
 That result should be written up rather than hidden. For a real user-facing
 product, not shipping a fragile learned policy is an acceptable outcome.
 
+## Current Evaluation Artifact
+
+The current committed Stage 1 local artifact is:
+
+- `benchmarks/results/learned-policy-stage1-local.json`
+- `benchmarks/results/learned-policy-stage1-local.md`
+
+It uses the ContinuityBench v0 dataset hash
+`sha256:a68d3f55a21b3ad0799f4c10e28e02a53b4cac2e39e5679df214323ad961bfaa`
+and a fixed four-decision held-out trace. The candidate score is `0.00`, the
+deterministic baseline score is `2.25`, and the recommendation is
+`StopBaselineNotBeaten`. The checked-in conclusion is: deterministic
+significance is sufficient; RL not justified.
+
+Invariant evidence is covered by:
+
+```sh
+python3 -m pytest benchmarks/test_learned_policy_artifact.py
+```
+
 ## Current Non-Claims
 
 - There is no online contextual-bandit loop in the product.

@@ -7,10 +7,11 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "check": "node scripts/check.mjs",
-    "test": "npm run check && npm run test:contracts && npm run test:classifier && npm run test:runtime && npm run test:dom && npm run test:visual",
+    "test": "npm run check && npm run test:contracts && npm run test:gateway && npm run test:classifier && npm run test:runtime && npm run test:dom && npm run test:visual",
     "test:classifier": "node scripts/test-classifier.mjs",
     "test:contracts": "node scripts/test-gateway-contract.mjs",
     "test:dom": "node scripts/test-dom-resilience.mjs",
+    "test:gateway": "node scripts/test-gateway-classifier.mjs",
     "test:runtime": "node scripts/test-runtime.mjs",
     "test:visual": "node scripts/test-visual.mjs"
   },

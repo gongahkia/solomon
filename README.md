@@ -26,18 +26,20 @@ The first implementation pass is intentionally local-first:
 - MV3 extension shell
 - LinkedIn content script entrypoint
 - Local tonal classifier rendered under detected posts that clear the confidence gate
+- Optional gateway classifier path with local fallback
 - Chrome side panel shell
 - Local settings, detected-post history, note ledger, and ratings
 - Chromium runtime fixture test for detection, insertion, gating, unique traces, and rating persistence
 - Visual snapshot test for the rendered note card
 
-Remote model calls and retrieval are not bundled into the client until the trust, cost, and key-management boundaries are explicit.
+Provider model calls and retrieval are not bundled into the extension client; remote classification goes through the gateway boundary.
 
 ## Tests
 
 `npm test` runs:
 
 - Static manifest and JavaScript syntax checks.
+- Gateway classifier contract tests.
 - A Chromium fixture test against `tests/fixtures/linkedin-feed.html`.
 - A visual snapshot comparison for the note card; the current PNG artifact is written to `.tmp/visual/note-card.png`.
 

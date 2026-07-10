@@ -1,4 +1,5 @@
 import { classifyPostTone } from "./tonal-classifier.js";
+import { classifyPostWithGateway } from "./gateway-classifier.js";
 import {
   createClassifierRequest,
   createSkippedClassifierResponse,
@@ -10,7 +11,11 @@ import {
 const DEFAULT_SETTINGS = {
   enabled: true,
   tonalClassifierEnabled: true,
-  minimumConfidence: 0.75
+  minimumConfidence: 0.75,
+  classifierSource: "local",
+  gatewayUrl: "",
+  gatewayAccessToken: "",
+  gatewayTimeoutMs: 8000
 };
 
 const STORAGE_KEYS = {
@@ -79,14 +84,29 @@ function clampConfidence(value) {
   return Math.min(0.99, Math.max(0.5, numericValue));
 }
 
+function clampGatewayTimeout(value) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return DEFAULT_SETTINGS.gatewayTimeoutMs;
+  }
+
+  return Math.min(15000, Math.max(1000, numericValue));
+}
+
 function sanitizeSettings(settings) {
   const tonalClassifierEnabled =
     settings.tonalClassifierEnabled ?? settings.mockNotesEnabled ?? true;
+  const classifierSource = settings.classifierSource === "gateway" ? "gateway" : "local";
 
   return {
     enabled: Boolean(settings.enabled),
     tonalClassifierEnabled: Boolean(tonalClassifierEnabled),
-    minimumConfidence: clampConfidence(settings.minimumConfidence)
+    minimumConfidence: clampConfidence(settings.minimumConfidence),
+    classifierSource,
+    gatewayUrl: String(settings.gatewayUrl ?? "").trim(),
+    gatewayAccessToken: String(settings.gatewayAccessToken ?? "").trim(),
+    gatewayTimeoutMs: clampGatewayTimeout(settings.gatewayTimeoutMs)
   };
 }
 
@@ -236,6 +256,14 @@ async function classifyPost(post) {
   }
 
   const request = createClassifierRequest({ post, settings });
+  if (settings.classifierSource === "gateway") {
+    return classifyPostWithGateway(request, {
+      gatewayUrl: settings.gatewayUrl,
+      accessToken: settings.gatewayAccessToken,
+      timeoutMs: settings.gatewayTimeoutMs
+    });
+  }
+
   const response = classifyPostTone(request);
   const validation = validateClassifierResponse(response);
 

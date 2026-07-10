@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const extensionDir = resolve(root, "extension");
+const gatewayDir = resolve(root, "gateway");
 const manifestPath = resolve(root, "extension", "manifest.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 
@@ -76,9 +77,11 @@ for (const contentScript of manifest.content_scripts) {
   }
 }
 
+const gatewayStats = await stat(gatewayDir).catch(() => null);
 const JavaScriptFiles = [
   ...(await collectFiles(resolve(root, "scripts"), ".mjs")),
-  ...(await collectFiles(extensionDir, ".js"))
+  ...(await collectFiles(extensionDir, ".js")),
+  ...(gatewayStats?.isDirectory() ? await collectFiles(gatewayDir, ".js") : [])
 ];
 
 for (const path of JavaScriptFiles) {

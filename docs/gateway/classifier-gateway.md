@@ -85,7 +85,8 @@ The gateway may call Anthropic's Messages API with:
 
 - `POST /v1/messages`
 - `anthropic-version: 2023-06-01`
-- a current Haiku model for first-pass classification
+- `claude-haiku-4-5` for first-pass classification
+- `claude-sonnet-5` only for borderline tonal decisions
 - `max_tokens` sized for compact JSON output
 - prompt caching on the stable rubric/schema prompt
 
@@ -105,6 +106,8 @@ The per-request prompt should include only:
 - post text
 - detected URL
 - threshold/settings snapshot
+
+The gateway implementation keeps this provider policy in `gateway/src/anthropic-tonal-classifier.js`. Confidence values within `0.06` of the configured threshold are treated as borderline and may be sent to Sonnet for a second pass. Non-borderline posts stay on Haiku.
 
 ## Key Isolation
 

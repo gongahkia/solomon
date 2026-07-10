@@ -19,6 +19,8 @@ export const SKIPPED_REASONS = [
   "decorum_disabled",
   "tonal_classifier_disabled",
   "below_confidence_threshold",
+  "gateway_unavailable",
+  "gateway_response_invalid",
   "contract_validation_failed"
 ];
 
@@ -113,13 +115,13 @@ export function validateClassifierRequest(request) {
   };
 }
 
-export function createSkippedClassifierResponse({ request, skippedReason, candidate = null }) {
+export function createSkippedClassifierResponse({ request, skippedReason, candidate = null, classifier = null }) {
   return {
     contractVersion: CLASSIFIER_CONTRACT_VERSION,
     requestId: request.requestId,
     responseId: `res:${stableHash(`${request.requestId}:${skippedReason}`)}`,
     generatedAt: new Date().toISOString(),
-    classifier: {
+    classifier: classifier ?? {
       provider: "local",
       model: LOCAL_CLASSIFIER_VERSION,
       rubricVersion: request.rubricVersion,

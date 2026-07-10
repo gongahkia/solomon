@@ -131,6 +131,13 @@ Invariant evidence is covered by:
 python3 -m pytest benchmarks/test_learned_policy_artifact.py
 ```
 
+## Stage 2 Status
+
+Issue #9 is closed as not justified by the current Stage 1 artifact. The
+held-out candidate did not beat deterministic significance, so no online
+contextual-bandit runtime experiment should run. The Stage 2 planner remains a
+disabled-by-default API gate only.
+
 ## Current Non-Claims
 
 - There is no online contextual-bandit loop in the product.

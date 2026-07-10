@@ -30,7 +30,7 @@ Current implementation status:
 - LinkedIn's User Agreement prohibits modifying the service appearance by inserting elements. Keep this as an unpacked, private prototype until the distribution posture is reviewed.
 - The local tonal classifier is deterministic and conservative. It is useful for validating the product loop, but it should not be treated as equivalent to the planned Haiku/Sonnet classifier.
 - The visual snapshot prevents accidental drift in this repo, but it is not proof that the card exactly matches live X Community Notes. A browser comparison against real X notes is still needed before making that claim.
-- Public naming should avoid "LinkedIn Community Notes" because it creates unnecessary brand and affiliation risk.
+- Public naming uses "Decorum" and avoids "LinkedIn Community Notes" because it creates unnecessary brand and affiliation risk.
 - CI disables strict PNG byte-hash comparison because Chrome builds can render antialiasing differently. It still checks computed visual tokens and dimensions.
 
 ## Verification

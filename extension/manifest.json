@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Decorum",
   "version": "0.1.0",
-  "description": "Adds restrained context cards under LinkedIn posts when Decorum has enough signal.",
+  "description": "Adds unaffiliated context cards under LinkedIn posts when Decorum has enough signal.",
   "action": {
     "default_title": "Open Decorum"
   },

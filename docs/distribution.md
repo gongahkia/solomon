@@ -49,7 +49,7 @@ Private testers must be told:
 
 - Written legal/product approval that explicitly addresses LinkedIn User Agreement sections 8.2(2), 8.2(4), 8.2(10), and 8.2(15).
 - A decision on whether to seek written permission from LinkedIn before publication.
-- Naming review that avoids implied affiliation.
+- Follow the naming rules in [naming.md](./naming.md).
 - Backend authentication and key isolation.
 - Public privacy posture for stored posts, traces, ratings, and false-positive ledger entries.
 - A public-facing disclosure flow for what the extension reads, stores, sends, renders, and modifies.

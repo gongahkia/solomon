@@ -127,6 +127,17 @@ def test_mcp_runtime_maps_all_required_tools_to_service(tmp_path: Path) -> None:
     assert item.id in impact["stale_item_ids"]
     assert other_item.id not in impact["stale_item_ids"]
 
+    currency_report = runtime.currency_report(
+        period_start="2026-01-01T00:00:00+00:00",
+        period_end="2026-12-31T00:00:00+00:00",
+        scope="matter",
+        matter_id="matter-a",
+        client_id="client-a",
+        format="pack",
+    )
+    assert currency_report["report"]["items"][0]["item_id"] == item.id
+    assert currency_report["pack"]["manifest_json"]
+
     verification = runtime.verify_position(
         knowledge_item_id=item.id,
         verifier_id="partner-a",

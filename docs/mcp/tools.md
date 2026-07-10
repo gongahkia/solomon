@@ -173,6 +173,35 @@ Output:
 | `pack` | object/string | JSON object or generated file reference |
 | `hash_chain` | object | journal verification metadata |
 
+### `solomon.currency_report`
+
+Purpose: Return partner-facing currency movements for a scope and period.
+
+Read/write: read/export
+
+Backing API: `SolomonService.currency_report(...)`, reading knowledge events plus current graph/currency state.
+
+Input:
+
+| Field | Type | Required | Notes |
+|---|---|---:|---|
+| `period_start` | string | yes | ISO-8601 start timestamp |
+| `period_end` | string | yes | ISO-8601 end timestamp |
+| `scope` | enum | no | `firm`, `practice_area`, or `matter`; default `firm` |
+| `practice_area` | string | no | required for practice-area scope |
+| `matter_id` | string | no | required for matter scope |
+| `client_id` | string | no | optional client filter |
+| `format` | enum | no | `json`, `pdf`, or `pack`; default `json` |
+
+Output:
+
+| Field | Type | Notes |
+|---|---|---|
+| `report` | object | stale, contradictory, superseded, and retired movement rows |
+| `pack` | object/null | audit-pack manifest/report JSON when `format=pack` |
+| `pdf_base64` | string/null | human-readable PDF bytes when `format=pdf` |
+| `hash_chain` | object | MCP call audit hash |
+
 ### `solomon.dependency_suggestions`
 
 Purpose: Return proposed dependency edges for human confirmation.

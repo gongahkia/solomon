@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from solomon.currency.models import CurrencyState, KnowledgeItem
+
+
+@dataclass(frozen=True)
+class KnowledgeEvent:
+    seq: int
+    event_type: str
+    item_id: str
+    occurred_at: datetime
+    payload: dict[str, Any]
 
 
 class KnowledgeStoreProtocol(Protocol):
@@ -42,3 +52,11 @@ class KnowledgeStoreProtocol(Protocol):
     ) -> tuple[KnowledgeItem, KnowledgeItem]: ...
 
     def as_of(self, timestamp: datetime) -> list[KnowledgeItem]: ...
+
+    def list_events(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        event_types: set[str] | None = None,
+    ) -> list[KnowledgeEvent]: ...

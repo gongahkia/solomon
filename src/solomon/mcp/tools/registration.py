@@ -68,6 +68,12 @@ def register_solomon_tools(server: FastMCPProtocol, runtime: SolomonMCPRuntime) 
         structured_output=True,
     )(runtime.audit_pack)
     server.tool(
+        name="solomon.currency_report",
+        description=TOOL_DESCRIPTIONS["solomon.currency_report"],
+        annotations=annotations_for("solomon.currency_report"),
+        structured_output=True,
+    )(runtime.currency_report)
+    server.tool(
         name="solomon.dependency_suggestions",
         description=TOOL_DESCRIPTIONS["solomon.dependency_suggestions"],
         annotations=annotations_for("solomon.dependency_suggestions"),

@@ -22,6 +22,7 @@ from solomon.store.postgres.connection import (
 from solomon.store.postgres.ddl import create_knowledge_store_schema, create_schema_if_needed
 from solomon.store.postgres.serialization import events_to_state, item_from_json, payload_json_text, row_value
 from solomon.store.sqlite import ItemNotFoundError, StoreError
+from solomon.store.types import KnowledgeEvent
 
 
 class PostgresKnowledgeStore:
@@ -166,6 +167,49 @@ class PostgresKnowledgeStore:
             (timestamp.isoformat(),),
         ).fetchall()
         return events_to_state(rows)
+
+    def list_events(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        event_types: set[str] | None = None,
+    ) -> list[KnowledgeEvent]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if since is not None:
+            clauses.append("occurred_at >= %s")
+            params.append(since.isoformat())
+        if until is not None:
+            clauses.append("occurred_at <= %s")
+            params.append(until.isoformat())
+        if event_types is not None:
+            types = sorted(event_types)
+            if not types:
+                return []
+            placeholders = ",".join("%s" for _ in types)
+            clauses.append(f"event_type IN ({placeholders})")
+            params.extend(types)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._execute(
+            f"""
+            SELECT seq, event_type, item_id, occurred_at, payload_json
+            FROM {self._table("knowledge_events")}
+            {where}
+            ORDER BY occurred_at, seq
+            """,
+            tuple(params),
+        ).fetchall()
+        return [
+            KnowledgeEvent(
+                seq=int(row_value(row, "seq")),
+                event_type=str(row_value(row, "event_type")),
+                item_id=str(row_value(row, "item_id")),
+                occurred_at=datetime.fromisoformat(str(row_value(row, "occurred_at"))),
+                payload=json.loads(payload_json_text(row_value(row, "payload_json"))),
+            )
+            for row in rows
+        ]
 
     def snapshot(self, destination: Path | str) -> Path:
         target = Path(destination)

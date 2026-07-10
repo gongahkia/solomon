@@ -24,6 +24,7 @@ EXPECTED_TOOL_NAMES = {
     "solomon.verification_queue",
     "solomon.ingest",
     "solomon.audit_pack",
+    "solomon.currency_report",
     "solomon.dependency_suggestions",
     "solomon.impact",
 }

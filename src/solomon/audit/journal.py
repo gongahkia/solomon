@@ -27,6 +27,12 @@ from solomon.orchestrator.models import ModelCallAudit
 from solomon.orchestrator.retrieval import RecallResult
 
 GENESIS_HASH = "GENESIS"
+OPTIONAL_ARTIFACT_HASH_KEYS = (
+    ("verification_history_file", "verification_history_sha256"),
+    ("contradictions_file", "contradictions_sha256"),
+    ("currency_report_file", "currency_report_sha256"),
+    ("currency_report_pdf_file", "currency_report_pdf_sha256"),
+)
 
 
 class AuditEntry(SolomonModel):
@@ -121,6 +127,13 @@ def _optional_artifact_hash_ok(manifest: dict[str, Any], target: Path, *, file_k
         isinstance(artifact_file, str)
         and isinstance(artifact_digest, str)
         and hashlib.sha256((target / artifact_file).read_bytes()).hexdigest() == artifact_digest
+    )
+
+
+def _optional_artifacts_hash_ok(manifest: dict[str, Any], target: Path) -> bool:
+    return all(
+        _optional_artifact_hash_ok(manifest, target, file_key=file_key, digest_key=digest_key)
+        for file_key, digest_key in OPTIONAL_ARTIFACT_HASH_KEYS
     )
 
 
@@ -236,17 +249,7 @@ class AuditJournal:
         manifest_hash_ok = hashlib.sha256(manifest_bytes).hexdigest() == supplied_manifest_hash
         journal_path = target / str(manifest["journal_file"])
         journal_hash_ok = hashlib.sha256(journal_path.read_bytes()).hexdigest() == manifest["journal_sha256"]
-        artifacts_hash_ok = _optional_artifact_hash_ok(
-            manifest,
-            target,
-            file_key="verification_history_file",
-            digest_key="verification_history_sha256",
-        ) and _optional_artifact_hash_ok(
-            manifest,
-            target,
-            file_key="contradictions_file",
-            digest_key="contradictions_sha256",
-        )
+        artifacts_hash_ok = _optional_artifacts_hash_ok(manifest, target)
         journal = AuditJournal(journal_path).verify()
         return AuditPackVerification(
             ok=manifest_hash_ok and journal_hash_ok and artifacts_hash_ok and journal.ok,
@@ -490,8 +493,6 @@ def _load_ed25519_private_key(private_key_pem: str) -> Ed25519PrivateKey:
     if not isinstance(key, Ed25519PrivateKey):
         raise ValueError("private key must be Ed25519")
     return key
-
-
 def _load_ed25519_public_key(public_key_pem: str) -> Ed25519PublicKey:
     key = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
     if not isinstance(key, Ed25519PublicKey):

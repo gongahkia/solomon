@@ -46,6 +46,12 @@ from solomon.currency.contradiction import ContradictionSignal, contradictions_f
 from solomon.currency.engine import VerificationPolicy, record_verification
 from solomon.currency.models import KnowledgeItem
 from solomon.currency.prediction import StalenessRiskReport
+from solomon.currency.report import (
+    CurrencyMovementReport,
+    ReportScopeKind,
+    currency_movement_report,
+    render_currency_report_pdf,
+)
 from solomon.currency.verification import verification_history
 from solomon.errors import NotFoundError
 from solomon.graph.models import DependencyEdge
@@ -227,6 +233,46 @@ class SolomonService:
 
     def execute_plan(self, request: PrimitivePlanRequest) -> PrimitivePlanExecution:
         return self._recall.execute_plan(request)
+
+    def currency_report(
+        self,
+        *,
+        period_start: datetime,
+        period_end: datetime,
+        scope: ReportScopeKind = "firm",
+        practice_area: str | None = None,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> CurrencyMovementReport:
+        return currency_movement_report(
+            store=self.store,
+            graph=self.graph,
+            period_start=period_start,
+            period_end=period_end,
+            scope=scope,
+            practice_area=practice_area,
+            matter_id=matter_id,
+            client_id=client_id,
+        )
+
+    def export_currency_report_pack(self, destination: Path, report: CurrencyMovementReport) -> Path:
+        pack = self.audit.export_pack(destination)
+        report_path = pack.directory / "currency-report.json"
+        report_bytes = json.dumps(report.model_dump(mode="json"), sort_keys=True, indent=2).encode("utf-8")
+        report_path.write_bytes(report_bytes)
+        pdf_path = pack.directory / "currency-report.pdf"
+        pdf_bytes = render_currency_report_pdf(report)
+        pdf_path.write_bytes(pdf_bytes)
+        manifest = json.loads(pack.manifest_path.read_text(encoding="utf-8"))
+        manifest.pop("manifest_sha256", None)
+        manifest["currency_report_file"] = report_path.name
+        manifest["currency_report_sha256"] = hashlib.sha256(report_bytes).hexdigest()
+        manifest["currency_report_pdf_file"] = pdf_path.name
+        manifest["currency_report_pdf_sha256"] = hashlib.sha256(pdf_bytes).hexdigest()
+        manifest_bytes = json.dumps(manifest, sort_keys=True, indent=2).encode("utf-8")
+        manifest["manifest_sha256"] = hashlib.sha256(manifest_bytes).hexdigest()
+        pack.manifest_path.write_text(json.dumps(manifest, sort_keys=True, indent=2), encoding="utf-8")
+        return pack.directory
 
     def export_audit_pack(self, destination: Path) -> Path:
         pack = self.audit.export_pack(destination)

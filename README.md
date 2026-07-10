@@ -219,6 +219,8 @@ Included scenarios:
 
 - [`examples/scenarios/stale-house-view/`](./examples/scenarios/stale-house-view/): a 2023 memo becomes stale after a 2025
   authority change; the warehouse baseline misses it.
+- [`examples/scenarios/currency-report/`](./examples/scenarios/currency-report/): the same currency signal rendered as a
+  partner-facing period report.
 - [`examples/scenarios/internal-supersession/`](./examples/scenarios/internal-supersession/): a 2024 position supersedes a
   2022 position while the older item remains available for review and audit.
 
@@ -369,6 +371,7 @@ curl http://localhost:8140/health
   assumptions.
 - [`docs/known-limitations.md`](./docs/known-limitations.md): current monitoring, retrieval, boundary,
   and legal-adjudication limits.
+- [`docs/positioning.md`](./docs/positioning.md): partner-facing product narrative.
 - [`docs/benchmarks.md`](./docs/benchmarks.md): currency and retrieval evaluation results.
 - [`docs/release-artifacts.md`](./docs/release-artifacts.md): v0.1.0 artifact hashes and release evidence.
 - [`docs/api/openapi.json`](./docs/api/openapi.json): generated OpenAPI contract.

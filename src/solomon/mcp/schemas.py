@@ -16,6 +16,8 @@ CurrencyStateValue: TypeAlias = Literal["live", "stale_pending", "superseded", "
 DependencyDirection: TypeAlias = Literal["upstream", "downstream", "both"]
 DependencySuggestionDecision: TypeAlias = Literal["pending", "confirmed", "rejected"]
 AuditPackFormat: TypeAlias = Literal["json", "pdf"]
+CurrencyReportFormat: TypeAlias = Literal["json", "pdf", "pack"]
+CurrencyReportScopeValue: TypeAlias = Literal["firm", "practice_area", "matter"]
 VerificationDecision: TypeAlias = Literal["reaffirm", "supersede", "retire", "pin"]
 ConclusionPolarityValue: TypeAlias = Literal["affirmative", "negative"]
 
@@ -166,6 +168,26 @@ class AuditPackOutput(SolomonModel):
     hash_chain: JsonObject
 
 
+class CurrencyReportInput(SolomonModel):
+    period_start: str = Field(min_length=1)
+    period_end: str = Field(min_length=1)
+    scope: CurrencyReportScopeValue = "firm"
+    practice_area: str | None = None
+    matter_id: str | None = None
+    client_id: str | None = None
+    format: CurrencyReportFormat = "json"
+    caller_id: str | None = None
+
+
+class CurrencyReportOutput(SolomonModel):
+    schema_id: str = "solomon.mcp.currency_report.v1"
+    format: CurrencyReportFormat
+    report: JsonObject
+    pack: JsonObject | None = None
+    pdf_base64: str | None = None
+    hash_chain: JsonObject
+
+
 class DependencySuggestionsInput(SolomonModel):
     knowledge_item_id: str = Field(min_length=1)
     decision: DependencySuggestionDecision = "pending"
@@ -215,6 +237,7 @@ TOOL_SCHEMA_MODELS: dict[str, SchemaPair] = {
     "solomon.verification_queue": (VerificationQueueInput, VerificationQueueOutput),
     "solomon.ingest": (IngestInput, IngestOutput),
     "solomon.audit_pack": (AuditPackInput, AuditPackOutput),
+    "solomon.currency_report": (CurrencyReportInput, CurrencyReportOutput),
     "solomon.dependency_suggestions": (DependencySuggestionsInput, DependencySuggestionsOutput),
     "solomon.impact": (ImpactInput, ImpactOutput),
 }
@@ -238,6 +261,8 @@ __all__ = [
     "AuditPackOutput",
     "CheckCurrencyInput",
     "CheckCurrencyOutput",
+    "CurrencyReportInput",
+    "CurrencyReportOutput",
     "DependencySuggestionsInput",
     "DependencySuggestionsOutput",
     "GetDependenciesInput",

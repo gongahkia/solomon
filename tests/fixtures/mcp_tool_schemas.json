@@ -245,6 +245,158 @@
       "type": "object"
     }
   },
+  "solomon.currency_report": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "caller_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Id"
+        },
+        "client_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Id"
+        },
+        "format": {
+          "default": "json",
+          "enum": [
+            "json",
+            "pdf",
+            "pack"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "matter_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matter Id"
+        },
+        "period_end": {
+          "minLength": 1,
+          "title": "Period End",
+          "type": "string"
+        },
+        "period_start": {
+          "minLength": 1,
+          "title": "Period Start",
+          "type": "string"
+        },
+        "practice_area": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Practice Area"
+        },
+        "scope": {
+          "default": "firm",
+          "enum": [
+            "firm",
+            "practice_area",
+            "matter"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "period_start",
+        "period_end"
+      ],
+      "title": "CurrencyReportInput",
+      "type": "object"
+    },
+    "output": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "enum": [
+            "json",
+            "pdf",
+            "pack"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "hash_chain": {
+          "additionalProperties": true,
+          "title": "Hash Chain",
+          "type": "object"
+        },
+        "pack": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pack"
+        },
+        "pdf_base64": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pdf Base64"
+        },
+        "report": {
+          "additionalProperties": true,
+          "title": "Report",
+          "type": "object"
+        },
+        "schema_id": {
+          "default": "solomon.mcp.currency_report.v1",
+          "title": "Schema Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "report",
+        "hash_chain"
+      ],
+      "title": "CurrencyReportOutput",
+      "type": "object"
+    }
+  },
   "solomon.dependency_suggestions": {
     "input": {
       "additionalProperties": false,

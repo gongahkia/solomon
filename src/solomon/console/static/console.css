@@ -300,6 +300,23 @@ select {
   grid-template-columns: 1fr auto;
 }
 
+.report-workspace {
+  grid-template-columns: minmax(360px, 34%) 1fr;
+}
+
+.report-filters {
+  grid-template-columns: 1fr 1fr;
+}
+
+.report-list {
+  display: grid;
+  gap: 12px;
+}
+
+.report-row {
+  border-left: 4px solid #2563eb;
+}
+
 .export-actions {
   display: flex;
   flex-wrap: wrap;

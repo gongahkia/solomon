@@ -69,6 +69,8 @@ class SQLiteRetrievalIndex:
     def __init__(self, path: Path | str, *, strategy: EmbeddingStrategy | None = None) -> None:
         self.path = Path(path)
         self.strategy = strategy or EmbeddingStrategy()
+        self._vector_cache: dict[str, tuple[str, list[float]]] = {}
+        self._search_cache: dict[tuple[str, int, str], list[IndexedHit]] = {}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
@@ -115,6 +117,8 @@ class SQLiteRetrievalIndex:
                 """,
                 (item.id, embedding_ref, json.dumps(tokens), json.dumps(vector), timestamp.isoformat()),
             )
+        self._vector_cache[item.id] = (embedding_ref, vector)
+        self._search_cache.clear()
         return item.model_copy(update={"embedding_ref": embedding_ref})
 
     def batch_upsert(self, items: list[KnowledgeItem]) -> list[KnowledgeItem]:
@@ -131,21 +135,30 @@ class SQLiteRetrievalIndex:
         return {str(row["item_id"]): str(row["embedding_ref"]) for row in rows}
 
     def search(self, query: str, *, limit: int = 20) -> list[IndexedHit]:
+        cache_key = (query, limit, self.strategy.ref)
+        if cached_hits := self._search_cache.get(cache_key):
+            return list(cached_hits)
         query_tokens = semantic_tokens(query)
         if not query_tokens:
             return []
-        query_vector = _embed_tokens(sorted(query_tokens), dimensions=self.strategy.dimensions)
+        query_terms = _nonzero_terms(_embed_tokens(sorted(query_tokens), dimensions=self.strategy.dimensions))
         rows = self._conn.execute(
             "SELECT item_id, embedding_ref, vector_json FROM retrieval_index ORDER BY item_id"
         ).fetchall()
         hits: list[IndexedHit] = []
         for row in rows:
-            score = _cosine_similarity(query_vector, json.loads(str(row["vector_json"])))
+            item_id = str(row["item_id"])
+            embedding_ref = str(row["embedding_ref"])
+            cached_vector = self._vector_cache.get(item_id)
+            if cached_vector is None or cached_vector[0] != embedding_ref:
+                cached_vector = (embedding_ref, json.loads(str(row["vector_json"])))
+                self._vector_cache[item_id] = cached_vector
+            score = _cosine_similarity_terms(query_terms, cached_vector[1])
             if score > 0:
-                hits.append(
-                    IndexedHit(item_id=str(row["item_id"]), similarity=score, embedding_ref=str(row["embedding_ref"]))
-                )
-        return sorted(hits, key=lambda hit: (hit.similarity, hit.item_id), reverse=True)[:limit]
+                hits.append(IndexedHit(item_id=item_id, similarity=score, embedding_ref=embedding_ref))
+        limited_hits = sorted(hits, key=lambda hit: (hit.similarity, hit.item_id), reverse=True)[:limit]
+        self._search_cache[cache_key] = limited_hits
+        return list(limited_hits)
 
 
 class RecallWeights(SolomonModel):
@@ -394,3 +407,16 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
     if len(left) != len(right):
         return 0.0
     return sum(a * b for a, b in zip(left, right, strict=True))
+
+
+def _nonzero_terms(vector: list[float]) -> list[tuple[int, float]]:
+    return [(index, value) for index, value in enumerate(vector) if value]
+
+
+def _cosine_similarity_terms(left: list[tuple[int, float]], right: list[float]) -> float:
+    if not left or not right:
+        return 0.0
+    max_index = left[-1][0]
+    if len(right) <= max_index:
+        return 0.0
+    return sum(value * right[index] for index, value in left)

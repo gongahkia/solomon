@@ -20,11 +20,15 @@ def events_to_state(rows: Iterable[Any]) -> list[KnowledgeItem]:
             "knowledge_item_written",
             "knowledge_item_updated",
             "knowledge_item_stale_flagged",
+            "knowledge_item_contradiction_flagged",
             "knowledge_item_indexed",
             "knowledge_item_contested",
             "knowledge_item_affirmed",
             "knowledge_item_correction_affirmed",
             "knowledge_item_pinned",
+            "verification_lifecycle_assigned",
+            "verification_lifecycle_in_review",
+            "verification_lifecycle_completed",
         }:
             item = KnowledgeItem.model_validate(payload["item"])
             state[item.id] = item

@@ -13,6 +13,7 @@ from typing import Any
 from typing_extensions import Self
 
 from solomon.currency.models import CurrencyState, KnowledgeItem, now_utc
+from solomon.store.types import KnowledgeEvent
 
 
 class StoreError(RuntimeError):
@@ -206,11 +207,15 @@ class SQLiteKnowledgeStore:
                 "knowledge_item_written",
                 "knowledge_item_updated",
                 "knowledge_item_stale_flagged",
+                "knowledge_item_contradiction_flagged",
                 "knowledge_item_indexed",
                 "knowledge_item_contested",
                 "knowledge_item_affirmed",
                 "knowledge_item_correction_affirmed",
                 "knowledge_item_pinned",
+                "verification_lifecycle_assigned",
+                "verification_lifecycle_in_review",
+                "verification_lifecycle_completed",
             }:
                 item = KnowledgeItem.model_validate(payload["item"])
                 state[item.id] = item
@@ -220,6 +225,49 @@ class SQLiteKnowledgeStore:
                 state[predecessor.id] = predecessor
                 state[successor.id] = successor
         return sorted(state.values(), key=lambda item: (item.ingested_at, item.id))
+
+    def list_events(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        event_types: set[str] | None = None,
+    ) -> list[KnowledgeEvent]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if since is not None:
+            clauses.append("occurred_at >= ?")
+            params.append(since.isoformat())
+        if until is not None:
+            clauses.append("occurred_at <= ?")
+            params.append(until.isoformat())
+        if event_types is not None:
+            types = sorted(event_types)
+            if not types:
+                return []
+            placeholders = ",".join("?" for _ in types)
+            clauses.append(f"event_type IN ({placeholders})")
+            params.extend(types)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._conn.execute(
+            f"""
+            SELECT seq, event_type, item_id, occurred_at, payload_json
+            FROM knowledge_events
+            {where}
+            ORDER BY occurred_at, seq
+            """,  # noqa: S608
+            params,
+        ).fetchall()
+        return [
+            KnowledgeEvent(
+                seq=int(row["seq"]),
+                event_type=str(row["event_type"]),
+                item_id=str(row["item_id"]),
+                occurred_at=datetime.fromisoformat(str(row["occurred_at"])),
+                payload=json.loads(str(row["payload_json"])),
+            )
+            for row in rows
+        ]
 
     def snapshot(self, destination: Path | str) -> Path:
         target = Path(destination)
@@ -275,11 +323,15 @@ class SQLiteKnowledgeStore:
                 "knowledge_item_written",
                 "knowledge_item_updated",
                 "knowledge_item_stale_flagged",
+                "knowledge_item_contradiction_flagged",
                 "knowledge_item_indexed",
                 "knowledge_item_contested",
                 "knowledge_item_affirmed",
                 "knowledge_item_correction_affirmed",
                 "knowledge_item_pinned",
+                "verification_lifecycle_assigned",
+                "verification_lifecycle_in_review",
+                "verification_lifecycle_completed",
             }:
                 item = KnowledgeItem.model_validate(payload["item"])
                 state[item.id] = item

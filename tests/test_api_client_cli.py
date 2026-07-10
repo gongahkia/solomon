@@ -233,7 +233,63 @@ def test_fastapi_app_exposes_public_verbs(tmp_path: Path) -> None:
         "/staleness/predict",
         "/why/{item_id}",
         "/timeline",
+        "/currency/report",
+        "/currency/report/export",
     }.issubset(paths)
+
+
+def test_currency_report_api_returns_report_and_exports(tmp_path: Path) -> None:
+    app = create_app(Settings(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal"))
+    service = app.state.service
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="structure x under regulation r section 12",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo-report",
+            matter_id="matter-a",
+            client_id="client-a",
+        )
+    )
+    service.add_dependency(
+        DependencyRequest(
+            source_id=item.id,
+            target_id="reg-r-12",
+            edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+            target_kind="external_authority",
+        )
+    )
+    service.register_authority_change(
+        "reg-r-12",
+        AuthorityChangeRequest(new_version="2026", changed_at="2026-01-05T00:00:00+00:00"),
+    )
+
+    async def exercise() -> tuple[httpx.Response, httpx.Response, httpx.Response]:
+        transport = httpx.ASGITransport(app=app)
+        params = {
+            "period_start": "2026-01-01T00:00:00+00:00",
+            "period_end": "2026-12-31T00:00:00+00:00",
+            "scope": "matter",
+            "matter_id": "matter-a",
+            "client_id": "client-a",
+        }
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            report = await client.get("/currency/report", params=params)
+            pdf = await client.get("/currency/report/export", params={**params, "format": "pdf"})
+            pack = await client.get("/currency/report/export", params={**params, "format": "pack"})
+            return report, pdf, pack
+
+    report, pdf, pack = asyncio.run(exercise())
+
+    assert report.status_code == 200
+    payload = report.json()
+    assert payload["schema_id"] == "solomon.currency_report.v1"
+    assert payload["items"][0]["item_id"] == item.id
+    assert payload["items"][0]["authority_id"] == "reg-r-12"
+    assert pdf.status_code == 200
+    assert pdf.content.startswith(b"%PDF-1.4")
+    assert pack.status_code == 200
+    assert pack.json()["manifest"]["currency_report_file"] == "currency-report.json"
 
 
 def test_answer_endpoint_runs_recall_boundary_router_model_workflow(tmp_path: Path) -> None:

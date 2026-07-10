@@ -26,6 +26,7 @@ from solomon.mcp.tools.read import (
 from solomon.mcp.tools.read import (
     verification_queue as verification_queue_tool,
 )
+from solomon.mcp.tools.report import currency_report as currency_report_tool
 from solomon.mcp.tools.status import health as health_tool
 from solomon.mcp.tools.write import ingest as ingest_tool
 from solomon.mcp.tools.write import verify_position as verify_position_tool
@@ -177,6 +178,30 @@ class SolomonMCPRuntime:
             format=format,
             matter_id=matter_id,
             client_id=client_id,
+            caller_id=caller_id,
+        )
+
+    def currency_report(
+        self,
+        *,
+        period_start: str,
+        period_end: str,
+        scope: str = "firm",
+        practice_area: str | None = None,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+        format: str = "json",
+        caller_id: str | None = None,
+    ) -> dict[str, Any]:
+        return currency_report_tool(
+            self,
+            period_start=period_start,
+            period_end=period_end,
+            scope=scope,
+            practice_area=practice_area,
+            matter_id=matter_id,
+            client_id=client_id,
+            format=format,
             caller_id=caller_id,
         )
 

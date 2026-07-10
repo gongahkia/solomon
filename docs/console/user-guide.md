@@ -33,7 +33,11 @@ The left queue shows suggested edges from deterministic reference extraction. Sh
 
 Accepting a suggestion creates a confirmed dependency edge and records the decision in the audit journal. Rejecting keeps the review history without changing the dependency graph.
 
-## 3. Export an audit pack
+## 3. Run the currency report
+
+Maya opens [Currency Report](currency-report.md), chooses the quarter and matter scope, and exports the partner-facing list of positions that went stale, contradictory, superseded, or retired. Each row shows the moved authority or dependency, current verification status, and dependent item count.
+
+## 4. Export an audit pack
 
 Finally, Maya opens [Audit Pack](audit-pack.md).
 
@@ -46,4 +50,4 @@ The exported pack is evidence for why Solomon treated the item as live, stale, s
 
 ## Daily close
 
-Maya finishes when the verification queue is empty, material dependency suggestions are accepted or rejected, and audit packs are exported for any contested or client-sensitive decisions.
+Maya finishes when the verification queue is empty, material dependency suggestions are accepted or rejected, the period currency report is exported, and audit packs are exported for any contested or client-sensitive decisions.

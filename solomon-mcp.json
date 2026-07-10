@@ -126,6 +126,12 @@
           "destructiveHint": false
         },
         {
+          "name": "solomon.currency_report",
+          "title": "Currency report",
+          "readOnlyHint": true,
+          "destructiveHint": false
+        },
+        {
           "name": "solomon.dependency_suggestions",
           "title": "List dependency suggestions",
           "readOnlyHint": true,

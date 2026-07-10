@@ -1,6 +1,6 @@
 # Curator console
 
-Three server-rendered screens cover the portfolio console scope: verification review, dependency review, and audit-pack export.
+Four server-rendered screens cover the portfolio console scope: verification review, dependency review, currency report, and audit-pack export.
 
 ## Verification Desk
 
@@ -25,5 +25,6 @@ Three server-rendered screens cover the portfolio console scope: verification re
 - [User guide](user-guide.md)
 - [Verification Desk wireframe](verification-desk.md)
 - [Dependency Review wireframe](dependency-review.md)
+- [Currency Report wireframe](currency-report.md)
 - [Audit Pack wireframe](audit-pack.md)
 - [Stack decision](stack.md)

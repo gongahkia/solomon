@@ -23,6 +23,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "solomon.verification_queue": "List items needing verification, optionally scoped to reviewer or matter.",
     "solomon.ingest": "Boundary-check and ingest new firm knowledge.",
     "solomon.audit_pack": "Export provenance, dependency, verification, boundary, and hash-chain evidence.",
+    "solomon.currency_report": "Return partner-facing currency movements for a scope and period.",
     "solomon.dependency_suggestions": "Return proposed dependency edges for human confirmation.",
     "solomon.impact": "Return internal items affected by a changed external authority.",
 }
@@ -34,6 +35,7 @@ READ_ONLY_TOOLS = {
     "solomon.get_dependencies",
     "solomon.verification_queue",
     "solomon.audit_pack",
+    "solomon.currency_report",
     "solomon.dependency_suggestions",
     "solomon.impact",
 }

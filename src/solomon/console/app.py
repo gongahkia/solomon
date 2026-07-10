@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from hmac import compare_digest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
@@ -27,6 +28,7 @@ from solomon.api.service import (
 from solomon.config import Settings, credence_policy_from_settings, get_settings, verification_policy_from_settings
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import CredenceTier, CurrencyState, KnowledgeItem, VerifiedState
+from solomon.currency.report import CurrencyMovementReport, ReportScopeKind, render_currency_report_pdf
 from solomon.errors import SolomonError
 from solomon.graph.suggestions import DependencySuggestion, SuggestionDecision
 
@@ -103,6 +105,66 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
     @app.get("/console/audit-pack")
     def audit_pack(request: Request, item_id: str | None = None, q: str | None = None) -> Response:
         return _render_audit_pack(request, resolved_service, item_id=item_id, query=q)
+
+    @app.get("/console/currency-report")
+    def currency_report(
+        request: Request,
+        period_start: str | None = None,
+        period_end: str | None = None,
+        scope: str = "firm",
+        practice_area: str | None = None,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> Response:
+        return _render_currency_report(
+            request,
+            resolved_service,
+            period_start=period_start,
+            period_end=period_end,
+            scope=scope,
+            practice_area=practice_area,
+            matter_id=matter_id,
+            client_id=client_id,
+        )
+
+    @app.get("/console/currency-report/export")
+    def export_currency_report(
+        period_start: str,
+        period_end: str,
+        scope: str = "firm",
+        practice_area: str | None = None,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+        format: str = "json",
+    ) -> Response:
+        try:
+            report = _currency_report_from_params(
+                resolved_service,
+                period_start=period_start,
+                period_end=period_end,
+                scope=scope,
+                practice_area=practice_area,
+                matter_id=matter_id,
+                client_id=client_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if format == "pdf":
+            return Response(
+                content=render_currency_report_pdf(report),
+                media_type="application/pdf",
+                headers={"Content-Disposition": 'attachment; filename="currency-report.pdf"'},
+            )
+        manifest, journal_jsonl = _exported_currency_report_pack(resolved_service, report)
+        return JSONResponse(
+            content={
+                "schema": "solomon.console.currency_report_pack.v1",
+                "report": report.model_dump(mode="json"),
+                "manifest": manifest,
+                "journal_jsonl": journal_jsonl,
+            },
+            headers={"Content-Disposition": 'attachment; filename="currency-report-pack.json"'},
+        )
 
     @app.get("/console/verification/items")
     def verification_items(request: Request) -> Response:
@@ -356,6 +418,79 @@ def _render_audit_pack(
     )
 
 
+def _render_currency_report(
+    request: Request,
+    service: SolomonService,
+    *,
+    period_start: str | None,
+    period_end: str | None,
+    scope: str,
+    practice_area: str | None,
+    matter_id: str | None,
+    client_id: str | None,
+) -> Response:
+    start, end = _default_report_period(period_start, period_end)
+    error = None
+    report = None
+    try:
+        report = _currency_report_from_params(
+            service,
+            period_start=start,
+            period_end=end,
+            scope=scope,
+            practice_area=practice_area,
+            matter_id=matter_id,
+            client_id=client_id,
+        )
+    except ValueError as exc:
+        error = str(exc)
+    return TEMPLATES.TemplateResponse(
+        request,
+        "currency_report.html",
+        {
+            "report": report.model_dump(mode="json") if report else None,
+            "period_start": start,
+            "period_end": end,
+            "scope": scope,
+            "practice_area": practice_area or "",
+            "matter_id": matter_id or "",
+            "client_id": client_id or "",
+            "error": error,
+            "active_page": "currency_report",
+        },
+        status_code=200 if error is None else 400,
+    )
+
+
+def _currency_report_from_params(
+    service: SolomonService,
+    *,
+    period_start: str,
+    period_end: str,
+    scope: str,
+    practice_area: str | None,
+    matter_id: str | None,
+    client_id: str | None,
+) -> CurrencyMovementReport:
+    if scope not in {"firm", "practice_area", "matter"}:
+        raise ValueError("unsupported currency report scope")
+    return service.currency_report(
+        period_start=datetime.fromisoformat(period_start.replace("Z", "+00:00")),
+        period_end=datetime.fromisoformat(period_end.replace("Z", "+00:00")),
+        scope=cast(ReportScopeKind, scope),
+        practice_area=practice_area or None,
+        matter_id=matter_id or None,
+        client_id=client_id or None,
+    )
+
+
+def _default_report_period(period_start: str | None, period_end: str | None) -> tuple[str, str]:
+    now = datetime.now(timezone.utc)
+    start = period_start or datetime(now.year, 1, 1, tzinfo=timezone.utc).isoformat()
+    end = period_end or now.isoformat()
+    return start, end
+
+
 def _audit_candidates(service: SolomonService, query: str | None) -> list[dict[str, Any]]:
     if query:
         try:
@@ -411,6 +546,17 @@ def _audit_pack_payload(trace: Any, *, manifest: dict[str, Any], journal_jsonl: 
 def _exported_pack_files(service: SolomonService) -> tuple[dict[str, Any], str]:
     with TemporaryDirectory(prefix="solomon-console-audit-") as temp_dir:
         pack_dir = service.export_audit_pack(Path(temp_dir))
+        manifest = json.loads((pack_dir / "manifest.json").read_text(encoding="utf-8"))
+        journal_jsonl = (pack_dir / str(manifest["journal_file"])).read_text(encoding="utf-8")
+    return manifest, journal_jsonl
+
+
+def _exported_currency_report_pack(
+    service: SolomonService,
+    report: CurrencyMovementReport,
+) -> tuple[dict[str, Any], str]:
+    with TemporaryDirectory(prefix="solomon-console-currency-report-") as temp_dir:
+        pack_dir = service.export_currency_report_pack(Path(temp_dir), report)
         manifest = json.loads((pack_dir / "manifest.json").read_text(encoding="utf-8"))
         journal_jsonl = (pack_dir / str(manifest["journal_file"])).read_text(encoding="utf-8")
     return manifest, journal_jsonl

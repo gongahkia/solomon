@@ -21,6 +21,7 @@ from solomon.api.auth import (
     static_secret_matches,
     validate_auth_scopes,
 )
+from solomon.api.report_routes import register_currency_report_routes
 from solomon.api.service import (
     AffirmRequest,
     AnswerRequest,
@@ -283,6 +284,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def answer(request: Request, payload: AnswerRequest) -> dict[str, Any]:
         return active_service(request).answer(payload, active_router()).model_dump(mode="json")
 
+    register_currency_report_routes(app, active_service)
+
     @app.get("/currency/{item_id}")
     def currency(request: Request, item_id: str) -> dict[str, Any]:
         return active_service(request).evaluate_currency(item_id)
@@ -494,6 +497,4 @@ def _tenant_response(record: TenantRecord) -> TenantResponse:
         api_key_configured=record.api_key_configured,
         api_key_scopes=list(record.api_key_scopes),
     )
-
-
 app = create_app()

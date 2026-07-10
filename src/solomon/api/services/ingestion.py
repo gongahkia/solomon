@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from solomon.api.service_models import (
     AffirmRequest,
@@ -32,6 +33,11 @@ from solomon.store.hardening import harden_stored_content
 class IngestionService(ServiceDelegate):
     def ingest(self, request: IngestRequest) -> KnowledgeItem:
         hardened = harden_stored_content(request.content)
+        metadata: dict[str, Any] = {"stored_content_hardening": hardened.findings} if hardened.findings else {}
+        if request.conclusion:
+            metadata["conclusion"] = request.conclusion
+        if request.conclusion_polarity is not None:
+            metadata["conclusion_polarity"] = request.conclusion_polarity.value
         item = KnowledgeItem(
             kind=request.kind,
             content=hardened.content,
@@ -50,7 +56,7 @@ class IngestionService(ServiceDelegate):
             ingested_at=request.ingested_at or datetime.now().astimezone(),
             matter_id=request.matter_id,
             client_id=request.client_id,
-            metadata={"stored_content_hardening": hardened.findings} if hardened.findings else {},
+            metadata=metadata,
         )
         item, _review = self.boundary.review_for_ingest(item)
         credence_entry_start = len(self.credence.entries)

@@ -19,6 +19,7 @@ from pydantic import Field, field_validator
 
 from solomon.api.schemas import SolomonModel
 from solomon.credence.policy import CredenceAuditEntry
+from solomon.currency.contradiction import ContradictionSignal
 from solomon.currency.models import KnowledgeItem, now_utc
 from solomon.currency.verification import VerificationLifecycleEvent
 from solomon.graph.models import ImpactResult
@@ -111,6 +112,18 @@ class AuditPack:
     journal_path: Path
 
 
+def _optional_artifact_hash_ok(manifest: dict[str, Any], target: Path, *, file_key: str, digest_key: str) -> bool:
+    artifact_file = manifest.get(file_key)
+    artifact_digest = manifest.get(digest_key)
+    if artifact_file is None and artifact_digest is None:
+        return True
+    return (
+        isinstance(artifact_file, str)
+        and isinstance(artifact_digest, str)
+        and hashlib.sha256((target / artifact_file).read_bytes()).hexdigest() == artifact_digest
+    )
+
+
 class AuditJournal:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
@@ -157,6 +170,8 @@ class AuditJournal:
                     "item_id": result.item.id,
                     "currency_state": result.currency_state.value,
                     "dependency_ids": [edge.id for edge in result.dependencies],
+                    "contradiction_ids": [signal["signal_id"] for signal in result.contradictions],
+                    "contradiction_count": len(result.contradictions),
                     "last_verified_at": result.last_verified_at.isoformat() if result.last_verified_at else None,
                 }
                 for result in results
@@ -175,6 +190,9 @@ class AuditJournal:
 
     def log_verification_lifecycle(self, event: VerificationLifecycleEvent) -> AuditEntry:
         return self.append("verification_lifecycle_event", event.model_dump(mode="json"), occurred_at=event.occurred_at)
+
+    def log_contradiction_signal(self, signal: ContradictionSignal) -> AuditEntry:
+        return self.append("contradiction_detected", signal.model_dump(mode="json"), occurred_at=signal.detected_at)
 
     def log_credence_change(self, entry: CredenceAuditEntry) -> AuditEntry:
         return self.append("credence_change", entry.model_dump(mode="json"))
@@ -218,20 +236,22 @@ class AuditJournal:
         manifest_hash_ok = hashlib.sha256(manifest_bytes).hexdigest() == supplied_manifest_hash
         journal_path = target / str(manifest["journal_file"])
         journal_hash_ok = hashlib.sha256(journal_path.read_bytes()).hexdigest() == manifest["journal_sha256"]
-        history_file = manifest.get("verification_history_file")
-        history_digest = manifest.get("verification_history_sha256")
-        history_hash_ok = True
-        if history_file is not None or history_digest is not None:
-            history_hash_ok = (
-                isinstance(history_file, str)
-                and isinstance(history_digest, str)
-                and hashlib.sha256((target / history_file).read_bytes()).hexdigest() == history_digest
-            )
+        artifacts_hash_ok = _optional_artifact_hash_ok(
+            manifest,
+            target,
+            file_key="verification_history_file",
+            digest_key="verification_history_sha256",
+        ) and _optional_artifact_hash_ok(
+            manifest,
+            target,
+            file_key="contradictions_file",
+            digest_key="contradictions_sha256",
+        )
         journal = AuditJournal(journal_path).verify()
         return AuditPackVerification(
-            ok=manifest_hash_ok and journal_hash_ok and history_hash_ok and journal.ok,
+            ok=manifest_hash_ok and journal_hash_ok and artifacts_hash_ok and journal.ok,
             journal=journal,
-            manifest_hash_ok=manifest_hash_ok and journal_hash_ok and history_hash_ok,
+            manifest_hash_ok=manifest_hash_ok and journal_hash_ok and artifacts_hash_ok,
         )
 
     def verify(self) -> JournalVerification:

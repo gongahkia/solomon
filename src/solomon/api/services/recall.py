@@ -16,6 +16,7 @@ from solomon.api.service_models import (
 )
 from solomon.api.services.base import ServiceDelegate
 from solomon.api.services.common import digest, jsonable, parse_iso_datetime, result_summary
+from solomon.currency.contradiction import contradictions_for_item
 from solomon.currency.engine import evaluate_currency
 from solomon.currency.verification import verification_history
 from solomon.errors import BadRequestError
@@ -44,6 +45,7 @@ class RecallService(ServiceDelegate):
             currency=evaluate_currency(item, as_of=as_of).model_dump(mode="json"),
             dependencies=[edge.model_dump(mode="json") for edge in self.graph.get_dependencies(item.id)],
             dependents=[edge.model_dump(mode="json") for edge in self.graph.get_dependents(item.id)],
+            contradictions=[signal.model_dump(mode="json") for signal in contradictions_for_item(item)],
             provenance=item.provenance.model_dump(mode="json"),
             credence_tier=item.credence_tier.value,
             verification={

@@ -116,6 +116,7 @@ def check_currency(
         "last_verified_at": trace.verification.get("last_verified_at"),
         "verified_by": trace.verification.get("verified_by"),
         "successor_id": trace.item.successor_id,
+        "contradictions": trace.contradictions,
     }
 
 

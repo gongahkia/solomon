@@ -25,6 +25,7 @@ from solomon.api.service import (
 )
 from solomon.boundary.solomon import probe_boundary_client
 from solomon.config import credence_policy_from_settings, get_settings, verification_policy_from_settings
+from solomon.currency.contradiction import ConclusionPolarity
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.currency.prediction import load_pending_amendments
@@ -161,9 +162,18 @@ def ingest(
     source_ref: Annotated[str, typer.Option("--source-ref", help="Source reference.")],
     kind: Annotated[KnowledgeKind, typer.Option("--kind")] = KnowledgeKind.NOTE,
     source_kind: Annotated[SourceKind, typer.Option("--source-kind")] = SourceKind.ASSOCIATE,
+    conclusion: Annotated[str | None, typer.Option("--conclusion", help="Structured conclusion text.")] = None,
+    conclusion_polarity: Annotated[ConclusionPolarity | None, typer.Option("--conclusion-polarity")] = None,
 ) -> None:
     item = _service().ingest(
-        IngestRequest(kind=kind, content=content, source_kind=source_kind, source_ref=source_ref)
+        IngestRequest(
+            kind=kind,
+            content=content,
+            source_kind=source_kind,
+            source_ref=source_ref,
+            conclusion=conclusion,
+            conclusion_polarity=conclusion_polarity,
+        )
     )
     _print_json(item.model_dump(mode="json"))
 

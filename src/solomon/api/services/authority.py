@@ -19,6 +19,12 @@ from solomon.api.service_models import (
 from solomon.api.services.base import ServiceDelegate
 from solomon.api.services.common import digest, parse_iso_datetime
 from solomon.audit.journal import sign_verification_attestation
+from solomon.currency.contradiction import (
+    ContradictionSignal,
+    append_contradiction_signal,
+    contradictions_for_item,
+    detect_same_authority_opposite_conclusions,
+)
 from solomon.currency.engine import register_authority_change
 from solomon.currency.models import CurrencyState, KnowledgeItem, VerifiedState
 from solomon.currency.prediction import StalenessRiskReport, predict_staleness_risk
@@ -30,8 +36,8 @@ from solomon.currency.verification import (
     lifecycle_state_for_outcome,
     verification_history,
 )
-from solomon.errors import BadRequestError
-from solomon.graph.models import DependencyEdge
+from solomon.errors import BadRequestError, NotFoundError
+from solomon.graph.models import DependencyEdge, EdgeType
 from solomon.graph.propagation import CurrencyPropagator
 from solomon.graph.suggestions import (
     DependencySuggestion,
@@ -210,7 +216,9 @@ class AuthorityService(ServiceDelegate):
             created_by=request.created_by,
             reason=request.reason,
         )
-        return self.graph.add_dependency(edge)
+        edge = self.graph.add_dependency(edge)
+        self._detect_for_edge(edge)
+        return edge
 
     def suggest_dependencies(
         self,
@@ -246,6 +254,7 @@ class AuthorityService(ServiceDelegate):
             raise BadRequestError("rejected dependency suggestions cannot be confirmed")
         edge = confirm_suggestion(suggestion, by=request.by)
         edge = self.graph.add_dependency(edge)
+        self._detect_for_edge(edge)
         confirmed = suggestion.model_copy(
             update={
                 "decision": SuggestionDecision.CONFIRMED,
@@ -372,8 +381,50 @@ class AuthorityService(ServiceDelegate):
                     "source": stored_suggestion.source,
                     "authority_ref_sha256": digest(stored_suggestion.authority_ref),
                 },
-            )
+        )
         return stored
+
+    def detect_contradictions(
+        self,
+        *,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[ContradictionSignal]:
+        signals = detect_same_authority_opposite_conclusions(
+            store=self.store,
+            graph=self.graph,
+            matter_id=matter_id,
+            client_id=client_id,
+        )
+        applied: list[ContradictionSignal] = []
+        for signal in signals:
+            item = self._get_item(signal.item_id)
+            if any(existing.signal_id == signal.signal_id for existing in contradictions_for_item(item)):
+                continue
+            updated = append_contradiction_signal(item, signal)
+            event = VerificationLifecycleEvent(
+                item_id=item.id,
+                state=VerificationLifecycleState.REQUESTED,
+                actor_id="system",
+                occurred_at=signal.detected_at,
+                basis=signal.basis,
+                source_ref=signal.authority_id,
+                policy_version=self.verification_policy_version,
+                credence_policy_version=self.credence_policy_version,
+                policy_snapshot=self._policy_snapshot(),
+            )
+            updated = append_verification_event(updated, event)
+            self.store.update_item(
+                updated,
+                event_type="knowledge_item_contradiction_flagged",
+                occurred_at=signal.detected_at,
+            )
+            self.index.upsert_item(updated)
+            self.currency_cache.invalidate({item.id})
+            self.audit.log_contradiction_signal(signal)
+            self.audit.log_verification_lifecycle(event)
+            applied.append(signal)
+        return applied
 
     def _append_lifecycle_event(
         self,
@@ -397,6 +448,15 @@ class AuthorityService(ServiceDelegate):
         self.currency_cache.invalidate({item.id})
         self.audit.log_verification_lifecycle(event)
         return item
+
+    def _detect_for_edge(self, edge: DependencyEdge) -> None:
+        if edge.edge_type is not EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL:
+            return
+        try:
+            item = self._get_item(edge.source_id)
+        except NotFoundError:
+            return
+        self.detect_contradictions(matter_id=item.matter_id, client_id=item.client_id)
 
     def _policy_snapshot(self) -> dict[str, Any]:
         return {

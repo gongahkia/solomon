@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from solomon.api.service import IngestRequest, PinRequest, VerificationRequest
+from solomon.currency.contradiction import ConclusionPolarity
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.graph.suggestions import SuggestionDecision
@@ -55,14 +56,14 @@ def verify_position(
     else:
         item = runtime.service.record_verification(
             knowledge_item_id,
-                VerificationRequest(
-                    by=verifier_id,
-                    outcome=VerificationOutcome(decision),
-                    basis=evidence_ref,
-                    source_ref=evidence_ref,
-                    successor_id=successor_id,
-                    recorded_at=_parse_datetime(recorded_at),
-                ),
+            VerificationRequest(
+                by=verifier_id,
+                outcome=VerificationOutcome(decision),
+                basis=evidence_ref,
+                source_ref=evidence_ref,
+                successor_id=successor_id,
+                recorded_at=_parse_datetime(recorded_at),
+            ),
         )
     currency = runtime.service.evaluate_currency(knowledge_item_id)
     entry = runtime.service.audit.append(
@@ -100,6 +101,8 @@ def ingest(
     scope: dict[str, Any],
     kind: str = "note",
     source_kind: str = "associate",
+    conclusion: str | None = None,
+    conclusion_polarity: str | None = None,
     author: str | None = None,
     caller_id: str | None = None,
 ) -> dict[str, Any]:
@@ -112,6 +115,8 @@ def ingest(
             content=text,
             source_kind=SourceKind(source_kind),
             source_ref=source_ref,
+            conclusion=conclusion,
+            conclusion_polarity=ConclusionPolarity(conclusion_polarity) if conclusion_polarity else None,
             author=author,
             matter_id=cast(str | None, scope.get("matter_id")),
             client_id=cast(str | None, scope.get("client_id")),
@@ -134,6 +139,7 @@ def ingest(
                 "scope": scope,
                 "kind": kind,
                 "source_kind": source_kind,
+                "conclusion_polarity": conclusion_polarity,
                 "author": author,
             },
             metadata={"item_id": item.id},

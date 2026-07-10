@@ -42,6 +42,7 @@ from solomon.audit.journal import AuditJournal
 from solomon.boundary.solomon import SolomonBoundary
 from solomon.credence.policy import CredenceLedger, CredencePolicy
 from solomon.currency.cache import CurrencyEvaluationCache
+from solomon.currency.contradiction import ContradictionSignal, contradictions_for_item
 from solomon.currency.engine import VerificationPolicy, record_verification
 from solomon.currency.models import KnowledgeItem
 from solomon.currency.prediction import StalenessRiskReport
@@ -142,6 +143,14 @@ class SolomonService:
             client_id=client_id,
         )
 
+    def detect_contradictions(
+        self,
+        *,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[ContradictionSignal]:
+        return self._authority.detect_contradictions(matter_id=matter_id, client_id=client_id)
+
     def register_authority_change(self, authority_id: str, request: AuthorityChangeRequest) -> dict[str, Any]:
         return self._authority.register_authority_change(authority_id, request)
 
@@ -229,10 +238,20 @@ class SolomonService:
         history_path = pack.directory / "verification-history.json"
         history_bytes = json.dumps(histories, sort_keys=True, indent=2).encode("utf-8")
         history_path.write_bytes(history_bytes)
+        contradictions = {
+            item.id: [signal.model_dump(mode="json") for signal in contradictions_for_item(item)]
+            for item in self.store.get_many()
+            if contradictions_for_item(item)
+        }
+        contradictions_path = pack.directory / "contradictions.json"
+        contradictions_bytes = json.dumps(contradictions, sort_keys=True, indent=2).encode("utf-8")
+        contradictions_path.write_bytes(contradictions_bytes)
         manifest = json.loads(pack.manifest_path.read_text(encoding="utf-8"))
         manifest.pop("manifest_sha256", None)
         manifest["verification_history_file"] = history_path.name
         manifest["verification_history_sha256"] = hashlib.sha256(history_bytes).hexdigest()
+        manifest["contradictions_file"] = contradictions_path.name
+        manifest["contradictions_sha256"] = hashlib.sha256(contradictions_bytes).hexdigest()
         manifest_bytes = json.dumps(manifest, sort_keys=True, indent=2).encode("utf-8")
         manifest["manifest_sha256"] = hashlib.sha256(manifest_bytes).hexdigest()
         pack.manifest_path.write_text(json.dumps(manifest, sort_keys=True, indent=2), encoding="utf-8")

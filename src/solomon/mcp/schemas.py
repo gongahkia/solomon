@@ -17,6 +17,7 @@ DependencyDirection: TypeAlias = Literal["upstream", "downstream", "both"]
 DependencySuggestionDecision: TypeAlias = Literal["pending", "confirmed", "rejected"]
 AuditPackFormat: TypeAlias = Literal["json", "pdf"]
 VerificationDecision: TypeAlias = Literal["reaffirm", "supersede", "retire", "pin"]
+ConclusionPolarityValue: TypeAlias = Literal["affirmative", "negative"]
 
 
 class EffectiveScope(SolomonModel):
@@ -82,6 +83,7 @@ class CheckCurrencyOutput(SolomonModel):
     last_verified_at: str | None = None
     verified_by: str | None = None
     successor_id: str | None = None
+    contradictions: list[JsonObject] = Field(default_factory=list)
 
 
 class GetDependenciesInput(SolomonModel):
@@ -136,6 +138,8 @@ class IngestInput(SolomonModel):
     scope: IngestScope
     kind: Literal["position", "clause", "house-view", "advice", "note"] = "note"
     source_kind: Literal["partner", "associate", "matter-doc", "external-feed", "model"] = "associate"
+    conclusion: str | None = None
+    conclusion_polarity: ConclusionPolarityValue | None = None
     author: str | None = None
     caller_id: str | None = None
 

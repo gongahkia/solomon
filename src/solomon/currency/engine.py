@@ -116,7 +116,10 @@ def evaluate_currency(
 
     if item.currency_state is CurrencyState.STALE_PENDING_REVERIFICATION or stale_reasons:
         if stale_reasons:
-            explanation.append("one or more dependencies moved and require human re-verification")
+            if item.metadata.get("contradictions"):
+                explanation.append("one or more live positions contradict this item and require human re-verification")
+            else:
+                explanation.append("one or more dependencies moved and require human re-verification")
         else:
             explanation.append("item is already marked stale-pending-reverification")
         return CurrencyEvaluation(

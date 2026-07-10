@@ -167,6 +167,14 @@
         "title": "BoundaryImportStatus",
         "type": "object"
       },
+      "ConclusionPolarity": {
+        "enum": [
+          "affirmative",
+          "negative"
+        ],
+        "title": "ConclusionPolarity",
+        "type": "string"
+      },
       "ContestRequest": {
         "additionalProperties": false,
         "properties": {
@@ -422,6 +430,27 @@
               }
             ],
             "title": "Client Id"
+          },
+          "conclusion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conclusion"
+          },
+          "conclusion_polarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConclusionPolarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "content": {
             "minLength": 1,
@@ -955,6 +984,17 @@
       "VerificationRequest": {
         "additionalProperties": false,
         "properties": {
+          "basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis"
+          },
           "by": {
             "title": "By",
             "type": "string"
@@ -973,6 +1013,17 @@
               }
             ],
             "title": "Recorded At"
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Ref"
           },
           "successor_id": {
             "anyOf": [

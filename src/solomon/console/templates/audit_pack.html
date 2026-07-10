@@ -78,6 +78,16 @@
               </ul>
             </section>
             <section>
+              <h4>Contradictions</h4>
+              <ul>
+                {% for signal in selected.contradictions %}
+                  <li>{{ signal.kind }} · {{ signal.conflicting_item_id }} · {{ signal.authority_id }}</li>
+                {% else %}
+                  <li>none</li>
+                {% endfor %}
+              </ul>
+            </section>
+            <section>
               <h4>Verification</h4>
               <p>{{ selected.verification.verified_state }} · {{ selected.verification.verified_by or "unassigned" }} · {{ selected.verification.last_verified_at or "no timestamp" }}</p>
               <ul>

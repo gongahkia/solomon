@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from solomon.api.schemas import SolomonModel
+from solomon.currency.contradiction import ConclusionPolarity
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import (
     CredenceTier,
@@ -25,6 +26,8 @@ class IngestRequest(SolomonModel):
     content: str = Field(min_length=1)
     source_kind: SourceKind
     source_ref: str = Field(min_length=1)
+    conclusion: str | None = None
+    conclusion_polarity: ConclusionPolarity | None = None
     author: str | None = None
     content_role: KnowledgeContentRole | None = None
     matter_id: str | None = None
@@ -160,6 +163,7 @@ class WhyTrace(SolomonModel):
     currency: dict[str, Any]
     dependencies: list[dict[str, Any]]
     dependents: list[dict[str, Any]]
+    contradictions: list[dict[str, Any]] = Field(default_factory=list)
     provenance: dict[str, Any]
     credence_tier: str
     verification: dict[str, Any]

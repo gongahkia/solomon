@@ -16,6 +16,7 @@ from pydantic import Field
 
 from solomon.api.schemas import SolomonModel
 from solomon.credence.policy import CredenceLedger, RetrievalCandidate
+from solomon.currency.contradiction import contradictions_for_item
 from solomon.currency.engine import evaluate_currency
 from solomon.currency.models import CurrencyState, KnowledgeItem
 from solomon.graph.models import DependencyEdge
@@ -168,6 +169,7 @@ class RecallResult(SolomonModel):
     currency_state: CurrencyState
     provenance: dict[str, Any]
     dependencies: list[DependencyEdge]
+    contradictions: list[dict[str, Any]] = Field(default_factory=list)
     superseded_by: str | None
     last_verified_at: datetime | None
     stale_reasons: list[dict[str, Any]]
@@ -332,6 +334,7 @@ class RetrievalOrchestrator:
             currency_state=evaluation.currency_state,
             provenance=item.provenance.model_dump(mode="json"),
             dependencies=self.graph.get_dependencies(item.id),
+            contradictions=[signal.model_dump(mode="json") for signal in contradictions_for_item(item)],
             superseded_by=item.successor_id,
             last_verified_at=item.last_verified_at,
             stale_reasons=[dict(reason) for reason in evaluation.stale_reasons],

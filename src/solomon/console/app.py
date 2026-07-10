@@ -239,6 +239,7 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
                         f"currency_state: {trace.currency['currency_state']}",
                         f"source_ref: {trace.provenance['source_ref']}",
                         f"dependencies: {len(trace.dependencies)}",
+                        f"contradictions: {len(trace.contradictions)}",
                         f"verification_events: {len(trace.verification.get('history', []))}",
                     ]
                 ),
@@ -380,6 +381,7 @@ def _audit_context(service: SolomonService, item_id: str | None) -> dict[str, An
         "currency": trace.currency,
         "dependencies": trace.dependencies,
         "dependents": trace.dependents,
+        "contradictions": trace.contradictions,
         "provenance": trace.provenance,
         "credence_tier": trace.credence_tier,
         "verification": trace.verification,
@@ -396,6 +398,7 @@ def _audit_pack_payload(trace: Any, *, manifest: dict[str, Any], journal_jsonl: 
         "currency": trace.currency,
         "dependencies": trace.dependencies,
         "dependents": trace.dependents,
+        "contradictions": trace.contradictions,
         "provenance": trace.provenance,
         "credence_tier": trace.credence_tier,
         "verification": trace.verification,

@@ -170,6 +170,14 @@
     "output": {
       "additionalProperties": false,
       "properties": {
+        "contradictions": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Contradictions",
+          "type": "array"
+        },
         "knowledge_item_id": {
           "title": "Knowledge Item Id",
           "type": "string"
@@ -750,6 +758,34 @@
           ],
           "default": null,
           "title": "Caller Id"
+        },
+        "conclusion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conclusion"
+        },
+        "conclusion_polarity": {
+          "anyOf": [
+            {
+              "enum": [
+                "affirmative",
+                "negative"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conclusion Polarity"
         },
         "kind": {
           "default": "note",

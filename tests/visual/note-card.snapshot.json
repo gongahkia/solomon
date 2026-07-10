@@ -1,37 +1,39 @@
 {
   "viewport": {
     "width": 1100,
-    "height": 761,
+    "height": 757,
     "devicePixelRatio": 1
   },
   "card": {
     "width": 608,
-    "height": 201,
+    "height": 248,
     "marginTop": "10px",
     "marginRight": "16px",
     "marginBottom": "12px",
     "marginLeft": "16px",
-    "borderRadius": "12px",
+    "borderRadius": "16px",
     "borderColor": "rgb(207, 217, 222)",
     "backgroundColor": "rgb(255, 255, 255)",
     "color": "rgb(15, 20, 25)",
-    "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "fontFamily": "-apple-system, \"system-ui\", \"Segoe UI\", sans-serif",
     "fontSize": "14px",
     "lineHeight": "19.88px"
   },
   "header": {
     "text": "Readers added context they thought people might want to know.",
-    "color": "rgb(83, 100, 113)",
-    "fontSize": "13px",
+    "color": "rgb(15, 20, 25)",
+    "backgroundColor": "rgb(247, 249, 249)",
+    "fontSize": "15px",
     "fontWeight": "700",
-    "iconText": "i",
-    "iconWidth": "18px",
-    "iconHeight": "18px"
+    "iconColor": "rgb(29, 155, 240)",
+    "iconText": "",
+    "iconWidth": "22px",
+    "iconHeight": "22px"
   },
   "screenshot": {
-    "sha256": "3321275d55a490d28143da1b440e6efe63864f3f286f872b26e98253080bf282",
-    "bytes": 30502,
+    "sha256": "26e0c19eeeb9e2737d6377996c9c178d4dc3a90ee08e689485e12cad1225d2b4",
+    "bytes": 30626,
     "width": 608,
-    "height": 201
+    "height": 248
   }
 }

@@ -1,14 +1,33 @@
 {
-  "source": "Manual visual tokens from the public X Community Notes card style used as Decorum's initial target.",
+  "source": "Captured public X Community Notes screenshots reviewed on 2026-07-10.",
+  "evidence": [
+    {
+      "url": "https://www.thepoke.com/2024/01/16/community-note-on-d-day-comment-goes-straight-into-hall-of-fame/",
+      "observed": "Desktop light card with long header copy, blue people icon, pale header strip, rounded border, source links, and separated rating row."
+    },
+    {
+      "url": "https://viewjournal.eu/articles/10.18146/view.324",
+      "observed": "Mobile light card with compact header, blue people icon, rounded border, blue source link, and separated rating row."
+    },
+    {
+      "url": "https://fij.ng/article/stake-watermark-rave-on-x-spells-doom-for-addicted-gamblers/",
+      "observed": "Dark card with blue people icon, dark border, black background, and separated rating row."
+    }
+  ],
   "headerText": "Readers added context they thought people might want to know.",
   "card": {
+    "borderRadius": "16px",
     "borderColor": "rgb(207, 217, 222)",
     "backgroundColor": "rgb(255, 255, 255)",
     "textColor": "rgb(15, 20, 25)"
   },
   "header": {
-    "color": "rgb(83, 100, 113)",
-    "fontSize": "13px",
-    "fontWeight": "700"
+    "color": "rgb(15, 20, 25)",
+    "backgroundColor": "rgb(247, 249, 249)",
+    "fontSize": "15px",
+    "fontWeight": "700",
+    "iconColor": "rgb(29, 155, 240)",
+    "iconWidth": "22px",
+    "iconHeight": "22px"
   }
 }

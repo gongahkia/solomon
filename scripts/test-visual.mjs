@@ -91,9 +91,17 @@ async function compareReference(actual) {
     "note background color drifted"
   );
   assert(actual.card.color === reference.card.textColor, "note text color drifted");
+  assert(actual.card.borderRadius === reference.card.borderRadius, "note radius drifted");
   assert(actual.header.color === reference.header.color, "note header color drifted");
+  assert(
+    actual.header.backgroundColor === reference.header.backgroundColor,
+    "note header background drifted"
+  );
   assert(actual.header.fontSize === reference.header.fontSize, "note header font size drifted");
   assert(actual.header.fontWeight === reference.header.fontWeight, "note header weight drifted");
+  assert(actual.header.iconColor === reference.header.iconColor, "note icon color drifted");
+  assert(actual.header.iconWidth === reference.header.iconWidth, "note icon width drifted");
+  assert(actual.header.iconHeight === reference.header.iconHeight, "note icon height drifted");
 }
 
 const server = await startStaticServer(fixturesDir);
@@ -153,8 +161,10 @@ try {
       header: {
         text: header.textContent,
         color: headerStyle.color,
+        backgroundColor: getComputedStyle(card.querySelector('.decorum-note-header')).backgroundColor,
         fontSize: headerStyle.fontSize,
         fontWeight: headerStyle.fontWeight,
+        iconColor: iconStyle.fill,
         iconText: icon.textContent,
         iconWidth: iconStyle.width,
         iconHeight: iconStyle.height

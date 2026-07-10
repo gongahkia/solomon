@@ -16,7 +16,7 @@ Current implementation status:
 - Versioned classifier request/response contract with eval fixtures and gateway examples.
 - Chromium runtime test proving detection, insertion under the flagged post, one-note behavior, threshold/disable reactivity, unique trace IDs, and rating persistence.
 - DOM-resilience test covering alternate LinkedIn-like post containers, fallback IDs, nested post-like blocks, and unrelated DOM churn.
-- Visual snapshot test covering note-card dimensions, key computed styles, header wording, and rendered PNG hash.
+- Visual snapshot test covering note-card dimensions, key computed styles, Community Notes reference tokens, header wording, and rendered PNG hash.
 
 ## Platform Decisions
 
@@ -34,6 +34,7 @@ Current implementation status:
 - LinkedIn's User Agreement prohibits modifying the service appearance by inserting elements. Keep this as an unpacked, private prototype until the distribution posture is reviewed.
 - The local tonal classifier is deterministic and conservative. It is useful for validating the product loop, but it should not be treated as equivalent to the planned Haiku/Sonnet classifier.
 - [Inference] The visual snapshot prevents accidental drift in this repo, but it is not proof that the card exactly matches live X Community Notes. A browser comparison against real X notes is still needed before making that claim.
+- The 2026-07-10 visual parity review matched the note card against captured public X Community Notes screenshots. Some product-specific differences remain documented.
 - Public naming uses "Decorum" and avoids "LinkedIn Community Notes" because it creates unnecessary brand and affiliation risk.
 - Visible notes stay AI-only for the next milestone. Ratings are eval labels, not user-contributed note text.
 - CI disables strict PNG byte-hash comparison because Chrome builds can render antialiasing differently. It still checks computed visual tokens and dimensions.
@@ -59,3 +60,4 @@ The runtime test uses a generated localhost extension manifest so the real conte
 - Exa pricing: https://exa.ai/pricing
 - Note generation policy: ./note-generation.md
 - Shared ledger design: ./ledger.md
+- Visual parity review: ./visual-parity.md

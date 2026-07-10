@@ -197,10 +197,16 @@
     const header = document.createElement("div");
     header.className = "decorum-note-header";
 
-    const icon = document.createElement("i");
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     icon.className = "decorum-note-icon";
+    icon.setAttribute("viewBox", "0 0 24 24");
     icon.setAttribute("aria-hidden", "true");
-    icon.textContent = "i";
+    const iconPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    iconPath.setAttribute(
+      "d",
+      "M8.8 10.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Zm6.4 0a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4ZM3.5 18.5c0-3 2.4-5.4 5.3-5.4s5.3 2.4 5.3 5.4v.7H3.5v-.7Zm8.8-4.6c.8-.5 1.8-.8 2.9-.8 2.9 0 5.3 2.4 5.3 5.4v.7h-4.1v-.7c0-1.8-.8-3.4-2.1-4.5-.6-.1-1.2-.2-2-.1Z"
+    );
+    icon.append(iconPath);
 
     const headerText = document.createElement("span");
     headerText.textContent = "Readers added context they thought people might want to know.";

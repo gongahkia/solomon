@@ -21,6 +21,7 @@ See [docs/note-generation.md](./docs/note-generation.md) for the AI-only note-ge
 See [docs/ledger.md](./docs/ledger.md) for the shared replay ledger and false-positive surface.
 See [docs/visual-parity.md](./docs/visual-parity.md) for the X Community Notes visual comparison.
 See [docs/distribution.md](./docs/distribution.md) for the current private-prototype distribution posture.
+See [docs/private-beta.md](./docs/private-beta.md) for the 5-tester unpacked-extension beta runbook.
 See [docs/naming.md](./docs/naming.md) for naming and affiliation rules.
 
 ## Current Scope

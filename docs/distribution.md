@@ -25,6 +25,8 @@ LinkedIn's User Agreement, effective 2025-11-03, creates direct distribution ris
 - Manual loading from `dist/` through `chrome://extensions`.
 - Small private friend testing when each tester receives the disclosures below before install.
 
+Use [private-beta.md](./private-beta.md) for the current 5-tester unpacked-extension runbook and feedback routing.
+
 ## Required Tester Disclosures
 
 Private testers must be told:

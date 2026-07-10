@@ -61,3 +61,4 @@ The runtime test uses a generated localhost extension manifest so the real conte
 - Note generation policy: ./note-generation.md
 - Shared ledger design: ./ledger.md
 - Visual parity review: ./visual-parity.md
+- Private beta runbook: ./private-beta.md

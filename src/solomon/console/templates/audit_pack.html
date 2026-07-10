@@ -80,6 +80,13 @@
             <section>
               <h4>Verification</h4>
               <p>{{ selected.verification.verified_state }} · {{ selected.verification.verified_by or "unassigned" }} · {{ selected.verification.last_verified_at or "no timestamp" }}</p>
+              <ul>
+                {% for event in selected.verification.history %}
+                  <li>{{ event.state }} · {{ event.reviewer_id or event.actor_id }} · {{ event.basis or event.source_ref or "no basis" }}</li>
+                {% else %}
+                  <li>no lifecycle events</li>
+                {% endfor %}
+              </ul>
             </section>
             <section>
               <h4>Boundary</h4>

@@ -163,7 +163,7 @@ def test_service_record_verification_invalidates_cached_currency(tmp_path: Path)
 
     service.record_verification(
         item.id,
-        VerificationRequest(by="Partner B", outcome=VerificationOutcome.REAFFIRM),
+        VerificationRequest(by="Partner B", outcome=VerificationOutcome.REAFFIRM, basis="reviewed memo"),
     )
 
     assert not service.currency_cache.contains(item.id)

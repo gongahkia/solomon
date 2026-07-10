@@ -10,7 +10,7 @@
         <span class="row-id">{{ row.item.id }}</span>
         <span class="row-meta">{{ row.item.kind }} · {{ row.currency.currency_state }}</span>
         <span class="row-reason">{{ row.reason }}</span>
-        <span class="row-scope">{{ row.item.matter_id or "no matter" }} / {{ row.item.client_id or "no client" }}</span>
+        <span class="row-scope">{{ row.reviewer_id or "unassigned" }} · {{ row.verification_status or "requested" }}</span>
       </a>
     {% endfor %}
   </div>

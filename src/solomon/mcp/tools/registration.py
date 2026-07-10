@@ -50,6 +50,12 @@ def register_solomon_tools(server: FastMCPProtocol, runtime: SolomonMCPRuntime) 
         structured_output=True,
     )(runtime.verify_position)
     server.tool(
+        name="solomon.verification_queue",
+        description=TOOL_DESCRIPTIONS["solomon.verification_queue"],
+        annotations=annotations_for("solomon.verification_queue"),
+        structured_output=True,
+    )(runtime.verification_queue)
+    server.tool(
         name="solomon.ingest",
         description=TOOL_DESCRIPTIONS["solomon.ingest"],
         annotations=annotations_for("solomon.ingest"),

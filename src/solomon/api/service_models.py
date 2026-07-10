@@ -45,8 +45,26 @@ class RecallRequest(SolomonModel):
 class VerificationRequest(SolomonModel):
     by: str
     outcome: VerificationOutcome
+    basis: str | None = None
+    source_ref: str | None = None
     successor_id: str | None = None
     recorded_at: datetime | None = None
+
+
+class VerificationAssignmentRequest(SolomonModel):
+    assigned_by: str = Field(min_length=1)
+    reviewer_id: str = Field(min_length=1)
+    role: str | None = None
+    basis: str | None = None
+    source_ref: str | None = None
+    assigned_at: datetime | None = None
+
+
+class VerificationReviewRequest(SolomonModel):
+    reviewer_id: str = Field(min_length=1)
+    basis: str | None = None
+    source_ref: str | None = None
+    started_at: datetime | None = None
 
 
 class AuthorityChangeRequest(SolomonModel):
@@ -179,6 +197,8 @@ __all__ = [
     "IngestRequest",
     "RecallRequest",
     "VerificationRequest",
+    "VerificationAssignmentRequest",
+    "VerificationReviewRequest",
     "AuthorityChangeRequest",
     "ContestRequest",
     "ContestResponse",

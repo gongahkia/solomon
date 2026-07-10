@@ -14,6 +14,10 @@
         <dd>{{ selected.credence_tier }}</dd>
         <dt>Verified</dt>
         <dd>{{ selected.verification.verified_state }}</dd>
+        <dt>Reviewer</dt>
+        <dd>{{ selected.verification.reviewer_id or "unassigned" }}</dd>
+        <dt>Status</dt>
+        <dd>{{ selected.verification.status or "requested" }}</dd>
         <dt>Source</dt>
         <dd>{{ selected.provenance.source_ref }}</dd>
         <dt>Reason</dt>
@@ -52,6 +56,32 @@
   <form
     class="decision"
     method="post"
+    action="/console/verification/items/{{ selected.item.id }}/assign"
+    hx-post="/console/verification/items/{{ selected.item.id }}/assign"
+    hx-target="#preview-panel"
+    hx-swap="innerHTML"
+  >
+    <fieldset>
+      <legend>Reviewer assignment</legend>
+      <label>
+        Reviewer id
+        <input name="reviewer_id" autocomplete="off" placeholder="Partner A">
+      </label>
+      <label>
+        Assigned by
+        <input name="assigned_by" autocomplete="off" placeholder="PSL">
+      </label>
+      <label>
+        Basis
+        <input name="basis" autocomplete="off" placeholder="authority moved">
+      </label>
+      <button type="submit">Assign reviewer</button>
+    </fieldset>
+  </form>
+
+  <form
+    class="decision"
+    method="post"
     action="/console/verification/items/{{ selected.item.id }}/decision"
     hx-post="/console/verification/items/{{ selected.item.id }}/decision"
     hx-target="#preview-panel"
@@ -78,6 +108,17 @@
     </label>
     <button type="submit">Submit decision</button>
   </form>
+
+  <section class="evidence">
+    <h3>Verification history</h3>
+    <ul>
+      {% for event in selected.verification_history %}
+        <li>{{ event.state }} · {{ event.reviewer_id or event.actor_id }} · {{ event.basis or event.source_ref or "no basis" }}</li>
+      {% else %}
+        <li>no lifecycle events</li>
+      {% endfor %}
+    </ul>
+  </section>
 {% else %}
   <div class="empty">Select an item.</div>
 {% endif %}

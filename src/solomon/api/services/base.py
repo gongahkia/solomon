@@ -9,7 +9,9 @@ from solomon.api.service_models import (
     PrimitivePlanExecution,
     PrimitivePlanRequest,
     RecallRequest,
+    VerificationAssignmentRequest,
     VerificationRequest,
+    VerificationReviewRequest,
     WhyTrace,
 )
 from solomon.audit.journal import AuditJournal
@@ -34,6 +36,8 @@ class ServiceContext(Protocol):
     audit: AuditJournal
     attestation_key: str | None
     boundary: SolomonBoundary
+    verification_policy_version: str
+    credence_policy_version: str
 
     def _get_item(self, item_id: str) -> KnowledgeItem: ...
 
@@ -60,6 +64,10 @@ class ServiceContext(Protocol):
     def timeline(self, request: RecallRequest, *, as_of: str) -> list[dict[str, Any]]: ...
 
     def record_verification(self, item_id: str, request: VerificationRequest) -> KnowledgeItem: ...
+
+    def assign_verification(self, item_id: str, request: VerificationAssignmentRequest) -> KnowledgeItem: ...
+
+    def start_verification_review(self, item_id: str, request: VerificationReviewRequest) -> KnowledgeItem: ...
 
     def why(self, item_id: str, *, as_of: datetime | None = None) -> WhyTrace: ...
 
@@ -114,6 +122,14 @@ class ServiceDelegate:
     def boundary(self) -> SolomonBoundary:
         return self._context.boundary
 
+    @property
+    def verification_policy_version(self) -> str:
+        return self._context.verification_policy_version
+
+    @property
+    def credence_policy_version(self) -> str:
+        return self._context.credence_policy_version
+
     def _get_item(self, item_id: str) -> KnowledgeItem:
         return self._context._get_item(item_id)
 
@@ -149,6 +165,12 @@ class ServiceDelegate:
 
     def record_verification(self, item_id: str, request: VerificationRequest) -> KnowledgeItem:
         return self._context.record_verification(item_id, request)
+
+    def assign_verification(self, item_id: str, request: VerificationAssignmentRequest) -> KnowledgeItem:
+        return self._context.assign_verification(item_id, request)
+
+    def start_verification_review(self, item_id: str, request: VerificationReviewRequest) -> KnowledgeItem:
+        return self._context.start_verification_review(item_id, request)
 
     def why(self, item_id: str, *, as_of: datetime | None = None) -> WhyTrace:
         return self._context.why(item_id, as_of=as_of)

@@ -46,7 +46,7 @@ from solomon.api.tenancy import (
     is_valid_tenant_id,
 )
 from solomon.boundary.solomon import BoundaryImportStatus, probe_boundary_client
-from solomon.config import Settings, get_settings
+from solomon.config import Settings, credence_policy_from_settings, get_settings, verification_policy_from_settings
 from solomon.errors import SolomonError
 from solomon.graph.suggestions import SuggestionDecision
 from solomon.graph.visualization import GraphFormat
@@ -102,11 +102,15 @@ class TenantResponse(BaseModel):
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
     tenant_registry = TenantRegistry(resolved_settings.data_dir / "tenants" / "registry.json")
+    vp = verification_policy_from_settings(resolved_settings)
+    cp = credence_policy_from_settings(resolved_settings)
     service = SolomonService(
         data_dir=resolved_settings.data_dir,
         journal_dir=resolved_settings.journal_dir,
         attestation_key=resolved_settings.verification_attestation_key,
         database_url=_service_database_url(resolved_settings, resolved_settings.data_dir),
+        verification_policy=vp, verification_policy_version=resolved_settings.verification_policy_version,
+        credence_policy=cp, credence_policy_version=resolved_settings.credence_policy_version,
     )
     tenant_services: dict[str, SolomonService] = {}
 
@@ -118,11 +122,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             data_dir=resolved_settings.data_dir / "tenants" / tenant_id,
             journal_dir=resolved_settings.journal_dir / "tenants" / tenant_id,
             attestation_key=resolved_settings.verification_attestation_key,
-            database_url=_service_database_url(
-                resolved_settings,
-                resolved_settings.data_dir / "tenants" / tenant_id,
-            ),
+            database_url=_service_database_url(resolved_settings, resolved_settings.data_dir / "tenants" / tenant_id),
             postgres_schema=_postgres_schema_for_tenant(resolved_settings, tenant_id),
+            verification_policy=vp, verification_policy_version=resolved_settings.verification_policy_version,
+            credence_policy=cp, credence_policy_version=resolved_settings.credence_policy_version,
         )
         tenant_services[tenant_id] = tenant_service
         return tenant_service

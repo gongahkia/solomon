@@ -6,6 +6,11 @@ from collections import deque
 from datetime import datetime
 
 from solomon.currency.models import CurrencyState, now_utc
+from solomon.currency.verification import (
+    VerificationLifecycleEvent,
+    VerificationLifecycleState,
+    append_verification_event,
+)
 from solomon.graph.models import ImpactResult, StalenessReason
 from solomon.graph.types import DependencyGraphProtocol
 from solomon.store.sqlite import ItemNotFoundError
@@ -55,6 +60,17 @@ class CurrencyPropagator:
                         "currency_state": CurrencyState.STALE_PENDING_REVERIFICATION,
                         "metadata": {**item.metadata, "staleness_reasons": existing},
                     }
+                )
+                updated = append_verification_event(
+                    updated,
+                    VerificationLifecycleEvent(
+                        item_id=item_id,
+                        state=VerificationLifecycleState.REQUESTED,
+                        actor_id="system",
+                        occurred_at=timestamp,
+                        basis=reason,
+                        source_ref=dependency_id,
+                    ),
                 )
                 self.store.update_item(updated, event_type="knowledge_item_stale_flagged", occurred_at=timestamp)
                 if item_id not in stale_item_ids:

@@ -55,12 +55,14 @@ def verify_position(
     else:
         item = runtime.service.record_verification(
             knowledge_item_id,
-            VerificationRequest(
-                by=verifier_id,
-                outcome=VerificationOutcome(decision),
-                successor_id=successor_id,
-                recorded_at=_parse_datetime(recorded_at),
-            ),
+                VerificationRequest(
+                    by=verifier_id,
+                    outcome=VerificationOutcome(decision),
+                    basis=evidence_ref,
+                    source_ref=evidence_ref,
+                    successor_id=successor_id,
+                    recorded_at=_parse_datetime(recorded_at),
+                ),
         )
     currency = runtime.service.evaluate_currency(knowledge_item_id)
     entry = runtime.service.audit.append(

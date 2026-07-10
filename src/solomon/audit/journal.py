@@ -20,6 +20,7 @@ from pydantic import Field, field_validator
 from solomon.api.schemas import SolomonModel
 from solomon.credence.policy import CredenceAuditEntry
 from solomon.currency.models import KnowledgeItem, now_utc
+from solomon.currency.verification import VerificationLifecycleEvent
 from solomon.graph.models import ImpactResult
 from solomon.orchestrator.models import ModelCallAudit
 from solomon.orchestrator.retrieval import RecallResult
@@ -172,6 +173,9 @@ class AuditJournal:
     def log_verification_attestation(self, attestation: VerificationAttestation) -> AuditEntry:
         return self.append("verification_attestation", attestation.model_dump(mode="json"))
 
+    def log_verification_lifecycle(self, event: VerificationLifecycleEvent) -> AuditEntry:
+        return self.append("verification_lifecycle_event", event.model_dump(mode="json"), occurred_at=event.occurred_at)
+
     def log_credence_change(self, entry: CredenceAuditEntry) -> AuditEntry:
         return self.append("credence_change", entry.model_dump(mode="json"))
 
@@ -214,11 +218,20 @@ class AuditJournal:
         manifest_hash_ok = hashlib.sha256(manifest_bytes).hexdigest() == supplied_manifest_hash
         journal_path = target / str(manifest["journal_file"])
         journal_hash_ok = hashlib.sha256(journal_path.read_bytes()).hexdigest() == manifest["journal_sha256"]
+        history_file = manifest.get("verification_history_file")
+        history_digest = manifest.get("verification_history_sha256")
+        history_hash_ok = True
+        if history_file is not None or history_digest is not None:
+            history_hash_ok = (
+                isinstance(history_file, str)
+                and isinstance(history_digest, str)
+                and hashlib.sha256((target / history_file).read_bytes()).hexdigest() == history_digest
+            )
         journal = AuditJournal(journal_path).verify()
         return AuditPackVerification(
-            ok=manifest_hash_ok and journal_hash_ok and journal.ok,
+            ok=manifest_hash_ok and journal_hash_ok and history_hash_ok and journal.ok,
             journal=journal,
-            manifest_hash_ok=manifest_hash_ok and journal_hash_ok,
+            manifest_hash_ok=manifest_hash_ok and journal_hash_ok and history_hash_ok,
         )
 
     def verify(self) -> JournalVerification:

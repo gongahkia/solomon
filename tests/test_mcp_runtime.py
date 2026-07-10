@@ -115,6 +115,14 @@ def test_mcp_runtime_maps_all_required_tools_to_service(tmp_path: Path) -> None:
     suggestions = runtime.dependency_suggestions(knowledge_item_id=item.id)
     assert "suggestions" in suggestions
 
+    service.register_authority_change(
+        "reg-r-12",
+        AuthorityChangeRequest(new_version="v2", changed_at="2026-01-01T00:00:00+00:00"),
+    )
+    queue = runtime.verification_queue(matter_id="matter-a", client_id="client-a")
+    assert queue["items"][0]["item"]["id"] == item.id
+    assert queue["items"][0]["latest_event"]["state"] == "verification_requested"
+
     impact = runtime.impact(external_authority_id="reg-r-12", matter_id="matter-a", client_id="client-a")
     assert item.id in impact["stale_item_ids"]
     assert other_item.id not in impact["stale_item_ids"]

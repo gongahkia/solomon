@@ -1222,6 +1222,130 @@
       "type": "object"
     }
   },
+  "solomon.verification_queue": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "caller_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Id"
+        },
+        "client_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Id"
+        },
+        "matter_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matter Id"
+        },
+        "reviewer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewer Id"
+        }
+      },
+      "title": "VerificationQueueInput",
+      "type": "object"
+    },
+    "output": {
+      "$defs": {
+        "EffectiveScope": {
+          "additionalProperties": false,
+          "properties": {
+            "caller_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Caller Id"
+            },
+            "client_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Client Id"
+            },
+            "matter_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Matter Id"
+            }
+          },
+          "title": "EffectiveScope",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "scope": {
+          "$ref": "#/$defs/EffectiveScope"
+        }
+      },
+      "required": [
+        "items",
+        "scope"
+      ],
+      "title": "VerificationQueueOutput",
+      "type": "object"
+    }
+  },
   "solomon.verify_position": {
     "input": {
       "additionalProperties": false,

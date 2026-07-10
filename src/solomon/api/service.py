@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,9 @@ from solomon.api.service_models import (
     RecallRequest,
     ReferenceExtractionRequest,
     StalenessPredictionRequest,
+    VerificationAssignmentRequest,
     VerificationRequest,
+    VerificationReviewRequest,
     WhyTrace,
 )
 from solomon.api.services.answer import AnswerService
@@ -37,11 +40,12 @@ from solomon.api.services.ingestion import IngestionService
 from solomon.api.services.recall import RecallService
 from solomon.audit.journal import AuditJournal
 from solomon.boundary.solomon import SolomonBoundary
-from solomon.credence.policy import CredenceLedger
+from solomon.credence.policy import CredenceLedger, CredencePolicy
 from solomon.currency.cache import CurrencyEvaluationCache
-from solomon.currency.engine import record_verification
+from solomon.currency.engine import VerificationPolicy, record_verification
 from solomon.currency.models import KnowledgeItem
 from solomon.currency.prediction import StalenessRiskReport
+from solomon.currency.verification import verification_history
 from solomon.errors import NotFoundError
 from solomon.graph.models import DependencyEdge
 from solomon.graph.suggestions import DependencySuggestion, ReferenceExtraction, SuggestionDecision
@@ -62,6 +66,10 @@ class SolomonService:
         boundary: SolomonBoundary | None = None,
         database_url: str | None = None,
         postgres_schema: str | None = None,
+        verification_policy: VerificationPolicy | None = None,
+        verification_policy_version: str = "verification-policy.v1",
+        credence_policy: CredencePolicy | None = None,
+        credence_policy_version: str = "credence-policy.v1",
     ) -> None:
         data_dir.mkdir(parents=True, exist_ok=True)
         journal_dir.mkdir(parents=True, exist_ok=True)
@@ -72,8 +80,11 @@ class SolomonService:
         self.store = storage.store
         self.graph = storage.graph
         self.index = storage.index
-        self.credence = CredenceLedger()
-        self.currency_cache = CurrencyEvaluationCache()
+        self.verification_policy = verification_policy or VerificationPolicy()
+        self.verification_policy_version = verification_policy_version
+        self.credence_policy_version = credence_policy_version
+        self.credence = CredenceLedger(policy=credence_policy)
+        self.currency_cache = CurrencyEvaluationCache(policy=self.verification_policy)
         self.retrieval = RetrievalOrchestrator(
             store=self.store,
             graph=self.graph,
@@ -111,6 +122,25 @@ class SolomonService:
 
     def record_verification(self, item_id: str, request: VerificationRequest) -> KnowledgeItem:
         return self._authority.record_verification(item_id, request)
+
+    def assign_verification(self, item_id: str, request: VerificationAssignmentRequest) -> KnowledgeItem:
+        return self._authority.assign_verification(item_id, request)
+
+    def start_verification_review(self, item_id: str, request: VerificationReviewRequest) -> KnowledgeItem:
+        return self._authority.start_verification_review(item_id, request)
+
+    def verification_queue(
+        self,
+        *,
+        reviewer_id: str | None = None,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._authority.verification_queue(
+            reviewer_id=reviewer_id,
+            matter_id=matter_id,
+            client_id=client_id,
+        )
 
     def register_authority_change(self, authority_id: str, request: AuthorityChangeRequest) -> dict[str, Any]:
         return self._authority.register_authority_change(authority_id, request)
@@ -190,7 +220,23 @@ class SolomonService:
         return self._recall.execute_plan(request)
 
     def export_audit_pack(self, destination: Path) -> Path:
-        return self.audit.export_pack(destination).directory
+        pack = self.audit.export_pack(destination)
+        histories = {
+            item.id: [event.model_dump(mode="json") for event in verification_history(item)]
+            for item in self.store.get_many()
+            if verification_history(item)
+        }
+        history_path = pack.directory / "verification-history.json"
+        history_bytes = json.dumps(histories, sort_keys=True, indent=2).encode("utf-8")
+        history_path.write_bytes(history_bytes)
+        manifest = json.loads(pack.manifest_path.read_text(encoding="utf-8"))
+        manifest.pop("manifest_sha256", None)
+        manifest["verification_history_file"] = history_path.name
+        manifest["verification_history_sha256"] = hashlib.sha256(history_bytes).hexdigest()
+        manifest_bytes = json.dumps(manifest, sort_keys=True, indent=2).encode("utf-8")
+        manifest["manifest_sha256"] = hashlib.sha256(manifest_bytes).hexdigest()
+        pack.manifest_path.write_text(json.dumps(manifest, sort_keys=True, indent=2), encoding="utf-8")
+        return pack.directory
 
     def _create_dependency_suggestions(
         self,
@@ -253,6 +299,8 @@ __all__ = [
     "IngestRequest",
     "RecallRequest",
     "VerificationRequest",
+    "VerificationAssignmentRequest",
+    "VerificationReviewRequest",
     "AuthorityChangeRequest",
     "ContestRequest",
     "ContestResponse",

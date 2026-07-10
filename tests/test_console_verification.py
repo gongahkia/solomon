@@ -48,6 +48,24 @@ def test_verification_desk_reaffirms_item(tmp_path: Path) -> None:
     assert service.evaluate_currency(item_id)["currency_state"] == "Live"
 
 
+def test_verification_desk_assigns_reviewer(tmp_path: Path) -> None:
+    service, item_id = _stale_service(tmp_path)
+
+    async def call() -> httpx.Response:
+        transport = httpx.ASGITransport(app=create_console_app(service=service))
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.post(
+                f"/console/verification/items/{item_id}/assign",
+                data={"reviewer_id": "Partner A", "assigned_by": "PSL", "basis": "authority moved"},
+            )
+
+    response = anyio.run(call)
+
+    assert response.status_code == 200
+    assert "Partner A" in response.text
+    assert service.verification_queue(reviewer_id="Partner A")[0]["item"]["id"] == item_id
+
+
 def _stale_service(tmp_path: Path) -> tuple[SolomonService, str]:
     service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
     item = service.ingest(

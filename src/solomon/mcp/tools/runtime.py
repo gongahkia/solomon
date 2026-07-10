@@ -23,6 +23,9 @@ from solomon.mcp.tools.read import (
 from solomon.mcp.tools.read import (
     preflight_context as preflight_context_tool,
 )
+from solomon.mcp.tools.read import (
+    verification_queue as verification_queue_tool,
+)
 from solomon.mcp.tools.status import health as health_tool
 from solomon.mcp.tools.write import ingest as ingest_tool
 from solomon.mcp.tools.write import verify_position as verify_position_tool
@@ -192,6 +195,22 @@ class SolomonMCPRuntime:
             knowledge_item_id=knowledge_item_id,
             decision=decision,
             limit=limit,
+            matter_id=matter_id,
+            client_id=client_id,
+            caller_id=caller_id,
+        )
+
+    def verification_queue(
+        self,
+        *,
+        reviewer_id: str | None = None,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+        caller_id: str | None = None,
+    ) -> dict[str, Any]:
+        return verification_queue_tool(
+            self,
+            reviewer_id=reviewer_id,
             matter_id=matter_id,
             client_id=client_id,
             caller_id=caller_id,

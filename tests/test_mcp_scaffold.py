@@ -31,7 +31,7 @@ def test_mcp_server_config_exposes_all_schema_tools() -> None:
 
     assert config.name == "solomon"
     assert config.transport.kind == "stdio"
-    assert len(config.tools) == 9
+    assert len(config.tools) == 10
     assert set(available_tool_names()) == {tool.name for tool in mcp_tool_specs()}
 
 

@@ -202,6 +202,33 @@ def dependency_suggestions(
     }
 
 
+def verification_queue(
+    runtime: SolomonMCPRuntime,
+    *,
+    reviewer_id: str | None = None,
+    matter_id: str | None = None,
+    client_id: str | None = None,
+    caller_id: str | None = None,
+) -> dict[str, Any]:
+    limited = runtime._rate_limit_error("solomon.verification_queue", caller_id)
+    if limited is not None:
+        return limited
+    rows = runtime.service.verification_queue(reviewer_id=reviewer_id, matter_id=matter_id, client_id=client_id)
+    _log_mcp_call(
+        runtime.service,
+        "solomon.verification_queue",
+        caller_id=caller_id,
+        matter_id=matter_id,
+        client_id=client_id,
+        input_payload={"reviewer_id": reviewer_id, "matter_id": matter_id, "client_id": client_id},
+        metadata={"result_count": len(rows)},
+    )
+    return {
+        "items": rows,
+        "scope": {"matter_id": matter_id, "client_id": client_id, "caller_id": caller_id},
+    }
+
+
 def impact(
     runtime: SolomonMCPRuntime,
     *,

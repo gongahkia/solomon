@@ -24,7 +24,7 @@ from solomon.api.service import (
     VerificationRequest,
 )
 from solomon.boundary.solomon import probe_boundary_client
-from solomon.config import get_settings
+from solomon.config import credence_policy_from_settings, get_settings, verification_policy_from_settings
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.currency.prediction import load_pending_amendments
@@ -145,6 +145,10 @@ def _service() -> SolomonService:
         data_dir=settings.data_dir,
         journal_dir=settings.journal_dir,
         attestation_key=settings.verification_attestation_key,
+        verification_policy=verification_policy_from_settings(settings),
+        verification_policy_version=settings.verification_policy_version,
+        credence_policy=credence_policy_from_settings(settings),
+        credence_policy_version=settings.credence_policy_version,
     )
 
 
@@ -425,11 +429,13 @@ def verify_position(
     outcome: Annotated[VerificationOutcome, typer.Option("--outcome")],
     by: Annotated[str, typer.Option("--by", help="Verifier identifier.")],
     successor_id: Annotated[str | None, typer.Option("--successor-id", help="Required for supersede.")] = None,
+    basis: Annotated[str | None, typer.Option("--basis", help="Verification rationale or basis.")] = None,
+    source_ref: Annotated[str | None, typer.Option("--source-ref", help="Optional evidence source pointer.")] = None,
 ) -> None:
     """Record a human verification decision with evidence."""
     item = _service().record_verification(
         item_id,
-        VerificationRequest(by=by, outcome=outcome, successor_id=successor_id),
+        VerificationRequest(by=by, outcome=outcome, basis=basis, source_ref=source_ref, successor_id=successor_id),
     )
     _print_json(item.model_dump(mode="json"))
 

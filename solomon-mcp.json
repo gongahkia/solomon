@@ -162,6 +162,12 @@
           "destructiveHint": false
         },
         {
+          "name": "solomon.verification_queue",
+          "title": "List verification queue",
+          "readOnlyHint": true,
+          "destructiveHint": false
+        },
+        {
           "name": "solomon.verify_position",
           "title": "Verify position",
           "readOnlyHint": false,

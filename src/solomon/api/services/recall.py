@@ -17,6 +17,7 @@ from solomon.api.service_models import (
 from solomon.api.services.base import ServiceDelegate
 from solomon.api.services.common import digest, jsonable, parse_iso_datetime, result_summary
 from solomon.currency.engine import evaluate_currency
+from solomon.currency.verification import verification_history
 from solomon.errors import BadRequestError
 from solomon.orchestrator.retrieval import MatterContext, RecallOptions
 
@@ -37,6 +38,7 @@ class RecallService(ServiceDelegate):
 
     def why(self, item_id: str, *, as_of: datetime | None = None) -> WhyTrace:
         item = self._get_item(item_id)
+        history = verification_history(item)
         return WhyTrace(
             item=item,
             currency=evaluate_currency(item, as_of=as_of).model_dump(mode="json"),
@@ -48,6 +50,11 @@ class RecallService(ServiceDelegate):
                 "verified_state": item.verified_state.value,
                 "last_verified_at": item.last_verified_at.isoformat() if item.last_verified_at else None,
                 "verified_by": item.verified_by,
+                "reviewer_id": item.metadata.get("verification_reviewer_id"),
+                "status": item.metadata.get("verification_status"),
+                "history": [event.model_dump(mode="json") for event in history],
+                "verification_policy_version": self.verification_policy_version,
+                "credence_policy_version": self.credence_policy_version,
             },
         )
 

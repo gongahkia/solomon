@@ -221,7 +221,10 @@ def test_cli_mcp_aligned_verbs_and_migration_shims(monkeypatch: pytest.MonkeyPat
     assert json.loads(impact.output)["changed_dependency_id"] == "regulation-r-section-12"
     assert json.loads(impact_query.output)["changed_dependency_id"] == "regulation-r-section-12"
 
-    verified = runner.invoke(app, ["verify-position", item["id"], "--outcome", "reaffirm", "--by", "Partner A"])
+    verified = runner.invoke(
+        app,
+        ["verify-position", item["id"], "--outcome", "reaffirm", "--by", "Partner A", "--basis", "reviewed memo"],
+    )
     assert verified.exit_code == 0
     assert json.loads(verified.output)["verified_by"] == "Partner A"
 

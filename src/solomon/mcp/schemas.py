@@ -118,6 +118,18 @@ class VerifyPositionOutput(SolomonModel):
     audit: AuditMetadata
 
 
+class VerificationQueueInput(SolomonModel):
+    reviewer_id: str | None = None
+    matter_id: str | None = None
+    client_id: str | None = None
+    caller_id: str | None = None
+
+
+class VerificationQueueOutput(SolomonModel):
+    items: list[JsonObject]
+    scope: EffectiveScope
+
+
 class IngestInput(SolomonModel):
     text: str = Field(min_length=1)
     source_ref: str = Field(min_length=1)
@@ -196,6 +208,7 @@ TOOL_SCHEMA_MODELS: dict[str, SchemaPair] = {
     "solomon.check_currency": (CheckCurrencyInput, CheckCurrencyOutput),
     "solomon.get_dependencies": (GetDependenciesInput, GetDependenciesOutput),
     "solomon.verify_position": (VerifyPositionInput, VerifyPositionOutput),
+    "solomon.verification_queue": (VerificationQueueInput, VerificationQueueOutput),
     "solomon.ingest": (IngestInput, IngestOutput),
     "solomon.audit_pack": (AuditPackInput, AuditPackOutput),
     "solomon.dependency_suggestions": (DependencySuggestionsInput, DependencySuggestionsOutput),
@@ -237,5 +250,7 @@ __all__ = [
     "TOOL_SCHEMA_MODELS",
     "VerifyPositionInput",
     "VerifyPositionOutput",
+    "VerificationQueueInput",
+    "VerificationQueueOutput",
     "json_schema_for_tool",
 ]

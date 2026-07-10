@@ -21,9 +21,10 @@ from solomon.api.service import (
     PinRequest,
     RecallRequest,
     SolomonService,
+    VerificationAssignmentRequest,
     VerificationRequest,
 )
-from solomon.config import Settings, get_settings
+from solomon.config import Settings, credence_policy_from_settings, get_settings, verification_policy_from_settings
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import CredenceTier, CurrencyState, KnowledgeItem, VerifiedState
 from solomon.errors import SolomonError
@@ -42,6 +43,10 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
         journal_dir=resolved_settings.journal_dir,
         attestation_key=resolved_settings.verification_attestation_key,
         database_url=_service_database_url(resolved_settings),
+        verification_policy=verification_policy_from_settings(resolved_settings),
+        verification_policy_version=resolved_settings.verification_policy_version,
+        credence_policy=credence_policy_from_settings(resolved_settings),
+        credence_policy_version=resolved_settings.credence_policy_version,
     )
     app = FastAPI(title="Solomon Console")
     app.state.service = resolved_service
@@ -143,6 +148,36 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
             status_code=status_code,
         )
 
+    @app.post("/console/verification/items/{item_id}/assign")
+    async def assign_verification(request: Request, item_id: str) -> Response:
+        form = await request.form()
+        reviewer_id = str(form.get("reviewer_id") or "").strip()
+        assigned_by = str(form.get("assigned_by") or request.state.console_user_id).strip()
+        role = str(form.get("role") or "").strip() or None
+        basis = str(form.get("basis") or "").strip() or None
+        error = None
+        if not reviewer_id:
+            error = "reviewer id is required"
+        else:
+            try:
+                resolved_service.assign_verification(
+                    item_id,
+                    VerificationAssignmentRequest(
+                        assigned_by=assigned_by,
+                        reviewer_id=reviewer_id,
+                        role=role,
+                        basis=basis,
+                    ),
+                )
+            except (SolomonError, ValueError) as exc:
+                error = str(exc)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "partials/verification_preview.html",
+            _preview_context(request, resolved_service, item_id=item_id, error=error),
+            status_code=200 if error is None else 400,
+        )
+
     @app.post("/console/dependencies/suggestions/{suggestion_id}/confirm")
     async def confirm_dependency(request: Request, suggestion_id: str) -> Response:
         form = await request.form()
@@ -204,6 +239,7 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
                         f"currency_state: {trace.currency['currency_state']}",
                         f"source_ref: {trace.provenance['source_ref']}",
                         f"dependencies: {len(trace.dependencies)}",
+                        f"verification_events: {len(trace.verification.get('history', []))}",
                     ]
                 ),
                 media_type="application/pdf",
@@ -265,6 +301,8 @@ def _review_rows(service: SolomonService) -> list[dict[str, Any]]:
                 "reason": _review_reason(item, currency),
                 "source_ref": item.provenance.source_ref,
                 "last_verified_at": item.last_verified_at.isoformat() if item.last_verified_at else None,
+                "reviewer_id": item.metadata.get("verification_reviewer_id"),
+                "verification_status": item.metadata.get("verification_status"),
             }
         )
     return sorted(rows, key=lambda row: (str(row["item"].get("matter_id") or ""), str(row["item"]["id"])))
@@ -361,6 +399,7 @@ def _audit_pack_payload(trace: Any, *, manifest: dict[str, Any], journal_jsonl: 
         "provenance": trace.provenance,
         "credence_tier": trace.credence_tier,
         "verification": trace.verification,
+        "verification_history": trace.verification.get("history", []),
         "manifest": manifest,
         "journal_jsonl": journal_jsonl,
     }
@@ -482,6 +521,7 @@ def _preview_context(
                 "provenance": trace.provenance,
                 "credence_tier": trace.credence_tier,
                 "verification": trace.verification,
+                "verification_history": trace.verification.get("history", []),
                 "reason": _review_reason(trace.item, trace.currency),
             }
         except SolomonError as exc:
@@ -530,6 +570,8 @@ def _apply_decision(
         VerificationRequest(
             by=partner_id,
             outcome=VerificationOutcome(decision),
+            basis=evidence_ref,
+            source_ref=evidence_ref,
             successor_id=successor_id,
         ),
     )

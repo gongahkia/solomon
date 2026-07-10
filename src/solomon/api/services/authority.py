@@ -12,14 +12,24 @@ from solomon.api.service_models import (
     DependencySuggestionRequest,
     ReferenceExtractionRequest,
     StalenessPredictionRequest,
+    VerificationAssignmentRequest,
     VerificationRequest,
+    VerificationReviewRequest,
 )
 from solomon.api.services.base import ServiceDelegate
 from solomon.api.services.common import digest, parse_iso_datetime
 from solomon.audit.journal import sign_verification_attestation
 from solomon.currency.engine import register_authority_change
-from solomon.currency.models import KnowledgeItem
+from solomon.currency.models import CurrencyState, KnowledgeItem, VerifiedState
 from solomon.currency.prediction import StalenessRiskReport, predict_staleness_risk
+from solomon.currency.verification import (
+    VerificationLifecycleEvent,
+    VerificationLifecycleState,
+    append_verification_event,
+    latest_verification_event,
+    lifecycle_state_for_outcome,
+    verification_history,
+)
 from solomon.errors import BadRequestError
 from solomon.graph.models import DependencyEdge
 from solomon.graph.propagation import CurrencyPropagator
@@ -42,9 +52,27 @@ class AuthorityService(ServiceDelegate):
         return self.currency_cache.get_or_evaluate(self._get_item(item_id), as_of=as_of).model_dump(mode="json")
 
     def record_verification(self, item_id: str, request: VerificationRequest) -> KnowledgeItem:
+        if not request.basis and not request.source_ref:
+            raise BadRequestError("verification basis or source_ref is required")
         item = self._get_item(item_id)
         from solomon.api import service as service_module
 
+        if latest_verification_event(item) is None:
+            item = self._append_lifecycle_event(
+                item,
+                VerificationLifecycleEvent(
+                    item_id=item_id,
+                    state=VerificationLifecycleState.IN_REVIEW,
+                    actor_id=request.by,
+                    reviewer_id=request.by,
+                    occurred_at=request.recorded_at or datetime.now(timezone.utc),
+                    basis="implicit review started by completion",
+                    policy_version=self.verification_policy_version,
+                    credence_policy_version=self.credence_policy_version,
+                    policy_snapshot=self._policy_snapshot(),
+                ),
+                event_type="verification_lifecycle_in_review",
+            )
         recorded = service_module.record_verification(
             item,
             by=request.by,
@@ -52,17 +80,106 @@ class AuthorityService(ServiceDelegate):
             successor_id=request.successor_id,
             recorded_at=request.recorded_at,
         )
-        self.store.update_item(recorded.item, event_type="knowledge_item_verified")
+        event = VerificationLifecycleEvent(
+            item_id=item_id,
+            state=lifecycle_state_for_outcome(request.outcome.value),
+            actor_id=request.by,
+            reviewer_id=request.by,
+            occurred_at=recorded.recorded_at,
+            basis=request.basis,
+            source_ref=request.source_ref,
+            policy_version=self.verification_policy_version,
+            credence_policy_version=self.credence_policy_version,
+            policy_snapshot=self._policy_snapshot(),
+        )
+        updated = append_verification_event(recorded.item, event)
+        self.store.update_item(updated, event_type="verification_lifecycle_completed", occurred_at=recorded.recorded_at)
+        self.index.upsert_item(updated)
+        self.audit.log_verification_lifecycle(event)
         self.currency_cache.invalidate({item_id})
         if self.attestation_key is not None:
             attestation = sign_verification_attestation(
-                recorded.item,
+                updated,
                 verified_by=request.by,
                 outcome=request.outcome.value,
                 signing_key=self.attestation_key,
             )
             self.audit.log_verification_attestation(attestation)
-        return recorded.item
+        return updated
+
+    def assign_verification(self, item_id: str, request: VerificationAssignmentRequest) -> KnowledgeItem:
+        item = self._get_item(item_id)
+        timestamp = request.assigned_at or datetime.now(timezone.utc)
+        event = VerificationLifecycleEvent(
+            item_id=item_id,
+            state=VerificationLifecycleState.ASSIGNED,
+            actor_id=request.assigned_by,
+            reviewer_id=request.reviewer_id,
+            role=request.role,
+            occurred_at=timestamp,
+            basis=request.basis,
+            source_ref=request.source_ref,
+            policy_version=self.verification_policy_version,
+            credence_policy_version=self.credence_policy_version,
+            policy_snapshot=self._policy_snapshot(),
+        )
+        updated = append_verification_event(
+            item.model_copy(update={"verified_state": VerifiedState.NEEDS_REVIEW}),
+            event,
+        )
+        return self._write_lifecycle_update(updated, event, event_type="verification_lifecycle_assigned")
+
+    def start_verification_review(self, item_id: str, request: VerificationReviewRequest) -> KnowledgeItem:
+        item = self._get_item(item_id)
+        timestamp = request.started_at or datetime.now(timezone.utc)
+        event = VerificationLifecycleEvent(
+            item_id=item_id,
+            state=VerificationLifecycleState.IN_REVIEW,
+            actor_id=request.reviewer_id,
+            reviewer_id=request.reviewer_id,
+            occurred_at=timestamp,
+            basis=request.basis,
+            source_ref=request.source_ref,
+            policy_version=self.verification_policy_version,
+            credence_policy_version=self.credence_policy_version,
+            policy_snapshot=self._policy_snapshot(),
+        )
+        updated = append_verification_event(item, event)
+        return self._write_lifecycle_update(updated, event, event_type="verification_lifecycle_in_review")
+
+    def verification_queue(
+        self,
+        *,
+        reviewer_id: str | None = None,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for item in self.store.get_many(matter_id=matter_id, client_id=client_id):
+            currency = self.evaluate_currency(item.id)
+            history = verification_history(item)
+            latest = history[-1] if history else None
+            assigned_reviewer = item.metadata.get("verification_reviewer_id")
+            if reviewer_id is not None and assigned_reviewer != reviewer_id:
+                continue
+            needs_review = (
+                str(currency.get("currency_state")) == CurrencyState.STALE_PENDING_REVERIFICATION.value
+                or item.verified_state is VerifiedState.NEEDS_REVIEW
+                or bool(item.metadata.get("staleness_reasons"))
+            )
+            if not needs_review:
+                continue
+            rows.append(
+                {
+                    "item": item.model_dump(mode="json"),
+                    "currency": currency,
+                    "reviewer_id": assigned_reviewer,
+                    "verification_status": item.metadata.get("verification_status"),
+                    "latest_event": latest.model_dump(mode="json") if latest else None,
+                    "history": [event.model_dump(mode="json") for event in history],
+                }
+            )
+        return sorted(rows, key=lambda row: (str(row.get("reviewer_id") or ""), str(row["item"]["id"])))
 
     def register_authority_change(self, authority_id: str, request: AuthorityChangeRequest) -> dict[str, Any]:
         from datetime import datetime
@@ -75,6 +192,11 @@ class AuthorityService(ServiceDelegate):
             store=self.store,
         )
         self.currency_cache.invalidate(set(impact.stale_item_ids))
+        for stale_item_id in impact.stale_item_ids:
+            item = self._get_item(stale_item_id)
+            event = latest_verification_event(item)
+            if event is not None and event.state is VerificationLifecycleState.REQUESTED:
+                self.audit.log_verification_lifecycle(event)
         self.audit.log_impact(impact)
         return impact.model_dump(mode="json")
 
@@ -252,3 +374,34 @@ class AuthorityService(ServiceDelegate):
                 },
             )
         return stored
+
+    def _append_lifecycle_event(
+        self,
+        item: KnowledgeItem,
+        event: VerificationLifecycleEvent,
+        *,
+        event_type: str,
+    ) -> KnowledgeItem:
+        updated = append_verification_event(item, event)
+        return self._write_lifecycle_update(updated, event, event_type=event_type)
+
+    def _write_lifecycle_update(
+        self,
+        item: KnowledgeItem,
+        event: VerificationLifecycleEvent,
+        *,
+        event_type: str,
+    ) -> KnowledgeItem:
+        self.store.update_item(item, event_type=event_type, occurred_at=event.occurred_at)
+        self.index.upsert_item(item)
+        self.currency_cache.invalidate({item.id})
+        self.audit.log_verification_lifecycle(event)
+        return item
+
+    def _policy_snapshot(self) -> dict[str, Any]:
+        return {
+            "verification_policy": self.currency_cache.policy.model_dump(mode="json"),
+            "verification_policy_version": self.verification_policy_version,
+            "credence_policy": self.credence.policy.model_dump(mode="json"),
+            "credence_policy_version": self.credence_policy_version,
+        }

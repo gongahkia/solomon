@@ -198,7 +198,10 @@ def test_service_records_signed_verification_attestation_when_configured(tmp_pat
         )
     )
 
-    service.record_verification(item.id, VerificationRequest(by="Partner A", outcome=VerificationOutcome.REAFFIRM))
+    service.record_verification(
+        item.id,
+        VerificationRequest(by="Partner A", outcome=VerificationOutcome.REAFFIRM, basis="reviewed source memo"),
+    )
 
     raw = (tmp_path / "journal" / "journal.jsonl").read_text(encoding="utf-8")
     assert "verification_attestation" in raw

@@ -9,6 +9,10 @@ from typing import Any
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from solomon.credence.policy import CredencePolicy
+from solomon.currency.engine import VerificationPolicy
+from solomon.currency.models import CredenceTier
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SOLOMON_", env_file=".env", extra="ignore")
@@ -31,6 +35,11 @@ class Settings(BaseSettings):
     allow_remote_egress: bool = False
     zero_egress_mode: bool = True
     verification_attestation_key: str | None = None
+    verification_policy_version: str = "verification-policy.v1"
+    verification_default_max_age_days: int = Field(default=365, ge=1)
+    verification_high_stakes_max_age_days: int = Field(default=180, ge=1)
+    credence_policy_version: str = "credence-policy.v1"
+    credence_load_bearing_minimum: str = "Verified"
     console_user_id: str = "dev"
     console_bearer_token: str | None = None
 
@@ -66,6 +75,11 @@ class Settings(BaseSettings):
             "allow_remote_egress": self.allow_remote_egress,
             "zero_egress_mode": self.zero_egress_mode,
             "verification_attestation_key_configured": self.verification_attestation_key is not None,
+            "verification_policy_version": self.verification_policy_version,
+            "verification_default_max_age_days": self.verification_default_max_age_days,
+            "verification_high_stakes_max_age_days": self.verification_high_stakes_max_age_days,
+            "credence_policy_version": self.credence_policy_version,
+            "credence_load_bearing_minimum": self.credence_load_bearing_minimum,
             "console_user_id": self.console_user_id,
             "console_bearer_token_configured": self.console_bearer_token is not None,
         }
@@ -79,6 +93,17 @@ def server_settings(**overrides: Any) -> Settings:
     defaults: dict[str, Any] = {"sku": "server", "zero_egress_mode": False, "server_api_key": "test-server-key"}
     defaults.update(overrides)
     return Settings(**defaults)
+
+
+def verification_policy_from_settings(settings: Settings) -> VerificationPolicy:
+    return VerificationPolicy(
+        default_max_age_days=settings.verification_default_max_age_days,
+        high_stakes_max_age_days=settings.verification_high_stakes_max_age_days,
+    )
+
+
+def credence_policy_from_settings(settings: Settings) -> CredencePolicy:
+    return CredencePolicy(load_bearing_minimum=CredenceTier(settings.credence_load_bearing_minimum))
 
 
 @lru_cache(maxsize=1)

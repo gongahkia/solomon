@@ -10,7 +10,8 @@ export const NOTE_KINDS = [
   "ai_ghostwritten",
   "corporate_cliche",
   "sycophancy",
-  "waffle"
+  "waffle",
+  "funding_announcement"
 ];
 
 export const SKIPPED_REASONS = [
@@ -70,12 +71,13 @@ export function createClassifierRequest({ post, settings, source = "extension" }
     rubricVersion: RUBRIC_VERSION,
     safetyCopyVersion: SAFETY_COPY_VERSION,
     capabilities: {
-      tonal: true,
-      factual: false
+      tonal: Boolean(settings?.tonalClassifierEnabled ?? true),
+      factual: Boolean(settings?.factualRetrievalEnabled ?? false)
     },
     settingsSnapshot: {
       minimumConfidence: Number(settings?.minimumConfidence ?? 0.75),
-      tonalClassifierEnabled: Boolean(settings?.tonalClassifierEnabled ?? true)
+      tonalClassifierEnabled: Boolean(settings?.tonalClassifierEnabled ?? true),
+      factualRetrievalEnabled: Boolean(settings?.factualRetrievalEnabled ?? false)
     },
     post: normalizedPost
   };

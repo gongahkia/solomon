@@ -114,6 +114,7 @@ The gateway implementation keeps this provider policy in `gateway/src/anthropic-
 Provider credentials are Worker secrets. Required secret names:
 
 - `ANTHROPIC_API_KEY`
+- `EXA_API_KEY`
 - `DECORUM_TOKEN_SIGNING_KEY`
 - retrieval-provider keys only after retrieval is enabled
 
@@ -128,6 +129,33 @@ Do not store provider credentials in:
 - logs or analytics events
 
 Gateway responses may include provider and model names for replay, but never raw secret values, authorization headers, or provider request headers.
+
+## Funding Retrieval
+
+Use Exa Search for the first factual retrieval milestone. The gateway owns the Exa call; the extension only sends the normal classifier request with `capabilities.factual` and `settingsSnapshot.factualRetrievalEnabled`.
+
+Funding retrieval runs only when:
+
+- factual retrieval is enabled
+- the post text matches a funding-announcement pattern, such as raised/secured/closed funding plus amount, or seed/Series round language
+- an Exa API key is configured gateway-side
+- retrieved sources clear the same minimum confidence threshold used for note rendering
+
+The gateway calls:
+
+- `POST https://api.exa.ai/search`
+- `x-api-key: <EXA_API_KEY>`
+- `type: fast`
+- `category: news`
+- `contents.highlights: true`
+- `contents.summary: true`
+
+Gateway behavior:
+
+- If tonal classification returns a shown note, attach up to three Exa sources to that note.
+- If tonal classification skips but funding retrieval is confident, return a `funding_announcement` note.
+- If retrieval fails, has no sources, or is below threshold, render nothing.
+- Store source title, URL, published date, excerpt, provider, and provider request ID in the replayable classifier response. The background ledger already persists `sources` and `evidence` from shown notes.
 
 ## Replay Requirements
 
@@ -160,5 +188,6 @@ If the gateway is unavailable, invalid, or returns a malformed response, the ext
 - Cloudflare Workers: https://developers.cloudflare.com/workers/
 - Cloudflare D1: https://developers.cloudflare.com/d1/
 - Cloudflare Workers secrets: https://developers.cloudflare.com/workers/configuration/secrets/
+- Exa Search API: https://exa.ai/docs/reference/search
 - Anthropic Messages API: https://platform.claude.com/docs/en/api/messages
 - Anthropic prompt caching: https://platform.claude.com/docs/en/build-with-claude/prompt-caching

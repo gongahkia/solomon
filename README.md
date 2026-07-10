@@ -27,6 +27,7 @@ The first implementation pass is intentionally local-first:
 - LinkedIn content script entrypoint
 - Local tonal classifier rendered under detected posts that clear the confidence gate
 - Optional gateway classifier path with local fallback
+- Optional gateway factual retrieval for funding-announcement claims
 - Chrome side panel shell
 - Local settings, detected-post history, note ledger, and ratings
 - Chromium runtime fixture test for detection, insertion, gating, unique traces, and rating persistence
@@ -40,6 +41,7 @@ Provider model calls and retrieval are not bundled into the extension client; re
 
 - Static manifest and JavaScript syntax checks.
 - Gateway classifier contract tests.
+- Funding retrieval contract tests.
 - A Chromium fixture test against `tests/fixtures/linkedin-feed.html`.
 - A visual snapshot comparison for the note card; the current PNG artifact is written to `.tmp/visual/note-card.png`.
 

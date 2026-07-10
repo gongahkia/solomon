@@ -3,6 +3,11 @@ import {
   createSkippedClassifierResponse,
   validateClassifierResponse
 } from "../../extension/src/shared/classifier-contract.js";
+import {
+  attachFundingContextToClassification,
+  createFundingContextResponse,
+  searchFundingContextWithExa
+} from "./funding-retrieval.js";
 
 export const ANTHROPIC_TONAL_MODELS = {
   firstPass: "claude-haiku-4-5",
@@ -195,7 +200,35 @@ async function requestAnthropicClassification({ request, apiKey, fetchImpl, pass
   };
 }
 
-export async function classifyPostWithAnthropic({ request, apiKey, fetchImpl = fetch }) {
+async function applyFundingRetrieval({ request, classification, exaApiKey, fetchImpl }) {
+  if (!request.capabilities?.factual || !request.settingsSnapshot?.factualRetrievalEnabled || !exaApiKey) {
+    return classification;
+  }
+
+  const retrieval = await searchFundingContextWithExa({
+    request,
+    apiKey: exaApiKey,
+    fetchImpl
+  });
+
+  if (classification?.decision?.status === "shown") {
+    return attachFundingContextToClassification({
+      classification,
+      retrieval
+    });
+  }
+
+  if (retrieval.confidence >= request.settingsSnapshot.minimumConfidence) {
+    return createFundingContextResponse({
+      request,
+      retrieval
+    });
+  }
+
+  return classification;
+}
+
+export async function classifyPostWithAnthropic({ request, apiKey, exaApiKey = "", fetchImpl = fetch }) {
   if (!apiKey) {
     return createGatewaySkippedResponse(request, "gateway_unavailable");
   }
@@ -210,7 +243,12 @@ export async function classifyPostWithAnthropic({ request, apiKey, fetchImpl = f
     });
 
     if (!isBorderlineTonalDecision(firstPass.classification, request.settingsSnapshot.minimumConfidence)) {
-      return firstPass.classification;
+      return applyFundingRetrieval({
+        request,
+        classification: firstPass.classification,
+        exaApiKey,
+        fetchImpl
+      });
     }
 
     const borderlinePass = await requestAnthropicClassification({
@@ -221,7 +259,12 @@ export async function classifyPostWithAnthropic({ request, apiKey, fetchImpl = f
       priorClassification: firstPass.classification
     });
 
-    return borderlinePass.classification;
+    return applyFundingRetrieval({
+      request,
+      classification: borderlinePass.classification,
+      exaApiKey,
+      fetchImpl
+    });
   } catch {
     return createGatewaySkippedResponse(request, "gateway_unavailable");
   }

@@ -2,7 +2,8 @@
   const DEFAULT_SETTINGS = {
     enabled: true,
     tonalClassifierEnabled: true,
-    minimumConfidence: 0.75
+    minimumConfidence: 0.75,
+    factualRetrievalEnabled: false
   };
 
   const knownPosts = new Map();
@@ -146,6 +147,47 @@
     return actions;
   }
 
+  function createSources(note) {
+    const sources = (Array.isArray(note.sources) ? note.sources : [])
+      .filter((source) => /^https?:\/\//i.test(source?.url ?? ""))
+      .slice(0, 3);
+
+    if (sources.length === 0) {
+      return null;
+    }
+
+    const section = document.createElement("div");
+    section.className = "decorum-note-sources";
+
+    const heading = document.createElement("p");
+    heading.className = "decorum-note-sources-heading";
+    heading.textContent = "Sources";
+
+    const list = document.createElement("ol");
+
+    for (const source of sources) {
+      const item = document.createElement("li");
+      const link = document.createElement("a");
+      link.href = source.url;
+      link.target = "_blank";
+      link.rel = "noreferrer noopener";
+      link.textContent = source.title || source.url;
+
+      item.append(link);
+
+      if (source.excerpt) {
+        const excerpt = document.createElement("p");
+        excerpt.textContent = source.excerpt;
+        item.append(excerpt);
+      }
+
+      list.append(item);
+    }
+
+    section.append(heading, list);
+    return section;
+  }
+
   function createNoteCard(note, post) {
     const card = document.createElement("aside");
     card.className = "decorum-note-card";
@@ -174,10 +216,17 @@
 
     const meta = document.createElement("p");
     meta.className = "decorum-note-meta";
-    meta.textContent = `Confidence ${formatConfidence(note.confidence)}. This flags a writing pattern, not the author. No factual retrieval used.`;
+    const sources = createSources(note);
+    meta.textContent =
+      sources
+        ? `Confidence ${formatConfidence(note.confidence)}. Sources are shown for factual context.`
+        : `Confidence ${formatConfidence(note.confidence)}. This flags a writing pattern, not the author. No factual retrieval used.`;
 
     header.append(icon, headerText);
     body.append(reason, meta);
+    if (sources) {
+      body.append(sources);
+    }
     card.append(header, body, createRatingActions(note, post), createTrace(note, post));
 
     return card;

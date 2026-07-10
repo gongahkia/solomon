@@ -64,6 +64,38 @@
   font-size: 13px;
 }
 
+.decorum-note-sources {
+  display: grid;
+  gap: 6px;
+  color: #536471;
+  font-size: 13px;
+}
+
+.decorum-note-sources-heading {
+  font-weight: 700;
+}
+
+.decorum-note-sources ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.decorum-note-sources a {
+  color: #1d9bf0;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.decorum-note-sources a:hover {
+  text-decoration: underline;
+}
+
+.decorum-note-sources li p {
+  margin: 2px 0 0;
+}
+
 .decorum-note-actions {
   display: flex;
   flex-wrap: wrap;

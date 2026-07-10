@@ -2,6 +2,7 @@ const DEFAULT_STATE = {
   settings: {
     enabled: true,
     tonalClassifierEnabled: true,
+    factualRetrievalEnabled: false,
     minimumConfidence: 0.75
   },
   detectedPosts: [],
@@ -12,6 +13,7 @@ const elements = {
   statusMessage: document.querySelector("#status-message"),
   enabledInput: document.querySelector("#enabled-input"),
   mockNotesInput: document.querySelector("#mock-notes-input"),
+  factualRetrievalInput: document.querySelector("#factual-retrieval-input"),
   confidenceInput: document.querySelector("#confidence-input"),
   confidenceOutput: document.querySelector("#confidence-output"),
   detectedSummary: document.querySelector("#detected-summary"),
@@ -54,6 +56,7 @@ async function sendMessage(message) {
 function renderSettings(settings) {
   elements.enabledInput.checked = settings.enabled;
   elements.mockNotesInput.checked = settings.tonalClassifierEnabled;
+  elements.factualRetrievalInput.checked = settings.factualRetrievalEnabled;
   elements.confidenceInput.value = String(Math.round(settings.minimumConfidence * 100));
   elements.confidenceOutput.textContent = formatConfidence(settings.minimumConfidence);
   elements.statusMessage.textContent = settings.enabled ? "Enabled" : "Disabled";
@@ -168,6 +171,12 @@ elements.enabledInput.addEventListener("change", () => {
 elements.mockNotesInput.addEventListener("change", () => {
   updateSettings({ tonalClassifierEnabled: elements.mockNotesInput.checked }).catch((error) => {
     console.error("[decorum] Failed to update tonal classifier setting", error);
+  });
+});
+
+elements.factualRetrievalInput.addEventListener("change", () => {
+  updateSettings({ factualRetrievalEnabled: elements.factualRetrievalInput.checked }).catch((error) => {
+    console.error("[decorum] Failed to update factual retrieval setting", error);
   });
 });
 

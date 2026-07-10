@@ -431,9 +431,10 @@ Run the full local preflight:
 scripts/ci/all.sh
 ```
 
-Run binding smoke checks:
+Run binding parity and smoke checks:
 
 ```bash
+scripts/ci/binding-parity.sh
 scripts/ci/python-binding-smoke.sh
 scripts/ci/node-binding-smoke.sh
 ```

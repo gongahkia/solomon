@@ -6,6 +6,7 @@ Architecture notes, ADRs, API references, performance notes, and launch document
 - `api/README.md`: generated API reference from Rust, TypeScript/Node, and Python source docs.
 - `adr/README.md`: index of accepted architecture decision records.
 - `architecture.md`: implemented component map, data model, request lifecycle, and deployment surfaces.
+- `binding-parity.md`: Rust/Python/Node binding parity matrix and CI gate.
 - `benchmarks.md`: benchmark methodology, reproduction commands, current local results, and open gaps.
 - `competitive-positioning.md`: comparison against Mem0, Zep, Letta, and Engram.
 - `concepts.md`: plain-language explanation of memories, significance, tiers, credence, reconstruction, and graph concepts.

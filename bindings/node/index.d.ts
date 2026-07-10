@@ -203,6 +203,10 @@ export interface RecallOptions {
   includeCold?: boolean
   includeInstructions?: boolean
   maxContextTokens?: number
+  similarityWeight?: number
+  significanceWeight?: number
+  recencyWeight?: number
+  graphWeight?: number
 }
 
 export interface SignificanceBreakdown {

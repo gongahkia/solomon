@@ -18,7 +18,7 @@ use shibahama_core::model::{
 };
 use shibahama_core::retrieval::{
     RecallCandidate as CoreRecallCandidate, RecallCandidateCurrency, RecallCandidateSource,
-    RecallRequest,
+    RecallRankingConfig, RecallRequest,
 };
 use shibahama_core::significance::SignificanceBreakdown as CoreSignificanceBreakdown;
 use shibahama_core::storage::{EventRecord, MemoryEvent, MemoryWriteEvent};
@@ -125,6 +125,10 @@ pub struct RecallOptions {
     pub include_cold: Option<bool>,
     pub include_instructions: Option<bool>,
     pub max_context_tokens: Option<u32>,
+    pub similarity_weight: Option<f64>,
+    pub significance_weight: Option<f64>,
+    pub recency_weight: Option<f64>,
+    pub graph_weight: Option<f64>,
 }
 
 /// Iterator over recall candidates.
@@ -872,6 +876,7 @@ fn recall_request<'a>(
     if let Some(max_context_tokens) = options.max_context_tokens {
         request = request.with_max_context_tokens(max_context_tokens as usize);
     }
+    request = request.with_ranking(recall_ranking(options)?);
 
     Ok(request)
 }
@@ -882,7 +887,42 @@ static DEFAULT_RECALL_OPTIONS: RecallOptions = RecallOptions {
     include_cold: None,
     include_instructions: None,
     max_context_tokens: None,
+    similarity_weight: None,
+    significance_weight: None,
+    recency_weight: None,
+    graph_weight: None,
 };
+
+fn recall_ranking(options: &RecallOptions) -> Result<RecallRankingConfig> {
+    let default = RecallRankingConfig::default();
+
+    Ok(RecallRankingConfig {
+        similarity_weight: finite_weight(
+            options.similarity_weight,
+            "similarityWeight",
+            default.similarity_weight,
+        )?,
+        significance_weight: finite_weight(
+            options.significance_weight,
+            "significanceWeight",
+            default.significance_weight,
+        )?,
+        recency_weight: finite_weight(
+            options.recency_weight,
+            "recencyWeight",
+            default.recency_weight,
+        )?,
+        graph_weight: finite_weight(options.graph_weight, "graphWeight", default.graph_weight)?,
+    })
+}
+
+fn finite_weight(value: Option<f64>, name: &str, default: f64) -> Result<f64> {
+    match value {
+        Some(value) if value.is_finite() => Ok(value),
+        Some(_) => Err(Error::from_reason(format!("{name} must be finite"))),
+        None => Ok(default),
+    }
+}
 
 fn time_from_optional_unix(value: Option<f64>) -> Result<OffsetDateTime> {
     match value {

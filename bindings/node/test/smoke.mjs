@@ -65,6 +65,16 @@ try {
   assert.equal(engine.invalidate(stale.id, 10), true);
   assert.equal(engine.why(stale.id, 10).currencyState, "invalidated");
   assert.equal(engine.reinforce(item.id, "cited"), true);
+  assert.equal(
+    engine.recall([10, 10], 3, {
+      nowUnix: 0,
+      similarityWeight: 0,
+      significanceWeight: 1,
+      recencyWeight: 0,
+      graphWeight: 0,
+    })[0].id,
+    item.id,
+  );
   assert.equal(why.item.id, item.id);
   assert.ok(items.some((memory) => memory.id === item.id));
   assert.ok(engine.eventRecords().eventCount >= 2);

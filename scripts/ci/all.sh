@@ -9,8 +9,7 @@ cd "$ROOT"
 
 scripts/ci/rust.sh
 scripts/ci/server-smoke.sh
-scripts/ci/python-binding-smoke.sh
-scripts/ci/node-binding-smoke.sh
+scripts/ci/binding-parity.sh
 scripts/ci/golden-parity.sh
 python3 scripts/ci/correctness-smoke.py
 

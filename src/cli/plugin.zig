@@ -1602,7 +1602,7 @@ test "checked-in marketplace index parses" {
 
     const output = try pluginSearchAlloc(allocator, bundled_marketplace_index, "k8s");
     defer allocator.free(output);
-    try std.testing.expect(std.mem.indexOf(u8, output, "kubectx community 0.1.0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "kubectx official 0.1.0") != null);
 }
 
 test "plugin verify rejects direct shell execution" {

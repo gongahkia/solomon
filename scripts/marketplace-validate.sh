@@ -29,7 +29,7 @@ awk '
   }
 ' "$index_path" | while IFS='|' read -r name path version; do
   if [ -z "$name" ] || [ -z "$path" ] || [ -z "$version" ]; then
-    echo "invalid marketplace entry" >&2
+    echo "invalid catalog entry" >&2
     exit 1
   fi
   target="$repo_root/$path"

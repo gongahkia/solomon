@@ -15,7 +15,7 @@
   description: Design proposal requiring RFC review.
 - name: kind/plugin
   color: c2e0c6
-  description: Plugin, plugin API, or marketplace work.
+  description: Plugin, plugin API, or catalog work.
 - name: area/core
   color: 0e8a16
   description: Daemon, protocol, renderer, cache, or CLI core.

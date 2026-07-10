@@ -81,10 +81,10 @@ The repository includes:
 
 ## What Still Needs External Proof
 
-The local harness can run Shibahama and a warehouse baseline today. LoCoMo and
-LongMemEval loaders accept official dataset exports, but checked-in comparison
-claims still require committed run artifacts. External-system adapters should
-not be claimed until they are backed by reproducible successful runs.
+The local harness can run Shibahama, warehouse, full-context, and Mem0 OSS
+exact-event baselines today. LoCoMo and LongMemEval loaders accept official
+dataset exports, and the checked-in Phase C artifacts report those standard
+benchmarks without claiming broad superiority.
 
 Engram is now the closest published comparison for bi-temporal, non-destructive
 agent memory. Any launch claim about supersession, point-in-time recall, or

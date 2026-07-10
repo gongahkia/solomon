@@ -483,7 +483,6 @@ Still pending:
 - TestPyPI/PyPI publish for `pip install shibahama`.
 - npm publish for `npm install shibahama`.
 - final `v0.1.0` tag and registry publication.
-- LoCoMo and LongMemEval benchmark runs with real dataset exports.
 - citable ContinuityBench archive/DOI submission.
 
 Remaining tracked work lives in GitHub issues. `NEXT-TODO.md` and `TODO.md`

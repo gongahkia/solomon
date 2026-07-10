@@ -32,8 +32,10 @@ local recall p50 around `62-72 ms` from 1k to 100k items and explicitly says the
 run does not prove sub-millisecond recall or tier-latency benefit. Keep using
 Phase A as reproducibility evidence, not as a speed superiority claim.
 
-Phase C is still open. Official LoCoMo and LongMemEval-S artifacts are not
-checked in yet, so do not claim standard benchmark superiority.
+Phase C now has checked-in official LoCoMo and LongMemEval-S artifacts. They do
+not support standard benchmark superiority: full-context and warehouse beat
+Shibahama on both plain-recall slices, and Mem0 OSS also beats Shibahama on
+LongMemEval-S.
 
 Sources in repo:
 
@@ -51,7 +53,7 @@ across memories. Its paper reports LoCoMo gains and lower overhead versus
 full-context baselines. [Unverified by this repo]
 
 Do not argue that Shibahama is "more accurate than Mem0" on public conversation
-benchmarks until Phase C exists. The honest comparison today:
+benchmarks. The honest comparison today:
 
 - Mem0 is the better default for teams wanting a broad app-memory product,
   hosted platform features, and ecosystem integrations.
@@ -149,8 +151,9 @@ Avoid:
 
 Use:
 
-> Standard LoCoMo and LongMemEval artifacts are still pending; the checked-in
-> proof today is continuity and epistemic-governance behavior.
+> Checked-in LoCoMo and LongMemEval-S artifacts do not show standard benchmark
+> superiority; the stronger proof today is continuity and epistemic-governance
+> behavior.
 
 Avoid:
 

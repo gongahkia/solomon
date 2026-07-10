@@ -36,6 +36,7 @@ class BenchmarkQuery:
     forbidden: str | None = None
     now_unix: int = 0
     changed_at_unix: int | None = None
+    category: str | None = None
 
 
 @dataclass(frozen=True)
@@ -474,6 +475,7 @@ def load_longmemeval_export(data: object, path: Path) -> list[BenchmarkCase]:
                         prompt=str(record.get("question", "")),
                         expected=answer,
                         now_unix=now_unix,
+                        category=str(record.get("question_type", "")),
                     ),
                 ),
                 metadata={
@@ -518,6 +520,7 @@ def _queries(values: Iterable[dict[str, object]], line_number: int) -> Iterable[
             changed_at_unix=(
                 None if value.get("changed_at_unix") is None else int(value["changed_at_unix"])
             ),
+            category=None if value.get("category") is None else str(value["category"]),
         )
 
 
@@ -582,6 +585,11 @@ def _locomo_queries(sample: dict[str, object], now_unix: int) -> Iterator[Benchm
             prompt=question,
             expected=answer,
             now_unix=now_unix,
+            category=(
+                None
+                if qa_object.get("category") is None
+                else f"locomo-category-{qa_object['category']}"
+            ),
         )
 
 

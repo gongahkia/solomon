@@ -7,11 +7,10 @@ summary Markdown.
 
 ## Current Scope
 
-The repository currently has deterministic local suites that can run without
-hosted services. The local suites are the only results that should be treated as
-reproducible from a fresh checkout today. LoCoMo and LongMemEval have official
-dataset loaders, but checked-in result claims still require caller-supplied
-dataset exports and committed run artifacts.
+The repository has deterministic local suites plus checked-in Phase C artifacts
+for official LoCoMo and LongMemEval-S exports. The official datasets are not
+bundled; the artifacts record caller-supplied dataset paths, byte sizes, and
+SHA-256 hashes.
 
 ## Claim Boundary
 
@@ -46,11 +45,13 @@ Current adapters:
   local embeddings from `benchmarks/shibahama_bench/embeddings.py`.
 - `warehouse`: append-only keyword baseline with no currency or invalidation
   model.
+- `full-context`: all observations valid at query time, newest first.
+- `mem0-oss-exact`: self-hosted Mem0 OSS exact-event retrieval with
+  `infer=False`, local Qdrant, and deterministic local embeddings routed through
+  Mem0's embedder factory.
 
-There are intentionally no hosted/external-system adapters in the checked-in
-registry. `benchmarks/shibahama_bench/adapters.py` validates adapter metadata at
-import time; any future external adapter must declare checked-in successful
-result artifacts before it can be used by the harness.
+`benchmarks/shibahama_bench/adapters.py` validates adapter metadata at import
+time; external adapters must declare checked-in successful result artifacts.
 
 ## Suites
 
@@ -171,6 +172,29 @@ whether the suite used a built-in generator or an external file. Per-case
 metadata also records whether the loader used the neutral JSONL shape, official
 LoCoMo JSON, or official LongMemEval JSON.
 
+The checked-in Phase C artifacts are:
+
+- `benchmarks/results/phase-c-locomo.json`
+- `benchmarks/results/phase-c-locomo.md`
+- `benchmarks/results/phase-c-longmemeval-s.json`
+- `benchmarks/results/phase-c-longmemeval-s.md`
+
+Current Phase C summary:
+
+| Suite | System | Queries | Accuracy | Stale Answer Rate | Mean Token Cost |
+| --- | --- | ---: | ---: | ---: | ---: |
+| locomo | full-context | 1531 | 0.314 | 0.686 | 4095.105 |
+| locomo | warehouse | 1531 | 0.153 | 0.847 | 90.816 |
+| locomo | mem0-oss-exact | 1531 | 0.138 | 0.862 | 81.424 |
+| locomo | shibahama | 1531 | 0.047 | 0.953 | 79.133 |
+| longmemeval | full-context | 500 | 0.500 | 0.500 | 74014.154 |
+| longmemeval | warehouse | 500 | 0.422 | 0.578 | 11128.144 |
+| longmemeval | mem0-oss-exact | 500 | 0.372 | 0.628 | 8758.462 |
+| longmemeval | shibahama | 500 | 0.218 | 0.782 | 7481.056 |
+
+Interpretation boundary: these standard QA runs are plain expected-substring
+retrieval scores. They do not support a Shibahama standard-benchmark win claim.
+
 ## Running Local Benchmarks
 
 Build the Python binding first:
@@ -222,7 +246,7 @@ Run LoCoMo from the official export:
 python benchmarks/run.py \
   --suite locomo \
   --dataset path/to/locomo10.json \
-  --systems shibahama,warehouse \
+  --systems shibahama,warehouse,full-context,mem0-oss-exact \
   --output benchmarks/results/locomo-local.json \
   --markdown benchmarks/results/locomo-local.md
 ```
@@ -233,7 +257,7 @@ Run LongMemEval from the official cleaned export:
 python benchmarks/run.py \
   --suite longmemeval \
   --dataset path/to/longmemeval_s_cleaned.json \
-  --systems shibahama,warehouse \
+  --systems shibahama,warehouse,full-context,mem0-oss-exact \
   --output benchmarks/results/longmemeval-local.json \
   --markdown benchmarks/results/longmemeval-local.md
 ```

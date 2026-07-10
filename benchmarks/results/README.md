@@ -16,3 +16,7 @@ Generated benchmark summaries live here.
 - `continuity/SUMMARY.md` is the ContinuityBench v0 baseline comparison for
   Shibahama, warehouse, full-context, Mem0 OSS exact-event retrieval, and Engram
   exact-event retrieval.
+- `phase-c-locomo.md` is the official LoCoMo `locomo10.json` run with
+  Shibahama, warehouse, full-context, and Mem0 OSS exact-event retrieval.
+- `phase-c-longmemeval-s.md` is the official LongMemEval-S cleaned-export run
+  with Shibahama, warehouse, full-context, and Mem0 OSS exact-event retrieval.

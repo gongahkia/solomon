@@ -200,6 +200,7 @@ production implementations:
 - Remote vector support is an injected transport boundary, not a bundled network client.
 - Multi-reader/single-writer or MVCC behavior is inherited from redb but has not
   yet been documented as a tested Shibahama concurrency contract.
-- LoCoMo and LongMemEval benchmark runs still need external dataset exports.
+- LoCoMo and LongMemEval benchmarks still require caller-supplied official
+  dataset exports; checked-in Phase C artifacts record the dataset hashes used.
 - Publishing to crates.io, PyPI, and npm is intentionally outside the local
   architecture and requires registry credentials or trusted publishing setup.

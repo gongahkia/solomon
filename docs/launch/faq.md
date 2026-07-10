@@ -35,8 +35,8 @@ that never-delete source/event history, credence floors, append-only human signa
 reconstruction/consolidation make memory behavior easier to audit and contest.
 
 Engram is the closest published comparison for bi-temporal, non-destructive
-memory. Shibahama should not imply superiority there without checked-in
-LongMemEval-S, LoCoMo, or continuity-task artifacts.
+memory. Shibahama should not imply superiority there unless checked-in
+LongMemEval-S, LoCoMo, or continuity-task artifacts support the specific claim.
 
 ## Why not put all of this in the prompt?
 

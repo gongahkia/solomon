@@ -15,13 +15,8 @@ class AdapterRegistryTests(unittest.TestCase):
     def test_current_registry_has_metadata_for_every_adapter(self) -> None:
         validate_adapter_registry()
         self.assertEqual(set(adapters.ADAPTERS), set(adapters.ADAPTER_METADATA))
-        self.assertFalse(
-            [
-                metadata.name
-                for metadata in adapters.ADAPTER_METADATA.values()
-                if metadata.is_external
-            ]
-        )
+        self.assertIn("mem0-oss-exact", adapters.ADAPTER_METADATA)
+        self.assertTrue(adapters.ADAPTER_METADATA["mem0-oss-exact"].is_external)
 
     def test_external_adapter_requires_declared_result_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

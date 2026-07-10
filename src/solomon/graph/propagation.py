@@ -53,6 +53,8 @@ class CurrencyPropagator:
                     item = self.store.get_item(item_id)
                 except ItemNotFoundError:
                     continue
+                if item.currency_state is CurrencyState.RETIRED:
+                    continue
                 existing = list(item.metadata.get("staleness_reasons", []))
                 existing.append(staleness.model_dump(mode="json"))
                 updated = item.model_copy(

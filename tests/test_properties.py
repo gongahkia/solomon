@@ -12,7 +12,9 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from solomon.api.service import IngestRequest, SolomonService
+from solomon.audit.journal import AuditEntry, AuditJournal
 from solomon.credence.policy import CredenceLedger, RetrievalCandidate
+from solomon.currency.engine import record_verification
 from solomon.currency.models import (
     CredenceTier,
     CurrencyState,
@@ -118,6 +120,104 @@ def test_no_operation_path_deletes_knowledge_items_property(contents: list[str])
             previous_id = successor.id
 
         assert {item.id for item in store.get_many()} == expected_ids
+
+
+@given(length=st.integers(min_value=2, max_value=6))
+@settings(max_examples=15)
+def test_supersession_chain_is_acyclic_property(length: int) -> None:
+    with tempfile.TemporaryDirectory(prefix="solomon-supersession-") as tmp:
+        store = SQLiteKnowledgeStore(Path(tmp) / "solomon.sqlite3")
+        first = _item("item-0", "version 0")
+        store.write_item(first)
+        previous_id = first.id
+        for index in range(1, length):
+            timestamp = _dt() + timedelta(seconds=index)
+            successor = _item(f"item-{index}", f"version {index}").model_copy(
+                update={"valid_from": timestamp, "ingested_at": timestamp}
+            )
+            store.supersede(previous_id, successor, superseded_at=timestamp)
+            previous_id = successor.id
+
+        seen: set[str] = set()
+        current_id: str | None = first.id
+        while current_id is not None:
+            assert current_id not in seen
+            seen.add(current_id)
+            current_id = store.get_item(current_id).successor_id
+        assert len(seen) == length
+
+
+@given(offset_days=st.integers(min_value=0, max_value=30), duration_days=st.integers(min_value=1, max_value=60))
+@settings(max_examples=20)
+def test_valid_time_is_not_after_ingestion_time_property(offset_days: int, duration_days: int) -> None:
+    with tempfile.TemporaryDirectory(prefix="solomon-valid-time-") as tmp:
+        valid_from = _dt()
+        item = _item("item-1", "valid-time fact").model_copy(
+            update={
+                "valid_from": valid_from,
+                "valid_to": valid_from + timedelta(days=duration_days),
+                "ingested_at": valid_from + timedelta(days=offset_days),
+            }
+        )
+        store = SQLiteKnowledgeStore(Path(tmp) / "solomon.sqlite3")
+        store.write_item(item)
+
+        stored = store.get_item(item.id)
+        assert stored.valid_from <= stored.ingested_at
+        assert stored.valid_to is not None
+        assert stored.valid_from < stored.valid_to
+
+
+def test_retire_is_terminal_for_dependency_propagation(tmp_path: Path) -> None:
+    db = tmp_path / "solomon.sqlite3"
+    store = SQLiteKnowledgeStore(db)
+    graph = GraphStore(db)
+    item = _item("retired", "retired position depending on reg-r-12")
+    store.write_item(item)
+    retired_at = _dt() + timedelta(seconds=1)
+    retired = record_verification(item, by="Partner A", outcome="retire", recorded_at=retired_at).item
+    store.update_item(retired, event_type="knowledge_item_retired", occurred_at=retired_at)
+    graph.add_dependency(
+        DependencyEdge(
+            id="retired-edge",
+            source_id=item.id,
+            target_id="reg-r-12",
+            edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+            target_kind="external_authority",
+        )
+    )
+
+    impact = CurrencyPropagator(graph=graph, store=store).propagate_dependency_change(
+        "reg-r-12",
+        changed_at=retired_at + timedelta(seconds=1),
+        reason="retired terminal check",
+    )
+
+    assert impact.stale_item_ids == []
+    assert store.get_item(item.id).currency_state is CurrencyState.RETIRED
+
+
+@given(events=st.lists(SAFE_TEXT, min_size=1, max_size=5))
+@settings(max_examples=15)
+def test_audit_chain_hashes_verify_after_rebuild_property(events: list[str]) -> None:
+    with tempfile.TemporaryDirectory(prefix="solomon-audit-rebuild-") as tmp:
+        root = Path(tmp)
+        original = AuditJournal(root / "journal.jsonl")
+        for index, payload in enumerate(events):
+            original.append(
+                "property_event",
+                {"index": index, "payload": payload},
+                occurred_at=_dt() + timedelta(seconds=index),
+            )
+
+        rebuilt = AuditJournal(root / "rebuilt.jsonl")
+        for line in original.path.read_text(encoding="utf-8").splitlines():
+            entry = AuditEntry.model_validate_json(line)
+            rebuilt.append(entry.event_type, entry.payload, occurred_at=entry.occurred_at)
+
+        assert original.verify().ok is True
+        assert rebuilt.verify().ok is True
+        assert rebuilt.path.read_text(encoding="utf-8") == original.path.read_text(encoding="utf-8")
 
 
 def test_fuzz_malformed_ingest_rejects_empty_content(tmp_path: Path) -> None:

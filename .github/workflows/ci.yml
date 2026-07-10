@@ -25,6 +25,7 @@ jobs:
       - run: uv run mypy src tests scripts
       - run: uv run pytest
       - run: uv run python benchmarks/performance_budget.py
+      - run: uv run python benchmarks/currency_regression.py
 
   boundary-smoke:
     name: Vendored boundary smoke

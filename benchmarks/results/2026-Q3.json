@@ -1,0 +1,61 @@
+{
+  "baseline_metrics": {
+    "dependency_completeness": 0.0,
+    "false_stale_rate": 0.5,
+    "stale_detection_precision": 0.5,
+    "stale_detection_recall": 0.5,
+    "supersession_propagation_completeness": 0.0,
+    "time_to_flag_seconds": 0.0001461669999116566
+  },
+  "baseline_stale_item_ids": [
+    "bench-item-0",
+    "bench-item-10",
+    "bench-item-2",
+    "bench-item-4",
+    "bench-item-6",
+    "bench-item-8"
+  ],
+  "expected_stale_item_ids": [
+    "bench-item-0",
+    "bench-item-1",
+    "bench-item-4",
+    "bench-item-5",
+    "bench-item-8",
+    "bench-item-9"
+  ],
+  "manifest": {
+    "changed_authority_ids": [
+      "reg-r-12",
+      "reg-r-13",
+      "reg-r-14"
+    ],
+    "corpus_size": 12,
+    "generated_at": "2026-07-10T06:32:49.590891Z",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "python_version": "3.10.20",
+    "schema_id": "solomon.currency_benchmark_manifest.v1",
+    "seed": 7,
+    "solomon_version": "0.1.0",
+    "supersession_events": 3
+  },
+  "max_precision_drop": 0.05,
+  "passed_regression_gate": true,
+  "previous_precision": 1.0,
+  "schema_id": "solomon.currency_benchmark_result.v1",
+  "solomon_metrics": {
+    "dependency_completeness": 1.0,
+    "false_stale_rate": 0.0,
+    "stale_detection_precision": 1.0,
+    "stale_detection_recall": 1.0,
+    "supersession_propagation_completeness": 1.0,
+    "time_to_flag_seconds": 0.004520374999628984
+  },
+  "solomon_stale_item_ids": [
+    "bench-item-0",
+    "bench-item-1",
+    "bench-item-4",
+    "bench-item-5",
+    "bench-item-8",
+    "bench-item-9"
+  ]
+}

@@ -14,11 +14,13 @@ from solomon.evaluation import (
     default_external_law_monitor_cases,
     evaluate_ablation,
     export_synthetic_corpus,
+    generate_benchmark_corpus,
     generate_jurisdiction_coverage_cases,
     generate_synthetic_corpus,
     impact_query_recall,
     render_results_table,
     run_boundary_fidelity_suite,
+    run_currency_benchmark,
     run_currency_evaluation,
     run_external_law_monitoring_benchmark,
     run_jurisdiction_coverage_benchmark,
@@ -26,6 +28,8 @@ from solomon.evaluation import (
     time_to_flag,
     tune_recall_weights,
     warehouse_similarity_baseline,
+    write_benchmark_corpus,
+    write_currency_benchmark_result,
     write_synthetic_corpus,
 )
 from solomon.orchestrator.retrieval import RecallWeights
@@ -105,6 +109,33 @@ def test_synthetic_corpus_export_is_reproducible(tmp_path: Path) -> None:
     assert exported.schema_id == "solomon.synthetic_corpus.v1"
     assert exported.expected_stale_item_ids == ["item-0", "item-2"]
     assert '"expected_stale_item_ids": [' in target.read_text(encoding="utf-8")
+
+
+def test_currency_benchmark_metrics_manifest_and_reproducible_outputs(tmp_path: Path) -> None:
+    corpus = generate_benchmark_corpus(size=12, supersession_events=3, seed=7)
+    result_path = tmp_path / "result.json"
+    corpus_path = tmp_path / "corpus.json"
+
+    result = run_currency_benchmark(size=12, supersession_events=3, seed=7)
+    written = write_currency_benchmark_result(str(result_path), size=12, supersession_events=3, seed=7)
+    write_benchmark_corpus(str(corpus_path), size=12, supersession_events=3, seed=7)
+
+    assert corpus.changed_authority_ids == ["reg-r-12", "reg-r-13", "reg-r-14"]
+    assert result.manifest.seed == 7
+    assert result.manifest.changed_authority_ids == corpus.changed_authority_ids
+    assert result.expected_stale_item_ids == sorted(corpus.expected_stale_item_ids)
+    assert result.baseline_metrics.stale_detection_precision == 0.5
+    assert result.baseline_metrics.stale_detection_recall == 0.5
+    assert result.baseline_metrics.supersession_propagation_completeness == 0.0
+    assert result.baseline_metrics.dependency_completeness == 0.0
+    assert result.solomon_metrics.stale_detection_precision == 1.0
+    assert result.solomon_metrics.stale_detection_recall == 1.0
+    assert result.solomon_metrics.supersession_propagation_completeness == 1.0
+    assert result.solomon_metrics.false_stale_rate == 0.0
+    assert result.passed_regression_gate is True
+    assert written.manifest.seed == result.manifest.seed
+    assert '"schema_id": "solomon.currency_benchmark_result.v1"' in result_path.read_text(encoding="utf-8")
+    assert '"schema_id": "solomon.synthetic_currency_benchmark_corpus.v1"' in corpus_path.read_text(encoding="utf-8")
 
 
 def test_jurisdiction_coverage_benchmark_covers_vendored_packs() -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import platform
 import tempfile
 import time
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from typing import Any
 
 from pydantic import Field
 
+from solomon import __version__
 from solomon.api.schemas import SolomonModel
 from solomon.boundary.engine.jurisdictions import resolve_pack, supported_jurisdiction_codes
 from solomon.boundary.engine.review import review_text
@@ -46,6 +48,14 @@ class SyntheticCorpus:
     expected_stale_item_ids: set[str]
 
 
+@dataclass(frozen=True)
+class SyntheticBenchmarkCorpus:
+    items: list[KnowledgeItem]
+    dependencies: list[DependencyEdge]
+    changed_authority_ids: list[str]
+    expected_stale_item_ids: set[str]
+
+
 class SyntheticCorpusExport(SolomonModel):
     schema_id: str = "solomon.synthetic_corpus.v1"
     size: int
@@ -55,10 +65,55 @@ class SyntheticCorpusExport(SolomonModel):
     dependencies: list[dict[str, Any]]
 
 
+class SyntheticBenchmarkCorpusExport(SolomonModel):
+    schema_id: str = "solomon.synthetic_currency_benchmark_corpus.v1"
+    size: int
+    seed: int
+    supersession_events: int
+    changed_authority_ids: list[str]
+    expected_stale_item_ids: list[str]
+    items: list[dict[str, Any]]
+    dependencies: list[dict[str, Any]]
+
+
 class EvaluationMetrics(SolomonModel):
     stale_surface_rate: float
     time_to_flag_seconds: float
     impact_query_recall: float
+
+
+class CurrencyBenchmarkMetrics(SolomonModel):
+    stale_detection_precision: float
+    stale_detection_recall: float
+    supersession_propagation_completeness: float
+    false_stale_rate: float
+    time_to_flag_seconds: float
+    dependency_completeness: float
+
+
+class CurrencyBenchmarkManifest(SolomonModel):
+    schema_id: str = "solomon.currency_benchmark_manifest.v1"
+    seed: int
+    solomon_version: str
+    python_version: str
+    platform: str
+    corpus_size: int
+    supersession_events: int
+    changed_authority_ids: list[str]
+    generated_at: datetime
+
+
+class CurrencyBenchmarkResult(SolomonModel):
+    schema_id: str = "solomon.currency_benchmark_result.v1"
+    manifest: CurrencyBenchmarkManifest
+    baseline_metrics: CurrencyBenchmarkMetrics
+    solomon_metrics: CurrencyBenchmarkMetrics
+    expected_stale_item_ids: list[str]
+    baseline_stale_item_ids: list[str]
+    solomon_stale_item_ids: list[str]
+    previous_precision: float
+    max_precision_drop: float
+    passed_regression_gate: bool
 
 
 class AblationConfig(SolomonModel):
@@ -344,6 +399,90 @@ def generate_synthetic_corpus(size: int = 10) -> SyntheticCorpus:
     )
 
 
+def generate_benchmark_corpus(
+    *,
+    size: int = 12,
+    supersession_events: int = 3,
+    seed: int = 7,
+) -> SyntheticBenchmarkCorpus:
+    if size < 1:
+        raise ValueError("size must be positive")
+    if supersession_events < 1:
+        raise ValueError("supersession_events must be positive")
+
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    topics = ["structure X", "fund gating", "selective disclosure", "cross-border filing"]
+    authorities = [f"reg-r-{12 + index}" for index in range(supersession_events)]
+    changed: set[str] = set()
+    expected: set[str] = set()
+    items: list[KnowledgeItem] = []
+    dependencies: list[DependencyEdge] = []
+    root_id_by_group: dict[int, str] = {}
+
+    for index in range(size):
+        group = index // 4
+        slot = index % 4
+        authority = authorities[group % len(authorities)]
+        timestamp = base - timedelta(days=365 - index)
+        topic = topics[(seed + index) % len(topics)]
+        item_id = f"bench-item-{index}"
+        if slot == 0:
+            content = f"Firm position {index} about {topic} under {authority} authority."
+        elif slot == 1 and group in root_id_by_group:
+            content = f"Client advice {index} relying on internal house view {root_id_by_group[group]}."
+        elif slot == 2:
+            content = f"Background note {index} mentions {authority} without adopted dependency."
+        else:
+            content = f"Stable note {index} about unrelated operational workflow."
+        item = KnowledgeItem(
+            id=item_id,
+            kind=KnowledgeKind.POSITION,
+            content=content,
+            provenance=Provenance(source_kind=SourceKind.PARTNER, source_ref=f"bench-memo-{index}"),
+            valid_from=timestamp,
+            ingested_at=timestamp + timedelta(hours=1),
+            last_verified_at=timestamp + timedelta(days=30),
+            credence_tier=CredenceTier.FIRM_AUTHORITATIVE if slot in {0, 1} else CredenceTier.VERIFIED,
+        )
+        items.append(item)
+
+        if slot == 0:
+            root_id_by_group[group] = item_id
+            changed.add(authority)
+            expected.add(item_id)
+            dependencies.append(
+                DependencyEdge(
+                    id=f"bench-edge-external-{index}",
+                    source_id=item_id,
+                    target_id=authority,
+                    edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+                    target_kind="external_authority",
+                    valid_from=timestamp,
+                    created_at=timestamp,
+                )
+            )
+        elif slot == 1 and group in root_id_by_group:
+            expected.add(item_id)
+            dependencies.append(
+                DependencyEdge(
+                    id=f"bench-edge-internal-{index}",
+                    source_id=item_id,
+                    target_id=root_id_by_group[group],
+                    edge_type=EdgeType.INTERNAL_DEPENDS_ON_INTERNAL,
+                    target_kind="knowledge_item",
+                    valid_from=timestamp,
+                    created_at=timestamp,
+                )
+            )
+
+    return SyntheticBenchmarkCorpus(
+        items=items,
+        dependencies=dependencies,
+        changed_authority_ids=sorted(changed),
+        expected_stale_item_ids=expected,
+    )
+
+
 def export_synthetic_corpus(corpus: SyntheticCorpus) -> SyntheticCorpusExport:
     return SyntheticCorpusExport(
         size=len(corpus.items),
@@ -352,6 +491,39 @@ def export_synthetic_corpus(corpus: SyntheticCorpus) -> SyntheticCorpusExport:
         items=[item.model_dump(mode="json") for item in corpus.items],
         dependencies=[edge.model_dump(mode="json") for edge in corpus.dependencies],
     )
+
+
+def export_benchmark_corpus(
+    corpus: SyntheticBenchmarkCorpus,
+    *,
+    seed: int,
+    supersession_events: int,
+) -> SyntheticBenchmarkCorpusExport:
+    return SyntheticBenchmarkCorpusExport(
+        size=len(corpus.items),
+        seed=seed,
+        supersession_events=supersession_events,
+        changed_authority_ids=corpus.changed_authority_ids,
+        expected_stale_item_ids=sorted(corpus.expected_stale_item_ids),
+        items=[item.model_dump(mode="json") for item in corpus.items],
+        dependencies=[edge.model_dump(mode="json") for edge in corpus.dependencies],
+    )
+
+
+def write_benchmark_corpus(
+    path: str,
+    *,
+    size: int = 12,
+    supersession_events: int = 3,
+    seed: int = 7,
+) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    corpus = generate_benchmark_corpus(size=size, supersession_events=supersession_events, seed=seed)
+    payload = export_benchmark_corpus(corpus, seed=seed, supersession_events=supersession_events).model_dump(
+        mode="json"
+    )
+    target.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def write_synthetic_corpus(path: str, *, size: int = 10) -> None:
@@ -378,6 +550,145 @@ def impact_query_recall(expected_ids: set[str], actual_ids: set[str]) -> float:
     if not expected_ids:
         return 1.0
     return len(expected_ids & actual_ids) / len(expected_ids)
+
+
+def run_currency_benchmark(
+    *,
+    size: int = 12,
+    supersession_events: int = 3,
+    seed: int = 7,
+    previous_precision: float = 1.0,
+    max_precision_drop: float = 0.05,
+) -> CurrencyBenchmarkResult:
+    corpus = generate_benchmark_corpus(size=size, supersession_events=supersession_events, seed=seed)
+    transitive_expected = _transitive_expected_item_ids(corpus)
+
+    baseline_start = time.perf_counter()
+    baseline_stale_ids = _semantic_search_only_stale_ids(corpus)
+    baseline_elapsed = time.perf_counter() - baseline_start
+
+    with tempfile.TemporaryDirectory(prefix="solomon-currency-benchmark-") as tmp:
+        db = Path(tmp) / "solomon.sqlite3"
+        store = SQLiteKnowledgeStore(db)
+        graph = GraphStore(db)
+        for item in corpus.items:
+            store.write_item(item)
+        for edge in corpus.dependencies:
+            graph.add_dependency(edge)
+
+        solomon_start = time.perf_counter()
+        solomon_stale_ids: set[str] = set()
+        propagator = CurrencyPropagator(graph=graph, store=store)
+        for authority_id in corpus.changed_authority_ids:
+            impact = propagator.propagate_dependency_change(
+                authority_id,
+                changed_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+                reason=f"{authority_id} superseded during synthetic benchmark",
+            )
+            solomon_stale_ids.update(impact.stale_item_ids)
+        solomon_elapsed = time.perf_counter() - solomon_start
+
+    baseline_metrics = _currency_benchmark_metrics(
+        expected=corpus.expected_stale_item_ids,
+        actual=baseline_stale_ids,
+        transitive_expected=transitive_expected,
+        elapsed=baseline_elapsed,
+        dependency_completeness=0.0,
+    )
+    solomon_metrics = _currency_benchmark_metrics(
+        expected=corpus.expected_stale_item_ids,
+        actual=solomon_stale_ids,
+        transitive_expected=transitive_expected,
+        elapsed=solomon_elapsed,
+        dependency_completeness=1.0,
+    )
+    manifest = CurrencyBenchmarkManifest(
+        seed=seed,
+        solomon_version=__version__,
+        python_version=platform.python_version(),
+        platform=platform.platform(),
+        corpus_size=size,
+        supersession_events=supersession_events,
+        changed_authority_ids=corpus.changed_authority_ids,
+        generated_at=datetime.now(timezone.utc),
+    )
+    return CurrencyBenchmarkResult(
+        manifest=manifest,
+        baseline_metrics=baseline_metrics,
+        solomon_metrics=solomon_metrics,
+        expected_stale_item_ids=sorted(corpus.expected_stale_item_ids),
+        baseline_stale_item_ids=sorted(baseline_stale_ids),
+        solomon_stale_item_ids=sorted(solomon_stale_ids),
+        previous_precision=previous_precision,
+        max_precision_drop=max_precision_drop,
+        passed_regression_gate=solomon_metrics.stale_detection_precision >= previous_precision - max_precision_drop,
+    )
+
+
+def write_currency_benchmark_result(
+    path: str,
+    *,
+    size: int = 12,
+    supersession_events: int = 3,
+    seed: int = 7,
+    previous_precision: float = 1.0,
+    max_precision_drop: float = 0.05,
+) -> CurrencyBenchmarkResult:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    result = run_currency_benchmark(
+        size=size,
+        supersession_events=supersession_events,
+        seed=seed,
+        previous_precision=previous_precision,
+        max_precision_drop=max_precision_drop,
+    )
+    target.write_text(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True), encoding="utf-8")
+    return result
+
+
+def _semantic_search_only_stale_ids(corpus: SyntheticBenchmarkCorpus) -> set[str]:
+    stale_ids: set[str] = set()
+    for authority_id in corpus.changed_authority_ids:
+        stale_ids.update(
+            item.id
+            for item in warehouse_similarity_baseline(
+                corpus.items,
+                query=authority_id,
+                limit=len(corpus.items),
+            )
+        )
+    return stale_ids
+
+
+def _currency_benchmark_metrics(
+    *,
+    expected: set[str],
+    actual: set[str],
+    transitive_expected: set[str],
+    elapsed: float,
+    dependency_completeness: float,
+) -> CurrencyBenchmarkMetrics:
+    true_positive = expected & actual
+    false_positive = actual - expected
+    return CurrencyBenchmarkMetrics(
+        stale_detection_precision=len(true_positive) / len(actual) if actual else 1.0,
+        stale_detection_recall=len(true_positive) / len(expected) if expected else 1.0,
+        supersession_propagation_completeness=(
+            len(transitive_expected & actual) / len(transitive_expected) if transitive_expected else 1.0
+        ),
+        false_stale_rate=len(false_positive) / len(actual) if actual else 0.0,
+        time_to_flag_seconds=elapsed,
+        dependency_completeness=dependency_completeness,
+    )
+
+
+def _transitive_expected_item_ids(corpus: SyntheticBenchmarkCorpus) -> set[str]:
+    return {
+        edge.source_id
+        for edge in corpus.dependencies
+        if edge.edge_type is EdgeType.INTERNAL_DEPENDS_ON_INTERNAL and edge.source_id in corpus.expected_stale_item_ids
+    }
 
 
 def detect_external_authority_change(before: ExternalAuthoritySnapshot, after: ExternalAuthoritySnapshot) -> bool:

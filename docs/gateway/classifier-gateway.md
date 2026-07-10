@@ -109,6 +109,8 @@ The per-request prompt should include only:
 
 The gateway implementation keeps this provider policy in `gateway/src/anthropic-tonal-classifier.js`. Confidence values within `0.06` of the configured threshold are treated as borderline and may be sent to Sonnet for a second pass. Non-borderline posts stay on Haiku.
 
+See `docs/cost-model.md` for the current per-DAU estimate and rollout quotas.
+
 ## Key Isolation
 
 Provider credentials are Worker secrets. Required secret names:
@@ -188,6 +190,7 @@ If the gateway is unavailable, invalid, or returns a malformed response, the ext
 - Cloudflare Workers: https://developers.cloudflare.com/workers/
 - Cloudflare D1: https://developers.cloudflare.com/d1/
 - Cloudflare Workers secrets: https://developers.cloudflare.com/workers/configuration/secrets/
+- Decorum cost model: ../cost-model.md
 - Exa Search API: https://exa.ai/docs/reference/search
 - Anthropic Messages API: https://platform.claude.com/docs/en/api/messages
 - Anthropic prompt caching: https://platform.claude.com/docs/en/build-with-claude/prompt-caching

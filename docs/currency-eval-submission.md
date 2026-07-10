@@ -14,6 +14,24 @@ The currency-eval writeup is submitted as a repository-citable artifact for `v0.
 - Citation metadata: [../CITATION.cff](../CITATION.cff)
 - Repository URL: `https://github.com/gongahkia/solomon`
 
+## Latest Local Verification
+
+Verified on 2026-07-10 with:
+
+```bash
+uv run python -m solomon.evaluation
+```
+
+Result summary:
+
+- Solomon stale-surface rate: `0.000`
+- Solomon time-to-flag: `0.066s`
+- Solomon impact-query recall: `1.000`
+- Jurisdiction coverage: `18/18`, coverage rate `1.0`
+- External-law monitoring change-detection recall: `1.0`
+- External-law monitoring false-positive rate: `0.0`
+- External-law monitoring impact-query recall: `1.0`
+
 External DOI publication can be layered on later by connecting the repository to an archival service, but the
 current artifact is already versioned, reproducible from source, release-addressable on GitHub, and tracked in
 a public issue.

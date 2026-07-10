@@ -138,6 +138,14 @@ held-out candidate did not beat deterministic significance, so no online
 contextual-bandit runtime experiment should run. The Stage 2 planner remains a
 disabled-by-default API gate only.
 
+## Stage 3 Status
+
+Issue #10 is closed as not started. Stage 3 requires Stage 1 and Stage 2 to
+prove useful signal without invariant violations; the current Stage 1 artifact
+does not beat deterministic significance, and Stage 2 is not justified. No
+GRPO/PPO training setup, reward ablation, GPU plan, or runtime learned-policy
+deployment is authorized.
+
 ## Current Non-Claims
 
 - There is no online contextual-bandit loop in the product.

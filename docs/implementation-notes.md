@@ -31,8 +31,9 @@ Current implementation status:
 - LinkedIn DOM selectors are unstable. The detector deliberately uses selector fallbacks and marks scanned nodes to avoid repeat work, but `.feed-shared-update-v2` can break without notice.
 - LinkedIn's User Agreement prohibits modifying the service appearance by inserting elements. Keep this as an unpacked, private prototype until the distribution posture is reviewed.
 - The local tonal classifier is deterministic and conservative. It is useful for validating the product loop, but it should not be treated as equivalent to the planned Haiku/Sonnet classifier.
-- The visual snapshot prevents accidental drift in this repo, but it is not proof that the card exactly matches live X Community Notes. A browser comparison against real X notes is still needed before making that claim.
+- [Inference] The visual snapshot prevents accidental drift in this repo, but it is not proof that the card exactly matches live X Community Notes. A browser comparison against real X notes is still needed before making that claim.
 - Public naming uses "Decorum" and avoids "LinkedIn Community Notes" because it creates unnecessary brand and affiliation risk.
+- Visible notes stay AI-only for the next milestone. Ratings are eval labels, not user-contributed note text.
 - CI disables strict PNG byte-hash comparison because Chrome builds can render antialiasing differently. It still checks computed visual tokens and dimensions.
 
 ## Verification
@@ -54,3 +55,4 @@ The runtime test uses a generated localhost extension manifest so the real conte
 - LinkedIn User Agreement: https://www.linkedin.com/legal/user-agreement
 - Anthropic model overview: https://platform.claude.com/docs/en/about-claude/models/overview
 - Exa pricing: https://exa.ai/pricing
+- Note generation policy: ./note-generation.md

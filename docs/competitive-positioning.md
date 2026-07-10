@@ -84,6 +84,10 @@ shape:
 - Shibahama's best current proof is not standard recall; it is continuity under
   contradiction and supersession.
 
+The current repo has no reproducible Zep/Graphiti run. The explicit not-run
+anchor is `benchmarks/results/zep-graphiti-not-run.md`; do not claim a
+Zep/Graphiti win until a real artifact replaces it.
+
 References:
 
 - https://help.getzep.com/graph-overview

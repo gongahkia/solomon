@@ -302,3 +302,8 @@ all of the following in one change:
 
 Until then, README and launch materials must keep the claim to local Shibahama
 versus warehouse-baseline runs.
+
+The current Zep/Graphiti anchor status is explicitly not run:
+
+- `benchmarks/results/zep-graphiti-not-run.json`
+- `benchmarks/results/zep-graphiti-not-run.md`

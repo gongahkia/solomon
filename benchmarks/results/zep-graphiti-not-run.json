@@ -1,0 +1,32 @@
+{
+  "issue": 13,
+  "system": "zep-graphiti",
+  "status": "not_run",
+  "timestamp_utc": "2026-07-10T02:48:36Z",
+  "target_dataset": {
+    "name": "ContinuityBench v0",
+    "path": "benchmarks/continuity/dataset/continuitybench-v0.json",
+    "hash": "sha256:a68d3f55a21b3ad0799f4c10e28e02a53b4cac2e39e5679df214323ad961bfaa"
+  },
+  "setup_path": null,
+  "service_version": null,
+  "exact_command": null,
+  "metric_comparison": null,
+  "token_cost_accounting": null,
+  "reason": "No reproducible local or self-hosted Zep/Graphiti setup, service version, credentials state, and dataset-permission manifest is committed in this repo.",
+  "required_before_real_run": [
+    "adapter implementation and dependency instructions",
+    "local or self-hosted setup path",
+    "service or package version",
+    "credential and dataset-permission manifest",
+    "exact command",
+    "generated JSON and Markdown result artifacts",
+    "metric comparison against Shibahama, warehouse, and full-context on the identical slice",
+    "token-cost accounting where available"
+  ],
+  "unsupported_claims_omitted": [
+    "Shibahama beats Zep/Graphiti on LoCoMo",
+    "Shibahama beats Zep/Graphiti on LongMemEval",
+    "Shibahama beats Zep/Graphiti on ContinuityBench"
+  ]
+}

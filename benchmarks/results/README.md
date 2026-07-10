@@ -11,6 +11,8 @@ Generated benchmark summaries live here.
 - `learned-policy-stage1-local.md` is the Stage 1 learned-policy null-result
   artifact showing the deterministic significance baseline beats the candidate
   trace.
+- `zep-graphiti-not-run.md` records that no reproducible Zep/Graphiti run is
+  committed and that no Zep/Graphiti superiority claim is supported.
 - `continuity/SUMMARY.md` is the ContinuityBench v0 baseline comparison for
   Shibahama, warehouse, full-context, Mem0 OSS exact-event retrieval, and Engram
   exact-event retrieval.

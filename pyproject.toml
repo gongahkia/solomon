@@ -65,7 +65,7 @@ select = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101"]
-"src/solomon/store/postgres.py" = ["S608"]
+"src/solomon/store/postgres/**/*.py" = ["S608"]
 
 [tool.mypy]
 python_version = "3.10"

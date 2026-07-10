@@ -3,211 +3,53 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any
 
-from pydantic import Field
-
-from solomon.api.schemas import SolomonModel
-from solomon.audit.journal import AuditJournal, sign_verification_attestation
+from solomon.api.service_models import (
+    AffirmRequest,
+    AffirmResponse,
+    AnswerRequest,
+    AnswerResponse,
+    AuthorityChangeRequest,
+    ContestRequest,
+    ContestResponse,
+    DependencyRequest,
+    DependencySuggestionDecisionRequest,
+    DependencySuggestionRequest,
+    IngestRequest,
+    PinRequest,
+    PrimitivePlanExecution,
+    PrimitivePlanRequest,
+    PrimitivePlanStep,
+    PrimitiveStepResult,
+    RecallRequest,
+    ReferenceExtractionRequest,
+    StalenessPredictionRequest,
+    VerificationRequest,
+    WhyTrace,
+)
+from solomon.api.services.answer import AnswerService
+from solomon.api.services.authority import AuthorityService
+from solomon.api.services.common import digest
+from solomon.api.services.ingestion import IngestionService
+from solomon.api.services.recall import RecallService
+from solomon.audit.journal import AuditJournal
 from solomon.boundary.solomon import SolomonBoundary
 from solomon.credence.policy import CredenceLedger
 from solomon.currency.cache import CurrencyEvaluationCache
-from solomon.currency.engine import (
-    VerificationOutcome,
-    evaluate_currency,
-    record_verification,
-    register_authority_change,
-)
-from solomon.currency.models import (
-    CredenceTier,
-    CurrencyState,
-    KnowledgeContentRole,
-    KnowledgeItem,
-    KnowledgeKind,
-    Matter,
-    Provenance,
-    SourceKind,
-    VerifiedState,
-    new_uuid7,
-)
-from solomon.currency.prediction import PendingAuthorityAmendment, StalenessRiskReport, predict_staleness_risk
-from solomon.errors import BadRequestError, NotFoundError, PolicyRefusalError
-from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
-from solomon.graph.propagation import CurrencyPropagator
-from solomon.graph.suggestions import (
-    DependencySuggestion,
-    ReferenceExtraction,
-    SuggestionDecision,
-    confirm_suggestion,
-    extract_defined_terms_and_citations,
-    reject_suggestion,
-    suggest_authority_dependencies,
-    suggest_authority_dependencies_with_llm,
-)
-from solomon.graph.visualization import GraphFormat, dependency_graph_view, render_dependency_graph
+from solomon.currency.engine import record_verification
+from solomon.currency.models import KnowledgeItem
+from solomon.currency.prediction import StalenessRiskReport
+from solomon.errors import NotFoundError
+from solomon.graph.models import DependencyEdge
+from solomon.graph.suggestions import DependencySuggestion, ReferenceExtraction, SuggestionDecision
+from solomon.graph.visualization import GraphFormat
 from solomon.orchestrator.models import ModelRequest, ModelRouter, RoutedModelResult
-from solomon.orchestrator.retrieval import MatterContext, RecallOptions, RetrievalOrchestrator
+from solomon.orchestrator.retrieval import RetrievalOrchestrator
 from solomon.store.factory import create_storage_bundle
-from solomon.store.hardening import harden_stored_content
 from solomon.store.sqlite import ItemNotFoundError
-
-
-class IngestRequest(SolomonModel):
-    kind: KnowledgeKind
-    content: str = Field(min_length=1)
-    source_kind: SourceKind
-    source_ref: str = Field(min_length=1)
-    author: str | None = None
-    content_role: KnowledgeContentRole | None = None
-    matter_id: str | None = None
-    client_id: str | None = None
-    valid_from: datetime | None = None
-    ingested_at: datetime | None = None
-
-
-class RecallRequest(SolomonModel):
-    query: str
-    matter_id: str | None = None
-    client_id: str | None = None
-    review_mode: bool = False
-    limit: int = 10
-    max_context_tokens: int | None = Field(default=None, ge=1)
-
-
-class VerificationRequest(SolomonModel):
-    by: str
-    outcome: VerificationOutcome
-    successor_id: str | None = None
-    recorded_at: datetime | None = None
-
-
-class AuthorityChangeRequest(SolomonModel):
-    new_version: str
-    changed_at: str
-
-
-class ContestRequest(SolomonModel):
-    lawyer_id: str = Field(min_length=1)
-    reason: str = Field(min_length=1)
-    proposed_correction: str | None = None
-    actor_tier: CredenceTier = CredenceTier.VERIFIED
-    contested_at: datetime | None = None
-
-
-class ContestResponse(SolomonModel):
-    item: KnowledgeItem
-    correction_item: KnowledgeItem | None = None
-    impact: dict[str, Any]
-
-
-class AffirmRequest(SolomonModel):
-    lawyer_id: str = Field(min_length=1)
-    actor_tier: CredenceTier = CredenceTier.FIRM_AUTHORITATIVE
-    correction_item_id: str | None = None
-    affirmed_at: datetime | None = None
-
-
-class AffirmResponse(SolomonModel):
-    item: KnowledgeItem
-    correction_item: KnowledgeItem | None = None
-    superseded: bool = False
-
-
-class PinRequest(SolomonModel):
-    lawyer_id: str = Field(min_length=1)
-    reason: str = Field(min_length=1)
-    actor_tier: CredenceTier = CredenceTier.FIRM_AUTHORITATIVE
-    pinned_at: datetime | None = None
-
-
-class ReferenceExtractionRequest(SolomonModel):
-    content: str = Field(min_length=1)
-
-
-class StalenessPredictionRequest(SolomonModel):
-    pending_amendments: list[PendingAuthorityAmendment]
-    lookahead_days: int = Field(default=180, ge=1)
-    as_of: str | None = None
-
-
-class DependencyRequest(SolomonModel):
-    source_id: str
-    target_id: str
-    edge_type: EdgeType
-    target_kind: str
-    confidence: EdgeConfidence = EdgeConfidence.HUMAN_ASSERTED
-    created_by: str | None = None
-    reason: str | None = None
-
-
-class DependencySuggestionRequest(SolomonModel):
-    item_id: str
-    use_llm: bool = False
-
-
-class DependencySuggestionDecisionRequest(SolomonModel):
-    by: str = Field(min_length=1)
-
-
-class AnswerRequest(SolomonModel):
-    query: str
-    matter_id: str | None = None
-    client_id: str | None = None
-    matter_sensitivity: Literal["standard", "confidential", "strict"] = "standard"
-    limit: int = Field(default=5, ge=1)
-    max_context_tokens: int | None = Field(default=1200, ge=1)
-    max_tokens: int = Field(default=1024, ge=1)
-    temperature: float = Field(default=0.0, ge=0.0)
-
-
-class AnswerResponse(SolomonModel):
-    query: str
-    text: str
-    model: dict[str, Any]
-    recalled: list[dict[str, Any]]
-    prompt: dict[str, Any]
-    primitive_plan: dict[str, Any]
-
-
-class WhyTrace(SolomonModel):
-    item: KnowledgeItem
-    currency: dict[str, Any]
-    dependencies: list[dict[str, Any]]
-    dependents: list[dict[str, Any]]
-    provenance: dict[str, Any]
-    credence_tier: str
-    verification: dict[str, Any]
-
-
-class PrimitivePlanStep(SolomonModel):
-    primitive: str
-    args: dict[str, Any] = Field(default_factory=dict)
-
-
-class PrimitivePlanRequest(SolomonModel):
-    plan_id: str | None = None
-    steps: list[PrimitivePlanStep] = Field(min_length=1)
-
-
-class PrimitiveStepResult(SolomonModel):
-    index: int
-    primitive: str
-    args_sha256: str
-    result_sha256: str
-    result_summary: dict[str, Any]
-    result: Any
-
-
-class PrimitivePlanExecution(SolomonModel):
-    schema_id: str = "solomon.primitive_plan_execution.v1"
-    plan_id: str
-    plan: PrimitivePlanRequest
-    store_state_sha256: str
-    steps: list[PrimitiveStepResult]
-    audit_event_hash: str
 
 
 class SolomonService:
@@ -241,380 +83,49 @@ class SolomonService:
         self.audit = AuditJournal(journal_dir / "journal.jsonl")
         self.attestation_key = attestation_key
         self.boundary = boundary or SolomonBoundary()
+        self._ingestion = IngestionService(self)
+        self._answer = AnswerService(self)
+        self._authority = AuthorityService(self)
+        self._recall = RecallService(self)
 
     def ingest(self, request: IngestRequest) -> KnowledgeItem:
-        hardened = harden_stored_content(request.content)
-        item = KnowledgeItem(
-            kind=request.kind,
-            content=hardened.content,
-            content_role=(
-                KnowledgeContentRole.INSTRUCTION
-                if hardened.content_role is KnowledgeContentRole.INSTRUCTION
-                else request.content_role or hardened.content_role
-            ),
-            provenance=Provenance(
-                source_kind=request.source_kind,
-                source_ref=request.source_ref,
-                author=request.author,
-                matter_id=request.matter_id,
-            ),
-            valid_from=request.valid_from or datetime.now().astimezone(),
-            ingested_at=request.ingested_at or datetime.now().astimezone(),
-            matter_id=request.matter_id,
-            client_id=request.client_id,
-            metadata={"stored_content_hardening": hardened.findings} if hardened.findings else {},
-        )
-        item, _review = self.boundary.review_for_ingest(item)
-        credence_entry_start = len(self.credence.entries)
-        item = self.credence.assign_on_ingest(item)
-        self._persist_credence_entries(start=credence_entry_start)
-        item = self._seed_verification_from_source(item)
-        item = self.index.upsert_item(item)
-        self.store.write_item(item)
-        self._create_dependency_suggestions(item)
-        return item
+        return self._ingestion.ingest(request)
 
     def recall(self, request: RecallRequest) -> list[dict[str, Any]]:
-        results = self.retrieval.recall(
-            request.query,
-            matter_context=MatterContext(matter_id=request.matter_id, client_id=request.client_id),
-            options=RecallOptions(
-                limit=request.limit,
-                review_mode=request.review_mode,
-                max_context_tokens=request.max_context_tokens,
-            ),
-        )
-        self.audit.log_query(query_id=request.query, results=results)
-        return [result.model_dump(mode="json") for result in results]
+        return self._recall.recall(request)
 
     def answer(self, request: AnswerRequest, router: ModelRouter) -> AnswerResponse:
-        primitive_plan = self.execute_plan(
-            PrimitivePlanRequest(
-                plan_id=f"answer:{_digest({'query': request.query, 'matter_id': request.matter_id})[:16]}",
-                steps=[
-                    PrimitivePlanStep(
-                        primitive="recall",
-                        args={
-                            "query": request.query,
-                            "matter_id": request.matter_id,
-                            "client_id": request.client_id,
-                            "review_mode": False,
-                            "limit": request.limit,
-                            "max_context_tokens": request.max_context_tokens,
-                        },
-                    )
-                ],
-            )
-        )
-        recalled = cast(list[dict[str, Any]], primitive_plan.steps[0].result)
-        self._enforce_load_bearing_answer_policy(request, recalled)
-        prompt = _build_answer_prompt(request.query, recalled)
-        matter = Matter(
-            id=request.matter_id or "ad-hoc",
-            client_id=request.client_id or "unknown-client",
-            name=request.matter_id or "Ad hoc answer request",
-            sensitivity=request.matter_sensitivity,
-        )
-        routed = self.complete_model_request(
-            router,
-            ModelRequest(
-                prompt=prompt,
-                matter_id=request.matter_id,
-                max_tokens=request.max_tokens,
-                temperature=request.temperature,
-            ),
-            matter=matter,
-        )
-        self.audit.append(
-            "answer_workflow",
-            {
-                "query_id": request.query,
-                "matter_id": request.matter_id,
-                "client_id": request.client_id,
-                "context_item_ids": [entry["item"]["id"] for entry in recalled],
-                "context_count": len(recalled),
-                "model": routed.audit.model_dump(mode="json"),
-                "boundary": routed.response.metadata.get("boundary", {}),
-            },
-        )
-        return AnswerResponse(
-            query=request.query,
-            text=routed.response.text,
-            model={
-                "endpoint": routed.audit.endpoint.value,
-                "reason": routed.audit.reason,
-                "crossed_boundary": routed.audit.crossed_boundary,
-                "fallback_used": routed.audit.fallback_used,
-                "quality_caveat": routed.audit.quality_caveat,
-                "prompt_sha256": routed.audit.prompt_sha256,
-                "prompt_chars": routed.audit.prompt_chars,
-                "latency_ms": routed.audit.latency_ms,
-                "cost_usd": routed.audit.cost_usd,
-                "response_metadata": routed.response.metadata,
-            },
-            recalled=recalled,
-            prompt={
-                "context_item_ids": [entry["item"]["id"] for entry in recalled],
-                "context_count": len(recalled),
-                "boundary_applied": True,
-            },
-            primitive_plan=_plan_explainability_summary(primitive_plan),
-        )
+        return self._answer.answer(request, router)
 
     def complete_model_request(
         self,
         router: ModelRouter,
         request: ModelRequest,
         *,
-        matter: Matter | None = None,
+        matter: Any | None = None,
     ) -> RoutedModelResult:
-        context = self.boundary.sanitize_context(request.prompt, matter_id=request.matter_id)
-        routed = router.complete(request.model_copy(update={"prompt": context.sanitized_text}), matter=matter)
-        demasked = self.boundary.reidentify_response(context.context_id, routed.response.text)
-        response = routed.response.model_copy(
-            update={
-                "text": demasked.text,
-                "metadata": {
-                    **routed.response.metadata,
-                    "boundary": {
-                        "context_id": context.context_id,
-                        "mapping_count": context.mapping_count,
-                        "mapping_flushed": demasked.mapping_flushed,
-                        "source_jurisdiction": context.source_jurisdiction,
-                        "destination_jurisdiction": context.destination_jurisdiction,
-                        "input_mode": context.input_mode,
-                    },
-                },
-            }
-        )
-        self.audit.append(
-            "model_call",
-            {
-                "matter_id": request.matter_id,
-                "endpoint": routed.audit.endpoint.value,
-                "crossed_boundary": routed.audit.crossed_boundary,
-                "prompt_sha256": routed.audit.prompt_sha256,
-                "prompt_chars": routed.audit.prompt_chars,
-                "mapping_count": context.mapping_count,
-                "mapping_flushed": demasked.mapping_flushed,
-            },
-        )
-        return RoutedModelResult(response=response, audit=routed.audit)
+        return self._answer.complete_model_request(router, request, matter=matter)
 
     def evaluate_currency(self, item_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
-        return self.currency_cache.get_or_evaluate(self._get_item(item_id), as_of=as_of).model_dump(mode="json")
+        return self._authority.evaluate_currency(item_id, as_of=as_of)
 
     def record_verification(self, item_id: str, request: VerificationRequest) -> KnowledgeItem:
-        item = self._get_item(item_id)
-        recorded = record_verification(
-            item,
-            by=request.by,
-            outcome=request.outcome,
-            successor_id=request.successor_id,
-            recorded_at=request.recorded_at,
-        )
-        self.store.update_item(recorded.item, event_type="knowledge_item_verified")
-        self.currency_cache.invalidate({item_id})
-        if self.attestation_key is not None:
-            attestation = sign_verification_attestation(
-                recorded.item,
-                verified_by=request.by,
-                outcome=request.outcome.value,
-                signing_key=self.attestation_key,
-            )
-            self.audit.log_verification_attestation(attestation)
-        return recorded.item
+        return self._authority.record_verification(item_id, request)
 
     def register_authority_change(self, authority_id: str, request: AuthorityChangeRequest) -> dict[str, Any]:
-        from datetime import datetime
-
-        impact = register_authority_change(
-            authority_id=authority_id,
-            new_version=request.new_version,
-            changed_at=datetime.fromisoformat(request.changed_at),
-            graph=self.graph,
-            store=self.store,
-        )
-        self.currency_cache.invalidate(set(impact.stale_item_ids))
-        self.audit.log_impact(impact)
-        return impact.model_dump(mode="json")
+        return self._authority.register_authority_change(authority_id, request)
 
     def contest(self, item_id: str, request: ContestRequest) -> ContestResponse:
-        timestamp = request.contested_at or datetime.now(timezone.utc)
-        item = self._get_item(item_id)
-        contest_id = new_uuid7()
-        correction = self._create_contest_correction(item, request, contest_id=contest_id, timestamp=timestamp)
-        contests = list(item.metadata.get("contests", []))
-        contests.append(
-            {
-                "contest_id": contest_id,
-                "lawyer_id": request.lawyer_id,
-                "reason": request.reason,
-                "actor_tier": request.actor_tier.value,
-                "contested_at": timestamp.isoformat(),
-                "proposed_correction_item_id": correction.id if correction is not None else None,
-                "status": "pending_review",
-            }
-        )
-        staleness_reasons = list(item.metadata.get("staleness_reasons", []))
-        staleness_reasons.append(
-            {
-                "dependency_id": item.id,
-                "changed_at": timestamp.isoformat(),
-                "reason": f"contest by {request.lawyer_id}: {request.reason}",
-                "edge_id": None,
-            }
-        )
-        contested = item.model_copy(
-            update={
-                "currency_state": CurrencyState.STALE_PENDING_REVERIFICATION,
-                "verified_state": VerifiedState.NEEDS_REVIEW,
-                "credence_tier": CredenceTier.UNVERIFIED,
-                "metadata": {
-                    **item.metadata,
-                    "contests": contests,
-                    "staleness_reasons": staleness_reasons,
-                    "contested": True,
-                },
-            }
-        )
-        self.store.update_item(contested, event_type="knowledge_item_contested", occurred_at=timestamp)
-        self.index.upsert_item(contested)
-        self.currency_cache.invalidate({item_id})
-        impact = CurrencyPropagator(graph=self.graph, store=self.store).propagate_dependency_change(
-            item_id,
-            changed_at=timestamp,
-            reason=f"contest on {item_id} requires dependent re-verification",
-        )
-        self.currency_cache.invalidate(set(impact.stale_item_ids))
-        self.audit.log_impact(impact)
-        self.audit.append(
-            "contest",
-            {
-                "contest_id": contest_id,
-                "item_id": item_id,
-                "lawyer_id": request.lawyer_id,
-                "actor_tier": request.actor_tier.value,
-                "reason_sha256": _digest(request.reason),
-                "proposed_correction_item_id": correction.id if correction is not None else None,
-                "proposed_correction_sha256": (
-                    _digest(request.proposed_correction) if request.proposed_correction else None
-                ),
-            },
-            occurred_at=timestamp,
-        )
-        return ContestResponse(item=contested, correction_item=correction, impact=impact.model_dump(mode="json"))
+        return self._ingestion.contest(item_id, request)
 
     def affirm(self, item_id: str, request: AffirmRequest) -> AffirmResponse:
-        if request.actor_tier is not CredenceTier.FIRM_AUTHORITATIVE:
-            raise PolicyRefusalError("only FirmAuthoritative actors can affirm contested knowledge")
-        timestamp = request.affirmed_at or datetime.now(timezone.utc)
-        item = self._get_item(item_id)
-        if request.correction_item_id is not None:
-            correction = self._get_item(request.correction_item_id)
-            if correction.metadata.get("proposed_correction_for") != item_id:
-                raise BadRequestError("correction item is not proposed for this item")
-            successor_metadata = {
-                **correction.metadata,
-                "quarantined": False,
-                "affirmed_by": request.lawyer_id,
-                "affirmed_at": timestamp.isoformat(),
-                "contest_status": "affirmed",
-            }
-            successor = correction.model_copy(
-                update={
-                    "currency_state": CurrencyState.LIVE,
-                    "verified_state": VerifiedState.VERIFIED,
-                    "last_verified_at": timestamp,
-                    "verified_by": request.lawyer_id,
-                    "credence_tier": CredenceTier.FIRM_AUTHORITATIVE,
-                    "metadata": successor_metadata,
-                }
-            )
-            closed, written_successor = self.store.supersede(item_id, successor, superseded_at=timestamp)
-            self.index.upsert_item(closed)
-            self.index.upsert_item(written_successor)
-            self.currency_cache.invalidate({item_id, written_successor.id})
-            self.audit.append(
-                "affirm",
-                {
-                    "item_id": item_id,
-                    "lawyer_id": request.lawyer_id,
-                    "correction_item_id": written_successor.id,
-                    "superseded": True,
-                },
-                occurred_at=timestamp,
-            )
-            return AffirmResponse(item=closed, correction_item=written_successor, superseded=True)
-
-        metadata = dict(item.metadata)
-        metadata["affirmed_by"] = request.lawyer_id
-        metadata["affirmed_at"] = timestamp.isoformat()
-        metadata["contest_status"] = "affirmed"
-        metadata.pop("staleness_reasons", None)
-        affirmed = item.model_copy(
-            update={
-                "currency_state": CurrencyState.LIVE,
-                "verified_state": VerifiedState.VERIFIED,
-                "last_verified_at": timestamp,
-                "verified_by": request.lawyer_id,
-                "credence_tier": CredenceTier.FIRM_AUTHORITATIVE,
-                "metadata": metadata,
-            }
-        )
-        self.store.update_item(affirmed, event_type="knowledge_item_affirmed", occurred_at=timestamp)
-        self.index.upsert_item(affirmed)
-        self.currency_cache.invalidate({item_id})
-        self.audit.append(
-            "affirm",
-            {"item_id": item_id, "lawyer_id": request.lawyer_id, "superseded": False},
-            occurred_at=timestamp,
-        )
-        return AffirmResponse(item=affirmed)
+        return self._ingestion.affirm(item_id, request)
 
     def pin(self, item_id: str, request: PinRequest) -> KnowledgeItem:
-        if request.actor_tier is not CredenceTier.FIRM_AUTHORITATIVE:
-            raise PolicyRefusalError("only FirmAuthoritative actors can pin knowledge")
-        timestamp = request.pinned_at or datetime.now(timezone.utc)
-        item = self._get_item(item_id)
-        pinned = item.model_copy(
-            update={
-                "credence_tier": CredenceTier.FIRM_AUTHORITATIVE,
-                "metadata": {
-                    **item.metadata,
-                    "credence_floor": CredenceTier.FIRM_AUTHORITATIVE.value,
-                    "pinned_by": request.lawyer_id,
-                    "pinned_at": timestamp.isoformat(),
-                    "pin_reason": request.reason,
-                },
-            }
-        )
-        self.store.update_item(pinned, event_type="knowledge_item_pinned", occurred_at=timestamp)
-        self.index.upsert_item(pinned)
-        self.currency_cache.invalidate({item_id})
-        self.audit.append(
-            "pin",
-            {
-                "item_id": item_id,
-                "lawyer_id": request.lawyer_id,
-                "reason_sha256": _digest(request.reason),
-                "credence_floor": CredenceTier.FIRM_AUTHORITATIVE.value,
-            },
-            occurred_at=timestamp,
-        )
-        return pinned
+        return self._ingestion.pin(item_id, request)
 
     def add_dependency(self, request: DependencyRequest) -> DependencyEdge:
-        edge = DependencyEdge(
-            source_id=request.source_id,
-            target_id=request.target_id,
-            edge_type=request.edge_type,
-            target_kind=request.target_kind,  # type: ignore[arg-type]
-            confidence=request.confidence,
-            created_by=request.created_by,
-            reason=request.reason,
-        )
-        return self.graph.add_dependency(edge)
+        return self._authority.add_dependency(request)
 
     def suggest_dependencies(
         self,
@@ -622,12 +133,7 @@ class SolomonService:
         *,
         router: ModelRouter | None = None,
     ) -> list[DependencySuggestion]:
-        item = self._get_item(request.item_id)
-        return self._create_dependency_suggestions(
-            item,
-            use_llm=request.use_llm,
-            router=router,
-        )
+        return self._authority.suggest_dependencies(request, router=router)
 
     def dependency_suggestions(
         self,
@@ -636,71 +142,24 @@ class SolomonService:
         decision: SuggestionDecision | None = None,
         limit: int = 100,
     ) -> list[DependencySuggestion]:
-        return self.graph.list_dependency_suggestions(item_id=item_id, decision=decision, limit=limit)
+        return self._authority.dependency_suggestions(item_id=item_id, decision=decision, limit=limit)
 
     def confirm_dependency_suggestion(
         self,
         suggestion_id: str,
         request: DependencySuggestionDecisionRequest,
     ) -> DependencyEdge:
-        suggestion = self.graph.get_dependency_suggestion(suggestion_id)
-        if suggestion.decision is SuggestionDecision.CONFIRMED:
-            return suggestion.suggested_edge
-        if suggestion.decision is SuggestionDecision.REJECTED:
-            raise BadRequestError("rejected dependency suggestions cannot be confirmed")
-        edge = confirm_suggestion(suggestion, by=request.by)
-        edge = self.graph.add_dependency(edge)
-        confirmed = suggestion.model_copy(
-            update={
-                "decision": SuggestionDecision.CONFIRMED,
-                "decided_by": request.by,
-                "decided_at": datetime.now(timezone.utc),
-                "suggested_edge": edge,
-            }
-        )
-        self.graph.update_dependency_suggestion(confirmed)
-        self.currency_cache.invalidate({edge.source_id})
-        self.audit.append(
-            "dependency_suggestion_confirmed",
-            {
-                "suggestion_id": suggestion_id,
-                "item_id": edge.source_id,
-                "target_id": edge.target_id,
-                "edge_id": edge.id,
-                "by": request.by,
-            },
-        )
-        return edge
+        return self._authority.confirm_dependency_suggestion(suggestion_id, request)
 
     def reject_dependency_suggestion(
         self,
         suggestion_id: str,
         request: DependencySuggestionDecisionRequest,
     ) -> DependencySuggestion:
-        suggestion = self.graph.get_dependency_suggestion(suggestion_id)
-        if suggestion.decision is SuggestionDecision.REJECTED:
-            return suggestion
-        if suggestion.decision is SuggestionDecision.CONFIRMED:
-            raise BadRequestError("confirmed dependency suggestions cannot be rejected")
-        rejected = reject_suggestion(suggestion, by=request.by)
-        self.graph.update_dependency_suggestion(rejected)
-        self.audit.append(
-            "dependency_suggestion_rejected",
-            {
-                "suggestion_id": suggestion_id,
-                "item_id": rejected.item_id,
-                "target_id": rejected.suggested_edge.target_id,
-                "by": request.by,
-            },
-        )
-        return rejected
+        return self._authority.reject_dependency_suggestion(suggestion_id, request)
 
     def impact_query(self, authority_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
-        timestamp = as_of or self._deterministic_store_timestamp()
-        return CurrencyPropagator(graph=self.graph, store=self.store).impact_query(
-            authority_id,
-            as_of=timestamp,
-        ).model_dump(mode="json")
+        return self._authority.impact_query(authority_id, as_of=as_of)
 
     def dependency_graph(
         self,
@@ -709,172 +168,38 @@ class SolomonService:
         matter_id: str | None = None,
         client_id: str | None = None,
     ) -> str:
-        view = dependency_graph_view(graph=self.graph, store=self.store, matter_id=matter_id, client_id=client_id)
-        return render_dependency_graph(view, output_format=output_format)
+        return self._authority.dependency_graph(
+            output_format=output_format,
+            matter_id=matter_id,
+            client_id=client_id,
+        )
 
     def extract_references(self, request: ReferenceExtractionRequest) -> ReferenceExtraction:
-        return extract_defined_terms_and_citations(content=request.content)
+        return self._authority.extract_references(request)
 
     def predict_staleness(self, request: StalenessPredictionRequest) -> StalenessRiskReport:
-        return predict_staleness_risk(
-            request.pending_amendments,
-            graph=self.graph,
-            store=self.store,
-            as_of=_parse_iso_datetime(request.as_of) if request.as_of else None,
-            lookahead_days=request.lookahead_days,
-        )
+        return self._authority.predict_staleness(request)
 
     def why(self, item_id: str, *, as_of: datetime | None = None) -> WhyTrace:
-        item = self._get_item(item_id)
-        return WhyTrace(
-            item=item,
-            currency=evaluate_currency(item, as_of=as_of).model_dump(mode="json"),
-            dependencies=[edge.model_dump(mode="json") for edge in self.graph.get_dependencies(item.id)],
-            dependents=[edge.model_dump(mode="json") for edge in self.graph.get_dependents(item.id)],
-            provenance=item.provenance.model_dump(mode="json"),
-            credence_tier=item.credence_tier.value,
-            verification={
-                "verified_state": item.verified_state.value,
-                "last_verified_at": item.last_verified_at.isoformat() if item.last_verified_at else None,
-                "verified_by": item.verified_by,
-            },
-        )
+        return self._recall.why(item_id, as_of=as_of)
 
     def timeline(self, request: RecallRequest, *, as_of: str) -> list[dict[str, Any]]:
-        results = self.retrieval.timeline(
-            request.query,
-            as_of=_parse_iso_datetime(as_of),
-            options=RecallOptions(
-                limit=request.limit,
-                review_mode=True,
-                max_context_tokens=request.max_context_tokens,
-            ),
-        )
-        return [result.model_dump(mode="json") for result in results]
+        return self._recall.timeline(request, as_of=as_of)
 
     def execute_plan(self, request: PrimitivePlanRequest) -> PrimitivePlanExecution:
-        plan_id = request.plan_id or f"plan:{_digest(request.model_dump(mode='json'))[:16]}"
-        store_state_sha256 = self._store_state_sha256()
-        step_results: list[PrimitiveStepResult] = []
-        for index, step in enumerate(request.steps, start=1):
-            result = _jsonable(self._execute_primitive(step))
-            step_results.append(
-                PrimitiveStepResult(
-                    index=index,
-                    primitive=step.primitive,
-                    args_sha256=_digest(step.args),
-                    result_sha256=_digest(result),
-                    result_summary=_result_summary(result),
-                    result=result,
-                )
-            )
-        audit_entry = self.audit.append(
-            "primitive_plan",
-            {
-                "schema_id": "solomon.primitive_plan_execution.v1",
-                "plan_id": plan_id,
-                "plan_sha256": _digest(request.model_dump(mode="json")),
-                "store_state_sha256": store_state_sha256,
-                "steps": [
-                    {
-                        "index": result.index,
-                        "primitive": result.primitive,
-                        "args_sha256": result.args_sha256,
-                        "result_sha256": result.result_sha256,
-                        "result_summary": result.result_summary,
-                    }
-                    for result in step_results
-                ],
-            },
-        )
-        return PrimitivePlanExecution(
-            plan_id=plan_id,
-            plan=request.model_copy(update={"plan_id": plan_id}),
-            store_state_sha256=store_state_sha256,
-            steps=step_results,
-            audit_event_hash=audit_entry.entry_hash,
-        )
+        return self._recall.execute_plan(request)
 
     def export_audit_pack(self, destination: Path) -> Path:
         return self.audit.export_pack(destination).directory
 
-    def _create_contest_correction(
+    def _create_dependency_suggestions(
         self,
         item: KnowledgeItem,
-        request: ContestRequest,
         *,
-        contest_id: str,
-        timestamp: datetime,
-    ) -> KnowledgeItem | None:
-        if request.proposed_correction is None:
-            return None
-        correction = KnowledgeItem(
-            kind=item.kind,
-            content=request.proposed_correction,
-            content_role=item.content_role,
-            provenance=Provenance(
-                source_kind=(
-                    SourceKind.MODEL if request.actor_tier is CredenceTier.MODEL_INFERRED else SourceKind.ASSOCIATE
-                ),
-                source_ref=f"contest:{contest_id}",
-                author=request.lawyer_id,
-                matter_id=item.matter_id,
-            ),
-            valid_from=timestamp,
-            ingested_at=timestamp,
-            matter_id=item.matter_id,
-            client_id=item.client_id,
-            currency_state=CurrencyState.STALE_PENDING_REVERIFICATION,
-            verified_state=VerifiedState.NEEDS_REVIEW,
-            credence_tier=CredenceTier.UNVERIFIED,
-            metadata={
-                "proposed_correction_for": item.id,
-                "contest_id": contest_id,
-                "quarantined": True,
-                "contest_status": "pending_review",
-            },
-        )
-        correction, _review = self.boundary.review_for_ingest(correction)
-        correction = self.index.upsert_item(correction)
-        self.store.write_item(correction)
-        return correction
-
-    def _execute_primitive(self, step: PrimitivePlanStep) -> Any:
-        if step.primitive == "recall":
-            return self.recall(RecallRequest.model_validate(step.args))
-        if step.primitive == "evaluate_currency":
-            _ensure_subset_args(step, {"item_id", "as_of"})
-            _ensure_arg(step, "item_id")
-            return self.evaluate_currency(
-                _required_arg(step, "item_id"),
-                as_of=_optional_datetime_arg(step, "as_of") or self._deterministic_store_timestamp(),
-            )
-        if step.primitive == "impact_query":
-            _ensure_subset_args(step, {"authority_id", "as_of"})
-            _ensure_arg(step, "authority_id")
-            return self.impact_query(
-                _required_arg(step, "authority_id"),
-                as_of=_optional_datetime_arg(step, "as_of") or self._deterministic_store_timestamp(),
-            )
-        if step.primitive == "timeline":
-            _ensure_arg(step, "as_of")
-            timeline_args = dict(step.args)
-            as_of = str(timeline_args.pop("as_of"))
-            return self.timeline(RecallRequest.model_validate(timeline_args), as_of=as_of)
-        if step.primitive == "record_verification":
-            _ensure_arg(step, "item_id")
-            _ensure_arg(step, "recorded_at")
-            verification_args = dict(step.args)
-            item_id = str(verification_args.pop("item_id"))
-            return self.record_verification(item_id, VerificationRequest.model_validate(verification_args))
-        if step.primitive == "why":
-            _ensure_subset_args(step, {"item_id", "as_of"})
-            _ensure_arg(step, "item_id")
-            return self.why(
-                _required_arg(step, "item_id"),
-                as_of=_optional_datetime_arg(step, "as_of") or self._deterministic_store_timestamp(),
-            )
-        raise BadRequestError(f"unsupported primitive: {step.primitive}")
+        use_llm: bool = False,
+        router: ModelRouter | None = None,
+    ) -> list[DependencySuggestion]:
+        return self._authority._create_dependency_suggestions(item, use_llm=use_llm, router=router)
 
     def _store_state_sha256(self) -> str:
         items = []
@@ -900,7 +225,7 @@ class SolomonService:
                 key=lambda current: current.id,
             )
         ]
-        return _digest({"items": items, "edges": edges})
+        return digest({"items": items, "edges": edges})
 
     def _deterministic_store_timestamp(self) -> datetime:
         timestamps: list[datetime] = []
@@ -922,209 +247,29 @@ class SolomonService:
         for entry in self.credence.entries[start:]:
             self.audit.log_credence_change(entry)
 
-    def _enforce_load_bearing_answer_policy(self, request: AnswerRequest, recalled: list[dict[str, Any]]) -> None:
-        refusals: list[dict[str, Any]] = []
-        if not recalled:
-            refusals.append({"item_id": None, "reasons": ["no live context recalled for load-bearing answer"]})
-        for entry in recalled:
-            item = KnowledgeItem.model_validate(entry["item"])
-            decision = self.credence.load_bearing_decision(item)
-            if not decision.allowed:
-                refusals.append(decision.model_dump(mode="json"))
-        if not refusals:
-            return
-        self.audit.append(
-            "load_bearing_refusal",
-            {
-                "query_id": request.query,
-                "matter_id": request.matter_id,
-                "client_id": request.client_id,
-                "refusals": refusals,
-            },
-        )
-        reason_text = "; ".join(", ".join(refusal["reasons"]) for refusal in refusals)
-        raise PolicyRefusalError(f"load-bearing answer refused: {reason_text}")
 
-    def _seed_verification_from_source(self, item: KnowledgeItem) -> KnowledgeItem:
-        if item.credence_tier not in {CredenceTier.FIRM_AUTHORITATIVE, CredenceTier.VERIFIED}:
-            return item
-        return item.model_copy(
-            update={
-                "verified_state": VerifiedState.VERIFIED,
-                "last_verified_at": item.ingested_at,
-                "verified_by": item.provenance.author or f"source:{item.provenance.source_kind.value}",
-            }
-        )
-
-    def _create_dependency_suggestions(
-        self,
-        item: KnowledgeItem,
-        *,
-        use_llm: bool = False,
-        router: ModelRouter | None = None,
-    ) -> list[DependencySuggestion]:
-        suggestions = suggest_authority_dependencies(
-            item_id=item.id,
-            content=item.content,
-            boundary=self.boundary,
-            matter_id=item.matter_id,
-        )
-        if use_llm:
-            if router is None:
-                raise BadRequestError("LLM dependency suggestion requires a model router")
-            suggestions.extend(
-                suggest_authority_dependencies_with_llm(
-                    item_id=item.id,
-                    content=item.content,
-                    boundary=self.boundary,
-                    router=router,
-                    matter_id=item.matter_id,
-                )
-            )
-        stored: list[DependencySuggestion] = []
-        existing_edges = {
-            (edge.target_id, edge.edge_type)
-            for edge in self.graph.get_dependencies(item.id)
-            if edge.valid_to is None
-        }
-        existing_suggestions = {
-            (suggestion.suggested_edge.target_id, suggestion.suggested_edge.edge_type)
-            for suggestion in self.graph.list_dependency_suggestions(item_id=item.id)
-        }
-        for suggestion in suggestions:
-            key = (suggestion.suggested_edge.target_id, suggestion.suggested_edge.edge_type)
-            if key in existing_edges or key in existing_suggestions:
-                continue
-            stored_suggestion = self.graph.add_dependency_suggestion(suggestion)
-            existing_suggestions.add(key)
-            stored.append(stored_suggestion)
-            self.audit.append(
-                "dependency_suggestion_created",
-                {
-                    "suggestion_id": stored_suggestion.id,
-                    "item_id": stored_suggestion.item_id,
-                    "target_id": stored_suggestion.suggested_edge.target_id,
-                    "edge_type": stored_suggestion.suggested_edge.edge_type.value,
-                    "source": stored_suggestion.source,
-                    "authority_ref_sha256": _digest(stored_suggestion.authority_ref),
-                },
-            )
-        return stored
-
-
-def _build_answer_prompt(query: str, recalled: list[dict[str, Any]]) -> str:
-    context_blocks: list[str] = []
-    for index, entry in enumerate(recalled, start=1):
-        item = entry["item"]
-        provenance = entry["provenance"]
-        context_blocks.append(
-            "\n".join(
-                [
-                    f"[{index}] item_id={item['id']}",
-                    f"currency={entry['currency_state']} credence={item['credence_tier']}",
-                    f"source={provenance['source_ref']} source_kind={provenance['source_kind']}",
-                    f"stale_reasons={entry['stale_reasons']}",
-                    item["content"],
-                ]
-            )
-        )
-    context = "\n\n".join(context_blocks) if context_blocks else "No live Solomon context was recalled."
-    return "\n".join(
-        [
-            "You are answering from Solomon's recalled firm knowledge.",
-            "Use only the recalled context. If context is missing or stale, say so.",
-            f"Question: {query}",
-            "Recalled context:",
-            context,
-        ]
-    )
-
-
-def _ensure_subset_args(step: PrimitivePlanStep, allowed: set[str]) -> None:
-    extra = sorted(set(step.args) - allowed)
-    if extra:
-        raise BadRequestError(f"{step.primitive} got unsupported args: {', '.join(extra)}")
-
-
-def _ensure_arg(step: PrimitivePlanStep, name: str) -> None:
-    if name not in step.args or step.args[name] is None:
-        raise BadRequestError(f"{step.primitive} requires arg: {name}")
-
-
-def _required_arg(step: PrimitivePlanStep, name: str) -> str:
-    _ensure_arg(step, name)
-    return str(step.args[name])
-
-
-def _optional_datetime_arg(step: PrimitivePlanStep, name: str) -> datetime | None:
-    raw = step.args.get(name)
-    if raw is None:
-        return None
-    if isinstance(raw, datetime):
-        return raw
-    return _parse_iso_datetime(str(raw))
-
-
-def _parse_iso_datetime(value: str) -> datetime:
-    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
-    return datetime.fromisoformat(normalized)
-
-
-def _jsonable(value: Any) -> Any:
-    if isinstance(value, SolomonModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, list):
-        return [_jsonable(entry) for entry in value]
-    if isinstance(value, dict):
-        return {str(key): _jsonable(entry) for key, entry in value.items()}
-    return value
-
-
-def _digest(value: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(_jsonable(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-    ).hexdigest()
-
-
-def _result_summary(value: Any) -> dict[str, Any]:
-    identifiers: set[str] = set()
-
-    def walk(current: Any) -> None:
-        if isinstance(current, dict):
-            for key in ("id", "item_id", "authority_id", "changed_dependency_id"):
-                raw = current.get(key)
-                if isinstance(raw, str):
-                    identifiers.add(f"{key}:{raw}")
-            for nested in current.values():
-                walk(nested)
-        elif isinstance(current, list):
-            for nested in current:
-                walk(nested)
-
-    walk(value)
-    summary: dict[str, Any] = {"result_type": type(value).__name__, "identifiers": sorted(identifiers)}
-    if isinstance(value, list):
-        summary["count"] = len(value)
-    elif isinstance(value, dict):
-        summary["keys"] = sorted(value)
-    return summary
-
-
-def _plan_explainability_summary(execution: PrimitivePlanExecution) -> dict[str, Any]:
-    return {
-        "plan_id": execution.plan_id,
-        "schema_id": execution.schema_id,
-        "plan": execution.plan.model_dump(mode="json"),
-        "store_state_sha256": execution.store_state_sha256,
-        "audit_event_hash": execution.audit_event_hash,
-        "steps": [
-            {
-                "index": step.index,
-                "primitive": step.primitive,
-                "args_sha256": step.args_sha256,
-                "result_sha256": step.result_sha256,
-                "result_summary": step.result_summary,
-            }
-            for step in execution.steps
-        ],
-    }
+__all__ = [
+    "SolomonService",
+    "IngestRequest",
+    "RecallRequest",
+    "VerificationRequest",
+    "AuthorityChangeRequest",
+    "ContestRequest",
+    "ContestResponse",
+    "AffirmRequest",
+    "AffirmResponse",
+    "PinRequest",
+    "ReferenceExtractionRequest",
+    "StalenessPredictionRequest",
+    "DependencyRequest",
+    "DependencySuggestionRequest",
+    "DependencySuggestionDecisionRequest",
+    "AnswerRequest",
+    "AnswerResponse",
+    "WhyTrace",
+    "PrimitivePlanStep",
+    "PrimitivePlanRequest",
+    "PrimitiveStepResult",
+    "PrimitivePlanExecution",
+    "record_verification",
+]

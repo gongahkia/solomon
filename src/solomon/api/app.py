@@ -393,7 +393,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 def _model_router_from_settings(settings: Settings) -> ModelRouter:
-    local = LocalModelEndpoint(url=settings.local_model_url)
+    local = LocalModelEndpoint(url=settings.local_model_url, model=settings.local_model_name)
     remote: ModelEndpoint
     if settings.remote_model_provider == "openai-responses" and settings.remote_model_api_key:
         remote = OpenAIResponsesEndpoint(

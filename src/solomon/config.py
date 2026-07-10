@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     server_auto_provision_tenants: bool = True
     database_url: str = "sqlite:///./solomon-data/solomon.sqlite3"
     local_model_url: str = "http://127.0.0.1:11434/api/generate"
+    local_model_name: str = "qwen2.5-coder:1.5b"
     remote_model_url: str | None = None
     remote_model_provider: str = Field(default="generic", pattern="^(generic|openai-responses)$")
     remote_model_name: str = "gpt-5.5"
@@ -68,6 +69,7 @@ class Settings(BaseSettings):
             "database_url": self.database_url,
             "server_auto_provision_tenants": self.server_auto_provision_tenants,
             "local_model_url": self.local_model_url,
+            "local_model_name": self.local_model_name,
             "remote_model_configured": self.remote_model_url is not None,
             "remote_model_provider": self.remote_model_provider,
             "remote_model_name": self.remote_model_name,

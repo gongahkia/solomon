@@ -146,14 +146,22 @@ class OpenAIResponsesEndpoint:
 class LocalModelEndpoint:
     kind = EndpointKind.LOCAL
 
-    def __init__(self, *, url: str = "http://127.0.0.1:11434/api/generate", timeout: float = 60.0) -> None:
+    def __init__(
+        self,
+        *,
+        url: str = "http://127.0.0.1:11434/api/generate",
+        model: str = "qwen2.5-coder:1.5b",
+        timeout: float = 60.0,
+    ) -> None:
         self.url = url
+        self.model = model
         self.timeout = timeout
 
     def complete(self, request: ModelRequest) -> ModelResponse:
         response = httpx.post(
             self.url,
             json={
+                "model": self.model,
                 "prompt": request.prompt,
                 "stream": False,
                 "options": {"temperature": request.temperature, "num_predict": request.max_tokens},

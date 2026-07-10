@@ -483,10 +483,10 @@ Still pending:
 - npm publish for `npm install shibahama`.
 - final `v0.1.0` tag and registry publication.
 - LoCoMo and LongMemEval benchmark runs with real dataset exports.
-- citable CurrencyBench archive/DOI submission.
+- citable ContinuityBench archive/DOI submission.
 
-Remaining tracked work lives in [`NEXT-TODO.md`](./NEXT-TODO.md). `TODO.md` has
-already been removed because it had no remaining unique implementation work.
+Remaining tracked work lives in GitHub issues. `NEXT-TODO.md` and `TODO.md`
+have been removed because they had no remaining unique implementation work.
 
 ## License
 

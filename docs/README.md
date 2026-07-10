@@ -2,6 +2,7 @@
 
 Architecture notes, ADRs, API references, performance notes, and launch documentation.
 
+- `audits/state-of-repo-2026-07-10.md`: Gate 0 / Phase A state-of-repo audit and reviewer-catch status.
 - `api/README.md`: generated API reference from Rust, TypeScript/Node, and Python source docs.
 - `adr/README.md`: index of accepted architecture decision records.
 - `architecture.md`: implemented component map, data model, request lifecycle, and deployment surfaces.

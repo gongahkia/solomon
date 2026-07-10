@@ -12,6 +12,7 @@ Current implementation status:
 - Optional gateway-backed classifier path that can call a Decorum REST gateway while preserving the local classifier as the default fallback.
 - Optional Exa-backed funding-announcement retrieval through the gateway; cited sources render only when confidence clears the threshold.
 - Local settings, detected-post history, shown-note ledger, and note ratings in `chrome.storage.local`.
+- Shared ledger design that preserves replay data while keeping public false-positive rows redacted.
 - Versioned classifier request/response contract with eval fixtures and gateway examples.
 - Chromium runtime test proving detection, insertion under the flagged post, one-note behavior, threshold/disable reactivity, unique trace IDs, and rating persistence.
 - DOM-resilience test covering alternate LinkedIn-like post containers, fallback IDs, nested post-like blocks, and unrelated DOM churn.
@@ -24,6 +25,7 @@ Current implementation status:
 - The MVP ledger uses `chrome.storage.local`, not SQLite. SQLite is still the right long-term audit shape for a backend or packaged local service, but it is not a native MV3 browser-extension primitive. The storage schema keeps trace IDs, full post text, classifier request/response metadata, threshold snapshots, and rating outcomes so it can migrate to SQLite or D1 later.
 - Provider model and retrieval calls are not in the client. Putting Anthropic or Exa keys in a content script would leak them. The optional gateway classifier sends the versioned classifier request to a Decorum gateway and renders nothing on gateway failure or malformed responses. Funding-announcement retrieval also runs gateway-side and stores cited sources in the classifier response and ledger. The local deterministic classifier remains the default dev/test fallback.
 - Background storage writes are serialized to avoid concurrent `chrome.storage.local` updates overwriting detected-post or ledger entries.
+- The shared ledger design uses private encrypted replay blobs plus redacted public rows. False positives are top-level ledger rows with the same visual weight as shown notes.
 - The detector performs an initial scan, then scans only added DOM subtrees that look like LinkedIn post containers. Metrics are exposed through document data attributes for fixture tests.
 
 ## Risk Register
@@ -56,3 +58,4 @@ The runtime test uses a generated localhost extension manifest so the real conte
 - Anthropic model overview: https://platform.claude.com/docs/en/about-claude/models/overview
 - Exa pricing: https://exa.ai/pricing
 - Note generation policy: ./note-generation.md
+- Shared ledger design: ./ledger.md

@@ -181,6 +181,8 @@ Server replay rows should also include:
 - quota decision
 - redaction/logging version
 
+See `docs/ledger.md` for the shared ledger schema, public snapshot rules, and false-positive review surface.
+
 ## Failure Policy
 
 If the gateway is unavailable, invalid, or returns a malformed response, the extension should render no note. Empty is better than noisy.
@@ -191,6 +193,7 @@ If the gateway is unavailable, invalid, or returns a malformed response, the ext
 - Cloudflare D1: https://developers.cloudflare.com/d1/
 - Cloudflare Workers secrets: https://developers.cloudflare.com/workers/configuration/secrets/
 - Decorum cost model: ../cost-model.md
+- Decorum shared ledger: ../ledger.md
 - Exa Search API: https://exa.ai/docs/reference/search
 - Anthropic Messages API: https://platform.claude.com/docs/en/api/messages
 - Anthropic prompt caching: https://platform.claude.com/docs/en/build-with-claude/prompt-caching

@@ -18,6 +18,7 @@ See [docs/implementation-notes.md](./docs/implementation-notes.md) for current a
 See [docs/gateway/classifier-gateway.md](./docs/gateway/classifier-gateway.md) for the remote classifier boundary.
 See [docs/cost-model.md](./docs/cost-model.md) for remote model, retrieval, and rollout quotas.
 See [docs/note-generation.md](./docs/note-generation.md) for the AI-only note-generation decision.
+See [docs/ledger.md](./docs/ledger.md) for the shared replay ledger and false-positive surface.
 See [docs/distribution.md](./docs/distribution.md) for the current private-prototype distribution posture.
 See [docs/naming.md](./docs/naming.md) for naming and affiliation rules.
 

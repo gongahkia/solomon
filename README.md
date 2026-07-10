@@ -8,7 +8,7 @@ Shisa keeps slow prompt work out of the shell. A per-user daemon watches local s
 
 ## Status
 
-**Alpha.** Shisa works from source on a developer machine. There is no signed release, Homebrew formula, Scoop manifest, or packaged installer yet.
+**Alpha.** Shisa works from source on a developer machine. There is no signed release or packaged installer yet.
 
 Current release blockers:
 

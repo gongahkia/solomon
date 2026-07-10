@@ -4,7 +4,7 @@ const lua = @import("lua.zig");
 const reference_manifests = [_][]const u8{
     "examples/plugins/git/plugin.lua",
     "examples/plugins/language_versions/plugin.lua",
-    "examples/plugins/kubernetes-context/plugin.lua",
+    "examples/plugins/kubectx/plugin.lua",
     "examples/plugins/aws-profile/plugin.lua",
     "examples/plugins/a11y-live/plugin.lua",
     "examples/plugins/fossil/plugin.lua",

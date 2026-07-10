@@ -1,9 +1,9 @@
 [[plugins]]
 name = "kubectx"
-repo = "gongahkia/shisa-plugin-kubectx"
-homepage = "https://github.com/gongahkia/shisa-plugin-kubectx"
+path = "examples/plugins/kubectx"
+homepage = "https://github.com/gongahkia/shisa/tree/main/examples/plugins/kubectx"
 version = "0.1.0"
-capabilities = ["fs_read", "env_read"]
-status = "community"
+capabilities = ["fs_read", "fs_watch", "env_read"]
+status = "official"
 description = "Kubernetes k8s current context and namespace prompt segment"
 keywords = ["k8s", "kubernetes", "kubectl", "context"]

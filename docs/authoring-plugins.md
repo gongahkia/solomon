@@ -74,11 +74,10 @@ Declare only what the plugin needs:
 
 Capability review follows [Plugin Policy](plugin-policy.md).
 
-## 4. Prepare for Marketplace Review
+## 4. Prepare for Catalog Review
 
-Before submitting a marketplace entry:
+Before adding a catalog entry:
 
-- tag a release in the plugin repo
 - include `README.md`, `LICENSE`, and `plugin.lua`
 - explain each requested capability
 - include screenshots or prompt output examples when the plugin renders user-visible text

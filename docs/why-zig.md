@@ -46,7 +46,7 @@ The repo uses one `build.zig` for:
 
 ### Distribution wants native binaries
 
-The roadmap targets Homebrew, AUR, nixpkgs, WSL, and direct release archives. A native `shisa` plus `shisad` pair fits the install model and avoids requiring a language runtime in users' interactive shell startup path.
+The roadmap targets native package managers, WSL, and direct release archives. A native `shisa` plus `shisad` pair fits the install model and avoids requiring a language runtime in users' interactive shell startup path.
 
 ## Why Not Something Else
 

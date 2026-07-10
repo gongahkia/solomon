@@ -542,6 +542,20 @@ const PluginInstallConfig = struct {
     index_path: ?[]const u8 = null,
 };
 
+const PluginInstallSourceKind = enum {
+    local_path,
+    git_url,
+};
+
+const PluginInstallSource = struct {
+    kind: PluginInstallSourceKind,
+    value: []u8,
+
+    fn deinit(self: PluginInstallSource, allocator: std.mem.Allocator) void {
+        allocator.free(self.value);
+    }
+};
+
 fn parsePluginInstallArgs(args: []const []const u8) !PluginInstallConfig {
     var config: PluginInstallConfig = undefined;
     var seen_url = false;
@@ -574,14 +588,17 @@ fn parsePluginInstallArgs(args: []const []const u8) !PluginInstallConfig {
 fn pluginInstall(allocator: std.mem.Allocator, plugins_dir: []const u8, trusted_path: []const u8, config: PluginInstallConfig) !void {
     try std.fs.cwd().makePath(plugins_dir);
 
-    const resolved_url = try pluginInstallSourceUrlAlloc(allocator, config);
-    defer allocator.free(resolved_url);
+    const source = try pluginInstallSourceAlloc(allocator, config);
+    defer source.deinit(allocator);
 
     const temp_path = try std.fmt.allocPrint(allocator, "{s}/.install-{x}", .{ plugins_dir, std.crypto.random.int(u64) });
     defer allocator.free(temp_path);
     defer std.fs.cwd().deleteTree(temp_path) catch {};
 
-    try runGitClone(allocator, resolved_url, temp_path);
+    switch (source.kind) {
+        .local_path => try copyPluginTree(allocator, source.value, temp_path),
+        .git_url => try runGitClone(allocator, source.value, temp_path),
+    }
 
     const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{temp_path});
     defer allocator.free(manifest_path);
@@ -613,14 +630,18 @@ fn pluginInstall(allocator: std.mem.Allocator, plugins_dir: []const u8, trusted_
     try std.fs.File.stdout().writeAll(message);
 }
 
-fn pluginInstallSourceUrlAlloc(allocator: std.mem.Allocator, config: PluginInstallConfig) ![]u8 {
-    if (!pluginInstallSourceNeedsMarketplace(config.url)) return allocator.dupe(u8, config.url);
+fn pluginInstallSourceAlloc(allocator: std.mem.Allocator, config: PluginInstallConfig) !PluginInstallSource {
+    if (!pluginInstallSourceNeedsMarketplace(config.url)) {
+        const kind: PluginInstallSourceKind = if (pluginInstallSourceIsGit(config.url)) .git_url else .local_path;
+        const value = if (kind == .local_path) try expandPluginPathAlloc(allocator, config.url) else try allocator.dupe(u8, config.url);
+        return .{ .kind = kind, .value = value };
+    }
     if (config.index_path) |path| {
         const source = try std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024);
         defer allocator.free(source);
-        return marketplacePluginUrlAlloc(allocator, source, config.url);
+        return .{ .kind = .local_path, .value = try marketplacePluginPathAlloc(allocator, source, config.url) };
     }
-    return marketplacePluginUrlAlloc(allocator, bundled_marketplace_index, config.url);
+    return .{ .kind = .local_path, .value = try marketplacePluginPathAlloc(allocator, bundled_marketplace_index, config.url) };
 }
 
 fn pluginInstallSourceNeedsMarketplace(source: []const u8) bool {
@@ -630,6 +651,22 @@ fn pluginInstallSourceNeedsMarketplace(source: []const u8) bool {
     if (std.mem.indexOfScalar(u8, source, ':') != null) return false;
     if (std.mem.endsWith(u8, source, ".git")) return false;
     return true;
+}
+
+fn pluginInstallSourceIsGit(source: []const u8) bool {
+    if (std.mem.indexOf(u8, source, "://") != null) return true;
+    if (std.mem.endsWith(u8, source, ".git")) return true;
+    return false;
+}
+
+fn expandPluginPathAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    if (std.mem.eql(u8, path, "~")) return std.process.getEnvVarOwned(allocator, "HOME");
+    if (std.mem.startsWith(u8, path, "~/")) {
+        const home = try std.process.getEnvVarOwned(allocator, "HOME");
+        defer allocator.free(home);
+        return std.fmt.allocPrint(allocator, "{s}/{s}", .{ home, path[2..] });
+    }
+    return allocator.dupe(u8, path);
 }
 
 fn runGitClone(allocator: std.mem.Allocator, url: []const u8, target_path: []const u8) !void {
@@ -642,6 +679,32 @@ fn runGitClone(allocator: std.mem.Allocator, url: []const u8, target_path: []con
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
     if (!cli_util.exitedZero(result.term)) return error.PluginCloneFailed;
+}
+
+fn copyPluginTree(allocator: std.mem.Allocator, source_path: []const u8, target_path: []const u8) !void {
+    var source_dir = try std.fs.cwd().openDir(source_path, .{ .iterate = true });
+    defer source_dir.close();
+    try std.fs.cwd().makePath(target_path);
+    errdefer std.fs.cwd().deleteTree(target_path) catch {};
+    try copyPluginDirContents(allocator, source_dir, target_path);
+}
+
+fn copyPluginDirContents(allocator: std.mem.Allocator, source_dir: std.fs.Dir, target_path: []const u8) !void {
+    var it = source_dir.iterate();
+    while (try it.next()) |entry| {
+        const child_target = try std.fs.path.join(allocator, &.{ target_path, entry.name });
+        defer allocator.free(child_target);
+        switch (entry.kind) {
+            .file => try source_dir.copyFile(entry.name, std.fs.cwd(), child_target, .{}),
+            .directory => {
+                try std.fs.cwd().makePath(child_target);
+                var child_source = try source_dir.openDir(entry.name, .{ .iterate = true });
+                defer child_source.close();
+                try copyPluginDirContents(allocator, child_source, child_target);
+            },
+            else => return error.PluginUnsupportedFileType,
+        }
+    }
 }
 
 fn confirmPluginInstall(allocator: std.mem.Allocator, manifest: plugin_manifest.Manifest) !bool {
@@ -725,8 +788,8 @@ fn pluginListAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, disabl
 
 const PluginMarketplaceEntry = struct {
     name: []const u8,
-    repo: []const u8,
-    homepage: []const u8,
+    path: []const u8,
+    homepage: ?[]const u8 = null,
     version: []const u8,
     capabilities: []const []const u8,
     sigstore_key: ?[]const u8 = null,
@@ -749,7 +812,7 @@ const PluginMarketplaceIndex = struct {
 
 const PluginMarketplaceEntryBuilder = struct {
     name: ?[]const u8 = null,
-    repo: ?[]const u8 = null,
+    path: ?[]const u8 = null,
     homepage: ?[]const u8 = null,
     version: ?[]const u8 = null,
     capabilities: ?[]const []const u8 = null,
@@ -779,7 +842,8 @@ fn pluginSearchAlloc(allocator: std.mem.Allocator, source: []const u8, query: []
     for (parsed.plugins) |entry| {
         if (!marketplaceEntryMatches(entry, query)) continue;
         const sigstore_badge = if (entry.sigstore_key != null) " sigstore" else "";
-        try cli_util.appendFmt(allocator, &out, "{s} {s}{s} {s} {s}", .{ entry.name, entry.status, sigstore_badge, entry.version, entry.homepage });
+        const location = entry.homepage orelse entry.path;
+        try cli_util.appendFmt(allocator, &out, "{s} {s}{s} {s} {s}", .{ entry.name, entry.status, sigstore_badge, entry.version, location });
         if (entry.description) |description| try cli_util.appendFmt(allocator, &out, " - {s}", .{description});
         if (entry.capabilities.len != 0) {
             try out.appendSlice(allocator, " [");
@@ -794,19 +858,19 @@ fn pluginSearchAlloc(allocator: std.mem.Allocator, source: []const u8, query: []
     return out.toOwnedSlice(allocator);
 }
 
-fn marketplacePluginUrlAlloc(allocator: std.mem.Allocator, source: []const u8, name: []const u8) ![]u8 {
+fn marketplacePluginPathAlloc(allocator: std.mem.Allocator, source: []const u8, name: []const u8) ![]u8 {
     var parsed = try parseMarketplaceIndexAlloc(allocator, source);
     defer parsed.deinit(allocator);
     for (parsed.plugins) |entry| {
-        if (std.mem.eql(u8, entry.name, name)) return std.fmt.allocPrint(allocator, "https://github.com/{s}.git", .{entry.repo});
+        if (std.mem.eql(u8, entry.name, name)) return allocator.dupe(u8, entry.path);
     }
     return error.PluginMarketplaceEntryNotFound;
 }
 
 fn marketplaceEntryMatches(entry: PluginMarketplaceEntry, query: []const u8) bool {
     if (containsIgnoreAsciiCase(entry.name, query)) return true;
-    if (containsIgnoreAsciiCase(entry.repo, query)) return true;
-    if (containsIgnoreAsciiCase(entry.homepage, query)) return true;
+    if (containsIgnoreAsciiCase(entry.path, query)) return true;
+    if (entry.homepage) |homepage| if (containsIgnoreAsciiCase(homepage, query)) return true;
     if (containsIgnoreAsciiCase(entry.status, query)) return true;
     if (containsIgnoreAsciiCase(entry.version, query)) return true;
     if (entry.description) |description| if (containsIgnoreAsciiCase(description, query)) return true;
@@ -855,9 +919,9 @@ fn setMarketplaceEntryField(allocator: std.mem.Allocator, builder: *PluginMarket
     if (std.mem.eql(u8, key, "name")) {
         if (builder.name != null) return error.InvalidMarketplaceIndex;
         builder.name = try parseTomlString(value);
-    } else if (std.mem.eql(u8, key, "repo")) {
-        if (builder.repo != null) return error.InvalidMarketplaceIndex;
-        builder.repo = try parseTomlString(value);
+    } else if (std.mem.eql(u8, key, "path")) {
+        if (builder.path != null) return error.InvalidMarketplaceIndex;
+        builder.path = try parseTomlString(value);
     } else if (std.mem.eql(u8, key, "homepage")) {
         if (builder.homepage != null) return error.InvalidMarketplaceIndex;
         builder.homepage = try parseTomlString(value);
@@ -894,8 +958,8 @@ fn finishMarketplaceEntryAlloc(allocator: std.mem.Allocator, builder: *PluginMar
 
     const entry = PluginMarketplaceEntry{
         .name = builder.name orelse return error.InvalidMarketplaceIndex,
-        .repo = builder.repo orelse return error.InvalidMarketplaceIndex,
-        .homepage = builder.homepage orelse return error.InvalidMarketplaceIndex,
+        .path = builder.path orelse return error.InvalidMarketplaceIndex,
+        .homepage = builder.homepage,
         .version = builder.version orelse return error.InvalidMarketplaceIndex,
         .capabilities = capabilities,
         .sigstore_key = builder.sigstore_key,
@@ -909,8 +973,10 @@ fn finishMarketplaceEntryAlloc(allocator: std.mem.Allocator, builder: *PluginMar
 
 fn validateMarketplaceEntry(entry: PluginMarketplaceEntry) !void {
     if (!plugin_manifest.isValidPluginName(entry.name)) return error.InvalidMarketplaceIndex;
-    if (!validGithubRepo(entry.repo)) return error.InvalidMarketplaceIndex;
-    if (!std.mem.startsWith(u8, entry.homepage, "https://")) return error.InvalidMarketplaceIndex;
+    if (!validMarketplacePath(entry.path)) return error.InvalidMarketplaceIndex;
+    if (entry.homepage) |homepage| {
+        if (!std.mem.startsWith(u8, homepage, "https://")) return error.InvalidMarketplaceIndex;
+    }
     if (!validMarketplaceStatus(entry.status)) return error.InvalidMarketplaceIndex;
     if (entry.capabilities.len == 0) return error.InvalidMarketplaceIndex;
     for (entry.capabilities) |capability| {
@@ -918,10 +984,14 @@ fn validateMarketplaceEntry(entry: PluginMarketplaceEntry) !void {
     }
 }
 
-fn validGithubRepo(repo: []const u8) bool {
-    const slash = std.mem.indexOfScalar(u8, repo, '/') orelse return false;
-    if (slash == 0 or slash + 1 >= repo.len) return false;
-    return std.mem.indexOfAny(u8, repo, " \t\r\n") == null;
+fn validMarketplacePath(path: []const u8) bool {
+    if (path.len == 0 or std.fs.path.isAbsolute(path)) return false;
+    if (std.mem.indexOfAny(u8, path, " \t\r\n") != null) return false;
+    var components = std.mem.splitScalar(u8, path, '/');
+    while (components.next()) |component| {
+        if (component.len == 0 or std.mem.eql(u8, component, ".") or std.mem.eql(u8, component, "..")) return false;
+    }
+    return true;
 }
 
 fn validMarketplaceStatus(status: []const u8) bool {
@@ -1486,7 +1556,7 @@ test "plugin search filters marketplace index" {
         .data =
         \\[[plugins]]
         \\name = "git-tools"
-        \\repo = "example/git-tools"
+        \\path = "examples/plugins/git"
         \\homepage = "https://example.com/git-tools"
         \\version = "0.1.0"
         \\capabilities = ["fs_read"]
@@ -1495,7 +1565,7 @@ test "plugin search filters marketplace index" {
         \\
         \\[[plugins]]
         \\name = "cloud-risk"
-        \\repo = "example/cloud-risk"
+        \\path = "examples/plugin-packs/cloud-safety"
         \\homepage = "https://example.com/cloud-risk"
         \\version = "0.2.0"
         \\capabilities = ["fs_read", "env_read"]
@@ -1513,9 +1583,10 @@ test "plugin search filters marketplace index" {
     try std.testing.expectEqualStrings(index_path, config.index_path.?);
 
     const install_config = try parsePluginInstallArgs(&.{ "cloud-risk", "--index", index_path, "--yes" });
-    const resolved_url = try pluginInstallSourceUrlAlloc(allocator, install_config);
-    defer allocator.free(resolved_url);
-    try std.testing.expectEqualStrings("https://github.com/example/cloud-risk.git", resolved_url);
+    const resolved_source = try pluginInstallSourceAlloc(allocator, install_config);
+    defer resolved_source.deinit(allocator);
+    try std.testing.expectEqual(.local_path, resolved_source.kind);
+    try std.testing.expectEqualStrings("examples/plugin-packs/cloud-safety", resolved_source.value);
     try std.testing.expect(pluginInstallSourceNeedsMarketplace("cloud-risk"));
     try std.testing.expect(!pluginInstallSourceNeedsMarketplace("https://example.com/cloud-risk.git"));
 }

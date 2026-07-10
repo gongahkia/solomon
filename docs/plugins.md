@@ -57,7 +57,7 @@ Optional fields:
 See `docs/plugin-manifest.md` for exact validation rules.
 Lifecycle hook wall-time limits are documented in [Plugin Manifest](plugin-manifest.md).
 
-New plugin authors should start with [Authoring Plugins](authoring-plugins.md). Marketplace review and delisting rules live in [Plugin Policy](plugin-policy.md).
+New plugin authors should start with [Authoring Plugins](authoring-plugins.md). Catalog review and delisting rules live in [Plugin Policy](plugin-policy.md).
 
 ## Sandbox
 
@@ -124,7 +124,7 @@ shisa plugin new demo-plugin
 shisa plugin lint demo-plugin
 shisa plugin doctor demo-plugin
 shisa plugin search git
-shisa plugin install git-tools
+shisa plugin install kubectx
 shisa plugin pack demo-plugin
 shisa plugin list
 shisa plugin disable demo-plugin
@@ -139,15 +139,15 @@ shisa plugin trust shisa.ai --net=openai
 
 `shisa plugin verify <path>` strict-loads the manifest and rejects direct `os.execute` or `io.popen` use in `plugin.lua`.
 
-`shisa plugin search <query> [--index <path>]` reads the bundled TOML marketplace index from `marketplace/index.toml`, or an explicit TOML index path.
+`shisa plugin search <query> [--index <path>]` reads the bundled TOML catalog index from `marketplace/index.toml`, or an explicit TOML index path.
 
-`shisa plugin install <name> [--index <path>]` resolves `<name>` through the marketplace index, then clones the listed GitHub repo. Direct URLs and explicit paths still bypass the index.
+`shisa plugin install <name> [--index <path>]` resolves `<name>` through the catalog index, then copies the listed local plugin directory. Direct Git URLs and explicit paths still bypass the index.
 
 `shisa plugin trust <name> --net=<provider>` records provider-scoped network trust. A grant for `openai` does not cover another provider such as `anthropic`, and it does not cover non-network capability changes. `[ai].provider` may select a cloud provider only when `[ai].plugin` names a trusted plugin with the matching `net=<provider>` grant.
 
-`shisa plugin list` prints `verified` for plugins recorded in `plugins.verified`. Marketplace sync is expected to maintain that file once the repo index workflow lands.
+`shisa plugin list` prints `verified` for plugins recorded in `plugins.verified`. Catalog sync is expected to maintain that file once the index workflow lands.
 
-Marketplace schema and submission workflow live in [Plugin Marketplace](plugin-marketplace.md).
+Catalog schema and submission workflow live in [Plugin Catalog](plugin-marketplace.md).
 
 ## Current Limits
 
@@ -161,7 +161,7 @@ Reference manifests live under `examples/plugins/`:
 
 - `git`: git branch and dirty-state capabilities.
 - `language_versions`: python/node/rust/go probe capabilities.
-- `kubernetes-context`: kubeconfig/env capabilities.
+- `kubectx`: Kubernetes context and namespace capabilities.
 - `aws-profile`: AWS config/env capabilities.
 - `a11y-live`: optional accessibility live-announcer template for risk-tier transitions.
 - `fossil`: community Fossil VCS status template.

@@ -1,10 +1,10 @@
-# Plugin Policy
+# Plugin Catalog Policy
 
-Shisa's plugin marketplace is a directory of user-owned repositories. A listing does not transfer maintenance, liability, or review ownership to core maintainers.
+Shisa's plugin catalog is a directory of local example plugins in this repo. External plugin repositories can still be installed directly by URL, but they are not catalog entries.
 
 ## Listing Requirements
 
-Marketplace entries must:
+Catalog entries must:
 
 - expose a valid `plugin.lua` manifest
 - use a license compatible with redistribution
@@ -15,7 +15,7 @@ Marketplace entries must:
 
 Plugins that handle secrets, cloud accounts, kubeconfigs, SSH config, or production context must describe their local data flow in the README.
 
-The marketplace index is checked in at `marketplace/index.toml`. Entries stay out of the index until the repository URL, manifest, capability list, and optional signing metadata can be reviewed.
+The catalog index is checked in at `marketplace/index.toml`. Entries stay out of the index until the local path, manifest, capability list, and optional signing metadata can be reviewed.
 
 ## Verified Badge
 
@@ -38,4 +38,4 @@ Delisting is reversible when the owner fixes the issue and publishes a reviewabl
 
 ## Appeals
 
-Plugin owners may appeal with a regular project issue once the plugin has published a reviewable remediation. Appeals must include the plugin id, repository, disputed action, and remediation evidence.
+Plugin owners may appeal with a regular project issue once the plugin has published a reviewable remediation. Appeals must include the plugin id, disputed action, and remediation evidence.

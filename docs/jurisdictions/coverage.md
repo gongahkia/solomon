@@ -42,5 +42,4 @@ signal, not a legal conclusion.
 2. No jurisdiction pack is certified against the complete text of its privacy, market-abuse, professional, or sectoral rules.
 3. Pattern matching does not establish identity, controller/processor role, privileged status, consent, transfer basis,
    or notification duties.
-4. Singapore and Malaysia identifier-specific expansion, additional UK identifiers, and per-jurisdiction fixtures are
-   tracked separately.
+4. Additional identifier coverage and jurisdiction-profile configuration remain open.

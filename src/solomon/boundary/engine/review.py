@@ -181,6 +181,16 @@ def review_text(
         findings.extend(
             _find(MY_MYKAD_RE, text, kind="my_mykad", severity="high", jurisdiction="MY", category="PII")
         )
+        findings.extend(
+            _find(
+                MY_SSM_REGISTRATION_RE,
+                text,
+                kind="my_ssm_registration_number",
+                severity="medium",
+                jurisdiction="MY",
+                category="PII",
+            )
+        )
     if "SG" in {source_pack.code, destination_pack.code}:
         findings.extend(_find(SG_UEN_RE, text, kind="sg_uen", severity="medium", jurisdiction="SG", category="PII"))
         findings.extend(
@@ -203,17 +213,6 @@ def review_text(
                 category="PII",
             )
         )
-        findings.extend(
-            _find(
-                MY_SSM_REGISTRATION_RE,
-                text,
-                kind="my_ssm_registration_number",
-                severity="medium",
-                jurisdiction="MY",
-                category="PII",
-            )
-        )
-
     strict_terms = set(source_pack.strict_terms) | set(destination_pack.strict_terms)
     mnpi_terms = set(source_pack.mnpi_strict_terms) | set(destination_pack.mnpi_strict_terms)
     for term in strict_terms:

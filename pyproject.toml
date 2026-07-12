@@ -90,6 +90,7 @@ source = ["src/solomon"]
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+fail_under = 90
 
 [tool.solomon.boundary]
 engine = "src/solomon/boundary/engine"

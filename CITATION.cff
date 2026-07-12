@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use Shibahama or CurrencyBench, cite this repository release."
+message: "If you use Shibahama or ContinuityBench, cite this repository release."
 title: "Shibahama: Usage-Aware Reconstructive Memory for Long-Lived Agents"
 version: "0.1.0"
 date-released: "2026-06-12"
@@ -15,9 +15,9 @@ keywords:
   - stale answer detection
 preferred-citation:
   type: software
-  title: "CurrencyBench v0: Fact-Change Benchmark for Agent Memory Currency"
+  title: "ContinuityBench v0: Mutable Long-Lived Memory Benchmark"
   version: "0.1.0"
   date-released: "2026-06-12"
-  repository-code: "https://github.com/gongahkia/shibahama/tree/main/benchmarks/currencybench"
+  repository-code: "https://github.com/gongahkia/shibahama/tree/main/benchmarks/continuity"
   authors:
     - name: "Shibahama contributors"

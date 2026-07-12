@@ -74,7 +74,7 @@ The repository includes:
 - Python and Node bindings;
 - optional server mode;
 - deterministic local benchmarks;
-- CurrencyBench dataset/generator;
+- ContinuityBench dataset/generator and checked-in baseline artifacts;
 - coding-agent demo;
 - Tideline debugger;
 - docs for architecture, concepts, security, performance, and ADRs.

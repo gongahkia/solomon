@@ -1,7 +1,7 @@
 {
   "title": "Shibahama: Usage-Aware Reconstructive Memory for Long-Lived Agents",
   "upload_type": "software",
-  "description": "Shibahama is an embeddable Rust/Python/Node memory engine for long-lived agents. CurrencyBench v0 is the included deterministic fact-change benchmark for stale-answer and currency-aware recall behavior.",
+  "description": "Shibahama is an embeddable Rust/Python/Node memory engine for long-lived agents. ContinuityBench v0 is the included deterministic benchmark for mutable long-lived memory, including stale-answer, contradiction-resolution, evidence-quality, and stable-recall slices.",
   "creators": [
     {
       "name": "Shibahama contributors"
@@ -17,7 +17,7 @@
   ],
   "related_identifiers": [
     {
-      "identifier": "https://github.com/gongahkia/shibahama/tree/main/benchmarks/currencybench",
+      "identifier": "https://github.com/gongahkia/shibahama/tree/main/benchmarks/continuity",
       "relation": "isSupplementedBy",
       "scheme": "url"
     }

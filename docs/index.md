@@ -37,3 +37,4 @@ contested. It does not decide the law or replace lawyer review.
 - [Singapore AI governance](./jurisdictions/sg/pdpc-ai.md)
 - [Law Society of Singapore AI advisory](./jurisdictions/sg/lawsoc.md)
 - [Singapore authority sources](./jurisdictions/sg/canonical-sources.md)
+- [UK AI, legal-services supervision, and data protection](./jurisdictions/uk/ai-data-protection.md)

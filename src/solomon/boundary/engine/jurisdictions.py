@@ -11,6 +11,7 @@ class JurisdictionPack:
     code: str
     name: str
     strict_terms: tuple[str, ...]
+    mnpi_strict_terms: tuple[str, ...] = ()
     pii_statute: str = ""
     mnpi_statute: str = ""
 
@@ -20,6 +21,7 @@ JURISDICTION_PACKS: dict[str, JurisdictionPack] = {
         code="SG",
         name="Singapore",
         strict_terms=("NRIC", "FIN", "SFA section 218", "inside information"),
+        mnpi_strict_terms=("SFA section 218", "inside information"),
         pii_statute="Personal Data Protection Act 2012",
         mnpi_statute="Securities and Futures Act 2001 ss215, 218, 219",
     ),
@@ -27,6 +29,7 @@ JURISDICTION_PACKS: dict[str, JurisdictionPack] = {
         code="MY",
         name="Malaysia",
         strict_terms=("MyKad", "PDPA Malaysia", "CMSA sections 188-189"),
+        mnpi_strict_terms=("CMSA sections 188-189",),
         pii_statute="Personal Data Protection Act 2010",
         mnpi_statute="Capital Markets and Services Act 2007 ss188-189",
     ),
@@ -97,6 +100,7 @@ JURISDICTION_PACKS: dict[str, JurisdictionPack] = {
         code="UK",
         name="United Kingdom",
         strict_terms=("National Insurance", "UK MAR", "inside information"),
+        mnpi_strict_terms=("UK MAR", "inside information"),
         pii_statute="UK GDPR and Data Protection Act 2018",
         mnpi_statute="UK Market Abuse Regulation Article 7",
     ),
@@ -104,6 +108,7 @@ JURISDICTION_PACKS: dict[str, JurisdictionPack] = {
         code="EU",
         name="European Union",
         strict_terms=("MAR Article 7", "inside information", "GDPR special category"),
+        mnpi_strict_terms=("MAR Article 7", "inside information"),
         pii_statute="GDPR",
         mnpi_statute="EU Market Abuse Regulation 596/2014 Article 7",
     ),

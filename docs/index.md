@@ -33,6 +33,7 @@ contested. It does not decide the law or replace lawyer review.
 ## Jurisdictions
 
 - [Jurisdiction matrix](./jurisdictions/index.md)
+- [Boundary coverage audit](./jurisdictions/coverage.md)
 - [Singapore PDPA](./jurisdictions/sg/pdpa.md)
 - [Singapore AI governance](./jurisdictions/sg/pdpc-ai.md)
 - [Law Society of Singapore AI advisory](./jurisdictions/sg/lawsoc.md)

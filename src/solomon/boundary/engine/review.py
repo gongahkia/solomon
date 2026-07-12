@@ -162,18 +162,19 @@ def review_text(
         findings.extend(_find_uk_nhs_numbers(text))
 
     strict_terms = set(source_pack.strict_terms) | set(destination_pack.strict_terms)
+    mnpi_terms = set(source_pack.mnpi_strict_terms) | set(destination_pack.mnpi_strict_terms)
     for term in strict_terms:
         for match in re.finditer(re.escape(term), text, flags=re.IGNORECASE):
             findings.append(
                 ReviewFinding(
                     kind="jurisdiction_strict_term",
                     text=match.group(0),
-                    severity="high" if "inside information" in term.lower() else "medium",
+                    severity="high" if term in mnpi_terms else "medium",
                     start=match.start(),
                     end=match.end(),
                     jurisdiction=destination_pack.code,
                     metadata={
-                        "category": "MNPI" if "inside" in term.lower() or "MAR" in term else "PII",
+                        "category": "MNPI" if term in mnpi_terms else "PII",
                         "source_statute": source_pack.pii_statute,
                         "destination_statute": destination_pack.pii_statute,
                     },

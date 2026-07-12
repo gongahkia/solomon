@@ -7,6 +7,7 @@ target="${1:-testpypi}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 dist_dir="$repo_root/dist/python"
 tmpdir="$(mktemp -d)"
+python_bin="${PYTHON:-python3}"
 trap 'rm -rf "$tmpdir"' EXIT
 
 case "$target" in
@@ -27,7 +28,7 @@ esac
 rm -rf "$dist_dir"
 mkdir -p "$dist_dir"
 
-python -m venv "$tmpdir/venv"
+"$python_bin" -m venv "$tmpdir/venv"
 export VIRTUAL_ENV="$tmpdir/venv"
 export PATH="$VIRTUAL_ENV/bin:$PATH"
 

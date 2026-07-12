@@ -178,6 +178,8 @@ The checked-in Phase C artifacts are:
 - `benchmarks/results/phase-c-locomo.md`
 - `benchmarks/results/phase-c-longmemeval-s.json`
 - `benchmarks/results/phase-c-longmemeval-s.md`
+- `benchmarks/results/SUMMARY.md` cross-references these rows with
+  ContinuityBench, including explicit losses and ties.
 
 Current Phase C summary:
 

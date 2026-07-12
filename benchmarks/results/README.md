@@ -2,6 +2,9 @@
 
 Generated benchmark summaries live here.
 
+- `SUMMARY.md` cross-references the committed ContinuityBench and Phase C
+  artifacts, including losses, ties, and the Mem0 OSS exact-event comparison.
+
 - `currencybench-local.md` is the current local smoke result for Shibahama and
   the warehouse baseline.
 - `coding-agent-local.md` is the compact continuity smoke for rejected

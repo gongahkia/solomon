@@ -411,6 +411,7 @@ curl http://localhost:8140/health
 - [`docs/known-limitations.md`](./docs/known-limitations.md): current monitoring, retrieval, boundary,
   and legal-adjudication limits.
 - [`docs/positioning.md`](./docs/positioning.md): partner-facing product narrative.
+- [`docs/one-pager.md`](./docs/one-pager.md): portfolio-review summary, with a rendered PDF in `output/pdf/`.
 - [`docs/benchmarks.md`](./docs/benchmarks.md): currency and retrieval evaluation results.
 - [`docs/release-artifacts.md`](./docs/release-artifacts.md): v0.1.0 artifact hashes and release evidence.
 - [`docs/api/openapi.json`](./docs/api/openapi.json): generated OpenAPI contract.

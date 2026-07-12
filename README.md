@@ -389,6 +389,10 @@ SOLOMON_REMOTE_MODEL_URL=https://example.invalid/v1/responses
 
 ### Docker
 
+`docker-compose.server.yml` is the canonical development deployment for the server SKU. It mounts the checkout and
+keeps SQLite data and audit journals in named volumes; use it for the documented local server loop rather than
+maintaining a parallel Compose file.
+
 ```bash
 docker compose -f docker-compose.server.yml up --build
 curl http://localhost:8140/health

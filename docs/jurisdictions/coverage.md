@@ -21,7 +21,7 @@ transferable.
 | Pack | Current PII terms/detectors | Current MNPI terms | Status |
 | --- | --- | --- | --- |
 | SG | `NRIC`, `FIN`, plus common detectors. | `SFA section 218`, `inside information`, plus common MNPI lexicon. | Implementation coverage only; UEN/MyInfo/IRAS-specific patterns remain open. |
-| MY | `MyKad`, `PDPA Malaysia`, plus common detectors. | `CMSA sections 188-189`, plus common MNPI lexicon. | Implementation coverage only; MyKad/SSM number patterns remain open. |
+| MY | `MyKad`, `PDPA Malaysia`, common detectors, and labelled MyKad/MyPR and SSM 12-digit-registration patterns. | `CMSA sections 188-189`, plus common MNPI lexicon. | Implementation coverage only; Malaysia profile work remains open. |
 | UK | `National Insurance`, common detectors, and NI/labelled UTR/Companies House/NHS patterns. | `UK MAR`, `inside information`, plus common MNPI lexicon. | Implementation coverage only; additional UK profile work remains open. |
 | EU | `GDPR special category`, plus common detectors. | `MAR Article 7`, `inside information`, plus common MNPI lexicon. | Implementation coverage only; EU profile design remains open. |
 

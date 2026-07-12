@@ -48,6 +48,14 @@ UK_COMPANIES_HOUSE_RE = re.compile(
     re.IGNORECASE,
 )
 UK_NHS_NUMBER_RE = re.compile(r"\bNHS\s+(?:number|no\.?)\s*[:#-]?\s*(\d{3}\s?\d{3}\s?\d{4})\b", re.IGNORECASE)
+MY_MYKAD_RE = re.compile(
+    r"\b(?:MyKad|MyPR|NRIC|I\.?(?:C|D)\.?(?:\s+(?:number|no\.?)?)?)\s*[:#-]?\s*(\d{6}-?\d{2}-?\d{4})\b",
+    re.IGNORECASE,
+)
+MY_SSM_REGISTRATION_RE = re.compile(
+    r"\b(?:SSM\s+)?(?:company|business|entity)?\s*registration\s*(?:number|no\.?)\s*[:#-]?\s*((?:19|20)\d{10})\b",
+    re.IGNORECASE,
+)
 FINANCIAL_AMOUNT_RE = re.compile(
     r"\b(?:US\$|S\$|\$|EUR|GBP|JPY|CNY|HKD|AUD)\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:million|billion|m|bn))?\b",
     re.IGNORECASE,
@@ -160,6 +168,20 @@ def review_text(
             )
         )
         findings.extend(_find_uk_nhs_numbers(text))
+    if "MY" in {source_pack.code, destination_pack.code}:
+        findings.extend(
+            _find(MY_MYKAD_RE, text, kind="my_mykad", severity="high", jurisdiction="MY", category="PII")
+        )
+        findings.extend(
+            _find(
+                MY_SSM_REGISTRATION_RE,
+                text,
+                kind="my_ssm_registration_number",
+                severity="medium",
+                jurisdiction="MY",
+                category="PII",
+            )
+        )
 
     strict_terms = set(source_pack.strict_terms) | set(destination_pack.strict_terms)
     mnpi_terms = set(source_pack.mnpi_strict_terms) | set(destination_pack.mnpi_strict_terms)
@@ -392,6 +414,8 @@ def _collect_replacements(text: str) -> list[tuple[int, int, str, str]]:
         (UK_UTR_RE, "UK_UTR"),
         (UK_COMPANIES_HOUSE_RE, "UK_COMPANIES_HOUSE"),
         (UK_NHS_NUMBER_RE, "UK_NHS"),
+        (MY_MYKAD_RE, "MY_MYKAD"),
+        (MY_SSM_REGISTRATION_RE, "MY_SSM_REGISTRATION"),
         (FINANCIAL_AMOUNT_RE, "FINANCIAL_AMOUNT"),
         (PERCENT_RE, "PERCENT"),
         (CLIENT_RE, "CLIENT"),

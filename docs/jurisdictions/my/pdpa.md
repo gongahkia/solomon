@@ -12,6 +12,8 @@ substitute for Malaysia-specific analysis of a matter, processor/vendor arrangem
 - [Personal Data Protection (Amendment) Act 2024 (Act A1727)](https://www.pdp.gov.my/ppdpv1/wp-content/uploads/2024/11/Act-A1727.pdf)
 - [Cross-Border Transfer of Personal Data Guideline No. 3/2025](https://www.pdp.gov.my/ppdpv1/wp-content/uploads/2025/08/GP_CBPDT_EN.pdf)
 - [Data Protection Officer guideline](https://www.pdp.gov.my/ppdpv1/en/akta/personal-data-protection-guidelines-on-the-appointment-of-data-protection-officer-dpo/)
+- [SSM: 12-digit business-registration format](https://www.ssm.com.my/Lists/Announcement/AnnouncementDetails.aspx?ID=134)
+- [Government system manual: MyKad/MyPR 12-digit input](https://iportal.ispkp.gov.my/wp-content/uploads/manual/MODUL-KAD-PEMANDU/USER-MANUAL-ISPKP-DRIVER-CARD.pdf)
 
 The Commissioner says Act 709 applies to processing, or control/authorisation of processing, of personal data in
 commercial transactions, subject to the Act's scope and exclusions. Its published material describes Malaysia

@@ -96,3 +96,8 @@ fail_under = 90
 engine = "src/solomon/boundary/engine"
 source = "solomon-boundary"
 source_commit = "7415069e57d69398e2c44ef6ababafb0c04a988b"
+
+[dependency-groups]
+dev = [
+    "bandit>=1.9.4",
+]

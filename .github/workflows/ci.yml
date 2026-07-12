@@ -29,6 +29,7 @@ jobs:
       - run: uv run python scripts/check_license_headers.py
       - run: uv run python scripts/check_file_lengths.py
       - run: uv run mypy src tests scripts
+      - run: uv run bandit -r src/solomon --baseline .bandit-baseline.json
       - run: uv run pytest --cov=src/solomon
       - run: uv run python benchmarks/performance_budget.py
       - run: uv run python benchmarks/currency_regression.py

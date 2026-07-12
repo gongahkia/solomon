@@ -36,10 +36,16 @@ signal, not a legal conclusion.
 - [IRAS CRS tax-reference guide](https://www.iras.gov.sg/media/docs/default-source/uploadedfiles/pdf/iras-xml-schema-user-guide-for-crs-return-%28fourth-edition%29.pdf?sfvrsn=403f9e36_4)
 - [Singpass Myinfo personal data catalogue](https://docs.developer.singpass.gov.sg/docs/data-catalog-myinfo/catalog/personal)
 
+## Profile selection
+
+`SOLOMON_JURISDICTION=sg|my|uk|eu` sets the default source and destination boundary packs for API, MCP, and console
+services. The CLI also accepts `--jurisdiction` for `ingest`, `mcp serve`, and `console serve`. The profile determines
+which jurisdiction-specific lexical detectors run alongside the common baseline; it does not make a deployment legally
+correct or compliant.
+
 ## Known gaps
 
-1. No per-jurisdiction CLI/MCP/console profile exists; callers pass source and destination codes to the boundary route.
-2. No jurisdiction pack is certified against the complete text of its privacy, market-abuse, professional, or sectoral rules.
-3. Pattern matching does not establish identity, controller/processor role, privileged status, consent, transfer basis,
+1. No jurisdiction pack is certified against the complete text of its privacy, market-abuse, professional, or sectoral rules.
+2. Pattern matching does not establish identity, controller/processor role, privileged status, consent, transfer basis,
    or notification duties.
-4. Additional identifier coverage and jurisdiction-profile configuration remain open.
+3. Additional identifier coverage and profile-specific legal review remain open.

@@ -25,7 +25,14 @@ from solomon.api.service import (
     VerificationAssignmentRequest,
     VerificationRequest,
 )
-from solomon.config import Settings, credence_policy_from_settings, get_settings, verification_policy_from_settings
+from solomon.boundary.solomon import SolomonBoundary
+from solomon.config import (
+    Settings,
+    boundary_policy_from_settings,
+    credence_policy_from_settings,
+    get_settings,
+    verification_policy_from_settings,
+)
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import CredenceTier, CurrencyState, KnowledgeItem, VerifiedState
 from solomon.currency.report import CurrencyMovementReport, ReportScopeKind, render_currency_report_pdf
@@ -49,6 +56,7 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
         verification_policy_version=resolved_settings.verification_policy_version,
         credence_policy=credence_policy_from_settings(resolved_settings),
         credence_policy_version=resolved_settings.credence_policy_version,
+        boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
     )
     app = FastAPI(title="Solomon Console")
     app.state.service = resolved_service

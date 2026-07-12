@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from solomon.boundary.solomon import BoundaryPolicy
 from solomon.credence.policy import CredencePolicy
 from solomon.currency.engine import VerificationPolicy
 from solomon.currency.models import CredenceTier
@@ -24,6 +25,7 @@ class Settings(BaseSettings):
     boundary_base_url: str = "in-process://solomon-boundary-engine"
     boundary_api_key: str | None = None
     boundary_timeout_seconds: float = 30.0
+    jurisdiction: str = "SG"
     server_api_key: str | None = None
     server_auto_provision_tenants: bool = True
     database_url: str = "sqlite:///./solomon-data/solomon.sqlite3"
@@ -46,6 +48,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_egress_policy(self) -> Settings:
+        self.jurisdiction = _normalized_jurisdiction(self.jurisdiction)
         if self.sku == "local" and self.allow_remote_egress:
             raise ValueError("solomon-local cannot enable remote egress")
         if self.sku == "server" and not self.server_api_key:
@@ -66,6 +69,7 @@ class Settings(BaseSettings):
             "boundary_api_key_configured": self.boundary_api_key is not None,
             "server_api_key_configured": self.server_api_key is not None,
             "boundary_timeout_seconds": self.boundary_timeout_seconds,
+            "jurisdiction": self.jurisdiction,
             "database_url": self.database_url,
             "server_auto_provision_tenants": self.server_auto_provision_tenants,
             "local_model_url": self.local_model_url,
@@ -106,6 +110,24 @@ def verification_policy_from_settings(settings: Settings) -> VerificationPolicy:
 
 def credence_policy_from_settings(settings: Settings) -> CredencePolicy:
     return CredencePolicy(load_bearing_minimum=CredenceTier(settings.credence_load_bearing_minimum))
+
+
+def boundary_policy_from_settings(settings: Settings, *, jurisdiction: str | None = None) -> BoundaryPolicy:
+    code = _normalized_jurisdiction(jurisdiction or settings.jurisdiction)
+    return BoundaryPolicy(default_source_jurisdiction=code, default_destination_jurisdiction=code)
+
+
+def settings_with_jurisdiction(settings: Settings, jurisdiction: str) -> Settings:
+    values = settings.model_dump()
+    values["jurisdiction"] = _normalized_jurisdiction(jurisdiction)
+    return Settings(**values)
+
+
+def _normalized_jurisdiction(value: str) -> str:
+    code = value.upper()
+    if code not in {"SG", "MY", "UK", "EU"}:
+        raise ValueError("jurisdiction must be one of SG, MY, UK, EU")
+    return code
 
 
 @lru_cache(maxsize=1)

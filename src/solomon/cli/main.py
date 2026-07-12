@@ -23,8 +23,14 @@ from solomon.api.service import (
     StalenessPredictionRequest,
     VerificationRequest,
 )
-from solomon.boundary.solomon import probe_boundary_client
-from solomon.config import credence_policy_from_settings, get_settings, verification_policy_from_settings
+from solomon.boundary.solomon import SolomonBoundary, probe_boundary_client
+from solomon.config import (
+    boundary_policy_from_settings,
+    credence_policy_from_settings,
+    get_settings,
+    settings_with_jurisdiction,
+    verification_policy_from_settings,
+)
 from solomon.currency.contradiction import ConclusionPolarity
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
@@ -106,10 +112,23 @@ def mcp_serve(
     sse: Annotated[bool, typer.Option("--sse", help="Serve legacy SSE MCP instead of stdio.")] = False,
     host: Annotated[str, typer.Option("--host", help="HTTP/SSE bind host.")] = "127.0.0.1",
     port: Annotated[int, typer.Option("--port", min=1, max=65535, help="HTTP/SSE bind port.")] = 8141,
+    jurisdiction: Annotated[
+        str | None, typer.Option("--jurisdiction", help="Boundary profile: sg, my, uk, or eu.")
+    ] = None,
 ) -> None:
     """Serve Solomon as an MCP server."""
     if http and sse:
         raise typer.BadParameter("--http and --sse are mutually exclusive")
+    if jurisdiction is not None:
+        service = _service(jurisdiction=jurisdiction)
+        if http:
+            run_streamable_http_server(service, host=host, port=port)
+            return
+        if sse:
+            run_sse_server(service, host=host, port=port)
+            return
+        run_stdio_server(service)
+        return
     if http:
         run_streamable_http_server(host=host, port=port)
         return
@@ -127,10 +146,27 @@ def console_serve(
     host: Annotated[str, typer.Option("--host", help="Console bind host.")] = "127.0.0.1",
     port: Annotated[int, typer.Option("--port", min=1, max=65535, help="Console bind port.")] = 8150,
     reload: Annotated[bool, typer.Option("--reload", help="Reload console server on source changes.")] = False,
+    jurisdiction: Annotated[
+        str | None, typer.Option("--jurisdiction", help="Boundary profile: sg, my, uk, or eu.")
+    ] = None,
 ) -> None:
     """Serve the Solomon curator console."""
     import uvicorn
 
+    if jurisdiction is not None:
+        if reload:
+            raise typer.BadParameter(
+                "--jurisdiction cannot be combined with --reload; use SOLOMON_JURISDICTION instead"
+            )
+        from solomon.console.app import create_console_app
+
+        uvicorn.run(
+            create_console_app(settings=settings_with_jurisdiction(get_settings(), jurisdiction)),
+            host=host,
+            port=port,
+            reload=False,
+        )
+        return
     uvicorn.run(
         "solomon.console.app:create_console_app",
         factory=True,
@@ -140,7 +176,7 @@ def console_serve(
     )
 
 
-def _service() -> SolomonService:
+def _service(*, jurisdiction: str | None = None) -> SolomonService:
     settings = get_settings()
     return SolomonService(
         data_dir=settings.data_dir,
@@ -150,6 +186,7 @@ def _service() -> SolomonService:
         verification_policy_version=settings.verification_policy_version,
         credence_policy=credence_policy_from_settings(settings),
         credence_policy_version=settings.credence_policy_version,
+        boundary=SolomonBoundary(policy=boundary_policy_from_settings(settings, jurisdiction=jurisdiction)),
     )
 
 
@@ -164,8 +201,11 @@ def ingest(
     source_kind: Annotated[SourceKind, typer.Option("--source-kind")] = SourceKind.ASSOCIATE,
     conclusion: Annotated[str | None, typer.Option("--conclusion", help="Structured conclusion text.")] = None,
     conclusion_polarity: Annotated[ConclusionPolarity | None, typer.Option("--conclusion-polarity")] = None,
+    jurisdiction: Annotated[
+        str | None, typer.Option("--jurisdiction", help="Boundary profile: sg, my, uk, or eu.")
+    ] = None,
 ) -> None:
-    item = _service().ingest(
+    item = _service(jurisdiction=jurisdiction).ingest(
         IngestRequest(
             kind=kind,
             content=content,

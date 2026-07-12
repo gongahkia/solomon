@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from solomon.config import Settings, local_settings, server_settings
+from solomon.config import (
+    Settings,
+    boundary_policy_from_settings,
+    local_settings,
+    server_settings,
+    settings_with_jurisdiction,
+)
 
 
 def test_local_sku_is_offline_default() -> None:
@@ -33,3 +39,20 @@ def test_server_sku_requires_explicit_remote_model_for_egress() -> None:
 def test_server_sku_requires_admin_api_key() -> None:
     with pytest.raises(ValueError, match="requires SOLOMON_SERVER_API_KEY"):
         Settings(sku="server", zero_egress_mode=False)
+
+
+def test_jurisdiction_profile_normalizes_and_sets_both_boundary_defaults() -> None:
+    settings = Settings(jurisdiction="uk")
+
+    policy = boundary_policy_from_settings(settings)
+
+    assert settings.jurisdiction == "UK"
+    assert policy.default_source_jurisdiction == "UK"
+    assert policy.default_destination_jurisdiction == "UK"
+    assert settings.public_diagnostics()["jurisdiction"] == "UK"
+    assert settings_with_jurisdiction(settings, "eu").jurisdiction == "EU"
+
+
+def test_jurisdiction_profile_rejects_unsupported_code() -> None:
+    with pytest.raises(ValueError, match="jurisdiction must be one of"):
+        Settings(jurisdiction="ID")

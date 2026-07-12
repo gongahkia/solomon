@@ -49,6 +49,19 @@ def test_cli_mcp_serve_dispatches_stdio(monkeypatch: pytest.MonkeyPatch) -> None
     assert calls == ["stdio"]
 
 
+def test_cli_mcp_serve_loads_selected_jurisdiction(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _configure_cli_store(monkeypatch, tmp_path)
+    calls: list[object] = []
+    monkeypatch.setattr("solomon.cli.main.run_stdio_server", lambda service: calls.append(service))
+
+    result = runner.invoke(app, ["mcp", "serve", "--jurisdiction", "uk"])
+
+    assert result.exit_code == 0
+    assert len(calls) == 1
+    assert calls[0].boundary.policy.default_source_jurisdiction == "UK"
+    assert calls[0].boundary.policy.default_destination_jurisdiction == "UK"
+
+
 def test_cli_mcp_serve_dispatches_http(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str, int]] = []
 
@@ -126,6 +139,23 @@ def test_cli_console_serve_dispatches_uvicorn(monkeypatch: pytest.MonkeyPatch) -
             "reload": True,
         }
     ]
+
+
+def test_cli_console_serve_loads_selected_jurisdiction(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _configure_cli_store(monkeypatch, tmp_path)
+    calls: list[dict[str, object]] = []
+
+    def run(application: object, **kwargs: object) -> None:
+        calls.append({"application": application, **kwargs})
+
+    monkeypatch.setattr("uvicorn.run", run)
+
+    result = runner.invoke(app, ["console", "serve", "--jurisdiction", "eu"])
+
+    assert result.exit_code == 0
+    service = calls[0]["application"].state.service
+    assert service.boundary.policy.default_source_jurisdiction == "EU"
+    assert service.boundary.policy.default_destination_jurisdiction == "EU"
 
 
 def test_cli_ingest_recall_and_why_use_same_local_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -46,8 +46,14 @@ from solomon.api.tenancy import (
     TenantRegistry,
     is_valid_tenant_id,
 )
-from solomon.boundary.solomon import BoundaryImportStatus, probe_boundary_client
-from solomon.config import Settings, credence_policy_from_settings, get_settings, verification_policy_from_settings
+from solomon.boundary.solomon import BoundaryImportStatus, SolomonBoundary, probe_boundary_client
+from solomon.config import (
+    Settings,
+    boundary_policy_from_settings,
+    credence_policy_from_settings,
+    get_settings,
+    verification_policy_from_settings,
+)
 from solomon.errors import SolomonError
 from solomon.graph.suggestions import SuggestionDecision
 from solomon.graph.visualization import GraphFormat
@@ -112,6 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         database_url=_service_database_url(resolved_settings, resolved_settings.data_dir),
         verification_policy=vp, verification_policy_version=resolved_settings.verification_policy_version,
         credence_policy=cp, credence_policy_version=resolved_settings.credence_policy_version,
+        boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
     )
     tenant_services: dict[str, SolomonService] = {}
 
@@ -127,6 +134,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             postgres_schema=_postgres_schema_for_tenant(resolved_settings, tenant_id),
             verification_policy=vp, verification_policy_version=resolved_settings.verification_policy_version,
             credence_policy=cp, credence_policy_version=resolved_settings.credence_policy_version,
+            boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
         )
         tenant_services[tenant_id] = tenant_service
         return tenant_service

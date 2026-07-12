@@ -333,6 +333,18 @@ internal knowledge is live, stale-pending-reverification, superseded, or retired
 Solomon is self-contained. The local boundary engine under [`src/solomon/boundary/engine/`](./src/solomon/boundary/engine/)
 requires no sibling checkout.
 
+Select the supported boundary profile (`sg`, `my`, `uk`, or `eu`) through `SOLOMON_JURISDICTION`, or for a single
+operation with `--jurisdiction`:
+
+```bash
+uv run solomon ingest "memo text" --source-ref memo-1 --jurisdiction uk
+uv run solomon mcp serve --http --jurisdiction uk
+uv run solomon console serve --jurisdiction uk
+```
+
+The profile sets both default source and destination jurisdictions. It is a detector-routing setting, not a legal
+classification or compliance switch.
+
 ## Runtime Modes
 
 ### Local SKU

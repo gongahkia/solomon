@@ -14,7 +14,13 @@ from uvicorn import Config, Server
 from solomon import __version__
 from solomon.api.schemas import SolomonModel
 from solomon.api.service import SolomonService
-from solomon.config import credence_policy_from_settings, get_settings, verification_policy_from_settings
+from solomon.boundary.solomon import SolomonBoundary
+from solomon.config import (
+    boundary_policy_from_settings,
+    credence_policy_from_settings,
+    get_settings,
+    verification_policy_from_settings,
+)
 from solomon.mcp.auth import MCPAuthConfig, bearer_token_matches, token_from_env
 from solomon.mcp.tools import MCPToolSpec, SolomonMCPRuntime, mcp_tool_specs, register_solomon_tools
 from solomon.mcp.transport import MCPShutdownConfig, MCPTransportConfig, MCPTransportKind
@@ -92,6 +98,7 @@ def service_from_settings() -> SolomonService:
         verification_policy_version=settings.verification_policy_version,
         credence_policy=credence_policy_from_settings(settings),
         credence_policy_version=settings.credence_policy_version,
+        boundary=SolomonBoundary(policy=boundary_policy_from_settings(settings)),
     )
 
 

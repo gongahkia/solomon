@@ -1,5 +1,12 @@
-# Getting support
+# Support
 
-Use the GitHub issue forms for reproducible bugs, repair requests, and engineering work. Before opening an issue, check the README and existing issues.
+Solomon is a portfolio project. It provides no service-level agreement, support entitlement, uptime commitment, or
+production incident response.
 
-Share the smallest redacted command and output that reproduces the behavior. Do not post passwords, tokens, cookies, private URLs, or full terminal logs containing sensitive data. Security reports belong in the private channel described in [SECURITY.md](SECURITY.md), not in an issue.
+For reproducible bugs or documentation defects, open a [GitHub issue](https://github.com/gongahkia/solomon/issues)
+with the commit, runtime mode, operating system, Python version, and minimal non-sensitive reproduction. Do not post
+client data, credentials, boundary mappings, or security vulnerabilities in public issues; use the process in
+[SECURITY.md](./SECURITY.md) for vulnerabilities.
+
+Before production or legal use, independently assess security, retention, confidentiality, jurisdictional, and
+professional-responsibility requirements for the intended deployment.

@@ -42,3 +42,4 @@ contested. It does not decide the law or replace lawyer review.
 - [UK AI, legal-services supervision, and data protection](./jurisdictions/uk/ai-data-protection.md)
 - [EU AI Act legal-decision-support note](./jurisdictions/uk/eu-ai-act.md)
 - [Hong Kong AI governance](./jurisdictions/hk/ai-governance.md)
+- [Indonesia PDP Law source status](./jurisdictions/id/pdp-status.md)

@@ -12,7 +12,7 @@ statement that a jurisdiction profile has been implemented.
 | United Kingdom | SRA/ICO AI and data-protection research published. | Minimum profile only. | NI/UTR/NHS patterns and UK profile work remain open. |
 | European Union | EU AI Act legal-decision-support research published. | Minimum profile only. | EU profile design remains open. |
 | Hong Kong | PCPD AI-governance research published. | Minimum profile only. | Hong Kong profile design remains open. |
-| Indonesia | Not yet published. | Minimum profile only. | PDP implementation-rule research remains open. |
+| Indonesia | PDP Law source-status note published; implementation-rule set unverified. | Minimum profile only. | Current implementation-rule research and profile design remain open. |
 
 Before enabling a matter or model route for a jurisdiction, verify current legislation, professional rules, vendor
 data flows, transfer requirements, and firm policy. See the [Singapore research notes](./sg/) and [UK AI/data-protection

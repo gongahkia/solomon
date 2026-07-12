@@ -28,6 +28,9 @@ class CurrencyPropagator:
         *,
         changed_at: datetime | None = None,
         reason: str,
+        collect_reasons: bool = True,
+        record_verification_events: bool = True,
+        record_staleness_metadata: bool = True,
     ) -> ImpactResult:
         timestamp = changed_at or now_utc()
         queue: deque[str] = deque([changed_dependency_id])
@@ -43,41 +46,52 @@ class CurrencyPropagator:
 
             for edge in self.graph.get_dependents(dependency_id):
                 item_id = edge.source_id
-                staleness = StalenessReason(
-                    dependency_id=dependency_id,
-                    changed_at=timestamp,
-                    reason=reason,
-                    edge_id=edge.id,
-                )
                 try:
                     item = self.store.get_item(item_id)
                 except ItemNotFoundError:
                     continue
                 if item.currency_state is CurrencyState.RETIRED:
                     continue
-                existing = list(item.metadata.get("staleness_reasons", []))
-                existing.append(staleness.model_dump(mode="json"))
+                staleness: StalenessReason | None = None
+                metadata = item.metadata
+                if record_staleness_metadata or collect_reasons:
+                    staleness = StalenessReason(
+                        dependency_id=dependency_id,
+                        changed_at=timestamp,
+                        reason=reason,
+                        edge_id=edge.id,
+                    )
+                if record_staleness_metadata:
+                    if staleness is None:
+                        raise RuntimeError("staleness reason required when recording propagation metadata")
+                    existing = list(item.metadata.get("staleness_reasons", []))
+                    existing.append(staleness.model_dump(mode="json"))
+                    metadata = {**item.metadata, "staleness_reasons": existing}
                 updated = item.model_copy(
                     update={
                         "currency_state": CurrencyState.STALE_PENDING_REVERIFICATION,
-                        "metadata": {**item.metadata, "staleness_reasons": existing},
+                        "metadata": metadata,
                     }
                 )
-                updated = append_verification_event(
-                    updated,
-                    VerificationLifecycleEvent(
-                        item_id=item_id,
-                        state=VerificationLifecycleState.REQUESTED,
-                        actor_id="system",
-                        occurred_at=timestamp,
-                        basis=reason,
-                        source_ref=dependency_id,
-                    ),
-                )
+                if record_verification_events:
+                    updated = append_verification_event(
+                        updated,
+                        VerificationLifecycleEvent(
+                            item_id=item_id,
+                            state=VerificationLifecycleState.REQUESTED,
+                            actor_id="system",
+                            occurred_at=timestamp,
+                            basis=reason,
+                            source_ref=dependency_id,
+                        ),
+                    )
                 self.store.update_item(updated, event_type="knowledge_item_stale_flagged", occurred_at=timestamp)
                 if item_id not in stale_item_ids:
                     stale_item_ids.append(item_id)
-                reasons.setdefault(item_id, []).append(staleness)
+                if collect_reasons:
+                    if staleness is None:
+                        raise RuntimeError("staleness reason required when collecting propagation reasons")
+                    reasons.setdefault(item_id, []).append(staleness)
                 queue.append(item_id)
 
         return ImpactResult(

@@ -29,3 +29,13 @@ Generate a deterministic synthetic corpus:
 ```bash
 uv run python benchmarks/synthetic/generate.py /tmp/solomon-corpus.json --size 12 --supersession-events 3 --seed 7
 ```
+
+## Dependency propagation
+
+Run the 1k, 10k, and 100k direct-fan-out benchmark:
+
+```bash
+uv run python benchmarks/perf/dependency_propagation.py
+```
+
+CI runs the 1k p95 regression gate; see [`perf/README.md`](./perf/README.md) for scope and larger-run guidance.

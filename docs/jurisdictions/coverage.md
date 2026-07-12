@@ -20,10 +20,10 @@ transferable.
 
 | Pack | Current PII terms/detectors | Current MNPI terms | Status |
 | --- | --- | --- | --- |
-| SG | `NRIC`, `FIN`, common detectors, labelled UEN and IRAS references, and Myinfo identity-field markers. | `SFA section 218`, `inside information`, plus common MNPI lexicon. | Implementation coverage only; Singapore profile work remains open. |
-| MY | `MyKad`, `PDPA Malaysia`, common detectors, and labelled MyKad/MyPR and SSM 12-digit-registration patterns. | `CMSA sections 188-189`, plus common MNPI lexicon. | Implementation coverage only; Malaysia profile work remains open. |
-| UK | `National Insurance`, common detectors, and NI/labelled UTR/Companies House/NHS patterns. | `UK MAR`, `inside information`, plus common MNPI lexicon. | Implementation coverage only; additional UK profile work remains open. |
-| EU | `GDPR special category`, plus common detectors. | `MAR Article 7`, `inside information`, plus common MNPI lexicon. | Implementation coverage only; EU profile design remains open. |
+| SG | `NRIC`, `FIN`, common detectors, labelled UEN and IRAS references, and Myinfo identity-field markers. | `SFA section 218`, `inside information`, plus common MNPI lexicon. | Implemented and exercised by jurisdiction tests; this is not a compliance determination. |
+| MY | `MyKad`, `PDPA Malaysia`, common detectors, and labelled MyKad/MyPR and SSM 12-digit-registration patterns. | `CMSA sections 188-189`, plus common MNPI lexicon. | Implemented and exercised by jurisdiction tests; this is not a compliance determination. |
+| UK | `National Insurance`, common detectors, and NI/labelled UTR/Companies House/NHS patterns. | `UK MAR`, `inside information`, plus common MNPI lexicon. | Implemented and exercised by jurisdiction tests; this is not a compliance determination. |
+| EU | `GDPR special category`, plus common detectors. | `MAR Article 7`, `inside information`, plus common MNPI lexicon. | Implemented and exercised by jurisdiction tests; this is not a compliance determination. |
 
 Jurisdictional strict terms can originate from either source or destination pack. The engine marks the four listed
 market-abuse terms as high-severity `MNPI`; other strict terms are medium-severity `PII` markers. This is a routing
@@ -51,4 +51,4 @@ PII/MNPI examples through every profile to prevent a profile from weakening base
 1. No jurisdiction pack is certified against the complete text of its privacy, market-abuse, professional, or sectoral rules.
 2. Pattern matching does not establish identity, controller/processor role, privileged status, consent, transfer basis,
    or notification duties.
-3. Additional identifier coverage and profile-specific legal review remain open.
+3. Future identifier coverage and deployment-specific legal review require separate review.

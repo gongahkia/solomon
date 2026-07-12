@@ -13,7 +13,7 @@
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square">
 </p>
 
-**MCP-native currency layer for internal legal knowledge — works behind Claude, Copilot, Harvey, iManage.**
+**MCP-native currency infrastructure for verified legal knowledge.**
 
 Solomon tracks whether internal positions, clauses, house views, notes, and prior advice are still live,
 what they depend on, and why re-verification is due. It keeps firm knowledge behind a vendored
@@ -22,21 +22,24 @@ credence, verification, deterministic primitive plans, and contestability.
 
 ## Table of Contents
 
-- [Quick Start](#quick-start)
+- [MCP Quick Start](#mcp-quick-start)
+- [Curator Console](#curator-console)
+- [CLI And SDK](#cli-and-sdk)
+- [Boundary And Memory](#boundary-and-memory)
+- [Audit Evidence](#audit-evidence)
+- [Development & Evaluation](#development--evaluation)
 - [What Solomon Does](#what-solomon-does)
 - [API Surface](#api-surface)
 - [Examples](#examples)
 - [How It Works](#how-it-works)
 - [Regulator-ready by construction](#regulator-ready-by-construction)
-- [Boundary And Memory](#boundary-and-memory)
 - [Runtime Modes](#runtime-modes)
 - [Documentation](#documentation)
-- [Development & Evaluation](#development--evaluation)
 - [Packaging & Deployment](#packaging--deployment)
 - [Screenshots](#screenshots)
 - [License](#license)
 
-## Quick Start
+## MCP Quick Start
 
 Install dependencies:
 
@@ -44,27 +47,49 @@ Install dependencies:
 uv sync --extra dev
 ```
 
-Run the standard verification gate:
+Check the stdio server:
 
 ```bash
-uv run ruff check .
-uv run mypy src/solomon
-uv run pytest
+uv run solomon mcp serve --help
 ```
 
-Run the headline stale-house-view scenario:
+For Claude Desktop, add the following server after replacing `/absolute/path/to/solomon`:
+
+```json
+{
+  "mcpServers": {
+    "solomon": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/solomon",
+        "run",
+        "solomon",
+        "mcp",
+        "serve"
+      ]
+    }
+  }
+}
+```
+
+Detailed host setup, seed data, and a smoke prompt: [`docs/mcp/install.md`](./docs/mcp/install.md).
+
+## Curator Console
+
+Run the thin curator console for dependency review, verification, and audit-pack inspection:
 
 ```bash
-uv run python examples/scenarios/stale-house-view/run.py
+uv run solomon console serve --host 127.0.0.1 --port 8150
 ```
 
-Start the API:
+See [`docs/console/`](./docs/console/) for supported workflows and screenshots.
 
-```bash
-uv run uvicorn solomon.api.app:create_app --factory --host 127.0.0.1 --port 8140
-```
+## CLI And SDK
 
-Use the CLI:
+### Power users / dev loop
+
+Use the CLI to seed data, inspect state, or run the local verification loop:
 
 ```bash
 uv run solomon diagnostics
@@ -72,6 +97,8 @@ uv run solomon ingest "Structure X relies on Regulation R section 12." --source-
 uv run solomon dependency-suggestions
 uv run solomon recall "structure X regulation"
 ```
+
+The Python and TypeScript client quickstarts are in [`docs/sdk/`](./docs/sdk/).
 
 ## What Solomon Does
 
@@ -273,6 +300,13 @@ Core invariants:
 - `ModelInferred` content cannot outrank `FirmAuthoritative` content as a settled answer.
 - Boundary mappings are volatile and flushed after reidentification.
 - Audit logs store metadata and hashes, not privileged prompt content.
+
+## Audit Evidence
+
+Solomon records a metadata-only, hash-chained audit journal. An audit pack binds the primitive plan,
+provenance, currency state, verification events, boundary decision metadata, and tamper-verification result
+needed to reconstruct what Solomon did without retaining privileged prompt content. See
+[`docs/release-artifacts.md`](./docs/release-artifacts.md) and [`docs/regulatory-evidence.md`](./docs/regulatory-evidence.md).
 
 ## Regulator-ready by construction
 

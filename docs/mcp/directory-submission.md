@@ -4,6 +4,13 @@ Research date: 2026-06-14
 
 Access caveat: no access to the private submission portal UI. This note uses public docs and public review artifacts only.
 
+## Listing copy
+
+**MCP-native currency infrastructure for verified legal knowledge.**
+
+Use this exact description in MCP Registry or directory metadata until a separate product-description decision is
+made.
+
 ## Scope
 
 Anthropic's public docs now distinguish three related but separate distribution paths:

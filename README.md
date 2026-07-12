@@ -406,8 +406,8 @@ keeps SQLite data and audit journals in named volumes; use it for the documented
 maintaining a parallel Compose file.
 
 ```bash
-docker compose -f docker-compose.server.yml up --build
-curl http://localhost:8140/health
+SOLOMON_SERVER_API_KEY=change-me docker compose -f docker-compose.server.yml up --build
+curl -H 'Authorization: Bearer change-me' http://localhost:8140/health
 ```
 
 ## Documentation

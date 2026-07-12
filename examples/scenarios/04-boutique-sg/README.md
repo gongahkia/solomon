@@ -21,3 +21,11 @@ Expected invariants:
 - the audit journal verifies.
 
 The Compose console walkthrough and recording remain open work.
+
+For the one-container local console demo, start Compose from this directory and open
+`http://127.0.0.1:8150/console`:
+
+```bash
+cd examples/scenarios/04-boutique-sg
+docker compose up --build
+```

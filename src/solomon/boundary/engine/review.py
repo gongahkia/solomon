@@ -40,6 +40,14 @@ CUSTOMER_ACCOUNT_RE = re.compile(
     re.IGNORECASE,
 )
 MEDICAL_RECORD_RE = re.compile(r"\b(?:MRN|medical\s+record)\s*[:#-]?\s*([A-Z0-9-]{4,24})\b", re.IGNORECASE)
+UK_NATIONAL_INSURANCE_RE = re.compile(r"\b[A-CEGHJ-PR-TW-Z]{2}\s?\d{2}\s?\d{2}\s?\d{2}\s?[A-D]\b", re.IGNORECASE)
+UK_UTR_RE = re.compile(r"\b(?:UTR|unique\s+taxpayer\s+reference)\s*[:#-]?\s*(\d{10})\b", re.IGNORECASE)
+UK_COMPANIES_HOUSE_RE = re.compile(
+    r"\b(?:companies\s+house\s+(?:number|no\.?)|company\s+(?:number|no\.?)|CH\s+(?:number|no\.?))\s*[:#-]?\s*"
+    r"([A-Z]{2}\d{6}|\d{8})\b",
+    re.IGNORECASE,
+)
+UK_NHS_NUMBER_RE = re.compile(r"\bNHS\s+(?:number|no\.?)\s*[:#-]?\s*(\d{3}\s?\d{3}\s?\d{4})\b", re.IGNORECASE)
 FINANCIAL_AMOUNT_RE = re.compile(
     r"\b(?:US\$|S\$|\$|EUR|GBP|JPY|CNY|HKD|AUD)\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:million|billion|m|bn))?\b",
     re.IGNORECASE,
@@ -127,6 +135,31 @@ def review_text(
     )
     findings.extend(_find_luhn(IMEI_RE, text, kind="imei", severity="high", jurisdiction=source_pack.code))
     findings.extend(_find_ip_addresses(text, jurisdiction=source_pack.code))
+    if "UK" in {source_pack.code, destination_pack.code}:
+        findings.extend(
+            _find(
+                UK_NATIONAL_INSURANCE_RE,
+                text,
+                kind="uk_national_insurance_number",
+                severity="high",
+                jurisdiction="UK",
+                category="PII",
+            )
+        )
+        findings.extend(
+            _find(UK_UTR_RE, text, kind="uk_utr", severity="high", jurisdiction="UK", category="PII")
+        )
+        findings.extend(
+            _find(
+                UK_COMPANIES_HOUSE_RE,
+                text,
+                kind="uk_companies_house_number",
+                severity="medium",
+                jurisdiction="UK",
+                category="PII",
+            )
+        )
+        findings.extend(_find_uk_nhs_numbers(text))
 
     strict_terms = set(source_pack.strict_terms) | set(destination_pack.strict_terms)
     for term in strict_terms:
@@ -307,6 +340,26 @@ def _find_ip_addresses(text: str, *, jurisdiction: str) -> list[ReviewFinding]:
     return findings
 
 
+def _find_uk_nhs_numbers(text: str) -> list[ReviewFinding]:
+    findings: list[ReviewFinding] = []
+    for match in UK_NHS_NUMBER_RE.finditer(text):
+        digits = re.sub(r"\D", "", match.group(1))
+        if not _uk_nhs_number_valid(digits):
+            continue
+        findings.append(
+            ReviewFinding(
+                kind="uk_nhs_number",
+                text=match.group(0),
+                severity="high",
+                start=match.start(),
+                end=match.end(),
+                jurisdiction="UK",
+                metadata={"category": "PII", "rule": "uk_nhs_number", "validator": "nhs_mod11"},
+            )
+        )
+    return findings
+
+
 def _dedupe_findings(findings: list[ReviewFinding]) -> list[ReviewFinding]:
     seen: set[tuple[str, str, int | None, int | None]] = set()
     deduped: list[ReviewFinding] = []
@@ -334,6 +387,10 @@ def _collect_replacements(text: str) -> list[tuple[int, int, str, str]]:
         (EMPLOYEE_ID_RE, "EMPLOYEE_ID"),
         (CUSTOMER_ACCOUNT_RE, "CUSTOMER_ACCOUNT"),
         (MEDICAL_RECORD_RE, "MEDICAL_RECORD"),
+        (UK_NATIONAL_INSURANCE_RE, "UK_NI"),
+        (UK_UTR_RE, "UK_UTR"),
+        (UK_COMPANIES_HOUSE_RE, "UK_COMPANIES_HOUSE"),
+        (UK_NHS_NUMBER_RE, "UK_NHS"),
         (FINANCIAL_AMOUNT_RE, "FINANCIAL_AMOUNT"),
         (PERCENT_RE, "PERCENT"),
         (CLIENT_RE, "CLIENT"),
@@ -367,3 +424,12 @@ def _luhn_valid(digits: str) -> bool:
                 value -= 9
         total += value
     return total % 10 == 0
+
+
+def _uk_nhs_number_valid(digits: str) -> bool:
+    if len(digits) != 10 or not digits.isdigit():
+        return False
+    expected = 11 - sum(int(value) * weight for value, weight in zip(digits[:9], range(10, 1, -1), strict=True)) % 11
+    if expected == 11:
+        expected = 0
+    return expected != 10 and int(digits[-1]) == expected

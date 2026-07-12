@@ -1,6 +1,6 @@
 # Duties Map
 
-Checked: 2026-07-10
+Checked: 2026-07-12
 
 Scope: issue #15 R18. This is a product-positioning map, not legal advice.
 `[Inference]` marks claims about how Solomon helps satisfy a duty.
@@ -17,7 +17,7 @@ Scope: issue #15 R18. This is a product-positioning map, not legal advice.
 | Law Society of Singapore AI advisory | Review terms, retention/model-training defaults, and cyber safeguards. | [Inference] Deployment checklist should require approved model endpoints and documented retention settings before enabling non-local models. |
 | Singapore PDPA | Compliance, policies/practices, consent/purpose/notification, accuracy, protection, retention, transfer, breach notification. | [Inference] Scoped storage, provenance, authority versioning, and audit logs support compliance evidence, but PDPA obligations remain firm-owned. |
 | ICO AI/data-protection guidance | AI/data-protection risk assessment, explanation, auditing, and accountable processing. | [Inference] Currency explanations and evidence packs support explainability and post-hoc audit of AI-context decisions. |
-| SRA AI guidance | [Unverified] Current SRA AI source not captured. | Do not cite SRA-specific claims until reverified. |
+| SRA Effective Supervision guidance | AI-assisted or AI-generated work requires appropriate human review, scrutiny, and professional judgement; an authorised individual retains ultimate responsibility. | [Inference] Solomon's currency states, verification evidence, and audit packs make a review checkpoint visible, but do not discharge supervision duties. |
 
 ## Product Implications
 
@@ -35,4 +35,4 @@ Scope: issue #15 R18. This is a product-positioning map, not legal advice.
 - Singapore PDPA: <https://sso.agc.gov.sg/Act/PDPA2012>
 - PDPC AI governance: <https://www.pdpc.gov.sg/organisations/resources/guidance-by-topic/singapores-approach-to-ai-governance>
 - ICO AI/data protection: <https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/artificial-intelligence/>
-- SRA probe: <https://www.sra.org.uk/solicitors/resources-archived/artificial-intelligence/>
+- SRA Effective Supervision: <https://www.sra.org.uk/solicitors/guidance/effective-supervision-guidance/>

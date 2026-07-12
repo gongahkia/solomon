@@ -38,3 +38,4 @@ contested. It does not decide the law or replace lawyer review.
 - [Law Society of Singapore AI advisory](./jurisdictions/sg/lawsoc.md)
 - [Singapore authority sources](./jurisdictions/sg/canonical-sources.md)
 - [UK AI, legal-services supervision, and data protection](./jurisdictions/uk/ai-data-protection.md)
+- [EU AI Act legal-decision-support note](./jurisdictions/uk/eu-ai-act.md)

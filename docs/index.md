@@ -33,6 +33,10 @@ contested. It does not decide the law or replace lawyer review.
 ## Jurisdictions
 
 - [Jurisdiction matrix](./jurisdictions/index.md)
+- [Singapore boundary profile](./jurisdictions/sg/)
+- [Malaysia boundary profile](./jurisdictions/my/)
+- [UK boundary profile](./jurisdictions/uk/)
+- [EU boundary profile](./jurisdictions/eu/)
 - [Boundary coverage audit](./jurisdictions/coverage.md)
 - [Singapore PDPA](./jurisdictions/sg/pdpa.md)
 - [Singapore AI governance](./jurisdictions/sg/pdpc-ai.md)

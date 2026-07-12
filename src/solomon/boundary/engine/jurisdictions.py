@@ -149,6 +149,22 @@ JURISDICTION_PACKS: dict[str, JurisdictionPack] = {
     ),
 }
 
+MINIMUM_PROFILE_DETECTOR_FAMILIES = frozenset(
+    {
+        "universal_pii",
+        "special_category_pii",
+        "privacy_handling_events",
+        "mnpi_lexicon",
+        "financial_scalars",
+        "placeholder_rewrite",
+        "document_scrub",
+    }
+)
+JURISDICTION_PROFILE_DETECTOR_FAMILIES: dict[str, frozenset[str]] = {
+    code: MINIMUM_PROFILE_DETECTOR_FAMILIES | {"jurisdiction_specific_terms", "jurisdiction_identifier_patterns"}
+    for code in ("SG", "MY", "UK", "EU")
+}
+
 
 def resolve_pack(code: str) -> JurisdictionPack:
     normalized = code.upper()
@@ -157,3 +173,10 @@ def resolve_pack(code: str) -> JurisdictionPack:
 
 def supported_jurisdiction_codes() -> list[str]:
     return sorted(JURISDICTION_PACKS)
+
+
+def profile_detector_families(code: str) -> frozenset[str]:
+    normalized = code.upper()
+    if normalized not in JURISDICTION_PROFILE_DETECTOR_FAMILIES:
+        raise ValueError("jurisdiction profile must be one of SG, MY, UK, EU")
+    return JURISDICTION_PROFILE_DETECTOR_FAMILIES[normalized]

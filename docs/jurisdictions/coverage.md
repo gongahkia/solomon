@@ -43,6 +43,9 @@ services. The CLI also accepts `--jurisdiction` for `ingest`, `mcp serve`, and `
 which jurisdiction-specific lexical detectors run alongside the common baseline; it does not make a deployment legally
 correct or compliant.
 
+The four profiles strictly extend the documented minimum detector-family baseline. Property coverage exercises common
+PII/MNPI examples through every profile to prevent a profile from weakening baseline findings.
+
 ## Known gaps
 
 1. No jurisdiction pack is certified against the complete text of its privacy, market-abuse, professional, or sectoral rules.

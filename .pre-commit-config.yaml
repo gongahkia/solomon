@@ -14,9 +14,9 @@ repos:
         entry: uv run mypy src tests scripts
         language: system
         pass_filenames: false
-      - id: pytest
-        name: pytest
-        entry: uv run pytest
+      - id: pytest-fast
+        name: pytest-fast
+        entry: uv run pytest -q
         language: system
         pass_filenames: false
       - id: secret-scan
@@ -24,4 +24,8 @@ repos:
         entry: git secrets --scan
         language: system
         pass_filenames: false
-
+      - id: conventional-commit
+        name: conventional commit message
+        entry: uv run python scripts/check_conventional_commit.py
+        language: system
+        stages: [commit-msg]

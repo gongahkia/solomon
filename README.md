@@ -277,19 +277,22 @@ Core flow:
 
 ```mermaid
 flowchart TD
-    Lawyer[Lawyer / API / CLI] --> Ingest[Ingest knowledge]
-    Ingest --> Boundary[Solomon boundary review]
+    Host[MCP host] --> MCP[Solomon MCP server]
+    Lawyer[Curator] --> Console[Curator console]
+    Operator[Power user] --> CLI[CLI]
+    MCP --> Service[Solomon service]
+    Console --> Service
+    CLI --> Service
+    Service --> Boundary[Solomon boundary]
     Boundary --> Store[Bi-temporal event store]
     Store --> Graph[Dependency graph]
-    Graph --> Currency[Currency engine]
-    Currency --> Recall[Recall / answer / why]
-    Recall --> Plan[Deterministic primitive plan]
+    Graph --> Engine[Currency engine]
+    Engine --> Context[Current context / why / impact]
+    Context --> Plan[Deterministic primitive plan]
     Plan --> Model{Model needed}
-    Model -->|local or approved ZDR| Answer[Answer with evidence]
-    Recall --> Contest[Contest / affirm / pin]
-    Store --> Audit[Metadata-only audit journal]
+    Model -->|local or approved ZDR| Answer[Host answer with evidence]
+    Service --> Audit[Metadata-only audit journal]
     Plan --> Audit
-    Contest --> Audit
 ```
 
 Core invariants:

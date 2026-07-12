@@ -56,6 +56,15 @@ MY_SSM_REGISTRATION_RE = re.compile(
     r"\b(?:SSM\s+)?(?:company|business|entity)?\s*registration\s*(?:number|no\.?)\s*[:#-]?\s*((?:19|20)\d{10})\b",
     re.IGNORECASE,
 )
+SG_UEN_RE = re.compile(
+    r"\b(?:UEN|unique\s+entity\s+number)\s*[:#-]?\s*((?:\d{8,9}|T\d{2}[A-Z]{2}\d{4})[A-Z])\b",
+    re.IGNORECASE,
+)
+SG_IRAS_TAX_REFERENCE_RE = re.compile(r"\b(?:ASGD|ITR)\s+([A-Z]\d{7}[A-Z])\b", re.IGNORECASE)
+SG_MYINFO_FIELD_RE = re.compile(
+    r"\bMy[Ii]nfo\s+(?:uinfin|partialuinfin|principal\s+name|alias\s+name|hanyu\s+pinyin\s+(?:name|alias\s+name))\b",
+    re.IGNORECASE,
+)
 FINANCIAL_AMOUNT_RE = re.compile(
     r"\b(?:US\$|S\$|\$|EUR|GBP|JPY|CNY|HKD|AUD)\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:million|billion|m|bn))?\b",
     re.IGNORECASE,
@@ -171,6 +180,28 @@ def review_text(
     if "MY" in {source_pack.code, destination_pack.code}:
         findings.extend(
             _find(MY_MYKAD_RE, text, kind="my_mykad", severity="high", jurisdiction="MY", category="PII")
+        )
+    if "SG" in {source_pack.code, destination_pack.code}:
+        findings.extend(_find(SG_UEN_RE, text, kind="sg_uen", severity="medium", jurisdiction="SG", category="PII"))
+        findings.extend(
+            _find(
+                SG_IRAS_TAX_REFERENCE_RE,
+                text,
+                kind="sg_iras_tax_reference",
+                severity="high",
+                jurisdiction="SG",
+                category="PII",
+            )
+        )
+        findings.extend(
+            _find(
+                SG_MYINFO_FIELD_RE,
+                text,
+                kind="sg_myinfo_field",
+                severity="medium",
+                jurisdiction="SG",
+                category="PII",
+            )
         )
         findings.extend(
             _find(
@@ -416,6 +447,8 @@ def _collect_replacements(text: str) -> list[tuple[int, int, str, str]]:
         (UK_NHS_NUMBER_RE, "UK_NHS"),
         (MY_MYKAD_RE, "MY_MYKAD"),
         (MY_SSM_REGISTRATION_RE, "MY_SSM_REGISTRATION"),
+        (SG_UEN_RE, "SG_UEN"),
+        (SG_IRAS_TAX_REFERENCE_RE, "SG_IRAS_TAX_REFERENCE"),
         (FINANCIAL_AMOUNT_RE, "FINANCIAL_AMOUNT"),
         (PERCENT_RE, "PERCENT"),
         (CLIENT_RE, "CLIENT"),

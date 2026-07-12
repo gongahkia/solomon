@@ -20,7 +20,7 @@ transferable.
 
 | Pack | Current PII terms/detectors | Current MNPI terms | Status |
 | --- | --- | --- | --- |
-| SG | `NRIC`, `FIN`, plus common detectors. | `SFA section 218`, `inside information`, plus common MNPI lexicon. | Implementation coverage only; UEN/MyInfo/IRAS-specific patterns remain open. |
+| SG | `NRIC`, `FIN`, common detectors, labelled UEN and IRAS references, and Myinfo identity-field markers. | `SFA section 218`, `inside information`, plus common MNPI lexicon. | Implementation coverage only; Singapore profile work remains open. |
 | MY | `MyKad`, `PDPA Malaysia`, common detectors, and labelled MyKad/MyPR and SSM 12-digit-registration patterns. | `CMSA sections 188-189`, plus common MNPI lexicon. | Implementation coverage only; Malaysia profile work remains open. |
 | UK | `National Insurance`, common detectors, and NI/labelled UTR/Companies House/NHS patterns. | `UK MAR`, `inside information`, plus common MNPI lexicon. | Implementation coverage only; additional UK profile work remains open. |
 | EU | `GDPR special category`, plus common detectors. | `MAR Article 7`, `inside information`, plus common MNPI lexicon. | Implementation coverage only; EU profile design remains open. |
@@ -28,6 +28,13 @@ transferable.
 Jurisdictional strict terms can originate from either source or destination pack. The engine marks the four listed
 market-abuse terms as high-severity `MNPI`; other strict terms are medium-severity `PII` markers. This is a routing
 signal, not a legal conclusion.
+
+## Identifier sources
+
+- [ACRA UEN guidance](https://www.acra.gov.sg/resources/guides-forms/applying-for-special-uen/)
+- [IRAS GST search identifier examples](https://mytax.iras.gov.sg/ESVWeb/default.aspx?lang=en&target=GSTListingSearch)
+- [IRAS CRS tax-reference guide](https://www.iras.gov.sg/media/docs/default-source/uploadedfiles/pdf/iras-xml-schema-user-guide-for-crs-return-%28fourth-edition%29.pdf?sfvrsn=403f9e36_4)
+- [Singpass Myinfo personal data catalogue](https://docs.developer.singpass.gov.sg/docs/data-catalog-myinfo/catalog/personal)
 
 ## Known gaps
 

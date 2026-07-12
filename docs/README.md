@@ -20,3 +20,4 @@ Architecture notes, ADRs, API references, performance notes, and launch document
 - `null-hypothesis.md`: honest benchmark threat model and when flat retrieval may win.
 - `security.md`: poisoning posture, logging behavior, encryption limits, and operational guidance.
 - `why-shibahama.md`: naming rationale and design philosophy.
+- `brand/logo-directions.md`: approved logo directions and production mark guidance.

@@ -37,6 +37,48 @@ def test_primitive_plan_rejects_unsanctioned_step(tmp_path: Path) -> None:
         )
 
 
+def test_primitive_plan_executes_timeline_and_verification(tmp_path: Path) -> None:
+    service = _seed_service(tmp_path)
+    timestamp = "2026-01-01T00:00:00+00:00"
+
+    execution = service.execute_plan(
+        PrimitivePlanRequest(
+            steps=[
+                PrimitivePlanStep(primitive="timeline", args={"query": "Regulation R", "as_of": timestamp}),
+                PrimitivePlanStep(
+                    primitive="record_verification",
+                    args={
+                        "item_id": "item-1",
+                        "by": "Partner B",
+                        "outcome": "reaffirm",
+                        "basis": "reviewed source",
+                        "recorded_at": timestamp,
+                    },
+                ),
+            ]
+        )
+    )
+
+    assert execution.steps[0].result[0]["item"]["id"] == "item-1"
+    assert execution.steps[1].result["verified_by"] == "Partner B"
+
+
+@pytest.mark.parametrize(
+    ("step", "message"),
+    [
+        (PrimitivePlanStep(primitive="why", args={"unexpected": "value"}), "got unsupported args"),
+        (PrimitivePlanStep(primitive="evaluate_currency"), "requires arg: item_id"),
+    ],
+)
+def test_primitive_plan_rejects_invalid_primitive_arguments(
+    tmp_path: Path, step: PrimitivePlanStep, message: str
+) -> None:
+    service = _seed_service(tmp_path)
+
+    with pytest.raises(BadRequestError, match=message):
+        service.execute_plan(PrimitivePlanRequest(steps=[step]))
+
+
 def test_primitive_plan_audit_is_metadata_only(tmp_path: Path) -> None:
     service = _seed_service(tmp_path)
 

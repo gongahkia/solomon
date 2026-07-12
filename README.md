@@ -244,6 +244,8 @@ with SolomonClient("http://127.0.0.1:8140") as client:
 
 Included scenarios:
 
+- [`examples/scenarios/01-vendor-integration/`](./examples/scenarios/01-vendor-integration/): a fictional MCP host
+  compares stale-text reuse against deterministic preflight and currency checks.
 - [`examples/scenarios/stale-house-view/`](./examples/scenarios/stale-house-view/): a 2023 memo becomes stale after a 2025
   authority change; the warehouse baseline misses it.
 - [`examples/scenarios/currency-report/`](./examples/scenarios/currency-report/): the same currency signal rendered as a
@@ -459,6 +461,7 @@ Regenerate README media and API artifacts:
 ```bash
 uv run python scripts/render_stale_house_view_gif.py
 uv run python scripts/render_console_gifs.py
+uv run python scripts/render_vendor_integration_gif.py
 uv run python scripts/export_openapi.py
 ```
 

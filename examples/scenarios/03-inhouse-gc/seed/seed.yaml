@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+company: Lantern Circuit Pte. Ltd.
+authority: PDPA 2012 section 26
+items:
+  - {kind: nda, title: "NDA APAC reseller"}
+  - {kind: nda, title: "NDA cloud-hosting vendor"}
+  - {kind: nda, title: "NDA analytics supplier"}
+  - {kind: nda, title: "NDA recruitment agency"}
+  - {kind: nda, title: "NDA payroll processor"}
+  - {kind: nda, title: "NDA product-design studio"}
+  - {kind: nda, title: "NDA security assessor"}
+  - {kind: nda, title: "NDA Singapore distributor"}
+  - {kind: nda, title: "NDA Thailand distributor"}
+  - {kind: nda, title: "NDA Malaysia distributor"}
+  - {kind: nda, title: "NDA Indonesia distributor"}
+  - {kind: nda, title: "NDA customer-support vendor"}
+  - {kind: handbook, title: "employee handbook privacy clause"}
+  - {kind: policy, title: "data-retention policy position"}
+  - {kind: template, title: "vendor data-processing addendum"}

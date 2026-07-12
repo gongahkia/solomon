@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Solomon Evidence Window</title>
+  <desc id="desc">Three stacked evidence windows with one current state highlighted.</desc>
+  <path d="M14 10h36v12H14zM14 26h36v12H14zM14 42h36v12H14z" fill="none" stroke="#25364D" stroke-linejoin="round" stroke-width="5"/>
+  <path d="M35 29h12v6H35z" fill="#11A683"/>
+</svg>

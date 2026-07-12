@@ -10,11 +10,18 @@ from pathlib import Path
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 
-from solomon.api.service import IngestRequest, SolomonService
+from solomon.api.service import (
+    AuthorityChangeRequest,
+    DependencyRequest,
+    IngestRequest,
+    SolomonService,
+    VerificationRequest,
+)
 from solomon.audit.journal import AuditEntry, AuditJournal
 from solomon.credence.policy import CredenceLedger, RetrievalCandidate
-from solomon.currency.engine import record_verification
+from solomon.currency.engine import VerificationOutcome, record_verification
 from solomon.currency.models import (
     CredenceTier,
     CurrencyState,
@@ -335,3 +342,64 @@ def test_boundary_client_contract() -> None:
     client_class = load_boundary_client_class()
     for method in ["review", "pseudonymize", "anonymize", "redact", "reidentify", "scrub_document", "capabilities"]:
         assert hasattr(client_class, method)
+
+
+class CurrencyLifecycleStateMachine(RuleBasedStateMachine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.temp_dir = tempfile.TemporaryDirectory(prefix="solomon-currency-stateful-")
+        root = Path(self.temp_dir.name)
+        self.service = SolomonService(data_dir=root / "data", journal_dir=root / "journal")
+        item = self.service.ingest(
+            IngestRequest(
+                kind=KnowledgeKind.POSITION,
+                content="Structure X depends on Regulation R section 12.",
+                source_kind=SourceKind.PARTNER,
+                source_ref="stateful-memo",
+            )
+        )
+        self.item_id = item.id
+        self.service.add_dependency(
+            DependencyRequest(
+                source_id=item.id,
+                target_id="reg-r-12",
+                edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+                target_kind="external_authority",
+            )
+        )
+        self.change_number = 0
+
+    def teardown(self) -> None:
+        self.temp_dir.cleanup()
+
+    @rule()
+    def register_authority_change(self) -> None:
+        self.change_number += 1
+        self.service.register_authority_change(
+            "reg-r-12",
+            AuthorityChangeRequest(
+                new_version=f"v{self.change_number}",
+                changed_at=f"2026-01-{self.change_number:02d}T00:00:00+00:00",
+            ),
+        )
+
+    @rule()
+    def reaffirm_position(self) -> None:
+        self.service.record_verification(
+            self.item_id,
+            VerificationRequest(
+                by="partner-a",
+                outcome=VerificationOutcome.REAFFIRM,
+                basis="stateful currency review",
+                source_ref="stateful-memo",
+            ),
+        )
+
+    @invariant()
+    def preserves_item_and_audit_integrity(self) -> None:
+        assert self.service.store.get_item(self.item_id).id == self.item_id
+        assert self.service.audit.verify().ok is True
+
+
+CurrencyLifecycleStateMachine.TestCase.settings = settings(max_examples=10, stateful_step_count=8)
+TestCurrencyLifecycleStateMachine = CurrencyLifecycleStateMachine.TestCase

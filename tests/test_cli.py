@@ -6,9 +6,11 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
 from typer.testing import CliRunner
 
 from solomon import __version__
+from solomon.api.service import SolomonService
 from solomon.cli.main import app
 from solomon.config import get_settings
 
@@ -58,6 +60,7 @@ def test_cli_mcp_serve_loads_selected_jurisdiction(monkeypatch: pytest.MonkeyPat
 
     assert result.exit_code == 0
     assert len(calls) == 1
+    assert isinstance(calls[0], SolomonService)
     assert calls[0].boundary.policy.default_source_jurisdiction == "UK"
     assert calls[0].boundary.policy.default_destination_jurisdiction == "UK"
 
@@ -153,7 +156,10 @@ def test_cli_console_serve_loads_selected_jurisdiction(monkeypatch: pytest.Monke
     result = runner.invoke(app, ["console", "serve", "--jurisdiction", "eu"])
 
     assert result.exit_code == 0
-    service = calls[0]["application"].state.service
+    application = calls[0]["application"]
+    assert isinstance(application, FastAPI)
+    service = application.state.service
+    assert isinstance(service, SolomonService)
     assert service.boundary.policy.default_source_jurisdiction == "EU"
     assert service.boundary.policy.default_destination_jurisdiction == "EU"
 

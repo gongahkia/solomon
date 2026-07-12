@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -19,6 +20,11 @@ MINIMUM_CASES = {
 def test_jurisdiction_profiles_strictly_extend_minimum_detector_families() -> None:
     for code in ("SG", "MY", "UK", "EU"):
         assert MINIMUM_PROFILE_DETECTOR_FAMILIES < profile_detector_families(code)
+
+
+def test_jurisdiction_profile_rejects_unsupported_code() -> None:
+    with pytest.raises(ValueError, match="jurisdiction profile must be one of"):
+        profile_detector_families("ID")
 
 
 @given(text=st.sampled_from(tuple(MINIMUM_CASES)))

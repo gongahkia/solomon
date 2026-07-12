@@ -13,6 +13,7 @@ contested. It does not decide the law or replace lawyer review.
 - [MCP installation](./mcp/install.md)
 - [Positioning](./positioning.md)
 - [One-pager](./one-pager.md) and [PDF](https://github.com/gongahkia/solomon/blob/main/output/pdf/solomon-one-pager.pdf)
+- [Technical whitepaper](./whitepaper.md)
 - [Known limitations](./known-limitations.md)
 
 ## Architecture and evidence

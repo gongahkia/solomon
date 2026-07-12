@@ -6,11 +6,10 @@ The harness builds a direct authority-to-position fan-out and measures only the
 `CurrencyPropagator.propagate_dependency_change` algorithm. It uses an in-memory store/graph fixture so 100k-item
 algorithmic fan-out is measurable without SQLite journaling dominating the result. For its direct-fan-out topology,
 the fixture discards each updated item after the propagation step; it verifies the affected-item count but does not
-claim durable storage semantics. It also disables collection of the large per-item result-reasons payload while
-retaining each item's stale-state update, and disables verification-event creation. SQLite persistence and complete
-evidence creation. It also omits per-item staleness metadata, so this is a state-transition throughput benchmark,
-not an audit-evidence benchmark. SQLite persistence and complete evidence creation are covered by the normal
-test/performance gates and should be benchmarked separately for deployment capacity planning.
+claim durable storage semantics. It also disables collection of the large per-item result-reasons payload,
+verification-event creation, and per-item staleness metadata. This is a state-transition throughput benchmark, not an
+audit-evidence benchmark. SQLite persistence and complete evidence creation are covered by normal test/performance
+gates and should be benchmarked separately for deployment capacity planning.
 
 Run the full 1k/10k/100k sweep locally:
 

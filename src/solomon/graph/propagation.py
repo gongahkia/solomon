@@ -36,6 +36,7 @@ class CurrencyPropagator:
         queue: deque[str] = deque([changed_dependency_id])
         visited_dependencies: set[str] = set()
         stale_item_ids: list[str] = []
+        stale_item_id_set: set[str] = set()
         reasons: dict[str, list[StalenessReason]] = {}
 
         while queue:
@@ -86,8 +87,9 @@ class CurrencyPropagator:
                         ),
                     )
                 self.store.update_item(updated, event_type="knowledge_item_stale_flagged", occurred_at=timestamp)
-                if item_id not in stale_item_ids:
+                if item_id not in stale_item_id_set:
                     stale_item_ids.append(item_id)
+                    stale_item_id_set.add(item_id)
                 if collect_reasons:
                     if staleness is None:
                         raise RuntimeError("staleness reason required when collecting propagation reasons")
@@ -103,6 +105,7 @@ class CurrencyPropagator:
     def impact_query(self, authority_or_item_id: str, *, as_of: datetime | None = None) -> ImpactResult:
         reasons: dict[str, list[StalenessReason]] = {}
         stale_item_ids: list[str] = []
+        stale_item_id_set: set[str] = set()
         timestamp = as_of or now_utc()
         queue: deque[str] = deque([authority_or_item_id])
         visited_dependencies: set[str] = set()
@@ -113,8 +116,9 @@ class CurrencyPropagator:
             visited_dependencies.add(dependency_id)
             for edge in self.graph.get_dependents(dependency_id):
                 item_id = edge.source_id
-                if item_id not in stale_item_ids:
+                if item_id not in stale_item_id_set:
                     stale_item_ids.append(item_id)
+                    stale_item_id_set.add(item_id)
                 reasons.setdefault(item_id, []).append(
                     StalenessReason(
                         dependency_id=dependency_id,

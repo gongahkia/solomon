@@ -7,7 +7,7 @@ statement that a jurisdiction profile has been implemented.
 
 | Jurisdiction | Research status | Boundary profile | Known limit |
 | --- | --- | --- | --- |
-| Singapore | PDPA, PDPC AI governance, Law Society AI advisory, LSRA/entity, and authority-source notes published. | Minimum profile only; Singapore-specific profile work remains open. | No production compliance determination or automated authority monitoring. |
+| Singapore | PDPA, PDPC AI governance, Law Society AI advisory, LSRA/entity, MAS FEAT, and authority-source notes published. | Minimum profile only; Singapore-specific profile work remains open. | No production compliance determination or automated authority monitoring. |
 | Malaysia | PDPA and cross-border-transfer research published. | Minimum profile only. | MyKad/SSM patterns and Malaysia profile work remain open. |
 | United Kingdom | SRA/ICO AI and data-protection research published. | Minimum profile only. | NI/UTR/NHS patterns and UK profile work remain open. |
 | European Union | EU AI Act legal-decision-support research published. | Minimum profile only. | EU profile design remains open. |

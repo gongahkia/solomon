@@ -40,6 +40,7 @@ class AuditEntry(SolomonModel):
     event_type: str
     occurred_at: datetime = Field(default_factory=now_utc)
     payload: dict[str, Any]
+    attribution: AuditAttribution | None = None
     prev_hash: str
     entry_hash: str
 
@@ -52,6 +53,13 @@ class AuditEntry(SolomonModel):
 
     def to_json(self) -> str:
         return json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+
+
+class AuditAttribution(SolomonModel):
+    actor_id: str | None = Field(default=None, min_length=1)
+    correlation_id: str | None = Field(default=None, min_length=1)
+    source_connector_id: str | None = Field(default=None, min_length=1)
+    review_task_id: str | None = Field(default=None, min_length=1)
 
 
 class JournalVerification(SolomonModel):
@@ -92,22 +100,39 @@ class VerificationAttestation(SolomonModel):
         return _ensure_aware_utc(value)
 
 
-def _canonical_event(seq: int, event_type: str, occurred_at: datetime, payload: dict[str, Any], prev_hash: str) -> str:
+def _canonical_event(
+    seq: int,
+    event_type: str,
+    occurred_at: datetime,
+    payload: dict[str, Any],
+    prev_hash: str,
+    attribution: AuditAttribution | None = None,
+) -> str:
+    event: dict[str, Any] = {
+        "seq": seq,
+        "event_type": event_type,
+        "occurred_at": occurred_at.isoformat(),
+        "payload": payload,
+        "prev_hash": prev_hash,
+    }
+    if attribution is not None:
+        event["attribution"] = attribution.model_dump(mode="json")
     return json.dumps(
-        {
-            "seq": seq,
-            "event_type": event_type,
-            "occurred_at": occurred_at.isoformat(),
-            "payload": payload,
-            "prev_hash": prev_hash,
-        },
+        event,
         sort_keys=True,
         separators=(",", ":"),
     )
 
 
-def _entry_hash(seq: int, event_type: str, occurred_at: datetime, payload: dict[str, Any], prev_hash: str) -> str:
-    message = _canonical_event(seq, event_type, occurred_at, payload, prev_hash).encode("utf-8")
+def _entry_hash(
+    seq: int,
+    event_type: str,
+    occurred_at: datetime,
+    payload: dict[str, Any],
+    prev_hash: str,
+    attribution: AuditAttribution | None = None,
+) -> str:
+    message = _canonical_event(seq, event_type, occurred_at, payload, prev_hash, attribution).encode("utf-8")
     return hashlib.sha256(message).hexdigest()
 
 
@@ -149,17 +174,19 @@ class AuditJournal:
         payload: dict[str, Any],
         *,
         occurred_at: datetime | None = None,
+        attribution: AuditAttribution | None = None,
     ) -> AuditEntry:
         last = self._last_entry()
         seq = 1 if last is None else last.seq + 1
         prev_hash = GENESIS_HASH if last is None else last.entry_hash
         timestamp = occurred_at or now_utc()
-        entry_hash = _entry_hash(seq, event_type, timestamp, payload, prev_hash)
+        entry_hash = _entry_hash(seq, event_type, timestamp, payload, prev_hash, attribution)
         entry = AuditEntry(
             seq=seq,
             event_type=event_type,
             occurred_at=timestamp,
             payload=payload,
+            attribution=attribution,
             prev_hash=prev_hash,
             entry_hash=entry_hash,
         )
@@ -167,6 +194,24 @@ class AuditJournal:
             fh.write(entry.to_json())
             fh.write("\n")
         return entry
+
+    def list_entries(
+        self,
+        *,
+        correlation_id: str | None = None,
+        actor_id: str | None = None,
+    ) -> list[AuditEntry]:
+        entries = [
+            AuditEntry.model_validate_json(line)
+            for line in self.path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        return [
+            entry
+            for entry in entries
+            if (correlation_id is None or entry.attribution and entry.attribution.correlation_id == correlation_id)
+            and (actor_id is None or entry.attribution and entry.attribution.actor_id == actor_id)
+        ]
 
     def log_query(
         self,
@@ -272,6 +317,7 @@ class AuditJournal:
                     entry.occurred_at,
                     entry.payload,
                     entry.prev_hash,
+                    entry.attribution,
                 )
                 if entry.prev_hash != previous:
                     return JournalVerification(ok=False, entries=count, error=f"bad prev_hash at seq {entry.seq}")

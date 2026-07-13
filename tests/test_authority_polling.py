@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from solomon.api.service import DependencyRequest, IngestRequest, SolomonService
+from solomon.authority_polling import AuthorityPollRetryPolicy
 from solomon.contracts import AdapterHealth, AuthorityPollSchedule, AuthoritySource, AuthoritySourceKind, SyncCheckpoint
 from solomon.currency.models import CurrencyState, KnowledgeKind, SourceKind, VerifiedState
 from solomon.graph.models import EdgeType
@@ -17,12 +18,12 @@ POLL_AT = datetime(2026, 7, 13, 8, 30, tzinfo=timezone.utc)
 class FixtureAuthorityAdapter:
     kind = AuthoritySourceKind.API
 
-    def __init__(self, *, fail: bool = False) -> None:
-        self.fail = fail
+    def __init__(self, *, failure: Exception | None = None) -> None:
+        self.failure = failure
         self.checkpoints: list[SyncCheckpoint | None] = []
 
     def health(self, _source: AuthoritySource) -> AdapterHealth:
-        return AdapterHealth(healthy=not self.fail)
+        return AdapterHealth(healthy=self.failure is None)
 
     def poll(
         self,
@@ -30,8 +31,8 @@ class FixtureAuthorityAdapter:
         checkpoint: SyncCheckpoint | None,
     ) -> tuple[list[AuthorityChangeEvent], SyncCheckpoint | None]:
         self.checkpoints.append(checkpoint)
-        if self.fail:
-            raise RuntimeError("connector unavailable")
+        if self.failure is not None:
+            raise self.failure
         return (
             [
                 AuthorityChangeEvent(
@@ -124,14 +125,47 @@ def test_durable_authority_polling_persists_checkpoint_and_creates_review_obliga
 def test_authority_polling_keeps_failed_work_pending_without_advancing_checkpoint(tmp_path: Path) -> None:
     service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
     service.register_authority_source(_source())
-    adapter = FixtureAuthorityAdapter(fail=True)
+    adapter = FixtureAuthorityAdapter(failure=ConnectionError("connector unavailable"))
 
     service.schedule_authority_polls(as_of=POLL_AT)
     batch = service.run_authority_polls({AuthoritySourceKind.API: adapter}, as_of=POLL_AT)
-    pending = service.authority_sources.pending_poll_events(available_before=POLL_AT)
+    pending = service.authority_sources.pending_poll_events(available_before=POLL_AT + timedelta(seconds=30))
 
-    assert batch.results[0].state == "failed"
+    assert batch.results[0].state == "retrying"
     assert "connector unavailable" in (batch.results[0].error or "")
     assert len(pending) == 1
     assert pending[0].delivery_attempts == 1
     assert service.authority_sources.get_poll_checkpoint("official-gazette") is None
+
+
+def test_authority_polling_dead_letters_bounded_transient_failures_and_allows_manual_retry(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    service.register_authority_source(_source())
+    adapter = FixtureAuthorityAdapter(failure=ConnectionError("connector unavailable"))
+    policy = AuthorityPollRetryPolicy(max_attempts=2, initial_delay_seconds=5)
+
+    service.schedule_authority_polls(as_of=POLL_AT)
+    first = service.run_authority_polls({AuthoritySourceKind.API: adapter}, as_of=POLL_AT, retry_policy=policy)
+    early = service.run_authority_polls(
+        {AuthoritySourceKind.API: adapter}, as_of=POLL_AT + timedelta(seconds=4), retry_policy=policy
+    )
+    second = service.run_authority_polls(
+        {AuthoritySourceKind.API: adapter}, as_of=POLL_AT + timedelta(seconds=5), retry_policy=policy
+    )
+    dead_letter = service.authority_poll_dead_letters()[0]
+
+    assert first.results[0].state == "retrying"
+    assert early.results == []
+    assert second.results[0].state == "dead_lettered"
+    assert dead_letter.record.delivery_attempts == 2
+    assert "connector unavailable" in dead_letter.reason
+    assert service.authority_sources.pending_poll_events(available_before=POLL_AT + timedelta(days=1)) == []
+
+    adapter.failure = None
+    service.retry_authority_poll_dead_letter(dead_letter.record.event.event_id, as_of=POLL_AT + timedelta(seconds=6))
+    recovered = service.run_authority_polls(
+        {AuthoritySourceKind.API: adapter}, as_of=POLL_AT + timedelta(seconds=6), retry_policy=policy
+    )
+
+    assert recovered.results[0].state == "succeeded"
+    assert service.authority_poll_dead_letters() == []

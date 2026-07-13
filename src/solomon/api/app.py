@@ -369,6 +369,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def authority_event(request: Request, payload: AuthorityEventRequest) -> dict[str, Any]:
         return active_service(request).register_authority_event(payload)
 
+    @app.get("/authority-polls/dead-letters")
+    def authority_poll_dead_letters(request: Request, limit: int = 100) -> list[dict[str, Any]]:
+        return [
+            dead_letter.model_dump(mode="json")
+            for dead_letter in active_service(request).authority_poll_dead_letters(limit=limit)
+        ]
+
+    @app.post("/authority-polls/dead-letters/{event_id}/retry")
+    def retry_authority_poll_dead_letter(request: Request, event_id: str) -> dict[str, Any]:
+        return active_service(request).retry_authority_poll_dead_letter(event_id).model_dump(mode="json")
+
     @app.get("/review-tasks")
     def review_tasks(
         request: Request,

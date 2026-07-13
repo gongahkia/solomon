@@ -50,8 +50,12 @@ from solomon.api.services.common import digest
 from solomon.api.services.ingestion import IngestionService
 from solomon.api.services.recall import RecallService
 from solomon.audit.journal import AuditJournal
-from solomon.authority_polling import AuthorityPollBatch, AuthorityPollOutbox
-from solomon.authority_sources import SQLiteAuthoritySourceRegistry
+from solomon.authority_polling import AuthorityPollBatch, AuthorityPollOutbox, AuthorityPollRetryPolicy
+from solomon.authority_sources import (
+    AuthorityPollDeadLetter,
+    AuthorityPollEventNotFoundError,
+    SQLiteAuthoritySourceRegistry,
+)
 from solomon.boundary.solomon import SolomonBoundary
 from solomon.contracts import AdapterHealth, AuthoritySource, AuthoritySourceAdapter, AuthoritySourceKind
 from solomon.credence.policy import CredenceLedger, CredencePolicy
@@ -93,6 +97,7 @@ from solomon.sources.store import (
 )
 from solomon.sources.sync import FilesystemSourceSynchronizer
 from solomon.store.factory import create_storage_bundle
+from solomon.store.outbox import OutboxRecord
 from solomon.store.sqlite import ItemNotFoundError
 from solomon.workflow.models import AuthorityChangeEvent, ReviewTask, ReviewTaskPriority, ReviewTaskState
 from solomon.workflow.store import SQLiteWorkflowStore
@@ -474,12 +479,28 @@ class SolomonService:
         *,
         as_of: datetime | None = None,
         limit: int = 100,
+        retry_policy: AuthorityPollRetryPolicy | None = None,
     ) -> AuthorityPollBatch:
         return AuthorityPollOutbox(
             registry=self.authority_sources,
             adapters=adapters,
             consume_event=self._register_polled_authority_event,
+            retry_policy=retry_policy,
         ).run_due(as_of=as_of, limit=limit)
+
+    def authority_poll_dead_letters(self, *, limit: int = 100) -> list[AuthorityPollDeadLetter]:
+        try:
+            return self.authority_sources.dead_letter_poll_events(limit=limit)
+        except ValueError as exc:
+            raise BadRequestError(str(exc)) from exc
+
+    def retry_authority_poll_dead_letter(self, event_id: str, *, as_of: datetime | None = None) -> OutboxRecord:
+        try:
+            return self.authority_sources.requeue_dead_letter(event_id, available_at=as_of)
+        except AuthorityPollEventNotFoundError as exc:
+            raise NotFoundError(f"authority poll event not found: {event_id}") from exc
+        except ValueError as exc:
+            raise BadRequestError(str(exc)) from exc
 
     def register_authority_event(self, request: AuthorityEventRequest) -> dict[str, Any]:
         return self._register_polled_authority_event(

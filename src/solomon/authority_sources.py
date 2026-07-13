@@ -8,6 +8,9 @@ from datetime import datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 
+from pydantic import Field
+
+from solomon.api.schemas import SolomonModel
 from solomon.contracts import AuthoritySource, SyncCheckpoint
 from solomon.currency.models import _ensure_aware_utc, now_utc
 from solomon.events import DomainEventEnvelope
@@ -16,6 +19,12 @@ from solomon.store.outbox import OutboxRecord
 
 class AuthoritySourceNotFoundError(KeyError):
     pass
+
+
+class AuthorityPollDeadLetter(SolomonModel):
+    record: OutboxRecord
+    dead_lettered_at: datetime
+    reason: str = Field(min_length=1)
 
 
 class SQLiteAuthoritySourceRegistry:
@@ -64,10 +73,20 @@ class SQLiteAuthoritySourceRegistry:
                     delivered_at TEXT,
                     delivery_attempts INTEGER NOT NULL,
                     last_error TEXT,
+                    dead_lettered_at TEXT,
+                    dead_letter_reason TEXT,
                     event_json TEXT NOT NULL
                 )
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in self._conn.execute("PRAGMA table_info(authority_poll_outbox)").fetchall()
+            }
+            if "dead_lettered_at" not in columns:
+                self._conn.execute("ALTER TABLE authority_poll_outbox ADD COLUMN dead_lettered_at TEXT")
+            if "dead_letter_reason" not in columns:
+                self._conn.execute("ALTER TABLE authority_poll_outbox ADD COLUMN dead_letter_reason TEXT")
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_authority_poll_outbox_pending "
                 "ON authority_poll_outbox(delivered_at, available_at, event_id)"
@@ -150,7 +169,7 @@ class SQLiteAuthoritySourceRegistry:
             """
             SELECT event_json, available_at, delivered_at, delivery_attempts, last_error
             FROM authority_poll_outbox
-            WHERE delivered_at IS NULL AND available_at <= ?
+            WHERE delivered_at IS NULL AND dead_lettered_at IS NULL AND available_at <= ?
             ORDER BY available_at, event_id LIMIT ?
             """,
             (cutoff, limit),
@@ -203,7 +222,16 @@ class SQLiteAuthoritySourceRegistry:
                 )
         return record.model_copy(update={"delivered_at": completed, "delivery_attempts": record.delivery_attempts + 1})
 
-    def record_poll_failure(self, event_id: str, *, error: str) -> OutboxRecord:
+    def record_poll_failure(
+        self,
+        event_id: str,
+        *,
+        error: str,
+        retry_at: datetime | None = None,
+        dead_letter: bool = False,
+        failed_at: datetime | None = None,
+    ) -> OutboxRecord:
+        failure_at = _ensure_aware_utc(failed_at or now_utc())
         with self._conn:
             row = self._conn.execute(
                 """
@@ -217,14 +245,79 @@ class SQLiteAuthoritySourceRegistry:
             record = self._outbox_record(row)
             if record.delivered_at is not None:
                 return record
+            available_at = (
+                _ensure_aware_utc(retry_at).isoformat() if retry_at is not None else record.available_at.isoformat()
+            )
             self._conn.execute(
                 """
                 UPDATE authority_poll_outbox
-                SET delivery_attempts = delivery_attempts + 1, last_error = ? WHERE event_id = ?
+                SET delivery_attempts = delivery_attempts + 1, last_error = ?, available_at = ?,
+                    dead_lettered_at = ?, dead_letter_reason = ?
+                WHERE event_id = ?
                 """,
-                (error[:500], event_id),
+                (
+                    error[:500],
+                    available_at,
+                    failure_at.isoformat() if dead_letter else None,
+                    error[:500] if dead_letter else None,
+                    event_id,
+                ),
             )
-        return record.model_copy(update={"delivery_attempts": record.delivery_attempts + 1, "last_error": error[:500]})
+        return record.model_copy(
+            update={
+                "available_at": datetime.fromisoformat(available_at),
+                "delivery_attempts": record.delivery_attempts + 1,
+                "last_error": error[:500],
+            }
+        )
+
+    def dead_letter_poll_events(self, *, limit: int = 100) -> builtins.list[AuthorityPollDeadLetter]:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        rows = self._conn.execute(
+            """
+            SELECT event_json, available_at, delivered_at, delivery_attempts, last_error,
+                   dead_lettered_at, dead_letter_reason
+            FROM authority_poll_outbox
+            WHERE dead_lettered_at IS NOT NULL
+            ORDER BY dead_lettered_at, event_id LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [
+            AuthorityPollDeadLetter(
+                record=self._outbox_record(row),
+                dead_lettered_at=datetime.fromisoformat(str(row["dead_lettered_at"])),
+                reason=str(row["dead_letter_reason"]),
+            )
+            for row in rows
+        ]
+
+    def requeue_dead_letter(self, event_id: str, *, available_at: datetime | None = None) -> OutboxRecord:
+        retry_at = _ensure_aware_utc(available_at or now_utc())
+        with self._conn:
+            row = self._conn.execute(
+                """
+                SELECT event_json, available_at, delivered_at, delivery_attempts, last_error, dead_lettered_at
+                FROM authority_poll_outbox WHERE event_id = ?
+                """,
+                (event_id,),
+            ).fetchone()
+            if row is None:
+                raise AuthorityPollEventNotFoundError(event_id)
+            if row["dead_lettered_at"] is None:
+                raise ValueError("authority poll event is not dead-lettered")
+            record = self._outbox_record(row)
+            self._conn.execute(
+                """
+                UPDATE authority_poll_outbox
+                SET available_at = ?, delivery_attempts = 0, last_error = NULL,
+                    dead_lettered_at = NULL, dead_letter_reason = NULL
+                WHERE event_id = ?
+                """,
+                (retry_at.isoformat(), event_id),
+            )
+        return record.model_copy(update={"available_at": retry_at, "delivery_attempts": 0, "last_error": None})
 
     def _schedule_source_poll(self, source: AuthoritySource, due_at: datetime) -> OutboxRecord | None:
         with self._conn:
@@ -260,10 +353,11 @@ class SQLiteAuthoritySourceRegistry:
             self._conn.execute(
                 """
                 INSERT OR IGNORE INTO authority_poll_outbox
-                (event_id, source_id, available_at, delivered_at, delivery_attempts, last_error, event_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (event_id, source_id, available_at, delivered_at, delivery_attempts, last_error,
+                 dead_lettered_at, dead_letter_reason, event_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (event.event_id, source.id, due_at.isoformat(), None, 0, None, event.model_dump_json()),
+                (event.event_id, source.id, due_at.isoformat(), None, 0, None, None, None, event.model_dump_json()),
             )
             self._conn.execute(
                 "UPDATE authority_poll_state SET next_due_at = ? WHERE source_id = ?",
@@ -288,6 +382,7 @@ class AuthorityPollEventNotFoundError(KeyError):
 
 __all__ = [
     "AuthorityPollEventNotFoundError",
+    "AuthorityPollDeadLetter",
     "AuthoritySourceNotFoundError",
     "SQLiteAuthoritySourceRegistry",
 ]

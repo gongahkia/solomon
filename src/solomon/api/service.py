@@ -100,6 +100,7 @@ from solomon.sources.store import (
     SQLiteDocumentStore,
 )
 from solomon.sources.sync import FilesystemSourceSynchronizer
+from solomon.store.encryption import ContentEnvelopeCipher
 from solomon.store.factory import create_storage_bundle
 from solomon.store.outbox import OutboxRecord
 from solomon.store.sqlite import ItemNotFoundError
@@ -185,6 +186,7 @@ class SolomonService:
         credence_policy: CredencePolicy | None = None,
         credence_policy_version: str = "credence-policy.v1",
         embedding_provider: RetrievalEmbeddingProvider | None = None,
+        content_cipher: ContentEnvelopeCipher | None = None,
     ) -> None:
         data_dir.mkdir(parents=True, exist_ok=True)
         journal_dir.mkdir(parents=True, exist_ok=True)
@@ -208,7 +210,7 @@ class SolomonService:
             credence=self.credence,
         )
         self.audit = AuditJournal(journal_dir / "journal.jsonl")
-        self.document_store = SQLiteDocumentStore(data_dir / "sources.sqlite3")
+        self.document_store = SQLiteDocumentStore(data_dir / "sources.sqlite3", content_cipher=content_cipher)
         self.authority_sources = SQLiteAuthoritySourceRegistry(data_dir / "authority-sources.sqlite3")
         self.workflow_store = SQLiteWorkflowStore(data_dir / "workflow.sqlite3")
         self.attestation_key = attestation_key
@@ -259,6 +261,36 @@ class SolomonService:
                 "principal is not authorized for service operation",
                 details={"operation": operation},
             )
+
+    def _audit_content_encryption(
+        self,
+        *,
+        source_id: str,
+        document_id: str | None = None,
+        candidate_count: int = 0,
+        document_count: int = 1,
+    ) -> None:
+        cipher = self.document_store.content_cipher
+        if cipher is None:
+            return
+        authorization = _service_authorization.get()
+        actor_id = authorization.principal.subject if authorization is not None else "system:content-encryption"
+        correlation_id = (
+            authorization.correlation_id if authorization is not None else f"content-encryption:{source_id}"
+        )
+        self.audit.append(
+            "content_envelope_encryption",
+            {
+                "decision": "allowed",
+                "protection": "envelope-encrypted",
+                "key_ref": cipher.key_ref,
+                "source_id": source_id,
+                "document_id": document_id,
+                "document_count": document_count,
+                "candidate_count": candidate_count,
+            },
+            attribution=AuditAttribution(actor_id=actor_id, correlation_id=correlation_id),
+        )
 
     def ingest(self, request: IngestRequest) -> KnowledgeItem:
         return self._ingestion.ingest(request)
@@ -342,6 +374,12 @@ class SolomonService:
             }
         )
         self.document_store.write_sync_run(completed)
+        if completed.created or completed.updated:
+            self._audit_content_encryption(
+                source_id=source_id,
+                candidate_count=0,
+                document_count=completed.created + completed.updated,
+            )
         self.audit.append(
             "document_source_synced",
             {
@@ -365,10 +403,20 @@ class SolomonService:
             document.extraction_state is DocumentExtractionState.READY
             and not self.document_store.list_candidates(document.id)
         ):
+            candidates: list[CandidateClaim] = []
             for content, start, end in candidate_claims_from_text(document.content):
-                self.document_store.add_candidate(
-                    CandidateClaim(document_id=document.id, content=content, start_offset=start, end_offset=end)
+                candidates.append(
+                    self.document_store.add_candidate(
+                        CandidateClaim(document_id=document.id, content=content, start_offset=start, end_offset=end)
+                    )
                 )
+        else:
+            candidates = []
+        self._audit_content_encryption(
+            source_id=source_id,
+            document_id=document.id,
+            candidate_count=len(candidates),
+        )
         self.audit.append(
             "source_document_extraction_retried",
             {
@@ -417,6 +465,11 @@ class SolomonService:
                 )
                 for content, start, end in candidate_claims_from_text(document.content)
             ]
+        self._audit_content_encryption(
+            source_id=source_id,
+            document_id=document.id,
+            candidate_count=len(candidates),
+        )
         self.audit.append(
             "source_document_ingested",
             {

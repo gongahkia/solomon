@@ -20,6 +20,7 @@ from solomon.orchestrator.retrieval import (
     OpenAICompatibleEmbeddingProvider,
     RetrievalEmbeddingProvider,
 )
+from solomon.store.encryption import ContentEnvelopeCipher
 
 
 class Settings(BaseSettings):
@@ -43,6 +44,8 @@ class Settings(BaseSettings):
     oidc_role_claim: str = Field(default="roles", min_length=1)
     oidc_role_mappings: dict[str, str] = Field(default_factory=dict)
     database_url: str = "sqlite:///./solomon-data/solomon.sqlite3"
+    content_encryption_key_ref: str | None = Field(default=None, min_length=1, max_length=256)
+    content_encryption_key: SecretStr | None = None
     local_model_url: str = "http://127.0.0.1:11434/api/generate"
     local_model_name: str = "qwen2.5-coder:1.5b"
     remote_model_url: str | None = None
@@ -93,6 +96,13 @@ class Settings(BaseSettings):
         oidc_configuration_missing = self.oidc_issuer is None and not self.server_api_key
         if self.sku == "server" and self.server_auth_mode == "oidc" and oidc_configuration_missing:
             raise ValueError("OIDC server mode requires issuer, audience, and role mappings")
+        if (self.content_encryption_key_ref is None) != (self.content_encryption_key is None):
+            raise ValueError("content encryption key reference and key must be configured together")
+        if self.content_encryption_key_ref is not None and self.content_encryption_key is not None:
+            ContentEnvelopeCipher(
+                key_ref=self.content_encryption_key_ref,
+                wrapping_key=self.content_encryption_key,
+            )
         if self.console_role not in OIDC_AUTH_ROLES:
             raise ValueError("console role must be a Solomon role")
         if self.zero_egress_mode and self.allow_remote_egress:
@@ -125,6 +135,8 @@ class Settings(BaseSettings):
             "boundary_timeout_seconds": self.boundary_timeout_seconds,
             "jurisdiction": self.jurisdiction,
             "database_url": self.database_url,
+            "content_encryption_configured": self.content_encryption_key is not None,
+            "content_encryption_key_ref": self.content_encryption_key_ref,
             "server_auto_provision_tenants": self.server_auto_provision_tenants,
             "oidc_configured": self.oidc_issuer is not None,
             "oidc_clock_skew_seconds": self.oidc_clock_skew_seconds,
@@ -183,6 +195,15 @@ def embedding_provider_from_settings(settings: Settings) -> RetrievalEmbeddingPr
             dimensions=settings.embedding_dimensions,
         )
     return HashedEmbeddingProvider()
+
+
+def content_envelope_from_settings(settings: Settings) -> ContentEnvelopeCipher | None:
+    if settings.content_encryption_key_ref is None or settings.content_encryption_key is None:
+        return None
+    return ContentEnvelopeCipher(
+        key_ref=settings.content_encryption_key_ref,
+        wrapping_key=settings.content_encryption_key,
+    )
 
 
 def verification_policy_from_settings(settings: Settings) -> VerificationPolicy:

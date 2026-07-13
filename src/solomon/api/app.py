@@ -72,6 +72,7 @@ from solomon.boundary.solomon import BoundaryImportStatus, SolomonBoundary, prob
 from solomon.config import (
     Settings,
     boundary_policy_from_settings,
+    content_envelope_from_settings,
     credence_policy_from_settings,
     embedding_provider_from_settings,
     get_settings,
@@ -159,6 +160,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     vp = verification_policy_from_settings(resolved_settings)
     cp = credence_policy_from_settings(resolved_settings)
     embedding_provider = embedding_provider_from_settings(resolved_settings)
+    content_cipher = content_envelope_from_settings(resolved_settings)
     service = SolomonService(
         data_dir=resolved_settings.data_dir,
         journal_dir=resolved_settings.journal_dir,
@@ -167,6 +169,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         verification_policy=vp, verification_policy_version=resolved_settings.verification_policy_version,
         credence_policy=cp, credence_policy_version=resolved_settings.credence_policy_version,
         embedding_provider=embedding_provider,
+        content_cipher=content_cipher,
         boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
     )
     tenant_services: dict[str, SolomonService] = {}
@@ -186,6 +189,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             verification_policy=vp, verification_policy_version=resolved_settings.verification_policy_version,
             credence_policy=cp, credence_policy_version=resolved_settings.credence_policy_version,
             embedding_provider=embedding_provider,
+            content_cipher=content_cipher,
             boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
         )
         metrics.attach(tenant_service)

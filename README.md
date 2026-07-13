@@ -464,6 +464,19 @@ SOLOMON_OIDC_ROLE_CLAIM=roles \
 SOLOMON_OIDC_ROLE_MAPPINGS='{"firm-admin":"admin","firm-lawyer":"lawyer","connector":"integration"}'
 ```
 
+Envelope-encrypt source-document and candidate-claim content at rest by supplying a non-secret key reference and a
+Base64-encoded 32-byte AES-256 key through the deployment secret manager. The key value is not included in diagnostics
+or audit records.
+
+```bash
+SOLOMON_CONTENT_ENCRYPTION_KEY_REF='kms://firm-keyring/solomon-content/v1' \
+SOLOMON_CONTENT_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+uv run uvicorn solomon.api.app:create_app --factory --host 0.0.0.0 --port 8140
+```
+
+Changing the reference or key prevents startup from reading existing encrypted content; restore the matching key
+before rotating data through an approved migration.
+
 Create tenant-bound integration credentials with an admin principal. The generated credential is shown only on
 creation or rotation; keep it in a secret manager. Solomon stores only a PBKDF2-SHA256 hash, requires the bound
 `x-tenant-id` on each request, enforces its configured scopes, and denies it after revocation.

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from solomon.contracts import SyncCheckpoint
 from solomon.currency.models import now_utc
@@ -17,6 +20,7 @@ from solomon.sources.models import (
     SourceDocument,
     SourceSyncRun,
 )
+from solomon.store.encryption import ContentEnvelopeCipher, ContentEnvelopeError
 
 
 class SourceNotFoundError(KeyError):
@@ -34,8 +38,9 @@ class CandidateClaimNotFoundError(KeyError):
 class SQLiteDocumentStore:
     """Append-oriented source-document and candidate-claim store for local deployments."""
 
-    def __init__(self, path: Path | str) -> None:
+    def __init__(self, path: Path | str, *, content_cipher: ContentEnvelopeCipher | None = None) -> None:
         self.path = Path(path)
+        self.content_cipher = content_cipher
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
@@ -135,6 +140,7 @@ class SQLiteDocumentStore:
                 "CREATE INDEX IF NOT EXISTS idx_source_sync_runs "
                 "ON source_sync_runs(source_id, started_at DESC, run_id DESC)"
             )
+            self._migrate_plaintext_content()
 
     def upsert_source(self, source: DocumentSource) -> DocumentSource:
         with self._conn:
@@ -206,7 +212,7 @@ class SQLiteDocumentStore:
                     document.extraction_state.value,
                     document.deleted_at.isoformat() if document.deleted_at else None,
                     document.ingested_at.isoformat(),
-                    document.model_dump_json(),
+                    self._document_json(document),
                 ),
             )
             self._record_change_event(document, previous=latest)
@@ -235,7 +241,7 @@ class SQLiteDocumentStore:
         ).fetchone()
         if row is None:
             raise SourceDocumentNotFoundError(document_id)
-        return SourceDocument.model_validate_json(str(row["document_json"]))
+        return self._document_from_json(str(row["document_json"]))
 
     def list_documents(self, source_id: str) -> list[SourceDocument]:
         rows = self._conn.execute(
@@ -246,7 +252,7 @@ class SQLiteDocumentStore:
             """,
             (source_id,),
         ).fetchall()
-        return [SourceDocument.model_validate_json(str(row["document_json"])) for row in rows]
+        return [self._document_from_json(str(row["document_json"])) for row in rows]
 
     def list_latest_documents(self, source_id: str) -> list[SourceDocument]:
         latest: dict[str, SourceDocument] = {}
@@ -264,7 +270,7 @@ class SQLiteDocumentStore:
             """,
             (source_id, external_id),
         ).fetchall()
-        return [SourceDocument.model_validate_json(str(row["document_json"])) for row in rows]
+        return [self._document_from_json(str(row["document_json"])) for row in rows]
 
     def list_change_events(self, source_id: str, *, external_id: str | None = None) -> list[SourceChangeEvent]:
         if external_id is None:
@@ -298,7 +304,7 @@ class SQLiteDocumentStore:
                     candidate.document_id,
                     candidate.status.value,
                     candidate.created_at.isoformat(),
-                    candidate.model_dump_json(),
+                    self._candidate_json(candidate),
                 ),
             )
         return candidate
@@ -309,7 +315,7 @@ class SQLiteDocumentStore:
         ).fetchone()
         if row is None:
             raise CandidateClaimNotFoundError(candidate_id)
-        return CandidateClaim.model_validate_json(str(row["candidate_json"]))
+        return self._candidate_from_json(str(row["candidate_json"]))
 
     def list_candidates(
         self,
@@ -330,7 +336,7 @@ class SQLiteDocumentStore:
                 """,
                 (document_id, status.value),
             ).fetchall()
-        return [CandidateClaim.model_validate_json(str(row["candidate_json"])) for row in rows]
+        return [self._candidate_from_json(str(row["candidate_json"])) for row in rows]
 
     def update_candidate(self, candidate: CandidateClaim) -> CandidateClaim:
         with self._conn:
@@ -339,7 +345,7 @@ class SQLiteDocumentStore:
                 UPDATE candidate_claims SET status = ?, candidate_json = ?
                 WHERE candidate_id = ?
                 """,
-                (candidate.status.value, candidate.model_dump_json(), candidate.id),
+                (candidate.status.value, self._candidate_json(candidate), candidate.id),
             )
         if result.rowcount == 0:
             raise CandidateClaimNotFoundError(candidate.id)
@@ -420,7 +426,63 @@ class SQLiteDocumentStore:
             """,
             (source_id, external_id),
         ).fetchone()
-        return SourceDocument.model_validate_json(str(row["document_json"])) if row is not None else None
+        return self._document_from_json(str(row["document_json"])) if row is not None else None
+
+    def _migrate_plaintext_content(self) -> None:
+        if self.content_cipher is None:
+            return
+        document_rows = self._conn.execute("SELECT document_id, document_json FROM source_documents").fetchall()
+        for row in document_rows:
+            document = self._document_from_json(str(row["document_json"]))
+            raw = json.loads(str(row["document_json"]))
+            if isinstance(raw.get("content"), str):
+                self._conn.execute(
+                    "UPDATE source_documents SET document_json = ? WHERE document_id = ?",
+                    (self._document_json(document), document.id),
+                )
+        candidate_rows = self._conn.execute("SELECT candidate_id, candidate_json FROM candidate_claims").fetchall()
+        for row in candidate_rows:
+            candidate = self._candidate_from_json(str(row["candidate_json"]))
+            raw = json.loads(str(row["candidate_json"]))
+            if isinstance(raw.get("content"), str):
+                self._conn.execute(
+                    "UPDATE candidate_claims SET candidate_json = ? WHERE candidate_id = ?",
+                    (self._candidate_json(candidate), candidate.id),
+                )
+
+    def _document_json(self, document: SourceDocument) -> str:
+        payload = document.model_dump(mode="json")
+        payload["content"] = self._encrypt_content(document.content, f"source-document:{document.id}:content")
+        return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+    def _document_from_json(self, raw: str) -> SourceDocument:
+        payload = json.loads(raw)
+        payload["content"] = self._decrypt_content(payload.get("content"), f"source-document:{payload['id']}:content")
+        return SourceDocument.model_validate(payload)
+
+    def _candidate_json(self, candidate: CandidateClaim) -> str:
+        payload = candidate.model_dump(mode="json")
+        payload["content"] = self._encrypt_content(candidate.content, f"candidate-claim:{candidate.id}:content")
+        return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+    def _candidate_from_json(self, raw: str) -> CandidateClaim:
+        payload = json.loads(raw)
+        payload["content"] = self._decrypt_content(payload.get("content"), f"candidate-claim:{payload['id']}:content")
+        return CandidateClaim.model_validate(payload)
+
+    def _encrypt_content(self, content: str, associated_data: str) -> str | dict[str, Any]:
+        if self.content_cipher is None:
+            return content
+        return self.content_cipher.encrypt(content, associated_data=associated_data)
+
+    def _decrypt_content(self, content: object, associated_data: str) -> str:
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, Mapping):
+            raise ContentEnvelopeError("stored content is invalid")
+        if self.content_cipher is None:
+            raise ContentEnvelopeError("encrypted content requires a configured key reference")
+        return self.content_cipher.decrypt(content, associated_data=associated_data)
 
     def _record_change_event(self, document: SourceDocument, *, previous: SourceDocument | None) -> None:
         if document.extraction_state is DocumentExtractionState.DELETED:

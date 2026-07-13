@@ -51,6 +51,15 @@ only its PBKDF2-SHA256 hash. A service principal presents the credential with `x
 `x-tenant-id`; it cannot authenticate for another tenant. Its explicit scopes are enforced before dispatch, and
 authentication plus lifecycle decisions are metadata-only, hash-chained audit entries with actor and correlation ID.
 
+Source-document and candidate-claim content can use envelope encryption when both
+`SOLOMON_CONTENT_ENCRYPTION_KEY_REF` and `SOLOMON_CONTENT_ENCRYPTION_KEY` are configured. Solomon generates a
+unique AES-256-GCM data-encryption key per content field and wraps it with the configured AES-256 key-encryption key
+using AES Key Wrap; the envelope stores the non-secret key reference, wrapped data key, nonce, and ciphertext. The
+key value is a Base64-encoded 32-byte secret supplied by the deployment's secret injector and is never written to
+diagnostics, audit entries, or the database. Existing plaintext source-document and candidate-claim rows are migrated
+when encryption is enabled; unavailable references or authentication failures fail closed. Encryption decisions are
+metadata-only audit entries with actor and correlation ID.
+
 Optional server OIDC authentication requires `SOLOMON_OIDC_ISSUER` and `SOLOMON_OIDC_AUDIENCE`. The issuer must
 be HTTPS; Solomon obtains signing keys from its discovery document, caches JWKS entries, refreshes once for an
 unknown `kid`, and accepts only RS256 or ES256 JWTs with matching issuer, audience, expiry, and clock-skew checks.

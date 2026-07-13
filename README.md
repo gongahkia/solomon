@@ -582,6 +582,14 @@ of them before exposing either port. Validate the Compose model without starting
 scripts/check_production_compose.sh
 ```
 
+### Kubernetes Helm
+
+[`charts/solomon`](./charts/solomon/) deploys the server services with OIDC, a migration hook, API, console, worker,
+optional self-hosted pgvector, ingress, and Prometheus/OTLP configuration. It accepts existing Secret references only;
+it does not render secret values. The shared durable-state PVC defaults to `ReadWriteMany` because metadata and the
+audit journal remain local files. See the [chart README](./charts/solomon/README.md) for required secrets, OIDC values,
+external Postgres, ingress TLS, and validation.
+
 ## Documentation
 
 - [`docs/architecture.md`](./docs/architecture.md): service architecture, deterministic primitive plans,

@@ -8,6 +8,8 @@
 - `Dockerfile` and `docker-compose.production.yml` build a self-hosted server profile with pgvector, migrations,
   API, console, and a filesystem-source worker. See the production Compose section in the root README for secret files
   and the startup command.
+- `charts/solomon` is the self-hosted Kubernetes chart. It requires existing secret references, supports OIDC,
+  pgvector or an external PostgreSQL deployment, ingress, worker, migration hooks, and Prometheus/OTLP configuration.
 
 ## v0.1.0 release artifacts
 

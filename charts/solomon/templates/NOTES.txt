@@ -1,0 +1,13 @@
+Solomon is deployed with OIDC, PostgreSQL/pgvector, a migration hook, API, console, and worker.
+
+Create the referenced Kubernetes Secrets before install. The chart never renders secret data.
+Use `helm upgrade --install --wait` so the migration hook completes before the app resources are released.
+
+{{- if .Values.api.ingress.enabled }}
+API ingress hosts:
+{{- range .Values.api.ingress.hosts }}
+  - https://{{ .host }}
+{{- end }}
+{{- else }}
+API service: {{ include "solomon.fullname" . }}-api:{{ .Values.api.service.port }}
+{{- end }}

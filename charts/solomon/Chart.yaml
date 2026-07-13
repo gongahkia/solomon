@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: v2
+name: solomon
+description: Self-hosted Solomon server deployment with OIDC, pgvector, worker, ingress, and observability.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"

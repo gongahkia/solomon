@@ -36,7 +36,10 @@ class SchemaMigration:
 
 def apply_sqlite_migrations(connection: Any, migrations: Sequence[SchemaMigration]) -> list[SchemaMigration]:
     ordered = _validate_migrations(migrations)
-    with connection:
+    owns_transaction = not connection.in_transaction
+    if owns_transaction:
+        connection.execute("BEGIN IMMEDIATE")
+    try:
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -67,6 +70,12 @@ def apply_sqlite_migrations(connection: Any, migrations: Sequence[SchemaMigratio
                     now_utc().isoformat(),
                 ),
             )
+    except Exception:
+        if owns_transaction:
+            connection.rollback()
+        raise
+    if owns_transaction:
+        connection.commit()
     return pending
 
 

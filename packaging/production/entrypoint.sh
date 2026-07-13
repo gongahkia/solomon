@@ -32,7 +32,12 @@ if [ -n "${SOLOMON_DATABASE_HOST:-}" ]; then
     : "${SOLOMON_DATABASE_USER:?set SOLOMON_DATABASE_USER}"
     : "${SOLOMON_DATABASE_NAME:?set SOLOMON_DATABASE_NAME}"
     encoded_password="$(printf %s "$POSTGRES_PASSWORD" | python -c 'import sys; from urllib.parse import quote; print(quote(sys.stdin.read(), safe=""))')"
-    export SOLOMON_DATABASE_URL="postgresql://${SOLOMON_DATABASE_USER}:${encoded_password}@${SOLOMON_DATABASE_HOST}:${SOLOMON_DATABASE_PORT:-5432}/${SOLOMON_DATABASE_NAME}"
+    ssl_query=""
+    if [ -n "${SOLOMON_DATABASE_SSLMODE:-}" ]; then
+        encoded_sslmode="$(printf %s "$SOLOMON_DATABASE_SSLMODE" | python -c 'import sys; from urllib.parse import quote; print(quote(sys.stdin.read(), safe=""))')"
+        ssl_query="?sslmode=${encoded_sslmode}"
+    fi
+    export SOLOMON_DATABASE_URL="postgresql://${SOLOMON_DATABASE_USER}:${encoded_password}@${SOLOMON_DATABASE_HOST}:${SOLOMON_DATABASE_PORT:-5432}/${SOLOMON_DATABASE_NAME}${ssl_query}"
     unset POSTGRES_PASSWORD
 fi
 

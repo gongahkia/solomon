@@ -1,0 +1,147 @@
+# SPDX-License-Identifier: Apache-2.0
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: solomon
+  tag: production
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+serviceAccount:
+  create: false
+  name: ""
+  annotations: {}
+
+auth:
+  mode: oidc
+  oidc:
+    issuer: ""
+    audience: ""
+    roleClaim: roles
+    roleMappings: {}
+  legacyApiKeySecret:
+    name: ""
+    key: server_api_key
+
+secrets:
+  contentEncryption:
+    existingSecret: ""
+    key: content_encryption_key
+    keyRef: ""
+
+database:
+  existingSecret: ""
+  passwordKey: password
+  user: solomon
+  name: solomon
+  host: ""
+  port: 5432
+  sslMode: ""
+
+postgresql:
+  enabled: true
+  image:
+    repository: pgvector/pgvector
+    tag: 0.8.2-pg16-bookworm
+    pullPolicy: IfNotPresent
+  service:
+    port: 5432
+  persistence:
+    existingClaim: ""
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 20Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+persistence:
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteMany
+  size: 10Gi
+
+api:
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8140
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts: []
+    tls: []
+
+console:
+  enabled: true
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8150
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts: []
+    tls: []
+
+worker:
+  replicaCount: 1
+  sourceSyncIntervalSeconds: 300
+  sourceSyncLimit: 100
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+migrations:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 300
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+observability:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: false
+      interval: 30s
+      labels: {}
+  openTelemetry:
+    enabled: false
+    serviceName: solomon
+    endpoint: ""
+
+podAnnotations: {}
+podLabels: {}

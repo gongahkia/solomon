@@ -13,6 +13,7 @@ dist/
 htmlcov/
 solomon-data/
 solomon-journal/
+site/
 *.db
 *.sqlite
 *.sqlite3

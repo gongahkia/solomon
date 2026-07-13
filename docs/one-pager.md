@@ -41,4 +41,5 @@ those systems, monitor every authority, or decide legal correctness.
 Ask: What is current? What changed? Which matters are affected? Who verified the position? What evidence supports the
 answer? Solomon stores the evidence required to answer those questions reproducibly.
 
-See the [README](../README.md), [positioning](./positioning.md), and [known limitations](./known-limitations.md).
+See the [README](https://github.com/gongahkia/solomon), [positioning](./positioning.md), and
+[known limitations](./known-limitations.md).

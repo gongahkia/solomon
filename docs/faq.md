@@ -18,7 +18,8 @@ and evidence primitives to an MCP host. A host may use Solomon before it reuses 
 
 Solomon's audit journal is metadata-only, and boundary mappings are volatile after reidentification. Those design
 choices do not determine a firm's retention, legal-hold, privilege, DMS, model-provider, or deployment obligations.
-Validate the complete data path before processing client information. See [Boundary and memory](../README.md#boundary-and-memory).
+Validate the complete data path before processing client information. See
+[Boundary and memory](https://github.com/gongahkia/solomon#boundary-and-memory).
 
 ## What about ABA Formal Opinion 512, SRA, and PDPA?
 

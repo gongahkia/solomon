@@ -21,7 +21,8 @@ uv run solomon ingest "Structure X relies on Regulation R section 12." --source-
 
 ## Stdio config
 
-Use [`examples/mcp/mcp.json`](../../examples/mcp/mcp.json) as the shared stdio config.
+Use [`examples/mcp/mcp.json`](https://github.com/gongahkia/solomon/blob/main/examples/mcp/mcp.json) as the shared
+stdio config.
 
 Replace `/absolute/path/to/solomon` with this repo path. The server command is:
 

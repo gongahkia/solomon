@@ -47,9 +47,12 @@ Solomon is one system with three separable layers. The distinction is not cosmet
 |---|---|---|---|---|
 | **Boundary** | What is safe to let leave the building? | Regulated safety infrastructure | **Stateless** — forgets by design | Python/FastAPI |
 | **Currency engine** | Is what we know still true, and can we prove it? | Domain reasoning under constraints | **Never forgets** — currency is the problem | Python |
-| **MCP/API layer** | How do existing legal-AI tools ask for current firm context? | Infra-grade integration surface | **Just-in-time** — injects only scoped, current context | MCP, HTTP API, thin CLI |
+| **MCP/API layer** | How do compatible hosts ask for current firm context? | Infra-grade integration surface | **Just-in-time** — injects only scoped, current context | MCP, HTTP API, CLI |
 
-The boundary is a native Solomon subset, not a separate product. The currency engine is the source of truth. The MCP/API layer is the primary product surface: Claude, Copilot, Harvey-like vendors, iManage-style knowledge systems, and internal tools should call Solomon for preflight context, currency checks, impact analysis, verification writes, and audit packs. A standalone curator console exists only as a thin side-channel for human review; it is not the destination app and it does not replace the legal tools lawyers already use.
+The boundary is a native Solomon subset, not a separate product. The currency engine is the source of truth. The MCP/API
+layer exposes a generic host-facing surface for preflight context, currency checks, impact analysis, verification writes,
+and audit packs. The curator console is a first-class operational review surface; it does not replace the legal tools
+lawyers already use.
 
 Solomon rejects age/usage decay because currency, not significance-fade, is the legal problem.
 
@@ -57,7 +60,10 @@ Solomon rejects age/usage decay because currency, not significance-fade, is the 
 
 The 2026 legal-AI adoption pattern is embedded assistance, not another destination workspace. On 12 May 2026, Legaltech Hub reported Anthropic's Claude for Legal launch as 12 legal plugins plus 20+ MCP connectors built with legal-tech providers inside the existing Claude surface; Reuters Connect separately reported Anthropic giving law firms secure access from Claude into third-party legal research, document-management, and AI products. Microsoft documents Microsoft 365 Copilot as working in the context of Word, Excel, PowerPoint, Outlook, Teams, and other Microsoft 365 apps, with responses grounded in work content the user can access; Microsoft also made agentic Word, Excel, and PowerPoint capabilities generally available in April 2026. Spellbook's own positioning is the same pattern: draft and review directly in Word, without window-switching.
 
-[Inference] Solomon should therefore be infrastructure first. The winning interface is whichever surface the lawyer or vendor already has open; Solomon's job is to provide scoped, current, boundary-checked firm context to that surface through MCP/API calls. The curator console remains deliberately small: it handles verification, dependency review, and audit-pack export, but it does not become chat, retrieval, drafting, or DMS UI.
+[Inference] Solomon should therefore be infrastructure first. The winning interface is whichever compatible host a lawyer
+already has open; Solomon's job is to provide scoped, current, boundary-checked firm context through MCP/API calls. The
+curator console is a first-class operational surface for verification, dependency review, and audit-pack export; it does
+not become chat, retrieval, drafting, or DMS UI.
 
 Sources checked: [Legaltech Hub, "Anthropic Unveils 'Claude for Legal'..." (2026-05-12)](https://www.legaltechnologyhub.com/contents/anthropic-unveils-claude-for-legal-with-12-new-plugins-20-mcp-connectors-and-more/); [Reuters Connect via The Daily Record, "Anthropic expands Claude's AI tools..." (2026-05-13)](https://thedailyrecord.com/2026/05/13/anthropic-expands-claude-ai-tools-law-firms/); [Microsoft Learn, "Microsoft 365 Copilot overview"](https://learn.microsoft.com/en-us/microsoft-365/copilot/microsoft-365-copilot-overview); [Microsoft 365 Blog, "Copilot's agentic capabilities..." (2026-04-22)](https://www.microsoft.com/en-us/microsoft-365/blog/2026/04/22/copilots-agentic-capabilities-in-word-excel-and-powerpoint-are-generally-available/); [Spellbook product site, "Works in Word"](https://spellbook.com/).
 
@@ -95,13 +101,15 @@ The boundary is solved. The currency engine is the project.
 
 ## 6. Architecture
 
-A Python infrastructure layer inside the firm perimeter. Durable knowledge never leaves; external work surfaces call Solomon over MCP/API for scoped, current, boundary-checked context. The curator console is a side-channel for review and export, not the primary lawyer interface.
+A Python infrastructure layer inside the firm perimeter. Durable knowledge never leaves; compatible hosts call Solomon
+over MCP/API for scoped, current, boundary-checked context. The curator console is a first-class operational interface
+for review and export, not a lawyer drafting interface.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  EXISTING WORK SURFACES                                                     │
 │                                                                              │
-│  Claude / Claude Code      Microsoft Copilot      Harvey-like vendor agent   │
+│  MCP-compatible host       Internal workflow      Service client              │
 │          │                        │                         │                │
 │          └────────────── MCP/API tool calls ────────────────┘                │
 └───────────────────────────────────┬──────────────────────────────────────────┘
@@ -115,7 +123,7 @@ A Python infrastructure layer inside the firm perimeter. Durable knowledge never
 │  └───────────────┬────────────────────────────────────────────────────────┘  │
 │                  │                                                           │
 │  ┌───────────────▼──────────────┐   ┌────────────────────────────────────┐   │
-│  │ Solomon boundary client       │   │ Curator console (side-channel)     │   │
+│  │ Solomon boundary client       │   │ Curator console (operational UI)   │   │
 │  │ /review · /pseudonymize       │   │ human review · dependency confirm  │   │
 │  └───────────────┬──────────────┘   │ audit-pack export                  │   │
 │                  │                  └───────────────┬────────────────────┘   │
@@ -161,7 +169,8 @@ The curator console is limited to three screens:
 2. **Dependency Review** — accept or reject suggested internal/external dependency edges.
 3. **Audit Pack export** — generate provenance, dependency, verification, boundary, and hash-chain artifacts.
 
-It is not a chat surface. It is not a retrieval UI. It is not a drafting product. External legal-AI surfaces call Solomon through MCP/API; the console exists only for human curation actions that need traceable review.
+It is not a chat surface. It is not a retrieval UI. It is not a drafting product. Compatible hosts call Solomon through
+MCP/API; the console provides human curation actions that need traceable review.
 
 ### 6.6 Audit chain
 Append-only journal: what was known, when, on what basis, what verification ran, what crossed the boundary (metadata only). This is the privilege/defensibility artifact.

@@ -166,7 +166,7 @@ The Rust core is the semantic source of truth. Other surfaces are adapters:
   consolidation, human signals, `why`, event/audit inspection, export, and
   optional server mode.
 - The HTTP server is a thin wrapper over the same core API. It currently exposes
-  `/healthz`, `/readyz`, `/inspect`, `/events`, `/audit/{memory_id}`, `/write`,
+  `/healthz`, `/readyz`, `/inspect`, `/events`, `/audit/{memory_id}`, `/write`, `/invalidate`,
   `/recall`, `/timeline`, `/reinforce`, `/consolidate`, `/challenge`,
   `/affirm`, `/correct`, `/pin`, `/unpin`, `/why/{memory_id}`, graph snapshot,
   entity CRUD, relation CRUD, graph traversal, and Tideline

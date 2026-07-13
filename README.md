@@ -166,11 +166,13 @@ Inspection and maintenance:
 Optional server mode:
 
 - `GET /healthz`
+- `GET /capabilities`
 - `GET /readyz`
 - `GET /inspect`
 - `GET /events`
 - `GET /audit/{id}`
 - `POST /write`
+- `POST /invalidate`
 - `POST /recall`
 - `POST /timeline`
 - `POST /reinforce`

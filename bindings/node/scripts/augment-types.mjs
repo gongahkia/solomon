@@ -6,6 +6,21 @@ const path = new URL("../index.d.ts", import.meta.url);
 const marker = "// Shibahama JavaScript shims";
 const additions = `
 ${marker}
+export interface CapabilityDocument {
+  schemaVersion: number
+  version: string
+  memorySchemaVersion: number
+  capabilities: Array<string>
+}
+
+export declare function capabilities(): CapabilityDocument
+
+export interface ShibahamaError extends Error {
+  code: string
+  severity: "recoverable" | "fatal"
+  retryable: boolean
+}
+
 export type EmbedFunction = (text: string) => Array<number> | Promise<Array<number>>
 
 export interface LangChainMemoryOptions {

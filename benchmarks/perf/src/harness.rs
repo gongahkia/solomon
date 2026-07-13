@@ -165,7 +165,7 @@ impl BenchStore {
             store.quality_ids = Some(quality_ids);
         }
 
-        Ok((store, scale as f64 / elapsed_seconds))
+        Ok((store, throughput_items_per_second(scale, elapsed_seconds)?))
     }
 
     fn populated_with_quality_ids(scale: usize, keep_quality_ids: bool) -> BenchResult<Self> {
@@ -543,6 +543,13 @@ fn invalid_input(message: String) -> Box<dyn std::error::Error + Send + Sync> {
     Box::new(IoError::new(ErrorKind::InvalidInput, message))
 }
 
+fn throughput_items_per_second(items: usize, elapsed_seconds: f64) -> BenchResult<f64> {
+    let items = u32::try_from(items)
+        .map_err(|_| invalid_input("benchmark item count exceeds f64-safe range".to_owned()))?;
+
+    Ok(f64::from(items) / elapsed_seconds)
+}
+
 fn timestamp_for(index: usize) -> OffsetDateTime {
     let seconds = i64::try_from(index).unwrap_or(i64::MAX / 2);
 
@@ -597,5 +604,25 @@ fn source_kind_for_index(index: usize) -> SourceKind {
         2 => SourceKind::File,
         3 => SourceKind::Tool,
         _ => SourceKind::Web,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::throughput_items_per_second;
+
+    #[test]
+    fn throughput_converts_a_safe_item_count() {
+        let throughput = throughput_items_per_second(1_000, 2.0)
+            .expect("safe benchmark item count should convert");
+
+        assert!((throughput - 500.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn throughput_rejects_an_imprecise_item_count() {
+        if usize::BITS > u32::BITS {
+            assert!(throughput_items_per_second(usize::MAX, 1.0).is_err());
+        }
     }
 }

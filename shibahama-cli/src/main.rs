@@ -642,6 +642,12 @@ struct ServerRecallRequest {
 }
 
 #[derive(Deserialize)]
+struct ServerInvalidateRequest {
+    memory_id: String,
+    valid_to_unix: i64,
+}
+
+#[derive(Deserialize)]
 struct ServerTimelineRequest {
     query_vector: Vec<f32>,
     top_k: Option<usize>,
@@ -736,20 +742,32 @@ struct ServerGraphTraverseRequest {
 #[derive(Debug)]
 struct ServerError {
     status: StatusCode,
+    code: String,
+    severity: &'static str,
+    retryable: bool,
     message: String,
 }
 
 impl ServerError {
     fn internal(error: impl Display) -> Self {
+        let message = error.to_string();
+        let code = shibahama_error_code(&message).unwrap_or("SHIBA_INTERNAL");
+
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: error.to_string(),
+            code: code.to_owned(),
+            severity: server_error_severity(code),
+            retryable: server_error_retryable(code),
+            message,
         }
     }
 
     fn bad_request(error: impl Display) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
+            code: "SHIBA_INVALID_REQUEST".to_owned(),
+            severity: "fatal",
+            retryable: false,
             message: error.to_string(),
         }
     }
@@ -757,6 +775,9 @@ impl ServerError {
     fn unauthorized(error: impl Display) -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
+            code: "SHIBA_UNAUTHORIZED".to_owned(),
+            severity: "fatal",
+            retryable: false,
             message: error.to_string(),
         }
     }
@@ -764,6 +785,9 @@ impl ServerError {
     fn not_found(error: impl Display) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
+            code: "SHIBA_NOT_FOUND".to_owned(),
+            severity: "fatal",
+            retryable: false,
             message: error.to_string(),
         }
     }
@@ -771,6 +795,9 @@ impl ServerError {
     fn too_many_requests(error: impl Display) -> Self {
         Self {
             status: StatusCode::TOO_MANY_REQUESTS,
+            code: "SHIBA_RATE_LIMITED".to_owned(),
+            severity: "recoverable",
+            retryable: true,
             message: error.to_string(),
         }
     }
@@ -782,10 +809,30 @@ impl IntoResponse for ServerError {
             self.status,
             Json(json!({
                 "error": self.message,
+                "code": self.code,
+                "severity": self.severity,
+                "retryable": self.retryable,
             })),
         )
             .into_response()
     }
+}
+
+fn shibahama_error_code(message: &str) -> Option<&str> {
+    let start = message.find("[SHIBA_")? + 1;
+    let end = message[start..].find(']')? + start;
+    Some(&message[start..end])
+}
+
+fn server_error_severity(code: &str) -> &'static str {
+    match code {
+        "SHIBA_RECALL" | "SHIBA_TASK" => "recoverable",
+        _ => "fatal",
+    }
+}
+
+fn server_error_retryable(code: &str) -> bool {
+    matches!(code, "SHIBA_RECALL" | "SHIBA_TASK")
 }
 
 fn main() -> ExitCode {
@@ -1071,9 +1118,11 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
     };
     let app = Router::new()
         .route("/healthz", get(server_health))
+        .route("/capabilities", get(server_capabilities))
         .route("/readyz", get(server_ready))
         .route("/inspect", get(server_inspect))
         .route("/write", post(server_write))
+        .route("/invalidate", post(server_invalidate))
         .route("/recall", post(server_recall))
         .route("/timeline", post(server_timeline))
         .route("/reinforce", post(server_reinforce))
@@ -2041,6 +2090,10 @@ async fn server_health() -> Json<serde_json::Value> {
     }))
 }
 
+async fn server_capabilities() -> Json<shibahama_core::CapabilityDocument> {
+    Json(shibahama_core::capabilities())
+}
+
 async fn server_ready(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -2249,6 +2302,35 @@ async fn server_write(
             Err(error)
         }
     }
+}
+
+async fn server_invalidate(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerInvalidateRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/invalidate")?;
+    let result: Result<(Json<serde_json::Value>, serde_json::Value), ServerError> = (|| {
+        let id = parse_memory_id(&body.memory_id).map_err(ServerError::bad_request)?;
+        let valid_to = OffsetDateTime::from_unix_timestamp(body.valid_to_unix)
+            .map_err(ServerError::bad_request)?;
+        let mut engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+
+        ensure_memory_in_namespace(&engine, id, &context.namespace)?;
+        let applied = engine
+            .invalidate(id, valid_to)
+            .map_err(ServerError::internal)?;
+
+        Ok((
+            Json(json!({ "applied": applied })),
+            json!({ "request_units": 1, "memory_writes": i32::from(applied) }),
+        ))
+    })();
+
+    server_json_result("POST", "/invalidate", &context, result)
 }
 
 async fn server_recall(
@@ -3741,7 +3823,7 @@ impl From<ConsolidationPassReport> for ConsolidationPassDto {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_vector;
+    use super::{ServerError, parse_vector};
 
     #[test]
     fn parse_vector_accepts_commas_and_spaces() {
@@ -3751,5 +3833,14 @@ mod tests {
     #[test]
     fn parse_vector_rejects_empty_values() {
         assert!(parse_vector(" , ").is_err());
+    }
+
+    #[test]
+    fn server_errors_preserve_core_error_metadata() {
+        let error = ServerError::internal("[SHIBA_RECALL] recall operation failed");
+
+        assert_eq!(error.code, "SHIBA_RECALL");
+        assert_eq!(error.severity, "recoverable");
+        assert!(error.retryable);
     }
 }

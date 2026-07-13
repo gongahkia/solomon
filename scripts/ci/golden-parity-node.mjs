@@ -12,12 +12,15 @@ if (!fixturePath) {
 }
 
 const fixture = JSON.parse(await readFile(fixturePath, "utf8"));
+if (fixture.schema_version !== 1 || fixture.contract !== "shibahama.memory") {
+  throw new Error("unsupported golden parity contract fixture");
+}
 const dir = await mkdtemp(join(tmpdir(), "shibahama-golden-node-"));
 
 try {
   const engine = new Shibahama(join(dir, "node.redb"), fixture.dimensions, fixture.capacity);
   const ids = new Map();
-  const output = { queries: [], memories: [], why: [] };
+  const output = { queries: [], timelines: [], signals: [], errors: [], memories: [], why: [] };
 
   for (const step of fixture.steps) {
     if (step.op === "write") {
@@ -56,6 +59,17 @@ try {
     });
   }
 
+  for (const query of fixture.timelines) {
+    const recalled = engine.timeline(query.vector, query.top_k, query.as_of_unix, {
+      rawQueryContext: query.raw_query_context,
+      includeCold: query.include_cold,
+    });
+    output.timelines.push({
+      name: query.name,
+      recall: recalled.map(normalizeCandidate),
+    });
+  }
+
   const memories = engine
     .memoryItems()
     .map(normalizeMemory)
@@ -68,6 +82,31 @@ try {
     }
     return normalizeWhy(trace);
   });
+  for (const signal of fixture.human_signals) {
+    const id = ids.get(signal.source_ref);
+    if (!id || signal.op !== "affirm") {
+      throw new Error(`unsupported human signal: ${signal.name}`);
+    }
+    output.signals.push({ name: signal.name, applied: engine.affirm(id).applied });
+  }
+  for (const query of fixture.errors) {
+    if (query.op !== "recall") {
+      throw new Error(`unknown error operation: ${query.op}`);
+    }
+    let code;
+    try {
+      engine.recall(query.vector, query.top_k, { nowUnix: query.now_unix });
+    } catch (error) {
+      code = errorCode(error.message);
+    }
+    if (!code) {
+      throw new Error(`${query.name} should fail`);
+    }
+    if (code !== query.code) {
+      throw new Error(`${query.name} returned ${code}`);
+    }
+    output.errors.push({ name: query.name, code });
+  }
 
   console.log(JSON.stringify(output));
 } finally {
@@ -108,4 +147,12 @@ function normalizeWhy(trace) {
 
 function fixed(value) {
   return Number(value).toFixed(6);
+}
+
+function errorCode(message) {
+  const match = /\[(SHIBA_[A-Z_]+)\]/.exec(message);
+  if (!match) {
+    throw new Error(`missing Shibahama error code: ${message}`);
+  }
+  return match[1];
 }

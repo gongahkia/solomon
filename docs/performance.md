@@ -21,6 +21,13 @@ and temporary database size as JSON. The budget intentionally measures the
 in-process binding plus Rust core together because that is the embeddable shape
 most Python users exercise locally.
 
+## 100k Embedded Scale Gate
+
+Use `python benchmarks/embedded-scale.py --check-budget` to run the scheduled
+100k local-store gate. It records ingest time, durable reopen time, recall p50/p95,
+RSS delta, and store size in one JSON artifact. The weekly GitHub Actions workflow
+uploads its result; this is a regression guardrail, not a cross-machine speed claim.
+
 ## Significance Recompute Profile
 
 Use `python benchmarks/significance-recompute.py --check-budget` after building

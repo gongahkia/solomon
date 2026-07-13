@@ -16,8 +16,46 @@ from ._shibahama import (
     Shibahama as _NativeShibahama,
     SignificanceBreakdown,
     WhyTrace,
+    capabilities_json,
     version,
 )
+
+
+def capabilities() -> dict[str, Any]:
+    """Return the versioned capability document for this build."""
+    return json.loads(capabilities_json())
+
+
+class ShibahamaError(RuntimeError):
+    """Structured error raised by the public Shibahama Python wrapper."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.code = _error_code(message)
+        self.severity = "recoverable" if self.code in {"SHIBA_RECALL", "SHIBA_TASK"} else "fatal"
+        self.retryable = self.severity == "recoverable"
+
+
+def _error_code(message: str) -> str:
+    start = message.find("[SHIBA_")
+    end = message.find("]", start)
+    return message[start + 1 : end] if start != -1 and end != -1 else "SHIBA_INTERNAL"
+
+
+def _raise_structured(error: RuntimeError) -> None:
+    if isinstance(error, ShibahamaError):
+        raise error
+    raise ShibahamaError(str(error)) from error
+
+
+def _structured_errors(method):
+    def wrapped(*args, **kwargs):
+        try:
+            return method(*args, **kwargs)
+        except RuntimeError as error:
+            _raise_structured(error)
+
+    return wrapped
 
 
 class Shibahama:
@@ -347,6 +385,11 @@ class Shibahama:
     async def async_why(self, *args, **kwargs) -> WhyTrace | None:
         """Async wrapper for `why` using a worker thread."""
         return await asyncio.to_thread(self.why, *args, **kwargs)
+
+
+for _name, _method in vars(Shibahama).items():
+    if not _name.startswith("_") and callable(_method):
+        setattr(Shibahama, _name, _structured_errors(_method))
 
 
 class LangChainMemory:

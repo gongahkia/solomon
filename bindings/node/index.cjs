@@ -33,6 +33,33 @@ const parsedMethods = {
   unpin: "unpinJson",
 };
 
+function annotateError(error) {
+  if (!(error instanceof Error) || String(error.code ?? "").startsWith("SHIBA_")) {
+    return error;
+  }
+
+  const match = /\[(SHIBA_[A-Z_]+)\]/.exec(error.message);
+  error.code = match ? match[1] : "SHIBA_INTERNAL";
+  error.severity = ["SHIBA_RECALL", "SHIBA_TASK"].includes(error.code)
+    ? "recoverable"
+    : "fatal";
+  error.retryable = error.severity === "recoverable";
+  return error;
+}
+
+if (typeof native.capabilitiesJson === "function") {
+  native.capabilities = () => {
+    const document = JSON.parse(native.capabilitiesJson());
+
+    return {
+      schemaVersion: document.schema_version,
+      version: document.version,
+      memorySchemaVersion: document.memory_schema_version,
+      capabilities: document.capabilities,
+    };
+  };
+}
+
 for (const [method, jsonMethod] of Object.entries(parsedMethods)) {
   if (
     native.Shibahama &&
@@ -42,6 +69,22 @@ for (const [method, jsonMethod] of Object.entries(parsedMethods)) {
   ) {
     native.Shibahama.prototype[method] = function parsedJsonMethod(...args) {
       return JSON.parse(this[jsonMethod](...args));
+    };
+  }
+}
+
+if (native.Shibahama?.prototype) {
+  for (const name of Object.getOwnPropertyNames(native.Shibahama.prototype)) {
+    if (name === "constructor" || typeof native.Shibahama.prototype[name] !== "function") {
+      continue;
+    }
+    const method = native.Shibahama.prototype[name];
+    native.Shibahama.prototype[name] = function structuredNativeError(...args) {
+      try {
+        return method.apply(this, args);
+      } catch (error) {
+        throw annotateError(error);
+      }
     };
   }
 }

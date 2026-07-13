@@ -18,10 +18,15 @@ use time::OffsetDateTime;
 
 #[derive(Deserialize)]
 struct Fixture {
+    schema_version: u32,
+    contract: String,
     dimensions: usize,
     capacity: usize,
     steps: Vec<Step>,
     queries: Vec<Query>,
+    timelines: Vec<TimelineQuery>,
+    human_signals: Vec<HumanSignalStep>,
+    errors: Vec<ErrorQuery>,
     why_now_unix: i64,
 }
 
@@ -55,11 +60,42 @@ struct Query {
     include_cold: bool,
 }
 
+#[derive(Deserialize)]
+struct TimelineQuery {
+    name: String,
+    vector: Vec<f32>,
+    top_k: usize,
+    as_of_unix: i64,
+    raw_query_context: String,
+    include_cold: bool,
+}
+
+#[derive(Deserialize)]
+struct HumanSignalStep {
+    name: String,
+    op: String,
+    source_ref: String,
+}
+
+#[derive(Deserialize)]
+struct ErrorQuery {
+    name: String,
+    op: String,
+    vector: Vec<f32>,
+    top_k: usize,
+    now_unix: i64,
+    code: String,
+}
+
+#[allow(clippy::too_many_lines)]
 fn main() -> Result<(), Box<dyn Error>> {
     let fixture_path = env::args()
         .nth(1)
         .ok_or("usage: cargo run --example golden_parity -- scripts/ci/golden-parity.json")?;
     let fixture: Fixture = serde_json::from_str(&fs::read_to_string(fixture_path)?)?;
+    if fixture.schema_version != 1 || fixture.contract != "shibahama.memory" {
+        return Err("unsupported golden parity contract fixture".into());
+    }
     let store = NamedTempFile::new()?;
     let mut engine = Shibahama::open(
         store.path(),
@@ -126,6 +162,19 @@ fn main() -> Result<(), Box<dyn Error>> {
             "recall": recalled.iter().map(normalize_candidate).collect::<Vec<_>>(),
         }));
     }
+    let mut timeline_outputs = Vec::new();
+    for query in &fixture.timelines {
+        let mut request = RecallRequest::new(&query.vector, query.top_k, unix(query.as_of_unix)?)
+            .with_raw_query_context(&query.raw_query_context);
+        if query.include_cold {
+            request = request.include_cold();
+        }
+        let recalled = engine.timeline(&request)?;
+        timeline_outputs.push(json!({
+            "name": query.name,
+            "recall": recalled.iter().map(normalize_candidate).collect::<Vec<_>>(),
+        }));
+    }
     let mut items = engine.memory_items()?;
     items.sort_by(|left, right| left.provenance.source_ref.cmp(&right.provenance.source_ref));
     let mut why_outputs = Vec::new();
@@ -135,8 +184,40 @@ fn main() -> Result<(), Box<dyn Error>> {
             .ok_or_else(|| format!("missing why trace for {}", item.id))?;
         why_outputs.push(normalize_why(&trace));
     }
+    let mut signal_outputs = Vec::new();
+    for signal in &fixture.human_signals {
+        let id = ids
+            .get(&signal.source_ref)
+            .copied()
+            .ok_or_else(|| format!("missing id for {}", signal.source_ref))?;
+        let applied = match signal.op.as_str() {
+            "affirm" => engine.affirm(id)?,
+            _ => return Err(format!("unknown human signal op: {}", signal.op).into()),
+        };
+        signal_outputs.push(json!({ "name": signal.name, "applied": applied }));
+    }
+    let mut error_outputs = Vec::new();
+    for query in &fixture.errors {
+        if query.op != "recall" {
+            return Err(format!("unknown error operation: {}", query.op).into());
+        }
+        let error = engine
+            .recall(&RecallRequest::new(
+                &query.vector,
+                query.top_k,
+                unix(query.now_unix)?,
+            ))
+            .expect_err("invalid contract query should fail");
+        if error.code() != query.code {
+            return Err(format!("{} returned {}", query.name, error.code()).into());
+        }
+        error_outputs.push(json!({ "name": query.name, "code": error.code() }));
+    }
     let output = json!({
         "queries": query_outputs,
+        "timelines": timeline_outputs,
+        "signals": signal_outputs,
+        "errors": error_outputs,
         "memories": items.iter().map(normalize_memory).collect::<Vec<_>>(),
         "why": why_outputs,
     });

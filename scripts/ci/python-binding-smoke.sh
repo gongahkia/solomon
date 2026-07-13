@@ -30,8 +30,23 @@ import shibahama
 
 assert shibahama.version() == shibahama.__version__
 assert shibahama.version()
+capabilities = shibahama.capabilities()
+assert capabilities["schema_version"] == 1
+assert "recall" in capabilities["capabilities"]
+assert capabilities["memory_schema_version"] >= 1
 assert (Path("bindings/python/python/shibahama/__init__.pyi")).is_file()
 assert (Path("bindings/python/python/shibahama/py.typed")).is_file()
+
+with tempfile.NamedTemporaryFile() as invalid_db:
+    invalid_engine = shibahama.Shibahama(invalid_db.name, 2)
+    try:
+        invalid_engine.recall([0.0], 1, now_unix=0)
+    except shibahama.ShibahamaError as error:
+        assert error.code == "SHIBA_VECTOR"
+        assert error.severity == "fatal"
+        assert error.retryable is False
+    else:
+        raise AssertionError("invalid vector should raise ShibahamaError")
 
 with tempfile.NamedTemporaryFile() as db:
     engine = shibahama.Shibahama(db.name, 2)

@@ -158,6 +158,9 @@ export declare class Shibahama {
   correctJson(memoryId: string, proposedContent: string, reason?: string | undefined | null, actor?: string | undefined | null, timestampUnix?: number | undefined | null): string
 }
 
+/** Returns the versioned capability document as JSON. */
+export declare function capabilitiesJson(): string
+
 export interface MemoryItem {
   id: string
   content: string
@@ -252,6 +255,21 @@ export interface WriteOptions {
 }
 
 // Shibahama JavaScript shims
+export interface CapabilityDocument {
+  schemaVersion: number
+  version: string
+  memorySchemaVersion: number
+  capabilities: Array<string>
+}
+
+export declare function capabilities(): CapabilityDocument
+
+export interface ShibahamaError extends Error {
+  code: string
+  severity: "recoverable" | "fatal"
+  retryable: boolean
+}
+
 export type EmbedFunction = (text: string) => Array<number> | Promise<Array<number>>
 
 export interface LangChainMemoryOptions {

@@ -10,6 +10,8 @@ trap 'rm -rf "$tmpdir"' EXIT
 
 cd "$ROOT"
 
+python3 scripts/ci/contract-fixtures.py
+
 "$PYTHON_BIN" -m venv "$tmpdir/venv"
 export VIRTUAL_ENV="$tmpdir/venv"
 export PATH="$VIRTUAL_ENV/bin:$PATH"

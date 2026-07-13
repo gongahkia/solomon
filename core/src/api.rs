@@ -131,6 +131,26 @@ pub enum ShibahamaErrorKind {
     Task,
 }
 
+/// Operational severity for a Shibahama error category.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShibahamaErrorSeverity {
+    /// The caller can continue with an explicitly degraded result or retry.
+    Recoverable,
+    /// The requested operation cannot safely complete.
+    Fatal,
+}
+
+impl ShibahamaErrorSeverity {
+    /// Stable machine-readable severity value.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Recoverable => "recoverable",
+            Self::Fatal => "fatal",
+        }
+    }
+}
+
 impl ShibahamaErrorKind {
     /// Stable machine-readable code for this error category.
     #[must_use]
@@ -163,6 +183,28 @@ impl ShibahamaErrorKind {
             Self::Task => "inspect the runtime for cancellation or panic before retrying",
         }
     }
+
+    /// Operational severity for this category.
+    #[must_use]
+    pub const fn severity(self) -> ShibahamaErrorSeverity {
+        match self {
+            Self::Recall => ShibahamaErrorSeverity::Recoverable,
+            #[cfg(feature = "tokio")]
+            Self::Task => ShibahamaErrorSeverity::Recoverable,
+            Self::Storage | Self::Vector | Self::InvalidRequest => ShibahamaErrorSeverity::Fatal,
+        }
+    }
+
+    /// Whether retrying unchanged input can reasonably succeed.
+    #[must_use]
+    pub const fn retryable(self) -> bool {
+        match self {
+            Self::Recall => true,
+            #[cfg(feature = "tokio")]
+            Self::Task => true,
+            Self::Storage | Self::Vector | Self::InvalidRequest => false,
+        }
+    }
 }
 
 impl ShibahamaError {
@@ -189,6 +231,18 @@ impl ShibahamaError {
     #[must_use]
     pub const fn action(&self) -> &'static str {
         self.kind().action()
+    }
+
+    /// Operational severity for this error.
+    #[must_use]
+    pub const fn severity(&self) -> ShibahamaErrorSeverity {
+        self.kind().severity()
+    }
+
+    /// Whether retrying unchanged input can reasonably succeed.
+    #[must_use]
+    pub const fn retryable(&self) -> bool {
+        self.kind().retryable()
     }
 }
 
@@ -2141,12 +2195,55 @@ mod tests {
     use crate::read_safety::DefaultSanitizingGateway;
     use crate::retrieval::{RecallCandidateCurrency, RecallRequest};
     use crate::storage::MemoryEvent;
-    use crate::vector::HnswVectorIndex;
+    use crate::vector::{HnswVectorIndex, VectorIndex, VectorIndexError, VectorSearchResult};
     use tempfile::NamedTempFile;
     use time::{Duration, OffsetDateTime};
 
     struct StaticRevalidator {
         event: MemoryWriteEvent,
+    }
+
+    #[derive(Clone, Copy)]
+    enum FailingVectorMode {
+        Add,
+        Search,
+    }
+
+    struct FailingVectorIndex {
+        dimensions: usize,
+        mode: FailingVectorMode,
+    }
+
+    impl VectorIndex for FailingVectorIndex {
+        fn add(&mut self, _id: MemoryId, _vector: &[f32]) -> Result<(), VectorIndexError> {
+            match self.mode {
+                FailingVectorMode::Add => {
+                    Err(VectorIndexError::Backend("injected add failure".to_owned()))
+                }
+                FailingVectorMode::Search => Ok(()),
+            }
+        }
+
+        fn search(
+            &self,
+            _query: &[f32],
+            _top_k: usize,
+        ) -> Result<Vec<VectorSearchResult>, VectorIndexError> {
+            match self.mode {
+                FailingVectorMode::Add => Ok(Vec::new()),
+                FailingVectorMode::Search => Err(VectorIndexError::Backend(
+                    "injected search failure".to_owned(),
+                )),
+            }
+        }
+
+        fn delete_by_id(&mut self, _id: MemoryId) -> Result<(), VectorIndexError> {
+            Ok(())
+        }
+
+        fn dimensions(&self) -> usize {
+            self.dimensions
+        }
     }
 
     impl RevalidationSource for StaticRevalidator {
@@ -2941,12 +3038,80 @@ mod tests {
         assert_eq!(error.kind(), ShibahamaErrorKind::Vector);
         assert_eq!(error.code(), "SHIBA_VECTOR");
         assert_eq!(error.action(), ShibahamaErrorKind::Vector.action());
+        assert_eq!(error.severity(), ShibahamaErrorSeverity::Fatal);
+        assert!(!error.retryable());
         assert!(error.to_string().contains("[SHIBA_VECTOR]"));
         assert!(
             error
                 .to_string()
                 .contains("action: verify embedding dimensionality")
         );
+    }
+
+    #[test]
+    fn injected_vector_write_failure_leaves_no_durable_state() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let mut shibahama = Shibahama::open(
+            file.path(),
+            FailingVectorIndex {
+                dimensions: 2,
+                mode: FailingVectorMode::Add,
+            },
+        )
+        .expect("engine should open");
+        let event = MemoryWriteEvent::new(
+            "injected write failure",
+            Provenance::new(SourceKind::User, None, "api-test"),
+            OffsetDateTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
+        );
+
+        let error = shibahama
+            .write_with_embedding(
+                event,
+                WriteEmbedding {
+                    vector: &[0.0, 0.0],
+                    index_name: "api-test",
+                    model: "embedding-model",
+                    model_version: "v1",
+                },
+            )
+            .expect_err("injected vector failure should fail the write");
+
+        assert_eq!(error.code(), "SHIBA_VECTOR");
+        assert!(
+            shibahama
+                .memory_items()
+                .expect("items should read")
+                .is_empty()
+        );
+        assert!(
+            shibahama
+                .event_records()
+                .expect("events should read")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn injected_vector_search_failure_is_explicit() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let shibahama = Shibahama::open(
+            file.path(),
+            FailingVectorIndex {
+                dimensions: 2,
+                mode: FailingVectorMode::Search,
+            },
+        )
+        .expect("engine should open");
+        let request = shibahama.recall_request(&[0.0, 0.0], 1, OffsetDateTime::UNIX_EPOCH);
+
+        let error = shibahama
+            .recall(&request)
+            .expect_err("injected vector failure should fail recall");
+
+        assert_eq!(error.code(), "SHIBA_VECTOR");
+        assert_eq!(error.severity(), ShibahamaErrorSeverity::Fatal);
     }
 
     #[test]

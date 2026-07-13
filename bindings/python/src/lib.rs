@@ -996,11 +996,18 @@ fn version() -> &'static str {
     shibahama_core::version()
 }
 
+/// Returns the versioned capability document as JSON.
+#[pyfunction]
+fn capabilities_json() -> PyResult<String> {
+    serde_json::to_string(&shibahama_core::capabilities()).map_err(json_error)
+}
+
 /// Python extension module entry point.
 #[pymodule]
 fn _shibahama(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("__version__", shibahama_core::version())?;
     module.add_function(wrap_pyfunction!(version, module)?)?;
+    module.add_function(wrap_pyfunction!(capabilities_json, module)?)?;
     module.add_class::<PyProvenance>()?;
     module.add_class::<PyMemoryItem>()?;
     module.add_class::<PyRecallCandidate>()?;

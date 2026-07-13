@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
+use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -120,6 +121,141 @@ impl From<RelationId> for Uuid {
     fn from(value: RelationId) -> Self {
         value.0
     }
+}
+
+/// Stable validated identifier for a repository or team scope.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ScopeId(String);
+
+impl ScopeId {
+    /// Validates and creates a scope identifier.
+    ///
+    /// Scope identifiers are 1-160 ASCII characters from the canonical portable set:
+    /// letters, digits, `.`, `_`, `-`, `/`, and `:`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScopeError`] when `value` is empty, oversized, or contains a non-canonical
+    /// character.
+    pub fn new(value: impl Into<String>) -> Result<Self, ScopeError> {
+        let value = value.into();
+        if value.is_empty() {
+            return Err(ScopeError::EmptyId);
+        }
+        if value.len() > 160 {
+            return Err(ScopeError::IdTooLong);
+        }
+        if !value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-' | '/' | ':')
+        }) {
+            return Err(ScopeError::InvalidCharacter);
+        }
+
+        Ok(Self(value))
+    }
+
+    /// Returns the canonical scope identifier string.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Display for ScopeId {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl TryFrom<String> for ScopeId {
+    type Error = ScopeError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl From<ScopeId> for String {
+    fn from(value: ScopeId) -> Self {
+        value.0
+    }
+}
+
+/// Visibility boundary for a durable memory scope.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScopeVisibility {
+    /// A memory remains available only to its repository scope.
+    Repository,
+    /// A memory is explicitly promoted into its owning team's shared scope.
+    Team,
+}
+
+/// Repository ownership and optional team-sharing boundary for one memory.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MemoryScope {
+    /// Canonical repository identifier that owns the memory.
+    pub repository: ScopeId,
+    /// Canonical team identifier for explicitly shared memory.
+    pub team: Option<ScopeId>,
+    /// Visibility boundary enforced by storage and retrieval layers.
+    pub visibility: ScopeVisibility,
+}
+
+impl MemoryScope {
+    /// Creates a repository-local memory scope.
+    #[must_use]
+    pub fn repository(repository: ScopeId) -> Self {
+        Self {
+            repository,
+            team: None,
+            visibility: ScopeVisibility::Repository,
+        }
+    }
+
+    /// Creates an explicitly shared team memory scope.
+    #[must_use]
+    pub fn team(repository: ScopeId, team: ScopeId) -> Self {
+        Self {
+            repository,
+            team: Some(team),
+            visibility: ScopeVisibility::Team,
+        }
+    }
+
+    /// Validates a deserialized or caller-assembled scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScopeError`] when visibility and team ownership disagree.
+    pub fn validate(&self) -> Result<(), ScopeError> {
+        match (self.visibility, self.team.is_some()) {
+            (ScopeVisibility::Repository, false) | (ScopeVisibility::Team, true) => Ok(()),
+            (ScopeVisibility::Repository, true) => Err(ScopeError::RepositoryScopeHasTeam),
+            (ScopeVisibility::Team, false) => Err(ScopeError::TeamScopeMissingTeam),
+        }
+    }
+}
+
+/// Validation failure for a durable memory scope.
+#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
+pub enum ScopeError {
+    /// A scope identifier is empty.
+    #[error("scope identifier must not be empty")]
+    EmptyId,
+    /// A scope identifier exceeds the portable maximum length.
+    #[error("scope identifier exceeds 160 characters")]
+    IdTooLong,
+    /// A scope identifier contains a non-canonical character.
+    #[error("scope identifier contains an invalid character")]
+    InvalidCharacter,
+    /// A repository-local scope cannot carry team ownership.
+    #[error("repository visibility must not include a team")]
+    RepositoryScopeHasTeam,
+    /// A team-shared scope must name its owning team.
+    #[error("team visibility requires a team")]
+    TeamScopeMissingTeam,
 }
 
 /// Trust class assigned to a memory from its provenance and corroboration state.
@@ -972,6 +1108,38 @@ mod tests {
         assert!(AccessOutcome::LedSomewhere.is_actual_use());
         assert!(AccessOutcome::Cited.is_actual_use());
         assert!(!AccessOutcome::Contradicted.is_actual_use());
+    }
+
+    #[test]
+    fn memory_scope_round_trips_and_enforces_visibility() {
+        let repository = ScopeId::new("github.com/acme/shibahama").expect("repository is valid");
+        let team = ScopeId::new("acme:memory").expect("team is valid");
+        let scope = MemoryScope::team(repository, team);
+        let encoded = serde_json::to_string(&scope).expect("scope should serialize");
+        let decoded: MemoryScope =
+            serde_json::from_str(&encoded).expect("scope should deserialize");
+
+        assert_eq!(scope, decoded);
+        assert!(decoded.validate().is_ok());
+    }
+
+    #[test]
+    fn memory_scope_rejects_noncanonical_ids_and_invalid_ownership() {
+        assert_eq!(
+            ScopeId::new("repo with spaces"),
+            Err(ScopeError::InvalidCharacter)
+        );
+        assert_eq!(ScopeId::new(""), Err(ScopeError::EmptyId));
+
+        let repository = ScopeId::new("acme/repo").expect("repository is valid");
+        let team = ScopeId::new("acme").expect("team is valid");
+        let invalid = MemoryScope {
+            repository,
+            team: Some(team),
+            visibility: ScopeVisibility::Repository,
+        };
+
+        assert_eq!(invalid.validate(), Err(ScopeError::RepositoryScopeHasTeam));
     }
 
     #[test]

@@ -19,6 +19,11 @@ __version__: str
 
 def version() -> str: ...
 
+class ShibahamaError(RuntimeError):
+    code: str
+    severity: Literal["recoverable", "fatal"]
+    retryable: bool
+
 class Provenance:
     source_kind: SourceKind
     source_ref: str | None
@@ -333,3 +338,4 @@ class LangChainMemory:
     ) -> None: ...
     def clear(self) -> None: ...
     async def aclear(self) -> None: ...
+def capabilities() -> dict[str, object]: ...

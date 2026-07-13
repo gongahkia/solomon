@@ -69,8 +69,18 @@ for part in sys.argv[1].split("."):
 print(value)' "$field"
 }
 
+capabilities_json="$(curl -fsS "${base}/capabilities")"
+if [[ "$(json_field schema_version <<<"$capabilities_json")" != "1" ]]; then
+  echo "unexpected capability schema version" >&2
+  exit 1
+fi
+
 item_json="$(request POST /write '{"content":"Server smoke memory","vector":[1,0],"source_kind":"user","source_ref":"server-smoke","valid_from_unix":0,"ingested_at_unix":0}')"
 memory_id="$(json_field id <<<"$item_json")"
+
+invalidated_json="$(request POST /write '{"content":"Invalidated server smoke memory","vector":[0,1],"source_kind":"file","source_ref":"server-smoke-invalidated","valid_from_unix":0,"ingested_at_unix":0}')"
+invalidated_id="$(json_field id <<<"$invalidated_json")"
+request POST /invalidate "{\"memory_id\":\"${invalidated_id}\",\"valid_to_unix\":10}" >/dev/null
 
 request POST /timeline '{"query_vector":[1,0],"top_k":1,"as_of_unix":0}' >/dev/null
 request POST /reinforce "{\"memory_id\":\"${memory_id}\",\"outcome\":\"cited\"}" >/dev/null

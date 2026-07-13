@@ -832,6 +832,12 @@ pub fn version() -> String {
     shibahama_core::version().to_owned()
 }
 
+/// Returns the versioned capability document as JSON.
+#[napi]
+pub fn capabilities_json() -> Result<String> {
+    serde_json::to_string(&shibahama_core::capabilities()).map_err(json_error)
+}
+
 fn write_event(
     content: String,
     source_kind: &str,

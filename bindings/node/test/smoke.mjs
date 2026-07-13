@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import shibahama, { LangChainMemory, Shibahama, version } from "../index.mjs";
+import shibahama, { LangChainMemory, Shibahama, capabilities, version } from "../index.mjs";
 
 const require = createRequire(import.meta.url);
 const cjs = require("../index.cjs");
@@ -18,8 +18,20 @@ try {
 
   assert.equal(version(), shibahama.version());
   assert.equal(cjs.version(), version());
+  assert.equal(capabilities().schemaVersion, 1);
+  assert.ok(capabilities().capabilities.includes("recall"));
+  assert.deepEqual(cjs.capabilities(), capabilities());
   assert.equal(engine.isOpen(), true);
   assert.equal(cjsEngine.isOpen(), true);
+
+  try {
+    engine.recall([0], 1, { nowUnix: 0 });
+    assert.fail("invalid vector should throw");
+  } catch (error) {
+    assert.equal(error.code, "SHIBA_VECTOR");
+    assert.equal(error.severity, "fatal");
+    assert.equal(error.retryable, false);
+  }
 
   const item = engine.write("Node binding memory", {
     vector: [0, 0],

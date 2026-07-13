@@ -63,13 +63,28 @@ class AuthoritySourceKind(str, Enum):
     WEBHOOK = "webhook"
 
 
+class AuthorityPollSchedule(SolomonModel):
+    interval_seconds: int = Field(default=3600, ge=60)
+    jitter_seconds: int = Field(default=0, ge=0)
+
+    @field_validator("jitter_seconds")
+    @classmethod
+    def validate_jitter(cls, value: int, info: Any) -> int:
+        interval = info.data.get("interval_seconds", 3600)
+        if value >= interval:
+            raise ValueError("jitter_seconds must be less than interval_seconds")
+        return value
+
+
 class AuthoritySource(ContractModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1, max_length=120)
     kind: AuthoritySourceKind
     root_ref: str = Field(min_length=1)
+    canonical_namespace: str = Field(default="default", pattern=r"^[a-z][a-z0-9_-]{0,63}$")
     enabled: bool = True
     config: ConnectorConfiguration = Field(default_factory=ConnectorConfiguration)
+    poll_schedule: AuthorityPollSchedule = Field(default_factory=AuthorityPollSchedule)
 
 
 class AuthorityObservation(ContractModel):
@@ -193,6 +208,7 @@ __all__ = [
     "AuthoritySource",
     "AuthoritySourceAdapter",
     "AuthoritySourceKind",
+    "AuthorityPollSchedule",
     "ContractModel",
     "DiscoveredDocument",
     "DocumentSourceAdapter",

@@ -22,5 +22,13 @@ Expected invariants:
 - the seven `MAS Notice 626` dependent memos transition to `StalePendingReverification`; and
 - the audit journal verifies.
 
-The partner-console walkthrough and recording remain open work; this harness supplies deterministic seed and cascade
-evidence for them.
+The partner-console recording remains open work; this harness supplies deterministic seed and cascade evidence.
+
+Run the partner walkthrough through the console's decision routes:
+
+```bash
+uv run python examples/scenarios/02-biglaw-sg/run.py --console-walkthrough
+```
+
+It has Partner Tan reaffirm three positions, supersede two with recorded successors, and retire two. The expected
+post-review states are three `Live`, two `Superseded`, and two `Retired`; the audit journal must verify.

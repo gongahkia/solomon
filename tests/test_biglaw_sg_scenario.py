@@ -26,3 +26,14 @@ def test_biglaw_sg_mas_change_stales_seven_dependent_memos(tmp_path: Path) -> No
     assert result["stale_dependent_count"] == 7
     assert result["states"] == ["StalePendingReverification"] * 7
     assert result["audit_ok"] is True
+
+
+def test_biglaw_sg_partner_console_walkthrough_resolves_all_review_items(tmp_path: Path) -> None:
+    result = _load_scenario().run_partner_console_walkthrough(tmp_path)
+
+    assert result["partner"] == "Partner Tan"
+    assert result["reaffirmed_count"] == 3
+    assert result["superseded_count"] == 2
+    assert result["retired_count"] == 2
+    assert result["states"] == ["Live"] * 3 + ["Superseded"] * 2 + ["Retired"] * 2
+    assert result["audit_ok"] is True

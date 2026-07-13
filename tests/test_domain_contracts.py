@@ -65,6 +65,26 @@ class StubAuthorityAdapter:
         _ = source, checkpoint
         return [], None
 
+    def checkpoint(self, source: AuthoritySource) -> SyncCheckpoint | None:
+        return SyncCheckpoint(source_id=source.id, cursor="v2")
+
+    def replay(self, source: AuthoritySource, checkpoint: SyncCheckpoint) -> list[AuthorityChangeEvent]:
+        return [
+            AuthorityChangeEvent(
+                source_id=source.id,
+                idempotency_key=f"{checkpoint.cursor}:regulation-r-12",
+                authority_id="regulation-r-12",
+                new_version="v2",
+                changed_at=datetime(2026, 7, 13, tzinfo=timezone.utc),
+            )
+        ]
+
+
+class UnhealthyAuthorityAdapter(StubAuthorityAdapter):
+    def health(self, source: AuthoritySource) -> AdapterHealth:
+        _ = source
+        return AdapterHealth(healthy=False, detail="upstream unavailable")
+
 
 class StubEmbeddingProvider:
     def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
@@ -132,6 +152,12 @@ def test_contract_protocols_accept_typed_adapter_implementations():
     assert discovered[0].external_id == "memo-1"
     assert checkpoint is not None
     assert authority_adapter.health(authority).healthy is True
+    authority_checkpoint = authority_adapter.checkpoint(authority)
+    assert authority_checkpoint is not None
+    replayed = authority_adapter.replay(authority, authority_checkpoint)
+    assert replayed[0].idempotency_key == "v2:regulation-r-12"
+    assert authority_adapter.replay(authority, authority_checkpoint)[0].idempotency_key == replayed[0].idempotency_key
+    assert UnhealthyAuthorityAdapter().health(authority).healthy is False
     assert embedding_provider.embed(EmbeddingRequest(model="local", texts=["text"])).vectors == [[0.25]]
     dispatch = ReviewDispatch(task=task, destination="queue://reviews", idempotency_key="task-1")
     assert review_dispatcher.dispatch(dispatch).delivery_id == "delivery-1"

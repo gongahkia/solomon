@@ -166,6 +166,10 @@ class AuthoritySourceAdapter(Protocol):
         checkpoint: SyncCheckpoint | None,
     ) -> tuple[list[AuthorityChangeEvent], SyncCheckpoint | None]: ...
 
+    def checkpoint(self, source: AuthoritySource) -> SyncCheckpoint | None: ...
+
+    def replay(self, source: AuthoritySource, checkpoint: SyncCheckpoint) -> list[AuthorityChangeEvent]: ...
+
 
 @runtime_checkable
 class EmbeddingProvider(Protocol):

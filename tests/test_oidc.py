@@ -381,6 +381,11 @@ def test_oidc_mapped_roles_authorize_server_routes_and_audit_denials(tmp_path: P
                     "source_ref": "oidc",
                 },
             )
+            curator_contest = await client.post(
+                f"/contest/{lawyer_ingest.json()['id']}",
+                headers=headers("firm-curator", "role-curator-contest"),
+                json={"lawyer_id": "curator-1", "reason": "requires review"},
+            )
             integration_recall = await client.post(
                 "/recall",
                 headers=headers("connector", "role-integration-read"),
@@ -401,6 +406,7 @@ def test_oidc_mapped_roles_authorize_server_routes_and_audit_denials(tmp_path: P
             "curator_source": curator_source,
             "reviewer_source": reviewer_source,
             "lawyer_ingest": lawyer_ingest,
+            "curator_contest": curator_contest,
             "integration_recall": integration_recall,
             "integration_ingest": integration_ingest,
             "unmapped_recall": unmapped_recall,
@@ -412,6 +418,8 @@ def test_oidc_mapped_roles_authorize_server_routes_and_audit_denials(tmp_path: P
     assert responses["curator_source"].status_code == 200
     assert responses["reviewer_source"].status_code == 403
     assert responses["lawyer_ingest"].status_code == 200
+    assert responses["curator_contest"].status_code == 403
+    assert responses["curator_contest"].json()["error"]["code"] == "policy_refusal"
     assert responses["integration_recall"].status_code == 200
     assert responses["integration_ingest"].status_code == 403
     assert responses["unmapped_recall"].status_code == 401

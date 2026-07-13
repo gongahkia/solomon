@@ -54,6 +54,11 @@ denied. Roles resolve in a fixed admin-to-integration precedence and their scope
 decisions are hash-chained audit entries with actor ID (when validated), canonical roles, decision, and request
 correlation ID; bearer tokens and claim bodies are not recorded.
 
+Authenticated server requests bind their principal and correlation ID to the selected tenant service. Each
+content-returning or mutating service operation applies a centralized `read`, `write`, `curate`, or `review` policy
+before invoking domain logic, then writes a metadata-only allow/deny audit entry. Curators manage sources and
+dependencies; reviewers and lawyers perform verification/contestability actions; integrations remain read-only.
+
 ## Server Auth
 
 `solomon-server` requires `SOLOMON_SERVER_API_KEY`. Requests may present credentials through `Authorization:

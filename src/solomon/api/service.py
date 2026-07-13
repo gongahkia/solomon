@@ -5,11 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 from base64 import b64decode
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+from solomon.api.auth import SOURCE_MANAGE_SCOPE, TENANT_READ_SCOPE, TENANT_WRITE_SCOPE, AuthPrincipal, AuthRole
 from solomon.api.service_models import (
     AffirmRequest,
     AffirmResponse,
@@ -49,7 +53,7 @@ from solomon.api.services.authority import AuthorityService
 from solomon.api.services.common import digest
 from solomon.api.services.ingestion import IngestionService
 from solomon.api.services.recall import RecallService
-from solomon.audit.journal import AuditJournal
+from solomon.audit.journal import AuditAttribution, AuditJournal
 from solomon.authority_polling import AuthorityPollBatch, AuthorityPollOutbox, AuthorityPollRetryPolicy
 from solomon.authority_sources import (
     AuthorityPollDeadLetter,
@@ -71,7 +75,7 @@ from solomon.currency.report import (
     render_currency_report_pdf,
 )
 from solomon.currency.verification import verification_history
-from solomon.errors import BadRequestError, NotFoundError, SolomonError
+from solomon.errors import BadRequestError, NotFoundError, PolicyRefusalError, SolomonError
 from solomon.graph.models import DependencyEdge
 from solomon.graph.suggestions import DependencySuggestion, ReferenceExtraction, SuggestionDecision
 from solomon.graph.visualization import GraphFormat
@@ -101,6 +105,69 @@ from solomon.store.outbox import OutboxRecord
 from solomon.store.sqlite import ItemNotFoundError
 from solomon.workflow.models import AuthorityChangeEvent, ReviewTask, ReviewTaskPriority, ReviewTaskState
 from solomon.workflow.store import SQLiteWorkflowStore
+
+ServiceAccess = Literal["read", "write", "curate", "review"]
+SERVICE_ACCESS: dict[str, ServiceAccess] = {
+    "ingest": "write",
+    "register_document_source": "curate",
+    "source_documents": "read",
+    "document_source_health": "read",
+    "document_source_sync_runs": "read",
+    "sync_document_source": "curate",
+    "retry_source_document_extraction": "curate",
+    "ingest_source_document": "curate",
+    "candidate_claims": "read",
+    "promote_candidate_claim": "curate",
+    "reject_candidate_claim": "curate",
+    "defer_candidate_claim": "curate",
+    "recall": "read",
+    "answer": "read",
+    "complete_model_request": "read",
+    "evaluate_currency": "read",
+    "record_verification": "review",
+    "assign_verification": "review",
+    "start_verification_review": "review",
+    "verification_queue": "read",
+    "detect_contradictions": "read",
+    "register_authority_change": "curate",
+    "register_authority_source": "curate",
+    "schedule_authority_polls": "curate",
+    "run_authority_polls": "curate",
+    "authority_poll_dead_letters": "read",
+    "retry_authority_poll_dead_letter": "curate",
+    "register_authority_event": "curate",
+    "review_tasks": "read",
+    "assign_review_task": "curate",
+    "start_review_task": "review",
+    "resolve_review_task": "review",
+    "contest": "review",
+    "affirm": "review",
+    "pin": "review",
+    "add_dependency": "curate",
+    "suggest_dependencies": "curate",
+    "dependency_suggestions": "read",
+    "confirm_dependency_suggestion": "curate",
+    "reject_dependency_suggestion": "curate",
+    "impact_query": "read",
+    "dependency_graph": "read",
+    "extract_references": "read",
+    "predict_staleness": "read",
+    "why": "read",
+    "timeline": "read",
+    "execute_plan": "write",
+    "currency_report": "read",
+    "export_currency_report_pack": "read",
+    "export_audit_pack": "read",
+}
+
+
+@dataclass(frozen=True)
+class ServiceAuthorization:
+    principal: AuthPrincipal
+    correlation_id: str
+
+
+_service_authorization: ContextVar[ServiceAuthorization | None] = ContextVar("service_authorization", default=None)
 
 
 class SolomonService:
@@ -150,6 +217,48 @@ class SolomonService:
         self._answer = AnswerService(self)
         self._authority = AuthorityService(self)
         self._recall = RecallService(self)
+
+    def __getattribute__(self, name: str) -> Any:
+        value = super().__getattribute__(name)
+        access = SERVICE_ACCESS.get(name)
+        if access is None or not callable(value):
+            return value
+
+        def authorized(*args: Any, **kwargs: Any) -> Any:
+            self._authorize_service_operation(name, access)
+            return value(*args, **kwargs)
+
+        return authorized
+
+    @contextmanager
+    def authorized_as(self, principal: AuthPrincipal, correlation_id: str) -> Iterator[None]:
+        token = _service_authorization.set(ServiceAuthorization(principal=principal, correlation_id=correlation_id))
+        try:
+            yield
+        finally:
+            _service_authorization.reset(token)
+
+    def _authorize_service_operation(self, operation: str, access: ServiceAccess) -> None:
+        authorization = _service_authorization.get()
+        if authorization is None:
+            return
+        principal = authorization.principal
+        allowed = _service_access_allowed(principal, access)
+        self.audit.append(
+            "service_authorization",
+            {
+                "operation": operation,
+                "access": access,
+                "decision": "allowed" if allowed else "denied",
+                "roles": sorted(principal.roles or frozenset({principal.role})),
+            },
+            attribution=AuditAttribution(actor_id=principal.subject, correlation_id=authorization.correlation_id),
+        )
+        if not allowed:
+            raise PolicyRefusalError(
+                "principal is not authorized for service operation",
+                details={"operation": operation},
+            )
 
     def ingest(self, request: IngestRequest) -> KnowledgeItem:
         return self._ingestion.ingest(request)
@@ -807,6 +916,17 @@ class SolomonService:
     def _persist_credence_entries(self, *, start: int) -> None:
         for entry in self.credence.entries[start:]:
             self.audit.log_credence_change(entry)
+
+
+def _service_access_allowed(principal: AuthPrincipal, access: ServiceAccess) -> bool:
+    if access == "read":
+        return principal.has_scope(TENANT_READ_SCOPE)
+    if access == "write":
+        return principal.has_scope(TENANT_WRITE_SCOPE)
+    if access == "curate":
+        return principal.has_scope(SOURCE_MANAGE_SCOPE)
+    review_roles: tuple[AuthRole, ...] = ("admin", "reviewer", "lawyer")
+    return any(principal.has_role(role) for role in review_roles)
 
 
 def _review_priority(item: KnowledgeItem) -> ReviewTaskPriority:

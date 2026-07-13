@@ -204,6 +204,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if resolved_settings.sku == "server" and path not in PUBLIC_PATHS:
             supplied_api_key = extract_api_key(request.headers)
             required_scope = required_scope_for_request(request.method, path)
+            request.state.correlation_id = _correlation_id(request)
             if _is_admin_path(path):
                 principal = _admin_principal(resolved_settings, supplied_api_key)
                 if principal is None:
@@ -220,7 +221,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if not principal.has_scope(required_scope):
                     return _forbidden_error(required_scope)
                 request.state.principal = principal
-                return await call_next(request)
+                with service.authorized_as(principal, request.state.correlation_id):
+                    return await call_next(request)
 
             tenant_id = request.headers.get("x-tenant-id")
             if tenant_id is None or not is_valid_tenant_id(tenant_id):
@@ -260,6 +262,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request.state.tenant_id = tenant_id
             request.state.service = service_for_tenant(tenant_id)
             request.state.principal = principal
+            with request.state.service.authorized_as(principal, request.state.correlation_id):
+                return await call_next(request)
         return await call_next(request)
 
     @app.middleware("http")

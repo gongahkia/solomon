@@ -10,9 +10,10 @@ from fastapi import FastAPI
 from typer.testing import CliRunner
 
 from solomon import __version__
-from solomon.api.service import SolomonService
+from solomon.api.service import IngestRequest, SolomonService
 from solomon.cli.main import app
 from solomon.config import get_settings
+from solomon.currency.models import KnowledgeKind, SourceKind
 
 runner = CliRunner()
 
@@ -108,6 +109,9 @@ def test_cli_help_includes_examples_for_visible_commands() -> None:
         ["verify-position"],
         ["why"],
         ["audit-pack"],
+        ["backup"],
+        ["restore"],
+        ["recovery-drill"],
         ["mcp", "serve"],
         ["console", "serve"],
     ]
@@ -120,6 +124,33 @@ def test_cli_help_includes_examples_for_visible_commands() -> None:
         result = runner.invoke(app, [*command, "--help"])
         assert result.exit_code == 0, command
         assert "Example:" in result.output, command
+
+
+def test_cli_backup_restore_and_recovery_drill(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _configure_cli_store(monkeypatch, tmp_path)
+    monkeypatch.setenv("SOLOMON_BACKUP_PASSPHRASE", "cli-backup-passphrase")
+    SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal").ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="CLI recovery position",
+            source_kind=SourceKind.PARTNER,
+            source_ref="cli-backup-memo",
+        )
+    )
+    archive = tmp_path / "backup.enc"
+
+    backed_up = runner.invoke(app, ["backup", str(archive)])
+    assert backed_up.exit_code == 0, backed_up.output
+    assert "cli-backup-passphrase" not in backed_up.output
+
+    restored_root = tmp_path / "restored"
+    restored = runner.invoke(app, ["restore", str(archive), str(restored_root)])
+    assert restored.exit_code == 0, restored.output
+    assert (restored_root / "data" / "solomon.sqlite3").is_file()
+
+    drill = runner.invoke(app, ["recovery-drill", str(archive)])
+    assert drill.exit_code == 0, drill.output
+    assert json.loads(drill.output)["knowledge_items"] == 1
 
 
 def test_cli_console_serve_dispatches_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:

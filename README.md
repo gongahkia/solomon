@@ -316,6 +316,25 @@ provenance, currency state, verification events, boundary decision metadata, and
 needed to reconstruct what Solomon did without retaining privileged prompt content. See
 [`docs/release-artifacts.md`](./docs/release-artifacts.md) and [`docs/regulatory-evidence.md`](./docs/regulatory-evidence.md).
 
+## Backup And Recovery
+
+SQLite deployments can create an encrypted archive of every local durable database and the audit journal. The
+passphrase is read only from `SOLOMON_BACKUP_PASSPHRASE`; retain both the archive and its adjacent manifest.
+
+```bash
+export SOLOMON_BACKUP_PASSPHRASE='store-this-outside-the-deployment'
+uv run solomon backup ./solomon-backup.enc
+uv run solomon recovery-drill ./solomon-backup.enc
+uv run solomon restore ./solomon-backup.enc ./restored-deployment
+```
+
+`restore` rejects an existing target and writes `data/` and `journal/` below the supplied deployment root. Point a
+fresh deployment at those paths with `SOLOMON_DATA_DIR` and `SOLOMON_JOURNAL_DIR`. `recovery-drill` restores to a
+temporary fresh deployment, checks every SQLite database, initializes the local service, and verifies the audit
+journal. Run backups during a brief writer quiescence when cross-database point-in-time consistency is required.
+The commands intentionally reject Postgres deployments; use a database-native Postgres backup until a
+coordinated server-storage backup contract is available.
+
 ## Regulator-ready by construction
 
 Every model-backed answer carries a reproducible primitive plan, source provenance, currency state,

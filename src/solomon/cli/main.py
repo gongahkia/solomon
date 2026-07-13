@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Annotated, cast
 
@@ -23,6 +24,7 @@ from solomon.api.service import (
     StalenessPredictionRequest,
     VerificationRequest,
 )
+from solomon.backup import BackupError, create_encrypted_backup, restore_encrypted_backup, run_recovery_drill
 from solomon.boundary.solomon import SolomonBoundary, probe_boundary_client
 from solomon.config import (
     boundary_policy_from_settings,
@@ -188,6 +190,65 @@ def _service(*, jurisdiction: str | None = None) -> SolomonService:
         credence_policy_version=settings.credence_policy_version,
         boundary=SolomonBoundary(policy=boundary_policy_from_settings(settings, jurisdiction=jurisdiction)),
     )
+
+
+def _backup_passphrase() -> str:
+    passphrase = os.environ.get("SOLOMON_BACKUP_PASSPHRASE")
+    if not passphrase:
+        raise typer.BadParameter("set SOLOMON_BACKUP_PASSPHRASE")
+    return passphrase
+
+
+def _require_sqlite_backup_target() -> None:
+    database_url = get_settings().database_url
+    if database_url.startswith(("postgres://", "postgresql://")):
+        raise typer.BadParameter("backup commands currently support SQLite deployments only")
+
+
+@app.command("backup", epilog=_example("SOLOMON_BACKUP_PASSPHRASE=... uv run solomon backup ./solomon-backup.enc"))
+def backup(destination: Annotated[Path, typer.Argument(help="New encrypted backup archive path.")]) -> None:
+    """Create an encrypted backup of local durable data and journal files."""
+    _require_sqlite_backup_target()
+    settings = get_settings()
+    try:
+        result = create_encrypted_backup(
+            data_dir=settings.data_dir,
+            journal_dir=settings.journal_dir,
+            destination=destination,
+            passphrase=_backup_passphrase(),
+        )
+    except BackupError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _print_json(result.model_dump(mode="json"), sort_keys=True)
+
+
+@app.command(
+    "restore",
+    epilog=_example("SOLOMON_BACKUP_PASSPHRASE=... uv run solomon restore ./solomon-backup.enc ./restored-deployment"),
+)
+def restore(
+    archive: Annotated[Path, typer.Argument(help="Encrypted backup archive path.")],
+    destination: Annotated[Path, typer.Argument(help="New empty deployment-root path.")],
+) -> None:
+    """Restore an encrypted backup into a fresh deployment root."""
+    try:
+        result = restore_encrypted_backup(archive, destination, passphrase=_backup_passphrase())
+    except BackupError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _print_json(result.model_dump(mode="json"), sort_keys=True)
+
+
+@app.command(
+    "recovery-drill",
+    epilog=_example("SOLOMON_BACKUP_PASSPHRASE=... uv run solomon recovery-drill ./solomon-backup.enc"),
+)
+def recovery_drill(archive: Annotated[Path, typer.Argument(help="Encrypted backup archive path.")]) -> None:
+    """Restore and validate an encrypted backup in a temporary fresh deployment."""
+    try:
+        report = run_recovery_drill(archive, passphrase=_backup_passphrase())
+    except BackupError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _print_json(report.model_dump(mode="json"), sort_keys=True)
 
 
 @app.command(

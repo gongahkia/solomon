@@ -16,6 +16,7 @@ from solomon.orchestrator.retrieval import (
     _embed_tokens,
     semantic_tokens,
 )
+from solomon.store.migrations import apply_postgres_migrations
 from solomon.store.postgres.connection import (
     ConnectCallable,
     default_connect,
@@ -23,7 +24,12 @@ from solomon.store.postgres.connection import (
     qualified,
     quote_identifier,
 )
-from solomon.store.postgres.ddl import create_retrieval_index_schema, create_schema_if_needed
+from solomon.store.postgres.ddl import (
+    POSTGRES_VECTOR_DIMENSIONS,
+    create_schema_if_needed,
+    ensure_pgvector_extension,
+    retrieval_index_migrations,
+)
 from solomon.store.postgres.serialization import row_value
 
 
@@ -41,32 +47,44 @@ class PostgresRetrievalIndex:
         self.dsn = dsn
         self.schema = normalize_schema(schema)
         self.strategy = strategy or EmbeddingStrategy()
+        if self.strategy.dimensions != POSTGRES_VECTOR_DIMENSIONS:
+            raise ValueError(f"Postgres retrieval requires {POSTGRES_VECTOR_DIMENSIONS}-dimensional embeddings")
         self._conn = (connect or default_connect)(dsn)
         self.initialize()
 
     def initialize(self) -> None:
         with self._transaction():
             create_schema_if_needed(self._execute, self.schema)
-            create_retrieval_index_schema(self._execute, self._table, self._index)
+            ensure_pgvector_extension(self._execute)
+            apply_postgres_migrations(
+                self._execute,
+                retrieval_index_migrations(
+                    self._table,
+                    self._index,
+                    scope=f"postgres-retrieval-index:{self.schema or 'public'}",
+                ),
+            )
 
     def upsert_item(self, item: KnowledgeItem, *, indexed_at: datetime | None = None) -> KnowledgeItem:
         embedding_ref = self.strategy.ref
         tokens = sorted(semantic_tokens(item.content))
         vector = _embed_tokens(tokens, dimensions=self.strategy.dimensions)
+        vector_literal = json.dumps(vector, separators=(",", ":"))
         timestamp = indexed_at or now_utc()
         with self._transaction():
             self._execute(
                 f"""
                 INSERT INTO {self._table("retrieval_index")}
-                (item_id, embedding_ref, tokens_json, vector_json, indexed_at)
-                VALUES (%s, %s, %s, %s, %s)
+                (item_id, embedding_ref, tokens_json, vector_json, embedding, indexed_at)
+                VALUES (%s, %s, %s, %s, %s::vector, %s)
                 ON CONFLICT(item_id) DO UPDATE SET
                     embedding_ref = EXCLUDED.embedding_ref,
                     tokens_json = EXCLUDED.tokens_json,
                     vector_json = EXCLUDED.vector_json,
+                    embedding = EXCLUDED.embedding,
                     indexed_at = EXCLUDED.indexed_at
                 """,
-                (item.id, embedding_ref, json.dumps(tokens), json.dumps(vector), timestamp.isoformat()),
+                (item.id, embedding_ref, json.dumps(tokens), vector_literal, vector_literal, timestamp.isoformat()),
             )
         return item.model_copy(update={"embedding_ref": embedding_ref})
 

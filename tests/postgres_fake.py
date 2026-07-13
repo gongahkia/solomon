@@ -18,7 +18,14 @@ class FakePostgresConnection:
         self._conn.row_factory = sqlite3.Row
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
+        if "CREATE EXTENSION IF NOT EXISTS vector" in sql:
+            return self._conn.execute("SELECT 1")
+        if "FROM pg_extension WHERE extname" in sql:
+            return self._conn.execute("SELECT 1")
         return self._conn.execute(_translate(sql), params)
+
+    def begin(self) -> None:
+        self._conn.execute("BEGIN")
 
     def commit(self) -> None:
         self._conn.commit()
@@ -39,6 +46,14 @@ def _translate(sql: str) -> str:
         translated,
     )
     translated = translated.replace("BIGSERIAL PRIMARY KEY", "INTEGER PRIMARY KEY AUTOINCREMENT")
+    translated = translated.replace(" ADD COLUMN IF NOT EXISTS ", " ADD COLUMN ")
+    translated = re.sub(r"::vector(?:\([0-9]+\))?", "", translated)
+    translated = re.sub(
+        r"(CREATE INDEX IF NOT EXISTS .+? ON .+?) USING hnsw \(embedding vector_cosine_ops\)",
+        r"\1(embedding)",
+        translated,
+        flags=re.DOTALL,
+    )
     translated = re.sub(r"\bEXCLUDED\.", "excluded.", translated)
     translated = re.sub(r"\bTRUNCATE TABLE\s+([A-Za-z0-9_\".]+)", r"DELETE FROM \1", translated)
     return translated

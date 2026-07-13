@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
+
+import pytest
 
 from solomon.currency.models import CredenceTier, CurrencyState, KnowledgeItem, KnowledgeKind, Provenance, SourceKind
 from solomon.graph.models import DependencyEdge, EdgeType
@@ -11,7 +14,12 @@ from solomon.graph.propagation import CurrencyPropagator
 from solomon.graph.suggestions import DependencySuggestion, SuggestionDecision
 from solomon.orchestrator.retrieval import MatterContext, RecallOptions, RetrievalOrchestrator
 from solomon.store.factory import create_storage_bundle
-from solomon.store.postgres import PostgresGraphStore, PostgresKnowledgeStore, PostgresRetrievalIndex
+from solomon.store.postgres import (
+    PostgresGraphStore,
+    PostgresKnowledgeStore,
+    PostgresRetrievalIndex,
+    PostgresVectorExtensionError,
+)
 from tests.postgres_fake import FakePostgresConnection
 
 
@@ -139,3 +147,109 @@ def test_storage_bundle_can_create_postgres_store_graph_and_index(tmp_path: Path
     bundle.store.write_item(indexed)
 
     assert bundle.store.get_item("item-1").embedding_ref == bundle.index.strategy.ref
+
+
+def test_postgres_retrieval_migrates_legacy_vectors_and_dual_writes_embeddings(tmp_path: Path) -> None:
+    connection = _connect(tmp_path)
+    legacy_vector = json.dumps([0.0] * 256)
+    connection.execute(
+        """
+        CREATE TABLE retrieval_index (
+            item_id TEXT PRIMARY KEY,
+            embedding_ref TEXT NOT NULL,
+            tokens_json TEXT NOT NULL,
+            vector_json TEXT NOT NULL,
+            indexed_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO retrieval_index (item_id, embedding_ref, tokens_json, vector_json, indexed_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        ("legacy", "hashed-token-vector:1", "[]", legacy_vector, _dt(2024, 1, 1).isoformat()),
+    )
+    connection.commit()
+
+    index = PostgresRetrievalIndex("postgresql://unit/solomon", connect=lambda _dsn: connection)
+    indexed = index.upsert_item(_item("new", "structure x regulation r"))
+
+    columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(retrieval_index)").fetchall()}
+    legacy = connection.execute("SELECT embedding FROM retrieval_index WHERE item_id = ?", ("legacy",)).fetchone()
+    current = connection.execute("SELECT embedding FROM retrieval_index WHERE item_id = ?", ("new",)).fetchone()
+    migrations = connection.execute(
+        "SELECT version FROM schema_migrations WHERE scope = ? ORDER BY version",
+        ("postgres-retrieval-index:public",),
+    ).fetchall()
+    hnsw_index = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
+        ("idx_retrieval_embedding_hnsw",),
+    ).fetchone()
+
+    assert columns >= {"embedding", "vector_json"}
+    assert legacy is not None and str(legacy["embedding"]) == legacy_vector
+    assert current is not None and len(json.loads(str(current["embedding"]))) == 256
+    assert indexed.embedding_ref == "hashed-token-vector:1"
+    assert [int(row["version"]) for row in migrations] == [1, 2]
+    assert hnsw_index is not None
+
+
+def test_postgres_retrieval_applies_pgvector_migrations_per_schema(tmp_path: Path) -> None:
+    connection = _connect(tmp_path)
+    default = PostgresRetrievalIndex("postgresql://unit/solomon", connect=lambda _dsn: connection)
+    tenant = PostgresRetrievalIndex("postgresql://unit/solomon", connect=lambda _dsn: connection, schema="tenant-a")
+
+    default.upsert_item(_item("default", "default structure"))
+    tenant.upsert_item(_item("tenant", "tenant structure"))
+
+    scopes = connection.execute(
+        "SELECT scope, version FROM schema_migrations WHERE scope LIKE ? ORDER BY scope, version",
+        ("postgres-retrieval-index:%",),
+    ).fetchall()
+    tenant_embedding = connection.execute(
+        'SELECT embedding FROM "tenant_a__retrieval_index" WHERE item_id = ?',
+        ("tenant",),
+    ).fetchone()
+
+    assert [(str(row["scope"]), int(row["version"])) for row in scopes] == [
+        ("postgres-retrieval-index:public", 1),
+        ("postgres-retrieval-index:public", 2),
+        ("postgres-retrieval-index:tenant_a", 1),
+        ("postgres-retrieval-index:tenant_a", 2),
+    ]
+    assert tenant_embedding is not None
+
+
+def test_postgres_retrieval_rolls_back_a_failed_pgvector_migration(tmp_path: Path) -> None:
+    class FailingHnswConnection(FakePostgresConnection):
+        def execute(self, sql: str, params: tuple[object, ...] = ()) -> object:
+            if "USING hnsw" in sql:
+                raise RuntimeError("hnsw unavailable")
+            return super().execute(sql, params)
+
+    connection = FailingHnswConnection(tmp_path / "postgres.sqlite3")
+    connection.begin()
+
+    with pytest.raises(RuntimeError, match="hnsw unavailable"):
+        PostgresRetrievalIndex("postgresql://unit/solomon", connect=lambda _dsn: connection)
+
+    table = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+        ("retrieval_index",),
+    ).fetchone()
+
+    assert table is None
+
+
+def test_postgres_retrieval_fails_when_pgvector_cannot_be_confirmed(tmp_path: Path) -> None:
+    class MissingPgvectorConnection(FakePostgresConnection):
+        def execute(self, sql: str, params: tuple[object, ...] = ()) -> object:
+            if "FROM pg_extension WHERE extname" in sql:
+                return self._conn.execute("SELECT 1 WHERE 0")
+            return super().execute(sql, params)
+
+    connection = MissingPgvectorConnection(tmp_path / "postgres.sqlite3")
+
+    with pytest.raises(PostgresVectorExtensionError, match="pgvector"):
+        PostgresRetrievalIndex("postgresql://unit/solomon", connect=lambda _dsn: connection)

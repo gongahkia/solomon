@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from solomon.store.postgres.connection import quote_identifier
+from solomon.store.migrations import SchemaMigration
+from solomon.store.postgres.connection import PostgresVectorExtensionError, quote_identifier
 
 
 class ExecuteSQL(Protocol):
@@ -13,6 +14,7 @@ class ExecuteSQL(Protocol):
 
 
 NameResolver = Callable[[str], str]
+POSTGRES_VECTOR_DIMENSIONS = 256
 
 
 def create_schema_if_needed(execute: ExecuteSQL, schema: str | None) -> None:
@@ -134,16 +136,62 @@ def create_graph_store_schema(execute: ExecuteSQL, table: NameResolver, index: N
     )
 
 
-def create_retrieval_index_schema(execute: ExecuteSQL, table: NameResolver, index: NameResolver) -> None:
-    execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {table("retrieval_index")} (
-            item_id TEXT PRIMARY KEY,
-            embedding_ref TEXT NOT NULL,
-            tokens_json TEXT NOT NULL,
-            vector_json TEXT NOT NULL,
-            indexed_at TEXT NOT NULL
-        )
-        """
+def ensure_pgvector_extension(execute: ExecuteSQL) -> None:
+    try:
+        execute("CREATE EXTENSION IF NOT EXISTS vector")
+    except Exception as exc:
+        raise PostgresVectorExtensionError(
+            "Postgres retrieval requires the self-hosted pgvector extension and CREATE EXTENSION privilege"
+        ) from exc
+    if execute("SELECT 1 FROM pg_extension WHERE extname = %s", ("vector",)).fetchone() is None:
+        raise PostgresVectorExtensionError("Postgres retrieval requires the self-hosted pgvector extension")
+
+
+def retrieval_index_migrations(
+    table: NameResolver,
+    index: NameResolver,
+    *,
+    scope: str,
+) -> tuple[SchemaMigration, ...]:
+    return (
+        SchemaMigration(
+            scope=scope,
+            version=1,
+            name="retrieval-index-base-schema",
+            sqlite_statements=(),
+            postgres_statements=(
+                f"""
+                CREATE TABLE IF NOT EXISTS {table("retrieval_index")} (
+                    item_id TEXT PRIMARY KEY,
+                    embedding_ref TEXT NOT NULL,
+                    tokens_json TEXT NOT NULL,
+                    vector_json TEXT NOT NULL,
+                    indexed_at TEXT NOT NULL
+                )
+                """,
+                f"CREATE INDEX IF NOT EXISTS {index('idx_retrieval_ref')} ON {table('retrieval_index')}(embedding_ref)",
+            ),
+        ),
+        SchemaMigration(
+            scope=scope,
+            version=2,
+            name="pgvector-embedding-and-hnsw-index",
+            sqlite_statements=(),
+            postgres_statements=(
+                f"""
+                ALTER TABLE {table("retrieval_index")}
+                ADD COLUMN IF NOT EXISTS embedding vector({POSTGRES_VECTOR_DIMENSIONS})
+                """,
+                f"""
+                UPDATE {table("retrieval_index")}
+                SET embedding = vector_json::vector({POSTGRES_VECTOR_DIMENSIONS})
+                WHERE embedding IS NULL
+                """,
+                f"ALTER TABLE {table('retrieval_index')} ALTER COLUMN embedding SET NOT NULL",
+                f"""
+                CREATE INDEX IF NOT EXISTS {index('idx_retrieval_embedding_hnsw')}
+                ON {table("retrieval_index")} USING hnsw (embedding vector_cosine_ops)
+                """,
+            ),
+        ),
     )
-    execute(f"CREATE INDEX IF NOT EXISTS {index('idx_retrieval_ref')} ON {table('retrieval_index')}(embedding_ref)")

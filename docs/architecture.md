@@ -29,8 +29,9 @@ SQLite is the local default. Server deployments can set `SOLOMON_DATABASE_URL` t
 `postgresql://` DSN and install the optional `solomon[server]` dependency for the psycopg driver. Both
 backends preserve the same event-log contract: knowledge is written through append-only events and projected
 into current state, dependency edges are bi-temporal, and the retrieval index stores deterministic hashed
-vectors. Supersession closes `valid_to`, links the successor, and leaves the predecessor queryable in review
-or historical modes.
+vectors. Postgres stores these as `pgvector` `vector(256)` values, with a transactional backfill migration and
+HNSW cosine index; deployments must install the self-hosted extension and grant the startup role `CREATE EXTENSION`.
+Supersession closes `valid_to`, links the successor, and leaves the predecessor queryable in review or historical modes.
 
 In server mode, tenants are tracked in a durable registry at `data_dir/tenants/registry.json`. Admin requests
 can create, list, suspend, and reactivate tenants through `/tenants`, `/tenants/{tenant_id}/suspend`, and

@@ -447,6 +447,10 @@ SOLOMON_DATABASE_URL=postgresql://solomon:solomon@localhost:5432/solomon \
 uv run uvicorn solomon.api.app:create_app --factory --host 0.0.0.0 --port 8140
 ```
 
+Postgres retrieval requires the self-hosted `pgvector` extension. Startup runs `CREATE EXTENSION IF NOT EXISTS vector`,
+validates it, and applies the transactional `vector(256)`/HNSW migration; the database role therefore needs that
+extension installed and creation privilege.
+
 Remote model egress requires explicit configuration:
 
 ```bash

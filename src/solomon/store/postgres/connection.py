@@ -17,6 +17,10 @@ class PostgresDependencyError(StoreError):
     """Raised when the optional Postgres driver is unavailable."""
 
 
+class PostgresVectorExtensionError(StoreError):
+    """Raised when the required pgvector extension is unavailable."""
+
+
 def default_connect(dsn: str) -> Any:
     try:
         psycopg = importlib.import_module("psycopg")

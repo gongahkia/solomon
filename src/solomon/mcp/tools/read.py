@@ -137,7 +137,16 @@ def get_dependencies(
     limited = runtime._rate_limit_error("solomon.get_dependencies", caller_id)
     if limited is not None:
         return limited
-    _ = depth
+    if depth < 1:
+        return {
+            "ok": False,
+            "error": {
+                "code": "invalid_request",
+                "message": "depth must be at least 1",
+                "retryable": False,
+                "details": {"depth": depth},
+            },
+        }
     scope_error = _scope_error_for_item(
         runtime.service,
         knowledge_item_id,
@@ -147,7 +156,22 @@ def get_dependencies(
     )
     if scope_error is not None:
         return scope_error
-    trace = runtime.service.why(knowledge_item_id)
+    upstream, upstream_truncated = _traverse_edges(
+        runtime,
+        knowledge_item_id,
+        direction="upstream",
+        depth=depth,
+        matter_id=matter_id,
+        client_id=client_id,
+    )
+    downstream, downstream_truncated = _traverse_edges(
+        runtime,
+        knowledge_item_id,
+        direction="downstream",
+        depth=depth,
+        matter_id=matter_id,
+        client_id=client_id,
+    )
     _log_mcp_call(
         runtime.service,
         "solomon.get_dependencies",
@@ -158,10 +182,72 @@ def get_dependencies(
     )
     return {
         "knowledge_item_id": knowledge_item_id,
-        "upstream": trace.dependencies if direction in {"upstream", "both"} else [],
-        "downstream": trace.dependents if direction in {"downstream", "both"} else [],
-        "truncated": False,
+        "upstream": upstream if direction in {"upstream", "both"} else [],
+        "downstream": downstream if direction in {"downstream", "both"} else [],
+        "truncated": (
+            (upstream_truncated and direction in {"upstream", "both"})
+            or (downstream_truncated and direction in {"downstream", "both"})
+        ),
     }
+
+
+def _traverse_edges(
+    runtime: SolomonMCPRuntime,
+    root_id: str,
+    *,
+    direction: str,
+    depth: int,
+    matter_id: str | None,
+    client_id: str | None,
+) -> tuple[list[dict[str, Any]], bool]:
+    frontier = [root_id]
+    visited_nodes = {root_id}
+    seen_edges: set[str] = set()
+    collected: list[dict[str, Any]] = []
+    for _level in range(depth):
+        next_frontier: list[str] = []
+        for node_id in frontier:
+            edges = (
+                runtime.service.graph.get_dependencies(node_id)
+                if direction == "upstream"
+                else runtime.service.graph.get_dependents(node_id)
+            )
+            for edge in edges:
+                if not _edge_in_scope(runtime, edge.source_id, matter_id=matter_id, client_id=client_id):
+                    continue
+                if edge.id not in seen_edges:
+                    collected.append(edge.model_dump(mode="json"))
+                    seen_edges.add(edge.id)
+                next_id = edge.target_id if direction == "upstream" else edge.source_id
+                if next_id not in visited_nodes:
+                    visited_nodes.add(next_id)
+                    next_frontier.append(next_id)
+        frontier = next_frontier
+        if not frontier:
+            return collected, False
+    truncated = any(
+        runtime.service.graph.get_dependencies(node_id)
+        if direction == "upstream"
+        else runtime.service.graph.get_dependents(node_id)
+        for node_id in frontier
+    )
+    return collected, truncated
+
+
+def _edge_in_scope(
+    runtime: SolomonMCPRuntime,
+    source_id: str,
+    *,
+    matter_id: str | None,
+    client_id: str | None,
+) -> bool:
+    if matter_id is None and client_id is None:
+        return True
+    try:
+        item = runtime.service.store.get_item(source_id)
+    except Exception:  # noqa: BLE001
+        return False
+    return (matter_id is None or item.matter_id == matter_id) and (client_id is None or item.client_id == client_id)
 
 
 def dependency_suggestions(

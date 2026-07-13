@@ -109,6 +109,47 @@ def test_server_auth_enforces_admin_and_tenant_scopes(tmp_path: Path) -> None:
     assert allowed_recall.status_code == 200
 
 
+def test_source_registration_requires_source_manage_scope(tmp_path: Path) -> None:
+    app = create_app(
+        Settings(
+            sku="server",
+            zero_egress_mode=False,
+            data_dir=tmp_path / "data",
+            journal_dir=tmp_path / "journal",
+            server_api_key="admin-secret",
+            server_auto_provision_tenants=False,
+        )
+    )
+    admin_headers = {"Authorization": "Bearer admin-secret"}
+    writer_headers = {"Authorization": "Bearer writer-secret", "x-tenant-id": "writer"}
+    manager_headers = {"Authorization": "Bearer manager-secret", "x-tenant-id": "manager"}
+
+    async def exercise() -> tuple[httpx.Response, httpx.Response]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            for tenant_id, key, scopes in (
+                ("writer", "writer-secret", ["tenant:write"]),
+                ("manager", "manager-secret", ["source:manage"]),
+            ):
+                response = await client.post(
+                    "/tenants",
+                    headers=admin_headers,
+                    json={"tenant_id": tenant_id, "api_key": key, "api_key_scopes": scopes},
+                )
+                assert response.status_code == 201
+            payload = {"source_id": "filesystem-1", "name": "files", "kind": "filesystem", "root_ref": "/knowledge"}
+            denied = await client.post("/sources", headers=writer_headers, json=payload)
+            allowed = await client.post("/sources", headers=manager_headers, json=payload)
+            return denied, allowed
+
+    denied, allowed = asyncio.run(exercise())
+
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "forbidden"
+    assert allowed.status_code == 200
+    assert allowed.json()["id"] == "filesystem-1"
+
+
 def test_boundary_mapping_hygiene_never_persists_after_demasking() -> None:
     client = HygieneBoundaryClient()
     boundary = SolomonBoundary(client)

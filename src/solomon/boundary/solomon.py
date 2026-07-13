@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from solomon.boundary.engine.client import BoundaryClient
 from solomon.currency.models import KnowledgeItem
+from solomon.telemetry import SolomonTelemetry
 
 
 class BoundaryImportStatus(BaseModel):
@@ -134,12 +135,34 @@ class SolomonBoundary:
         client: BoundaryClientProtocol | None = None,
         *,
         policy: BoundaryPolicy | None = None,
+        telemetry: SolomonTelemetry | None = None,
     ) -> None:
         self.client = client or BoundaryClient()
         self.policy = policy or BoundaryPolicy()
+        self.telemetry = telemetry or SolomonTelemetry()
         self._volatile_mappings: dict[str, list[dict[str, str]]] = {}
 
+    def set_telemetry(self, telemetry: SolomonTelemetry) -> None:
+        self.telemetry = telemetry
+
     def review_for_ingest(
+        self,
+        item: KnowledgeItem,
+        *,
+        source_jurisdiction: str | None = None,
+        destination_jurisdiction: str | None = None,
+    ) -> tuple[KnowledgeItem, BoundaryReview]:
+        with self.telemetry.span(
+            "solomon.boundary.review",
+            attributes={"solomon.boundary.operation": "review_for_ingest"},
+        ):
+            return self._review_for_ingest(
+                item,
+                source_jurisdiction=source_jurisdiction,
+                destination_jurisdiction=destination_jurisdiction,
+            )
+
+    def _review_for_ingest(
         self,
         item: KnowledgeItem,
         *,

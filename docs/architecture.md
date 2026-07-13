@@ -68,6 +68,11 @@ history remains intact for audit-chain verification. Legal-hold reasons, scope I
 in audit entries; the durable registry keeps a subject-reference hash, request state, and affected item IDs. Server
 retention endpoints require an administrator and an explicit registered `tenant_id`.
 
+Optional OpenTelemetry tracing uses a process-local provider and OTLP/HTTP only when
+`SOLOMON_TELEMETRY_ENABLED=true` with `SOLOMON_TELEMETRY_OTLP_ENDPOINT`. The provider is not bound to a managed
+vendor. It traces ingestion, source connectors, retrieval, review, boundary review, MCP tools, and webhooks with
+operation-level attributes only; raw knowledge, query text, identifiers, credentials, and scope IDs are excluded.
+
 Optional server OIDC authentication requires `SOLOMON_OIDC_ISSUER` and `SOLOMON_OIDC_AUDIENCE`. The issuer must
 be HTTPS; Solomon obtains signing keys from its discovery document, caches JWKS entries, refreshes once for an
 unknown `kid`, and accepts only RS256 or ES256 JWTs with matching issuer, audience, expiry, and clock-skew checks.

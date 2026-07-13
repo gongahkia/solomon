@@ -124,17 +124,21 @@ def _review_mcp_output(
     if not text:
         return {"status": "passed", "classification": "SAFE", "finding_count": 0, "context_id": None}
     try:
-        response = service.boundary.client.review(
-            request={
-                "text": text,
-                "source_jurisdiction": service.boundary.policy.default_source_jurisdiction,
-                "destination_jurisdiction": service.boundary.policy.default_destination_jurisdiction,
-                "document_type": "mcp_tool_result",
-                "review_profile": service.boundary.policy.review_profile,
-                "matter_id": matter_id,
-                "include_suggestions": True,
-            }
-        )
+        with service.telemetry.span(
+            "solomon.boundary.review",
+            attributes={"solomon.boundary.operation": "mcp_output_review"},
+        ):
+            response = service.boundary.client.review(
+                request={
+                    "text": text,
+                    "source_jurisdiction": service.boundary.policy.default_source_jurisdiction,
+                    "destination_jurisdiction": service.boundary.policy.default_destination_jurisdiction,
+                    "document_type": "mcp_tool_result",
+                    "review_profile": service.boundary.policy.review_profile,
+                    "matter_id": matter_id,
+                    "include_suggestions": True,
+                }
+            )
     except Exception as exc:  # pragma: no cover - client failures are implementation-dependent
         return _error_result(
             "boundary_rejected",

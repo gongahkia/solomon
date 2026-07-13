@@ -106,6 +106,7 @@ from solomon.store.encryption import ContentEnvelopeCipher
 from solomon.store.factory import create_storage_bundle
 from solomon.store.outbox import OutboxRecord
 from solomon.store.sqlite import ItemNotFoundError
+from solomon.telemetry import SolomonTelemetry
 from solomon.workflow.models import AuthorityChangeEvent, ReviewTask, ReviewTaskPriority, ReviewTaskState
 from solomon.workflow.store import SQLiteWorkflowStore
 
@@ -169,6 +170,24 @@ SERVICE_ACCESS: dict[str, ServiceAccess] = {
     "export_audit_pack": "read",
 }
 
+SERVICE_SPAN_NAMES: dict[str, str] = {
+    "ingest": "solomon.ingestion.ingest",
+    "register_document_source": "solomon.connector.register",
+    "sync_document_source": "solomon.connector.sync",
+    "retry_source_document_extraction": "solomon.connector.extract",
+    "ingest_source_document": "solomon.connector.ingest_document",
+    "recall": "solomon.retrieval.recall",
+    "answer": "solomon.retrieval.answer",
+    "timeline": "solomon.retrieval.timeline",
+    "record_verification": "solomon.review.record_verification",
+    "assign_verification": "solomon.review.assign",
+    "start_verification_review": "solomon.review.start",
+    "resolve_review_task": "solomon.review.resolve",
+    "contest": "solomon.review.contest",
+    "affirm": "solomon.review.affirm",
+    "pin": "solomon.review.pin",
+}
+
 
 @dataclass(frozen=True)
 class ServiceAuthorization:
@@ -196,6 +215,7 @@ class SolomonService:
         embedding_provider: RetrievalEmbeddingProvider | None = None,
         content_cipher: ContentEnvelopeCipher | None = None,
         retention_default_days: int | None = None,
+        telemetry: SolomonTelemetry | None = None,
     ) -> None:
         data_dir.mkdir(parents=True, exist_ok=True)
         journal_dir.mkdir(parents=True, exist_ok=True)
@@ -207,6 +227,7 @@ class SolomonService:
         self.store = storage.store
         self.graph = storage.graph
         self.index = storage.index
+        self.telemetry = telemetry or SolomonTelemetry()
         self.verification_policy = verification_policy or VerificationPolicy()
         self.verification_policy_version = verification_policy_version
         self.credence_policy_version = credence_policy_version
@@ -225,7 +246,8 @@ class SolomonService:
         self.authority_sources = SQLiteAuthoritySourceRegistry(data_dir / "authority-sources.sqlite3")
         self.workflow_store = SQLiteWorkflowStore(data_dir / "workflow.sqlite3")
         self.attestation_key = attestation_key
-        self.boundary = boundary or SolomonBoundary()
+        self.boundary = boundary or SolomonBoundary(telemetry=self.telemetry)
+        self.boundary.set_telemetry(self.telemetry)
         self._ingestion = IngestionService(self)
         self._answer = AnswerService(self)
         self._authority = AuthorityService(self)
@@ -238,8 +260,13 @@ class SolomonService:
             return value
 
         def authorized(*args: Any, **kwargs: Any) -> Any:
-            self._authorize_service_operation(name, access)
-            return value(*args, **kwargs)
+            span_name = SERVICE_SPAN_NAMES.get(name, f"solomon.service.{name}")
+            with self.telemetry.span(
+                span_name,
+                attributes={"solomon.service.operation": name, "solomon.service.access": access},
+            ):
+                self._authorize_service_operation(name, access)
+                return value(*args, **kwargs)
 
         return authorized
 

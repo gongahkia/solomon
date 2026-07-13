@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     content_encryption_key_ref: str | None = Field(default=None, min_length=1, max_length=256)
     content_encryption_key: SecretStr | None = None
     retention_default_days: int | None = Field(default=None, ge=1, le=36_500)
+    telemetry_enabled: bool = False
+    telemetry_service_name: str = Field(default="solomon", min_length=1, max_length=120)
+    telemetry_otlp_endpoint: str | None = None
     local_model_url: str = "http://127.0.0.1:11434/api/generate"
     local_model_name: str = "qwen2.5-coder:1.5b"
     remote_model_url: str | None = None
@@ -106,6 +109,12 @@ class Settings(BaseSettings):
             )
         if self.console_role not in OIDC_AUTH_ROLES:
             raise ValueError("console role must be a Solomon role")
+        if self.telemetry_otlp_endpoint is not None:
+            endpoint = urlparse(self.telemetry_otlp_endpoint)
+            if endpoint.scheme not in {"http", "https"} or not endpoint.netloc or endpoint.query or endpoint.fragment:
+                raise ValueError("OpenTelemetry endpoint must be an absolute HTTP(S) URL without query or fragment")
+            if not self.telemetry_enabled:
+                raise ValueError("OpenTelemetry endpoint requires SOLOMON_TELEMETRY_ENABLED=true")
         if self.zero_egress_mode and self.allow_remote_egress:
             raise ValueError("zero-egress mode conflicts with remote egress")
         if self.sku == "server" and self.allow_remote_egress and not self.remote_model_url:
@@ -139,6 +148,9 @@ class Settings(BaseSettings):
             "content_encryption_configured": self.content_encryption_key is not None,
             "content_encryption_key_ref": self.content_encryption_key_ref,
             "retention_default_days": self.retention_default_days,
+            "telemetry_enabled": self.telemetry_enabled,
+            "telemetry_service_name": self.telemetry_service_name,
+            "telemetry_otlp_configured": self.telemetry_otlp_endpoint is not None,
             "server_auto_provision_tenants": self.server_auto_provision_tenants,
             "oidc_configured": self.oidc_issuer is not None,
             "oidc_clock_skew_seconds": self.oidc_clock_skew_seconds,

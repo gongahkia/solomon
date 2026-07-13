@@ -42,6 +42,7 @@ from solomon.graph.suggestions import SuggestionDecision
 from solomon.graph.visualization import GraphFormat
 from solomon.mcp.server import run_sse_server, run_stdio_server, run_streamable_http_server
 from solomon.mcp.tools import SolomonMCPRuntime
+from solomon.telemetry import telemetry_from_settings
 
 
 def _example(command: str) -> str:
@@ -188,6 +189,11 @@ def _service(*, jurisdiction: str | None = None) -> SolomonService:
         verification_policy_version=settings.verification_policy_version,
         credence_policy=credence_policy_from_settings(settings),
         credence_policy_version=settings.credence_policy_version,
+        telemetry=telemetry_from_settings(
+            enabled=settings.telemetry_enabled,
+            service_name=settings.telemetry_service_name,
+            otlp_endpoint=settings.telemetry_otlp_endpoint,
+        ),
         boundary=SolomonBoundary(policy=boundary_policy_from_settings(settings, jurisdiction=jurisdiction)),
     )
 

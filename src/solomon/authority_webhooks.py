@@ -13,6 +13,7 @@ from pydantic import Field
 from solomon.api.schemas import SolomonModel
 from solomon.connectors import SecretReference
 from solomon.contracts import AuthoritySource
+from solomon.telemetry import SolomonTelemetry
 from solomon.workflow.models import AuthorityChangeEvent
 
 
@@ -32,10 +33,19 @@ class AuthorityWebhookVerificationError(ValueError):
 
 
 class AuthorityWebhookIntake:
-    def __init__(self, resolve_secret: Callable[[SecretReference], str]) -> None:
+    def __init__(
+        self,
+        resolve_secret: Callable[[SecretReference], str],
+        telemetry: SolomonTelemetry | None = None,
+    ) -> None:
         self.resolve_secret = resolve_secret
+        self.telemetry = telemetry or SolomonTelemetry()
 
     def parse(self, source: AuthoritySource, body: bytes, signature: str | None) -> AuthorityChangeEvent:
+        with self.telemetry.span("solomon.webhook.intake", attributes={"solomon.webhook.operation": "intake"}):
+            return self._parse(source, body, signature)
+
+    def _parse(self, source: AuthoritySource, body: bytes, signature: str | None) -> AuthorityChangeEvent:
         secret_reference = source.config.secret_references.get("webhook_signing_secret")
         if secret_reference is None:
             raise AuthorityWebhookVerificationError("authority source has no webhook signing-secret reference")

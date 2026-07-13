@@ -357,6 +357,21 @@ curl -fsS http://127.0.0.1:8140/metrics
 The exporter is process-local and uses the open-source `prometheus-client` library; it needs no managed observability
 vendor. Scrapes use SQL aggregate gauges, and audit-journal verification is cached for 30 seconds.
 
+## OpenTelemetry Tracing
+
+Tracing is opt-in and exports only to a configured OTLP/HTTP endpoint, so deployments can use a self-hosted OpenTelemetry
+Collector and backend. Set an endpoint only with explicit enablement:
+
+```bash
+export SOLOMON_TELEMETRY_ENABLED=true
+export SOLOMON_TELEMETRY_SERVICE_NAME=solomon-prod
+export SOLOMON_TELEMETRY_OTLP_ENDPOINT=http://otel-collector:4318/v1/traces
+```
+
+Solomon emits low-cardinality spans for ingestion, document-source connector operations, retrieval, review, boundary
+review, MCP tools, and inbound/outbound webhooks. Span attributes exclude query text, document content, source
+references, credentials, tenant IDs, matter IDs, and client IDs. FastAPI requests honor an inbound W3C `traceparent`.
+
 ## End-to-End Evaluation
 
 [`docs/evaluation-corpus.e2e.synthetic.json`](./docs/evaluation-corpus.e2e.synthetic.json) is a public, versioned,

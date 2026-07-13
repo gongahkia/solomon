@@ -18,6 +18,7 @@ from pydantic import Field
 from solomon.api.schemas import SolomonModel
 from solomon.contracts import WebhookDelivery, WebhookDeliveryResult
 from solomon.currency.models import _ensure_aware_utc, now_utc
+from solomon.telemetry import SolomonTelemetry
 
 
 class WebhookDeliveryState(str, Enum):
@@ -140,6 +141,7 @@ class HMACWebhookDispatcher:
         transport: WebhookTransport,
         max_attempts: int = 3,
         clock: Callable[[], datetime] = now_utc,
+        telemetry: SolomonTelemetry | None = None,
     ) -> None:
         if max_attempts < 1:
             raise ValueError("max_attempts must be at least one")
@@ -148,8 +150,13 @@ class HMACWebhookDispatcher:
         self.transport = transport
         self.max_attempts = max_attempts
         self.clock = clock
+        self.telemetry = telemetry or SolomonTelemetry()
 
     def deliver(self, delivery: WebhookDelivery) -> WebhookDeliveryResult:
+        with self.telemetry.span("solomon.webhook.deliver", attributes={"solomon.webhook.operation": "deliver"}):
+            return self._deliver(delivery)
+
+    def _deliver(self, delivery: WebhookDelivery) -> WebhookDeliveryResult:
         _validate_target_url(delivery.target_url)
         body = _event_body(delivery)
         payload_sha256 = hashlib.sha256(body).hexdigest()

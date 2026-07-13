@@ -48,6 +48,7 @@ from solomon.currency.models import CredenceTier, CurrencyState, KnowledgeItem, 
 from solomon.currency.report import CurrencyMovementReport, ReportScopeKind, render_currency_report_pdf
 from solomon.errors import SolomonError
 from solomon.graph.suggestions import DependencySuggestion, SuggestionDecision
+from solomon.telemetry import telemetry_from_settings
 from solomon.workflow.models import ReviewTaskPriority, ReviewTaskState
 
 DEFAULT_DATABASE_URL = str(Settings.model_fields["database_url"].default)
@@ -70,6 +71,11 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
         verification_policy_version=resolved_settings.verification_policy_version,
         credence_policy=credence_policy_from_settings(resolved_settings),
         credence_policy_version=resolved_settings.credence_policy_version,
+        telemetry=telemetry_from_settings(
+            enabled=resolved_settings.telemetry_enabled,
+            service_name=resolved_settings.telemetry_service_name,
+            otlp_endpoint=resolved_settings.telemetry_otlp_endpoint,
+        ),
         boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
     )
     app = FastAPI(title="Solomon Console")

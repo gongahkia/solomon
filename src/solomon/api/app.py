@@ -92,6 +92,7 @@ from solomon.orchestrator.models import (
     RoutingPolicy,
 )
 from solomon.retention import ErasureRecord, LegalHoldRecord, RetentionScope
+from solomon.telemetry import telemetry_from_settings
 from solomon.workflow.models import ReviewTaskState
 
 PUBLIC_PATHS = {"/health", "/ready", "/metrics", "/docs", "/redoc", "/openapi.json"}
@@ -180,6 +181,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     cp = credence_policy_from_settings(resolved_settings)
     embedding_provider = embedding_provider_from_settings(resolved_settings)
     content_cipher = content_envelope_from_settings(resolved_settings)
+    telemetry = telemetry_from_settings(
+        enabled=resolved_settings.telemetry_enabled,
+        service_name=resolved_settings.telemetry_service_name,
+        otlp_endpoint=resolved_settings.telemetry_otlp_endpoint,
+    )
     service = SolomonService(
         data_dir=resolved_settings.data_dir,
         journal_dir=resolved_settings.journal_dir,
@@ -190,6 +196,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         embedding_provider=embedding_provider,
         content_cipher=content_cipher,
         retention_default_days=resolved_settings.retention_default_days,
+        telemetry=telemetry,
         boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
     )
     tenant_services: dict[str, SolomonService] = {}
@@ -211,6 +218,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             embedding_provider=embedding_provider,
             content_cipher=content_cipher,
             retention_default_days=resolved_settings.retention_default_days,
+            telemetry=telemetry,
             boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
         )
         metrics.attach(tenant_service)
@@ -246,6 +254,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.tenant_registry = tenant_registry
     app.state.service_principal_registry = service_principal_registry
     app.state.metrics = metrics
+    app.state.telemetry = telemetry
     app.state.oidc_validator = _oidc_validator_from_settings(resolved_settings)
 
     def active_router() -> ModelRouter:
@@ -365,6 +374,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 elapsed_seconds=request_started() - started_at,
             )
         return response
+
+    @app.middleware("http")
+    async def telemetry_middleware(request: Request, call_next: Any) -> Any:
+        with telemetry.span(
+            "solomon.http.request",
+            attributes={"http.request.method": request.method},
+            headers=dict(request.headers),
+        ) as span:
+            response = await call_next(request)
+            if span is not None:
+                route = getattr(request.scope.get("route"), "path", request.url.path)
+                span.set_attribute("http.route", route)
+                span.set_attribute("http.response.status_code", response.status_code)
+            return response
 
     @app.exception_handler(SolomonError)
     def solomon_error_handler(_request: Request, exc: SolomonError) -> JSONResponse:

@@ -28,6 +28,7 @@ from solomon.mcp.auth import MCPAuthConfig, MCPPrincipal, authorized_mcp_call, b
 from solomon.mcp.tools import MCPToolSpec, SolomonMCPRuntime, mcp_tool_specs, register_solomon_tools
 from solomon.mcp.tools.helpers import _error_result
 from solomon.mcp.transport import MCPShutdownConfig, MCPTransportConfig, MCPTransportKind
+from solomon.telemetry import telemetry_from_settings
 
 PROTECTED_RESOURCE_METADATA_PREFIX = "/.well-known/oauth-protected-resource"
 MCPIdentityResolver = Callable[[str], MCPPrincipal | None]
@@ -138,6 +139,11 @@ def create_fastmcp_server(
 
 def service_from_settings() -> SolomonService:
     settings = get_settings()
+    telemetry = telemetry_from_settings(
+        enabled=settings.telemetry_enabled,
+        service_name=settings.telemetry_service_name,
+        otlp_endpoint=settings.telemetry_otlp_endpoint,
+    )
     return SolomonService(
         data_dir=settings.data_dir,
         journal_dir=settings.journal_dir,
@@ -147,6 +153,7 @@ def service_from_settings() -> SolomonService:
         verification_policy_version=settings.verification_policy_version,
         credence_policy=credence_policy_from_settings(settings),
         credence_policy_version=settings.credence_policy_version,
+        telemetry=telemetry,
         boundary=SolomonBoundary(policy=boundary_policy_from_settings(settings)),
     )
 

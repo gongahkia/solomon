@@ -13,7 +13,7 @@ from typing import Any
 
 from typing_extensions import Self
 
-from solomon.currency.models import CurrencyState, KnowledgeItem, now_utc
+from solomon.currency.models import CurrencyState, KnowledgeItem, is_v01_knowledge_item_payload, now_utc
 from solomon.events import DomainEventEnvelope
 from solomon.store.migrations import apply_sqlite_migrations, sqlite_knowledge_store_migrations
 from solomon.store.outbox import OutboxRecord
@@ -56,6 +56,7 @@ class SQLiteKnowledgeStore:
 
     def initialize(self) -> None:
         apply_sqlite_migrations(self._conn, sqlite_knowledge_store_migrations())
+        self._migrate_v01_current_items()
 
     def write_item(self, item: KnowledgeItem) -> KnowledgeItem:
         with self._conn:
@@ -424,6 +425,15 @@ class SQLiteKnowledgeStore:
                     raise
                 time.sleep(0.05 * (attempt + 1))
         raise StoreError("unreachable SQLite retry state")
+
+    def _migrate_v01_current_items(self) -> None:
+        rows = self._conn.execute("SELECT item_json FROM knowledge_items").fetchall()
+        with self._conn:
+            for row in rows:
+                payload = json.loads(str(row["item_json"]))
+                if not is_v01_knowledge_item_payload(payload):
+                    continue
+                self._upsert_current(KnowledgeItem.model_validate(payload))
 
     def _append_event(
         self,

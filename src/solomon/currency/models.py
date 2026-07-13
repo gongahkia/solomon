@@ -5,12 +5,13 @@ from __future__ import annotations
 import secrets
 import time
 import uuid
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from enum import Enum
 from threading import Lock
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 
 from solomon.api.schemas import SolomonModel
 
@@ -146,6 +147,30 @@ class Provenance(SolomonModel):
     boundary_review_classification: str | None = None
     boundary_findings: list[dict[str, Any]] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_v01_boundary_fields(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        migrated = dict(value)
+        if "boundary_review_classification" not in migrated and "kaypoh_review_classification" in migrated:
+            migrated["boundary_review_classification"] = migrated["kaypoh_review_classification"]
+        if "boundary_findings" not in migrated and "kaypoh_findings" in migrated:
+            migrated["boundary_findings"] = migrated["kaypoh_findings"]
+        migrated.pop("kaypoh_review_classification", None)
+        migrated.pop("kaypoh_findings", None)
+        return migrated
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def kaypoh_review_classification(self) -> str | None:
+        return self.boundary_review_classification
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def kaypoh_findings(self) -> list[dict[str, Any]]:
+        return self.boundary_findings
+
 
 class KnowledgeItem(SolomonModel):
     id: str = Field(default_factory=new_uuid7)
@@ -167,6 +192,15 @@ class KnowledgeItem(SolomonModel):
     client_id: str | None = None
     successor_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_v01_claim_shape(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        migrated = dict(value)
+        migrated.setdefault("content_role", KnowledgeContentRole.POSITION.value)
+        return migrated
 
     @field_validator("valid_from", "valid_to", "ingested_at", "last_verified_at")
     @classmethod
@@ -191,3 +225,13 @@ class KnowledgeItem(SolomonModel):
                 "successor_id": successor_id,
             }
         )
+
+
+def is_v01_knowledge_item_payload(value: object) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    provenance = value.get("provenance")
+    return "content_role" not in value or (
+        isinstance(provenance, Mapping)
+        and ("kaypoh_review_classification" in provenance or "kaypoh_findings" in provenance)
+    )

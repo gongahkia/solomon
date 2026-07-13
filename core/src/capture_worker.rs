@@ -8,10 +8,14 @@ use crate::extraction::{
     ExtractionCandidate, ExtractionRequest, MemoryExtractor, SourceEvidence, validate_candidates,
 };
 use crate::model::{MemoryId, MemoryScope, Provenance, SourceKind};
-use crate::policy::{CaptureIntent, CapturePolicyRequest, PolicyActorClass};
-use crate::storage::MemoryWriteEvent;
+use crate::observability::{ObservabilityOperation, ObservabilityRecord};
+use crate::policy::{
+    CaptureIntent, CapturePolicyRequest, PolicyActorClass, PolicyAuditDisposition,
+};
+use crate::storage::{MemoryEvent, MemoryWriteEvent};
 use crate::vector::VectorIndex;
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -236,6 +240,7 @@ impl AutomaticCaptureWorker {
         extractor: &dyn MemoryExtractor,
         cancellation: &dyn AutomaticCaptureCancellation,
     ) -> Result<AutomaticCaptureReport, AutomaticCaptureError> {
+        let started = Instant::now();
         for input in inputs {
             validate_input(input)?;
         }
@@ -268,6 +273,12 @@ impl AutomaticCaptureWorker {
                 )?;
                 report.denied += 1;
             }
+            record_automatic_capture_observability(
+                engine,
+                &run_id,
+                started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                provider,
+            )?;
             return Ok(report);
         }
 
@@ -473,6 +484,12 @@ impl AutomaticCaptureWorker {
             }
         }
 
+        record_automatic_capture_observability(
+            engine,
+            &run_id,
+            started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+            provider,
+        )?;
         Ok(report)
     }
 }
@@ -570,6 +587,63 @@ fn record_audit<V: VectorIndex>(
         .store()
         .record_automatic_capture(record)
         .map_err(|_| AutomaticCaptureError::Core)?;
+    Ok(())
+}
+
+fn record_automatic_capture_observability<V: VectorIndex>(
+    engine: &Shibahama<V>,
+    run_id: &str,
+    duration_ms: u64,
+    provider: Option<(&dyn EmbeddingProvider, &str)>,
+) -> Result<(), AutomaticCaptureError> {
+    let audits = engine
+        .store()
+        .events()
+        .map_err(|_| AutomaticCaptureError::Core)?
+        .into_iter()
+        .filter_map(|event| match event.event {
+            MemoryEvent::AutomaticCaptureRecorded { record } if record.run_id == run_id => {
+                Some(record)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    for audit in audits {
+        let (policy_outcome, error_code) = match audit.disposition {
+            AutomaticCaptureDisposition::DeniedByPolicy => {
+                (PolicyAuditDisposition::Denied, Some("SHIBA_POLICY_DENIED"))
+            }
+            AutomaticCaptureDisposition::InvalidCandidate => (
+                PolicyAuditDisposition::Allowed,
+                Some("SHIBA_INVALID_REQUEST"),
+            ),
+            AutomaticCaptureDisposition::ExtractionFailed
+            | AutomaticCaptureDisposition::PersistenceFailed => (
+                PolicyAuditDisposition::Allowed,
+                Some("SHIBA_CAPTURE_FAILED"),
+            ),
+            AutomaticCaptureDisposition::Cancelled => {
+                (PolicyAuditDisposition::Allowed, Some("SHIBA_CANCELLED"))
+            }
+            AutomaticCaptureDisposition::Persisted
+            | AutomaticCaptureDisposition::Duplicate
+            | AutomaticCaptureDisposition::NoCandidate => (PolicyAuditDisposition::Allowed, None),
+        };
+        engine
+            .store()
+            .record_observability(ObservabilityRecord {
+                operation: ObservabilityOperation::AutomaticCapture,
+                duration_ms,
+                item_count: usize::from(audit.memory_id.is_some()),
+                provider: provider.map(|(provider, _)| provider.metadata().provider),
+                model: provider.map(|(provider, _)| provider.metadata().model),
+                policy_outcome: Some(policy_outcome),
+                error_code: error_code.map(str::to_owned),
+                scope: Some(audit.scope),
+            })
+            .map_err(|_| AutomaticCaptureError::Core)?;
+    }
     Ok(())
 }
 
@@ -926,6 +1000,26 @@ mod tests {
             .filter(|event| matches!(event.event, MemoryEvent::AutomaticCaptureRecorded { .. }))
             .count();
         assert_eq!(automatic_audits, 6);
+        let telemetry = engine
+            .store()
+            .events_in_scope(&scope)
+            .expect("events should read")
+            .into_iter()
+            .filter_map(|event| match event.event {
+                MemoryEvent::ObservabilityRecorded { record }
+                    if record.operation == ObservabilityOperation::AutomaticCapture =>
+                {
+                    Some(record)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(telemetry.len(), 6);
+        assert!(telemetry.iter().all(|record| {
+            record.scope.as_ref() == Some(&scope)
+                && record.policy_outcome == Some(PolicyAuditDisposition::Allowed)
+        }));
+        assert!(telemetry.iter().any(|record| record.item_count == 0));
     }
 
     #[test]

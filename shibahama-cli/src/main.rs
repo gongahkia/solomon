@@ -4,6 +4,8 @@
 
 #![allow(clippy::needless_pass_by_value)]
 
+mod mcp;
+
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::{HeaderMap, StatusCode};
@@ -95,6 +97,8 @@ enum Command {
     Export(ExportCommand),
     /// Start the optional HTTP server mode.
     Serve(ServeCommand),
+    /// Start the local Model Context Protocol server over stdio.
+    Mcp(McpCommand),
 }
 
 #[derive(Args)]
@@ -306,6 +310,22 @@ struct ServeCommand {
     /// Maximum materialized memories allowed per namespace.
     #[arg(long, default_value_t = 10_000)]
     max_memories_per_namespace: usize,
+}
+
+#[derive(Args)]
+struct McpCommand {
+    /// Repository scope fixed for this MCP server process.
+    #[arg(long)]
+    scope_repository: String,
+    /// Owning team scope when `--scope-visibility team` is selected.
+    #[arg(long)]
+    scope_team: Option<String>,
+    /// Scope visibility: `repository` or `team`.
+    #[arg(long)]
+    scope_visibility: String,
+    /// Local principal identity fixed for this MCP server process.
+    #[arg(long)]
+    principal: String,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -928,6 +948,7 @@ fn run() -> CliResult<()> {
         Command::Inspect(command) => inspect(command),
         Command::Export(command) => export(command),
         Command::Serve(command) => serve(command),
+        Command::Mcp(command) => serve_mcp(command),
     }
 }
 
@@ -1163,6 +1184,55 @@ fn serve(command: ServeCommand) -> CliResult<()> {
         .build()?;
 
     runtime.block_on(serve_async(command))
+}
+
+fn serve_mcp(command: McpCommand) -> CliResult<()> {
+    let scope = mcp_memory_scope(&command)?;
+    let principal = mcp_principal(&command.principal)?;
+
+    Ok(mcp::serve_stdio(mcp::McpServerContext::new(
+        scope, principal,
+    ))?)
+}
+
+fn mcp_memory_scope(command: &McpCommand) -> CliResult<MemoryScope> {
+    let repository = ScopeId::new(&command.scope_repository)?;
+    match command.scope_visibility.as_str() {
+        "repository" => {
+            if command.scope_team.is_some() {
+                return Err(Box::new(CliError(
+                    "repository MCP scope must not include --scope-team".to_owned(),
+                )));
+            }
+            Ok(MemoryScope::repository(repository))
+        }
+        "team" => {
+            let team = command.scope_team.as_deref().ok_or_else(|| {
+                Box::new(CliError("team MCP scope requires --scope-team".to_owned()))
+                    as Box<dyn Error>
+            })?;
+            Ok(MemoryScope::team(repository, ScopeId::new(team)?))
+        }
+        _ => Err(Box::new(CliError(
+            "MCP scope visibility must be `repository` or `team`".to_owned(),
+        ))),
+    }
+}
+
+fn mcp_principal(value: &str) -> CliResult<String> {
+    let valid = !value.is_empty()
+        && value.len() <= 128
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':')
+        });
+    if valid {
+        Ok(value.to_owned())
+    } else {
+        Err(Box::new(CliError(
+            "MCP principal must be 1-128 ASCII alphanumeric, `-`, `_`, `.`, or `:` characters"
+                .to_owned(),
+        )))
+    }
 }
 
 async fn serve_async(command: ServeCommand) -> CliResult<()> {

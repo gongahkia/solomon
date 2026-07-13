@@ -1526,15 +1526,46 @@ impl<V: VectorIndex> Shibahama<V> {
         let scope = event.scope.clone();
         let metadata = provider.metadata();
         if metadata.dimensions != self.vector_index.dimensions() {
+            self.store
+                .record_observability(ObservabilityRecord::failure(
+                    ObservabilityOperation::ProviderCapture,
+                    started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                    Some(metadata.provider),
+                    Some(metadata.model),
+                    "SHIBA_INVALID_REQUEST",
+                    Some(scope),
+                ))?;
             return Err(ShibahamaError::InvalidRequest(
                 "embedding provider dimensions do not match vector index".to_owned(),
             ));
         }
-        let vector = provider
-            .embed(&event.content, EmbeddingPurpose::Document)
-            .map_err(|error| ShibahamaError::InvalidRequest(error.detail))?;
-        validate_embedding(&metadata, EmbeddingPurpose::Document, &vector)
-            .map_err(|error| ShibahamaError::InvalidRequest(error.detail))?;
+        let vector = match provider.embed(&event.content, EmbeddingPurpose::Document) {
+            Ok(vector) => vector,
+            Err(error) => {
+                self.store
+                    .record_observability(ObservabilityRecord::failure(
+                        ObservabilityOperation::ProviderCapture,
+                        started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                        Some(metadata.provider),
+                        Some(metadata.model),
+                        "SHIBA_PROVIDER",
+                        Some(scope),
+                    ))?;
+                return Err(ShibahamaError::InvalidRequest(error.detail));
+            }
+        };
+        if let Err(error) = validate_embedding(&metadata, EmbeddingPurpose::Document, &vector) {
+            self.store
+                .record_observability(ObservabilityRecord::failure(
+                    ObservabilityOperation::ProviderCapture,
+                    started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                    Some(metadata.provider),
+                    Some(metadata.model),
+                    "SHIBA_INVALID_REQUEST",
+                    Some(scope),
+                ))?;
+            return Err(ShibahamaError::InvalidRequest(error.detail));
+        }
 
         let item = self.write_with_embedding(
             event,
@@ -1572,18 +1603,54 @@ impl<V: VectorIndex> Shibahama<V> {
         request: CapturePolicyRequest,
     ) -> Result<MemoryItem, ShibahamaError> {
         self.require_scope_context()?;
+        let started = Instant::now();
+        let scope = event.scope.clone();
         let audit = self.prepare_capture_policy(&event, request)?;
         let metadata = provider.metadata();
         if metadata.dimensions != self.vector_index.dimensions() {
+            self.store.record_observability(ObservabilityRecord {
+                operation: ObservabilityOperation::ProviderCapture,
+                duration_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                item_count: 0,
+                provider: Some(metadata.provider),
+                model: Some(metadata.model),
+                policy_outcome: Some(audit.disposition),
+                error_code: Some("SHIBA_INVALID_REQUEST".to_owned()),
+                scope: Some(scope),
+            })?;
             return Err(ShibahamaError::InvalidRequest(
                 "embedding provider dimensions do not match vector index".to_owned(),
             ));
         }
-        let vector = provider
-            .embed(&event.content, EmbeddingPurpose::Document)
-            .map_err(|error| ShibahamaError::InvalidRequest(error.detail))?;
-        validate_embedding(&metadata, EmbeddingPurpose::Document, &vector)
-            .map_err(|error| ShibahamaError::InvalidRequest(error.detail))?;
+        let vector = match provider.embed(&event.content, EmbeddingPurpose::Document) {
+            Ok(vector) => vector,
+            Err(error) => {
+                self.store.record_observability(ObservabilityRecord {
+                    operation: ObservabilityOperation::ProviderCapture,
+                    duration_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                    item_count: 0,
+                    provider: Some(metadata.provider),
+                    model: Some(metadata.model),
+                    policy_outcome: Some(audit.disposition),
+                    error_code: Some("SHIBA_PROVIDER".to_owned()),
+                    scope: Some(scope),
+                })?;
+                return Err(ShibahamaError::InvalidRequest(error.detail));
+            }
+        };
+        if let Err(error) = validate_embedding(&metadata, EmbeddingPurpose::Document, &vector) {
+            self.store.record_observability(ObservabilityRecord {
+                operation: ObservabilityOperation::ProviderCapture,
+                duration_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                item_count: 0,
+                provider: Some(metadata.provider),
+                model: Some(metadata.model),
+                policy_outcome: Some(audit.disposition),
+                error_code: Some("SHIBA_INVALID_REQUEST".to_owned()),
+                scope: Some(scope),
+            })?;
+            return Err(ShibahamaError::InvalidRequest(error.detail));
+        }
         let mut item = event.into_item_with_policy(self.config.ingest_credence);
 
         self.store.write_embedded(
@@ -1591,10 +1658,20 @@ impl<V: VectorIndex> Shibahama<V> {
             &mut self.vector_index,
             &vector,
             index_name,
-            metadata.model,
-            metadata.version,
+            &metadata.model,
+            &metadata.version,
         )?;
         self.store.record_policy_decision(audit)?;
+        self.store.record_observability(ObservabilityRecord {
+            operation: ObservabilityOperation::ProviderCapture,
+            duration_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+            item_count: 1,
+            provider: Some(metadata.provider),
+            model: Some(metadata.model),
+            policy_outcome: Some(PolicyAuditDisposition::Allowed),
+            error_code: None,
+            scope: Some(scope),
+        })?;
 
         Ok(item)
     }
@@ -1841,15 +1918,46 @@ impl<V: VectorIndex> Shibahama<V> {
         let started = Instant::now();
         let metadata = provider.metadata();
         if metadata.dimensions != self.vector_index.dimensions() {
+            self.store
+                .record_observability(ObservabilityRecord::failure(
+                    ObservabilityOperation::ProviderRecall,
+                    started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                    Some(metadata.provider),
+                    Some(metadata.model),
+                    "SHIBA_INVALID_REQUEST",
+                    None,
+                ))?;
             return Err(ShibahamaError::InvalidRequest(
                 "embedding provider dimensions do not match vector index".to_owned(),
             ));
         }
-        let vector = provider
-            .embed(query, EmbeddingPurpose::Query)
-            .map_err(|error| ShibahamaError::InvalidRequest(error.detail))?;
-        validate_embedding(&metadata, EmbeddingPurpose::Query, &vector)
-            .map_err(|error| ShibahamaError::InvalidRequest(error.detail))?;
+        let vector = match provider.embed(query, EmbeddingPurpose::Query) {
+            Ok(vector) => vector,
+            Err(error) => {
+                self.store
+                    .record_observability(ObservabilityRecord::failure(
+                        ObservabilityOperation::ProviderRecall,
+                        started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                        Some(metadata.provider),
+                        Some(metadata.model),
+                        "SHIBA_PROVIDER",
+                        None,
+                    ))?;
+                return Err(ShibahamaError::InvalidRequest(error.detail));
+            }
+        };
+        if let Err(error) = validate_embedding(&metadata, EmbeddingPurpose::Query, &vector) {
+            self.store
+                .record_observability(ObservabilityRecord::failure(
+                    ObservabilityOperation::ProviderRecall,
+                    started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                    Some(metadata.provider),
+                    Some(metadata.model),
+                    "SHIBA_INVALID_REQUEST",
+                    None,
+                ))?;
+            return Err(ShibahamaError::InvalidRequest(error.detail));
+        }
         let request = self.recall_request(&vector, top_k, now);
 
         let candidates = self.recall(&request)?;
@@ -4251,6 +4359,24 @@ mod tests {
             shibahama.memory_items().expect("items should read").len(),
             1
         );
+        let failures = shibahama
+            .event_records()
+            .expect("events should read")
+            .into_iter()
+            .filter_map(|event| match event.event {
+                MemoryEvent::ObservabilityRecorded { record } => Some(record),
+                _ => None,
+            })
+            .filter(|record| record.error_code.is_some())
+            .collect::<Vec<_>>();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(
+            failures[0].error_code.as_deref(),
+            Some("SHIBA_INVALID_REQUEST")
+        );
+        assert_eq!(failures[0].item_count, 0);
+        assert_eq!(failures[0].provider.as_deref(), Some("test"));
+        assert_eq!(failures[0].model.as_deref(), Some("fixed"));
     }
 
     #[test]

@@ -4,9 +4,12 @@
 
 use crate::api::{ScopedShibahama, Shibahama, ShibahamaError};
 use crate::model::MemoryScope;
+use crate::observability::{ObservabilityOperation, ObservabilityRecord};
+use crate::policy::PolicyAuditDisposition;
 use crate::policy::RecallMode;
 use crate::retrieval::{RecallCandidate, RecallRequest, RecallUnavailableStage};
 use crate::vector::VectorIndex;
+use std::time::Instant;
 use time::OffsetDateTime;
 
 /// Request to assemble bounded context for one explicit scope.
@@ -65,6 +68,7 @@ impl AutomaticContextWorker {
         engine: &mut Shibahama<V>,
         request: &AutomaticContextRequest,
     ) -> Result<AutomaticContextReport, ShibahamaError> {
+        let started = Instant::now();
         match engine.config().recall_policy.mode {
             RecallMode::Manual => {
                 return Ok(AutomaticContextReport::suppressed(
@@ -79,7 +83,19 @@ impl AutomaticContextWorker {
             RecallMode::Automatic => {}
         }
         let mut scoped = engine.scoped(request.scope.clone())?;
-        Self::assemble_scoped(&mut scoped, request)
+        let report = Self::assemble_scoped(&mut scoped, request)?;
+        drop(scoped);
+        engine.store().record_observability(ObservabilityRecord {
+            operation: ObservabilityOperation::AutomaticContext,
+            duration_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+            item_count: report.returned.len(),
+            provider: None,
+            model: None,
+            policy_outcome: Some(PolicyAuditDisposition::Allowed),
+            error_code: None,
+            scope: Some(request.scope.clone()),
+        })?;
+        Ok(report)
     }
 
     fn assemble_scoped<V: VectorIndex>(
@@ -124,7 +140,7 @@ mod tests {
     use crate::api::{ShibahamaConfig, WriteEmbedding};
     use crate::model::{Provenance, ScopeId, SourceKind};
     use crate::policy::RecallPolicy;
-    use crate::storage::MemoryWriteEvent;
+    use crate::storage::{MemoryEvent, MemoryWriteEvent};
     use crate::vector::HnswVectorIndex;
     use tempfile::NamedTempFile;
 
@@ -231,7 +247,7 @@ mod tests {
                 &mut engine,
                 &AutomaticContextRequest {
                     query_vector: vec![0.0, 0.0],
-                    scope: allowed,
+                    scope: allowed.clone(),
                     top_k: 8,
                     now: OffsetDateTime::UNIX_EPOCH,
                     raw_query_context: Some("query".to_owned()),
@@ -244,5 +260,26 @@ mod tests {
         assert!(report.context_tokens_used <= 16);
         assert!(!report.returned[0].item.content.starts_with("SYSTEM:"));
         assert!(report.omitted_candidates >= 1);
+        let telemetry = engine
+            .event_records()
+            .expect("events should read")
+            .into_iter()
+            .filter_map(|event| match event.event {
+                MemoryEvent::ObservabilityRecorded { record } => Some(record),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(telemetry.len(), 1);
+        assert_eq!(
+            telemetry[0].operation,
+            ObservabilityOperation::AutomaticContext
+        );
+        assert_eq!(telemetry[0].item_count, report.returned.len());
+        assert_eq!(
+            telemetry[0].policy_outcome,
+            Some(PolicyAuditDisposition::Allowed)
+        );
+        assert_eq!(telemetry[0].scope.as_ref(), Some(&allowed));
+        assert!(telemetry[0].error_code.is_none());
     }
 }

@@ -12,6 +12,8 @@ from solomon.sources.models import (
     CandidateClaimStatus,
     DocumentExtractionState,
     DocumentSource,
+    SourceChangeEvent,
+    SourceChangeKind,
     SourceDocument,
 )
 
@@ -101,6 +103,22 @@ class SQLiteDocumentStore:
                 )
                 """
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS source_change_events (
+                    event_id TEXT PRIMARY KEY,
+                    source_id TEXT NOT NULL,
+                    external_id TEXT NOT NULL,
+                    document_id TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    event_json TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_source_change_events "
+                "ON source_change_events(source_id, external_id, occurred_at, event_id)"
+            )
 
     def upsert_source(self, source: DocumentSource) -> DocumentSource:
         with self._conn:
@@ -175,6 +193,7 @@ class SQLiteDocumentStore:
                     document.model_dump_json(),
                 ),
             )
+            self._record_change_event(document, previous=latest)
         return document
 
     def tombstone_document(self, source_id: str, external_id: str) -> SourceDocument:
@@ -222,6 +241,25 @@ class SQLiteDocumentStore:
             (source_id, external_id),
         ).fetchall()
         return [SourceDocument.model_validate_json(str(row["document_json"])) for row in rows]
+
+    def list_change_events(self, source_id: str, *, external_id: str | None = None) -> list[SourceChangeEvent]:
+        if external_id is None:
+            rows = self._conn.execute(
+                """
+                SELECT event_json FROM source_change_events
+                WHERE source_id = ? ORDER BY occurred_at, event_id
+                """,
+                (source_id,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """
+                SELECT event_json FROM source_change_events
+                WHERE source_id = ? AND external_id = ? ORDER BY occurred_at, event_id
+                """,
+                (source_id, external_id),
+            ).fetchall()
+        return [SourceChangeEvent.model_validate_json(str(row["event_json"])) for row in rows]
 
     def add_candidate(self, candidate: CandidateClaim) -> CandidateClaim:
         self.get_document(candidate.document_id)
@@ -315,3 +353,37 @@ class SQLiteDocumentStore:
             (source_id, external_id),
         ).fetchone()
         return SourceDocument.model_validate_json(str(row["document_json"])) if row is not None else None
+
+    def _record_change_event(self, document: SourceDocument, *, previous: SourceDocument | None) -> None:
+        if document.extraction_state is DocumentExtractionState.DELETED:
+            kind = SourceChangeKind.DELETED
+        elif previous is None or previous.extraction_state is DocumentExtractionState.DELETED:
+            kind = SourceChangeKind.CREATED
+        elif previous.filename != document.filename:
+            kind = SourceChangeKind.RENAMED
+        else:
+            kind = SourceChangeKind.MODIFIED
+        event = SourceChangeEvent(
+            source_id=document.source_id,
+            document_id=document.id,
+            external_id=document.external_id,
+            kind=kind,
+            previous_document_id=previous.id if previous is not None else None,
+            occurred_at=document.ingested_at,
+            metadata={"filename": document.filename, "content_sha256": document.content_sha256},
+        )
+        self._conn.execute(
+            """
+            INSERT INTO source_change_events
+            (event_id, source_id, external_id, document_id, occurred_at, event_json)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event.id,
+                event.source_id,
+                event.external_id,
+                event.document_id,
+                event.occurred_at.isoformat(),
+                event.model_dump_json(),
+            ),
+        )

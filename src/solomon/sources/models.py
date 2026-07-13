@@ -28,6 +28,13 @@ class DocumentExtractionState(str, Enum):
     DELETED = "deleted"
 
 
+class SourceChangeKind(str, Enum):
+    CREATED = "created"
+    MODIFIED = "modified"
+    RENAMED = "renamed"
+    DELETED = "deleted"
+
+
 class CandidateClaimStatus(str, Enum):
     PENDING = "pending"
     PROMOTED = "promoted"
@@ -90,6 +97,22 @@ class SourceDocument(SolomonModel):
     def model_post_init(self, __context: Any) -> None:
         if not self.content_sha256:
             object.__setattr__(self, "content_sha256", hashlib.sha256(self.content.encode("utf-8")).hexdigest())
+
+
+class SourceChangeEvent(SolomonModel):
+    id: str = Field(default_factory=new_uuid7)
+    source_id: str
+    document_id: str
+    external_id: str
+    kind: SourceChangeKind
+    previous_document_id: str | None = None
+    occurred_at: datetime = Field(default_factory=now_utc)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("occurred_at")
+    @classmethod
+    def normalize_occurred_at(cls, value: datetime) -> datetime:
+        return _ensure_aware_utc(value)
 
 
 class CandidateClaim(SolomonModel):

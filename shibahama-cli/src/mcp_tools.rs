@@ -80,6 +80,11 @@ impl McpEngineBackend<'_> {
         let valid_from = required_time(arguments, "validFromUnix")?;
         let ingested_at = required_time(arguments, "ingestedAtUnix")?;
         let confidence_percent = optional_u8(arguments, "confidencePercent")?.unwrap_or(100);
+        let intent = optional_string(arguments, "captureIntent")?
+            .as_deref()
+            .map(capture_intent)
+            .transpose()?
+            .unwrap_or(CaptureIntent::Manual);
         let index_name =
             optional_string(arguments, "indexName")?.unwrap_or_else(|| "mcp".to_owned());
         let model =
@@ -111,7 +116,7 @@ impl McpEngineBackend<'_> {
                 },
                 CapturePolicyRequest {
                     actor,
-                    intent: CaptureIntent::Manual,
+                    intent,
                     confidence_percent,
                 },
             )
@@ -219,10 +224,19 @@ impl McpEngineBackend<'_> {
         if operation != "decide" {
             return Err(invalid_arguments());
         }
+        let candidate_id_text = required_string(arguments, "candidateId")?;
         let candidate_id = required_review_candidate_id(arguments, "candidateId")?;
-        let action = review_action(required_string(arguments, "action")?)?;
+        let action_name = required_string(arguments, "action")?;
+        let action = review_action(action_name)?;
         let rationale = required_string(arguments, "rationale")?;
         let reviewed_at = required_time(arguments, "reviewedAtUnix")?;
+        require_confirmation(
+            context,
+            arguments,
+            "review_decision",
+            candidate_id_text,
+            Some(("action", action_name)),
+        )?;
         let outcome = scoped
             .review_candidate(
                 candidate_id,
@@ -251,10 +265,17 @@ impl McpEngineBackend<'_> {
     ) -> Result<Value, McpToolError> {
         let _actor = require_mutation_actor(context, arguments)?;
         let memory_id = required_memory_id(arguments, "memoryId")?;
-        let team =
-            ScopeId::new(required_string(arguments, "team")?).map_err(|_| invalid_arguments())?;
+        let team_name = required_string(arguments, "team")?;
+        let team = ScopeId::new(team_name).map_err(|_| invalid_arguments())?;
         let rationale = required_string(arguments, "rationale")?;
         let promoted_at = required_time(arguments, "promotedAtUnix")?;
+        require_confirmation(
+            context,
+            arguments,
+            "promotion",
+            &memory_id.to_string(),
+            Some(("targetTeam", team_name)),
+        )?;
         let mut scoped = self
             .engine
             .scoped(context.scope().clone())
@@ -289,6 +310,14 @@ impl McpEngineBackend<'_> {
         }
         let memory_id = required_memory_id(arguments, "memoryId")?;
         let valid_to = required_time(arguments, "validToUnix")?;
+        let valid_to_unix = valid_to.unix_timestamp();
+        require_confirmation(
+            context,
+            arguments,
+            "erasure",
+            &memory_id.to_string(),
+            Some(("validToUnix", &valid_to_unix.to_string())),
+        )?;
         let mut scoped = self
             .engine
             .scoped(context.scope().clone())
@@ -335,6 +364,13 @@ fn require_mutation_actor(
         "service" => PolicyActorClass::Service,
         _ => return Err(invalid_arguments()),
     };
+    if actor != context.actor() {
+        return Err(McpToolError::new(
+            "SHIBA_UNAUTHORIZED",
+            "tool actor does not match transport identity",
+            false,
+        ));
+    }
     if required_string(arguments, "actorId")? != context.principal() {
         return Err(McpToolError::new(
             "SHIBA_UNAUTHORIZED",
@@ -343,6 +379,53 @@ fn require_mutation_actor(
         ));
     }
     Ok(actor)
+}
+
+fn require_confirmation(
+    context: &McpServerContext,
+    arguments: &Map<String, Value>,
+    intent: &str,
+    target_id: &str,
+    bound_field: Option<(&str, &str)>,
+) -> Result<(), McpToolError> {
+    let confirmation = arguments
+        .get("confirmation")
+        .and_then(Value::as_object)
+        .ok_or_else(confirmation_required)?;
+    if confirmation.get("schemaVersion").and_then(Value::as_u64) != Some(1)
+        || confirmation.get("intent").and_then(Value::as_str) != Some(intent)
+        || !confirmation
+            .get("token")
+            .and_then(Value::as_str)
+            .is_some_and(|token| (16..=128).contains(&token.len()))
+        || confirmation.get("actorId").and_then(Value::as_str) != Some(context.principal())
+        || confirmation.get("targetId").and_then(Value::as_str) != Some(target_id)
+    {
+        return Err(confirmation_required());
+    }
+    let scope = confirmation
+        .get("scope")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<MemoryScope>(value).ok())
+        .ok_or_else(confirmation_required)?;
+    if scope != *context.scope() {
+        return Err(confirmation_required());
+    }
+    if let Some((field, expected)) = bound_field
+        && !confirmation
+            .get(field)
+            .is_some_and(|value| confirmation_value_matches(value, expected))
+    {
+        return Err(confirmation_required());
+    }
+    Ok(())
+}
+
+fn confirmation_value_matches(value: &Value, expected: &str) -> bool {
+    value.as_str() == Some(expected)
+        || value
+            .as_i64()
+            .is_some_and(|integer| integer.to_string() == expected)
 }
 
 fn required_string<'a>(
@@ -477,6 +560,15 @@ fn source_kind(value: &str) -> Result<SourceKind, McpToolError> {
     }
 }
 
+fn capture_intent(value: &str) -> Result<CaptureIntent, McpToolError> {
+    match value {
+        "manual" => Ok(CaptureIntent::Manual),
+        "suggested" => Ok(CaptureIntent::Suggested),
+        "automatic" => Ok(CaptureIntent::Automatic),
+        _ => Err(invalid_arguments()),
+    }
+}
+
 fn review_action(value: &str) -> Result<ReviewAction, McpToolError> {
     match value {
         "approve" => Ok(ReviewAction::Approve),
@@ -507,6 +599,14 @@ fn internal_error() -> McpToolError {
     McpToolError::new("SHIBA_INTERNAL", "internal tool error", false)
 }
 
+fn confirmation_required() -> McpToolError {
+    McpToolError::new(
+        "SHIBA_CONFIRMATION_REQUIRED",
+        "explicit confirmation does not match the destructive action",
+        false,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -514,6 +614,7 @@ mod tests {
     use serde_json::json;
     use shibahama_core::api::AllowScopePromotionPolicy;
     use shibahama_core::model::{ScopeId, ScopeVisibility};
+    use shibahama_core::storage::MemoryEvent;
     use tempfile::NamedTempFile;
 
     fn context() -> McpServerContext {
@@ -524,6 +625,7 @@ mod tests {
                 visibility: ScopeVisibility::Repository,
             },
             "alice".to_owned(),
+            PolicyActorClass::Human,
         )
     }
 
@@ -579,11 +681,11 @@ mod tests {
             .expect("tool call should respond")
     }
 
-    fn write_arguments(actor_id: &str, content: &str) -> Value {
+    fn write_arguments(actor: &str, actor_id: &str, content: &str) -> Value {
         json!({
             "schemaVersion": 1,
             "scope": scope(),
-            "actor": "human",
+            "actor": actor,
             "actorId": actor_id,
             "content": content,
             "vector": [1.0, 0.0],
@@ -642,6 +744,15 @@ mod tests {
             "team": "team",
             "rationale": "share",
             "promotedAtUnix": 1,
+            "confirmation": {
+                "schemaVersion": 1,
+                "intent": "promotion",
+                "token": "promotion-confirm-0001",
+                "actorId": "alice",
+                "scope": scope(),
+                "targetId": memory_id,
+                "targetTeam": "team",
+            },
         })
     }
 
@@ -653,6 +764,15 @@ mod tests {
             "actorId": "alice",
             "memoryId": memory_id,
             "validToUnix": 2,
+            "confirmation": {
+                "schemaVersion": 1,
+                "intent": "erasure",
+                "token": "erasure-confirmation-0001",
+                "actorId": "alice",
+                "scope": scope(),
+                "targetId": memory_id,
+                "validToUnix": 2,
+            },
         })
     }
 
@@ -662,7 +782,7 @@ mod tests {
             backend,
             2,
             "shibahama_memory_write_v1",
-            write_arguments("alice", "MCP tool memory"),
+            write_arguments("human", "alice", "MCP tool memory"),
         );
         assert!(
             !write["result"]["isError"]
@@ -763,10 +883,26 @@ mod tests {
             "allowed"
         );
 
-        let erase = call(
+        let mut confused_deputy = promotion_arguments(memory_id);
+        confused_deputy["confirmation"]["targetId"] = json!("other-memory");
+        confused_deputy["confirmation"]["token"] = json!("confused-deputy-0001");
+        let rejected = call(
             session,
             backend,
             8,
+            "shibahama_memory_promote_v1",
+            confused_deputy,
+        );
+        assert_eq!(rejected["result"]["isError"], true);
+        assert_eq!(
+            rejected["result"]["structuredContent"]["error"]["code"],
+            "SHIBA_CONFIRMATION_REQUIRED"
+        );
+
+        let erase = call(
+            session,
+            backend,
+            9,
             "shibahama_memory_erase_v1",
             erase_arguments(memory_id),
         );
@@ -778,20 +914,115 @@ mod tests {
             erase["result"]["structuredContent"]["result"]["policyOutcome"],
             "allowed"
         );
+
+        let retry = call(
+            session,
+            backend,
+            10,
+            "shibahama_memory_erase_v1",
+            erase_arguments(memory_id),
+        );
+        assert_eq!(retry["result"]["isError"], true);
+        assert_eq!(
+            retry["result"]["structuredContent"]["error"]["code"],
+            "SHIBA_CONFIRMATION_CONSUMED"
+        );
     }
 
     fn assert_forged_actor_is_safe(session: &mut McpSession, backend: &mut McpEngineBackend<'_>) {
+        let forged_principal = call(
+            session,
+            backend,
+            11,
+            "shibahama_memory_write_v1",
+            write_arguments("human", "mallory", "secret must not appear in the error"),
+        );
+        assert_eq!(forged_principal["result"]["isError"], true);
+        let error = &forged_principal["result"]["structuredContent"]["error"];
+        assert_eq!(error["code"], "SHIBA_UNAUTHORIZED");
+        assert!(!error.to_string().contains("secret must not appear"));
+
+        let forged_actor = call(
+            session,
+            backend,
+            12,
+            "shibahama_memory_write_v1",
+            write_arguments("agent", "alice", "actor class must not be forgeable"),
+        );
+        assert_eq!(forged_actor["result"]["isError"], true);
+        assert_eq!(
+            forged_actor["result"]["structuredContent"]["error"]["code"],
+            "SHIBA_UNAUTHORIZED"
+        );
+        assert!(
+            !forged_actor
+                .to_string()
+                .contains("actor class must not be forgeable")
+        );
+    }
+
+    fn assert_capture_audits_transport_actor(engine: &Shibahama<HnswVectorIndex>) {
+        let events = engine
+            .store()
+            .events_in_scope(context().scope())
+            .expect("audit events should be readable");
+        assert!(events.iter().any(|record| {
+            matches!(
+                &record.event,
+                MemoryEvent::PolicyDecisionRecorded { record }
+                    if record.actor == Some(PolicyActorClass::Human)
+            )
+        }));
+    }
+
+    fn assert_review_decision_requires_confirmation(
+        session: &mut McpSession,
+        backend: &mut McpEngineBackend<'_>,
+    ) {
         let rejected = call(
             session,
             backend,
-            9,
-            "shibahama_memory_write_v1",
-            write_arguments("mallory", "secret must not appear in the error"),
+            13,
+            "shibahama_memory_review_v1",
+            json!({
+                "schemaVersion": 1,
+                "scope": scope(),
+                "actor": "human",
+                "actorId": "alice",
+                "operation": "decide",
+                "candidateId": "00000000-0000-4000-8000-000000000001",
+                "action": "reject",
+                "rationale": "missing explicit confirmation",
+                "reviewedAtUnix": 0,
+            }),
         );
         assert_eq!(rejected["result"]["isError"], true);
+        assert_eq!(
+            rejected["result"]["structuredContent"]["error"]["code"],
+            "SHIBA_CONFIRMATION_REQUIRED"
+        );
+        assert!(
+            !rejected
+                .to_string()
+                .contains("missing explicit confirmation")
+        );
+    }
+
+    fn assert_suggested_capture_is_policy_rejected(
+        session: &mut McpSession,
+        backend: &mut McpEngineBackend<'_>,
+    ) {
+        let mut suggested = write_arguments("human", "alice", "suggested capture must not persist");
+        suggested["captureIntent"] = json!("suggested");
+        let rejected = call(session, backend, 14, "shibahama_memory_write_v1", suggested);
+        assert_eq!(rejected["result"]["isError"], true);
         let error = &rejected["result"]["structuredContent"]["error"];
-        assert_eq!(error["code"], "SHIBA_UNAUTHORIZED");
-        assert!(!error.to_string().contains("secret must not appear"));
+        assert_eq!(error["code"], "SHIBA_POLICY");
+        assert!(
+            !error
+                .to_string()
+                .contains("suggested capture must not persist")
+        );
     }
 
     #[test]
@@ -800,11 +1031,16 @@ mod tests {
         let mut engine = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
             .expect("engine should open");
         engine.set_scope_authorization_policy(AllowScopePromotionPolicy);
-        let mut backend = McpEngineBackend::new(&mut engine);
-        let mut session = McpSession::new(context());
-        initialize(&mut session, &mut backend);
-        let memory_id = exercise_read_tools(&mut session, &mut backend);
-        exercise_mutating_tools(&mut session, &mut backend, &memory_id);
-        assert_forged_actor_is_safe(&mut session, &mut backend);
+        {
+            let mut backend = McpEngineBackend::new(&mut engine);
+            let mut session = McpSession::new(context());
+            initialize(&mut session, &mut backend);
+            let memory_id = exercise_read_tools(&mut session, &mut backend);
+            exercise_mutating_tools(&mut session, &mut backend, &memory_id);
+            assert_forged_actor_is_safe(&mut session, &mut backend);
+            assert_review_decision_requires_confirmation(&mut session, &mut backend);
+            assert_suggested_capture_is_policy_rejected(&mut session, &mut backend);
+        }
+        assert_capture_audits_transport_actor(&engine);
     }
 }

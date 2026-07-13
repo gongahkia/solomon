@@ -20,6 +20,8 @@ export declare class Shibahama {
   constructor(path: string, dimensions: number, capacity?: number | undefined | null)
   /** Returns true when the native engine lock is healthy. */
   isOpen(): boolean
+  /** Applies embedded SDK policy settings before subsequent capture or recall operations. */
+  configurePolicy(policy: EmbeddedPolicyConfig): void
   /** Simulates capture policy without writing memory or audit events. */
   simulateCapturePolicy(sourceKind: string, options?: CapturePolicySimulationOptions | undefined | null): string
   /** Simulates recall policy without reading memory or writing access events. */
@@ -40,6 +42,8 @@ export declare class Shibahama {
    * Returns an error when the memory id is invalid or persistence fails.
    */
   invalidate(memoryId: string, validToUnix: number): boolean
+  /** Soft-invalidates a memory only when it belongs to the supplied scope. */
+  invalidateScoped(memoryId: string, validToUnix: number, scope: MemoryScope): boolean
   /**
    * Recalls current fact memories for a query embedding.
    *
@@ -88,6 +92,8 @@ export declare class Shibahama {
    * Returns an error when the memory id or outcome is invalid, or persistence fails.
    */
   reinforce(memoryId: string, outcome?: string | undefined | null): boolean
+  /** Records a usage outcome only when the memory belongs to the supplied scope. */
+  reinforceScoped(memoryId: string, outcome: string | undefined | null, scope: MemoryScope): boolean
   /**
    * Explains why a memory currently has its state.
    *
@@ -96,6 +102,8 @@ export declare class Shibahama {
    * Returns an error when the memory id is invalid or state cannot be read.
    */
   why(memoryId: string, nowUnix?: number | undefined | null): WhyTrace | null
+  /** Explains one memory only when it belongs to the supplied scope. */
+  whyScoped(memoryId: string, nowUnix: number | undefined | null, scope: MemoryScope): WhyTrace | null
   /**
    * Returns all current materialized memory rows.
    *
@@ -104,6 +112,8 @@ export declare class Shibahama {
    * Returns an error when current item state cannot be read.
    */
   memoryItems(): Array<MemoryItem>
+  /** Returns materialized memories only from the supplied scope. */
+  memoryItemsScoped(scope: MemoryScope): Array<MemoryItem>
   /**
    * Returns durable event-log records as JSON.
    *
@@ -112,6 +122,8 @@ export declare class Shibahama {
    * Returns an error when event records cannot be read or serialized.
    */
   eventRecordsJson(): string
+  /** Returns durable event-log records visible from the supplied scope as JSON. */
+  eventRecordsScopedJson(scope: MemoryScope): string
   /**
    * Returns one memory's why trace and related events as JSON.
    *
@@ -188,6 +200,28 @@ export interface DegradedRecallResult {
   unavailableStages: Array<string>
 }
 
+/** Mutable embedded-SDK policy settings. Omitted fields retain their current values. */
+export interface EmbeddedPolicyConfig {
+  captureMode?: string
+  captureAllowHuman?: boolean
+  captureAllowAgent?: boolean
+  captureAllowAutomation?: boolean
+  captureAllowService?: boolean
+  captureAllowUser?: boolean
+  captureAllowFile?: boolean
+  captureAllowWeb?: boolean
+  captureAllowTool?: boolean
+  captureAllowRepository?: boolean
+  captureAllowTeam?: boolean
+  captureMinimumConfidencePercent?: number
+  recallMaxCandidates?: number
+  recallMaxContextTokens?: number
+  recallAllowCold?: boolean
+  recallAllowInstructions?: boolean
+  recallAllowRepository?: boolean
+  recallAllowTeam?: boolean
+}
+
 export interface MemoryItem {
   id: string
   content: string
@@ -244,6 +278,7 @@ export interface RecallOptions {
   significanceWeight?: number
   recencyWeight?: number
   graphWeight?: number
+  scope?: MemoryScope
 }
 
 export interface SignificanceBreakdown {
@@ -287,6 +322,9 @@ export interface WriteOptions {
   model?: string
   modelVersion?: string
   scope?: MemoryScope
+  actor?: string
+  intent?: string
+  confidencePercent?: number
 }
 
 // Shibahama JavaScript shims

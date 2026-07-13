@@ -4,6 +4,8 @@
 
 use serde_json::{Map, Value, json};
 use shibahama_core::model::MemoryScope;
+use shibahama_core::policy::PolicyActorClass;
+use std::collections::BTreeSet;
 use std::io::{self, BufRead, Write};
 
 /// Active MCP protocol revision implemented by Shibahama.
@@ -12,6 +14,13 @@ const NOT_INITIALIZED: i64 = -32002;
 
 /// Versioned MCP memory-tool capability advertised after initialization.
 pub const MEMORY_TOOLS_CAPABILITY: &str = "shibahama_memory_tools_v1";
+const WRITE_REQUIRED_FIELDS: &[&str] = &[
+    "content",
+    "vector",
+    "sourceKind",
+    "validFromUnix",
+    "ingestedAtUnix",
+];
 
 /// Safe application error returned inside an MCP tool result.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -92,13 +101,18 @@ impl McpToolBackend for UnsupportedMcpToolBackend {
 pub struct McpServerContext {
     scope: MemoryScope,
     principal: String,
+    actor: PolicyActorClass,
 }
 
 impl McpServerContext {
     /// Creates one immutable context that MCP messages cannot override.
     #[must_use]
-    pub fn new(scope: MemoryScope, principal: String) -> Self {
-        Self { scope, principal }
+    pub fn new(scope: MemoryScope, principal: String, actor: PolicyActorClass) -> Self {
+        Self {
+            scope,
+            principal,
+            actor,
+        }
     }
 
     /// Returns the immutable scope for the active transport session.
@@ -111,6 +125,12 @@ impl McpServerContext {
     #[must_use]
     pub fn principal(&self) -> &str {
         &self.principal
+    }
+
+    /// Returns the authenticated actor class fixed by the transport.
+    #[must_use]
+    pub const fn actor(&self) -> PolicyActorClass {
+        self.actor
     }
 }
 
@@ -167,6 +187,7 @@ fn serve_stdio_io_with_backend<R: BufRead, W: Write>(
 pub struct McpSession {
     context: McpServerContext,
     lifecycle: Lifecycle,
+    used_confirmation_tokens: BTreeSet<String>,
 }
 
 impl McpSession {
@@ -176,6 +197,7 @@ impl McpSession {
         Self {
             context,
             lifecycle: Lifecycle::Uninitialized,
+            used_confirmation_tokens: BTreeSet::new(),
         }
     }
 
@@ -321,6 +343,7 @@ impl McpSession {
                         "shibahama": {
                             "capabilities": [MEMORY_TOOLS_CAPABILITY],
                             "principal": self.context.principal,
+                            "actorClass": self.context.actor,
                             "scope": self.context.scope,
                         }
                     }
@@ -350,8 +373,30 @@ impl McpSession {
         {
             return protocol_error(id, -32601, "Method not found", None);
         }
+        let confirmation_token = destructive_confirmation_token(name, arguments);
+        if confirmation_token.is_some_and(|token| self.used_confirmation_tokens.contains(token)) {
+            return protocol_result(
+                id,
+                tool_result(
+                    json!({
+                        "schemaVersion": 1,
+                        "error": {
+                            "code": "SHIBA_CONFIRMATION_CONSUMED",
+                            "detail": "confirmation token was already consumed",
+                            "retryable": false,
+                        }
+                    }),
+                    true,
+                ),
+            );
+        }
         match backend.call(&self.context, name, arguments) {
-            Ok(structured_content) => protocol_result(id, tool_result(structured_content, false)),
+            Ok(structured_content) => {
+                if let Some(token) = confirmation_token {
+                    self.used_confirmation_tokens.insert(token.to_owned());
+                }
+                protocol_result(id, tool_result(structured_content, false))
+            }
             Err(error) => protocol_result(
                 id,
                 tool_result(
@@ -410,6 +455,22 @@ impl McpSession {
     }
 }
 
+fn destructive_confirmation_token<'a>(
+    name: &str,
+    arguments: &'a Map<String, Value>,
+) -> Option<&'a str> {
+    let destructive = matches!(
+        name,
+        "shibahama_memory_promote_v1" | "shibahama_memory_erase_v1"
+    ) || (name == "shibahama_memory_review_v1"
+        && arguments.get("operation").and_then(Value::as_str) == Some("decide"));
+    destructive
+        .then(|| arguments.get("confirmation"))?
+        .and_then(Value::as_object)?
+        .get("token")?
+        .as_str()
+}
+
 /// Returns whether a JSON-RPC message is an `initialize` request.
 #[must_use]
 pub fn is_initialize_request(message: &Value) -> bool {
@@ -425,28 +486,11 @@ pub fn tool_definitions() -> Vec<Value> {
         tool_definition(
             "shibahama_memory_write_v1",
             "Write a scoped memory with explicit actor and capture-policy metadata.",
-            json!({
-                "content": { "type": "string", "minLength": 1 },
-                "vector": { "type": "array", "items": { "type": "number" } },
-                "sourceKind": { "enum": ["user", "agent", "file", "web", "tool"] },
-                "sourceRef": { "type": ["string", "null"] },
-                "validFromUnix": { "type": "integer" },
-                "ingestedAtUnix": { "type": "integer" },
-                "kind": { "enum": ["fact", "instruction"] },
-                "indexName": { "type": "string" },
-                "model": { "type": "string" },
-                "modelVersion": { "type": "string" },
-                "confidencePercent": { "type": "integer", "minimum": 0, "maximum": 100 },
-            }),
+            write_tool_properties(),
             json!({ "memory": { "type": "object" }, "policyOutcome": { "const": "allowed" } }),
             false,
-            &[
-                "content",
-                "vector",
-                "sourceKind",
-                "validFromUnix",
-                "ingestedAtUnix",
-            ],
+            false,
+            WRITE_REQUIRED_FIELDS,
         ),
         tool_definition(
             "shibahama_memory_recall_v1",
@@ -461,6 +505,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }),
             json!({ "candidates": { "type": "array" }, "policyOutcome": { "type": "object" } }),
             true,
+            false,
             &["queryVector", "topK", "nowUnix"],
         ),
         tool_definition(
@@ -469,6 +514,7 @@ pub fn tool_definitions() -> Vec<Value> {
             json!({ "memoryId": { "type": "string" }, "nowUnix": { "type": "integer" } }),
             json!({ "trace": { "type": ["object", "null"] } }),
             true,
+            false,
             &["memoryId", "nowUnix"],
         ),
         tool_definition(
@@ -481,6 +527,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }),
             json!({ "candidates": { "type": "array" }, "policyOutcome": { "type": "object" } }),
             true,
+            false,
             &["queryVector", "topK", "asOfUnix"],
         ),
         tool_definition(
@@ -492,9 +539,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "action": { "enum": ["approve", "reject", "defer"] },
                 "rationale": { "type": "string" },
                 "reviewedAtUnix": { "type": "integer" },
+                "confirmation": confirmation_schema(),
             }),
             json!({ "queue": { "type": "array" }, "decision": { "type": "object" } }),
             false,
+            true,
             &["operation"],
         ),
         tool_definition(
@@ -508,6 +557,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }),
             json!({ "promotion": { "type": ["object", "null"] }, "policyOutcome": { "type": "string" } }),
             false,
+            true,
             &["memoryId", "team", "rationale", "promotedAtUnix"],
         ),
         tool_definition(
@@ -516,9 +566,27 @@ pub fn tool_definitions() -> Vec<Value> {
             json!({ "memoryId": { "type": "string" }, "validToUnix": { "type": "integer" } }),
             json!({ "applied": { "type": "boolean" }, "effect": { "const": "soft_invalidation" } }),
             false,
+            true,
             &["memoryId", "validToUnix"],
         ),
     ]
+}
+
+fn write_tool_properties() -> Value {
+    json!({
+        "content": { "type": "string", "minLength": 1 },
+        "vector": { "type": "array", "items": { "type": "number" } },
+        "sourceKind": { "enum": ["user", "agent", "file", "web", "tool"] },
+        "sourceRef": { "type": ["string", "null"] },
+        "validFromUnix": { "type": "integer" },
+        "ingestedAtUnix": { "type": "integer" },
+        "kind": { "enum": ["fact", "instruction"] },
+        "indexName": { "type": "string" },
+        "model": { "type": "string" },
+        "modelVersion": { "type": "string" },
+        "confidencePercent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "captureIntent": { "enum": ["manual", "suggested", "automatic"] },
+    })
 }
 
 fn tool_definition(
@@ -527,6 +595,7 @@ fn tool_definition(
     properties: Value,
     output_properties: Value,
     read_only: bool,
+    destructive: bool,
     required_tool_fields: &[&str],
 ) -> Value {
     let mut properties = properties.as_object().cloned().unwrap_or_default();
@@ -549,6 +618,9 @@ fn tool_definition(
             "actor".to_owned(),
             json!({ "enum": ["human", "agent", "automation", "service"] }),
         );
+        if destructive {
+            properties.insert("confirmation".to_owned(), confirmation_schema());
+        }
         properties.insert(
             "actorId".to_owned(),
             json!({ "type": "string", "minLength": 1 }),
@@ -564,11 +636,21 @@ fn tool_definition(
             Value::String("actorId".to_owned()),
         ]);
     }
+    if destructive && name != "shibahama_memory_review_v1" {
+        required.push(Value::String("confirmation".to_owned()));
+    }
     required.extend(
         required_tool_fields
             .iter()
             .map(|field| Value::String((*field).to_owned())),
     );
+    let confirmation_required_for = if !destructive {
+        "never"
+    } else if name == "shibahama_memory_review_v1" {
+        "operation=decide"
+    } else {
+        "always"
+    };
     json!({
         "name": name,
         "description": description,
@@ -580,6 +662,8 @@ fn tool_definition(
             "additionalProperties": false,
             "x-shibahama-schema-version": 1,
             "x-shibahama-capability": MEMORY_TOOLS_CAPABILITY,
+            "x-shibahama-confirmation-required": destructive,
+            "x-shibahama-confirmation-required-for": confirmation_required_for,
         },
         "outputSchema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -594,8 +678,36 @@ fn tool_definition(
         },
         "annotations": {
             "readOnlyHint": read_only,
-            "destructiveHint": !read_only,
+            "destructiveHint": destructive,
         },
+    })
+}
+
+fn confirmation_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "schemaVersion": { "const": 1 },
+            "intent": { "enum": ["review_decision", "promotion", "erasure"] },
+            "token": { "type": "string", "minLength": 16, "maxLength": 128 },
+            "actorId": { "type": "string", "minLength": 1 },
+            "scope": {
+                "type": "object",
+                "properties": {
+                    "repository": { "type": "string" },
+                    "team": { "type": ["string", "null"] },
+                    "visibility": { "enum": ["repository", "team"] },
+                },
+                "required": ["repository", "team", "visibility"],
+                "additionalProperties": false,
+            },
+            "targetId": { "type": "string", "minLength": 1 },
+            "targetTeam": { "type": "string", "minLength": 1 },
+            "action": { "enum": ["approve", "reject", "defer"] },
+            "validToUnix": { "type": "integer" },
+        },
+        "required": ["schemaVersion", "intent", "token", "actorId", "scope", "targetId"],
+        "additionalProperties": false,
     })
 }
 
@@ -673,6 +785,7 @@ mod tests {
                 visibility: ScopeVisibility::Team,
             },
             "codex".to_owned(),
+            PolicyActorClass::Agent,
         )
     }
 
@@ -723,6 +836,10 @@ mod tests {
             "codex"
         );
         assert_eq!(
+            output[0]["result"]["capabilities"]["experimental"]["shibahama"]["actorClass"],
+            "agent"
+        );
+        assert_eq!(
             output[0]["result"]["capabilities"]["experimental"]["shibahama"]["scope"]["repository"],
             "repo"
         );
@@ -735,6 +852,37 @@ mod tests {
                 && tool["outputSchema"]["x-shibahama-schema-version"] == 1
                 && tool["inputSchema"]["x-shibahama-capability"] == MEMORY_TOOLS_CAPABILITY
         }));
+        let write = tools
+            .iter()
+            .find(|tool| tool["name"] == "shibahama_memory_write_v1")
+            .expect("write tool should exist");
+        assert_eq!(write["annotations"]["destructiveHint"], false);
+        assert_eq!(
+            write["inputSchema"]["properties"]["captureIntent"],
+            json!({ "enum": ["manual", "suggested", "automatic"] })
+        );
+        let erase = tools
+            .iter()
+            .find(|tool| tool["name"] == "shibahama_memory_erase_v1")
+            .expect("erase tool should exist");
+        assert_eq!(erase["annotations"]["destructiveHint"], true);
+        assert_eq!(
+            erase["inputSchema"]["x-shibahama-confirmation-required"],
+            true
+        );
+        assert!(
+            erase["inputSchema"]["required"]
+                .as_array()
+                .is_some_and(|fields| fields.iter().any(|field| field == "confirmation"))
+        );
+        let review = tools
+            .iter()
+            .find(|tool| tool["name"] == "shibahama_memory_review_v1")
+            .expect("review tool should exist");
+        assert_eq!(
+            review["inputSchema"]["x-shibahama-confirmation-required-for"],
+            "operation=decide"
+        );
     }
 
     #[test]

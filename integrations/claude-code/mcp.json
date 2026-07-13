@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "shibahama": {
+      "command": "cargo",
+      "args": [
+        "run",
+        "-q",
+        "-p",
+        "shibahama-cli",
+        "--",
+        "mcp",
+        "--path",
+        "${SHIBAHAMA_MCP_PATH:-.shibahama/claude-code.redb}",
+        "--dimensions",
+        "${SHIBAHAMA_MCP_DIMENSIONS:-2}",
+        "--scope-repository",
+        "${SHIBAHAMA_MCP_SCOPE_REPOSITORY:-claude-code}",
+        "--scope-visibility",
+        "repository",
+        "--principal",
+        "claude-code",
+        "--actor",
+        "human"
+      ]
+    }
+  }
+}

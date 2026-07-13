@@ -54,11 +54,37 @@ jobs:
       - name: Rust format, lint, and tests
         run: scripts/ci/rust.sh
 
+      - name: MCP conformance and adversarial authorization suite
+        run: bash scripts/ci/mcp-conformance.sh
+
+      - name: Upload MCP conformance artifact
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: mcp-conformance-${{ matrix.os }}
+          path: target/mcp-conformance.json
+          if-no-files-found: error
+
       - name: Python binding smoke test
         run: scripts/ci/python-binding-smoke.sh
 
       - name: Node binding smoke test
         run: scripts/ci/node-binding-smoke.sh
+
+      - name: Embedded, HTTP, and MCP SDK contract
+        run: node scripts/ci/sdk-contract.mjs
+
+      - name: Claude Code MCP configuration fixture
+        run: node scripts/ci/claude-code-mcp-fixture.mjs
+
+      - name: Codex MCP configuration fixture
+        run: node scripts/ci/codex-mcp-fixture.mjs
+
+      - name: Pi extension API load
+        run: npm exec --yes --package @earendil-works/pi-coding-agent@0.80.6 -- pi --offline --no-session --approve --no-extensions --extension .pi/extensions/shibahama-mcp.ts --list-models
+
+      - name: Pi MCP configuration fixture
+        run: node scripts/ci/pi-mcp-fixture.mjs
 
       - name: Golden parity suite
         run: scripts/ci/golden-parity.sh

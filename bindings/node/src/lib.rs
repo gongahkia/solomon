@@ -18,7 +18,7 @@ use shibahama_core::model::{
     MemoryItem as CoreMemoryItem, MemoryKind, MemoryScope as CoreMemoryScope,
     Provenance as CoreProvenance, ScopeId, ScopeVisibility, SourceKind, Tier,
 };
-use shibahama_core::policy::{CaptureIntent, CapturePolicyRequest, PolicyActorClass};
+use shibahama_core::policy::{CaptureIntent, CaptureMode, CapturePolicyRequest, PolicyActorClass};
 use shibahama_core::retrieval::{
     RecallCandidate as CoreRecallCandidate, RecallCandidateCurrency, RecallCandidateSource,
     RecallRankingConfig, RecallRequest, RecallUnavailableStage,
@@ -135,6 +135,9 @@ pub struct WriteOptions {
     pub model: Option<String>,
     pub model_version: Option<String>,
     pub scope: Option<MemoryScope>,
+    pub actor: Option<String>,
+    pub intent: Option<String>,
+    pub confidence_percent: Option<u32>,
 }
 
 #[napi(object)]
@@ -149,6 +152,7 @@ pub struct RecallOptions {
     pub significance_weight: Option<f64>,
     pub recency_weight: Option<f64>,
     pub graph_weight: Option<f64>,
+    pub scope: Option<MemoryScope>,
 }
 
 #[napi(object)]
@@ -158,6 +162,30 @@ pub struct CapturePolicySimulationOptions {
     pub intent: Option<String>,
     pub confidence_percent: Option<u32>,
     pub scope: Option<MemoryScope>,
+}
+
+/// Mutable embedded-SDK policy settings. Omitted fields retain their current values.
+#[napi(object)]
+#[derive(Default)]
+pub struct EmbeddedPolicyConfig {
+    pub capture_mode: Option<String>,
+    pub capture_allow_human: Option<bool>,
+    pub capture_allow_agent: Option<bool>,
+    pub capture_allow_automation: Option<bool>,
+    pub capture_allow_service: Option<bool>,
+    pub capture_allow_user: Option<bool>,
+    pub capture_allow_file: Option<bool>,
+    pub capture_allow_web: Option<bool>,
+    pub capture_allow_tool: Option<bool>,
+    pub capture_allow_repository: Option<bool>,
+    pub capture_allow_team: Option<bool>,
+    pub capture_minimum_confidence_percent: Option<u32>,
+    pub recall_max_candidates: Option<u32>,
+    pub recall_max_context_tokens: Option<u32>,
+    pub recall_allow_cold: Option<bool>,
+    pub recall_allow_instructions: Option<bool>,
+    pub recall_allow_repository: Option<bool>,
+    pub recall_allow_team: Option<bool>,
 }
 
 /// Iterator over recall candidates.
@@ -212,6 +240,88 @@ impl Shibahama {
     #[must_use]
     pub fn is_open(&self) -> bool {
         self.inner.lock().is_ok()
+    }
+
+    /// Applies embedded SDK policy settings before subsequent capture or recall operations.
+    #[napi]
+    pub fn configure_policy(&self, policy: EmbeddedPolicyConfig) -> Result<()> {
+        let mut inner = self.inner.lock().map_err(lock_error)?;
+        let mut config = inner.config();
+
+        if let Some(mode) = policy.capture_mode.as_deref() {
+            config.capture_policy.mode = parse_capture_mode(mode)?;
+        }
+        set_optional_bool(
+            &mut config.capture_policy.actors.human,
+            policy.capture_allow_human,
+        );
+        set_optional_bool(
+            &mut config.capture_policy.actors.agent,
+            policy.capture_allow_agent,
+        );
+        set_optional_bool(
+            &mut config.capture_policy.actors.automation,
+            policy.capture_allow_automation,
+        );
+        set_optional_bool(
+            &mut config.capture_policy.actors.service,
+            policy.capture_allow_service,
+        );
+        set_optional_bool(
+            &mut config.capture_policy.sources.user,
+            policy.capture_allow_user,
+        );
+        set_optional_bool(
+            &mut config.capture_policy.sources.file,
+            policy.capture_allow_file,
+        );
+        set_optional_bool(
+            &mut config.capture_policy.sources.web,
+            policy.capture_allow_web,
+        );
+        set_optional_bool(
+            &mut config.capture_policy.sources.tool,
+            policy.capture_allow_tool,
+        );
+        set_optional_bool(
+            &mut config.capture_policy.scopes.repository,
+            policy.capture_allow_repository,
+        );
+        set_optional_bool(
+            &mut config.capture_policy.scopes.team,
+            policy.capture_allow_team,
+        );
+        if let Some(confidence) = policy.capture_minimum_confidence_percent {
+            config.capture_policy.minimum_confidence_percent =
+                confidence.try_into().map_err(|_| {
+                    Error::from_reason("capture minimum confidence must be 0 through 100")
+                })?;
+        }
+        if let Some(max_candidates) = policy.recall_max_candidates {
+            config.recall_policy.max_candidates = max_candidates as usize;
+        }
+        if let Some(max_context_tokens) = policy.recall_max_context_tokens {
+            config.recall_policy.max_context_tokens = max_context_tokens as usize;
+        }
+        set_optional_bool(
+            &mut config.recall_policy.allow_cold,
+            policy.recall_allow_cold,
+        );
+        set_optional_bool(
+            &mut config.recall_policy.allow_instructions,
+            policy.recall_allow_instructions,
+        );
+        set_optional_bool(
+            &mut config.recall_policy.scopes.repository,
+            policy.recall_allow_repository,
+        );
+        set_optional_bool(
+            &mut config.recall_policy.scopes.team,
+            policy.recall_allow_team,
+        );
+        inner.set_config(config);
+
+        Ok(())
     }
 
     /// Simulates capture policy without writing memory or audit events.
@@ -287,8 +397,9 @@ impl Shibahama {
             options.valid_from_unix,
             options.ingested_at_unix,
         )?;
-        if let Some(scope) = options.scope {
-            event = event.with_scope(parse_memory_scope(scope)?);
+        let scope = options.scope.map(parse_memory_scope).transpose()?;
+        if let Some(scope) = scope.as_ref() {
+            event = event.with_scope(scope.clone());
         }
 
         match parse_memory_kind(kind)? {
@@ -299,9 +410,34 @@ impl Shibahama {
         }
 
         let vector = options.vector.as_deref().map(vector_to_f32).transpose()?;
+        let request = CapturePolicyRequest {
+            actor: parse_policy_actor(options.actor.as_deref().unwrap_or("human"))?,
+            intent: parse_capture_intent(options.intent.as_deref().unwrap_or("manual"))?,
+            confidence_percent: options
+                .confidence_percent
+                .unwrap_or(100)
+                .try_into()
+                .map_err(|_| Error::from_reason("confidencePercent must be 0 through 100"))?,
+        };
         let mut inner = self.inner.lock().map_err(lock_error)?;
-        let item = if let Some(vector) = vector.as_deref() {
-            inner.write_with_embedding(
+        let item = if let Some(scope) = scope {
+            let mut scoped = inner.scoped(scope).map_err(js_error)?;
+            if let Some(vector) = vector.as_deref() {
+                scoped.write_with_embedding_and_capture_policy(
+                    event,
+                    WriteEmbedding {
+                        vector,
+                        index_name,
+                        model,
+                        model_version,
+                    },
+                    request,
+                )
+            } else {
+                scoped.write_with_capture_policy(event, request)
+            }
+        } else if let Some(vector) = vector.as_deref() {
+            inner.write_with_embedding_and_capture_policy(
                 event,
                 WriteEmbedding {
                     vector,
@@ -309,9 +445,10 @@ impl Shibahama {
                     model,
                     model_version,
                 },
+                request,
             )
         } else {
-            inner.write(event)
+            inner.write_with_capture_policy(event, request)
         }
         .map_err(js_error)?;
 
@@ -332,6 +469,26 @@ impl Shibahama {
         inner.invalidate(id, valid_to).map_err(js_error)
     }
 
+    /// Soft-invalidates a memory only when it belongs to the supplied scope.
+    #[napi]
+    pub fn invalidate_scoped(
+        &self,
+        memory_id: String,
+        valid_to_unix: f64,
+        scope: MemoryScope,
+    ) -> Result<bool> {
+        let id = parse_memory_id(&memory_id)?;
+        let valid_to = time_from_optional_unix(Some(valid_to_unix))?;
+        let scope = parse_memory_scope(scope)?;
+        let mut inner = self.inner.lock().map_err(lock_error)?;
+
+        inner
+            .scoped(scope)
+            .map_err(js_error)?
+            .invalidate(id, valid_to)
+            .map_err(js_error)
+    }
+
     /// Recalls current fact memories for a query embedding.
     ///
     /// # Errors
@@ -345,9 +502,19 @@ impl Shibahama {
         options: Option<RecallOptions>,
     ) -> Result<Vec<RecallCandidate>> {
         let query_vector = vector_to_f32(&query_vector)?;
-        let inner = self.inner.lock().map_err(lock_error)?;
+        let scope = options
+            .as_ref()
+            .and_then(|options| options.scope.clone())
+            .map(parse_memory_scope)
+            .transpose()?;
+        let mut inner = self.inner.lock().map_err(lock_error)?;
         let request = recall_request(&query_vector, top_k, options.as_ref())?;
-        let candidates = inner.recall(&request).map_err(js_error)?;
+        let candidates = if let Some(scope) = scope {
+            inner.scoped(scope).map_err(js_error)?.recall(&request)
+        } else {
+            inner.recall(&request)
+        }
+        .map_err(js_error)?;
 
         Ok(candidates.into_iter().map(RecallCandidate::from).collect())
     }
@@ -365,9 +532,22 @@ impl Shibahama {
         options: Option<RecallOptions>,
     ) -> Result<DegradedRecallResult> {
         let query_vector = vector_to_f32(&query_vector)?;
-        let inner = self.inner.lock().map_err(lock_error)?;
+        let scope = options
+            .as_ref()
+            .and_then(|options| options.scope.clone())
+            .map(parse_memory_scope)
+            .transpose()?;
+        let mut inner = self.inner.lock().map_err(lock_error)?;
         let request = recall_request(&query_vector, top_k, options.as_ref())?;
-        let result = inner.recall_with_degradation(&request).map_err(js_error)?;
+        let result = if let Some(scope) = scope {
+            inner
+                .scoped(scope)
+                .map_err(js_error)?
+                .recall_with_degradation(&request)
+        } else {
+            inner.recall_with_degradation(&request)
+        }
+        .map_err(js_error)?;
 
         Ok(DegradedRecallResult {
             candidates: result
@@ -415,11 +595,21 @@ impl Shibahama {
         options: Option<RecallOptions>,
     ) -> Result<Vec<RecallCandidate>> {
         let query_vector = vector_to_f32(&query_vector)?;
-        let inner = self.inner.lock().map_err(lock_error)?;
+        let scope = options
+            .as_ref()
+            .and_then(|options| options.scope.clone())
+            .map(parse_memory_scope)
+            .transpose()?;
+        let mut inner = self.inner.lock().map_err(lock_error)?;
         let mut options = options.unwrap_or_default();
         options.now_unix = Some(as_of_unix);
         let request = recall_request(&query_vector, top_k, Some(&options))?;
-        let candidates = inner.timeline(&request).map_err(js_error)?;
+        let candidates = if let Some(scope) = scope {
+            inner.scoped(scope).map_err(js_error)?.timeline(&request)
+        } else {
+            inner.timeline(&request)
+        }
+        .map_err(js_error)?;
 
         Ok(candidates.into_iter().map(RecallCandidate::from).collect())
     }
@@ -458,6 +648,26 @@ impl Shibahama {
         inner.reinforce(id, outcome).map_err(js_error)
     }
 
+    /// Records a usage outcome only when the memory belongs to the supplied scope.
+    #[napi]
+    pub fn reinforce_scoped(
+        &self,
+        memory_id: String,
+        outcome: Option<String>,
+        scope: MemoryScope,
+    ) -> Result<bool> {
+        let id = parse_memory_id(&memory_id)?;
+        let outcome = parse_access_outcome(outcome.as_deref().unwrap_or("cited"))?;
+        let scope = parse_memory_scope(scope)?;
+        let mut inner = self.inner.lock().map_err(lock_error)?;
+
+        inner
+            .scoped(scope)
+            .map_err(js_error)?
+            .reinforce(id, outcome)
+            .map_err(js_error)
+    }
+
     /// Explains why a memory currently has its state.
     ///
     /// # Errors
@@ -469,6 +679,27 @@ impl Shibahama {
         let now = time_from_optional_unix(now_unix)?;
         let inner = self.inner.lock().map_err(lock_error)?;
         let why = inner.why_at(id, now).map_err(js_error)?;
+
+        Ok(why.map(WhyTrace::from))
+    }
+
+    /// Explains one memory only when it belongs to the supplied scope.
+    #[napi]
+    pub fn why_scoped(
+        &self,
+        memory_id: String,
+        now_unix: Option<f64>,
+        scope: MemoryScope,
+    ) -> Result<Option<WhyTrace>> {
+        let id = parse_memory_id(&memory_id)?;
+        let now = time_from_optional_unix(now_unix)?;
+        let scope = parse_memory_scope(scope)?;
+        let mut inner = self.inner.lock().map_err(lock_error)?;
+        let why = inner
+            .scoped(scope)
+            .map_err(js_error)?
+            .why_at(id, now)
+            .map_err(js_error)?;
 
         Ok(why.map(WhyTrace::from))
     }
@@ -486,6 +717,20 @@ impl Shibahama {
         Ok(items.into_iter().map(MemoryItem::from).collect())
     }
 
+    /// Returns materialized memories only from the supplied scope.
+    #[napi]
+    pub fn memory_items_scoped(&self, scope: MemoryScope) -> Result<Vec<MemoryItem>> {
+        let scope = parse_memory_scope(scope)?;
+        let mut inner = self.inner.lock().map_err(lock_error)?;
+        let items = inner
+            .scoped(scope)
+            .map_err(js_error)?
+            .memory_items()
+            .map_err(js_error)?;
+
+        Ok(items.into_iter().map(MemoryItem::from).collect())
+    }
+
     /// Returns durable event-log records as JSON.
     ///
     /// # Errors
@@ -495,6 +740,27 @@ impl Shibahama {
     pub fn event_records_json(&self) -> Result<String> {
         let inner = self.inner.lock().map_err(lock_error)?;
         let events = inner
+            .event_records()
+            .map_err(js_error)?
+            .iter()
+            .map(event_record_json)
+            .collect::<Vec<_>>();
+
+        serde_json::to_string(&json!({
+            "eventCount": events.len(),
+            "events": events,
+        }))
+        .map_err(json_error)
+    }
+
+    /// Returns durable event-log records visible from the supplied scope as JSON.
+    #[napi]
+    pub fn event_records_scoped_json(&self, scope: MemoryScope) -> Result<String> {
+        let scope = parse_memory_scope(scope)?;
+        let mut inner = self.inner.lock().map_err(lock_error)?;
+        let events = inner
+            .scoped(scope)
+            .map_err(js_error)?
             .event_records()
             .map_err(js_error)?
             .iter()
@@ -1058,6 +1324,7 @@ static DEFAULT_RECALL_OPTIONS: RecallOptions = RecallOptions {
     significance_weight: None,
     recency_weight: None,
     graph_weight: None,
+    scope: None,
 };
 
 fn recall_ranking(options: &RecallOptions) -> Result<RecallRankingConfig> {
@@ -1178,6 +1445,23 @@ fn parse_capture_intent(value: &str) -> Result<CaptureIntent> {
         _ => Err(Error::from_reason(
             "intent must be `manual`, `suggested`, or `automatic`",
         )),
+    }
+}
+
+fn parse_capture_mode(value: &str) -> Result<CaptureMode> {
+    match value {
+        "manual" => Ok(CaptureMode::Manual),
+        "suggest" => Ok(CaptureMode::Suggest),
+        "automatic" => Ok(CaptureMode::Automatic),
+        _ => Err(Error::from_reason(
+            "captureMode must be `manual`, `suggest`, or `automatic`",
+        )),
+    }
+}
+
+fn set_optional_bool(target: &mut bool, value: Option<bool>) {
+    if let Some(value) = value {
+        *target = value;
     }
 }
 

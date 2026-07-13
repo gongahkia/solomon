@@ -313,6 +313,12 @@ struct ServeCommand {
     /// Maximum materialized memories allowed per namespace.
     #[arg(long, default_value_t = 10_000)]
     max_memories_per_namespace: usize,
+    /// Exact scope granted to HTTP MCP sessions.
+    #[arg(long, default_value = "repository")]
+    mcp_scope_visibility: String,
+    /// Team required when `--mcp-scope-visibility team` is selected.
+    #[arg(long)]
+    mcp_scope_team: Option<String>,
 }
 
 #[derive(Args)]
@@ -331,6 +337,9 @@ struct McpCommand {
     /// Local principal identity fixed for this MCP server process.
     #[arg(long)]
     principal: String,
+    /// Authenticated actor class fixed for this MCP server process.
+    #[arg(long, default_value = "human")]
+    actor: String,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -651,6 +660,7 @@ struct ServerState {
     path: String,
     default_namespace: String,
     api_key: Option<String>,
+    mcp_scope: MemoryScope,
     max_memories_per_namespace: usize,
 }
 
@@ -865,6 +875,16 @@ impl ServerError {
     fn unauthorized(_error: impl Display) -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
+            code: "SHIBA_UNAUTHORIZED".to_owned(),
+            severity: "fatal",
+            retryable: false,
+            detail: "authorization denied",
+        }
+    }
+
+    fn forbidden(_error: impl Display) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
             code: "SHIBA_UNAUTHORIZED".to_owned(),
             severity: "fatal",
             retryable: false,
@@ -1195,20 +1215,37 @@ fn serve(command: ServeCommand) -> CliResult<()> {
 fn serve_mcp(command: McpCommand) -> CliResult<()> {
     let scope = mcp_memory_scope(&command)?;
     let principal = mcp_principal(&command.principal)?;
+    let actor = mcp_actor(&command.actor)?;
     let mut engine = open_engine(&command.store, None)?;
     let mut backend = mcp_tools::McpEngineBackend::new(&mut engine);
 
     Ok(mcp::serve_stdio_with_backend(
-        mcp::McpServerContext::new(scope, principal),
+        mcp::McpServerContext::new(scope, principal, actor),
         &mut backend,
     )?)
 }
 
 fn mcp_memory_scope(command: &McpCommand) -> CliResult<MemoryScope> {
-    let repository = ScopeId::new(&command.scope_repository)?;
-    match command.scope_visibility.as_str() {
+    mcp_scope(
+        &command.scope_repository,
+        command.scope_team.as_deref(),
+        &command.scope_visibility,
+    )
+}
+
+fn server_mcp_scope(command: &ServeCommand) -> CliResult<MemoryScope> {
+    mcp_scope(
+        &command.namespace,
+        command.mcp_scope_team.as_deref(),
+        &command.mcp_scope_visibility,
+    )
+}
+
+fn mcp_scope(repository: &str, team: Option<&str>, visibility: &str) -> CliResult<MemoryScope> {
+    let repository = ScopeId::new(repository)?;
+    match visibility {
         "repository" => {
-            if command.scope_team.is_some() {
+            if team.is_some() {
                 return Err(Box::new(CliError(
                     "repository MCP scope must not include --scope-team".to_owned(),
                 )));
@@ -1216,7 +1253,7 @@ fn mcp_memory_scope(command: &McpCommand) -> CliResult<MemoryScope> {
             Ok(MemoryScope::repository(repository))
         }
         "team" => {
-            let team = command.scope_team.as_deref().ok_or_else(|| {
+            let team = team.ok_or_else(|| {
                 Box::new(CliError("team MCP scope requires --scope-team".to_owned()))
                     as Box<dyn Error>
             })?;
@@ -1224,6 +1261,18 @@ fn mcp_memory_scope(command: &McpCommand) -> CliResult<MemoryScope> {
         }
         _ => Err(Box::new(CliError(
             "MCP scope visibility must be `repository` or `team`".to_owned(),
+        ))),
+    }
+}
+
+fn mcp_actor(value: &str) -> CliResult<PolicyActorClass> {
+    match value {
+        "human" => Ok(PolicyActorClass::Human),
+        "agent" => Ok(PolicyActorClass::Agent),
+        "automation" => Ok(PolicyActorClass::Automation),
+        "service" => Ok(PolicyActorClass::Service),
+        _ => Err(Box::new(CliError(
+            "MCP actor must be `human`, `agent`, `automation`, or `service`".to_owned(),
         ))),
     }
 }
@@ -1246,6 +1295,7 @@ fn mcp_principal(value: &str) -> CliResult<String> {
 
 async fn serve_async(command: ServeCommand) -> CliResult<()> {
     validate_namespace(&command.namespace)?;
+    let mcp_scope = server_mcp_scope(&command)?;
     let engine = open_engine(&command.store, None)?;
     let api_key = command
         .api_key
@@ -1257,6 +1307,7 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
         path: command.store.path.display().to_string(),
         default_namespace: command.namespace,
         api_key,
+        mcp_scope,
         max_memories_per_namespace: command.max_memories_per_namespace,
     };
     let app = Router::new()
@@ -1345,6 +1396,49 @@ fn server_context(
         scope,
         principal,
     })
+}
+
+fn server_mcp_context(
+    headers: &HeaderMap,
+    state: &ServerState,
+) -> Result<mcp::McpServerContext, ServerError> {
+    let principal = authorize_server_request(headers, state)?;
+    let namespace = request_namespace(headers, state)?;
+    let scope = request_scope(headers, &namespace)?;
+    if scope != state.mcp_scope {
+        return Err(ServerError::forbidden(
+            "requested MCP scope does not match the transport grant",
+        ));
+    }
+    Ok(mcp::McpServerContext::new(
+        state.mcp_scope.clone(),
+        principal.to_owned(),
+        PolicyActorClass::Service,
+    ))
+}
+
+fn server_mcp_context_or_log(
+    headers: &HeaderMap,
+    state: &ServerState,
+    method: &str,
+) -> Result<mcp::McpServerContext, ServerError> {
+    match server_mcp_context(headers, state) {
+        Ok(context) => Ok(context),
+        Err(error) => {
+            let namespace = request_namespace(headers, state)
+                .ok()
+                .unwrap_or_else(|| "unknown".to_owned());
+            log_server_request(
+                method,
+                "/mcp",
+                Some(&namespace),
+                "rejected",
+                error.status,
+                json!({ "request_units": 1 }),
+            );
+            Err(error)
+        }
+    }
 }
 
 fn server_context_or_log(
@@ -2377,8 +2471,8 @@ async fn server_mcp_post(
             "Accept must include application/json and text/event-stream",
         );
     }
-    let context = match server_context_or_log(&headers, &state, "POST", "/mcp") {
-        Ok(context) => mcp::McpServerContext::new(context.scope, context.principal.to_owned()),
+    let context = match server_mcp_context_or_log(&headers, &state, "POST") {
+        Ok(context) => context,
         Err(error) => return error.into_response(),
     };
     let Ok(message) = serde_json::from_slice::<serde_json::Value>(&body) else {
@@ -2467,7 +2561,7 @@ async fn server_mcp_get(State(state): State<ServerState>, headers: HeaderMap) ->
             "Accept must include text/event-stream",
         );
     }
-    if let Err(error) = server_context_or_log(&headers, &state, "GET", "/mcp") {
+    if let Err(error) = server_mcp_context_or_log(&headers, &state, "GET") {
         return error.into_response();
     }
     StatusCode::METHOD_NOT_ALLOWED.into_response()
@@ -2484,8 +2578,8 @@ async fn server_mcp_delete(State(state): State<ServerState>, headers: HeaderMap)
             "Unsupported MCP protocol version",
         );
     }
-    let context = match server_context_or_log(&headers, &state, "DELETE", "/mcp") {
-        Ok(context) => mcp::McpServerContext::new(context.scope, context.principal.to_owned()),
+    let context = match server_mcp_context_or_log(&headers, &state, "DELETE") {
+        Ok(context) => context,
         Err(error) => return error.into_response(),
     };
     let Some(session_id) = headers

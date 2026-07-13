@@ -13,6 +13,17 @@
       "import": "./index.mjs",
       "require": "./index.cjs",
       "default": "./index.mjs"
+    },
+    "./mcp-client": {
+      "types": "./mcp-client.d.ts",
+      "import": "./mcp-client.mjs",
+      "default": "./mcp-client.mjs"
+    },
+    "./sdk": {
+      "types": "./sdk.d.ts",
+      "import": "./sdk.mjs",
+      "require": "./sdk.cjs",
+      "default": "./sdk.mjs"
     }
   },
   "files": [
@@ -20,16 +31,23 @@
     "index.d.ts",
     "index.mjs",
     "langchain-memory.cjs",
+    "mcp-client.d.ts",
+    "mcp-client.mjs",
+    "sdk-core.cjs",
+    "sdk.cjs",
+    "sdk.d.ts",
+    "sdk.mjs",
     "*.node",
     "README.md"
   ],
   "scripts": {
     "build": "napi build --release --platform && node scripts/augment-types.mjs",
     "build:debug": "napi build --platform && node scripts/augment-types.mjs",
-    "test": "node test/smoke.mjs"
+    "test": "node test/smoke.mjs && node test/mcp-client.mjs && node test/sdk.mjs && ./node_modules/.bin/tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 test/sdk-types.ts"
   },
   "devDependencies": {
-    "@napi-rs/cli": "3.7.1"
+    "@napi-rs/cli": "3.7.1",
+    "typescript": "5.9.3"
   },
   "engines": {
     "node": ">=18"

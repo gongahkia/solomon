@@ -209,7 +209,9 @@ curl -fsS -D "$mcp_init_headers" -o "$mcp_init_body" \
 mcp_session="$(awk 'tolower($1)=="mcp-session-id:" {gsub("\r", "", $2); print $2}' "$mcp_init_headers")"
 python3 -c 'import json,sys
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
-assert payload["result"]["protocolVersion"] == "2025-11-25"' "$mcp_init_body"
+assert payload["result"]["protocolVersion"] == "2025-11-25"
+assert payload["result"]["capabilities"]["resources"] == {}
+assert payload["result"]["capabilities"]["experimental"]["shibahama"]["actorClass"] == "service"' "$mcp_init_body"
 if [[ -z "$mcp_session" ]]; then
   echo "MCP initialization did not return a session" >&2
   exit 1
@@ -237,20 +239,60 @@ python3 -c 'import json,sys
 tools = json.load(open(sys.argv[1], encoding="utf-8"))["result"]["tools"]
 assert len(tools) == 7
 assert all(tool["inputSchema"]["x-shibahama-schema-version"] == 1 for tool in tools)' "$mcp_tools"
+mcp_resources="$tmpdir/mcp-resources.json"
+curl -fsS -o "$mcp_resources" -X POST "${mcp_headers[@]}" --data '{"jsonrpc":"2.0","id":3,"method":"resources/list"}' "${base}/mcp"
+python3 -c 'import json,sys
+resources = json.load(open(sys.argv[1], encoding="utf-8"))["result"]["resources"]
+assert len(resources) == 5
+assert all(resource["uri"].startswith("shibahama://v1/") for resource in resources)' "$mcp_resources"
+mcp_scope_resource="$tmpdir/mcp-scope-resource.json"
+curl -fsS -o "$mcp_scope_resource" -X POST "${mcp_headers[@]}" --data '{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"shibahama://v1/scope"}}' "${base}/mcp"
+python3 -c 'import json,sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+resource = json.loads(payload["result"]["contents"][0]["text"])
+assert resource["schemaVersion"] == 1
+assert resource["scope"]["repository"] == "smoke"
+assert resource["principal"] == "api_key"
+assert resource["actorClass"] == "service"' "$mcp_scope_resource"
+mcp_spoofed_actor="$tmpdir/mcp-spoofed-actor.json"
+curl -fsS -o "$mcp_spoofed_actor" -X POST "${mcp_headers[@]}" --data '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"shibahama_memory_write_v1","arguments":{"schemaVersion":1,"scope":{"repository":"smoke","team":null,"visibility":"repository"},"actor":"human","actorId":"api_key","content":"actor class must not be forgeable","vector":[1,0],"sourceKind":"user","validFromUnix":0,"ingestedAtUnix":0}}}' "${base}/mcp"
+python3 -c 'import json,sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+assert payload["result"]["isError"] is True
+assert payload["result"]["structuredContent"]["error"]["code"] == "SHIBA_UNAUTHORIZED"
+assert "actor class must not be forgeable" not in json.dumps(payload)' "$mcp_spoofed_actor"
 mcp_write="$tmpdir/mcp-write.json"
-curl -fsS -o "$mcp_write" -X POST "${mcp_headers[@]}" --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"shibahama_memory_write_v1","arguments":{"schemaVersion":1,"scope":{"repository":"smoke","team":null,"visibility":"repository"},"actor":"human","actorId":"api_key","content":"MCP server smoke memory","vector":[1,0],"sourceKind":"user","validFromUnix":0,"ingestedAtUnix":0}}}' "${base}/mcp"
+curl -fsS -o "$mcp_write" -X POST "${mcp_headers[@]}" --data '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"shibahama_memory_write_v1","arguments":{"schemaVersion":1,"scope":{"repository":"smoke","team":null,"visibility":"repository"},"actor":"service","actorId":"api_key","content":"MCP server smoke memory","vector":[1,0],"sourceKind":"user","validFromUnix":0,"ingestedAtUnix":0}}}' "${base}/mcp"
 mcp_memory_id="$(python3 -c 'import json,sys
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
 assert payload["result"]["isError"] is False
 assert payload["result"]["structuredContent"]["result"]["policyOutcome"] == "allowed"
 print(payload["result"]["structuredContent"]["result"]["memory"]["id"])' "$mcp_write")"
 mcp_recall="$tmpdir/mcp-recall.json"
-curl -fsS -o "$mcp_recall" -X POST "${mcp_headers[@]}" --data '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"shibahama_memory_recall_v1","arguments":{"schemaVersion":1,"scope":{"repository":"smoke","team":null,"visibility":"repository"},"queryVector":[1,0],"topK":1,"nowUnix":0}}}' "${base}/mcp"
+curl -fsS -o "$mcp_recall" -X POST "${mcp_headers[@]}" --data '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"shibahama_memory_recall_v1","arguments":{"schemaVersion":1,"scope":{"repository":"smoke","team":null,"visibility":"repository"},"queryVector":[1,0],"topK":1,"nowUnix":0}}}' "${base}/mcp"
 python3 -c 'import json,sys
 memory_id, payload = sys.argv[1:]
 payload = json.load(open(payload, encoding="utf-8"))
 assert payload["result"]["isError"] is False
 assert payload["result"]["structuredContent"]["result"]["candidates"][0]["id"] == memory_id' "$mcp_memory_id" "$mcp_recall"
+mcp_missing_confirmation="$tmpdir/mcp-missing-confirmation.json"
+curl -fsS -o "$mcp_missing_confirmation" -X POST "${mcp_headers[@]}" --data "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/call\",\"params\":{\"name\":\"shibahama_memory_erase_v1\",\"arguments\":{\"schemaVersion\":1,\"scope\":{\"repository\":\"smoke\",\"team\":null,\"visibility\":\"repository\"},\"actor\":\"service\",\"actorId\":\"api_key\",\"memoryId\":\"${mcp_memory_id}\",\"validToUnix\":2}}}" "${base}/mcp"
+python3 -c 'import json,sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+assert payload["result"]["isError"] is True
+assert payload["result"]["structuredContent"]["error"]["code"] == "SHIBA_CONFIRMATION_REQUIRED"' "$mcp_missing_confirmation"
+mcp_erase="$tmpdir/mcp-erase.json"
+curl -fsS -o "$mcp_erase" -X POST "${mcp_headers[@]}" --data "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",\"params\":{\"name\":\"shibahama_memory_erase_v1\",\"arguments\":{\"schemaVersion\":1,\"scope\":{\"repository\":\"smoke\",\"team\":null,\"visibility\":\"repository\"},\"actor\":\"service\",\"actorId\":\"api_key\",\"memoryId\":\"${mcp_memory_id}\",\"validToUnix\":2,\"confirmation\":{\"schemaVersion\":1,\"intent\":\"erasure\",\"token\":\"server-erase-confirm-0001\",\"actorId\":\"api_key\",\"scope\":{\"repository\":\"smoke\",\"team\":null,\"visibility\":\"repository\"},\"targetId\":\"${mcp_memory_id}\",\"validToUnix\":2}}}}" "${base}/mcp"
+python3 -c 'import json,sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+assert payload["result"]["isError"] is False
+assert payload["result"]["structuredContent"]["result"]["applied"] is True' "$mcp_erase"
+mcp_erase_retry="$tmpdir/mcp-erase-retry.json"
+curl -fsS -o "$mcp_erase_retry" -X POST "${mcp_headers[@]}" --data "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"tools/call\",\"params\":{\"name\":\"shibahama_memory_erase_v1\",\"arguments\":{\"schemaVersion\":1,\"scope\":{\"repository\":\"smoke\",\"team\":null,\"visibility\":\"repository\"},\"actor\":\"service\",\"actorId\":\"api_key\",\"memoryId\":\"${mcp_memory_id}\",\"validToUnix\":2,\"confirmation\":{\"schemaVersion\":1,\"intent\":\"erasure\",\"token\":\"server-erase-confirm-0001\",\"actorId\":\"api_key\",\"scope\":{\"repository\":\"smoke\",\"team\":null,\"visibility\":\"repository\"},\"targetId\":\"${mcp_memory_id}\",\"validToUnix\":2}}}}" "${base}/mcp"
+python3 -c 'import json,sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+assert payload["result"]["isError"] is True
+assert payload["result"]["structuredContent"]["error"]["code"] == "SHIBA_CONFIRMATION_CONSUMED"' "$mcp_erase_retry"
 if [[ "$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'accept: application/json, text/event-stream' -H 'content-type: application/json' -H "x-api-key: ${api_key}" -H "x-shibahama-namespace: ${namespace}" -H 'x-shibahama-scope-visibility: team' -H 'x-shibahama-scope-team: team-smoke' -H "mcp-session-id: ${mcp_session}" -H 'mcp-protocol-version: 2025-11-25' --data '{"jsonrpc":"2.0","id":3,"method":"tools/list"}' "${base}/mcp")" != "403" ]]; then
   echo "MCP session accepted a changed scope" >&2
   exit 1

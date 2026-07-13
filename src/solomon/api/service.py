@@ -19,6 +19,7 @@ from solomon.api.service_models import (
     DependencyRequest,
     DependencySuggestionDecisionRequest,
     DependencySuggestionRequest,
+    DocumentSourceRequest,
     IngestRequest,
     PinRequest,
     PrimitivePlanExecution,
@@ -59,6 +60,8 @@ from solomon.graph.suggestions import DependencySuggestion, ReferenceExtraction,
 from solomon.graph.visualization import GraphFormat
 from solomon.orchestrator.models import ModelRequest, ModelRouter, RoutedModelResult
 from solomon.orchestrator.retrieval import RetrievalOrchestrator
+from solomon.sources.models import DocumentSource
+from solomon.sources.store import SQLiteDocumentStore
 from solomon.store.factory import create_storage_bundle
 from solomon.store.sqlite import ItemNotFoundError
 
@@ -98,6 +101,7 @@ class SolomonService:
             index=self.index,
             credence=self.credence,
         )
+        self.document_store = SQLiteDocumentStore(data_dir / "sources.sqlite3")
         self.audit = AuditJournal(journal_dir / "journal.jsonl")
         self.attestation_key = attestation_key
         self.boundary = boundary or SolomonBoundary()
@@ -108,6 +112,36 @@ class SolomonService:
 
     def ingest(self, request: IngestRequest) -> KnowledgeItem:
         return self._ingestion.ingest(request)
+
+    def register_document_source(self, request: DocumentSourceRequest) -> DocumentSource:
+        source = DocumentSource(
+            name=request.name,
+            kind=request.kind,
+            root_ref=request.root_ref,
+            enabled=request.enabled,
+            config=request.config,
+        )
+        if request.source_id is not None:
+            try:
+                existing = self.document_store.get_source(request.source_id)
+            except KeyError:
+                source = source.model_copy(update={"id": request.source_id})
+            else:
+                if (
+                    existing.name == source.name
+                    and existing.kind is source.kind
+                    and existing.root_ref == source.root_ref
+                    and existing.enabled is source.enabled
+                    and existing.config == source.config
+                ):
+                    return existing
+                source = source.model_copy(update={"id": existing.id, "created_at": existing.created_at})
+        stored = self.document_store.upsert_source(source)
+        self.audit.append(
+            "document_source_registered",
+            {"source_id": stored.id, "kind": stored.kind.value, "root_ref_sha256": digest(stored.root_ref)},
+        )
+        return stored
 
     def recall(self, request: RecallRequest) -> list[dict[str, Any]]:
         return self._recall.recall(request)
@@ -362,6 +396,7 @@ class SolomonService:
 __all__ = [
     "SolomonService",
     "IngestRequest",
+    "DocumentSourceRequest",
     "RecallRequest",
     "VerificationRequest",
     "VerificationAssignmentRequest",

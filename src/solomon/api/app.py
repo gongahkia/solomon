@@ -30,6 +30,7 @@ from solomon.api.service import (
     DependencyRequest,
     DependencySuggestionDecisionRequest,
     DependencySuggestionRequest,
+    DocumentSourceRequest,
     IngestRequest,
     PinRequest,
     PrimitivePlanRequest,
@@ -283,6 +284,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/ingest")
     def ingest(request: Request, payload: IngestRequest) -> dict[str, Any]:
         return active_service(request).ingest(payload).model_dump(mode="json")
+
+    @app.post("/sources")
+    def register_document_source(request: Request, payload: DocumentSourceRequest) -> dict[str, Any]:
+        return active_service(request).register_document_source(payload).model_dump(mode="json")
 
     @app.post("/recall")
     def recall(request: Request, payload: RecallRequest) -> list[dict[str, Any]]:

@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from solomon.api.schemas import SolomonModel
 from solomon.connectors import ConnectorConfiguration
@@ -46,6 +48,22 @@ class DocumentSource(SolomonModel):
     @classmethod
     def normalize_datetimes(cls, value: datetime) -> datetime:
         return _ensure_aware_utc(value)
+
+    @model_validator(mode="after")
+    def validate_root_ref(self) -> DocumentSource:
+        if self.kind is DocumentSourceKind.FILESYSTEM:
+            if not Path(self.root_ref).is_absolute():
+                raise ValueError("filesystem source root_ref must be an absolute path")
+        elif self.kind is DocumentSourceKind.MICROSOFT_GRAPH:
+            parsed = urlparse(self.root_ref)
+            valid_graph_url = (
+                parsed.scheme == "https"
+                and parsed.netloc == "graph.microsoft.com"
+                and parsed.path.startswith("/v1.0/")
+            )
+            if not valid_graph_url:
+                raise ValueError("Microsoft Graph source root_ref must be an https://graph.microsoft.com/v1.0/ URL")
+        return self
 
 
 class SourceDocument(SolomonModel):

@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from solomon.api.schemas import SolomonModel
+from solomon.connectors import ConnectorConfiguration
 from solomon.currency.contradiction import ConclusionPolarity
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import (
@@ -19,6 +20,7 @@ from solomon.currency.models import (
 )
 from solomon.currency.prediction import PendingAuthorityAmendment
 from solomon.graph.models import EdgeConfidence, EdgeType
+from solomon.sources.models import DocumentSourceKind
 
 
 class IngestRequest(SolomonModel):
@@ -34,6 +36,15 @@ class IngestRequest(SolomonModel):
     client_id: str | None = None
     valid_from: datetime | None = None
     ingested_at: datetime | None = None
+
+
+class DocumentSourceRequest(SolomonModel):
+    source_id: str | None = Field(default=None, min_length=1)
+    name: str = Field(min_length=1, max_length=120)
+    kind: DocumentSourceKind
+    root_ref: str = Field(min_length=1)
+    enabled: bool = True
+    config: ConnectorConfiguration = Field(default_factory=ConnectorConfiguration)
 
 
 class RecallRequest(SolomonModel):
@@ -200,6 +211,7 @@ class PrimitivePlanExecution(SolomonModel):
 __all__ = [
     "IngestRequest",
     "RecallRequest",
+    "DocumentSourceRequest",
     "VerificationRequest",
     "VerificationAssignmentRequest",
     "VerificationReviewRequest",

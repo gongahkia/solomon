@@ -13,6 +13,7 @@ ADMIN_SCOPE = "admin:*"
 TENANT_READ_SCOPE = "tenant:read"
 TENANT_WRITE_SCOPE = "tenant:write"
 TENANT_MANAGE_SCOPE = "tenant:manage"
+SOURCE_MANAGE_SCOPE = "source:manage"
 DIAGNOSTICS_READ_SCOPE = "diagnostics:read"
 
 KNOWN_AUTH_SCOPES = frozenset(
@@ -21,6 +22,7 @@ KNOWN_AUTH_SCOPES = frozenset(
         TENANT_READ_SCOPE,
         TENANT_WRITE_SCOPE,
         TENANT_MANAGE_SCOPE,
+        SOURCE_MANAGE_SCOPE,
         DIAGNOSTICS_READ_SCOPE,
     }
 )
@@ -65,6 +67,8 @@ def required_scope_for_request(method: str, path: str) -> str:
         return DIAGNOSTICS_READ_SCOPE
     if path == "/tenants" or path.startswith("/tenants/"):
         return TENANT_MANAGE_SCOPE
+    if path == "/sources" and method.upper() == "POST":
+        return SOURCE_MANAGE_SCOPE
     if method.upper() in {"GET", "HEAD", "OPTIONS"}:
         return TENANT_READ_SCOPE
     if path in _TENANT_READ_POST_PATHS:

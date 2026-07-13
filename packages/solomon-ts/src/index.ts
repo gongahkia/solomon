@@ -37,6 +37,7 @@ export interface AuditMetadata {
 
 export interface ExcludedContextItem {
   item_id?: string | null;
+  candidate_id?: string | null;
   reason: string;
   code?: string | null;
 }

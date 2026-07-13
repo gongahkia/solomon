@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from solomon.api.service import RecallRequest
 from solomon.graph.suggestions import SuggestionDecision
 from solomon.mcp.tools.helpers import (
     _audit_metadata,
@@ -16,6 +15,7 @@ from solomon.mcp.tools.helpers import (
     _review_mcp_output,
     _scope_error_for_item,
 )
+from solomon.mcp.tools.preflight import boundary_rejections, preflight_candidates, rejected_boundary_metadata
 
 if TYPE_CHECKING:
     from solomon.mcp.tools.runtime import SolomonMCPRuntime
@@ -34,19 +34,23 @@ def preflight_context(
     limited = runtime._rate_limit_error("solomon.preflight_context", caller_id)
     if limited is not None:
         return limited
-    results = runtime.service.recall(
-        RecallRequest(
-            query=query,
-            matter_id=matter_id,
-            client_id=client_id,
-            review_mode=False,
-            limit=max_items,
-            max_context_tokens=max_context_tokens,
-        )
+    results, excluded = preflight_candidates(
+        runtime,
+        query=query,
+        matter_id=matter_id,
+        client_id=client_id,
+        max_items=max_items,
+        max_context_tokens=max_context_tokens,
     )
     review = _review_mcp_output(runtime.service, "solomon.preflight_context", results, matter_id=matter_id)
     if "error" in review:
-        return review
+        return {
+            "items": [],
+            "excluded": [*excluded, *boundary_rejections(results)],
+            "scope": {"matter_id": matter_id, "client_id": client_id, "caller_id": caller_id},
+            "boundary": rejected_boundary_metadata(review),
+            "audit": None,
+        }
     entry = runtime.service.audit.append(
         "mcp_call",
         _mcp_log_payload(
@@ -62,12 +66,12 @@ def preflight_context(
                 "max_items": max_items,
                 "max_context_tokens": max_context_tokens,
             },
-            metadata={"result_count": len(results)},
+            metadata={"result_count": len(results), "excluded_count": len(excluded)},
         ),
     )
     return {
         "items": results,
-        "excluded": [],
+        "excluded": excluded,
         "scope": {"matter_id": matter_id, "client_id": client_id, "caller_id": caller_id},
         "boundary": review,
         "audit": _audit_metadata(entry.seq, entry.entry_hash, runtime.service.audit.path),

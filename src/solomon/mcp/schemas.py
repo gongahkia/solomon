@@ -49,6 +49,7 @@ class AuditMetadata(SolomonModel):
 
 class ExcludedContextItem(SolomonModel):
     item_id: str | None = None
+    candidate_id: str | None = None
     reason: str
     code: str | None = None
 

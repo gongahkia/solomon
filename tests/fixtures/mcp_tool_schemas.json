@@ -1330,6 +1330,18 @@
         "ExcludedContextItem": {
           "additionalProperties": false,
           "properties": {
+            "candidate_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Candidate Id"
+            },
             "code": {
               "anyOf": [
                 {

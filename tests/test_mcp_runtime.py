@@ -15,10 +15,11 @@ from hypothesis import strategies as st
 
 from solomon.api.service import AuthorityChangeRequest, DependencyRequest, IngestRequest, SolomonService
 from solomon.boundary.solomon import SolomonBoundary
-from solomon.currency.models import KnowledgeKind, SourceKind
+from solomon.currency.models import CurrencyState, KnowledgeKind, SourceKind
 from solomon.graph.models import EdgeType
 from solomon.mcp.rate_limit import TokenBucketConfig, TokenBucketRateLimiter
 from solomon.mcp.tools import SolomonMCPRuntime
+from solomon.sources.models import CandidateClaim, DocumentSource, DocumentSourceKind, SourceDocument
 
 SAFE_TEXT = st.text(alphabet=string.ascii_letters + string.digits + " _.,;:-", min_size=1, max_size=60)
 LARGE_PASTED_TEXT = st.text(
@@ -178,9 +179,93 @@ def test_mcp_preflight_rejects_boundary_unsafe_output(tmp_path: Path) -> None:
 
     result = runtime.preflight_context(query=item.content)
 
-    assert result["ok"] is False
-    assert result["error"]["code"] == "boundary_rejected"
-    assert result["error"]["details"]["classification"] == "HIGH_RISK"
+    assert result["items"] == []
+    assert result["excluded"] == [
+        {
+            "item_id": item.id,
+            "candidate_id": None,
+            "code": "boundary_rejected",
+            "reason": "candidate withheld by output boundary review",
+        }
+    ]
+    assert result["boundary"] == {
+        "status": "rejected",
+        "classification": "HIGH_RISK",
+        "finding_count": 1,
+        "context_id": None,
+    }
+
+
+def test_mcp_preflight_reports_content_free_exclusions(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    runtime = SolomonMCPRuntime(service)
+    current = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="shared situation current public guidance",
+            source_kind=SourceKind.PARTNER,
+            source_ref="current",
+            matter_id="matter-a",
+            client_id="client-a",
+        )
+    )
+    stale = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="shared situation stale confidential detail",
+            source_kind=SourceKind.PARTNER,
+            source_ref="stale",
+            matter_id="matter-a",
+            client_id="client-a",
+        )
+    )
+    service.store.update_item(stale.model_copy(update={"currency_state": CurrencyState.STALE_PENDING_REVERIFICATION}))
+    service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="shared situation restricted nonpublic detail",
+            source_kind=SourceKind.PARTNER,
+            source_ref="restricted",
+            matter_id="matter-b",
+            client_id="client-b",
+        )
+    )
+    source = service.document_store.upsert_source(
+        DocumentSource(name="internal", kind=DocumentSourceKind.API, root_ref="api://internal")
+    )
+    document = service.document_store.write_document(
+        SourceDocument(
+            source_id=source.id,
+            external_id="source-1",
+            filename="source.txt",
+            mime_type="text/plain",
+            content="shared situation unpromoted nonpublic detail",
+        )
+    )
+    claim = service.document_store.add_candidate(
+        CandidateClaim(
+            document_id=document.id,
+            content="shared situation unpromoted nonpublic detail",
+            start_offset=0,
+            end_offset=42,
+        )
+    )
+
+    result = runtime.preflight_context(
+        query="shared situation",
+        matter_id="matter-a",
+        client_id="client-a",
+    )
+
+    assert [entry["item"]["id"] for entry in result["items"]] == [current.id]
+    assert {entry["code"] for entry in result["excluded"]} == {"stale", "unauthorized", "unpromoted"}
+    assert {entry["item_id"] for entry in result["excluded"] if entry["code"] == "stale"} == {stale.id}
+    assert [entry["candidate_id"] for entry in result["excluded"] if entry["code"] == "unpromoted"] == [claim.id]
+    assert [entry["item_id"] for entry in result["excluded"] if entry["code"] == "unauthorized"] == [None]
+    payload = json.dumps(result)
+    assert "stale confidential detail" not in payload
+    assert "restricted nonpublic detail" not in payload
+    assert "unpromoted nonpublic detail" not in payload
 
 
 def test_mcp_ingest_rejects_boundary_unsafe_output(tmp_path: Path) -> None:
@@ -421,10 +506,9 @@ def test_mcp_preflight_boundary_fuzz_rejects_unsafe_output(payload: str) -> None
 
         result = runtime.preflight_context(query="boundary fuzz payload", matter_id="matter-a", client_id="client-a")
 
-        assert result["ok"] is False
-        assert result["error"]["code"] == "boundary_rejected"
-        assert result["error"]["details"]["classification"] == "HIGH_RISK"
-        assert "items" not in result
+        assert result["items"] == []
+        assert result["excluded"][0]["code"] == "boundary_rejected"
+        assert result["boundary"]["classification"] == "HIGH_RISK"
         assert client.review_requests[-1]["document_type"] == "mcp_tool_result"
         assert "boundary fuzz payload" in client.review_requests[-1]["text"]
 

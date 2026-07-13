@@ -170,6 +170,7 @@ class RecallWeights(SolomonModel):
 
 class RecallOptions(SolomonModel):
     limit: int = 10
+    rrf_k: int = Field(default=60, ge=1)
     review_mode: bool = False
     weights: RecallWeights = Field(default_factory=RecallWeights)
     dedupe_near_identical: bool = True
@@ -180,6 +181,7 @@ class RecallResult(SolomonModel):
     item: KnowledgeItem
     score: float
     similarity: float
+    score_explanation: RetrievalScoreExplanation
     currency_state: CurrencyState
     provenance: dict[str, Any]
     dependencies: list[DependencyEdge]
@@ -194,6 +196,34 @@ class ReembedReport(SolomonModel):
     embedding_ref: str
     considered_item_ids: list[str]
     reembedded_item_ids: list[str]
+
+
+class RetrievalScoreExplanation(SolomonModel):
+    fusion_score: float
+    semantic_rank: int | None
+    semantic_similarity: float
+    lexical_rank: int | None
+    lexical_match_ratio: float
+    lexical_terms: list[str]
+
+
+@dataclass(frozen=True)
+class _LexicalHit:
+    item_id: str
+    match_ratio: float
+    terms: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _FusedHit:
+    item_id: str
+    embedding_ref: str
+    fusion_score: float
+    semantic_rank: int | None
+    semantic_similarity: float
+    lexical_rank: int | None
+    lexical_match_ratio: float
+    lexical_terms: tuple[str, ...]
 
 
 class RetrievalIndexProtocol(Protocol):
@@ -272,15 +302,24 @@ class RetrievalOrchestrator:
         options: RecallOptions | None = None,
     ) -> list[RecallResult]:
         resolved_options = options or RecallOptions()
-        hits = self.index.search(query, limit=max(resolved_options.limit * 4, resolved_options.limit))
+        candidate_limit = max(resolved_options.limit * 4, resolved_options.limit)
+        semantic_hits = self.index.search(query, limit=candidate_limit)
+        matter_id = matter_context.matter_id if matter_context else None
+        client_id = matter_context.client_id if matter_context else None
+        scoped_items = self.store.get_many(matter_id=matter_id, client_id=client_id)
+        hits = _fuse_hits(
+            semantic_hits,
+            _lexical_hits(query, scoped_items, limit=candidate_limit),
+            allowed_item_ids={item.id for item in scoped_items},
+            rrf_k=resolved_options.rrf_k,
+        )
         if not hits:
             self._observe_retrieval(candidates=0, results=[], withheld_by_currency_state={})
             return []
         hit_by_id = {hit.item_id: hit for hit in hits}
         item_ids = [hit.item_id for hit in hits]
-        matter_id = matter_context.matter_id if matter_context else None
-        client_id = matter_context.client_id if matter_context else None
-        items = self.store.get_many(item_ids, matter_id=matter_id, client_id=client_id)
+        item_by_id = {item.id: item for item in scoped_items}
+        items = [item_by_id[item_id] for item_id in item_ids if item_id in item_by_id]
         withheld_by_currency_state: dict[CurrencyState, int] = {}
         if not resolved_options.review_mode:
             live_items: list[KnowledgeItem] = []
@@ -296,7 +335,7 @@ class RetrievalOrchestrator:
         candidates = [
             RetrievalCandidate(
                 item=item,
-                relevance=hit_by_id[item.id].similarity,
+                relevance=hit_by_id[item.id].fusion_score,
                 centrality=float(centrality.get(item.id, 0)),
             )
             for item in items
@@ -367,7 +406,7 @@ class RetrievalOrchestrator:
     def _build_result(
         self,
         candidate: RetrievalCandidate,
-        hit: IndexedHit,
+        hit: IndexedHit | _FusedHit,
         weights: RecallWeights,
     ) -> RecallResult:
         item = candidate.item
@@ -377,15 +416,17 @@ class RetrievalOrchestrator:
             self.credence.policy.tier_rank.values()
         )
         centrality_score = min(candidate.centrality / 10.0, 1.0)
+        fusion_score = hit.similarity if isinstance(hit, IndexedHit) else hit.fusion_score
         score = (
-            hit.similarity * weights.similarity
+            fusion_score * weights.similarity
             + credence_rank * weights.credence
             + centrality_score * weights.centrality
         )
         return RecallResult(
             item=item,
             score=score,
-            similarity=hit.similarity,
+            similarity=hit.similarity if isinstance(hit, IndexedHit) else _display_similarity(hit),
+            score_explanation=_score_explanation(hit),
             currency_state=evaluation.currency_state,
             provenance=item.provenance.model_dump(mode="json"),
             dependencies=self.graph.get_dependencies(item.id),
@@ -428,6 +469,87 @@ class RetrievalOrchestrator:
                 )[0]
             )
         return deduped
+
+
+def _lexical_hits(query: str, items: list[KnowledgeItem], *, limit: int) -> list[_LexicalHit]:
+    query_terms = tokenize(query)
+    if not query_terms:
+        return []
+    hits: list[_LexicalHit] = []
+    for item in items:
+        matched_terms = tuple(sorted(query_terms & tokenize(item.content)))
+        if matched_terms:
+            hits.append(
+                _LexicalHit(
+                    item_id=item.id,
+                    match_ratio=len(matched_terms) / len(query_terms),
+                    terms=matched_terms,
+                )
+            )
+    return sorted(hits, key=lambda hit: (hit.match_ratio, hit.item_id), reverse=True)[:limit]
+
+
+def _fuse_hits(
+    semantic_hits: list[IndexedHit],
+    lexical_hits: list[_LexicalHit],
+    *,
+    allowed_item_ids: set[str],
+    rrf_k: int,
+) -> list[_FusedHit]:
+    allowed_semantic_hits = [hit for hit in semantic_hits if hit.item_id in allowed_item_ids]
+    semantic_by_id = {
+        hit.item_id: (rank, hit)
+        for rank, hit in enumerate(allowed_semantic_hits, start=1)
+    }
+    lexical_by_id = {hit.item_id: (rank, hit) for rank, hit in enumerate(lexical_hits, start=1)}
+    fused: list[_FusedHit] = []
+    for item_id in semantic_by_id.keys() | lexical_by_id.keys():
+        semantic = semantic_by_id.get(item_id)
+        lexical = lexical_by_id.get(item_id)
+        semantic_rank = semantic[0] if semantic else None
+        lexical_rank = lexical[0] if lexical else None
+        fusion_score = sum(1.0 / (rrf_k + rank) for rank in (semantic_rank, lexical_rank) if rank is not None)
+        fused.append(
+            _FusedHit(
+                item_id=item_id,
+                embedding_ref=semantic[1].embedding_ref if semantic else "lexical-only",
+                fusion_score=fusion_score,
+                semantic_rank=semantic_rank,
+                semantic_similarity=semantic[1].similarity if semantic else 0.0,
+                lexical_rank=lexical_rank,
+                lexical_match_ratio=lexical[1].match_ratio if lexical else 0.0,
+                lexical_terms=lexical[1].terms if lexical else (),
+            )
+        )
+    return sorted(
+        fused,
+        key=lambda hit: (hit.fusion_score, hit.semantic_similarity, hit.lexical_match_ratio, hit.item_id),
+        reverse=True,
+    )
+
+
+def _display_similarity(hit: _FusedHit) -> float:
+    return hit.semantic_similarity if hit.semantic_similarity > 0 else hit.lexical_match_ratio
+
+
+def _score_explanation(hit: IndexedHit | _FusedHit) -> RetrievalScoreExplanation:
+    if isinstance(hit, IndexedHit):
+        return RetrievalScoreExplanation(
+            fusion_score=hit.similarity,
+            semantic_rank=None,
+            semantic_similarity=hit.similarity,
+            lexical_rank=None,
+            lexical_match_ratio=0.0,
+            lexical_terms=[],
+        )
+    return RetrievalScoreExplanation(
+        fusion_score=hit.fusion_score,
+        semantic_rank=hit.semantic_rank,
+        semantic_similarity=hit.semantic_similarity,
+        lexical_rank=hit.lexical_rank,
+        lexical_match_ratio=hit.lexical_match_ratio,
+        lexical_terms=list(hit.lexical_terms),
+    )
 
 
 def estimate_context_tokens(item: KnowledgeItem) -> int:

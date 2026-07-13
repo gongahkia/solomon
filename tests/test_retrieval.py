@@ -18,6 +18,7 @@ from solomon.graph.models import DependencyEdge, EdgeType
 from solomon.graph.store import GraphStore
 from solomon.orchestrator.retrieval import (
     EmbeddingStrategy,
+    IndexedHit,
     MatterContext,
     RecallOptions,
     RetrievalOrchestrator,
@@ -60,6 +61,27 @@ def _orchestrator(tmp_path: Path) -> RetrievalOrchestrator:
         index=SQLiteRetrievalIndex(db),
         credence=CredenceLedger(),
     )
+
+
+class _StaticIndex:
+    def __init__(self, hits: list[IndexedHit]) -> None:
+        self.strategy = EmbeddingStrategy(name="static", version="1")
+        self.hits = hits
+
+    def upsert_item(self, item: KnowledgeItem, *, indexed_at: datetime | None = None) -> KnowledgeItem:
+        return item
+
+    def batch_upsert(self, items: list[KnowledgeItem]) -> list[KnowledgeItem]:
+        return items
+
+    def embedding_refs(self, item_ids: list[str]) -> dict[str, str]:
+        return {}
+
+    def search(self, query: str, *, limit: int = 20) -> list[IndexedHit]:
+        return self.hits[:limit]
+
+    def close(self) -> None:
+        return None
 
 
 def test_recall_returns_live_items_by_default_and_stale_in_review_mode(tmp_path: Path) -> None:
@@ -118,6 +140,9 @@ def test_recall_attaches_dependencies_provenance_currency_and_last_verified(tmp_
     assert result.provenance["source_ref"] == "item-1"
     assert result.dependencies[0].id == "edge-1"
     assert result.last_verified_at == _dt(2026, 1, 1)
+    assert result.score_explanation.semantic_rank == 1
+    assert result.score_explanation.lexical_rank == 1
+    assert result.score_explanation.lexical_terms == ["12", "r", "regulation", "section"]
 
 
 def test_credence_guardrail_and_dedupe_affect_ranking(tmp_path: Path) -> None:
@@ -218,3 +243,57 @@ def test_recall_context_budget_caps_results_before_sanitisation(tmp_path: Path) 
 
     assert [result.item.id for result in results] == ["short"]
     assert sum(result.estimated_context_tokens for result in results) <= 2
+
+
+def test_recall_fuses_semantic_and_lexical_ranks_with_evidence(tmp_path: Path) -> None:
+    db = tmp_path / "solomon.sqlite3"
+    store = SQLiteKnowledgeStore(db)
+    graph = GraphStore(db)
+    semantic_only = _item("semantic-only", "unrelated material")
+    exact = _item("exact", "citadel priority clause")
+    store.write_item(semantic_only)
+    store.write_item(exact)
+    orchestrator = RetrievalOrchestrator(
+        store=store,
+        graph=graph,
+        index=_StaticIndex(
+            [
+                IndexedHit(item_id="semantic-only", similarity=0.99, embedding_ref="static:1"),
+                IndexedHit(item_id="exact", similarity=0.01, embedding_ref="static:1"),
+            ]
+        ),
+        credence=CredenceLedger(),
+    )
+
+    results = orchestrator.recall("citadel priority clause", options=RecallOptions(dedupe_near_identical=False))
+
+    assert [result.item.id for result in results] == ["exact", "semantic-only"]
+    explanation = results[0].score_explanation
+    assert explanation.semantic_rank == 2
+    assert explanation.lexical_rank == 1
+    assert explanation.lexical_terms == ["citadel", "clause", "priority"]
+    assert explanation.fusion_score > results[1].score_explanation.fusion_score
+
+
+def test_recall_includes_lexical_only_candidate_with_evidence(tmp_path: Path) -> None:
+    db = tmp_path / "solomon.sqlite3"
+    store = SQLiteKnowledgeStore(db)
+    graph = GraphStore(db)
+    semantic_only = _item("semantic-only", "unrelated material")
+    lexical_only = _item("lexical-only", "citadel priority clause")
+    store.write_item(semantic_only)
+    store.write_item(lexical_only)
+    orchestrator = RetrievalOrchestrator(
+        store=store,
+        graph=graph,
+        index=_StaticIndex([IndexedHit(item_id="semantic-only", similarity=0.99, embedding_ref="static:1")]),
+        credence=CredenceLedger(),
+    )
+
+    results = orchestrator.recall("citadel priority clause", options=RecallOptions(dedupe_near_identical=False))
+
+    lexical = next(result for result in results if result.item.id == "lexical-only")
+    assert lexical.score_explanation.semantic_rank is None
+    assert lexical.score_explanation.lexical_rank == 1
+    assert lexical.score_explanation.semantic_similarity == 0.0
+    assert lexical.score_explanation.lexical_match_ratio == 1.0

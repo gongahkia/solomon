@@ -7,6 +7,7 @@ import json
 import platform
 import tempfile
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -16,9 +17,22 @@ from pydantic import Field
 
 from solomon import __version__
 from solomon.api.schemas import SolomonModel
+from solomon.api.service import (
+    AuthorityEventRequest,
+    CandidateClaimPromotionRequest,
+    DependencyRequest,
+    DocumentSourceRequest,
+    ReviewTaskAssignmentRequest,
+    ReviewTaskResolutionRequest,
+    ReviewTaskStartRequest,
+    SolomonService,
+    SourceDocumentIngestRequest,
+    VerificationRequest,
+)
 from solomon.boundary.engine.jurisdictions import resolve_pack, supported_jurisdiction_codes
 from solomon.boundary.engine.review import review_text
 from solomon.boundary.solomon import SolomonBoundary
+from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import (
     CredenceTier,
     CurrencyState,
@@ -30,6 +44,7 @@ from solomon.currency.models import (
 from solomon.graph.models import DependencyEdge, EdgeType
 from solomon.graph.propagation import CurrencyPropagator
 from solomon.graph.store import GraphStore
+from solomon.mcp.tools import SolomonMCPRuntime
 from solomon.orchestrator.retrieval import (
     RecallOptions,
     RecallWeights,
@@ -37,6 +52,7 @@ from solomon.orchestrator.retrieval import (
     SQLiteRetrievalIndex,
     tokenize,
 )
+from solomon.sources.models import DocumentSourceKind
 from solomon.store.sqlite import SQLiteKnowledgeStore
 
 
@@ -80,6 +96,46 @@ class EvaluationMetrics(SolomonModel):
     stale_surface_rate: float
     time_to_flag_seconds: float
     impact_query_recall: float
+
+
+class EndToEndEvaluationCase(SolomonModel):
+    case_id: str
+    document_text: str
+    query: str
+    authority_id: str
+    expected_candidate_count: int = Field(ge=1)
+
+
+class EndToEndEvaluationCorpus(SolomonModel):
+    schema_id: str = "solomon.end_to_end_evaluation_corpus.v1"
+    cases: list[EndToEndEvaluationCase]
+
+
+class EndToEndCaseResult(SolomonModel):
+    case_id: str
+    extraction_precision: float
+    extraction_recall: float
+    graph_impact_recall: float
+    stale_context_leakage_rate: float
+    source_to_review_completed: bool
+    mcp_context_recalled_after_review: bool
+
+
+class EndToEndEvaluationMetrics(SolomonModel):
+    source_to_review_completion_rate: float
+    extraction_precision: float
+    extraction_recall: float
+    graph_impact_recall: float
+    stale_context_leakage_rate: float
+    mcp_context_recall_after_review: float
+
+
+class EndToEndEvaluationResult(SolomonModel):
+    schema_id: str = "solomon.end_to_end_evaluation_result.v1"
+    corpus_sha256: str
+    case_count: int
+    metrics: EndToEndEvaluationMetrics
+    cases: list[EndToEndCaseResult]
 
 
 class CurrencyBenchmarkMetrics(SolomonModel):
@@ -256,6 +312,25 @@ DEFAULT_BOUNDARY_FIDELITY_CASES = [
         forbidden_terms=["Acme Pte Ltd"],
     ),
 ]
+
+DEFAULT_END_TO_END_EVALUATION_CORPUS = EndToEndEvaluationCorpus(
+    cases=[
+        EndToEndEvaluationCase(
+            case_id="regulation-r-control",
+            document_text="Regulation R section 12 requires a written control for Structure X.",
+            query="Structure X Regulation R section 12",
+            authority_id="evaluation:regulation-r-section-12",
+            expected_candidate_count=1,
+        ),
+        EndToEndEvaluationCase(
+            case_id="directive-d-review",
+            document_text="Directive D article 8 requires a recorded review before deployment.",
+            query="Directive D article 8 recorded review",
+            authority_id="evaluation:directive-d-article-8",
+            expected_candidate_count=1,
+        ),
+    ]
+)
 
 
 def generate_jurisdiction_coverage_cases() -> list[JurisdictionCoverageCase]:
@@ -860,6 +935,129 @@ def evaluate_ablation(config: AblationConfig, *, base: EvaluationMetrics) -> Eva
         stale_surface_rate=stale_surface,
         time_to_flag_seconds=base.time_to_flag_seconds,
         impact_query_recall=recall,
+    )
+
+
+def load_end_to_end_evaluation_corpus(path: Path | str) -> EndToEndEvaluationCorpus:
+    return EndToEndEvaluationCorpus.model_validate_json(Path(path).read_text(encoding="utf-8"))
+
+
+def write_end_to_end_evaluation_result(
+    path: Path | str,
+    *,
+    corpus: EndToEndEvaluationCorpus = DEFAULT_END_TO_END_EVALUATION_CORPUS,
+) -> EndToEndEvaluationResult:
+    result = run_end_to_end_evaluation(corpus.cases)
+    Path(path).write_text(result.model_dump_json(indent=2), encoding="utf-8")
+    return result
+
+
+def run_end_to_end_evaluation(
+    cases: Sequence[EndToEndEvaluationCase] = DEFAULT_END_TO_END_EVALUATION_CORPUS.cases,
+) -> EndToEndEvaluationResult:
+    if not cases:
+        raise ValueError("end-to-end evaluation requires at least one case")
+    case_results = [_run_end_to_end_case(case) for case in cases]
+    total = len(case_results)
+    metrics = EndToEndEvaluationMetrics(
+        source_to_review_completion_rate=sum(result.source_to_review_completed for result in case_results) / total,
+        extraction_precision=sum(result.extraction_precision for result in case_results) / total,
+        extraction_recall=sum(result.extraction_recall for result in case_results) / total,
+        graph_impact_recall=sum(result.graph_impact_recall for result in case_results) / total,
+        stale_context_leakage_rate=sum(result.stale_context_leakage_rate for result in case_results) / total,
+        mcp_context_recall_after_review=(
+            sum(result.mcp_context_recalled_after_review for result in case_results) / total
+        ),
+    )
+    canonical_corpus = EndToEndEvaluationCorpus(cases=list(cases)).model_dump_json()
+    return EndToEndEvaluationResult(
+        corpus_sha256=hashlib.sha256(canonical_corpus.encode("utf-8")).hexdigest(),
+        case_count=total,
+        metrics=metrics,
+        cases=case_results,
+    )
+
+
+def _run_end_to_end_case(case: EndToEndEvaluationCase) -> EndToEndCaseResult:
+    with tempfile.TemporaryDirectory(prefix="solomon-e2e-eval-") as temporary:
+        root = Path(temporary)
+        service = SolomonService(data_dir=root / "data", journal_dir=root / "journal")
+        source = service.register_document_source(
+            DocumentSourceRequest(
+                source_id=f"evaluation-source-{case.case_id}",
+                name=f"Evaluation {case.case_id}",
+                kind=DocumentSourceKind.FILESYSTEM,
+                root_ref=f"/evaluation/{case.case_id}",
+            )
+        )
+        _document, candidates = service.ingest_source_document(
+            source.id,
+            SourceDocumentIngestRequest(
+                external_id=case.case_id,
+                filename=f"{case.case_id}.txt",
+                content=case.document_text,
+            ),
+        )
+        item = service.promote_candidate_claim(
+            candidates[0].id,
+            CandidateClaimPromotionRequest(by="evaluation-curator"),
+        )
+        service.add_dependency(
+            DependencyRequest(
+                source_id=item.id,
+                target_id=case.authority_id,
+                edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+                target_kind="external_authority",
+                created_by="evaluation-harness",
+            )
+        )
+        event = service.register_authority_event(
+            AuthorityEventRequest(
+                source_id="evaluation-authority-feed",
+                idempotency_key=case.case_id,
+                authority_id=case.authority_id,
+                new_version="v2",
+                changed_at=datetime(2026, 7, 13, tzinfo=timezone.utc),
+            )
+        )
+        expected_stale = {item.id}
+        actual_stale = {str(item_id) for item_id in event["impact"]["stale_item_ids"]}
+        runtime = SolomonMCPRuntime(service)
+        before_review = runtime.preflight_context(query=case.query)
+        leaked_stale = {
+            str(result["item"]["id"])
+            for result in before_review["items"]
+            if str(result["item"]["id"]) in expected_stale
+        }
+        task_id = str(event["review_tasks"][0]["id"])
+        service.assign_review_task(
+            task_id,
+            ReviewTaskAssignmentRequest(reviewer_id="evaluation-lawyer", assigned_by="evaluation-curator"),
+        )
+        service.start_review_task(task_id, ReviewTaskStartRequest(reviewer_id="evaluation-lawyer"))
+        resolved = service.resolve_review_task(
+            task_id,
+            ReviewTaskResolutionRequest(
+                reviewer_id="evaluation-lawyer",
+                verification=VerificationRequest(
+                    by="evaluation-lawyer",
+                    outcome=VerificationOutcome.REAFFIRM,
+                    basis="evaluation authority version reviewed",
+                    source_ref=f"evaluation://{case.authority_id}/v2",
+                ),
+            ),
+        )
+        after_review = runtime.preflight_context(query=case.query)
+    return EndToEndCaseResult(
+        case_id=case.case_id,
+        extraction_precision=min(len(candidates), case.expected_candidate_count) / len(candidates),
+        extraction_recall=min(len(candidates), case.expected_candidate_count) / case.expected_candidate_count,
+        graph_impact_recall=impact_query_recall(expected_stale, actual_stale),
+        stale_context_leakage_rate=len(leaked_stale) / len(expected_stale),
+        source_to_review_completed=resolved.state.value == "resolved",
+        mcp_context_recalled_after_review=any(
+            str(result["item"]["id"]) == item.id for result in after_review["items"]
+        ),
     )
 
 

@@ -349,6 +349,17 @@ curl -fsS http://127.0.0.1:8140/metrics
 The exporter is process-local and uses the open-source `prometheus-client` library; it needs no managed observability
 vendor. Scrapes use SQL aggregate gauges, and audit-journal verification is cached for 30 seconds.
 
+## End-to-End Evaluation
+
+[`docs/evaluation-corpus.e2e.synthetic.json`](./docs/evaluation-corpus.e2e.synthetic.json) is a public, versioned,
+synthetic corpus for source ingestion, candidate promotion, authority impact, human review, and MCP-preflight
+outcomes. The harness reports extraction precision/recall, graph-impact recall, stale-context leakage, review
+completion, and post-review MCP context recall.
+
+```bash
+uv run python scripts/evaluate_end_to_end.py --output ./artifacts/end-to-end-evaluation.json
+```
+
 ## Regulator-ready by construction
 
 Every model-backed answer carries a reproducible primitive plan, source provenance, currency state,

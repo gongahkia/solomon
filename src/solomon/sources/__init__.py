@@ -7,6 +7,8 @@ from solomon.sources.models import (
     DocumentSource,
     DocumentSourceKind,
     SourceDocument,
+    SourceSyncRun,
+    SourceSyncRunState,
 )
 from solomon.sources.store import SQLiteDocumentStore
 
@@ -18,4 +20,6 @@ __all__ = [
     "DocumentSourceKind",
     "SQLiteDocumentStore",
     "SourceDocument",
+    "SourceSyncRun",
+    "SourceSyncRunState",
 ]

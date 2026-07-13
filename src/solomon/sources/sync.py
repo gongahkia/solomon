@@ -10,7 +10,7 @@ from solomon.api.schemas import SolomonModel
 from solomon.contracts import SyncCheckpoint
 from solomon.sources.extract import extract_document_bytes
 from solomon.sources.filesystem import FilesystemDocumentSourceAdapter
-from solomon.sources.models import DocumentExtractionState, SourceDocument
+from solomon.sources.models import DocumentExtractionState, DocumentSourceKind, SourceDocument
 from solomon.sources.store import SQLiteDocumentStore
 
 
@@ -89,6 +89,39 @@ class FilesystemSourceSynchronizer:
             unchanged=unchanged,
             deleted=deleted,
             checkpoint=next_checkpoint,
+        )
+
+    def retry_extraction(self, source_id: str, document_id: str) -> SourceDocument:
+        source = self.store.get_source(source_id)
+        if source.kind is not DocumentSourceKind.FILESYSTEM:
+            raise ValueError("filesystem extraction retry requires a filesystem source")
+        if not source.enabled:
+            raise ValueError("filesystem source is disabled")
+        document = self.store.get_document(document_id)
+        if document.source_id != source_id:
+            raise ValueError("source document does not belong to source")
+        if document.extraction_state is not DocumentExtractionState.REJECTED:
+            raise ValueError("only rejected source documents can be retried")
+        content_ref = document.metadata.get("content_ref")
+        if not isinstance(content_ref, str):
+            raise ValueError("source document has no retryable content reference")
+        raw = _read_content_ref(content_ref)
+        extracted = extract_document_bytes(raw, filename=document.filename, mime_type=document.mime_type)
+        return self.store.write_document(
+            SourceDocument(
+                source_id=source_id,
+                external_id=document.external_id,
+                filename=document.filename,
+                mime_type=extracted.mime_type,
+                content=extracted.text,
+                extraction_state=extracted.state,
+                extraction_reason=extracted.reason,
+                metadata={
+                    **document.metadata,
+                    "source_sha256": hashlib.sha256(raw).hexdigest(),
+                    "extraction": extracted.metadata,
+                },
+            )
         )
 
 

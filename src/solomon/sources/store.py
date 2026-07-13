@@ -15,6 +15,7 @@ from solomon.sources.models import (
     SourceChangeEvent,
     SourceChangeKind,
     SourceDocument,
+    SourceSyncRun,
 )
 
 
@@ -118,6 +119,21 @@ class SQLiteDocumentStore:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_source_change_events "
                 "ON source_change_events(source_id, external_id, occurred_at, event_id)"
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS source_sync_runs (
+                    run_id TEXT PRIMARY KEY,
+                    source_id TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    run_json TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_source_sync_runs "
+                "ON source_sync_runs(source_id, started_at DESC, run_id DESC)"
             )
 
     def upsert_source(self, source: DocumentSource) -> DocumentSource:
@@ -232,6 +248,14 @@ class SQLiteDocumentStore:
         ).fetchall()
         return [SourceDocument.model_validate_json(str(row["document_json"])) for row in rows]
 
+    def list_latest_documents(self, source_id: str) -> list[SourceDocument]:
+        latest: dict[str, SourceDocument] = {}
+        for document in self.list_documents(source_id):
+            current = latest.get(document.external_id)
+            if current is None or document.version > current.version:
+                latest[document.external_id] = document
+        return sorted(latest.values(), key=lambda document: (document.filename, document.external_id))
+
     def document_versions(self, source_id: str, external_id: str) -> list[SourceDocument]:
         rows = self._conn.execute(
             """
@@ -343,6 +367,33 @@ class SQLiteDocumentStore:
                 (checkpoint.source_id, checkpoint.model_dump_json(), now_utc().isoformat()),
             )
         return checkpoint
+
+    def write_sync_run(self, run: SourceSyncRun) -> SourceSyncRun:
+        self.get_source(run.source_id)
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO source_sync_runs (run_id, source_id, state, started_at, run_json)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    state = excluded.state,
+                    started_at = excluded.started_at,
+                    run_json = excluded.run_json
+                """,
+                (run.id, run.source_id, run.state.value, run.started_at.isoformat(), run.model_dump_json()),
+            )
+        return run
+
+    def list_sync_runs(self, source_id: str, *, limit: int = 20) -> list[SourceSyncRun]:
+        self.get_source(source_id)
+        rows = self._conn.execute(
+            """
+            SELECT run_json FROM source_sync_runs
+            WHERE source_id = ? ORDER BY started_at DESC, run_id DESC LIMIT ?
+            """,
+            (source_id, limit),
+        ).fetchall()
+        return [SourceSyncRun.model_validate_json(str(row["run_json"])) for row in rows]
 
     def _latest_document(self, source_id: str, external_id: str) -> SourceDocument | None:
         row = self._conn.execute(

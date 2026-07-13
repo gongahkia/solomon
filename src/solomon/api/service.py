@@ -50,6 +50,7 @@ from solomon.api.services.ingestion import IngestionService
 from solomon.api.services.recall import RecallService
 from solomon.audit.journal import AuditJournal
 from solomon.boundary.solomon import SolomonBoundary
+from solomon.contracts import AdapterHealth
 from solomon.credence.policy import CredenceLedger, CredencePolicy
 from solomon.currency.cache import CurrencyEvaluationCache
 from solomon.currency.contradiction import ContradictionSignal, contradictions_for_item
@@ -63,15 +64,31 @@ from solomon.currency.report import (
     render_currency_report_pdf,
 )
 from solomon.currency.verification import verification_history
-from solomon.errors import BadRequestError, NotFoundError
+from solomon.errors import BadRequestError, NotFoundError, SolomonError
 from solomon.graph.models import DependencyEdge
 from solomon.graph.suggestions import DependencySuggestion, ReferenceExtraction, SuggestionDecision
 from solomon.graph.visualization import GraphFormat
 from solomon.orchestrator.models import ModelRequest, ModelRouter, RoutedModelResult
 from solomon.orchestrator.retrieval import RetrievalOrchestrator
 from solomon.sources.extract import candidate_claims_from_text, extract_document_bytes
-from solomon.sources.models import CandidateClaim, CandidateClaimStatus, DocumentSource, SourceDocument
-from solomon.sources.store import CandidateClaimNotFoundError, SourceDocumentNotFoundError, SQLiteDocumentStore
+from solomon.sources.filesystem import FilesystemDocumentSourceAdapter
+from solomon.sources.models import (
+    CandidateClaim,
+    CandidateClaimStatus,
+    DocumentExtractionState,
+    DocumentSource,
+    DocumentSourceKind,
+    SourceDocument,
+    SourceSyncRun,
+    SourceSyncRunState,
+)
+from solomon.sources.store import (
+    CandidateClaimNotFoundError,
+    SourceDocumentNotFoundError,
+    SourceNotFoundError,
+    SQLiteDocumentStore,
+)
+from solomon.sources.sync import FilesystemSourceSynchronizer
 from solomon.store.factory import create_storage_bundle
 from solomon.store.sqlite import ItemNotFoundError
 from solomon.workflow.models import AuthorityChangeEvent, ReviewTask, ReviewTaskPriority, ReviewTaskState
@@ -159,6 +176,88 @@ class SolomonService:
     def source_documents(self, source_id: str) -> list[SourceDocument]:
         self.document_store.get_source(source_id)
         return self.document_store.list_documents(source_id)
+
+    def document_source_health(self, source_id: str) -> AdapterHealth:
+        source = self.document_store.get_source(source_id)
+        if source.kind is DocumentSourceKind.FILESYSTEM:
+            return FilesystemDocumentSourceAdapter().health(source)
+        return AdapterHealth(healthy=False, detail=f"health check unavailable for {source.kind.value} source")
+
+    def document_source_sync_runs(self, source_id: str) -> list[SourceSyncRun]:
+        return self.document_store.list_sync_runs(source_id)
+
+    def sync_document_source(self, source_id: str) -> SourceSyncRun:
+        try:
+            source = self.document_store.get_source(source_id)
+        except SourceNotFoundError as exc:
+            raise NotFoundError(f"document source not found: {source_id}") from exc
+        run = self.document_store.write_sync_run(SourceSyncRun(source_id=source_id))
+        try:
+            if source.kind is not DocumentSourceKind.FILESYSTEM:
+                raise BadRequestError(f"synchronization unavailable for {source.kind.value} source")
+            result = FilesystemSourceSynchronizer(self.document_store).sync(source_id)
+        except (OSError, ValueError, SolomonError) as exc:
+            failed = run.model_copy(
+                update={
+                    "state": SourceSyncRunState.FAILED,
+                    "completed_at": now_utc(),
+                    "error": f"{exc.__class__.__name__}: {str(exc)[:400]}",
+                }
+            )
+            self.document_store.write_sync_run(failed)
+            self.audit.append("document_source_sync_failed", {"source_id": source_id, "run_id": run.id})
+            if isinstance(exc, SolomonError):
+                raise
+            raise BadRequestError(str(exc)) from exc
+        completed = run.model_copy(
+            update={
+                "state": SourceSyncRunState.SUCCEEDED,
+                "completed_at": now_utc(),
+                "discovered": result.discovered,
+                "created": result.created,
+                "updated": result.updated,
+                "unchanged": result.unchanged,
+                "deleted": result.deleted,
+                "checkpoint": result.checkpoint.model_dump(mode="json"),
+            }
+        )
+        self.document_store.write_sync_run(completed)
+        self.audit.append(
+            "document_source_synced",
+            {
+                "source_id": source_id,
+                "run_id": completed.id,
+                "created": completed.created,
+                "updated": completed.updated,
+                "deleted": completed.deleted,
+            },
+        )
+        return completed
+
+    def retry_source_document_extraction(self, source_id: str, document_id: str) -> SourceDocument:
+        try:
+            document = FilesystemSourceSynchronizer(self.document_store).retry_extraction(source_id, document_id)
+        except (SourceNotFoundError, SourceDocumentNotFoundError) as exc:
+            raise NotFoundError(str(exc)) from exc
+        except (OSError, ValueError) as exc:
+            raise BadRequestError(str(exc)) from exc
+        if (
+            document.extraction_state is DocumentExtractionState.READY
+            and not self.document_store.list_candidates(document.id)
+        ):
+            for content, start, end in candidate_claims_from_text(document.content):
+                self.document_store.add_candidate(
+                    CandidateClaim(document_id=document.id, content=content, start_offset=start, end_offset=end)
+                )
+        self.audit.append(
+            "source_document_extraction_retried",
+            {
+                "source_id": source_id,
+                "document_id": document.id,
+                "extraction_state": document.extraction_state.value,
+            },
+        )
+        return document
 
     def ingest_source_document(
         self,

@@ -121,6 +121,10 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
     def claims(request: Request) -> Response:
         return _render_claims(request, resolved_service)
 
+    @app.get("/console/sources")
+    def sources(request: Request) -> Response:
+        return _render_sources(request, resolved_service)
+
     @app.get("/console/reviews")
     def reviews(request: Request, state: ReviewTaskState | None = None) -> Response:
         return _render_reviews(request, resolved_service, state=state)
@@ -316,6 +320,24 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
                 error = str(exc)
         return _render_claims(request, resolved_service, error=error, status_code=200 if error is None else 400)
 
+    @app.post("/console/sources/{source_id}/sync")
+    def sync_source(request: Request, source_id: str) -> Response:
+        error = None
+        try:
+            resolved_service.sync_document_source(source_id)
+        except (SolomonError, ValueError) as exc:
+            error = str(exc)
+        return _render_sources(request, resolved_service, error=error, status_code=200 if error is None else 400)
+
+    @app.post("/console/sources/{source_id}/documents/{document_id}/retry-extraction")
+    def retry_source_extraction(request: Request, source_id: str, document_id: str) -> Response:
+        error = None
+        try:
+            resolved_service.retry_source_document_extraction(source_id, document_id)
+        except (SolomonError, ValueError) as exc:
+            error = str(exc)
+        return _render_sources(request, resolved_service, error=error, status_code=200 if error is None else 400)
+
     @app.post("/console/reviews/{task_id}/{action}")
     async def review_action(request: Request, task_id: str, action: str) -> Response:
         form = await request.form()
@@ -439,6 +461,43 @@ def _render_claims(
         {"rows": _claim_rows(service), "error": error, "active_page": "claims"},
         status_code=status_code,
     )
+
+
+def _render_sources(
+    request: Request,
+    service: SolomonService,
+    *,
+    error: str | None = None,
+    status_code: int = 200,
+) -> Response:
+    return TEMPLATES.TemplateResponse(
+        request,
+        "sources.html",
+        {"rows": _source_rows(service), "error": error, "active_page": "sources"},
+        status_code=status_code,
+    )
+
+
+def _source_rows(service: SolomonService) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for source in service.document_store.list_sources():
+        latest_documents = service.document_store.list_latest_documents(source.id)
+        checkpoint = service.document_store.get_sync_checkpoint(source.id)
+        rows.append(
+            {
+                "source": source.model_dump(mode="json"),
+                "health": service.document_source_health(source.id).model_dump(mode="json"),
+                "checkpoint": checkpoint.model_dump(mode="json") if checkpoint is not None else None,
+                "runs": [run.model_dump(mode="json") for run in service.document_source_sync_runs(source.id)],
+                "failures": [
+                    document.model_dump(mode="json")
+                    for document in latest_documents
+                    if document.extraction_state.value == "rejected"
+                ],
+                "can_sync": source.kind.value == "filesystem",
+            }
+        )
+    return sorted(rows, key=lambda row: (str(row["source"]["name"]), str(row["source"]["id"])))
 
 
 def _render_reviews(

@@ -28,6 +28,12 @@ class DocumentExtractionState(str, Enum):
     DELETED = "deleted"
 
 
+class SourceSyncRunState(str, Enum):
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
 class SourceChangeKind(str, Enum):
     CREATED = "created"
     MODIFIED = "modified"
@@ -98,6 +104,26 @@ class SourceDocument(SolomonModel):
     def model_post_init(self, __context: Any) -> None:
         if not self.content_sha256:
             object.__setattr__(self, "content_sha256", hashlib.sha256(self.content.encode("utf-8")).hexdigest())
+
+
+class SourceSyncRun(SolomonModel):
+    id: str = Field(default_factory=new_uuid7)
+    source_id: str
+    state: SourceSyncRunState = SourceSyncRunState.RUNNING
+    started_at: datetime = Field(default_factory=now_utc)
+    completed_at: datetime | None = None
+    discovered: int = Field(default=0, ge=0)
+    created: int = Field(default=0, ge=0)
+    updated: int = Field(default=0, ge=0)
+    unchanged: int = Field(default=0, ge=0)
+    deleted: int = Field(default=0, ge=0)
+    checkpoint: dict[str, Any] | None = None
+    error: str | None = Field(default=None, max_length=500)
+
+    @field_validator("started_at", "completed_at")
+    @classmethod
+    def normalize_datetimes(cls, value: datetime | None) -> datetime | None:
+        return _ensure_aware_utc(value) if value is not None else None
 
 
 class SourceChangeEvent(SolomonModel):

@@ -54,6 +54,12 @@ from solomon.api.service import (
     StalenessPredictionRequest,
     VerificationRequest,
 )
+from solomon.api.service_principals import (
+    ServicePrincipalAlreadyExistsError,
+    ServicePrincipalNotFoundError,
+    ServicePrincipalRecord,
+    ServicePrincipalRegistry,
+)
 from solomon.api.tenancy import (
     TenantAlreadyExistsError,
     TenantNotFoundError,
@@ -125,9 +131,31 @@ class TenantResponse(BaseModel):
     api_key_scopes: list[str]
 
 
+class ServicePrincipalCreateRequest(BaseModel):
+    principal_id: str = Field(..., examples=["document-connector"])
+    tenant_id: str = Field(..., examples=["tenant-a"])
+    scopes: list[str] = Field(default_factory=lambda: ["tenant:read"])
+
+
+class ServicePrincipalResponse(BaseModel):
+    principal_id: str
+    tenant_id: str
+    status: str
+    created_at: str
+    updated_at: str
+    scopes: list[str]
+
+
+class ServicePrincipalCredentialResponse(ServicePrincipalResponse):
+    credential: str
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
     tenant_registry = TenantRegistry(resolved_settings.data_dir / "tenants" / "registry.json")
+    service_principal_registry = ServicePrincipalRegistry(
+        resolved_settings.data_dir / "service-principals" / "registry.json"
+    )
     vp = verification_policy_from_settings(resolved_settings)
     cp = credence_policy_from_settings(resolved_settings)
     embedding_provider = embedding_provider_from_settings(resolved_settings)
@@ -181,6 +209,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.service = service
     app.state.router = _model_router_from_settings(resolved_settings)
     app.state.tenant_registry = tenant_registry
+    app.state.service_principal_registry = service_principal_registry
     app.state.metrics = metrics
     app.state.oidc_validator = _oidc_validator_from_settings(resolved_settings)
 
@@ -245,7 +274,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     status_code=403,
                     content={"error": {"code": "tenant_suspended", "message": "tenant is suspended"}},
                 )
-            principal = _tenant_principal(resolved_settings, tenant_registry, record, tenant_id, supplied_api_key)
+            service_principal = _service_principal(service_principal_registry, tenant_id, request)
+            principal = service_principal or _tenant_principal(
+                resolved_settings, tenant_registry, record, tenant_id, supplied_api_key
+            )
             if principal is None:
                 principal = _oidc_principal_for_request(
                     request,
@@ -256,9 +288,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     required_scope=required_scope,
                 )
             if principal is None:
+                if _service_principal_credential(request) is not None:
+                    _record_service_principal_decision(service, None, tenant_id, request.state.correlation_id, "denied")
                 return _auth_error()
             if not principal.has_scope(required_scope):
+                if service_principal is not None:
+                    _record_service_principal_decision(
+                        service, service_principal, tenant_id, request.state.correlation_id, "denied"
+                    )
                 return _forbidden_error(required_scope)
+            if service_principal is not None:
+                _record_service_principal_decision(
+                    service, service_principal, tenant_id, request.state.correlation_id, "allowed"
+                )
             request.state.tenant_id = tenant_id
             request.state.service = service_for_tenant(tenant_id)
             request.state.principal = principal
@@ -371,6 +413,56 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return _tenant_response(tenant_registry.reactivate_tenant(tenant_id))
         except TenantNotFoundError as exc:
             raise HTTPException(status_code=404, detail="tenant not found") from exc
+
+    @app.get("/service-principals", response_model=list[ServicePrincipalResponse])
+    def service_principals(tenant_id: str | None = None) -> list[ServicePrincipalResponse]:
+        records = service_principal_registry.list_principals(tenant_id=tenant_id)
+        return [_service_principal_response(record) for record in records]
+
+    @app.post("/service-principals", response_model=ServicePrincipalCredentialResponse, status_code=201)
+    def create_service_principal(
+        request: Request,
+        payload: ServicePrincipalCreateRequest,
+    ) -> ServicePrincipalCredentialResponse:
+        tenant = tenant_registry.get(payload.tenant_id)
+        if tenant is None:
+            raise HTTPException(status_code=404, detail="tenant not found")
+        if tenant.status != "active":
+            raise HTTPException(status_code=403, detail="tenant is suspended")
+        try:
+            record, credential = service_principal_registry.create(
+                principal_id=payload.principal_id,
+                tenant_id=payload.tenant_id,
+                scopes=validate_auth_scopes(payload.scopes),
+            )
+        except ServicePrincipalAlreadyExistsError as exc:
+            raise HTTPException(status_code=409, detail="service principal already exists") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _record_service_principal_lifecycle(service, request, "created", record)
+        response = _service_principal_response(record).model_dump()
+        return ServicePrincipalCredentialResponse(**response, credential=credential)
+
+    @app.post("/service-principals/{principal_id}/rotate", response_model=ServicePrincipalCredentialResponse)
+    def rotate_service_principal(request: Request, principal_id: str) -> ServicePrincipalCredentialResponse:
+        try:
+            record, credential = service_principal_registry.rotate(principal_id)
+        except ServicePrincipalNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="service principal not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        _record_service_principal_lifecycle(service, request, "rotated", record)
+        response = _service_principal_response(record).model_dump()
+        return ServicePrincipalCredentialResponse(**response, credential=credential)
+
+    @app.post("/service-principals/{principal_id}/revoke", response_model=ServicePrincipalResponse)
+    def revoke_service_principal(request: Request, principal_id: str) -> ServicePrincipalResponse:
+        try:
+            record = service_principal_registry.revoke(principal_id)
+        except ServicePrincipalNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="service principal not found") from exc
+        _record_service_principal_lifecycle(service, request, "revoked", record)
+        return _service_principal_response(record)
 
     @app.post("/ingest")
     def ingest(request: Request, payload: IngestRequest) -> dict[str, Any]:
@@ -636,7 +728,13 @@ def _is_postgres_url(database_url: str) -> bool:
 
 
 def _is_admin_path(path: str) -> bool:
-    return path == "/diagnostics" or path == TENANT_MANAGEMENT_PREFIX or path.startswith(f"{TENANT_MANAGEMENT_PREFIX}/")
+    return (
+        path == "/diagnostics"
+        or path == TENANT_MANAGEMENT_PREFIX
+        or path.startswith(f"{TENANT_MANAGEMENT_PREFIX}/")
+        or path == "/service-principals"
+        or path.startswith("/service-principals/")
+    )
 
 
 def _oidc_validator_from_settings(settings: Settings) -> OIDCValidator | None:
@@ -768,6 +866,65 @@ def _tenant_principal(
     return None
 
 
+def _service_principal(
+    registry: ServicePrincipalRegistry,
+    tenant_id: str,
+    request: Request,
+) -> AuthPrincipal | None:
+    record = registry.authenticate(tenant_id=tenant_id, credential=_service_principal_credential(request))
+    if record is None:
+        return None
+    return AuthPrincipal(
+        subject=f"service-principal:{record.principal_id}",
+        role="integration",
+        tenant_id=tenant_id,
+        scopes=frozenset(record.scopes),
+        roles=frozenset({"integration"}),
+    )
+
+
+def _service_principal_credential(request: Request) -> str | None:
+    credential = request.headers.get("x-api-key")
+    return credential if credential and credential.startswith("solomon_sp_") else None
+
+
+def _record_service_principal_decision(
+    service: SolomonService,
+    principal: AuthPrincipal | None,
+    tenant_id: str,
+    correlation_id: str,
+    decision: str,
+) -> None:
+    service.audit.append(
+        "service_principal_authentication",
+        {"tenant_id": tenant_id, "decision": decision, "scopes": sorted(principal.scopes) if principal else []},
+        attribution=AuditAttribution(
+            actor_id=principal.subject if principal is not None else None,
+            correlation_id=correlation_id,
+        ),
+    )
+
+
+def _record_service_principal_lifecycle(
+    service: SolomonService,
+    request: Request,
+    decision: str,
+    record: ServicePrincipalRecord,
+) -> None:
+    principal = cast(AuthPrincipal, request.state.principal)
+    service.audit.append(
+        "service_principal_lifecycle",
+        {
+            "principal_id": record.principal_id,
+            "tenant_id": record.tenant_id,
+            "decision": decision,
+            "status": record.status,
+            "scopes": record.scopes,
+        },
+        attribution=AuditAttribution(actor_id=principal.subject, correlation_id=request.state.correlation_id),
+    )
+
+
 def _auth_error() -> JSONResponse:
     return JSONResponse(
         status_code=401,
@@ -791,5 +948,16 @@ def _tenant_response(record: TenantRecord) -> TenantResponse:
         updated_at=record.updated_at.isoformat(),
         api_key_configured=record.api_key_configured,
         api_key_scopes=list(record.api_key_scopes),
+    )
+
+
+def _service_principal_response(record: ServicePrincipalRecord) -> ServicePrincipalResponse:
+    return ServicePrincipalResponse(
+        principal_id=record.principal_id,
+        tenant_id=record.tenant_id,
+        status=record.status,
+        created_at=record.created_at.isoformat(),
+        updated_at=record.updated_at.isoformat(),
+        scopes=record.scopes,
     )
 app = create_app()

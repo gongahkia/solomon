@@ -137,6 +137,10 @@ Runtime and diagnostics:
 - `POST /tenants`
 - `POST /tenants/{tenant_id}/suspend`
 - `POST /tenants/{tenant_id}/reactivate`
+- `GET /service-principals`
+- `POST /service-principals`
+- `POST /service-principals/{principal_id}/rotate`
+- `POST /service-principals/{principal_id}/revoke`
 
 Knowledge, recall, and answers:
 
@@ -458,6 +462,23 @@ SOLOMON_OIDC_ISSUER=https://idp.example \
 SOLOMON_OIDC_AUDIENCE=solomon-api \
 SOLOMON_OIDC_ROLE_CLAIM=roles \
 SOLOMON_OIDC_ROLE_MAPPINGS='{"firm-admin":"admin","firm-lawyer":"lawyer","connector":"integration"}'
+```
+
+Create tenant-bound integration credentials with an admin principal. The generated credential is shown only on
+creation or rotation; keep it in a secret manager. Solomon stores only a PBKDF2-SHA256 hash, requires the bound
+`x-tenant-id` on each request, enforces its configured scopes, and denies it after revocation.
+
+```bash
+curl -X POST http://localhost:8140/service-principals \
+  -H 'x-api-key: change-me' \
+  -H 'content-type: application/json' \
+  -d '{"principal_id":"document-connector","tenant_id":"tenant-a","scopes":["tenant:read"]}'
+
+curl -X POST http://localhost:8140/recall \
+  -H 'x-api-key: <generated-credential>' \
+  -H 'x-tenant-id: tenant-a' \
+  -H 'content-type: application/json' \
+  -d '{"query":"contract renewal"}'
 ```
 
 Postgres retrieval requires the self-hosted `pgvector` extension. Startup runs `CREATE EXTENSION IF NOT EXISTS vector`,

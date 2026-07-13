@@ -110,7 +110,13 @@ def extract_api_key(headers: Mapping[str, str]) -> str | None:
 def required_scope_for_request(method: str, path: str) -> str:
     if path == "/diagnostics":
         return DIAGNOSTICS_READ_SCOPE
-    if path == "/tenants" or path.startswith("/tenants/"):
+    is_management_path = (
+        path == "/tenants"
+        or path.startswith("/tenants/")
+        or path == "/service-principals"
+        or path.startswith("/service-principals/")
+    )
+    if is_management_path:
         return TENANT_MANAGE_SCOPE
     if path == "/sources" and method.upper() == "POST":
         return SOURCE_MANAGE_SCOPE

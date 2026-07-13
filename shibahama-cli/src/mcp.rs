@@ -42,6 +42,32 @@ pub trait McpToolBackend {
         name: &str,
         arguments: &Map<String, Value>,
     ) -> Result<Value, McpToolError>;
+
+    /// Lists resources visible in immutable transport `context`.
+    fn list_resources(
+        &mut self,
+        _context: &McpServerContext,
+        _cursor: Option<&str>,
+    ) -> Result<Value, McpToolError> {
+        Err(McpToolError::new(
+            "SHIBA_UNSUPPORTED",
+            "MCP resources are unavailable for this transport",
+            false,
+        ))
+    }
+
+    /// Reads one resource visible in immutable transport `context`.
+    fn read_resource(
+        &mut self,
+        _context: &McpServerContext,
+        _uri: &str,
+    ) -> Result<Value, McpToolError> {
+        Err(McpToolError::new(
+            "SHIBA_UNSUPPORTED",
+            "MCP resources are unavailable for this transport",
+            false,
+        ))
+    }
 }
 
 struct UnsupportedMcpToolBackend;
@@ -218,6 +244,28 @@ impl McpSession {
                     ))
                 }
             }
+            ("resources/list", Some(id)) => {
+                if self.lifecycle != Lifecycle::Ready {
+                    return Some(protocol_error(
+                        id,
+                        NOT_INITIALIZED,
+                        "Server not initialized",
+                        None,
+                    ));
+                }
+                Some(self.list_resources(id, params, backend))
+            }
+            ("resources/read", Some(id)) => {
+                if self.lifecycle != Lifecycle::Ready {
+                    return Some(protocol_error(
+                        id,
+                        NOT_INITIALIZED,
+                        "Server not initialized",
+                        None,
+                    ));
+                }
+                Some(self.read_resource(id, params, backend))
+            }
             ("tools/call", Some(id)) => {
                 if self.lifecycle != Lifecycle::Ready {
                     return Some(protocol_error(
@@ -268,6 +316,7 @@ impl McpSession {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {
                     "tools": {},
+                    "resources": {},
                     "experimental": {
                         "shibahama": {
                             "capabilities": [MEMORY_TOOLS_CAPABILITY],
@@ -317,6 +366,46 @@ impl McpSession {
                     true,
                 ),
             ),
+        }
+    }
+
+    fn list_resources(
+        &mut self,
+        id: Value,
+        params: Value,
+        backend: &mut dyn McpToolBackend,
+    ) -> Value {
+        let cursor = match params {
+            Value::Null => None,
+            Value::Object(params) => match params.get("cursor") {
+                None => None,
+                Some(Value::String(cursor)) => Some(cursor.clone()),
+                Some(_) => return protocol_error(id, -32602, "Invalid params", None),
+            },
+            _ => return protocol_error(id, -32602, "Invalid params", None),
+        };
+        match backend.list_resources(&self.context, cursor.as_deref()) {
+            Ok(result) => protocol_result(id, result),
+            Err(error) => resource_error(id, error),
+        }
+    }
+
+    fn read_resource(
+        &mut self,
+        id: Value,
+        params: Value,
+        backend: &mut dyn McpToolBackend,
+    ) -> Value {
+        let Some(uri) = params
+            .as_object()
+            .and_then(|params| params.get("uri"))
+            .and_then(Value::as_str)
+        else {
+            return protocol_error(id, -32602, "Invalid params", None);
+        };
+        match backend.read_resource(&self.context, uri) {
+            Ok(result) => protocol_result(id, result),
+            Err(error) => resource_error(id, error),
         }
     }
 }
@@ -547,6 +636,19 @@ fn tool_result(structured_content: Value, is_error: bool) -> Value {
     })
 }
 
+fn resource_error(id: Value, error: McpToolError) -> Value {
+    protocol_error(
+        id,
+        -32000,
+        "Resource unavailable",
+        Some(json!({
+            "code": error.code,
+            "detail": error.detail,
+            "retryable": error.retryable,
+        })),
+    )
+}
+
 fn protocol_error(id: Value, code: i64, message: &str, data: Option<Value>) -> Value {
     let mut error = Map::from_iter([
         ("code".to_owned(), Value::from(code)),
@@ -615,6 +717,7 @@ mod tests {
         assert_eq!(output.len(), 2);
         assert_eq!(output[0]["result"]["protocolVersion"], PROTOCOL_VERSION);
         assert_eq!(output[0]["result"]["capabilities"]["tools"], json!({}));
+        assert_eq!(output[0]["result"]["capabilities"]["resources"], json!({}));
         assert_eq!(
             output[0]["result"]["capabilities"]["experimental"]["shibahama"]["principal"],
             "codex"

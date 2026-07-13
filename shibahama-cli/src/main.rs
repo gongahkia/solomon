@@ -5,6 +5,7 @@
 #![allow(clippy::needless_pass_by_value)]
 
 mod mcp;
+mod mcp_resources;
 mod mcp_tools;
 
 use axum::body::Bytes;

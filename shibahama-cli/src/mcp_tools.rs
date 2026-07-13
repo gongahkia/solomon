@@ -48,6 +48,22 @@ impl McpToolBackend for McpEngineBackend<'_> {
             _ => Err(invalid_arguments()),
         }
     }
+
+    fn list_resources(
+        &mut self,
+        context: &McpServerContext,
+        cursor: Option<&str>,
+    ) -> Result<Value, McpToolError> {
+        crate::mcp_resources::list_resources(context, cursor)
+    }
+
+    fn read_resource(
+        &mut self,
+        context: &McpServerContext,
+        uri: &str,
+    ) -> Result<Value, McpToolError> {
+        crate::mcp_resources::read_resource(self.engine, context, uri)
+    }
 }
 
 impl McpEngineBackend<'_> {
@@ -57,7 +73,7 @@ impl McpEngineBackend<'_> {
         arguments: &Map<String, Value>,
     ) -> Result<Value, McpToolError> {
         let actor = require_mutation_actor(context, arguments)?;
-        let content = required_string(arguments, "content")?;
+        let memory_content = required_string(arguments, "content")?;
         let vector = required_vector(arguments, "vector")?;
         let source_kind = source_kind(required_string(arguments, "sourceKind")?)?;
         let source_ref = optional_string(arguments, "sourceRef")?;
@@ -71,7 +87,7 @@ impl McpEngineBackend<'_> {
         let model_version =
             optional_string(arguments, "modelVersion")?.unwrap_or_else(|| "v1".to_owned());
         let mut event = MemoryWriteEvent::new(
-            content,
+            memory_content,
             Provenance::new(source_kind, source_ref, context.principal()),
             valid_from,
             ingested_at,
@@ -101,10 +117,10 @@ impl McpEngineBackend<'_> {
             )
             .map_err(core_error)?;
 
-        output(json!({
+        Ok(output(json!({
             "memory": serializable(MemoryItemDto::from(item))?,
             "policyOutcome": "allowed",
-        }))
+        })))
     }
 
     fn recall(
@@ -133,11 +149,11 @@ impl McpEngineBackend<'_> {
             .recall_with_policy_report(&request)
             .map_err(core_error)?;
 
-        output(json!({
+        Ok(output(json!({
             "candidates": serializable(report.candidates.into_iter().map(RecallCandidateDto::from).collect::<Vec<_>>())?,
             "policyOutcome": serializable(report.decision)?,
             "contextTokensUsed": report.context_tokens_used,
-        }))
+        })))
     }
 
     fn explain(
@@ -153,7 +169,10 @@ impl McpEngineBackend<'_> {
             .map_err(core_error)?;
         let trace = scoped.why_at(memory_id, now).map_err(core_error)?;
 
-        output(json!({ "trace": trace.map(WhyTraceDto::from).map(serializable).transpose()? }))
+        Ok(output(json!({
+            "trace": trace.map(WhyTraceDto::from).map(serializable).transpose()?,
+            "policyOutcome": "not_applicable",
+        })))
     }
 
     fn timeline(
@@ -173,11 +192,11 @@ impl McpEngineBackend<'_> {
             .timeline_with_policy_report(&request)
             .map_err(core_error)?;
 
-        output(json!({
+        Ok(output(json!({
             "candidates": serializable(report.candidates.into_iter().map(RecallCandidateDto::from).collect::<Vec<_>>())?,
             "policyOutcome": serializable(report.decision)?,
             "contextTokensUsed": report.context_tokens_used,
-        }))
+        })))
     }
 
     fn review(
@@ -193,7 +212,9 @@ impl McpEngineBackend<'_> {
             .map_err(core_error)?;
         if operation == "list" {
             let queue = scoped.review_queue().map_err(core_error)?;
-            return output(json!({ "queue": serializable(queue)?, "policyOutcome": "inspection" }));
+            return Ok(output(
+                json!({ "queue": serializable(queue)?, "policyOutcome": "inspection" }),
+            ));
         }
         if operation != "decide" {
             return Err(invalid_arguments());
@@ -215,12 +236,12 @@ impl McpEngineBackend<'_> {
             )
             .map_err(core_error)?;
 
-        output(json!({
+        Ok(output(json!({
             "queue": [],
             "decision": serializable(outcome.decision)?,
             "memory": outcome.memory.map(MemoryItemDto::from).map(serializable).transpose()?,
             "policyOutcome": "allowed",
-        }))
+        })))
     }
 
     fn promote(
@@ -241,11 +262,16 @@ impl McpEngineBackend<'_> {
         let promotion = scoped
             .promote_to_team(memory_id, team, context.principal(), rationale, promoted_at)
             .map_err(core_error)?;
+        let policy_outcome = if promotion.is_some() {
+            "allowed"
+        } else {
+            "not_found"
+        };
 
-        output(json!({
+        Ok(output(json!({
             "promotion": promotion.map(|record| MemoryItemDto::from(record.promoted)).map(serializable).transpose()?,
-            "policyOutcome": "allowed",
-        }))
+            "policyOutcome": policy_outcome,
+        })))
     }
 
     fn erase(
@@ -268,10 +294,11 @@ impl McpEngineBackend<'_> {
             .scoped(context.scope().clone())
             .map_err(core_error)?;
         let applied = scoped.invalidate(memory_id, valid_to).map_err(core_error)?;
+        let policy_outcome = if applied { "allowed" } else { "not_found" };
 
-        output(
-            json!({ "applied": applied, "effect": "soft_invalidation", "policyOutcome": "allowed" }),
-        )
+        Ok(output(
+            json!({ "applied": applied, "effect": "soft_invalidation", "policyOutcome": policy_outcome }),
+        ))
     }
 }
 
@@ -358,15 +385,13 @@ fn required_vector(arguments: &Map<String, Value>, field: &str) -> Result<Vec<f3
     if values.is_empty() {
         return Err(invalid_arguments());
     }
-    values
-        .iter()
-        .map(|value| {
-            value
-                .as_f64()
-                .map(|value| value as f32)
-                .ok_or_else(invalid_arguments)
-        })
-        .collect()
+    let vector = serde_json::from_value::<Vec<f32>>(Value::Array(values.clone()))
+        .map_err(|_| invalid_arguments())?;
+    if vector.iter().all(|value| value.is_finite()) {
+        Ok(vector)
+    } else {
+        Err(invalid_arguments())
+    }
 }
 
 fn required_usize(arguments: &Map<String, Value>, field: &str) -> Result<usize, McpToolError> {
@@ -465,8 +490,8 @@ fn serializable(value: impl serde::Serialize) -> Result<Value, McpToolError> {
     serde_json::to_value(value).map_err(|_| internal_error())
 }
 
-fn output(result: Value) -> Result<Value, McpToolError> {
-    Ok(json!({ "schemaVersion": 1, "result": result }))
+fn output(result: Value) -> Value {
+    json!({ "schemaVersion": 1, "result": result })
 }
 
 fn core_error(error: ShibahamaError) -> McpToolError {
@@ -554,32 +579,90 @@ mod tests {
             .expect("tool call should respond")
     }
 
-    #[test]
-    fn memory_tools_are_scoped_versioned_and_safe_on_rejection() {
-        let file = NamedTempFile::new().expect("tempfile should be created");
-        let mut engine = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
-            .expect("engine should open");
-        engine.set_scope_authorization_policy(AllowScopePromotionPolicy);
-        let mut backend = McpEngineBackend::new(&mut engine);
-        let mut session = McpSession::new(context());
-        initialize(&mut session, &mut backend);
+    fn write_arguments(actor_id: &str, content: &str) -> Value {
+        json!({
+            "schemaVersion": 1,
+            "scope": scope(),
+            "actor": "human",
+            "actorId": actor_id,
+            "content": content,
+            "vector": [1.0, 0.0],
+            "sourceKind": "user",
+            "validFromUnix": 0,
+            "ingestedAtUnix": 0,
+        })
+    }
 
+    fn recall_arguments() -> Value {
+        json!({
+            "schemaVersion": 1,
+            "scope": scope(),
+            "queryVector": [1.0, 0.0],
+            "topK": 1,
+            "nowUnix": 0,
+        })
+    }
+
+    fn explain_arguments(memory_id: &str) -> Value {
+        json!({
+            "schemaVersion": 1,
+            "scope": scope(),
+            "memoryId": memory_id,
+            "nowUnix": 0,
+        })
+    }
+
+    fn timeline_arguments() -> Value {
+        json!({
+            "schemaVersion": 1,
+            "scope": scope(),
+            "queryVector": [1.0, 0.0],
+            "topK": 1,
+            "asOfUnix": 0,
+        })
+    }
+
+    fn review_arguments() -> Value {
+        json!({
+            "schemaVersion": 1,
+            "scope": scope(),
+            "actor": "human",
+            "actorId": "alice",
+            "operation": "list",
+        })
+    }
+
+    fn promotion_arguments(memory_id: &str) -> Value {
+        json!({
+            "schemaVersion": 1,
+            "scope": scope(),
+            "actor": "human",
+            "actorId": "alice",
+            "memoryId": memory_id,
+            "team": "team",
+            "rationale": "share",
+            "promotedAtUnix": 1,
+        })
+    }
+
+    fn erase_arguments(memory_id: &str) -> Value {
+        json!({
+            "schemaVersion": 1,
+            "scope": scope(),
+            "actor": "human",
+            "actorId": "alice",
+            "memoryId": memory_id,
+            "validToUnix": 2,
+        })
+    }
+
+    fn exercise_read_tools(session: &mut McpSession, backend: &mut McpEngineBackend<'_>) -> String {
         let write = call(
-            &mut session,
-            &mut backend,
+            session,
+            backend,
             2,
             "shibahama_memory_write_v1",
-            json!({
-                "schemaVersion": 1,
-                "scope": scope(),
-                "actor": "human",
-                "actorId": "alice",
-                "content": "MCP tool memory",
-                "vector": [1.0, 0.0],
-                "sourceKind": "user",
-                "validFromUnix": 0,
-                "ingestedAtUnix": 0,
-            }),
+            write_arguments("alice", "MCP tool memory"),
         );
         assert!(
             !write["result"]["isError"]
@@ -594,138 +677,134 @@ mod tests {
             write["result"]["structuredContent"]["result"]["memory"]["provenance"]["ingested_by"],
             "alice"
         );
+        assert_eq!(
+            write["result"]["structuredContent"]["result"]["policyOutcome"],
+            "allowed"
+        );
 
         let recall = call(
-            &mut session,
-            &mut backend,
+            session,
+            backend,
             3,
             "shibahama_memory_recall_v1",
-            json!({
-                "schemaVersion": 1,
-                "scope": scope(),
-                "queryVector": [1.0, 0.0],
-                "topK": 1,
-                "nowUnix": 0,
-            }),
+            recall_arguments(),
         );
         assert_eq!(
             recall["result"]["structuredContent"]["result"]["candidates"][0]["id"],
             memory_id
         );
+        assert!(recall["result"]["structuredContent"]["result"]["policyOutcome"].is_object());
 
         let explain = call(
-            &mut session,
-            &mut backend,
+            session,
+            backend,
             4,
             "shibahama_memory_explain_v1",
-            json!({
-                "schemaVersion": 1,
-                "scope": scope(),
-                "memoryId": memory_id,
-                "nowUnix": 0,
-            }),
+            explain_arguments(&memory_id),
         );
         assert_eq!(
             explain["result"]["structuredContent"]["result"]["trace"]["provenance"]["ingested_by"],
             "alice"
         );
+        assert_eq!(
+            explain["result"]["structuredContent"]["result"]["policyOutcome"],
+            "not_applicable"
+        );
 
         let timeline = call(
-            &mut session,
-            &mut backend,
+            session,
+            backend,
             5,
             "shibahama_memory_timeline_v1",
-            json!({
-                "schemaVersion": 1,
-                "scope": scope(),
-                "queryVector": [1.0, 0.0],
-                "topK": 1,
-                "asOfUnix": 0,
-            }),
+            timeline_arguments(),
         );
         assert_eq!(
             timeline["result"]["structuredContent"]["result"]["candidates"][0]["id"],
             memory_id
         );
+        assert!(timeline["result"]["structuredContent"]["result"]["policyOutcome"].is_object());
+        memory_id
+    }
 
+    fn exercise_mutating_tools(
+        session: &mut McpSession,
+        backend: &mut McpEngineBackend<'_>,
+        memory_id: &str,
+    ) {
         let review = call(
-            &mut session,
-            &mut backend,
+            session,
+            backend,
             6,
             "shibahama_memory_review_v1",
-            json!({
-                "schemaVersion": 1,
-                "scope": scope(),
-                "actor": "human",
-                "actorId": "alice",
-                "operation": "list",
-            }),
+            review_arguments(),
         );
         assert_eq!(
             review["result"]["structuredContent"]["result"]["queue"],
             json!([])
         );
+        assert_eq!(
+            review["result"]["structuredContent"]["result"]["policyOutcome"],
+            "inspection"
+        );
 
         let promotion = call(
-            &mut session,
-            &mut backend,
+            session,
+            backend,
             7,
             "shibahama_memory_promote_v1",
-            json!({
-                "schemaVersion": 1,
-                "scope": scope(),
-                "actor": "human",
-                "actorId": "alice",
-                "memoryId": memory_id,
-                "team": "team",
-                "rationale": "share",
-                "promotedAtUnix": 1,
-            }),
+            promotion_arguments(memory_id),
         );
         assert_eq!(
             promotion["result"]["structuredContent"]["result"]["promotion"]["scope"]["visibility"],
             "team"
         );
+        assert_eq!(
+            promotion["result"]["structuredContent"]["result"]["policyOutcome"],
+            "allowed"
+        );
 
         let erase = call(
-            &mut session,
-            &mut backend,
+            session,
+            backend,
             8,
             "shibahama_memory_erase_v1",
-            json!({
-                "schemaVersion": 1,
-                "scope": scope(),
-                "actor": "human",
-                "actorId": "alice",
-                "memoryId": memory_id,
-                "validToUnix": 2,
-            }),
+            erase_arguments(memory_id),
         );
         assert_eq!(
             erase["result"]["structuredContent"]["result"]["effect"],
             "soft_invalidation"
         );
+        assert_eq!(
+            erase["result"]["structuredContent"]["result"]["policyOutcome"],
+            "allowed"
+        );
+    }
 
+    fn assert_forged_actor_is_safe(session: &mut McpSession, backend: &mut McpEngineBackend<'_>) {
         let rejected = call(
-            &mut session,
-            &mut backend,
+            session,
+            backend,
             9,
             "shibahama_memory_write_v1",
-            json!({
-                "schemaVersion": 1,
-                "scope": scope(),
-                "actor": "human",
-                "actorId": "mallory",
-                "content": "secret must not appear in the error",
-                "vector": [1.0, 0.0],
-                "sourceKind": "user",
-                "validFromUnix": 0,
-                "ingestedAtUnix": 0,
-            }),
+            write_arguments("mallory", "secret must not appear in the error"),
         );
         assert_eq!(rejected["result"]["isError"], true);
         let error = &rejected["result"]["structuredContent"]["error"];
         assert_eq!(error["code"], "SHIBA_UNAUTHORIZED");
         assert!(!error.to_string().contains("secret must not appear"));
+    }
+
+    #[test]
+    fn memory_tools_are_scoped_versioned_and_safe_on_rejection() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let mut engine = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("engine should open");
+        engine.set_scope_authorization_policy(AllowScopePromotionPolicy);
+        let mut backend = McpEngineBackend::new(&mut engine);
+        let mut session = McpSession::new(context());
+        initialize(&mut session, &mut backend);
+        let memory_id = exercise_read_tools(&mut session, &mut backend);
+        exercise_mutating_tools(&mut session, &mut backend, &memory_id);
+        assert_forged_actor_is_safe(&mut session, &mut backend);
     }
 }

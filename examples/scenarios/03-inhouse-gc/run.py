@@ -30,7 +30,7 @@ def _copilot_suggestion(current_context: list[dict[str, Any]]) -> str:
     return f"Suggested language grounded in current context: {current_context[0]['content']}"
 
 
-def run_scenario(root: Path) -> dict[str, Any]:
+def _seed_scenario(root: Path) -> tuple[dict[str, Any], SolomonService, list[str], dict[str, Any], dict[str, Any]]:
     seed = _seed()
     authority = str(seed["authority"])
     items = seed["items"]
@@ -83,6 +83,12 @@ def run_scenario(root: Path) -> dict[str, Any]:
         raise RuntimeError("PDPA change must stale all twelve NDA clauses")
     if after["items"]:
         raise RuntimeError("Copilot-like assistant must not receive stale NDA context")
+    return seed, service, nda_ids, before, after
+
+
+def run_scenario(root: Path) -> dict[str, Any]:
+    seed, service, nda_ids, before, after = _seed_scenario(root)
+    states = [service.evaluate_currency(item_id)["currency_state"] for item_id in nda_ids]
     return {
         "company": seed["company"],
         "nda_count": len(nda_ids),

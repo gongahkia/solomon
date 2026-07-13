@@ -13,4 +13,6 @@ Copilot-like assistant calls MCP `preflight_context` and receives no stale NDA c
 uv run python examples/scenarios/03-inhouse-gc/run.py
 ```
 
-The video recording remains open work; this scenario is the headless evidence for the ripple and MCP path.
+The [browser workflow replay](../../../docs/assets/scenarios/inhouse-gc/stale-nda-workflow.mp4) shows the twelve-item
+review queue; [WebVTT captions](../../../docs/assets/scenarios/inhouse-gc/stale-nda-workflow.vtt) accompany it. This
+scenario remains the headless evidence for the ripple and MCP path.

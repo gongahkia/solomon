@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,8 +12,10 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from solomon.api.service import IngestRequest, SolomonService
 from solomon.api.service_models import DocumentSourceRequest, RecallRequest, VerificationRequest
+from solomon.authority_webhooks import AuthorityWebhookIntake
 from solomon.config import Settings
-from solomon.contracts import WebhookDelivery, WebhookEvent
+from solomon.connectors import ConnectorConfiguration, SecretReference, SecretReferenceProvider
+from solomon.contracts import AuthoritySource, AuthoritySourceKind, WebhookDelivery, WebhookEvent
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.mcp.tools.runtime import SolomonMCPRuntime
@@ -92,6 +96,37 @@ def test_telemetry_traces_operational_surfaces_without_content(tmp_path: Path) -
     assert all("memo-telemetry" not in attributes for attributes in attribute_texts)
 
 
+def test_telemetry_traces_inbound_webhook_without_payload() -> None:
+    exporter = InMemorySpanExporter()
+    telemetry = SolomonTelemetry(enabled=True, span_exporter=exporter)
+    body = (
+        b'{"idempotency_key":"event-1","authority_id":"authority-1","new_version":"v2",'
+        b'"changed_at":"2026-07-13T00:00:00Z","diff":{"private":"payload"}}'
+    )
+    source = AuthoritySource(
+        id="authority-source",
+        name="authority source",
+        kind=AuthoritySourceKind.WEBHOOK,
+        root_ref="https://authority.example.test/webhook",
+        config=ConnectorConfiguration(
+            secret_references={
+                "webhook_signing_secret": SecretReference(
+                    provider=SecretReferenceProvider.VAULT,
+                    reference="kv/authority/webhook",
+                )
+            }
+        ),
+    )
+    secret = "webhook-secret"  # noqa: S105
+    signature = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    AuthorityWebhookIntake(lambda _reference: secret, telemetry).parse(source, body, signature)
+
+    assert telemetry.force_flush() is True
+    span = exporter.get_finished_spans()[-1]
+    assert span.name == "solomon.webhook.intake"
+    assert "payload" not in str(span.attributes or {})
+
+
 def test_telemetry_marks_failures_and_validates_self_hosted_endpoint() -> None:
     exporter = InMemorySpanExporter()
     telemetry = SolomonTelemetry(enabled=True, span_exporter=exporter)
@@ -102,6 +137,7 @@ def test_telemetry_marks_failures_and_validates_self_hosted_endpoint() -> None:
     assert telemetry.force_flush() is True
     failure = exporter.get_finished_spans()[-1]
     assert failure.status.status_code.name == "ERROR"
+    assert "failed operation" not in str(failure.events)
     assert Settings(
         telemetry_enabled=True,
         telemetry_otlp_endpoint="http://127.0.0.1:4318/v1/traces",

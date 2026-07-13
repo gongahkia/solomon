@@ -56,7 +56,6 @@ class SolomonTelemetry:
             try:
                 yield span
             except Exception as exc:
-                span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, exc.__class__.__name__))
                 raise
 

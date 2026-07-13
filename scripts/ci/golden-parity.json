@@ -95,6 +95,15 @@
       "code": "SHIBA_VECTOR"
     }
   ],
+  "degraded_recalls": [
+    {
+      "name": "degraded-decision-query",
+      "vector": [1.0, 0.0, 0.0],
+      "top_k": 1,
+      "now_unix": 50,
+      "include_cold": true
+    }
+  ],
   "why_now_unix": 50,
   "expected": {
     "queries": [
@@ -198,6 +207,22 @@
       {
         "name": "invalid-vector-dimensions",
         "code": "SHIBA_VECTOR"
+      }
+    ],
+    "degraded_recalls": [
+      {
+        "name": "degraded-decision-query",
+        "recall": [
+          {
+            "credence": "firm_authoritative",
+            "currency": "current",
+            "rank_score": "5.086294",
+            "significance_score": "3.836294",
+            "source_ref": "decision:temp-stores",
+            "tier": "hot"
+          }
+        ],
+        "unavailable_stages": []
       }
     ],
     "memories": [

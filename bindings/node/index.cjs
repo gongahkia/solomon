@@ -34,7 +34,18 @@ const parsedMethods = {
 };
 
 function annotateError(error) {
-  if (!(error instanceof Error) || String(error.code ?? "").startsWith("SHIBA_")) {
+  if (!(error instanceof Error)) {
+    return error;
+  }
+
+  const metadata = parseErrorMetadata(error.message);
+  if (metadata) {
+    Object.assign(error, metadata);
+    error.message = metadata.detail;
+    return error;
+  }
+
+  if (String(error.code ?? "").startsWith("SHIBA_")) {
     return error;
   }
 
@@ -44,7 +55,26 @@ function annotateError(error) {
     ? "recoverable"
     : "fatal";
   error.retryable = error.severity === "recoverable";
+  error.detail = "Shibahama request failed";
+  error.message = error.detail;
   return error;
+}
+
+function parseErrorMetadata(message) {
+  try {
+    const metadata = JSON.parse(message);
+    if (
+      typeof metadata?.code !== "string" ||
+      !["recoverable", "fatal"].includes(metadata.severity) ||
+      typeof metadata.retryable !== "boolean" ||
+      typeof metadata.detail !== "string"
+    ) {
+      return null;
+    }
+    return metadata;
+  } catch {
+    return null;
+  }
 }
 
 if (typeof native.capabilitiesJson === "function") {

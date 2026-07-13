@@ -180,11 +180,13 @@ mod tests {
     ) -> MemoryItem {
         MemoryItem {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: crate::model::MemoryScope::default(),
             id: MemoryId::new_v7(),
             content: "memory".to_owned(),
             kind: MemoryKind::Fact,
             compaction: None,
             consolidation: None,
+            promotion: None,
             embedding_ref: None,
             provenance: Provenance::new(source_kind, source_ref, "anomaly-test"),
             timestamps: TemporalBounds::open_from(

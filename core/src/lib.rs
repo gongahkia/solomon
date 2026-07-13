@@ -6,10 +6,12 @@ use serde::Serialize;
 
 pub mod anomaly;
 pub mod api;
+pub mod config;
 pub mod consolidation;
 pub mod encryption;
 pub mod learned_policy;
 pub mod model;
+pub mod policy;
 pub mod read_safety;
 pub mod reconstruction;
 pub mod retrieval;
@@ -38,6 +40,7 @@ pub const CAPABILITIES: &[&str] = &[
     "consolidate",
     "graph",
     "snapshot",
+    "scope_promotion_authorization",
     "learned_policy_gates",
 ];
 

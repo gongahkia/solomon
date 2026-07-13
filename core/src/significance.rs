@@ -345,11 +345,13 @@ mod tests {
         let now = OffsetDateTime::UNIX_EPOCH;
         let item = MemoryItem {
             schema_version: crate::model::CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: crate::model::MemoryScope::default(),
             id: crate::model::MemoryId::new_v7(),
             content: "contradicted".to_owned(),
             kind: crate::model::MemoryKind::Fact,
             compaction: None,
             consolidation: None,
+            promotion: None,
             embedding_ref: None,
             provenance: crate::model::Provenance::new(
                 crate::model::SourceKind::User,
@@ -380,11 +382,13 @@ mod tests {
         let now = OffsetDateTime::UNIX_EPOCH;
         let mut item = MemoryItem {
             schema_version: crate::model::CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: crate::model::MemoryScope::default(),
             id: crate::model::MemoryId::new_v7(),
             content: "score me".to_owned(),
             kind: crate::model::MemoryKind::Fact,
             compaction: None,
             consolidation: None,
+            promotion: None,
             embedding_ref: None,
             provenance: crate::model::Provenance::new(
                 crate::model::SourceKind::User,
@@ -417,11 +421,13 @@ mod tests {
         let now = OffsetDateTime::UNIX_EPOCH + Duration::seconds(10);
         let mut item = MemoryItem {
             schema_version: crate::model::CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: crate::model::MemoryScope::default(),
             id: crate::model::MemoryId::new_v7(),
             content: "stable recompute".to_owned(),
             kind: crate::model::MemoryKind::Fact,
             compaction: None,
             consolidation: None,
+            promotion: None,
             embedding_ref: None,
             provenance: crate::model::Provenance::new(
                 crate::model::SourceKind::User,
@@ -455,11 +461,13 @@ mod tests {
         let config = SignificanceConfig::default();
         let mut item = MemoryItem {
             schema_version: crate::model::CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: crate::model::MemoryScope::default(),
             id: crate::model::MemoryId::new_v7(),
             content: "single pass".to_owned(),
             kind: crate::model::MemoryKind::Fact,
             compaction: None,
             consolidation: None,
+            promotion: None,
             embedding_ref: None,
             provenance: crate::model::Provenance::new(
                 crate::model::SourceKind::User,
@@ -527,11 +535,13 @@ mod tests {
         let now = OffsetDateTime::UNIX_EPOCH;
         let item = MemoryItem {
             schema_version: crate::model::CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: crate::model::MemoryScope::default(),
             id: crate::model::MemoryId::new_v7(),
             content: "central".to_owned(),
             kind: crate::model::MemoryKind::Fact,
             compaction: None,
             consolidation: None,
+            promotion: None,
             embedding_ref: None,
             provenance: crate::model::Provenance::new(
                 crate::model::SourceKind::User,
@@ -561,11 +571,13 @@ mod tests {
         let now = OffsetDateTime::UNIX_EPOCH;
         let item = MemoryItem {
             schema_version: crate::model::CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: crate::model::MemoryScope::default(),
             id: crate::model::MemoryId::new_v7(),
             content: "floor me".to_owned(),
             kind: crate::model::MemoryKind::Fact,
             compaction: None,
             consolidation: None,
+            promotion: None,
             embedding_ref: None,
             provenance: crate::model::Provenance::new(
                 crate::model::SourceKind::User,
@@ -624,11 +636,13 @@ mod tests {
         let now = OffsetDateTime::UNIX_EPOCH;
         let item = MemoryItem {
             schema_version: crate::model::CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: crate::model::MemoryScope::default(),
             id: crate::model::MemoryId::new_v7(),
             content: "policy".to_owned(),
             kind: crate::model::MemoryKind::Fact,
             compaction: None,
             consolidation: None,
+            promotion: None,
             embedding_ref: None,
             provenance: crate::model::Provenance::new(
                 crate::model::SourceKind::User,

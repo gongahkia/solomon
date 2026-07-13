@@ -25,12 +25,25 @@ try {
   assert.equal(cjsEngine.isOpen(), true);
 
   try {
+    engine.write("invalid vector", { vector: [0] });
+    assert.fail("invalid write should throw");
+  } catch (error) {
+    assert.equal(error.code, "SHIBA_VECTOR");
+    assert.equal(error.severity, "fatal");
+    assert.equal(error.retryable, false);
+    assert.equal(error.detail, "vector index operation failed");
+    assert.equal(error.message, error.detail);
+  }
+
+  try {
     engine.recall([0], 1, { nowUnix: 0 });
     assert.fail("invalid vector should throw");
   } catch (error) {
     assert.equal(error.code, "SHIBA_VECTOR");
     assert.equal(error.severity, "fatal");
     assert.equal(error.retryable, false);
+    assert.equal(error.detail, "vector index operation failed");
+    assert.equal(error.message, error.detail);
   }
 
   const item = engine.write("Node binding memory", {
@@ -39,6 +52,7 @@ try {
     sourceRef: "smoke",
     validFromUnix: 0,
     ingestedAtUnix: 0,
+    scope: { repository: "repo-smoke", team: "team-smoke", visibility: "team" },
   });
   engine.write("Node binding overflow memory", {
     vector: [10, 10],
@@ -55,6 +69,7 @@ try {
     ingestedAtUnix: 0,
   });
   const recalled = engine.recall([0, 0], 1, { nowUnix: 0 });
+  const degraded = engine.recallWithDegradation([0, 0], 1, { nowUnix: 0 });
   const budgeted = engine.recall([0, 0], 2, { nowUnix: 0, maxContextTokens: 3 });
   const streamed = engine.streamRecall([0, 0], 1, { nowUnix: 0 });
   const timeline = engine.timeline([0, 0], 1, 0);
@@ -64,7 +79,14 @@ try {
 
   assert.equal(item.content, "Node binding memory");
   assert.equal(item.provenance.sourceKind, "user");
+  assert.deepEqual(item.scope, {
+    repository: "repo-smoke",
+    team: "team-smoke",
+    visibility: "team",
+  });
   assert.equal(recalled[0].id, item.id);
+  assert.equal(degraded.candidates[0].id, item.id);
+  assert.deepEqual(degraded.unavailableStages, []);
   assert.deepEqual(
     budgeted.map((candidate) => candidate.id),
     [item.id],

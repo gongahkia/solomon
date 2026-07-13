@@ -17,7 +17,7 @@
       "path": "scripts/ci/golden-parity.json",
       "schema_version": 1,
       "surfaces": ["rust", "python", "node", "http"],
-      "operations": ["write", "recall", "timeline", "invalidate", "human_signal", "why", "error"]
+      "operations": ["write", "recall", "timeline", "invalidate", "human_signal", "why", "error", "degraded_recall"]
     }
   ]
 }

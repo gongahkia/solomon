@@ -88,6 +88,7 @@ def run_python_lane(fixture: dict[str, Any]) -> dict[str, Any]:
             "timelines": [],
             "signals": [],
             "errors": [],
+            "degraded_recalls": [],
             "memories": [],
             "why": [],
         }
@@ -161,12 +162,33 @@ def run_python_lane(fixture: dict[str, Any]) -> dict[str, Any]:
             try:
                 engine.recall(query["vector"], query["top_k"], now_unix=query["now_unix"])
             except RuntimeError as error:
-                code = error_code(str(error))
+                code = getattr(error, "code", None)
+                if (
+                    not isinstance(code, str)
+                    or getattr(error, "severity", None) != "fatal"
+                    or getattr(error, "retryable", None) is not False
+                    or getattr(error, "detail", None) != "vector index operation failed"
+                ):
+                    raise AssertionError(f"invalid structured error: {error!r}") from error
             else:
                 raise AssertionError(f"{query['name']} should fail")
             if code != query["code"]:
                 raise AssertionError(f"{query['name']} returned {code}")
             output["errors"].append({"name": query["name"], "code": code})
+        for query in fixture["degraded_recalls"]:
+            result = engine.recall_with_degradation(
+                query["vector"],
+                query["top_k"],
+                now_unix=query["now_unix"],
+                include_cold=query["include_cold"],
+            )
+            output["degraded_recalls"].append(
+                {
+                    "name": query["name"],
+                    "recall": [normalize_python_candidate(candidate) for candidate in result.candidates],
+                    "unavailable_stages": result.unavailable_stages,
+                }
+            )
 
     return output
 
@@ -212,6 +234,7 @@ def run_http_lane(fixture: dict[str, Any]) -> dict[str, Any]:
                 "timelines": [],
                 "signals": [],
                 "errors": [],
+                "degraded_recalls": [],
                 "memories": [],
                 "why": [],
             }
@@ -349,16 +372,44 @@ def run_http_lane(fixture: dict[str, Any]) -> dict[str, Any]:
                     )
                 except urllib.error.HTTPError as error:
                     payload = json.loads(error.read().decode("utf-8"))
-                    code = error_code(payload["error"])
-                    if payload.get("code") != code:
-                        raise AssertionError(f"HTTP error code mismatch: {payload}")
-                    if payload.get("severity") != "fatal" or payload.get("retryable") is not False:
+                    code = payload.get("code")
+                    if (
+                        not isinstance(code, str)
+                        or payload.get("severity") != "fatal"
+                        or payload.get("retryable") is not False
+                        or payload.get("detail") != "vector index operation failed"
+                        or payload.get("error") != payload.get("detail")
+                    ):
                         raise AssertionError(f"HTTP error metadata mismatch: {payload}")
                 else:
                     raise AssertionError(f"{query['name']} should fail")
                 if code != query["code"]:
                     raise AssertionError(f"{query['name']} returned {code}")
                 output["errors"].append({"name": query["name"], "code": code})
+            for query in fixture["degraded_recalls"]:
+                result = server_request(
+                    base_url,
+                    api_key,
+                    namespace,
+                    "POST",
+                    "/recall/degraded",
+                    {
+                        "query_vector": query["vector"],
+                        "top_k": query["top_k"],
+                        "now_unix": query["now_unix"],
+                        "include_cold": query["include_cold"],
+                    },
+                )
+                output["degraded_recalls"].append(
+                    {
+                        "name": query["name"],
+                        "recall": [
+                            normalize_server_candidate(candidate, namespace)
+                            for candidate in result["candidates"]
+                        ],
+                        "unavailable_stages": result["unavailable_stages"],
+                    }
+                )
             return output
         finally:
             process.terminate()
@@ -484,14 +535,6 @@ def strip_server_namespace(source_ref: str | None, namespace: str) -> str | None
     if source_ref is None or not source_ref.startswith(prefix):
         raise AssertionError(f"missing expected namespace prefix: {source_ref}")
     return source_ref.removeprefix(prefix)
-
-
-def error_code(message: str) -> str:
-    start = message.find("[SHIBA_")
-    end = message.find("]", start)
-    if start == -1 or end == -1:
-        raise AssertionError(f"missing Shibahama error code: {message}")
-    return message[start + 1 : end]
 
 
 def require_trace(trace: Any | None) -> Any:

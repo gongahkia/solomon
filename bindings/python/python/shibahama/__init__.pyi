@@ -23,17 +23,28 @@ class ShibahamaError(RuntimeError):
     code: str
     severity: Literal["recoverable", "fatal"]
     retryable: bool
+    detail: str
+
+class DegradedRecallResult:
+    candidates: list[RecallCandidate]
+    unavailable_stages: list[str]
 
 class Provenance:
     source_kind: SourceKind
     source_ref: str | None
     ingested_by: str
 
+class MemoryScope:
+    repository: str
+    team: str | None
+    visibility: Literal["repository", "team"]
+
 class MemoryItem:
     id: str
     content: str
     kind: MemoryKind
     provenance: Provenance
+    scope: MemoryScope
     tier: Tier
     credence: Credence
     significance: float
@@ -104,6 +115,9 @@ class Shibahama:
         index_name: str = "default",
         model: str = "unknown",
         model_version: str = "unknown",
+        scope_repository: str = "default",
+        scope_team: str | None = None,
+        scope_visibility: Literal["repository", "team"] = "repository",
     ) -> MemoryItem: ...
     async def async_write(
         self,
@@ -118,6 +132,9 @@ class Shibahama:
         index_name: str = "default",
         model: str = "unknown",
         model_version: str = "unknown",
+        scope_repository: str = "default",
+        scope_team: str | None = None,
+        scope_visibility: Literal["repository", "team"] = "repository",
     ) -> MemoryItem: ...
     def invalidate(self, memory_id: str, valid_to_unix: int) -> bool: ...
     async def async_invalidate(self, memory_id: str, valid_to_unix: int) -> bool: ...
@@ -136,6 +153,24 @@ class Shibahama:
         graph_weight: float = 0.25,
         related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None,
     ) -> list[RecallCandidate]: ...
+    def recall_with_degradation(
+        self,
+        query_vector: Sequence[float],
+        top_k: int,
+        now_unix: int | None = None,
+        raw_query_context: str | None = None,
+        include_cold: bool = False,
+        include_instructions: bool = False,
+        max_context_tokens: int | None = None,
+        similarity_weight: float = 1.0,
+        significance_weight: float = 1.0,
+        recency_weight: float = 0.25,
+        graph_weight: float = 0.25,
+        related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None,
+    ) -> DegradedRecallResult: ...
+    async def async_recall_with_degradation(
+        self, *args: Any, **kwargs: Any
+    ) -> DegradedRecallResult: ...
     async def async_recall(
         self,
         query_vector: Sequence[float],

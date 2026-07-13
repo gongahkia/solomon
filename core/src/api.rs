@@ -15,7 +15,13 @@ use crate::learned_policy::{
 };
 use crate::model::{
     AccessOutcome, CredenceTier, Entity, EntityId, HumanSignal, HumanSignalAction, MemoryId,
-    MemoryItem, Provenance, Relation, RelationId, SourceKind, Tier,
+    MemoryItem, MemoryScope, Provenance, Relation, RelationId, ScopeAuthorizationAction, ScopeId,
+    SourceKind, Tier,
+};
+use crate::policy::{
+    CapturePolicy, CapturePolicyRequest, CapturePolicySimulation, EffectivePolicy,
+    PolicyAuditDisposition, PolicyAuditRecord, PolicyError, PolicyLayerSet, RecallPolicy,
+    RecallPolicyDecision, RecallPolicySimulation, resolve_policy_inheritance,
 };
 use crate::reconstruction::{
     BackgroundReconstructionConfig, CorroborationDecision, CorroborationPolicy,
@@ -26,17 +32,19 @@ use crate::reconstruction::{
     triggers_from_recall,
 };
 use crate::retrieval::{
-    RecallCandidate, RecallCandidateCurrency, RecallDiversificationConfig, RecallError,
-    RecallRankingConfig, RecallRequest, RecallStalenessConfig, recall, timeline,
+    DegradedRecallResult, RecallCandidate, RecallCandidateCurrency, RecallDiversificationConfig,
+    RecallError, RecallRankingConfig, RecallRequest, RecallStalenessConfig, recall,
+    recall_with_degradation, timeline,
 };
 use crate::significance::{SignificanceBreakdown, SignificanceConfig};
 use crate::storage::{
     ConsolidationDecisionRecord, EventRecord, GraphSnapshot, GraphTraversalRequest,
     GraphTraversalResult, HumanSignalRecord, IngestCredencePolicy, MemoryAuditEntry, MemoryEvent,
-    MemoryWriteEvent, ReconstructionReplacementRecord, RedbMemoryStore, StorageError,
-    SubgraphRequest, TierCapacityConfig,
+    MemoryWriteEvent, ReconstructionReplacementRecord, RedbMemoryStore, ScopePromotionRecord,
+    StorageError, SubgraphRequest, TierCapacityConfig,
 };
 use crate::vector::{VectorIndex, VectorIndexError};
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::iter::FusedIterator;
 use std::path::Path;
@@ -69,6 +77,16 @@ pub enum ShibahamaError {
     /// Caller supplied an unsupported or internally inconsistent request.
     #[error("[SHIBA_INVALID_REQUEST] invalid request: {0}; action: adjust the request and retry")]
     InvalidRequest(String),
+    /// Host policy denied a scope-crossing operation.
+    #[error(
+        "[SHIBA_UNAUTHORIZED] authorization denied; action: request access from a configured maintainer"
+    )]
+    AuthorizationDenied,
+    /// Configured capture or recall policy denied the requested operation.
+    #[error(
+        "[SHIBA_POLICY] policy denied the requested operation; action: adjust the policy or request explicit approval"
+    )]
+    PolicyDenied(#[source] PolicyError),
     /// Tokio task failed before returning an API result.
     #[cfg(feature = "tokio")]
     #[error(
@@ -91,6 +109,7 @@ impl From<RecallError> for ShibahamaError {
         match error {
             RecallError::Storage(error) => Self::from(error),
             RecallError::Vector(error) => Self::Vector(error),
+            error @ RecallError::StageUnavailable { .. } => Self::Recall(error),
         }
     }
 }
@@ -98,6 +117,12 @@ impl From<RecallError> for ShibahamaError {
 impl From<VectorIndexError> for ShibahamaError {
     fn from(error: VectorIndexError) -> Self {
         Self::Vector(error)
+    }
+}
+
+impl From<PolicyError> for ShibahamaError {
+    fn from(error: PolicyError) -> Self {
+        Self::PolicyDenied(error)
     }
 }
 
@@ -126,18 +151,36 @@ pub enum ShibahamaErrorKind {
     Vector,
     /// Caller supplied an unsupported or internally inconsistent request.
     InvalidRequest,
+    /// Host policy denied a scope-crossing operation.
+    AuthorizationDenied,
+    /// Configured policy denied the requested operation.
+    PolicyDenied,
     /// Tokio task failed before returning an API result.
     #[cfg(feature = "tokio")]
     Task,
 }
 
 /// Operational severity for a Shibahama error category.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ShibahamaErrorSeverity {
     /// The caller can continue with an explicitly degraded result or retry.
     Recoverable,
     /// The requested operation cannot safely complete.
     Fatal,
+}
+
+/// Stable transport-safe metadata for a high-level error.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub struct ShibahamaErrorMetadata {
+    /// Machine-readable error code.
+    pub code: &'static str,
+    /// Whether the caller can continue with a degraded result.
+    pub severity: ShibahamaErrorSeverity,
+    /// Whether retrying unchanged input can reasonably succeed.
+    pub retryable: bool,
+    /// Detail safe to return from a host transport.
+    pub detail: &'static str,
 }
 
 impl ShibahamaErrorSeverity {
@@ -152,6 +195,22 @@ impl ShibahamaErrorSeverity {
 }
 
 impl ShibahamaErrorKind {
+    /// Resolves a stable machine-readable code to its error category.
+    #[must_use]
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "SHIBA_STORAGE" => Some(Self::Storage),
+            "SHIBA_RECALL" => Some(Self::Recall),
+            "SHIBA_VECTOR" => Some(Self::Vector),
+            "SHIBA_INVALID_REQUEST" => Some(Self::InvalidRequest),
+            "SHIBA_UNAUTHORIZED" => Some(Self::AuthorizationDenied),
+            "SHIBA_POLICY" => Some(Self::PolicyDenied),
+            #[cfg(feature = "tokio")]
+            "SHIBA_TASK" => Some(Self::Task),
+            _ => None,
+        }
+    }
+
     /// Stable machine-readable code for this error category.
     #[must_use]
     pub const fn code(self) -> &'static str {
@@ -160,6 +219,8 @@ impl ShibahamaErrorKind {
             Self::Recall => "SHIBA_RECALL",
             Self::Vector => "SHIBA_VECTOR",
             Self::InvalidRequest => "SHIBA_INVALID_REQUEST",
+            Self::AuthorizationDenied => "SHIBA_UNAUTHORIZED",
+            Self::PolicyDenied => "SHIBA_POLICY",
             #[cfg(feature = "tokio")]
             Self::Task => "SHIBA_TASK",
         }
@@ -179,8 +240,25 @@ impl ShibahamaErrorKind {
                 "verify embedding dimensionality and vector backend availability before retrying"
             }
             Self::InvalidRequest => "adjust the request and retry",
+            Self::AuthorizationDenied => "request access from a configured maintainer",
+            Self::PolicyDenied => "adjust the policy or request explicit approval",
             #[cfg(feature = "tokio")]
             Self::Task => "inspect the runtime for cancellation or panic before retrying",
+        }
+    }
+
+    /// Detail safe to expose to host-language callers.
+    #[must_use]
+    pub const fn detail(self) -> &'static str {
+        match self {
+            Self::Storage => "storage operation failed",
+            Self::Recall => "recall operation failed",
+            Self::Vector => "vector index operation failed",
+            Self::InvalidRequest => "invalid request",
+            Self::AuthorizationDenied => "authorization denied",
+            Self::PolicyDenied => "policy denied the requested operation",
+            #[cfg(feature = "tokio")]
+            Self::Task => "async task failed",
         }
     }
 
@@ -191,7 +269,11 @@ impl ShibahamaErrorKind {
             Self::Recall => ShibahamaErrorSeverity::Recoverable,
             #[cfg(feature = "tokio")]
             Self::Task => ShibahamaErrorSeverity::Recoverable,
-            Self::Storage | Self::Vector | Self::InvalidRequest => ShibahamaErrorSeverity::Fatal,
+            Self::Storage
+            | Self::Vector
+            | Self::InvalidRequest
+            | Self::AuthorizationDenied
+            | Self::PolicyDenied => ShibahamaErrorSeverity::Fatal,
         }
     }
 
@@ -202,7 +284,11 @@ impl ShibahamaErrorKind {
             Self::Recall => true,
             #[cfg(feature = "tokio")]
             Self::Task => true,
-            Self::Storage | Self::Vector | Self::InvalidRequest => false,
+            Self::Storage
+            | Self::Vector
+            | Self::InvalidRequest
+            | Self::AuthorizationDenied
+            | Self::PolicyDenied => false,
         }
     }
 }
@@ -216,6 +302,8 @@ impl ShibahamaError {
             Self::Recall(_) => ShibahamaErrorKind::Recall,
             Self::Vector(_) => ShibahamaErrorKind::Vector,
             Self::InvalidRequest(_) => ShibahamaErrorKind::InvalidRequest,
+            Self::AuthorizationDenied => ShibahamaErrorKind::AuthorizationDenied,
+            Self::PolicyDenied(_) => ShibahamaErrorKind::PolicyDenied,
             #[cfg(feature = "tokio")]
             Self::Task(_) => ShibahamaErrorKind::Task,
         }
@@ -244,11 +332,41 @@ impl ShibahamaError {
     pub const fn retryable(&self) -> bool {
         self.kind().retryable()
     }
+
+    /// Stable transport-safe metadata without backend or caller content.
+    #[must_use]
+    pub const fn metadata(&self) -> ShibahamaErrorMetadata {
+        let kind = self.kind();
+
+        ShibahamaErrorMetadata {
+            code: kind.code(),
+            severity: kind.severity(),
+            retryable: kind.retryable(),
+            detail: kind.detail(),
+        }
+    }
+}
+
+impl ShibahamaErrorMetadata {
+    /// Resolves transport-safe metadata from a stable core error code.
+    #[must_use]
+    pub fn for_code(code: &str) -> Option<Self> {
+        let kind = ShibahamaErrorKind::from_code(code)?;
+
+        Some(Self {
+            code: kind.code(),
+            severity: kind.severity(),
+            retryable: kind.retryable(),
+            detail: kind.detail(),
+        })
+    }
 }
 
 /// Sane-default configuration for a Shibahama engine.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ShibahamaConfig {
+    /// Whether callers must use an explicit [`ScopedShibahama`] context.
+    pub scope_mode: ScopeMode,
     /// Transparent significance scoring and tier-promotion thresholds.
     pub significance: SignificanceConfig,
     /// Default recall ranking weights.
@@ -269,11 +387,102 @@ pub struct ShibahamaConfig {
     pub tier_capacity: TierCapacityConfig,
     /// Default source-kind to credence mapping used for writes without explicit credence.
     pub ingest_credence: IngestCredencePolicy,
+    /// Independent capture policy; manual capture is the default.
+    pub capture_policy: CapturePolicy,
+    /// Independent recall and context-assembly policy with conservative defaults.
+    pub recall_policy: RecallPolicy,
     /// Policy for caller-requested forgetting/invalidation.
     pub forgetting: ForgettingConfig,
 }
 
+/// Recall output with the policy decision and consumed context budget.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PolicyRecallResult {
+    /// Ranked candidates after policy limits were enforced.
+    pub candidates: Vec<RecallCandidate>,
+    /// Deterministic policy decision that constrained the request.
+    pub decision: RecallPolicyDecision,
+    /// Approximate whitespace tokens in returned candidate content.
+    pub context_tokens_used: usize,
+}
+
+/// Scope-context requirement for the core engine.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ScopeMode {
+    /// Preserve legacy embedded behavior for one local store.
+    #[default]
+    LocalSingleStore,
+    /// Reject unscoped public operations.
+    RequireExplicit,
+}
+
+/// Host authorization input for a scope-crossing operation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ScopeAuthorizationRequest<'a> {
+    /// Authenticated principal requesting the operation.
+    pub principal: &'a str,
+    /// Repository-local source scope.
+    pub source_scope: &'a MemoryScope,
+    /// Requested team target scope.
+    pub target_scope: &'a MemoryScope,
+    /// Requested operation.
+    pub action: ScopeAuthorizationAction,
+}
+
+/// Host policy decision for a scope-crossing operation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScopeAuthorizationDecision {
+    /// The host allows the requested operation.
+    Allow,
+    /// The host denies the requested operation.
+    Deny,
+}
+
+impl ScopeAuthorizationDecision {
+    /// Returns whether the requested operation is authorized.
+    #[must_use]
+    pub const fn is_allowed(self) -> bool {
+        matches!(self, Self::Allow)
+    }
+}
+
+/// Host-provided authorization policy for scope-crossing operations.
+pub trait ScopeAuthorizationPolicy: Send + Sync {
+    /// Evaluates a scope-crossing request without receiving memory content or identifiers.
+    fn authorize(&self, request: ScopeAuthorizationRequest<'_>) -> ScopeAuthorizationDecision;
+}
+
+/// Fail-closed default policy for embedded engines.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DenyScopePromotionPolicy;
+
+impl ScopeAuthorizationPolicy for DenyScopePromotionPolicy {
+    fn authorize(&self, _: ScopeAuthorizationRequest<'_>) -> ScopeAuthorizationDecision {
+        ScopeAuthorizationDecision::Deny
+    }
+}
+
+/// Explicit local/test policy that allows repository-to-team promotion.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AllowScopePromotionPolicy;
+
+impl ScopeAuthorizationPolicy for AllowScopePromotionPolicy {
+    fn authorize(&self, request: ScopeAuthorizationRequest<'_>) -> ScopeAuthorizationDecision {
+        match request.action {
+            ScopeAuthorizationAction::PromoteToTeam => ScopeAuthorizationDecision::Allow,
+        }
+    }
+}
+
 impl ShibahamaConfig {
+    /// Resolves global settings with optional team, repository, and session policy layers.
+    ///
+    /// Returned source layers are redacted to layer kinds and contain no scope identifiers.
+    #[must_use]
+    pub fn effective_policy(self, layers: &PolicyLayerSet) -> EffectivePolicy {
+        resolve_policy_inheritance(self.capture_policy, self.recall_policy, layers)
+    }
+
     /// Builds a recall request populated with this config's recall defaults.
     #[must_use]
     pub fn recall_request(
@@ -829,6 +1038,14 @@ pub struct Shibahama<V> {
     store: RedbMemoryStore,
     vector_index: V,
     config: ShibahamaConfig,
+    scope_authorization: Box<dyn ScopeAuthorizationPolicy>,
+}
+
+/// Explicit repository/team scope context for core memory operations.
+pub struct ScopedShibahama<'a, V> {
+    engine: &'a mut Shibahama<V>,
+    scope: MemoryScope,
+    previous_scope_mode: ScopeMode,
 }
 
 impl<V: VectorIndex> Shibahama<V> {
@@ -839,6 +1056,36 @@ impl<V: VectorIndex> Shibahama<V> {
     /// Returns an error when the durable store cannot be opened.
     pub fn open(path: impl AsRef<Path>, vector_index: V) -> Result<Self, ShibahamaError> {
         Self::open_with_config(path, vector_index, ShibahamaConfig::default())
+    }
+
+    /// Opens an engine only after strict runtime configuration validation succeeds.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error before opening storage when configuration is invalid or incompatible.
+    pub fn open_from_runtime_config(
+        runtime_config: &crate::config::RuntimeConfig,
+        vector_index: V,
+    ) -> Result<Self, ShibahamaError> {
+        runtime_config.validate().map_err(|_| {
+            ShibahamaError::InvalidRequest("runtime configuration is invalid".to_owned())
+        })?;
+        if runtime_config.provider.dimensions != vector_index.dimensions() {
+            return Err(ShibahamaError::InvalidRequest(
+                "runtime provider dimensions do not match the vector index".to_owned(),
+            ));
+        }
+        if runtime_config.storage.encryption == crate::config::StorageEncryptionMode::Required {
+            return Err(ShibahamaError::InvalidRequest(
+                "runtime configuration requires an encrypted store opener".to_owned(),
+            ));
+        }
+
+        Self::open_with_config(
+            &runtime_config.storage.path,
+            vector_index,
+            runtime_config.engine_config(),
+        )
     }
 
     /// Opens a Shibahama store with an explicit engine config.
@@ -855,6 +1102,7 @@ impl<V: VectorIndex> Shibahama<V> {
             store: RedbMemoryStore::open(path)?,
             vector_index,
             config,
+            scope_authorization: Box::new(DenyScopePromotionPolicy),
         };
 
         engine.hydrate_vector_index()?;
@@ -880,15 +1128,99 @@ impl<V: VectorIndex> Shibahama<V> {
         self.config
     }
 
+    /// Resolves this engine's global policy with caller-supplied scoped layers.
+    #[must_use]
+    pub fn effective_policy(&self, layers: &PolicyLayerSet) -> EffectivePolicy {
+        self.config.effective_policy(layers)
+    }
+
+    /// Simulates a capture-policy decision without writing memory, events, or provider requests.
+    #[must_use]
+    pub fn simulate_capture_policy(
+        &self,
+        source_kind: SourceKind,
+        scope: &MemoryScope,
+        request: CapturePolicyRequest,
+    ) -> CapturePolicySimulation {
+        CapturePolicySimulation {
+            decision: self
+                .config
+                .capture_policy
+                .evaluate(request, source_kind, scope),
+        }
+    }
+
+    /// Simulates a recall-policy decision without reading memory or writing access events.
+    #[must_use]
+    pub fn simulate_recall_policy(
+        &self,
+        requested_candidates: usize,
+        requested_context_tokens: Option<usize>,
+        include_cold: bool,
+        include_instructions: bool,
+        scope: Option<&MemoryScope>,
+    ) -> RecallPolicySimulation {
+        RecallPolicySimulation {
+            decision: self.config.recall_policy.decide(
+                requested_candidates,
+                requested_context_tokens,
+                include_cold,
+                include_instructions,
+            ),
+            scope_allowed: scope
+                .is_none_or(|scope| self.config.recall_policy.scopes.allows(scope)),
+        }
+    }
+
     /// Replaces this engine's active config.
     pub fn set_config(&mut self, config: ShibahamaConfig) {
         self.config = config;
+    }
+
+    /// Replaces the host policy for repository-to-team promotion.
+    pub fn set_scope_authorization_policy(
+        &mut self,
+        policy: impl ScopeAuthorizationPolicy + 'static,
+    ) {
+        self.scope_authorization = Box::new(policy);
+    }
+
+    /// Enters an explicit repository/team scope for fail-closed core operations.
+    ///
+    /// The unscoped API remains available only for local single-store embedding compatibility.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the supplied scope is internally inconsistent.
+    pub fn scoped(&mut self, scope: MemoryScope) -> Result<ScopedShibahama<'_, V>, ShibahamaError> {
+        scope
+            .validate()
+            .map_err(|error| ShibahamaError::InvalidRequest(error.to_string()))?;
+
+        let previous_scope_mode = self.config.scope_mode;
+        self.config.scope_mode = ScopeMode::LocalSingleStore;
+
+        Ok(ScopedShibahama {
+            engine: self,
+            scope,
+            previous_scope_mode,
+        })
     }
 
     fn hydrate_vector_index(&mut self) -> Result<(), ShibahamaError> {
         for embedding in self.store.stored_embeddings()? {
             self.vector_index
                 .add(embedding.memory_id, &embedding.vector)?;
+        }
+
+        Ok(())
+    }
+
+    fn require_scope_context(&self) -> Result<(), ShibahamaError> {
+        if self.config.scope_mode == ScopeMode::RequireExplicit {
+            return Err(ShibahamaError::InvalidRequest(
+                "an explicit scope context is required; call scoped(scope)".to_owned(),
+            ));
         }
 
         Ok(())
@@ -911,9 +1243,12 @@ impl<V: VectorIndex> Shibahama<V> {
     ///
     /// Returns an error when the write cannot be persisted.
     pub fn write(&self, event: MemoryWriteEvent) -> Result<MemoryItem, ShibahamaError> {
+        self.require_scope_context()?;
+        let audit = self.prepare_capture_policy(&event, CapturePolicyRequest::manual())?;
         let (_, item) = self
             .store
             .write_event_with_policy(event, self.config.ingest_credence)?;
+        self.store.record_policy_decision(audit)?;
 
         Ok(item)
     }
@@ -928,6 +1263,8 @@ impl<V: VectorIndex> Shibahama<V> {
         event: MemoryWriteEvent,
         embedding: WriteEmbedding<'_>,
     ) -> Result<MemoryItem, ShibahamaError> {
+        self.require_scope_context()?;
+        let audit = self.prepare_capture_policy(&event, CapturePolicyRequest::manual())?;
         let mut item = event.into_item_with_policy(self.config.ingest_credence);
 
         self.store.write_embedded(
@@ -938,6 +1275,27 @@ impl<V: VectorIndex> Shibahama<V> {
             embedding.model,
             embedding.model_version,
         )?;
+        self.store.record_policy_decision(audit)?;
+
+        Ok(item)
+    }
+
+    /// Writes a memory event after evaluating caller-supplied capture policy metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when policy denies the request or the write cannot be persisted.
+    pub fn write_with_capture_policy(
+        &self,
+        event: MemoryWriteEvent,
+        request: CapturePolicyRequest,
+    ) -> Result<MemoryItem, ShibahamaError> {
+        self.require_scope_context()?;
+        let audit = self.prepare_capture_policy(&event, request)?;
+        let (_, item) = self
+            .store
+            .write_event_with_policy(event, self.config.ingest_credence)?;
+        self.store.record_policy_decision(audit)?;
 
         Ok(item)
     }
@@ -953,6 +1311,7 @@ impl<V: VectorIndex> Shibahama<V> {
         id: MemoryId,
         valid_to: OffsetDateTime,
     ) -> Result<bool, ShibahamaError> {
+        self.require_scope_context()?;
         match self.config.forgetting.mode {
             ForgettingMode::SoftInvalidate => Ok(self
                 .store
@@ -965,12 +1324,77 @@ impl<V: VectorIndex> Shibahama<V> {
         }
     }
 
+    /// Copies an approved repository-local memory into one team scope without mutating its source.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when scope requirements, vector indexing, or durable promotion fail.
+    pub fn promote_to_team(
+        &mut self,
+        source_id: MemoryId,
+        team: ScopeId,
+        actor: impl Into<String>,
+        rationale: impl Into<String>,
+        promoted_at: OffsetDateTime,
+    ) -> Result<Option<ScopePromotionRecord>, ShibahamaError> {
+        self.require_scope_context()?;
+        let Some(source) = self.store.get(source_id)? else {
+            return Ok(None);
+        };
+        let target_scope = MemoryScope::team(source.scope.repository.clone(), team);
+        let actor = actor.into();
+        let authorization = ScopeAuthorizationRequest {
+            principal: &actor,
+            source_scope: &source.scope,
+            target_scope: &target_scope,
+            action: ScopeAuthorizationAction::PromoteToTeam,
+        };
+        if !self
+            .scope_authorization
+            .authorize(authorization)
+            .is_allowed()
+        {
+            self.store.record_scope_authorization_denial(
+                actor,
+                &source.scope,
+                &target_scope,
+                ScopeAuthorizationAction::PromoteToTeam,
+                promoted_at,
+            )?;
+            return Err(ShibahamaError::AuthorizationDenied);
+        }
+        let promoted_id = MemoryId::new_v7();
+        let vector = self
+            .store
+            .stored_embeddings()?
+            .into_iter()
+            .find(|embedding| embedding.memory_id == source_id)
+            .map(|embedding| embedding.vector);
+        if let Some(vector) = vector.as_deref() {
+            self.vector_index.add(promoted_id, vector)?;
+        }
+        let result = self.store.promote_memory_scope(
+            source_id,
+            promoted_id,
+            target_scope,
+            actor,
+            rationale,
+            promoted_at,
+        );
+        if result.is_err() && vector.is_some() {
+            let _ = self.vector_index.delete_by_id(promoted_id);
+        }
+
+        Ok(result?)
+    }
+
     /// Returns all current materialized memory rows.
     ///
     /// # Errors
     ///
     /// Returns an error when current item state cannot be read.
     pub fn memory_items(&self) -> Result<Vec<MemoryItem>, ShibahamaError> {
+        self.require_scope_context()?;
         Ok(self.store.memory_items()?)
     }
 
@@ -980,7 +1404,18 @@ impl<V: VectorIndex> Shibahama<V> {
     ///
     /// Returns an error when event-log records cannot be read.
     pub fn event_records(&self) -> Result<Vec<EventRecord>, ShibahamaError> {
+        self.require_scope_context()?;
         Ok(self.store.events()?)
+    }
+
+    /// Writes a local full-store snapshot when local single-store mode is enabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when explicit scope mode is enabled or snapshot export fails.
+    pub fn snapshot(&self, path: impl AsRef<Path>) -> Result<(), ShibahamaError> {
+        self.require_scope_context()?;
+        Ok(self.store.snapshot(path)?)
     }
 
     /// Evaluates offline learned-policy candidates against current memory state and event logs.
@@ -1039,12 +1474,123 @@ impl<V: VectorIndex> Shibahama<V> {
         &self,
         request: &RecallRequest<'_>,
     ) -> Result<Vec<RecallCandidate>, ShibahamaError> {
-        let mut request = *request;
-        if request.significance == SignificanceConfig::default() {
-            request.significance = self.config.significance;
+        self.require_scope_context()?;
+        let (request, decision) = self.policy_recall_request(request)?;
+        let candidates = recall(&self.store, &self.vector_index, &request)?;
+        self.record_recall_policy(&decision, &request, &candidates)?;
+
+        Ok(candidates)
+    }
+
+    /// Recalls candidates and returns the policy decision and context-budget use.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when scope policy, vector search, storage reads, or access recording fail.
+    pub fn recall_with_policy_report(
+        &self,
+        request: &RecallRequest<'_>,
+    ) -> Result<PolicyRecallResult, ShibahamaError> {
+        self.require_scope_context()?;
+        let (request, decision) = self.policy_recall_request(request)?;
+        let candidates = recall(&self.store, &self.vector_index, &request)?;
+        let context_tokens_used = candidates
+            .iter()
+            .map(|candidate| candidate.item.content.split_whitespace().count())
+            .sum();
+        self.record_recall_policy(&decision, &request, &candidates)?;
+
+        Ok(PolicyRecallResult {
+            candidates,
+            decision,
+            context_tokens_used,
+        })
+    }
+
+    /// Recalls usable candidates while reporting unavailable optional stages.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when vector search or initial candidate materialization cannot complete.
+    pub fn recall_with_degradation(
+        &self,
+        request: &RecallRequest<'_>,
+    ) -> Result<DegradedRecallResult, ShibahamaError> {
+        self.require_scope_context()?;
+        let (request, decision) = self.policy_recall_request(request)?;
+        let result = recall_with_degradation(&self.store, &self.vector_index, &request)?;
+        self.record_recall_policy(&decision, &request, &result.candidates)?;
+
+        Ok(result)
+    }
+
+    fn policy_recall_request<'request>(
+        &self,
+        request: &RecallRequest<'request>,
+    ) -> Result<(RecallRequest<'request>, RecallPolicyDecision), ShibahamaError> {
+        let simulation = self.simulate_recall_policy(
+            request.top_k,
+            request.max_context_tokens,
+            request.include_cold,
+            request.include_instructions,
+            request.scope,
+        );
+        if !simulation.scope_allowed {
+            self.store.record_policy_decision(simulation.decision.audit_record(
+                request.scope,
+                PolicyAuditDisposition::Denied,
+                None,
+            ))?;
+            return Err(ShibahamaError::AuthorizationDenied);
+        }
+        let decision = simulation.decision;
+        let mut effective = *request;
+        effective.top_k = decision.effective_candidates;
+        effective.max_context_tokens = Some(decision.effective_context_tokens);
+        effective.include_cold = decision.include_cold;
+        effective.include_instructions = decision.include_instructions;
+        effective.scope_policy = decision.allowed_scopes;
+        if effective.significance == SignificanceConfig::default() {
+            effective.significance = self.config.significance;
         }
 
-        Ok(recall(&self.store, &self.vector_index, &request)?)
+        Ok((effective, decision))
+    }
+
+    fn record_recall_policy(
+        &self,
+        decision: &RecallPolicyDecision,
+        request: &RecallRequest<'_>,
+        candidates: &[RecallCandidate],
+    ) -> Result<(), ShibahamaError> {
+        let context_tokens_used = candidates
+            .iter()
+            .map(|candidate| candidate.item.content.split_whitespace().count())
+            .sum();
+        self.store.record_policy_decision(decision.audit_record(
+            request.scope,
+            PolicyAuditDisposition::Allowed,
+            Some(context_tokens_used),
+        ))?;
+
+        Ok(())
+    }
+
+    fn prepare_capture_policy(
+        &self,
+        event: &MemoryWriteEvent,
+        request: CapturePolicyRequest,
+    ) -> Result<PolicyAuditRecord, ShibahamaError> {
+        let decision = self
+            .simulate_capture_policy(event.provenance.source_kind, &event.scope, request)
+            .decision;
+        let audit = decision.audit_record(request, event.provenance.source_kind, &event.scope);
+        if let Err(error) = decision.require_allowed() {
+            self.store.record_policy_decision(audit)?;
+            return Err(error.into());
+        }
+
+        Ok(audit)
     }
 
     /// Recalls current fact memories and returns an owning iterator over ranked candidates.
@@ -1328,6 +1874,7 @@ impl<V: VectorIndex> Shibahama<V> {
         id: MemoryId,
         request: HumanSignalRequest,
     ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        self.require_scope_context()?;
         self.store
             .challenge_memory(
                 id,
@@ -1361,6 +1908,7 @@ impl<V: VectorIndex> Shibahama<V> {
         id: MemoryId,
         request: HumanSignalRequest,
     ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        self.require_scope_context()?;
         self.store
             .affirm_memory(
                 id,
@@ -1405,6 +1953,7 @@ impl<V: VectorIndex> Shibahama<V> {
         proposed_content: impl Into<String>,
         request: HumanSignalRequest,
     ) -> Result<Option<HumanCorrectionOutcome>, ShibahamaError> {
+        self.require_scope_context()?;
         let Some(original) = self.store.get(id)? else {
             return Ok(None);
         };
@@ -1423,6 +1972,7 @@ impl<V: VectorIndex> Shibahama<V> {
             request.timestamp,
             request.timestamp,
         );
+        event = event.with_scope(original.scope.clone());
         event.tier = Tier::Cold;
         event.credence = Some(CredenceTier::Unverified);
         event.credence_floor = Tier::Cold;
@@ -1493,6 +2043,7 @@ impl<V: VectorIndex> Shibahama<V> {
         id: MemoryId,
         request: HumanSignalRequest,
     ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        self.require_scope_context()?;
         self.store
             .set_human_credence_floor(
                 id,
@@ -1526,6 +2077,7 @@ impl<V: VectorIndex> Shibahama<V> {
         id: MemoryId,
         request: HumanSignalRequest,
     ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        self.require_scope_context()?;
         self.store
             .set_human_credence_floor(
                 id,
@@ -1547,12 +2099,12 @@ impl<V: VectorIndex> Shibahama<V> {
         &self,
         request: &RecallRequest<'_>,
     ) -> Result<Vec<RecallCandidate>, ShibahamaError> {
-        let mut request = *request;
-        if request.significance == SignificanceConfig::default() {
-            request.significance = self.config.significance;
-        }
+        self.require_scope_context()?;
+        let (request, decision) = self.policy_recall_request(request)?;
+        let candidates = timeline(&self.store, &self.vector_index, &request)?;
+        self.record_recall_policy(&decision, &request, &candidates)?;
 
-        Ok(timeline(&self.store, &self.vector_index, &request)?)
+        Ok(candidates)
     }
 
     /// Replays timeline recall and returns an owning iterator over ranked candidates.
@@ -1573,6 +2125,7 @@ impl<V: VectorIndex> Shibahama<V> {
     ///
     /// Returns an error when the graph entity cannot be persisted.
     pub fn put_graph_entity(&self, entity: &Entity) -> Result<Entity, ShibahamaError> {
+        self.require_scope_context()?;
         self.store.put_entity(entity)?;
 
         Ok(entity.clone())
@@ -1584,6 +2137,7 @@ impl<V: VectorIndex> Shibahama<V> {
     ///
     /// Returns an error when graph state cannot be read.
     pub fn graph_entity(&self, id: EntityId) -> Result<Option<Entity>, ShibahamaError> {
+        self.require_scope_context()?;
         Ok(self.store.get_entity(id)?)
     }
 
@@ -1593,6 +2147,7 @@ impl<V: VectorIndex> Shibahama<V> {
     ///
     /// Returns an error when the graph relation cannot be persisted.
     pub fn put_graph_relation(&self, relation: &Relation) -> Result<Relation, ShibahamaError> {
+        self.require_scope_context()?;
         self.store.put_relation(relation)?;
 
         Ok(relation.clone())
@@ -1604,6 +2159,7 @@ impl<V: VectorIndex> Shibahama<V> {
     ///
     /// Returns an error when graph state cannot be read.
     pub fn graph_relation(&self, id: RelationId) -> Result<Option<Relation>, ShibahamaError> {
+        self.require_scope_context()?;
         Ok(self.store.get_relation(id)?)
     }
 
@@ -1613,6 +2169,7 @@ impl<V: VectorIndex> Shibahama<V> {
     ///
     /// Returns an error when graph state cannot be read.
     pub fn graph_snapshot(&self, as_of: OffsetDateTime) -> Result<GraphSnapshot, ShibahamaError> {
+        self.require_scope_context()?;
         Ok(self.store.graph_snapshot(as_of)?)
     }
 
@@ -1625,6 +2182,7 @@ impl<V: VectorIndex> Shibahama<V> {
         &self,
         request: &GraphTraversalRequest,
     ) -> Result<GraphTraversalResult, ShibahamaError> {
+        self.require_scope_context()?;
         Ok(self.store.traverse_graph(request)?)
     }
 
@@ -1646,6 +2204,7 @@ impl<V: VectorIndex> Shibahama<V> {
     ///
     /// Returns an error when the access event cannot be persisted.
     pub fn reinforce(&self, id: MemoryId, outcome: AccessOutcome) -> Result<bool, ShibahamaError> {
+        self.require_scope_context()?;
         Ok(self
             .store
             .record_access_with_policy(
@@ -1689,6 +2248,7 @@ impl<V: VectorIndex> Shibahama<V> {
         now: OffsetDateTime,
         policy: SignificanceConfig,
     ) -> Result<Option<WhyTrace>, ShibahamaError> {
+        self.require_scope_context()?;
         let Some(item) = self.store.get(id)? else {
             return Ok(None);
         };
@@ -1709,6 +2269,404 @@ impl<V: VectorIndex> Shibahama<V> {
             significance,
             audit_trail,
         }))
+    }
+}
+
+impl<V> Drop for ScopedShibahama<'_, V> {
+    fn drop(&mut self) {
+        self.engine.config.scope_mode = self.previous_scope_mode;
+    }
+}
+
+impl<V: VectorIndex> ScopedShibahama<'_, V> {
+    /// Returns the active repository/team scope.
+    #[must_use]
+    pub const fn scope(&self) -> &MemoryScope {
+        &self.scope
+    }
+
+    /// Writes a scope-marked snapshot containing only this context's memories and durable state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when scoped snapshot export fails.
+    pub fn snapshot(&mut self, path: impl AsRef<Path>) -> Result<(), ShibahamaError> {
+        Ok(self.engine.store.snapshot_scope(path, &self.scope)?)
+    }
+
+    /// Returns materialized memories in the active scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when scoped storage cannot be read.
+    pub fn memory_items(&mut self) -> Result<Vec<MemoryItem>, ShibahamaError> {
+        Ok(self.engine.store.memory_items_in_scope(&self.scope)?)
+    }
+
+    /// Returns inspection events visible to the active scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when scoped storage cannot be read.
+    pub fn event_records(&mut self) -> Result<Vec<EventRecord>, ShibahamaError> {
+        Ok(self.engine.store.events_in_scope(&self.scope)?)
+    }
+
+    /// Stores an entity only when its scope matches this context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the entity scope differs or storage rejects the write.
+    pub fn put_graph_entity(&mut self, entity: &Entity) -> Result<Entity, ShibahamaError> {
+        self.ensure_graph_scope(&entity.scope)?;
+        self.engine.put_graph_entity(entity)
+    }
+
+    /// Reads an entity only when it belongs to this context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph storage cannot be read.
+    pub fn graph_entity(&mut self, id: EntityId) -> Result<Option<Entity>, ShibahamaError> {
+        let entity = self.engine.graph_entity(id)?;
+        if entity
+            .as_ref()
+            .is_some_and(|entity| entity.scope != self.scope)
+        {
+            return Err(ShibahamaError::InvalidRequest(
+                "graph entity id is outside the active scope context".to_owned(),
+            ));
+        }
+
+        Ok(entity)
+    }
+
+    /// Stores a relation only when its scope matches this context and both endpoints are scoped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the relation scope differs or storage rejects the write.
+    pub fn put_graph_relation(&mut self, relation: &Relation) -> Result<Relation, ShibahamaError> {
+        self.ensure_graph_scope(&relation.scope)?;
+        self.engine.put_graph_relation(relation)
+    }
+
+    /// Reads a relation only when it belongs to this context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph storage cannot be read.
+    pub fn graph_relation(&mut self, id: RelationId) -> Result<Option<Relation>, ShibahamaError> {
+        let relation = self.engine.graph_relation(id)?;
+        if relation
+            .as_ref()
+            .is_some_and(|relation| relation.scope != self.scope)
+        {
+            return Err(ShibahamaError::InvalidRequest(
+                "graph relation id is outside the active scope context".to_owned(),
+            ));
+        }
+
+        Ok(relation)
+    }
+
+    /// Reconstructs graph state only within this context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph storage cannot be read.
+    pub fn graph_snapshot(
+        &mut self,
+        as_of: OffsetDateTime,
+    ) -> Result<GraphSnapshot, ShibahamaError> {
+        Ok(self
+            .engine
+            .store
+            .graph_snapshot_in_scope(as_of, &self.scope)?)
+    }
+
+    /// Traverses graph relations only within this context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a conflicting request scope is supplied or traversal fails.
+    pub fn traverse_graph(
+        &mut self,
+        request: &GraphTraversalRequest,
+    ) -> Result<GraphTraversalResult, ShibahamaError> {
+        if request
+            .scope
+            .as_ref()
+            .is_some_and(|scope| scope != &self.scope)
+        {
+            return Err(ShibahamaError::InvalidRequest(
+                "graph traversal scope conflicts with the active scope context".to_owned(),
+            ));
+        }
+
+        self.engine
+            .traverse_graph(&request.clone().with_scope(self.scope.clone()))
+    }
+
+    /// Writes a memory only when its scope matches this context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the event scope differs or storage rejects the write.
+    pub fn write(&mut self, event: MemoryWriteEvent) -> Result<MemoryItem, ShibahamaError> {
+        self.ensure_event_scope(&event)?;
+        self.engine.write(event)
+    }
+
+    /// Writes and indexes a memory only when its scope matches this context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the event scope differs or the write/index fails.
+    pub fn write_with_embedding(
+        &mut self,
+        event: MemoryWriteEvent,
+        embedding: WriteEmbedding<'_>,
+    ) -> Result<MemoryItem, ShibahamaError> {
+        self.ensure_event_scope(&event)?;
+        self.engine.write_with_embedding(event, embedding)
+    }
+
+    /// Recalls only memories in this scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a conflicting request scope is supplied or recall fails.
+    pub fn recall(
+        &mut self,
+        request: &RecallRequest<'_>,
+    ) -> Result<Vec<RecallCandidate>, ShibahamaError> {
+        self.engine.recall(&self.scoped_request(request)?)
+    }
+
+    /// Recalls this scope and returns the applied policy decision and budget use.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a conflicting scope is supplied or recall fails.
+    pub fn recall_with_policy_report(
+        &mut self,
+        request: &RecallRequest<'_>,
+    ) -> Result<PolicyRecallResult, ShibahamaError> {
+        self.engine
+            .recall_with_policy_report(&self.scoped_request(request)?)
+    }
+
+    /// Replays only memories in this scope at a historical instant.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a conflicting request scope is supplied or timeline recall fails.
+    pub fn timeline(
+        &mut self,
+        request: &RecallRequest<'_>,
+    ) -> Result<Vec<RecallCandidate>, ShibahamaError> {
+        self.engine.timeline(&self.scoped_request(request)?)
+    }
+
+    /// Invalidates one memory only when its id belongs to this scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the id belongs to another scope or invalidation fails.
+    pub fn invalidate(
+        &mut self,
+        id: MemoryId,
+        valid_to: OffsetDateTime,
+    ) -> Result<bool, ShibahamaError> {
+        self.ensure_memory_scope(id)?;
+        self.engine.invalidate(id, valid_to)
+    }
+
+    /// Promotes a repository-local memory in this context into one team scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the source is outside this scope or promotion fails.
+    pub fn promote_to_team(
+        &mut self,
+        source_id: MemoryId,
+        team: ScopeId,
+        actor: impl Into<String>,
+        rationale: impl Into<String>,
+        promoted_at: OffsetDateTime,
+    ) -> Result<Option<ScopePromotionRecord>, ShibahamaError> {
+        self.ensure_memory_scope(source_id)?;
+        self.engine
+            .promote_to_team(source_id, team, actor, rationale, promoted_at)
+    }
+
+    /// Records a usage outcome only when the memory belongs to this scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the id belongs to another scope or storage rejects the event.
+    pub fn reinforce(
+        &mut self,
+        id: MemoryId,
+        outcome: AccessOutcome,
+    ) -> Result<bool, ShibahamaError> {
+        self.ensure_memory_scope(id)?;
+        self.engine.reinforce(id, outcome)
+    }
+
+    /// Returns an explanation only for a memory in this scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the id belongs to another scope or explanation fails.
+    pub fn why_at(
+        &mut self,
+        id: MemoryId,
+        now: OffsetDateTime,
+    ) -> Result<Option<WhyTrace>, ShibahamaError> {
+        if self.ensure_memory_scope(id)?.is_none() {
+            return Ok(None);
+        }
+
+        let mut trace = self.engine.why_at(id, now)?;
+        if let Some(trace) = trace.as_mut() {
+            trace.audit_trail = self.engine.store.audit_trail_in_scope(id, &self.scope)?;
+            trace.tier.audit = trace.audit_trail.clone();
+        }
+
+        Ok(trace)
+    }
+
+    /// Challenges a memory only when it belongs to this scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the id belongs to another scope or the signal fails.
+    pub fn challenge_with_request(
+        &mut self,
+        id: MemoryId,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        if self.ensure_memory_scope(id)?.is_none() {
+            return Ok(None);
+        }
+
+        self.engine.challenge_with_request(id, request)
+    }
+
+    /// Affirms a memory only when it belongs to this scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the id belongs to another scope or the signal fails.
+    pub fn affirm_with_request(
+        &mut self,
+        id: MemoryId,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        if self.ensure_memory_scope(id)?.is_none() {
+            return Ok(None);
+        }
+
+        self.engine.affirm_with_request(id, request)
+    }
+
+    /// Pins a memory only when it belongs to this scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the id belongs to another scope or the signal fails.
+    pub fn pin_with_request(
+        &mut self,
+        id: MemoryId,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        if self.ensure_memory_scope(id)?.is_none() {
+            return Ok(None);
+        }
+
+        self.engine.pin_with_request(id, request)
+    }
+
+    /// Unpins a memory only when it belongs to this scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the id belongs to another scope or the signal fails.
+    pub fn unpin_with_request(
+        &mut self,
+        id: MemoryId,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanSignalOutcome>, ShibahamaError> {
+        if self.ensure_memory_scope(id)?.is_none() {
+            return Ok(None);
+        }
+
+        self.engine.unpin_with_request(id, request)
+    }
+
+    /// Corrects a memory only when it belongs to this scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the id belongs to another scope or correction fails.
+    pub fn correct_with_request(
+        &mut self,
+        id: MemoryId,
+        proposed_content: impl Into<String>,
+        request: HumanSignalRequest,
+    ) -> Result<Option<HumanCorrectionOutcome>, ShibahamaError> {
+        if self.ensure_memory_scope(id)?.is_none() {
+            return Ok(None);
+        }
+
+        self.engine
+            .correct_with_request(id, proposed_content, request)
+    }
+
+    fn ensure_event_scope(&self, event: &MemoryWriteEvent) -> Result<(), ShibahamaError> {
+        if event.scope == self.scope {
+            Ok(())
+        } else {
+            Err(ShibahamaError::InvalidRequest(
+                "memory event scope does not match the active scope context".to_owned(),
+            ))
+        }
+    }
+
+    fn ensure_graph_scope(&self, scope: &MemoryScope) -> Result<(), ShibahamaError> {
+        if *scope == self.scope {
+            Ok(())
+        } else {
+            Err(ShibahamaError::InvalidRequest(
+                "graph scope does not match the active scope context".to_owned(),
+            ))
+        }
+    }
+
+    fn ensure_memory_scope(&self, id: MemoryId) -> Result<Option<MemoryItem>, ShibahamaError> {
+        let item = self.engine.store.get(id)?;
+        if item.as_ref().is_some_and(|item| item.scope != self.scope) {
+            return Err(ShibahamaError::InvalidRequest(
+                "memory id is outside the active scope context".to_owned(),
+            ));
+        }
+
+        Ok(item)
+    }
+
+    fn scoped_request<'request>(
+        &'request self,
+        request: &RecallRequest<'request>,
+    ) -> Result<RecallRequest<'request>, ShibahamaError> {
+        if request.scope.is_some_and(|scope| scope != &self.scope) {
+            return Err(ShibahamaError::InvalidRequest(
+                "recall request scope conflicts with the active scope context".to_owned(),
+            ));
+        }
+
+        Ok((*request).with_scope(&self.scope))
     }
 }
 
@@ -2190,14 +3148,39 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ConsolidationAction, HumanSignalAction, Provenance, SourceKind};
+    use crate::model::{
+        ConsolidationAction, HumanSignalAction, MemoryScope, Provenance, ScopeId, SourceKind,
+    };
     #[cfg(feature = "tokio")]
     use crate::read_safety::DefaultSanitizingGateway;
     use crate::retrieval::{RecallCandidateCurrency, RecallRequest};
     use crate::storage::MemoryEvent;
     use crate::vector::{HnswVectorIndex, VectorIndex, VectorIndexError, VectorSearchResult};
+    use std::sync::{Arc, Mutex};
     use tempfile::NamedTempFile;
     use time::{Duration, OffsetDateTime};
+
+    type ScopeAuthorizationLog = (String, MemoryScope, MemoryScope, ScopeAuthorizationAction);
+
+    #[derive(Clone, Default)]
+    struct RecordingDenyScopePolicy {
+        requests: Arc<Mutex<Vec<ScopeAuthorizationLog>>>,
+    }
+
+    impl ScopeAuthorizationPolicy for RecordingDenyScopePolicy {
+        fn authorize(&self, request: ScopeAuthorizationRequest<'_>) -> ScopeAuthorizationDecision {
+            self.requests
+                .lock()
+                .expect("policy request lock should be healthy")
+                .push((
+                    request.principal.to_owned(),
+                    request.source_scope.clone(),
+                    request.target_scope.clone(),
+                    request.action,
+                ));
+            ScopeAuthorizationDecision::Deny
+        }
+    }
 
     struct StaticRevalidator {
         event: MemoryWriteEvent,
@@ -2343,6 +3326,558 @@ mod tests {
         assert!((why.significance.base_score - why.item.base_significance).abs() < f64::EPSILON);
         assert_eq!(why.audit_trail.len(), why.tier.audit.len());
         assert!(why.audit_trail.len() >= 2);
+    }
+
+    #[test]
+    fn recall_policy_report_clamps_candidates_tokens_and_unsafe_opt_ins() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let config = ShibahamaConfig {
+            recall_policy: RecallPolicy {
+                max_candidates: 1,
+                max_context_tokens: 2,
+                ..RecallPolicy::default()
+            },
+            ..ShibahamaConfig::default()
+        };
+        let mut shibahama =
+            Shibahama::open_with_config(file.path(), HnswVectorIndex::with_capacity(2, 8), config)
+                .expect("api should open");
+        write_api_endpoint_memory(
+            &mut shibahama,
+            api_endpoint_event("first compact", OffsetDateTime::UNIX_EPOCH),
+        );
+        write_api_endpoint_memory(
+            &mut shibahama,
+            api_endpoint_event("second compact", OffsetDateTime::UNIX_EPOCH),
+        );
+        let query = [0.0, 0.0];
+        let request = RecallRequest::new(&query, 10, OffsetDateTime::UNIX_EPOCH)
+            .include_cold()
+            .include_instructions()
+            .with_max_context_tokens(100);
+
+        let report = shibahama
+            .recall_with_policy_report(&request)
+            .expect("policy recall should work");
+
+        assert_eq!(report.decision.requested_candidates, 10);
+        assert_eq!(report.decision.effective_candidates, 1);
+        assert_eq!(report.decision.effective_context_tokens, 2);
+        assert!(!report.decision.include_cold);
+        assert!(!report.decision.include_instructions);
+        assert_eq!(report.candidates.len(), 1);
+        assert_eq!(report.context_tokens_used, 2);
+        assert!(
+            shibahama
+                .event_records()
+                .expect("events should read")
+                .iter()
+                .any(|event| matches!(
+                    event.event,
+                    MemoryEvent::PolicyDecisionRecorded { ref record }
+                        if record.operation == crate::policy::PolicyAuditOperation::Recall
+                            && record.context_tokens_used == Some(2)
+                ))
+        );
+    }
+
+    #[test]
+    fn capture_policy_is_enforced_at_core_write_boundaries() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let config = ShibahamaConfig {
+            capture_policy: CapturePolicy {
+                mode: crate::policy::CaptureMode::Automatic,
+                actors: crate::policy::ActorClassPolicy {
+                    automation: true,
+                    ..crate::policy::ActorClassPolicy::default()
+                },
+                minimum_confidence_percent: 80,
+                ..CapturePolicy::default()
+            },
+            ..ShibahamaConfig::default()
+        };
+        let shibahama =
+            Shibahama::open_with_config(file.path(), HnswVectorIndex::with_capacity(2, 8), config)
+                .expect("api should open");
+        let event = api_endpoint_event("policy-boundary", OffsetDateTime::UNIX_EPOCH);
+        let denied = shibahama
+            .write_with_capture_policy(
+                event.clone(),
+                CapturePolicyRequest {
+                    actor: crate::policy::PolicyActorClass::Automation,
+                    intent: crate::policy::CaptureIntent::Automatic,
+                    confidence_percent: 79,
+                },
+            )
+            .expect_err("low-confidence automatic capture must be denied");
+
+        assert!(matches!(
+            denied,
+            ShibahamaError::PolicyDenied(PolicyError::CaptureDenied {
+                reason: crate::policy::CaptureDecisionReason::ConfidenceTooLow
+            })
+        ));
+        assert!(
+            shibahama
+                .write_with_capture_policy(
+                    event,
+                    CapturePolicyRequest {
+                        actor: crate::policy::PolicyActorClass::Automation,
+                        intent: crate::policy::CaptureIntent::Automatic,
+                        confidence_percent: 80,
+                    },
+                )
+                .is_ok()
+        );
+        assert_eq!(
+            shibahama
+                .memory_items()
+                .expect("memory items should read")
+                .len(),
+            1
+        );
+        let audits = shibahama
+            .event_records()
+            .expect("events should read")
+            .into_iter()
+            .filter_map(|event| match event.event {
+                MemoryEvent::PolicyDecisionRecorded { record } => Some(record),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(audits.len(), 2);
+        assert_eq!(audits[0].disposition, PolicyAuditDisposition::Denied);
+        assert_eq!(
+            audits[0].capture_reason,
+            Some(crate::policy::CaptureDecisionReason::ConfidenceTooLow)
+        );
+        assert_eq!(audits[1].disposition, PolicyAuditDisposition::Allowed);
+        assert!(
+            audits
+                .iter()
+                .all(|audit| audit.source_kind == Some(SourceKind::File))
+        );
+    }
+
+    #[test]
+    fn policy_simulation_matches_live_decisions_without_mutation() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let scope = MemoryScope::default();
+        let before_events = shibahama.event_records().expect("events should read");
+        let before_items = shibahama.memory_items().expect("items should read");
+        let capture_request = CapturePolicyRequest {
+            actor: crate::policy::PolicyActorClass::Automation,
+            intent: crate::policy::CaptureIntent::Automatic,
+            confidence_percent: 100,
+        };
+
+        let capture =
+            shibahama.simulate_capture_policy(SourceKind::Agent, &scope, capture_request);
+        let recall = shibahama.simulate_recall_policy(20, Some(5_000), true, true, Some(&scope));
+
+        assert_eq!(
+            capture.decision,
+            shibahama
+                .config()
+                .capture_policy
+                .evaluate(capture_request, SourceKind::Agent, &scope)
+        );
+        assert_eq!(
+            recall.decision,
+            shibahama
+                .config()
+                .recall_policy
+                .decide(20, Some(5_000), true, true)
+        );
+        assert!(recall.scope_allowed);
+        assert_eq!(
+            shibahama.event_records().expect("events should read"),
+            before_events
+        );
+        assert_eq!(
+            shibahama.memory_items().expect("items should read"),
+            before_items
+        );
+    }
+
+    #[test]
+    fn scoped_facade_rejects_cross_scope_ids_and_conflicting_writes() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let mut shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let scope_a =
+            MemoryScope::repository(ScopeId::new("repo-a").expect("scope should validate"));
+        let scope_b =
+            MemoryScope::repository(ScopeId::new("repo-b").expect("scope should validate"));
+        shibahama.set_config(ShibahamaConfig {
+            scope_mode: ScopeMode::RequireExplicit,
+            ..ShibahamaConfig::default()
+        });
+        assert!(matches!(
+            shibahama.write(MemoryWriteEvent::new(
+                "unscoped memory",
+                Provenance::new(SourceKind::User, None, "api-test"),
+                OffsetDateTime::UNIX_EPOCH,
+                OffsetDateTime::UNIX_EPOCH,
+            )),
+            Err(ShibahamaError::InvalidRequest(message)) if message.contains("explicit scope")
+        ));
+        let event = MemoryWriteEvent::new(
+            "scoped facade memory",
+            Provenance::new(SourceKind::User, None, "api-test"),
+            OffsetDateTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
+        )
+        .with_scope(scope_a.clone());
+        let item = shibahama
+            .scoped(scope_a.clone())
+            .expect("scope should open")
+            .write_with_embedding(
+                event,
+                WriteEmbedding {
+                    vector: &[0.0, 0.0],
+                    index_name: "api-test",
+                    model: "embedding-model",
+                    model_version: "v1",
+                },
+            )
+            .expect("scoped write should work");
+
+        let query = [0.0, 0.0];
+        let recalled = shibahama
+            .scoped(scope_a.clone())
+            .expect("scope should open")
+            .recall(&RecallRequest::new(&query, 1, OffsetDateTime::UNIX_EPOCH))
+            .expect("scoped recall should work");
+        assert_eq!(recalled[0].id, item.id);
+
+        let mut other = shibahama.scoped(scope_b).expect("scope should open");
+        assert!(matches!(
+            other.why_at(item.id, OffsetDateTime::UNIX_EPOCH),
+            Err(ShibahamaError::InvalidRequest(message)) if message.contains("outside")
+        ));
+        assert!(matches!(
+            other.write(MemoryWriteEvent::new(
+                "wrong scope",
+                Provenance::new(SourceKind::User, None, "api-test"),
+                OffsetDateTime::UNIX_EPOCH,
+                OffsetDateTime::UNIX_EPOCH,
+            )),
+            Err(ShibahamaError::InvalidRequest(message)) if message.contains("does not match")
+        ));
+    }
+
+    #[test]
+    fn team_promotion_preserves_local_source_provenance_and_credence_ordering() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let mut shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let local_scope =
+            MemoryScope::repository(ScopeId::new("promotion-repo").expect("scope should validate"));
+        let team = ScopeId::new("promotion-team").expect("team should validate");
+        let team_scope = MemoryScope::team(local_scope.repository.clone(), team.clone());
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let mut local_event = MemoryWriteEvent::new(
+            "low credence local memory",
+            Provenance::new(
+                SourceKind::User,
+                Some("source://local".to_owned()),
+                "api-test",
+            ),
+            now,
+            now,
+        )
+        .with_scope(local_scope.clone());
+        local_event.credence = Some(CredenceTier::Unverified);
+        local_event.tier = Tier::Warm;
+        let source = shibahama
+            .scoped(local_scope.clone())
+            .expect("local scope should open")
+            .write_with_embedding(
+                local_event,
+                WriteEmbedding {
+                    vector: &[0.0, 0.0],
+                    index_name: "promotion-test",
+                    model: "embedding-model",
+                    model_version: "v1",
+                },
+            )
+            .expect("local write should work");
+        shibahama.set_scope_authorization_policy(AllowScopePromotionPolicy);
+        let promoted = shibahama
+            .scoped(local_scope.clone())
+            .expect("local scope should open")
+            .promote_to_team(
+                source.id,
+                team,
+                "maintainer",
+                "shared build convention",
+                now + Duration::seconds(1),
+            )
+            .expect("promotion should work")
+            .expect("source should exist");
+
+        assert_scope_promotion(&shibahama, &source, &promoted, &local_scope, &team_scope);
+
+        let mut authoritative = MemoryWriteEvent::new(
+            "authoritative team memory",
+            Provenance::new(
+                SourceKind::File,
+                Some("source://team".to_owned()),
+                "api-test",
+            ),
+            now,
+            now + Duration::seconds(1),
+        )
+        .with_scope(team_scope.clone());
+        authoritative.credence = Some(CredenceTier::FirmAuthoritative);
+        authoritative.tier = Tier::Warm;
+        let authoritative = shibahama
+            .scoped(team_scope.clone())
+            .expect("team scope should open")
+            .write_with_embedding(
+                authoritative,
+                WriteEmbedding {
+                    vector: &[0.0, 0.0],
+                    index_name: "promotion-test",
+                    model: "embedding-model",
+                    model_version: "v1",
+                },
+            )
+            .expect("team write should work");
+        let query = [0.0, 0.0];
+        let recalled = shibahama
+            .scoped(team_scope)
+            .expect("team scope should open")
+            .recall(&RecallRequest::new(&query, 2, now + Duration::seconds(2)).include_cold())
+            .expect("team recall should work");
+
+        assert_eq!(recalled[0].id, authoritative.id, "{recalled:#?}");
+        assert!(
+            recalled
+                .iter()
+                .any(|candidate| candidate.id == promoted.promoted.id)
+        );
+    }
+
+    fn assert_scope_promotion(
+        engine: &Shibahama<HnswVectorIndex>,
+        source: &MemoryItem,
+        promotion: &ScopePromotionRecord,
+        local_scope: &MemoryScope,
+        team_scope: &MemoryScope,
+    ) {
+        assert_eq!(source.scope, *local_scope);
+        assert_eq!(
+            engine
+                .store()
+                .get(source.id)
+                .expect("source should read")
+                .expect("source should remain stored"),
+            *source
+        );
+        assert_eq!(promotion.promoted.scope, *team_scope);
+        assert_eq!(promotion.promoted.provenance, source.provenance);
+        assert_eq!(
+            promotion
+                .promoted
+                .promotion
+                .as_ref()
+                .map(|value| value.source_memory_id),
+            Some(source.id)
+        );
+        assert_eq!(
+            promotion
+                .promoted
+                .promotion
+                .as_ref()
+                .map(|value| (value.promoted_by.as_str(), value.rationale.as_str())),
+            Some(("maintainer", "shared build convention"))
+        );
+        assert!(matches!(
+            promotion.promotion.event,
+            MemoryEvent::MemoryScopePromoted { source_id, promoted_id, .. }
+                if source_id == source.id && promoted_id == promotion.promoted.id
+        ));
+    }
+
+    #[test]
+    fn scope_promotion_policy_is_fail_closed_and_audits_without_memory_content() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let mut engine = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let source_scope = MemoryScope::repository(
+            ScopeId::new("authorization-repo").expect("scope should validate"),
+        );
+        let team = ScopeId::new("authorization-team").expect("scope should validate");
+        let target_scope = MemoryScope::team(source_scope.repository.clone(), team.clone());
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let source = engine
+            .scoped(source_scope.clone())
+            .expect("scope should open")
+            .write(
+                MemoryWriteEvent::new(
+                    "do not expose this secret memory",
+                    Provenance::new(SourceKind::User, None, "api-test"),
+                    now,
+                    now,
+                )
+                .with_scope(source_scope.clone()),
+            )
+            .expect("source should write");
+        let policy = RecordingDenyScopePolicy::default();
+        let requests = Arc::clone(&policy.requests);
+        engine.set_scope_authorization_policy(policy);
+
+        assert!(matches!(
+            engine.promote_to_team(source.id, team.clone(), "principal-1", "share", now),
+            Err(ShibahamaError::AuthorizationDenied)
+        ));
+        assert_eq!(
+            requests
+                .lock()
+                .expect("policy request lock should be healthy")
+                .as_slice(),
+            [(
+                "principal-1".to_owned(),
+                source_scope.clone(),
+                target_scope.clone(),
+                ScopeAuthorizationAction::PromoteToTeam,
+            )]
+        );
+
+        let denial = engine
+            .event_records()
+            .expect("events should read")
+            .pop()
+            .expect("denial should be recorded");
+        let denial_json = serde_json::to_string(&denial).expect("denial should serialize");
+        assert!(!denial_json.contains(&source.id.to_string()));
+        assert!(!denial_json.contains("do not expose this secret memory"));
+        assert!(matches!(
+            denial.event,
+            MemoryEvent::ScopeAuthorizationDenied {
+                principal,
+                source_scope: recorded_source,
+                target_scope: recorded_target,
+                action: ScopeAuthorizationAction::PromoteToTeam,
+                ..
+            } if principal == "principal-1"
+                && recorded_source == source_scope
+                && recorded_target == target_scope
+        ));
+
+        engine.set_scope_authorization_policy(AllowScopePromotionPolicy);
+        assert!(
+            engine
+                .promote_to_team(source.id, team, "principal-1", "share", now)
+                .expect("explicit local policy should allow promotion")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn scoped_inspection_projects_events_audit_and_snapshot_without_cross_scope_payloads() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let snapshot = NamedTempFile::new().expect("snapshot file should be created");
+        let mut engine = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let source_scope = MemoryScope::repository(
+            ScopeId::new("inspection-repo").expect("scope should validate"),
+        );
+        let team = ScopeId::new("inspection-team").expect("scope should validate");
+        let team_scope = MemoryScope::team(source_scope.repository.clone(), team.clone());
+        let other_scope = MemoryScope::repository(
+            ScopeId::new("inspection-other").expect("scope should validate"),
+        );
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let source = write_scoped_memory(
+            &mut engine,
+            source_scope.clone(),
+            "source-only inspection payload",
+            now,
+        );
+        write_scoped_memory(
+            &mut engine,
+            source_scope.clone(),
+            "private source inspection payload",
+            now,
+        );
+        let other = write_scoped_memory(
+            &mut engine,
+            other_scope.clone(),
+            "other-only inspection payload",
+            now,
+        );
+        engine.set_scope_authorization_policy(AllowScopePromotionPolicy);
+        let promoted = engine
+            .scoped(source_scope)
+            .expect("scope should open")
+            .promote_to_team(source.id, team, "maintainer", "share", now)
+            .expect("promotion should work")
+            .expect("source should exist");
+
+        let mut team_context = engine
+            .scoped(team_scope.clone())
+            .expect("scope should open");
+        assert_eq!(
+            team_context
+                .memory_items()
+                .expect("items should read")
+                .len(),
+            1
+        );
+        assert!(matches!(
+            team_context.event_records().expect("events should read").as_slice(),
+            [
+                EventRecord { event: MemoryEvent::MemoryWritten { .. }, .. },
+                EventRecord { event: MemoryEvent::MemoryScopePromoted { source_id, promoted_id, .. }, .. },
+            ] if *source_id == source.id && *promoted_id == promoted.promoted.id
+        ));
+        assert!(
+            team_context
+                .why_at(promoted.promoted.id, now)
+                .expect("why should read")
+                .is_some()
+        );
+        team_context
+            .snapshot(snapshot.path())
+            .expect("snapshot should write");
+        drop(team_context);
+
+        let snapshot_json = std::fs::read_to_string(snapshot.path()).expect("snapshot should read");
+        assert!(snapshot_json.contains(&source.id.to_string()));
+        assert!(!snapshot_json.contains("private source inspection payload"));
+        let mut other_context = engine.scoped(other_scope).expect("scope should open");
+        assert_eq!(
+            other_context.memory_items().expect("items should read")[0].id,
+            other.id
+        );
+        assert!(other_context.why_at(source.id, now).is_err());
+    }
+
+    fn write_scoped_memory(
+        engine: &mut Shibahama<HnswVectorIndex>,
+        scope: MemoryScope,
+        content: &str,
+        now: OffsetDateTime,
+    ) -> MemoryItem {
+        engine
+            .scoped(scope.clone())
+            .expect("scope should open")
+            .write(
+                MemoryWriteEvent::new(
+                    content,
+                    Provenance::new(SourceKind::User, None, "api-test"),
+                    now,
+                    now,
+                )
+                .with_scope(scope),
+            )
+            .expect("memory should write")
     }
 
     #[test]
@@ -3040,6 +4575,15 @@ mod tests {
         assert_eq!(error.action(), ShibahamaErrorKind::Vector.action());
         assert_eq!(error.severity(), ShibahamaErrorSeverity::Fatal);
         assert!(!error.retryable());
+        assert_eq!(
+            error.metadata(),
+            ShibahamaErrorMetadata {
+                code: "SHIBA_VECTOR",
+                severity: ShibahamaErrorSeverity::Fatal,
+                retryable: false,
+                detail: "vector index operation failed",
+            }
+        );
         assert!(error.to_string().contains("[SHIBA_VECTOR]"));
         assert!(
             error

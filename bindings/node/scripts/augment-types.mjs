@@ -19,6 +19,7 @@ export interface ShibahamaError extends Error {
   code: string
   severity: "recoverable" | "fatal"
   retryable: boolean
+  detail: string
 }
 
 export type EmbedFunction = (text: string) => Array<number> | Promise<Array<number>>

@@ -24,6 +24,9 @@ fn python_wrapper_round_trips_write_recall_timeline_and_invalidate() {
             "default",
             "test",
             "v1",
+            "default",
+            None,
+            "repository",
         )
         .expect("write should succeed");
 

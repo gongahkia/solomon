@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 /// Current schema version for persisted memory items.
-pub const CURRENT_MEMORY_SCHEMA_VERSION: u16 = 1;
+pub const CURRENT_MEMORY_SCHEMA_VERSION: u16 = 3;
 
 /// Stable identifier for a persisted memory item.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -192,6 +192,14 @@ pub enum ScopeVisibility {
     Team,
 }
 
+/// Permission-gated operation that can cross a memory scope boundary.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScopeAuthorizationAction {
+    /// Copy an approved repository-local memory into a team scope.
+    PromoteToTeam,
+}
+
 /// Repository ownership and optional team-sharing boundary for one memory.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MemoryScope {
@@ -235,6 +243,12 @@ impl MemoryScope {
             (ScopeVisibility::Repository, true) => Err(ScopeError::RepositoryScopeHasTeam),
             (ScopeVisibility::Team, false) => Err(ScopeError::TeamScopeMissingTeam),
         }
+    }
+}
+
+impl Default for MemoryScope {
+    fn default() -> Self {
+        Self::repository(ScopeId("default".to_owned()))
     }
 }
 
@@ -505,6 +519,9 @@ pub struct TemporalBounds {
 pub struct Entity {
     /// Stable entity id.
     pub id: EntityId,
+    /// Repository/team visibility boundary for this graph node.
+    #[serde(default)]
+    pub scope: MemoryScope,
     /// Caller-defined entity type, such as `Person`, `Project`, or `Claim`.
     pub entity_type: String,
     /// Canonical display label.
@@ -528,12 +545,20 @@ impl Entity {
     ) -> Self {
         Self {
             id: EntityId::new_v7(),
+            scope: MemoryScope::default(),
             entity_type: entity_type.into(),
             label: label.into(),
             stable_key: stable_key.into(),
             attributes: BTreeMap::new(),
             timestamps,
         }
+    }
+
+    /// Assigns a repository/team visibility boundary.
+    #[must_use]
+    pub fn with_scope(mut self, scope: MemoryScope) -> Self {
+        self.scope = scope;
+        self
     }
 }
 
@@ -542,6 +567,9 @@ impl Entity {
 pub struct Relation {
     /// Stable relation id.
     pub id: RelationId,
+    /// Repository/team visibility boundary for this graph edge.
+    #[serde(default)]
+    pub scope: MemoryScope,
     /// Caller-defined relation type, such as `owns`, `contradicts`, or `supersedes`.
     pub relation_type: String,
     /// Source entity id.
@@ -570,6 +598,7 @@ impl Relation {
     ) -> Self {
         Self {
             id: RelationId::new_v7(),
+            scope: MemoryScope::default(),
             relation_type: relation_type.into(),
             from_entity,
             to_entity,
@@ -578,6 +607,13 @@ impl Relation {
             attributes: BTreeMap::new(),
             timestamps,
         }
+    }
+
+    /// Assigns a repository/team visibility boundary.
+    #[must_use]
+    pub fn with_scope(mut self, scope: MemoryScope) -> Self {
+        self.scope = scope;
+        self
     }
 }
 
@@ -752,6 +788,19 @@ pub struct ConsolidationRef {
     pub resummarization_depth: u16,
 }
 
+/// Immutable linkage from a team-shared memory to its repository-local source.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ScopePromotionRef {
+    /// Repository-local source memory retained without mutation.
+    pub source_memory_id: MemoryId,
+    /// Human-readable approval rationale.
+    pub rationale: String,
+    /// Principal that approved the promotion.
+    pub promoted_by: String,
+    /// Approval timestamp.
+    pub promoted_at: OffsetDateTime,
+}
+
 /// Durable action type emitted by an offline consolidation pass.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ConsolidationAction {
@@ -846,6 +895,9 @@ pub struct ConsolidationWhy {
 pub struct MemoryItem {
     /// Persisted schema version for forward migration.
     pub schema_version: u16,
+    /// Repository/team visibility boundary for this memory.
+    #[serde(default)]
+    pub scope: MemoryScope,
     /// Stable time-ordered item id.
     pub id: MemoryId,
     /// Stored memory content.
@@ -858,6 +910,9 @@ pub struct MemoryItem {
     /// Consolidation lineage, when this item is an auto-generated summary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub consolidation: Option<ConsolidationRef>,
+    /// Source linkage when this item was promoted into a team scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promotion: Option<ScopePromotionRef>,
     /// Optional reference to the associated vector embedding.
     pub embedding_ref: Option<EmbeddingRef>,
     /// Provenance for the observation that produced this memory version.
@@ -1146,11 +1201,13 @@ mod tests {
     fn memory_item_carries_core_representation_fields() {
         let item = MemoryItem {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: MemoryScope::default(),
             id: MemoryId::new_v7(),
             content: "Use the Rust core as the source of truth.".to_owned(),
             kind: MemoryKind::Fact,
             compaction: None,
             consolidation: None,
+            promotion: None,
             embedding_ref: Some(EmbeddingRef {
                 index: "default".to_owned(),
                 vector_id: "vec-1".to_owned(),
@@ -1204,11 +1261,13 @@ mod tests {
     fn memory_item_clamps_proposed_tier_to_credence_floor() {
         let item = MemoryItem {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: MemoryScope::default(),
             id: MemoryId::new_v7(),
             content: "Do not reintroduce the rejected cache design.".to_owned(),
             kind: MemoryKind::Instruction,
             compaction: None,
             consolidation: None,
+            promotion: None,
             embedding_ref: None,
             provenance: Provenance::new(SourceKind::User, None, "unit-test"),
             timestamps: TemporalBounds::open_from(

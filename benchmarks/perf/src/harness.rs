@@ -420,6 +420,7 @@ fn snapshot_for_range(start_index: usize, count: usize) -> (StoreSnapshot, Vec<M
         });
         embeddings.push(StoredEmbedding {
             memory_id: item.id,
+            scope: item.scope.clone(),
             vector: generated.vector,
             index_name: INDEX_NAME.to_owned(),
             model: EMBEDDING_MODEL.to_owned(),
@@ -432,6 +433,7 @@ fn snapshot_for_range(start_index: usize, count: usize) -> (StoreSnapshot, Vec<M
     (
         StoreSnapshot {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: None,
             events,
             materialized_items,
             embeddings,

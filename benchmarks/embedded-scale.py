@@ -51,34 +51,10 @@ def main() -> int:
     validate_args(args)
 
     baseline_rss = current_rss_bytes()
-    with tempfile.TemporaryDirectory() as directory:
-        path = Path(directory) / "shibahama.redb"
-        started = time.perf_counter()
-        engine = shibahama.Shibahama(str(path), args.dimensions, capacity=args.items)
-        seed_store(engine, args.items, args.dimensions)
-        ingest_ms = elapsed_ms(started)
-        store_bytes = database_bytes(path.parent)
-
-        del engine
-        gc.collect()
-        started = time.perf_counter()
-        engine = shibahama.Shibahama(str(path), args.dimensions, capacity=args.items)
-        recovery_ms = elapsed_ms(started)
-
-        vectors = [
-            embed_text(query_text(index), args.dimensions)
-            for index in range(args.warmup + args.queries)
-        ]
-        for vector in vectors[: args.warmup]:
-            engine.recall(vector, args.top_k, now_unix=args.items + 1, include_cold=True)
-        latencies = []
-        for vector in vectors[args.warmup :]:
-            started = time.perf_counter()
-            engine.recall(vector, args.top_k, now_unix=args.items + 1, include_cold=True)
-            latencies.append(elapsed_ms(started))
-        after_rss = current_rss_bytes()
-
-    result = summarize(args, ingest_ms, recovery_ms, latencies, baseline_rss, after_rss, store_bytes)
+    try:
+        result = measure(args, baseline_rss)
+    except Exception as error:
+        result = failure_result(args, error)
     payload = json.dumps(result, indent=2, sort_keys=True)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -115,6 +91,45 @@ def seed_store(engine, items: int, dimensions: int) -> None:
         )
 
 
+def measure(args: argparse.Namespace, baseline_rss: int) -> dict[str, object]:
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "shibahama.redb"
+        started = time.perf_counter()
+        engine = shibahama.Shibahama(str(path), args.dimensions, capacity=args.items)
+        seed_store(engine, args.items, args.dimensions)
+        ingest_ms = elapsed_ms(started)
+        store_bytes = database_bytes(path.parent)
+
+        del engine
+        gc.collect()
+        started = time.perf_counter()
+        engine = shibahama.Shibahama(str(path), args.dimensions, capacity=args.items)
+        recovery_ms = elapsed_ms(started)
+
+        vectors = [
+            embed_text(query_text(index), args.dimensions)
+            for index in range(args.warmup + args.queries)
+        ]
+        for vector in vectors[: args.warmup]:
+            engine.recall(vector, args.top_k, now_unix=args.items + 1, include_cold=True)
+        latencies = []
+        for vector in vectors[args.warmup :]:
+            started = time.perf_counter()
+            engine.recall(vector, args.top_k, now_unix=args.items + 1, include_cold=True)
+            latencies.append(elapsed_ms(started))
+        after_rss = current_rss_bytes()
+
+    return summarize(
+        args,
+        ingest_ms,
+        recovery_ms,
+        latencies,
+        baseline_rss,
+        after_rss,
+        store_bytes,
+    )
+
+
 def query_text(index: int) -> str:
     return f"Who owns repo-{index % 128} route-{(index * 11) % 37} decision-{(index * 17) % 251}?"
 
@@ -144,6 +159,7 @@ def summarize(
         "recall_p95_ms": p95,
         "rss_delta_mib": rss_delta_mib,
         "store_mib": store_mib,
+        "failures": [],
         "budgets": {
             "recall_p95_ms": args.budget_p95_ms,
             "recovery_ms": args.budget_recovery_ms,
@@ -154,6 +170,31 @@ def summarize(
         and recovery_ms <= args.budget_recovery_ms
         and rss_delta_mib <= args.budget_rss_delta_mib
         and store_mib <= args.budget_store_mib,
+    }
+
+
+def failure_result(args: argparse.Namespace, error: Exception) -> dict[str, object]:
+    return {
+        "benchmark": "embedded-scale",
+        "items": args.items,
+        "queries": args.queries,
+        "warmup": args.warmup,
+        "dimensions": args.dimensions,
+        "top_k": args.top_k,
+        "ingest_ms": None,
+        "recovery_ms": None,
+        "recall_p50_ms": None,
+        "recall_p95_ms": None,
+        "rss_delta_mib": None,
+        "store_mib": None,
+        "failures": [{"stage": "measurement", "error": type(error).__name__}],
+        "budgets": {
+            "recall_p95_ms": args.budget_p95_ms,
+            "recovery_ms": args.budget_recovery_ms,
+            "rss_delta_mib": args.budget_rss_delta_mib,
+            "store_mib": args.budget_store_mib,
+        },
+        "budget_passed": False,
     }
 
 

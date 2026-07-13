@@ -39,6 +39,17 @@ def main() -> int:
         payload = load_json(path)
         require(payload.get("schema_version") == fixture["schema_version"], f"{fixture_id}: schema mismatch")
         require(payload.get("contract") == manifest["contract"], f"{fixture_id}: contract mismatch")
+        if "degraded_recall" in operations:
+            degraded_recalls = payload.get("degraded_recalls")
+            require(
+                isinstance(degraded_recalls, list) and degraded_recalls,
+                f"{fixture_id}: missing degraded_recalls",
+            )
+            for query in degraded_recalls:
+                require(isinstance(query, dict), f"{fixture_id}: invalid degraded recall")
+                require_string(query, "name")
+                require(isinstance(query.get("vector"), list), f"{fixture_id}: degraded recall vector")
+                require(isinstance(query.get("top_k"), int), f"{fixture_id}: degraded recall top_k")
 
     require(fixture_ids, "fixtures must not be empty")
     print(f"contract fixtures valid: {', '.join(sorted(fixture_ids))}")

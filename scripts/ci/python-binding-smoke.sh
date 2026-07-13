@@ -40,11 +40,23 @@ assert (Path("bindings/python/python/shibahama/py.typed")).is_file()
 with tempfile.NamedTemporaryFile() as invalid_db:
     invalid_engine = shibahama.Shibahama(invalid_db.name, 2)
     try:
+        invalid_engine.write("invalid vector", vector=[0.0])
+    except shibahama.ShibahamaError as error:
+        assert error.code == "SHIBA_VECTOR"
+        assert error.severity == "fatal"
+        assert error.retryable is False
+        assert error.detail == "vector index operation failed"
+        assert str(error) == error.detail
+    else:
+        raise AssertionError("invalid write should raise ShibahamaError")
+    try:
         invalid_engine.recall([0.0], 1, now_unix=0)
     except shibahama.ShibahamaError as error:
         assert error.code == "SHIBA_VECTOR"
         assert error.severity == "fatal"
         assert error.retryable is False
+        assert error.detail == "vector index operation failed"
+        assert str(error) == error.detail
     else:
         raise AssertionError("invalid vector should raise ShibahamaError")
 
@@ -57,6 +69,9 @@ with tempfile.NamedTemporaryFile() as db:
         source_ref="smoke",
         valid_from_unix=0,
         ingested_at_unix=0,
+        scope_repository="repo-smoke",
+        scope_team="team-smoke",
+        scope_visibility="team",
     )
     overflow_item = engine.write(
         "Python binding overflow memory",
@@ -67,6 +82,7 @@ with tempfile.NamedTemporaryFile() as db:
         ingested_at_unix=0,
     )
     recalled = engine.recall([0.0, 0.0], 1, now_unix=0)
+    degraded = engine.recall_with_degradation([0.0, 0.0], 1, now_unix=0)
     budgeted = engine.recall([0.0, 0.0], 2, now_unix=0, max_context_tokens=3)
     graph_expanded = engine.recall(
         [0.0, 0.0],
@@ -80,7 +96,12 @@ with tempfile.NamedTemporaryFile() as db:
     why = engine.why(item.id, now_unix=0)
 
     assert item.content == "Python binding memory"
+    assert item.scope.repository == "repo-smoke"
+    assert item.scope.team == "team-smoke"
+    assert item.scope.visibility == "team"
     assert recalled[0].id == item.id
+    assert degraded.candidates[0].id == item.id
+    assert degraded.unavailable_stages == []
     assert [candidate.id for candidate in budgeted] == [item.id]
     assert graph_expanded[0].id == overflow_item.id
     assert next(streamed).id == item.id

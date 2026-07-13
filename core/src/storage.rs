@@ -9,14 +9,16 @@ use crate::encryption::{EncryptionAtRest, EncryptionError, NoopEncryption};
 use crate::model::{
     AccessEvent, AccessOutcome, CURRENT_MEMORY_SCHEMA_VERSION, CompactionRef, ConsolidationAction,
     ConsolidationWhy, CredenceTier, EmbeddingRef, Entity, EntityId, HumanSignal, HumanSignalAction,
-    MemoryId, MemoryItem, MemoryKind, Provenance, Relation, RelationId, SourceKind, TemporalBounds,
-    Tier,
+    MemoryId, MemoryItem, MemoryKind, MemoryScope, Provenance, Relation, RelationId,
+    ScopeAuthorizationAction, ScopePromotionRef, ScopeVisibility, SourceKind, TemporalBounds, Tier,
 };
+use crate::policy::PolicyAuditRecord;
 use crate::significance::{SignificanceBreakdown, SignificanceConfig, SignificanceFunction};
 use crate::vector::{VectorIndex, VectorIndexError};
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use redb::{
-    Database, Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition,
+    Database, Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata, Table,
+    TableDefinition,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -29,6 +31,8 @@ use time::OffsetDateTime;
 
 const EVENT_LOG_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("event_log");
 const MEMORY_ITEMS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("memory_items");
+const MEMORY_SCOPE_INDEX_TABLE: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("memory_scope_index");
 const EMBEDDINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("embeddings");
 const COLD_CONTENT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("cold_content");
 const GRAPH_ENTITIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("graph_entities");
@@ -39,6 +43,7 @@ const LZ4_SIZE_PREPENDED: &str = "lz4-size-prepended";
 enum StorageTableName {
     EventLog,
     MemoryItems,
+    MemoryScopeIndex,
     Embeddings,
     ColdContent,
     GraphEntities,
@@ -50,6 +55,7 @@ impl StorageTableName {
         match self {
             Self::EventLog => "event_log",
             Self::MemoryItems => "memory_items",
+            Self::MemoryScopeIndex => "memory_scope_index",
             Self::Embeddings => "embeddings",
             Self::ColdContent => "cold_content",
             Self::GraphEntities => "graph_entities",
@@ -83,7 +89,7 @@ pub enum StorageError {
     #[error("storage invariant violated: {0}")]
     InvariantViolation(String),
     /// A persisted record uses an unsupported schema version.
-    #[error("schema version mismatch in {record}: expected v{expected}, found v{found}")]
+    #[error("unsupported store format in {record}: expected schema v{expected}, found v{found}")]
     SchemaVersionMismatch {
         /// Persisted record label.
         record: String,
@@ -97,6 +103,23 @@ pub enum StorageError {
     EncryptedSnapshotExportDisabled,
 }
 
+/// Deterministic storage-write fault point for failure testing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StorageFaultStage {
+    /// After vector insertion and before the durable write transaction starts.
+    EmbeddedWrite,
+}
+
+/// Injects a deterministic storage failure into an explicit write boundary.
+pub trait StorageFaultInjector {
+    /// Returns an error to fail the requested stage.
+    ///
+    /// # Errors
+    ///
+    /// Returns the deterministic storage error configured for `stage`.
+    fn check(&self, stage: StorageFaultStage) -> Result<(), StorageError>;
+}
+
 /// Append-only event describing a durable memory-state change.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum MemoryEvent {
@@ -104,6 +127,37 @@ pub enum MemoryEvent {
     MemoryWritten {
         /// Full item state at write time.
         item: Box<MemoryItem>,
+    },
+    /// Repository-local memory was copied into an approved team scope.
+    MemoryScopePromoted {
+        /// Immutable local source id.
+        source_id: MemoryId,
+        /// New team-scoped memory id.
+        promoted_id: MemoryId,
+        /// Principal that approved promotion.
+        actor: String,
+        /// Human-readable approval rationale.
+        rationale: String,
+        /// Approval timestamp.
+        promoted_at: OffsetDateTime,
+    },
+    /// Host policy denied a requested repository-to-team promotion.
+    ScopeAuthorizationDenied {
+        /// Principal requesting the operation.
+        principal: String,
+        /// Source repository scope, without a memory identifier or content.
+        source_scope: MemoryScope,
+        /// Requested team target scope.
+        target_scope: MemoryScope,
+        /// Requested scope-crossing operation.
+        action: ScopeAuthorizationAction,
+        /// Time the host policy denied the request.
+        denied_at: OffsetDateTime,
+    },
+    /// Content-free audit record for a capture or recall policy decision.
+    PolicyDecisionRecorded {
+        /// Evaluated policy metadata and outcome.
+        record: PolicyAuditRecord,
     },
     /// A memory item was soft-invalidated.
     MemoryInvalidated {
@@ -256,7 +310,7 @@ pub enum MemoryAuditChange {
 }
 
 /// One per-item audit-trail entry.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MemoryAuditEntry {
     /// Event-log sequence that produced this audit entry.
     pub sequence: u64,
@@ -264,6 +318,8 @@ pub struct MemoryAuditEntry {
     pub recorded_at: OffsetDateTime,
     /// Memory this audit entry describes.
     pub memory_id: MemoryId,
+    /// Durable scope resolved from the materialized memory row.
+    pub scope: MemoryScope,
     /// Field change.
     pub change: MemoryAuditChange,
     /// Why the change happened.
@@ -312,6 +368,17 @@ pub struct ReconstructionReplacementRecord {
     pub replacement_write: EventRecord,
     /// Reconstruction marker event for replay/debugger consumers.
     pub reconstruction: EventRecord,
+}
+
+/// Records created by promoting a repository-local memory into a team scope.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScopePromotionRecord {
+    /// Immutable copied memory in the target team scope.
+    pub promoted: MemoryItem,
+    /// Event that materialized the copied memory.
+    pub memory_write: EventRecord,
+    /// Event linking the source and promoted rows.
+    pub promotion: EventRecord,
 }
 
 /// Events produced by applying one consolidation decision.
@@ -381,6 +448,8 @@ pub struct GraphTraversalRequest {
     pub relation_types: BTreeSet<String>,
     /// Optional bi-temporal instant used to filter relation edges.
     pub as_of: Option<OffsetDateTime>,
+    /// Optional exact repository/team visibility boundary.
+    pub scope: Option<MemoryScope>,
 }
 
 impl GraphTraversalRequest {
@@ -392,6 +461,7 @@ impl GraphTraversalRequest {
             max_hops,
             relation_types: BTreeSet::new(),
             as_of: None,
+            scope: None,
         }
     }
 
@@ -406,6 +476,13 @@ impl GraphTraversalRequest {
     #[must_use]
     pub const fn as_of(mut self, as_of: OffsetDateTime) -> Self {
         self.as_of = Some(as_of);
+        self
+    }
+
+    /// Restricts traversal to one exact repository/team visibility boundary.
+    #[must_use]
+    pub fn with_scope(mut self, scope: MemoryScope) -> Self {
+        self.scope = Some(scope);
         self
     }
 }
@@ -465,6 +542,9 @@ impl SubgraphRequest {
 pub struct StoreSnapshot {
     /// Snapshot schema version.
     pub schema_version: u16,
+    /// Exact scope when this is a filtered export; absent for a local full-store snapshot.
+    #[serde(default)]
+    pub scope: Option<MemoryScope>,
     /// Event-log records.
     pub events: Vec<EventRecord>,
     /// Current materialized memory items.
@@ -485,6 +565,8 @@ pub struct StoreSnapshot {
 pub struct StoredEmbedding {
     /// Memory id this embedding belongs to.
     pub memory_id: MemoryId,
+    /// Scope inherited atomically from the embedding's memory.
+    pub scope: MemoryScope,
     /// Embedding vector.
     pub vector: Vec<f32>,
     /// Logical vector index name.
@@ -500,8 +582,16 @@ pub struct StoredEmbedding {
 pub struct ColdContentRecord {
     /// Storage key referenced by `CompactionRef`.
     pub storage_key: String,
+    /// Scope inherited atomically from the compacted memory.
+    pub scope: MemoryScope,
     /// Compressed payload bytes.
     pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct StoredColdContent {
+    scope: MemoryScope,
+    compressed: Vec<u8>,
 }
 
 /// Caller-supplied memory write event before it is assigned an id and materialized.
@@ -509,6 +599,8 @@ pub struct ColdContentRecord {
 pub struct MemoryWriteEvent {
     /// Stored memory content.
     pub content: String,
+    /// Repository/team visibility boundary assigned to the materialized memory.
+    pub scope: MemoryScope,
     /// Whether this write is a fact/observation or instruction/directive.
     pub kind: MemoryKind,
     /// Mandatory provenance for the observation.
@@ -540,6 +632,7 @@ impl MemoryWriteEvent {
 
         Self {
             content: content.into(),
+            scope: MemoryScope::default(),
             kind: MemoryKind::Fact,
             provenance,
             valid_from,
@@ -571,6 +664,7 @@ impl MemoryWriteEvent {
     ) -> Self {
         Self {
             content: content.into(),
+            scope: MemoryScope::default(),
             kind: MemoryKind::Fact,
             provenance,
             valid_from,
@@ -588,6 +682,13 @@ impl MemoryWriteEvent {
         self.into_item(policy)
     }
 
+    /// Assigns an explicit validated repository/team scope before materialization.
+    #[must_use]
+    pub fn with_scope(mut self, scope: MemoryScope) -> Self {
+        self.scope = scope;
+        self
+    }
+
     fn into_item(self, policy: IngestCredencePolicy) -> MemoryItem {
         let credence = self
             .credence
@@ -595,11 +696,13 @@ impl MemoryWriteEvent {
 
         MemoryItem {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: self.scope,
             id: MemoryId::new_v7(),
             content: self.content,
             kind: self.kind,
             compaction: None,
             consolidation: None,
+            promotion: None,
             embedding_ref: None,
             provenance: self.provenance,
             timestamps: TemporalBounds::open_from(self.valid_from, self.ingested_at),
@@ -812,6 +915,51 @@ impl RedbMemoryStore {
         sequence.to_be_bytes()
     }
 
+    fn scope_index_key(scope: &MemoryScope) -> String {
+        let visibility = match scope.visibility {
+            ScopeVisibility::Repository => "repository",
+            ScopeVisibility::Team => "team",
+        };
+        let team = scope.team.as_ref().map_or("", |team| team.as_str());
+
+        format!("{visibility}\u{1f}{}\u{1f}{team}", scope.repository)
+    }
+
+    fn index_memory_scope(
+        &self,
+        table: &mut Table<'_, &str, &[u8]>,
+        item: &MemoryItem,
+    ) -> Result<(), StorageError> {
+        item.scope
+            .validate()
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        let key = Self::scope_index_key(&item.scope);
+        let mut ids: Vec<MemoryId> = table
+            .get(key.as_str())
+            .map_err(embed)?
+            .map(|value| {
+                self.decode_json(
+                    StorageTableName::MemoryScopeIndex,
+                    key.as_bytes(),
+                    value.value(),
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+
+        if !ids.contains(&item.id) {
+            ids.push(item.id);
+            ids.sort_unstable();
+            let bytes =
+                self.encode_json(StorageTableName::MemoryScopeIndex, key.as_bytes(), &ids)?;
+            table
+                .insert(key.as_str(), bytes.as_slice())
+                .map_err(embed)?;
+        }
+
+        Ok(())
+    }
+
     fn encode_json<T: Serialize>(
         &self,
         table: StorageTableName,
@@ -901,6 +1049,9 @@ impl RedbMemoryStore {
         let sequence = {
             let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
             let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let mut scope_table = write_txn
+                .open_table(MEMORY_SCOPE_INDEX_TABLE)
+                .map_err(embed)?;
             let sequence = event_table.len().map_err(embed)?;
             let event = MemoryEvent::MemoryWritten {
                 item: Box::new(item.clone()),
@@ -922,6 +1073,7 @@ impl RedbMemoryStore {
             item_table
                 .insert(item_key.as_str(), item_bytes.as_slice())
                 .map_err(embed)?;
+            self.index_memory_scope(&mut scope_table, item)?;
 
             sequence
         };
@@ -959,6 +1111,217 @@ impl RedbMemoryStore {
         let record = self.write(&item)?;
 
         Ok((record, item))
+    }
+
+    /// Copies a repository-local memory into an approved team scope without mutating the source.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when source/target scopes are incompatible or durable writes fail.
+    #[allow(clippy::too_many_lines)]
+    pub fn promote_memory_scope(
+        &self,
+        source_id: MemoryId,
+        promoted_id: MemoryId,
+        target_scope: MemoryScope,
+        actor: impl Into<String>,
+        rationale: impl Into<String>,
+        promoted_at: OffsetDateTime,
+    ) -> Result<Option<ScopePromotionRecord>, StorageError> {
+        target_scope
+            .validate()
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        if target_scope.visibility != ScopeVisibility::Team {
+            return Err(StorageError::InvariantViolation(
+                "scope promotion requires a team target scope".to_owned(),
+            ));
+        }
+        let Some(source) = self.get(source_id)? else {
+            return Ok(None);
+        };
+        if source.scope.visibility != ScopeVisibility::Repository
+            || source.scope.repository != target_scope.repository
+        {
+            return Err(StorageError::InvariantViolation(
+                "scope promotion requires a repository-local source in the same repository"
+                    .to_owned(),
+            ));
+        }
+        let actor = actor.into();
+        let rationale = rationale.into();
+        if actor.trim().is_empty() || rationale.trim().is_empty() {
+            return Err(StorageError::InvariantViolation(
+                "scope promotion requires a non-empty actor and rationale".to_owned(),
+            ));
+        }
+        let mut promoted = source.clone();
+        promoted.id = promoted_id;
+        promoted.scope = target_scope.clone();
+        promoted.timestamps.ingested_at = promoted_at;
+        promoted.access_events.clear();
+        promoted.promotion = Some(ScopePromotionRef {
+            source_memory_id: source_id,
+            rationale: rationale.clone(),
+            promoted_by: actor.clone(),
+            promoted_at,
+        });
+        if let Some(embedding_ref) = promoted.embedding_ref.as_mut() {
+            embedding_ref.vector_id = promoted.id.to_string();
+        }
+
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let (write_sequence, promotion_sequence) = {
+            let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+            let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let mut scope_table = write_txn
+                .open_table(MEMORY_SCOPE_INDEX_TABLE)
+                .map_err(embed)?;
+            let mut embedding_table = write_txn.open_table(EMBEDDINGS_TABLE).map_err(embed)?;
+            let source_key = source_id.to_string();
+            let promoted_key = promoted.id.to_string();
+            if item_table
+                .get(promoted_key.as_str())
+                .map_err(embed)?
+                .is_some()
+            {
+                return Err(StorageError::InvariantViolation(format!(
+                    "promoted memory {} already exists",
+                    promoted.id
+                )));
+            }
+            let write_sequence = event_table.len().map_err(embed)?;
+            let promotion_sequence = write_sequence + 1;
+            let write_record = EventRecord {
+                sequence: write_sequence,
+                recorded_at: promoted_at,
+                event: MemoryEvent::MemoryWritten {
+                    item: Box::new(promoted.clone()),
+                },
+            };
+            let promotion_record = EventRecord {
+                sequence: promotion_sequence,
+                recorded_at: promoted_at,
+                event: MemoryEvent::MemoryScopePromoted {
+                    source_id,
+                    promoted_id: promoted.id,
+                    actor,
+                    rationale,
+                    promoted_at,
+                },
+            };
+            let write_key = Self::event_key(write_sequence);
+            let promotion_key = Self::event_key(promotion_sequence);
+            let write_bytes =
+                self.encode_json(StorageTableName::EventLog, &write_key, &write_record)?;
+            let promotion_bytes = self.encode_json(
+                StorageTableName::EventLog,
+                &promotion_key,
+                &promotion_record,
+            )?;
+            let item_bytes = self.encode_json(
+                StorageTableName::MemoryItems,
+                promoted_key.as_bytes(),
+                &promoted,
+            )?;
+
+            event_table
+                .insert(write_sequence, write_bytes.as_slice())
+                .map_err(embed)?;
+            event_table
+                .insert(promotion_sequence, promotion_bytes.as_slice())
+                .map_err(embed)?;
+            item_table
+                .insert(promoted_key.as_str(), item_bytes.as_slice())
+                .map_err(embed)?;
+            self.index_memory_scope(&mut scope_table, &promoted)?;
+
+            let source_embedding: Option<StoredEmbedding> = embedding_table
+                .get(source_key.as_str())
+                .map_err(embed)?
+                .map(|source_embedding| {
+                    self.decode_json(
+                        StorageTableName::Embeddings,
+                        source_key.as_bytes(),
+                        source_embedding.value(),
+                    )
+                })
+                .transpose()?;
+            if let Some(mut embedding) = source_embedding {
+                embedding.memory_id = promoted.id;
+                embedding.scope = target_scope;
+                let bytes = self.encode_json(
+                    StorageTableName::Embeddings,
+                    promoted_key.as_bytes(),
+                    &embedding,
+                )?;
+                embedding_table
+                    .insert(promoted_key.as_str(), bytes.as_slice())
+                    .map_err(embed)?;
+            }
+
+            (write_sequence, promotion_sequence)
+        };
+        write_txn.commit().map_err(embed)?;
+        let memory_write = self.event(write_sequence)?.ok_or_else(|| {
+            StorageError::Embedded("committed promotion write was not readable".to_owned())
+        })?;
+        let promotion = self.event(promotion_sequence)?.ok_or_else(|| {
+            StorageError::Embedded("committed promotion event was not readable".to_owned())
+        })?;
+
+        Ok(Some(ScopePromotionRecord {
+            promoted,
+            memory_write,
+            promotion,
+        }))
+    }
+
+    /// Appends a scope-only audit record for a policy-denied promotion attempt.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when scope validation or durable event append fails.
+    pub fn record_scope_authorization_denial(
+        &self,
+        principal: impl Into<String>,
+        source_scope: &MemoryScope,
+        target_scope: &MemoryScope,
+        action: ScopeAuthorizationAction,
+        denied_at: OffsetDateTime,
+    ) -> Result<EventRecord, StorageError> {
+        source_scope
+            .validate()
+            .and_then(|()| target_scope.validate())
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        let principal = principal.into();
+        if principal.trim().is_empty() {
+            return Err(StorageError::InvariantViolation(
+                "scope authorization audit requires a non-empty principal".to_owned(),
+            ));
+        }
+
+        self.append_event(MemoryEvent::ScopeAuthorizationDenied {
+            principal,
+            source_scope: source_scope.clone(),
+            target_scope: target_scope.clone(),
+            action,
+            denied_at,
+        })
+    }
+
+    /// Appends a content-free capture or recall policy decision to the event log.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when durable event append fails.
+    pub fn record_policy_decision(
+        &self,
+        record: PolicyAuditRecord,
+    ) -> Result<EventRecord, StorageError> {
+        self.append_event(MemoryEvent::PolicyDecisionRecorded { record })
     }
 
     /// Ingests a caller-supplied write event and vector embedding.
@@ -1004,6 +1367,35 @@ impl RedbMemoryStore {
         model: impl Into<String>,
         model_version: impl Into<String>,
     ) -> Result<EventRecord, StorageError> {
+        self.write_embedded_with_fault_injector(
+            item,
+            vector_index,
+            vector,
+            index_name,
+            model,
+            model_version,
+            None,
+        )
+    }
+
+    /// Writes an item and embedding while optionally injecting a deterministic storage fault.
+    ///
+    /// This exists for failure-path tests. Production callers should use [`Self::write_embedded`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when vector insertion, the injected fault, or the durable write fails.
+    #[allow(clippy::too_many_arguments)]
+    pub fn write_embedded_with_fault_injector(
+        &self,
+        item: &mut MemoryItem,
+        vector_index: &mut dyn VectorIndex,
+        vector: &[f32],
+        index_name: impl Into<String>,
+        model: impl Into<String>,
+        model_version: impl Into<String>,
+        fault_injector: Option<&dyn StorageFaultInjector>,
+    ) -> Result<EventRecord, StorageError> {
         let index_name = index_name.into();
         let model = model.into();
         let model_version = model_version.into();
@@ -1021,6 +1413,9 @@ impl RedbMemoryStore {
         });
 
         let result = (|| {
+            if let Some(fault_injector) = fault_injector {
+                fault_injector.check(StorageFaultStage::EmbeddedWrite)?;
+            }
             let mut write_txn = self.db.begin_write().map_err(embed)?;
             write_txn
                 .set_durability(Durability::Immediate)
@@ -1028,6 +1423,9 @@ impl RedbMemoryStore {
             let sequence = {
                 let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
                 let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+                let mut scope_table = write_txn
+                    .open_table(MEMORY_SCOPE_INDEX_TABLE)
+                    .map_err(embed)?;
                 let mut embedding_table = write_txn.open_table(EMBEDDINGS_TABLE).map_err(embed)?;
                 let sequence = event_table.len().map_err(embed)?;
                 let event = MemoryEvent::MemoryWritten {
@@ -1040,6 +1438,7 @@ impl RedbMemoryStore {
                 };
                 let embedding = StoredEmbedding {
                     memory_id: item.id,
+                    scope: item.scope.clone(),
                     vector: vector.to_vec(),
                     index_name,
                     model,
@@ -1063,6 +1462,7 @@ impl RedbMemoryStore {
                 item_table
                     .insert(item_key.as_str(), item_bytes.as_slice())
                     .map_err(embed)?;
+                self.index_memory_scope(&mut scope_table, item)?;
                 embedding_table
                     .insert(item_key.as_str(), embedding_bytes.as_slice())
                     .map_err(embed)?;
@@ -1222,7 +1622,10 @@ impl RedbMemoryStore {
                 }
                 MemoryEvent::ReverificationFlagged { .. }
                 | MemoryEvent::ReconstructionApplied { .. }
-                | MemoryEvent::ConsolidationDecision { .. } => {}
+                | MemoryEvent::ConsolidationDecision { .. }
+                | MemoryEvent::MemoryScopePromoted { .. }
+                | MemoryEvent::ScopeAuthorizationDenied { .. }
+                | MemoryEvent::PolicyDecisionRecorded { .. } => {}
             }
         }
 
@@ -1335,7 +1738,11 @@ impl RedbMemoryStore {
     /// # Errors
     ///
     /// Returns an error when event-log records cannot be read.
+    #[allow(clippy::too_many_lines)]
     pub fn audit_trail(&self, id: MemoryId) -> Result<Vec<MemoryAuditEntry>, StorageError> {
+        let Some(scope) = self.materialized_item(id)?.map(|item| item.scope) else {
+            return Ok(Vec::new());
+        };
         let mut entries = Vec::new();
         let mut previous_credence = None;
         let mut previous_tier = None;
@@ -1358,6 +1765,7 @@ impl RedbMemoryStore {
                             &mut entries,
                             &record,
                             id,
+                            &scope,
                             previous_credence,
                             item.credence,
                             cause,
@@ -1370,6 +1778,7 @@ impl RedbMemoryStore {
                             &mut entries,
                             &record,
                             id,
+                            &scope,
                             previous_tier,
                             item.tier,
                             cause,
@@ -1382,6 +1791,7 @@ impl RedbMemoryStore {
                             &mut entries,
                             &record,
                             id,
+                            &scope,
                             previous_credence_floor,
                             item.credence_floor,
                             cause,
@@ -1399,6 +1809,7 @@ impl RedbMemoryStore {
                         &mut entries,
                         &record,
                         id,
+                        &scope,
                         Some(from),
                         to,
                         MemoryAuditCause::from(cause),
@@ -1411,6 +1822,7 @@ impl RedbMemoryStore {
                             &mut entries,
                             &record,
                             id,
+                            &scope,
                             signal.previous_credence.or(previous_credence),
                             to,
                             MemoryAuditCause::HumanSignal,
@@ -1423,6 +1835,7 @@ impl RedbMemoryStore {
                             &mut entries,
                             &record,
                             id,
+                            &scope,
                             signal.previous_credence_floor.or(previous_credence_floor),
                             to,
                             MemoryAuditCause::HumanSignal,
@@ -1450,12 +1863,63 @@ impl RedbMemoryStore {
 
         let snapshot = StoreSnapshot {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: None,
             events: self.events()?,
             materialized_items: self.materialized_items()?,
             embeddings: self.stored_embeddings()?,
             cold_contents: self.cold_content_records()?,
             graph_entities: self.graph_entities()?,
             graph_relations: self.graph_relations()?,
+        };
+        let bytes = serde_json::to_vec_pretty(&snapshot)?;
+
+        fs::write(path, bytes)?;
+
+        Ok(())
+    }
+
+    /// Writes a scope-marked snapshot containing only one repository/team visibility boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when scope validation, storage reads, or file serialization fails.
+    pub fn snapshot_scope(
+        &self,
+        path: impl AsRef<Path>,
+        scope: &MemoryScope,
+    ) -> Result<(), StorageError> {
+        if self.encryption.is_enabled() {
+            return Err(StorageError::EncryptedSnapshotExportDisabled);
+        }
+        scope
+            .validate()
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        let materialized_items = self.memory_items_in_scope(scope)?;
+        let snapshot = StoreSnapshot {
+            schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: Some(scope.clone()),
+            events: self.events_in_scope(scope)?,
+            materialized_items,
+            embeddings: self
+                .stored_embeddings()?
+                .into_iter()
+                .filter(|embedding| embedding.scope == *scope)
+                .collect(),
+            cold_contents: self
+                .cold_content_records()?
+                .into_iter()
+                .filter(|content| content.scope == *scope)
+                .collect(),
+            graph_entities: self
+                .graph_entities()?
+                .into_iter()
+                .filter(|entity| entity.scope == *scope)
+                .collect(),
+            graph_relations: self
+                .graph_relations()?
+                .into_iter()
+                .filter(|relation| relation.scope == *scope)
+                .collect(),
         };
         let bytes = serde_json::to_vec_pretty(&snapshot)?;
 
@@ -1519,12 +1983,16 @@ impl RedbMemoryStore {
             .map_err(embed)?;
         {
             let mut table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let mut scope_table = write_txn
+                .open_table(MEMORY_SCOPE_INDEX_TABLE)
+                .map_err(embed)?;
             let key = item.id.to_string();
             let bytes = self.encode_json(StorageTableName::MemoryItems, key.as_bytes(), item)?;
 
             table
                 .insert(key.as_str(), bytes.as_slice())
                 .map_err(embed)?;
+            self.index_memory_scope(&mut scope_table, item)?;
         }
 
         write_txn.commit().map_err(embed)
@@ -1570,6 +2038,100 @@ impl RedbMemoryStore {
         self.materialized_items()
     }
 
+    /// Returns current memory ids for one exact repository/team visibility scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when scope validation or indexed storage reads fail.
+    pub fn memory_ids_in_scope(&self, scope: &MemoryScope) -> Result<Vec<MemoryId>, StorageError> {
+        scope
+            .validate()
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(MEMORY_SCOPE_INDEX_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(error) => return Err(embed(error)),
+        };
+        let key = Self::scope_index_key(scope);
+
+        table
+            .get(key.as_str())
+            .map_err(embed)?
+            .map(|value| {
+                self.decode_json(
+                    StorageTableName::MemoryScopeIndex,
+                    key.as_bytes(),
+                    value.value(),
+                )
+            })
+            .transpose()
+            .map(Option::unwrap_or_default)
+    }
+
+    /// Returns materialized memories for one exact scope using the scope index.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when indexed ids or materialized rows cannot be read.
+    pub fn memory_items_in_scope(
+        &self,
+        scope: &MemoryScope,
+    ) -> Result<Vec<MemoryItem>, StorageError> {
+        let ids = self.memory_ids_in_scope(scope)?;
+
+        Ok(self
+            .get_many(&ids)?
+            .into_iter()
+            .flatten()
+            .filter(|item| item.scope == *scope)
+            .collect())
+    }
+
+    /// Returns durable inspection events visible to one exact scope.
+    ///
+    /// Cross-scope lineage markers may expose only the paired memory identifiers, never the
+    /// opposite scope's memory payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when scope-index or event-log reads fail.
+    pub fn events_in_scope(&self, scope: &MemoryScope) -> Result<Vec<EventRecord>, StorageError> {
+        let memory_ids = self
+            .memory_ids_in_scope(scope)?
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+
+        Ok(self
+            .events()?
+            .into_iter()
+            .filter(|record| event_belongs_to_memory_ids(record, &memory_ids, scope))
+            .collect())
+    }
+
+    /// Returns one memory's audit trail only if it belongs to `scope`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read.
+    pub fn audit_trail_in_scope(
+        &self,
+        id: MemoryId,
+        scope: &MemoryScope,
+    ) -> Result<Vec<MemoryAuditEntry>, StorageError> {
+        scope
+            .validate()
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        let Some(item) = self.get(id)? else {
+            return Ok(Vec::new());
+        };
+        if item.scope != *scope {
+            return Ok(Vec::new());
+        }
+
+        self.audit_trail(id)
+    }
+
     fn materialized_items(&self) -> Result<Vec<MemoryItem>, StorageError> {
         let read_txn = self.db.begin_read().map_err(embed)?;
         let table = match read_txn.open_table(MEMORY_ITEMS_TABLE) {
@@ -1608,12 +2170,13 @@ impl RedbMemoryStore {
         for row in table.iter().map_err(embed)? {
             let (key, value) = row.map_err(embed)?;
             let key = key.value();
-            let bytes =
-                self.decode_bytes(StorageTableName::ColdContent, key.as_bytes(), value.value())?;
+            let stored: StoredColdContent =
+                self.decode_json(StorageTableName::ColdContent, key.as_bytes(), value.value())?;
 
             records.push(ColdContentRecord {
                 storage_key: key.to_owned(),
-                bytes,
+                scope: stored.scope,
+                bytes: stored.compressed,
             });
         }
 
@@ -1676,6 +2239,9 @@ impl RedbMemoryStore {
         {
             let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
             let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let mut scope_table = write_txn
+                .open_table(MEMORY_SCOPE_INDEX_TABLE)
+                .map_err(embed)?;
             let mut embedding_table = write_txn.open_table(EMBEDDINGS_TABLE).map_err(embed)?;
             let mut cold_table = write_txn.open_table(COLD_CONTENT_TABLE).map_err(embed)?;
             let mut entity_table = write_txn.open_table(GRAPH_ENTITIES_TABLE).map_err(embed)?;
@@ -1698,6 +2264,7 @@ impl RedbMemoryStore {
                 item_table
                     .insert(key.as_str(), bytes.as_slice())
                     .map_err(embed)?;
+                self.index_memory_scope(&mut scope_table, &item)?;
             }
 
             for embedding in snapshot.embeddings {
@@ -1711,10 +2278,14 @@ impl RedbMemoryStore {
             }
 
             for cold_content in snapshot.cold_contents {
-                let bytes = self.encode_bytes(
+                let stored = StoredColdContent {
+                    scope: cold_content.scope,
+                    compressed: cold_content.bytes,
+                };
+                let bytes = self.encode_json(
                     StorageTableName::ColdContent,
                     cold_content.storage_key.as_bytes(),
-                    &cold_content.bytes,
+                    &stored,
                 )?;
 
                 cold_table
@@ -1772,6 +2343,10 @@ impl RedbMemoryStore {
     ///
     /// Returns an error when the entity cannot be serialized, written, or committed.
     pub fn put_entity(&self, entity: &Entity) -> Result<(), StorageError> {
+        entity
+            .scope
+            .validate()
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
         let mut write_txn = self.db.begin_write().map_err(embed)?;
         write_txn
             .set_durability(Durability::Immediate)
@@ -1833,6 +2408,24 @@ impl RedbMemoryStore {
             .find(|entity| entity.entity_type == entity_type && entity.stable_key == stable_key))
     }
 
+    /// Finds an entity by type and stable key within one exact scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph entity rows cannot be read or decoded.
+    pub fn find_entity_by_stable_key_in_scope(
+        &self,
+        entity_type: &str,
+        stable_key: &str,
+        scope: &MemoryScope,
+    ) -> Result<Option<Entity>, StorageError> {
+        Ok(self.graph_entities()?.into_iter().find(|entity| {
+            entity.scope == *scope
+                && entity.entity_type == entity_type
+                && entity.stable_key == stable_key
+        }))
+    }
+
     /// Resolves `entity` to an existing entity with the same type and stable key, or stores it.
     ///
     /// This is the graph deduplication boundary for aliases or alternate labels that refer to the
@@ -1842,9 +2435,11 @@ impl RedbMemoryStore {
     ///
     /// Returns an error when graph entity rows cannot be read, written, or decoded.
     pub fn resolve_entity(&self, entity: &Entity) -> Result<Entity, StorageError> {
-        if let Some(existing) =
-            self.find_entity_by_stable_key(&entity.entity_type, &entity.stable_key)?
-        {
+        if let Some(existing) = self.find_entity_by_stable_key_in_scope(
+            &entity.entity_type,
+            &entity.stable_key,
+            &entity.scope,
+        )? {
             return Ok(existing);
         }
 
@@ -1859,6 +2454,7 @@ impl RedbMemoryStore {
     ///
     /// Returns an error when the relation cannot be serialized, written, or committed.
     pub fn put_relation(&self, relation: &Relation) -> Result<(), StorageError> {
+        self.validate_graph_relation_scope(relation)?;
         let mut write_txn = self.db.begin_write().map_err(embed)?;
         write_txn
             .set_durability(Durability::Immediate)
@@ -1902,6 +2498,61 @@ impl RedbMemoryStore {
                 )
             })
             .transpose()
+    }
+
+    fn validate_graph_relation_scope(&self, relation: &Relation) -> Result<(), StorageError> {
+        relation
+            .scope
+            .validate()
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        let from = self.get_entity(relation.from_entity)?.ok_or_else(|| {
+            StorageError::InvariantViolation(format!(
+                "relation {} references missing source entity {}",
+                relation.id, relation.from_entity
+            ))
+        })?;
+        let to = self.get_entity(relation.to_entity)?.ok_or_else(|| {
+            StorageError::InvariantViolation(format!(
+                "relation {} references missing target entity {}",
+                relation.id, relation.to_entity
+            ))
+        })?;
+        if from.scope != relation.scope || to.scope != relation.scope {
+            return Err(StorageError::InvariantViolation(format!(
+                "relation {} scope must match both endpoint scopes",
+                relation.id
+            )));
+        }
+        if let Some(memory_id) = relation.memory_id {
+            let memory = self.get(memory_id)?.ok_or_else(|| {
+                StorageError::InvariantViolation(format!(
+                    "relation {} references missing memory {memory_id}",
+                    relation.id
+                ))
+            })?;
+            if memory.scope != relation.scope {
+                return Err(StorageError::InvariantViolation(format!(
+                    "relation {} scope must match its supporting memory",
+                    relation.id
+                )));
+            }
+        }
+        if let Some(supersedes) = relation.supersedes {
+            let existing = self.get_relation(supersedes)?.ok_or_else(|| {
+                StorageError::InvariantViolation(format!(
+                    "relation {} supersedes missing relation {supersedes}",
+                    relation.id
+                ))
+            })?;
+            if existing.scope != relation.scope {
+                return Err(StorageError::InvariantViolation(format!(
+                    "relation {} scope must match its superseded relation",
+                    relation.id
+                )));
+            }
+        }
+
+        Ok(())
     }
 
     /// Returns direct relation edges touching `entity_id`.
@@ -1969,6 +2620,49 @@ impl RedbMemoryStore {
         })
     }
 
+    /// Reconstructs graph state for one exact scope at a point in time.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when graph state cannot be read or the scope is invalid.
+    pub fn graph_snapshot_in_scope(
+        &self,
+        as_of: OffsetDateTime,
+        scope: &MemoryScope,
+    ) -> Result<GraphSnapshot, StorageError> {
+        scope
+            .validate()
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        let mut entities = self
+            .graph_entities()?
+            .into_iter()
+            .filter(|entity| entity.scope == *scope && entity_believed_at(entity, as_of))
+            .collect::<Vec<_>>();
+        let entity_ids = entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect::<BTreeSet<_>>();
+        let mut relations = self
+            .graph_relations()?
+            .into_iter()
+            .filter(|relation| {
+                relation.scope == *scope
+                    && relation_believed_at(relation, as_of)
+                    && entity_ids.contains(&relation.from_entity)
+                    && entity_ids.contains(&relation.to_entity)
+            })
+            .collect::<Vec<_>>();
+
+        entities.sort_by_key(|entity| entity.id);
+        relations.sort_by_key(|relation| relation.id);
+
+        Ok(GraphSnapshot {
+            as_of,
+            entities,
+            relations,
+        })
+    }
+
     /// Detects whether `proposed` contradicts an active relation at `as_of`.
     ///
     /// A relation contradiction is defined as the same source entity and relation type pointing to
@@ -1984,6 +2678,7 @@ impl RedbMemoryStore {
     ) -> Result<Option<RelationContradiction>, StorageError> {
         let existing = self.graph_relations()?.into_iter().find(|relation| {
             relation.id != proposed.id
+                && relation.scope == proposed.scope
                 && relation.from_entity == proposed.from_entity
                 && relation.relation_type == proposed.relation_type
                 && relation.to_entity != proposed.to_entity
@@ -2009,6 +2704,7 @@ impl RedbMemoryStore {
         &self,
         proposed: &mut Relation,
     ) -> Result<Option<RelationId>, StorageError> {
+        self.validate_graph_relation_scope(proposed)?;
         let contradiction =
             self.detect_relation_contradiction(proposed, proposed.timestamps.valid_from)?;
         let superseded_relation_id = contradiction
@@ -2017,6 +2713,7 @@ impl RedbMemoryStore {
 
         if let Some(superseded_relation_id) = superseded_relation_id {
             proposed.supersedes = Some(superseded_relation_id);
+            self.validate_graph_relation_scope(proposed)?;
         }
 
         let mut write_txn = self.db.begin_write().map_err(embed)?;
@@ -2076,9 +2773,24 @@ impl RedbMemoryStore {
         let entities_by_id = self
             .graph_entities()?
             .into_iter()
+            .filter(|entity| {
+                request
+                    .scope
+                    .as_ref()
+                    .is_none_or(|scope| entity.scope == *scope)
+            })
             .map(|entity| (entity.id, entity))
             .collect::<BTreeMap<_, _>>();
-        let relations = self.graph_relations()?;
+        let relations = self
+            .graph_relations()?
+            .into_iter()
+            .filter(|relation| {
+                request
+                    .scope
+                    .as_ref()
+                    .is_none_or(|scope| relation.scope == *scope)
+            })
+            .collect::<Vec<_>>();
         let mut visited_entities = BTreeSet::new();
         let mut selected_relation_ids = BTreeSet::new();
         let mut queue = VecDeque::from([(request.start_entity, 0_usize)]);
@@ -2328,6 +3040,9 @@ impl RedbMemoryStore {
         let (invalidation_sequence, write_sequence, reconstruction_sequence) = {
             let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
             let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let mut scope_table = write_txn
+                .open_table(MEMORY_SCOPE_INDEX_TABLE)
+                .map_err(embed)?;
             let superseded_key = superseded_id.to_string();
             let replacement_key = replacement.id.to_string();
             let mut superseded: MemoryItem = {
@@ -2409,6 +3124,7 @@ impl RedbMemoryStore {
             item_table
                 .insert(replacement_key.as_str(), replacement_bytes.as_slice())
                 .map_err(embed)?;
+            self.index_memory_scope(&mut scope_table, replacement)?;
 
             (
                 invalidation_sequence,
@@ -2465,6 +3181,9 @@ impl RedbMemoryStore {
         let (write_sequence, decision_sequence) = {
             let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
             let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let mut scope_table = write_txn
+                .open_table(MEMORY_SCOPE_INDEX_TABLE)
+                .map_err(embed)?;
             let item_key = item.id.to_string();
 
             if item_table.get(item_key.as_str()).map_err(embed)?.is_some() {
@@ -2515,6 +3234,7 @@ impl RedbMemoryStore {
             item_table
                 .insert(item_key.as_str(), item_bytes.as_slice())
                 .map_err(embed)?;
+            self.index_memory_scope(&mut scope_table, item)?;
 
             (write_sequence, decision_sequence)
         };
@@ -3442,8 +4162,12 @@ impl RedbMemoryStore {
             let event_bytes = self.encode_json(StorageTableName::EventLog, &event_key, &record)?;
             let item_bytes =
                 self.encode_json(StorageTableName::MemoryItems, key.as_bytes(), &item)?;
+            let cold_content = StoredColdContent {
+                scope: item.scope.clone(),
+                compressed,
+            };
             let cold_bytes =
-                self.encode_bytes(StorageTableName::ColdContent, key.as_bytes(), &compressed)?;
+                self.encode_json(StorageTableName::ColdContent, key.as_bytes(), &cold_content)?;
 
             cold_table
                 .insert(key.as_str(), cold_bytes.as_slice())
@@ -3487,12 +4211,16 @@ impl RedbMemoryStore {
         let Some(value) = table.get(pointer.storage_key.as_str()).map_err(embed)? else {
             return Ok(None);
         };
-        let compressed = self.decode_bytes(
+        let stored: StoredColdContent = self.decode_json(
             StorageTableName::ColdContent,
             pointer.storage_key.as_bytes(),
             value.value(),
         )?;
-        let decompressed = decompress_size_prepended(&compressed).map_err(compression)?;
+        stored
+            .scope
+            .validate()
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        let decompressed = decompress_size_prepended(&stored.compressed).map_err(compression)?;
         let content = String::from_utf8(decompressed).map_err(compression)?;
 
         Ok(Some(content))
@@ -3661,6 +4389,7 @@ fn push_credence_audit_entry(
     entries: &mut Vec<MemoryAuditEntry>,
     record: &EventRecord,
     memory_id: MemoryId,
+    scope: &MemoryScope,
     from: Option<CredenceTier>,
     to: CredenceTier,
     cause: MemoryAuditCause,
@@ -3669,6 +4398,7 @@ fn push_credence_audit_entry(
         sequence: record.sequence,
         recorded_at: record.recorded_at,
         memory_id,
+        scope: scope.clone(),
         change: MemoryAuditChange::Credence { from, to },
         cause,
     });
@@ -3678,6 +4408,7 @@ fn push_tier_audit_entry(
     entries: &mut Vec<MemoryAuditEntry>,
     record: &EventRecord,
     memory_id: MemoryId,
+    scope: &MemoryScope,
     from: Option<Tier>,
     to: Tier,
     cause: MemoryAuditCause,
@@ -3686,6 +4417,7 @@ fn push_tier_audit_entry(
         sequence: record.sequence,
         recorded_at: record.recorded_at,
         memory_id,
+        scope: scope.clone(),
         change: MemoryAuditChange::Tier { from, to },
         cause,
     });
@@ -3695,6 +4427,7 @@ fn push_floor_audit_entry(
     entries: &mut Vec<MemoryAuditEntry>,
     record: &EventRecord,
     memory_id: MemoryId,
+    scope: &MemoryScope,
     from: Option<Tier>,
     to: Tier,
     cause: MemoryAuditCause,
@@ -3703,6 +4436,7 @@ fn push_floor_audit_entry(
         sequence: record.sequence,
         recorded_at: record.recorded_at,
         memory_id,
+        scope: scope.clone(),
         change: MemoryAuditChange::CredenceFloor { from, to },
         cause,
     });
@@ -3771,6 +4505,54 @@ fn validate_memory_schema_version(record: &str, found: u16) -> Result<(), Storag
     })
 }
 
+fn event_belongs_to_memory_ids(
+    record: &EventRecord,
+    memory_ids: &BTreeSet<MemoryId>,
+    scope: &MemoryScope,
+) -> bool {
+    match &record.event {
+        MemoryEvent::MemoryWritten { item } => {
+            item.scope == *scope && memory_ids.contains(&item.id)
+        }
+        MemoryEvent::MemoryInvalidated { id, .. }
+        | MemoryEvent::ReverificationFlagged { id, .. }
+        | MemoryEvent::AccessRecorded { id, .. }
+        | MemoryEvent::TierChanged { id, .. }
+        | MemoryEvent::ContentCompacted { id, .. } => memory_ids.contains(id),
+        MemoryEvent::ReconstructionApplied {
+            superseded_id,
+            replacement_id,
+            ..
+        } => memory_ids.contains(superseded_id) && memory_ids.contains(replacement_id),
+        MemoryEvent::ConsolidationDecision {
+            input_ids,
+            output_id,
+            ..
+        } => {
+            input_ids.iter().all(|id| memory_ids.contains(id))
+                && output_id.is_none_or(|id| memory_ids.contains(&id))
+        }
+        MemoryEvent::HumanSignalRecorded { signal } => {
+            memory_ids.contains(&signal.memory_id)
+                && signal.proposal_id.is_none_or(|id| memory_ids.contains(&id))
+        }
+        MemoryEvent::MemoryScopePromoted {
+            source_id,
+            promoted_id,
+            ..
+        } => memory_ids.contains(source_id) || memory_ids.contains(promoted_id),
+        MemoryEvent::ScopeAuthorizationDenied {
+            source_scope,
+            target_scope,
+            ..
+        } => source_scope == scope || target_scope == scope,
+        MemoryEvent::PolicyDecisionRecorded { record } => record
+            .scope
+            .as_ref()
+            .is_some_and(|record_scope| record_scope == scope),
+    }
+}
+
 fn compression(error: impl std::fmt::Display) -> StorageError {
     StorageError::Compression(error.to_string())
 }
@@ -3794,7 +4576,12 @@ fn relation_matches_traversal(relation: &Relation, request: &GraphTraversalReque
         .as_of
         .is_none_or(|instant| relation_believed_at(relation, instant));
 
-    type_allowed && time_allowed
+    type_allowed
+        && time_allowed
+        && request
+            .scope
+            .as_ref()
+            .is_none_or(|scope| relation.scope == *scope)
 }
 
 #[cfg(test)]
@@ -3802,8 +4589,8 @@ mod tests {
     use super::*;
     use crate::encryption::Aes256GcmEncryption;
     use crate::model::{
-        AccessOutcome, CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, Provenance, SourceKind,
-        TemporalBounds,
+        AccessOutcome, CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, Provenance, ScopeId,
+        SourceKind, TemporalBounds,
     };
     use crate::vector::{HnswVectorIndex, VectorIndex};
     use proptest::prelude::*;
@@ -3816,11 +4603,13 @@ mod tests {
     fn test_item(content: &str) -> MemoryItem {
         MemoryItem {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: MemoryScope::default(),
             id: MemoryId::new_v7(),
             content: content.to_owned(),
             kind: MemoryKind::Fact,
             compaction: None,
             consolidation: None,
+            promotion: None,
             embedding_ref: None,
             provenance: Provenance::new(SourceKind::User, None, "storage-test"),
             timestamps: TemporalBounds::open_from(
@@ -3834,6 +4623,179 @@ mod tests {
             credence_floor: Tier::Warm,
             access_events: Vec::new(),
         }
+    }
+
+    struct FailingEmbeddedWrite;
+
+    impl StorageFaultInjector for FailingEmbeddedWrite {
+        fn check(&self, stage: StorageFaultStage) -> Result<(), StorageError> {
+            assert_eq!(stage, StorageFaultStage::EmbeddedWrite);
+            Err(StorageError::Embedded(
+                "injected durable write failure".to_owned(),
+            ))
+        }
+    }
+
+    #[test]
+    fn injected_durable_write_failure_rolls_back_vector_and_persisted_state() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let mut item = test_item("failed durable write");
+
+        let error = store
+            .write_embedded_with_fault_injector(
+                &mut item,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "test",
+                "model",
+                "v1",
+                Some(&FailingEmbeddedWrite),
+            )
+            .expect_err("injected durable write should fail");
+
+        assert!(
+            matches!(error, StorageError::Embedded(message) if message == "injected durable write failure")
+        );
+        assert!(store.memory_items().expect("items should read").is_empty());
+        assert!(store.events().expect("events should read").is_empty());
+        assert!(
+            store
+                .stored_embeddings()
+                .expect("embeddings should read")
+                .is_empty()
+        );
+        assert!(
+            vector_index
+                .search(&[0.0, 0.0], 1)
+                .expect("vector index should remain readable")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn scope_index_persists_memory_ids_with_the_source_event() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let scope = MemoryScope::team(
+            ScopeId::new("repo-scope").expect("repository should validate"),
+            ScopeId::new("team-scope").expect("team should validate"),
+        );
+        let event = MemoryWriteEvent::new(
+            "scoped memory",
+            Provenance::new(SourceKind::User, None, "scope-test"),
+            OffsetDateTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
+        )
+        .with_scope(scope.clone());
+        let (record, item) = store.write_event(event).expect("write should succeed");
+
+        assert!(matches!(record.event, MemoryEvent::MemoryWritten { .. }));
+        assert_eq!(
+            store
+                .memory_ids_in_scope(&scope)
+                .expect("index should read"),
+            [item.id]
+        );
+        assert!(
+            store
+                .memory_ids_in_scope(&MemoryScope::default())
+                .expect("other index should read")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn scoped_snapshot_excludes_other_memory_scopes() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let snapshot_file = NamedTempFile::new().expect("snapshot file should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let scope = MemoryScope::repository(
+            ScopeId::new("snapshot-repo-a").expect("scope should validate"),
+        );
+        let other_scope = MemoryScope::repository(
+            ScopeId::new("snapshot-repo-b").expect("scope should validate"),
+        );
+        let (_, included) = store
+            .write_event(
+                MemoryWriteEvent::new(
+                    "included",
+                    Provenance::new(SourceKind::User, None, "snapshot-test"),
+                    OffsetDateTime::UNIX_EPOCH,
+                    OffsetDateTime::UNIX_EPOCH,
+                )
+                .with_scope(scope.clone()),
+            )
+            .expect("included write should work");
+        store
+            .write_event(
+                MemoryWriteEvent::new(
+                    "excluded",
+                    Provenance::new(SourceKind::User, None, "snapshot-test"),
+                    OffsetDateTime::UNIX_EPOCH,
+                    OffsetDateTime::UNIX_EPOCH,
+                )
+                .with_scope(other_scope),
+            )
+            .expect("excluded write should work");
+
+        store
+            .snapshot_scope(snapshot_file.path(), &scope)
+            .expect("scoped snapshot should write");
+        let snapshot: StoreSnapshot = serde_json::from_slice(
+            &std::fs::read(snapshot_file.path()).expect("snapshot should read"),
+        )
+        .expect("snapshot should decode");
+
+        assert_eq!(snapshot.scope, Some(scope));
+        assert_eq!(snapshot.materialized_items.len(), 1);
+        assert_eq!(snapshot.materialized_items[0].id, included.id);
+        assert_eq!(snapshot.events.len(), 1);
+    }
+
+    #[test]
+    fn graph_relations_reject_cross_scope_endpoints_and_traversal_is_filtered() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let timestamps =
+            TemporalBounds::open_from(OffsetDateTime::UNIX_EPOCH, OffsetDateTime::UNIX_EPOCH);
+        let scope =
+            MemoryScope::repository(ScopeId::new("graph-repo-a").expect("scope should validate"));
+        let other_scope =
+            MemoryScope::repository(ScopeId::new("graph-repo-b").expect("scope should validate"));
+        let source =
+            Entity::new("Project", "source", "source", timestamps).with_scope(scope.clone());
+        let target =
+            Entity::new("Project", "target", "target", timestamps).with_scope(scope.clone());
+        let outside =
+            Entity::new("Project", "outside", "outside", timestamps).with_scope(other_scope);
+        store.put_entity(&source).expect("source should write");
+        store.put_entity(&target).expect("target should write");
+        store.put_entity(&outside).expect("outside should write");
+
+        let valid_relation = Relation::new("supports", source.id, target.id, None, timestamps)
+            .with_scope(scope.clone());
+        store
+            .put_relation(&valid_relation)
+            .expect("same-scope relation should write");
+        let cross_scope = Relation::new("supports", source.id, outside.id, None, timestamps)
+            .with_scope(scope.clone());
+        assert!(matches!(
+            store.put_relation(&cross_scope),
+            Err(StorageError::InvariantViolation(message)) if message.contains("both endpoint")
+        ));
+
+        let snapshot = store
+            .graph_snapshot_in_scope(OffsetDateTime::UNIX_EPOCH, &scope)
+            .expect("scoped snapshot should read");
+        assert_eq!(snapshot.entities.len(), 2);
+        assert_eq!(snapshot.relations, vec![valid_relation.clone()]);
+        let traversed = store
+            .traverse_graph(&GraphTraversalRequest::new(source.id, 1).with_scope(scope.clone()))
+            .expect("scoped traversal should read");
+        assert_eq!(traversed.entities.len(), 2);
+        assert_eq!(traversed.relations, vec![valid_relation]);
     }
 
     fn test_entity(label: &str, timestamps: TemporalBounds) -> Entity {
@@ -5161,7 +6123,12 @@ mod tests {
                 ..
             } if found == CURRENT_MEMORY_SCHEMA_VERSION + 1
         ));
-        assert!(error.to_string().contains("expected v1, found v2"));
+        assert!(error.to_string().contains("unsupported store format"));
+        assert!(error.to_string().contains(&format!(
+            "expected schema v{}, found v{}",
+            CURRENT_MEMORY_SCHEMA_VERSION,
+            CURRENT_MEMORY_SCHEMA_VERSION + 1
+        )));
     }
 
     #[test]

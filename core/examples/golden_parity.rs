@@ -27,6 +27,7 @@ struct Fixture {
     timelines: Vec<TimelineQuery>,
     human_signals: Vec<HumanSignalStep>,
     errors: Vec<ErrorQuery>,
+    degraded_recalls: Vec<DegradedRecallQuery>,
     why_now_unix: i64,
 }
 
@@ -85,6 +86,15 @@ struct ErrorQuery {
     top_k: usize,
     now_unix: i64,
     code: String,
+}
+
+#[derive(Deserialize)]
+struct DegradedRecallQuery {
+    name: String,
+    vector: Vec<f32>,
+    top_k: usize,
+    now_unix: i64,
+    include_cold: bool,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -213,11 +223,29 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         error_outputs.push(json!({ "name": query.name, "code": error.code() }));
     }
+    let mut degraded_recall_outputs = Vec::new();
+    for query in &fixture.degraded_recalls {
+        let mut request = RecallRequest::new(&query.vector, query.top_k, unix(query.now_unix)?);
+        if query.include_cold {
+            request = request.include_cold();
+        }
+        let result = engine.recall_with_degradation(&request)?;
+        degraded_recall_outputs.push(json!({
+            "name": query.name,
+            "recall": result.candidates.iter().map(normalize_candidate).collect::<Vec<_>>(),
+            "unavailable_stages": result
+                .unavailable_stages
+                .iter()
+                .map(|stage| format!("{stage:?}").to_ascii_lowercase())
+                .collect::<Vec<_>>(),
+        }));
+    }
     let output = json!({
         "queries": query_outputs,
         "timelines": timeline_outputs,
         "signals": signal_outputs,
         "errors": error_outputs,
+        "degraded_recalls": degraded_recall_outputs,
         "memories": items.iter().map(normalize_memory).collect::<Vec<_>>(),
         "why": why_outputs,
     });

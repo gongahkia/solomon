@@ -13,11 +13,11 @@ use shibahama_core::api::{
 };
 use shibahama_core::model::{
     AccessOutcome, ConsolidationAction, CredenceTier, HumanSignal, HumanSignalAction, MemoryId,
-    MemoryItem, MemoryKind, Provenance, SourceKind, Tier,
+    MemoryItem, MemoryKind, MemoryScope, Provenance, ScopeId, ScopeVisibility, SourceKind, Tier,
 };
 use shibahama_core::retrieval::{
     RecallCandidate, RecallCandidateCurrency, RecallCandidateSource, RecallRankingConfig,
-    RecallRequest, RelatedMemoryProvider,
+    RecallRequest, RecallUnavailableStage, RelatedMemoryProvider,
 };
 use shibahama_core::significance::SignificanceBreakdown;
 use shibahama_core::storage::{EventRecord, MemoryEvent, MemoryWriteEvent, StorageError};
@@ -42,6 +42,21 @@ pub struct PyProvenance {
     pub ingested_by: String,
 }
 
+/// Python memory scope value.
+#[pyclass(frozen, name = "MemoryScope", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyMemoryScope {
+    /// Repository that owns the memory.
+    #[pyo3(get)]
+    pub repository: String,
+    /// Owning team when the memory is explicitly shared.
+    #[pyo3(get)]
+    pub team: Option<String>,
+    /// Visibility boundary: `repository` or `team`.
+    #[pyo3(get)]
+    pub visibility: String,
+}
+
 /// Python memory item value.
 #[pyclass(frozen, name = "MemoryItem", skip_from_py_object)]
 #[derive(Clone)]
@@ -58,6 +73,9 @@ pub struct PyMemoryItem {
     /// Provenance metadata.
     #[pyo3(get)]
     pub provenance: PyProvenance,
+    /// Repository/team visibility boundary.
+    #[pyo3(get)]
+    pub scope: PyMemoryScope,
     /// Accessibility tier.
     #[pyo3(get)]
     pub tier: String,
@@ -133,6 +151,18 @@ pub struct PyRecallCandidate {
     /// Read-safety findings.
     #[pyo3(get)]
     pub read_safety_findings: Vec<String>,
+}
+
+/// Python degraded recall result value.
+#[pyclass(frozen, name = "DegradedRecallResult", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyDegradedRecallResult {
+    /// Candidates returned through all required safety and ranking stages.
+    #[pyo3(get)]
+    pub candidates: Vec<PyRecallCandidate>,
+    /// Optional stages that were unavailable.
+    #[pyo3(get)]
+    pub unavailable_stages: Vec<String>,
 }
 
 /// Python significance breakdown value.
@@ -280,7 +310,10 @@ impl PyShibahama {
         kind = "fact",
         index_name = "default",
         model = "unknown",
-        model_version = "unknown"
+        model_version = "unknown",
+        scope_repository = "default",
+        scope_team = None,
+        scope_visibility = "repository"
     ))]
     pub fn write(
         &self,
@@ -295,6 +328,9 @@ impl PyShibahama {
         index_name: &str,
         model: &str,
         model_version: &str,
+        scope_repository: &str,
+        scope_team: Option<String>,
+        scope_visibility: &str,
     ) -> PyResult<PyMemoryItem> {
         let mut event = write_event(
             content,
@@ -304,6 +340,11 @@ impl PyShibahama {
             valid_from_unix,
             ingested_at_unix,
         )?;
+        event = event.with_scope(parse_memory_scope(
+            scope_repository,
+            scope_team,
+            scope_visibility,
+        )?);
 
         match parse_memory_kind(kind)? {
             MemoryKind::Fact => {}
@@ -407,6 +448,79 @@ impl PyShibahama {
             .into_iter()
             .map(PyRecallCandidate::from)
             .collect())
+    }
+
+    /// Recalls usable candidates and reports unavailable optional stages.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when vector search or initial candidate materialization cannot complete.
+    #[pyo3(signature = (
+        query_vector,
+        top_k,
+        now_unix = None,
+        raw_query_context = None,
+        include_cold = false,
+        include_instructions = false,
+        max_context_tokens = None,
+        similarity_weight = 1.0,
+        significance_weight = 1.0,
+        recency_weight = 0.25,
+        graph_weight = 0.25,
+        related_memory_ids_by_anchor = None
+    ))]
+    pub fn recall_with_degradation(
+        &self,
+        query_vector: Vec<f32>,
+        top_k: usize,
+        now_unix: Option<i64>,
+        raw_query_context: Option<&str>,
+        include_cold: bool,
+        include_instructions: bool,
+        max_context_tokens: Option<usize>,
+        similarity_weight: f64,
+        significance_weight: f64,
+        recency_weight: f64,
+        graph_weight: f64,
+        related_memory_ids_by_anchor: Option<BTreeMap<String, Vec<String>>>,
+    ) -> PyResult<PyDegradedRecallResult> {
+        let inner = self.inner.lock().map_err(lock_error)?;
+        let mut request = recall_request(
+            &query_vector,
+            top_k,
+            now_unix,
+            raw_query_context,
+            include_cold,
+            include_instructions,
+            max_context_tokens,
+        )?
+        .with_ranking(RecallRankingConfig {
+            similarity_weight,
+            significance_weight,
+            recency_weight,
+            graph_weight,
+        });
+        let related_provider = related_memory_ids_by_anchor
+            .map(parse_related_memory_provider)
+            .transpose()?;
+        if let Some(provider) = &related_provider {
+            request = request.with_related_memory_provider(provider);
+        }
+        let result = inner.recall_with_degradation(&request).map_err(py_error)?;
+
+        Ok(PyDegradedRecallResult {
+            candidates: result
+                .candidates
+                .into_iter()
+                .map(PyRecallCandidate::from)
+                .collect(),
+            unavailable_stages: result
+                .unavailable_stages
+                .into_iter()
+                .map(recall_unavailable_stage_str)
+                .map(str::to_owned)
+                .collect(),
+        })
     }
 
     /// Returns all current materialized memory rows.
@@ -761,6 +875,16 @@ impl From<Provenance> for PyProvenance {
     }
 }
 
+impl From<MemoryScope> for PyMemoryScope {
+    fn from(value: MemoryScope) -> Self {
+        Self {
+            repository: value.repository.to_string(),
+            team: value.team.map(|team| team.to_string()),
+            visibility: scope_visibility_str(value.visibility).to_owned(),
+        }
+    }
+}
+
 impl From<MemoryItem> for PyMemoryItem {
     fn from(value: MemoryItem) -> Self {
         Self {
@@ -768,6 +892,7 @@ impl From<MemoryItem> for PyMemoryItem {
             content: value.content,
             kind: memory_kind_str(value.kind).to_owned(),
             provenance: PyProvenance::from(value.provenance),
+            scope: PyMemoryScope::from(value.scope),
             tier: tier_str(value.tier).to_owned(),
             credence: credence_str(value.credence).to_owned(),
             significance: value.significance,
@@ -1009,14 +1134,43 @@ fn _shibahama(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(version, module)?)?;
     module.add_function(wrap_pyfunction!(capabilities_json, module)?)?;
     module.add_class::<PyProvenance>()?;
+    module.add_class::<PyMemoryScope>()?;
     module.add_class::<PyMemoryItem>()?;
     module.add_class::<PyRecallCandidate>()?;
+    module.add_class::<PyDegradedRecallResult>()?;
     module.add_class::<PySignificanceBreakdown>()?;
     module.add_class::<PyWhyTrace>()?;
     module.add_class::<PyRecallStream>()?;
     module.add_class::<PyShibahama>()?;
 
     Ok(())
+}
+
+fn parse_memory_scope(
+    repository: &str,
+    team: Option<String>,
+    visibility: &str,
+) -> PyResult<MemoryScope> {
+    let repository =
+        ScopeId::new(repository).map_err(|error| PyValueError::new_err(error.to_string()))?;
+    match visibility {
+        "repository" => {
+            if team.is_some() {
+                return Err(PyValueError::new_err(
+                    "repository scope must not specify a team",
+                ));
+            }
+            Ok(MemoryScope::repository(repository))
+        }
+        "team" => Ok(MemoryScope::team(
+            repository,
+            ScopeId::new(team.ok_or_else(|| PyValueError::new_err("team scope requires a team"))?)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?,
+        )),
+        _ => Err(PyValueError::new_err(
+            "scope_visibility must be `repository` or `team`",
+        )),
+    }
 }
 
 fn write_event(
@@ -1168,6 +1322,9 @@ fn human_signal_action_str(value: HumanSignalAction) -> &'static str {
 fn event_kind(event: &MemoryEvent) -> &'static str {
     match event {
         MemoryEvent::MemoryWritten { .. } => "memory_written",
+        MemoryEvent::MemoryScopePromoted { .. } => "memory_scope_promoted",
+        MemoryEvent::ScopeAuthorizationDenied { .. } => "scope_authorization_denied",
+        MemoryEvent::PolicyDecisionRecorded { .. } => "policy_decision",
         MemoryEvent::MemoryInvalidated { .. } => "memory_invalidated",
         MemoryEvent::ReverificationFlagged { .. } => "reverification_flagged",
         MemoryEvent::AccessRecorded { .. } => "access_recorded",
@@ -1182,6 +1339,13 @@ fn event_kind(event: &MemoryEvent) -> &'static str {
 fn event_memory_ids(event: &MemoryEvent) -> Vec<String> {
     match event {
         MemoryEvent::MemoryWritten { item } => vec![item.id.to_string()],
+        MemoryEvent::MemoryScopePromoted {
+            source_id,
+            promoted_id,
+            ..
+        } => vec![source_id.to_string(), promoted_id.to_string()],
+        MemoryEvent::ScopeAuthorizationDenied { .. }
+        | MemoryEvent::PolicyDecisionRecorded { .. } => Vec::new(),
         MemoryEvent::MemoryInvalidated { id, .. }
         | MemoryEvent::ReverificationFlagged { id, .. }
         | MemoryEvent::AccessRecorded { id, .. }
@@ -1212,6 +1376,13 @@ fn event_memory_ids(event: &MemoryEvent) -> Vec<String> {
 fn event_touches_memory(record: &EventRecord, id: MemoryId) -> bool {
     match &record.event {
         MemoryEvent::MemoryWritten { item } => item.id == id,
+        MemoryEvent::MemoryScopePromoted {
+            source_id,
+            promoted_id,
+            ..
+        } => *source_id == id || *promoted_id == id,
+        MemoryEvent::ScopeAuthorizationDenied { .. }
+        | MemoryEvent::PolicyDecisionRecorded { .. } => false,
         MemoryEvent::MemoryInvalidated { id: event_id, .. }
         | MemoryEvent::ReverificationFlagged { id: event_id, .. }
         | MemoryEvent::AccessRecorded { id: event_id, .. }
@@ -1261,6 +1432,13 @@ fn tier_str(value: Tier) -> &'static str {
     }
 }
 
+fn scope_visibility_str(value: ScopeVisibility) -> &'static str {
+    match value {
+        ScopeVisibility::Repository => "repository",
+        ScopeVisibility::Team => "team",
+    }
+}
+
 fn credence_str(value: CredenceTier) -> &'static str {
     match value {
         CredenceTier::Unverified => "unverified",
@@ -1287,8 +1465,24 @@ fn candidate_source_str(value: RecallCandidateSource) -> String {
     }
 }
 
+fn recall_unavailable_stage_str(value: RecallUnavailableStage) -> &'static str {
+    match value {
+        RecallUnavailableStage::VectorSearch => "vector_search",
+        RecallUnavailableStage::StorageHydration => "storage_hydration",
+        RecallUnavailableStage::GraphExpansion => "graph_expansion",
+        RecallUnavailableStage::Sanitization => "sanitization",
+        RecallUnavailableStage::AccessRecording => "access_recording",
+    }
+}
+
 fn py_error(error: ShibahamaError) -> PyErr {
-    PyRuntimeError::new_err(error.to_string())
+    PyRuntimeError::new_err(structured_error_reason(error))
+}
+
+fn structured_error_reason(error: ShibahamaError) -> String {
+    serde_json::to_string(&error.metadata()).unwrap_or_else(|_| {
+        "{\"code\":\"SHIBA_INTERNAL\",\"severity\":\"fatal\",\"retryable\":false,\"detail\":\"internal error\"}".to_owned()
+    })
 }
 
 fn json_error(error: serde_json::Error) -> PyErr {

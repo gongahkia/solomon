@@ -9,6 +9,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from ._shibahama import (
     __version__,
+    DegradedRecallResult,
     MemoryItem,
     Provenance,
     RecallCandidate,
@@ -30,16 +31,38 @@ class ShibahamaError(RuntimeError):
     """Structured error raised by the public Shibahama Python wrapper."""
 
     def __init__(self, message: str) -> None:
-        super().__init__(message)
-        self.code = _error_code(message)
-        self.severity = "recoverable" if self.code in {"SHIBA_RECALL", "SHIBA_TASK"} else "fatal"
-        self.retryable = self.severity == "recoverable"
+        metadata = _error_metadata(message)
+        super().__init__(metadata["detail"])
+        self.code = metadata["code"]
+        self.severity = metadata["severity"]
+        self.retryable = metadata["retryable"]
+        self.detail = metadata["detail"]
 
 
-def _error_code(message: str) -> str:
+def _error_metadata(message: str) -> dict[str, Any]:
+    try:
+        metadata = json.loads(message)
+    except json.JSONDecodeError:
+        metadata = None
+    if (
+        isinstance(metadata, dict)
+        and isinstance(metadata.get("code"), str)
+        and metadata.get("severity") in {"recoverable", "fatal"}
+        and isinstance(metadata.get("retryable"), bool)
+        and isinstance(metadata.get("detail"), str)
+    ):
+        return metadata
+
     start = message.find("[SHIBA_")
     end = message.find("]", start)
-    return message[start + 1 : end] if start != -1 and end != -1 else "SHIBA_INTERNAL"
+    code = message[start + 1 : end] if start != -1 and end != -1 else "SHIBA_INTERNAL"
+    severity = "recoverable" if code in {"SHIBA_RECALL", "SHIBA_TASK"} else "fatal"
+    return {
+        "code": code,
+        "severity": severity,
+        "retryable": severity == "recoverable",
+        "detail": "Shibahama request failed",
+    }
 
 
 def _raise_structured(error: RuntimeError) -> None:
@@ -80,6 +103,9 @@ class Shibahama:
         index_name: str = "default",
         model: str = "unknown",
         model_version: str = "unknown",
+        scope_repository: str = "default",
+        scope_team: str | None = None,
+        scope_visibility: str = "repository",
     ) -> MemoryItem:
         """Write a memory and optionally index an embedding vector."""
         return self._inner.write(
@@ -94,6 +120,9 @@ class Shibahama:
             index_name,
             model,
             model_version,
+            scope_repository,
+            scope_team,
+            scope_visibility,
         )
 
     async def async_write(self, *args, **kwargs) -> MemoryItem:
@@ -138,6 +167,41 @@ class Shibahama:
             graph_weight,
             related_memory_ids_by_anchor,
         )
+
+    def recall_with_degradation(
+        self,
+        query_vector,
+        top_k: int,
+        now_unix: int | None = None,
+        raw_query_context: str | None = None,
+        include_cold: bool = False,
+        include_instructions: bool = False,
+        max_context_tokens: int | None = None,
+        similarity_weight: float = 1.0,
+        significance_weight: float = 1.0,
+        recency_weight: float = 0.25,
+        graph_weight: float = 0.25,
+        related_memory_ids_by_anchor: Mapping[str, Sequence[str]] | None = None,
+    ) -> DegradedRecallResult:
+        """Recall usable candidates and report unavailable optional stages."""
+        return self._inner.recall_with_degradation(
+            query_vector,
+            top_k,
+            now_unix,
+            raw_query_context,
+            include_cold,
+            include_instructions,
+            max_context_tokens,
+            similarity_weight,
+            significance_weight,
+            recency_weight,
+            graph_weight,
+            related_memory_ids_by_anchor,
+        )
+
+    async def async_recall_with_degradation(self, *args, **kwargs) -> DegradedRecallResult:
+        """Async wrapper for `recall_with_degradation` using a worker thread."""
+        return await asyncio.to_thread(self.recall_with_degradation, *args, **kwargs)
 
     async def async_recall(self, *args, **kwargs) -> list[RecallCandidate]:
         """Async wrapper for `recall` using a worker thread."""

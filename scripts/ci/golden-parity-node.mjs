@@ -20,7 +20,7 @@ const dir = await mkdtemp(join(tmpdir(), "shibahama-golden-node-"));
 try {
   const engine = new Shibahama(join(dir, "node.redb"), fixture.dimensions, fixture.capacity);
   const ids = new Map();
-  const output = { queries: [], timelines: [], signals: [], errors: [], memories: [], why: [] };
+  const output = { queries: [], timelines: [], signals: [], errors: [], degraded_recalls: [], memories: [], why: [] };
 
   for (const step of fixture.steps) {
     if (step.op === "write") {
@@ -97,7 +97,15 @@ try {
     try {
       engine.recall(query.vector, query.top_k, { nowUnix: query.now_unix });
     } catch (error) {
-      code = errorCode(error.message);
+      if (
+        typeof error.code !== "string" ||
+        error.severity !== "fatal" ||
+        error.retryable !== false ||
+        error.detail !== "vector index operation failed"
+      ) {
+        throw new Error(`invalid structured error: ${JSON.stringify(error)}`);
+      }
+      code = error.code;
     }
     if (!code) {
       throw new Error(`${query.name} should fail`);
@@ -106,6 +114,17 @@ try {
       throw new Error(`${query.name} returned ${code}`);
     }
     output.errors.push({ name: query.name, code });
+  }
+  for (const query of fixture.degraded_recalls) {
+    const result = engine.recallWithDegradation(query.vector, query.top_k, {
+      nowUnix: query.now_unix,
+      includeCold: query.include_cold,
+    });
+    output.degraded_recalls.push({
+      name: query.name,
+      recall: result.candidates.map(normalizeCandidate),
+      unavailable_stages: result.unavailableStages,
+    });
   }
 
   console.log(JSON.stringify(output));
@@ -147,12 +166,4 @@ function normalizeWhy(trace) {
 
 function fixed(value) {
   return Number(value).toFixed(6);
-}
-
-function errorCode(message) {
-  const match = /\[(SHIBA_[A-Z_]+)\]/.exec(message);
-  if (!match) {
-    throw new Error(`missing Shibahama error code: ${message}`);
-  }
-  return match[1];
 }

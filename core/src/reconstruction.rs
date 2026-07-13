@@ -705,11 +705,13 @@ mod tests {
         let now = OffsetDateTime::UNIX_EPOCH;
         let item = MemoryItem {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: crate::model::MemoryScope::default(),
             id: MemoryId::new_v7(),
             content: "memory".to_owned(),
             kind: MemoryKind::Fact,
             compaction: None,
             consolidation: None,
+            promotion: None,
             embedding_ref: None,
             provenance: Provenance::new(SourceKind::User, None, "reconstruction-test"),
             timestamps: TemporalBounds::open_from(now, now),

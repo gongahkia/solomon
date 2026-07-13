@@ -3,15 +3,16 @@
 //! Retrieval orchestration for recall.
 
 use crate::model::{
-    AccessEvent, AccessOutcome, MemoryId, MemoryItem, MemoryKind, Provenance, Tier,
+    AccessEvent, AccessOutcome, MemoryId, MemoryItem, MemoryKind, MemoryScope, Provenance, Tier,
 };
+use crate::policy::ScopePolicy;
 use crate::read_safety::{
     DefaultSanitizingGateway, SanitizingGateway, StoredContentFinding,
     sanitize_memory_for_read_with_gateway,
 };
 use crate::significance::SignificanceConfig;
 use crate::storage::{GraphSnapshot, RedbMemoryStore, StorageError};
-use crate::vector::{VectorIndex, VectorIndexError};
+use crate::vector::{VectorIndex, VectorIndexError, VectorSearchResult};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -25,6 +26,46 @@ pub enum RecallError {
     /// Vector index operation failed.
     #[error(transparent)]
     Vector(#[from] VectorIndexError),
+    /// An explicitly injected or otherwise unavailable recall stage.
+    #[error("recall stage unavailable: {stage:?}")]
+    StageUnavailable {
+        /// Stage that could not complete.
+        stage: RecallUnavailableStage,
+    },
+}
+
+/// Recall stage that can be reported as unavailable without exposing backend details.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum RecallUnavailableStage {
+    /// Vector search could not run.
+    VectorSearch,
+    /// Candidate materialization or refresh could not complete.
+    StorageHydration,
+    /// Graph-based candidate expansion could not complete.
+    GraphExpansion,
+    /// Candidate content could not pass the read-safety boundary.
+    Sanitization,
+    /// Surfaced-access recording could not complete.
+    AccessRecording,
+}
+
+/// Test boundary for deterministically making one recall stage unavailable.
+pub trait RecallFaultInjector {
+    /// Returns an error when `stage` should be unavailable.
+    ///
+    /// # Errors
+    ///
+    /// Returns the deterministic fault configured for `stage`.
+    fn check(&self, stage: RecallUnavailableStage) -> Result<(), String>;
+}
+
+/// Recall output that preserves usable candidates alongside unavailable optional stages.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DegradedRecallResult {
+    /// Candidates that completed all required safety and ranking stages.
+    pub candidates: Vec<RecallCandidate>,
+    /// Optional stages that were unavailable during this recall.
+    pub unavailable_stages: Vec<RecallUnavailableStage>,
 }
 
 /// Recall request over a pre-computed query embedding.
@@ -58,6 +99,12 @@ pub struct RecallRequest<'a> {
     pub related_memory_provider: Option<&'a dyn RelatedMemoryProvider>,
     /// Optional provenance source-ref prefix that candidate items must match.
     pub source_ref_prefix: Option<&'a str>,
+    /// Optional exact repository/team visibility boundary for candidate items.
+    pub scope: Option<&'a MemoryScope>,
+    /// Visibility classes permitted to contribute candidates.
+    pub scope_policy: ScopePolicy,
+    /// Optional deterministic failure injector used by failure-path tests.
+    pub fault_injector: Option<&'a dyn RecallFaultInjector>,
 }
 
 impl<'a> RecallRequest<'a> {
@@ -79,6 +126,9 @@ impl<'a> RecallRequest<'a> {
             sanitizing_gateway: None,
             related_memory_provider: None,
             source_ref_prefix: None,
+            scope: None,
+            scope_policy: ScopePolicy::default(),
+            fault_injector: None,
         }
     }
 
@@ -86,6 +136,20 @@ impl<'a> RecallRequest<'a> {
     #[must_use]
     pub const fn with_raw_query_context(mut self, raw_query_context: &'a str) -> Self {
         self.raw_query_context = Some(raw_query_context);
+        self
+    }
+
+    /// Restricts candidates to one exact repository/team visibility boundary.
+    #[must_use]
+    pub const fn with_scope(mut self, scope: &'a MemoryScope) -> Self {
+        self.scope = Some(scope);
+        self
+    }
+
+    /// Restricts candidates to policy-permitted scope visibility classes.
+    #[must_use]
+    pub const fn with_scope_policy(mut self, scope_policy: ScopePolicy) -> Self {
+        self.scope_policy = scope_policy;
         self
     }
 
@@ -158,6 +222,16 @@ impl<'a> RecallRequest<'a> {
         related_memory_provider: &'a dyn RelatedMemoryProvider,
     ) -> Self {
         self.related_memory_provider = Some(related_memory_provider);
+        self
+    }
+
+    /// Injects deterministic recall-stage failures for testing.
+    #[must_use]
+    pub const fn with_fault_injector(
+        mut self,
+        fault_injector: &'a dyn RecallFaultInjector,
+    ) -> Self {
+        self.fault_injector = Some(fault_injector);
         self
     }
 
@@ -314,7 +388,24 @@ pub fn recall(
     vector_index: &dyn VectorIndex,
     request: &RecallRequest<'_>,
 ) -> Result<Vec<RecallCandidate>, RecallError> {
-    recall_inner(store, vector_index, request, true)
+    Ok(recall_inner(store, vector_index, request, true, false)?.candidates)
+}
+
+/// Recalls usable candidates while reporting unavailable optional stages.
+///
+/// Vector search and initial candidate materialization remain fail-closed because no safe result
+/// can be derived without them. Graph expansion, per-candidate hydration, sanitization, and
+/// surfaced-access recording may degrade explicitly.
+///
+/// # Errors
+///
+/// Returns an error when vector search or initial candidate materialization cannot complete.
+pub fn recall_with_degradation(
+    store: &RedbMemoryStore,
+    vector_index: &dyn VectorIndex,
+    request: &RecallRequest<'_>,
+) -> Result<DegradedRecallResult, RecallError> {
+    recall_inner(store, vector_index, request, true, true)
 }
 
 /// Reconstructs query results as they were believed at `request.now`.
@@ -334,6 +425,7 @@ pub fn timeline(
     timeline_inner(store, vector_index, request)
 }
 
+#[allow(clippy::too_many_lines)]
 fn timeline_inner(
     store: &RedbMemoryStore,
     vector_index: &dyn VectorIndex,
@@ -349,7 +441,7 @@ fn timeline_inner(
         now: request.now,
         sanitizing_gateway,
     };
-    let vector_results = vector_index.search(request.query_vector, request.top_k)?;
+    let (scoped_ids, vector_results) = scoped_vector_search(store, vector_index, request)?;
     let mut historical_items = store
         .memory_items_believed_at(request.now)?
         .into_iter()
@@ -359,6 +451,12 @@ fn timeline_inner(
     let mut candidates = Vec::new();
 
     for result in vector_results {
+        if scoped_ids
+            .as_ref()
+            .is_some_and(|ids| !ids.contains(&result.id))
+        {
+            continue;
+        }
         let Some(item) = historical_items.remove(&result.id) else {
             continue;
         };
@@ -446,12 +544,14 @@ fn timeline_inner(
     Ok(candidates)
 }
 
+#[allow(clippy::too_many_lines)]
 fn recall_inner(
     store: &RedbMemoryStore,
     vector_index: &dyn VectorIndex,
     request: &RecallRequest<'_>,
     record_surface_access: bool,
-) -> Result<Vec<RecallCandidate>, RecallError> {
+    allow_degradation: bool,
+) -> Result<DegradedRecallResult, RecallError> {
     let default_sanitizing_gateway = DefaultSanitizingGateway;
     let sanitizing_gateway = request
         .sanitizing_gateway
@@ -462,55 +562,89 @@ fn recall_inner(
         now: request.now,
         sanitizing_gateway,
     };
-    let vector_results = vector_index.search(request.query_vector, request.top_k)?;
+    let (scoped_ids, vector_results) = scoped_vector_search(store, vector_index, request)?;
     let ids = vector_results
         .iter()
         .map(|result| result.id)
         .collect::<Vec<_>>();
     let items = store.get_many(&ids)?;
+    let mut unavailable_stages = BTreeSet::new();
     let mut seen_ids = BTreeSet::new();
-    let mut candidates = vector_results
-        .into_iter()
-        .zip(items)
-        .map(
-            |(result, item)| -> Result<Option<RecallCandidate>, RecallError> {
-                let Some(item) = item else {
-                    return Ok(None);
-                };
+    let mut candidates = Vec::new();
 
-                let item = refresh_item_for_recall(store, item, request, record_surface_access)?;
+    for (result, item) in vector_results.into_iter().zip(items) {
+        let Some(item) = item else {
+            continue;
+        };
+        if scoped_ids
+            .as_ref()
+            .is_some_and(|ids| !ids.contains(&result.id))
+        {
+            continue;
+        }
 
-                if !is_recallable_item(&item, request) {
-                    return Ok(None);
-                }
+        let item = match refresh_item_for_recall(store, item, request, record_surface_access) {
+            Ok(item) => item,
+            Err(_error) if allow_degradation => {
+                unavailable_stages.insert(RecallUnavailableStage::StorageHydration);
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
 
-                Ok(Some(candidate_from_item(
-                    result.id,
-                    item,
-                    result.distance,
-                    RecallCandidateSource::Vector,
-                    &candidate_context,
-                )))
-            },
-        )
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+        if !is_recallable_item(&item, request) {
+            continue;
+        }
 
-    for candidate in &candidates {
-        seen_ids.insert(candidate.id);
+        match candidate_from_item_checked(
+            result.id,
+            item,
+            result.distance,
+            RecallCandidateSource::Vector,
+            &candidate_context,
+            request,
+        ) {
+            Ok(candidate) => {
+                seen_ids.insert(candidate.id);
+                candidates.push(candidate);
+            }
+            Err(_error) if allow_degradation => {
+                unavailable_stages.insert(RecallUnavailableStage::Sanitization);
+            }
+            Err(error) => return Err(error),
+        }
     }
 
     let anchors = candidates
         .iter()
         .map(|candidate| candidate.id)
         .collect::<Vec<_>>();
-    let related_ids_by_anchor = collect_related_memory_ids(store, &anchors, request)?;
+    let related_ids_by_anchor = match collect_related_memory_ids(store, &anchors, request) {
+        Ok(related_ids) => related_ids,
+        Err(_error) if allow_degradation => {
+            unavailable_stages.insert(RecallUnavailableStage::GraphExpansion);
+            BTreeMap::new()
+        }
+        Err(error) => return Err(error),
+    };
     let mut expanded_candidates = Vec::new();
 
     for (anchor, related_ids) in related_ids_by_anchor {
-        let related_items = store.get_many(&related_ids)?;
+        if let Err(error) = check_recall_stage(request, RecallUnavailableStage::StorageHydration) {
+            if allow_degradation {
+                unavailable_stages.insert(RecallUnavailableStage::StorageHydration);
+                continue;
+            }
+            return Err(error);
+        }
+        let related_items = match store.get_many(&related_ids) {
+            Ok(items) => items,
+            Err(_error) if allow_degradation => {
+                unavailable_stages.insert(RecallUnavailableStage::StorageHydration);
+                continue;
+            }
+            Err(error) => return Err(error.into()),
+        };
 
         for (related_id, related_item) in related_ids.into_iter().zip(related_items) {
             if !seen_ids.insert(related_id) {
@@ -521,19 +655,33 @@ fn recall_inner(
                 continue;
             };
 
-            let item = refresh_item_for_recall(store, item, request, record_surface_access)?;
+            let item = match refresh_item_for_recall(store, item, request, record_surface_access) {
+                Ok(item) => item,
+                Err(_error) if allow_degradation => {
+                    unavailable_stages.insert(RecallUnavailableStage::StorageHydration);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
 
             if !is_recallable_item(&item, request) {
                 continue;
             }
 
-            expanded_candidates.push(candidate_from_item(
+            match candidate_from_item_checked(
                 related_id,
                 item,
                 f32::INFINITY,
                 RecallCandidateSource::GraphExpansion { anchor },
                 &candidate_context,
-            ));
+                request,
+            ) {
+                Ok(candidate) => expanded_candidates.push(candidate),
+                Err(_error) if allow_degradation => {
+                    unavailable_stages.insert(RecallUnavailableStage::Sanitization);
+                }
+                Err(error) => return Err(error),
+            }
         }
     }
 
@@ -551,11 +699,20 @@ fn recall_inner(
     candidates = diversify_candidates(candidates, request.diversification);
     candidates = apply_context_token_budget(candidates, request.max_context_tokens);
 
-    if record_surface_access {
-        record_surface_accesses(store, &candidates, request)?;
+    if record_surface_access
+        && let Err(error) = record_surface_accesses(store, &candidates, request)
+    {
+        if allow_degradation {
+            unavailable_stages.insert(RecallUnavailableStage::AccessRecording);
+        } else {
+            return Err(error);
+        }
     }
 
-    Ok(candidates)
+    Ok(DegradedRecallResult {
+        candidates,
+        unavailable_stages: unavailable_stages.into_iter().collect(),
+    })
 }
 
 fn record_surface_accesses(
@@ -563,6 +720,8 @@ fn record_surface_accesses(
     candidates: &[RecallCandidate],
     request: &RecallRequest<'_>,
 ) -> Result<(), RecallError> {
+    check_recall_stage(request, RecallUnavailableStage::AccessRecording)?;
+
     for candidate in candidates {
         let access_event = request.raw_query_context.map_or_else(
             || AccessEvent::new(request.now, None, AccessOutcome::Surfaced),
@@ -581,12 +740,35 @@ fn record_surface_accesses(
     Ok(())
 }
 
+fn scoped_vector_search(
+    store: &RedbMemoryStore,
+    vector_index: &dyn VectorIndex,
+    request: &RecallRequest<'_>,
+) -> Result<(Option<BTreeSet<MemoryId>>, Vec<VectorSearchResult>), RecallError> {
+    check_recall_stage(request, RecallUnavailableStage::StorageHydration)?;
+    let scoped_ids = request
+        .scope
+        .map(|scope| store.memory_ids_in_scope(scope))
+        .transpose()?
+        .map(|ids| ids.into_iter().collect::<BTreeSet<_>>());
+    let top_k = scoped_ids.as_ref().map_or(request.top_k, |_| {
+        vector_index.live_len().max(request.top_k)
+    });
+    check_recall_stage(request, RecallUnavailableStage::VectorSearch)?;
+
+    Ok((
+        scoped_ids,
+        vector_index.search(request.query_vector, top_k)?,
+    ))
+}
+
 fn refresh_item_for_recall(
     store: &RedbMemoryStore,
     item: MemoryItem,
     request: &RecallRequest<'_>,
     record_surface_access: bool,
 ) -> Result<MemoryItem, RecallError> {
+    check_recall_stage(request, RecallUnavailableStage::StorageHydration)?;
     let item = if record_surface_access {
         store
             .refresh_significance(item.id, &request.significance, request.now)?
@@ -629,6 +811,7 @@ fn collect_related_memory_ids(
     let mut related_ids_by_anchor = BTreeMap::<MemoryId, BTreeSet<MemoryId>>::new();
 
     if request.ranking.graph_weight > 0.0 {
+        check_recall_stage(request, RecallUnavailableStage::GraphExpansion)?;
         let snapshot = store.graph_snapshot(request.now)?;
 
         for (anchor, related_ids) in stored_graph_related_memory_ids(&snapshot, anchors) {
@@ -640,6 +823,7 @@ fn collect_related_memory_ids(
     }
 
     if let Some(provider) = request.related_memory_provider {
+        check_recall_stage(request, RecallUnavailableStage::GraphExpansion)?;
         for anchor in anchors {
             related_ids_by_anchor
                 .entry(*anchor)
@@ -790,6 +974,37 @@ struct CandidateBuildContext<'a> {
     sanitizing_gateway: &'a dyn SanitizingGateway,
 }
 
+fn check_recall_stage(
+    request: &RecallRequest<'_>,
+    stage: RecallUnavailableStage,
+) -> Result<(), RecallError> {
+    request
+        .fault_injector
+        .map(|fault_injector| fault_injector.check(stage))
+        .transpose()
+        .map(|_| ())
+        .map_err(|_| RecallError::StageUnavailable { stage })
+}
+
+fn candidate_from_item_checked(
+    id: MemoryId,
+    item: MemoryItem,
+    vector_distance: f32,
+    source: RecallCandidateSource,
+    context: &CandidateBuildContext<'_>,
+    request: &RecallRequest<'_>,
+) -> Result<RecallCandidate, RecallError> {
+    check_recall_stage(request, RecallUnavailableStage::Sanitization)?;
+
+    Ok(candidate_from_item(
+        id,
+        item,
+        vector_distance,
+        source,
+        context,
+    ))
+}
+
 fn candidate_from_item(
     id: MemoryId,
     item: MemoryItem,
@@ -889,6 +1104,8 @@ fn is_recallable_item(item: &MemoryItem, request: &RecallRequest<'_>) -> bool {
                 .as_deref()
                 .is_some_and(|source_ref| source_ref.starts_with(prefix))
         })
+        && request.scope.is_none_or(|scope| item.scope == *scope)
+        && request.scope_policy.allows(&item.scope)
 }
 
 fn load_bearing_possibly_stale(
@@ -929,12 +1146,13 @@ fn similarity_from_distance(distance: f32) -> f64 {
 mod tests {
     use super::*;
     use crate::model::{
-        CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, Entity, Provenance, Relation, SourceKind,
-        TemporalBounds, Tier,
+        CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, Entity, MemoryScope, Provenance, Relation,
+        ScopeId, SourceKind, TemporalBounds, Tier,
     };
     use crate::storage::MemoryEvent;
     use crate::vector::HnswVectorIndex;
     use proptest::prelude::*;
+    use std::cell::Cell;
     use std::collections::BTreeMap;
     use tempfile::NamedTempFile;
     use time::Duration;
@@ -947,6 +1165,35 @@ mod tests {
     impl RelatedMemoryProvider for StaticRelatedMemoryProvider {
         fn related_memory_ids(&self, id: MemoryId) -> Result<Vec<MemoryId>, StorageError> {
             Ok(self.related.get(&id).cloned().unwrap_or_default())
+        }
+    }
+
+    struct FailingRecallStage {
+        stage: RecallUnavailableStage,
+    }
+
+    impl RecallFaultInjector for FailingRecallStage {
+        fn check(&self, stage: RecallUnavailableStage) -> Result<(), String> {
+            if stage == self.stage {
+                Err("injected failure".to_owned())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    struct FailFirstRecallStage {
+        stage: RecallUnavailableStage,
+        failed: Cell<bool>,
+    }
+
+    impl RecallFaultInjector for FailFirstRecallStage {
+        fn check(&self, stage: RecallUnavailableStage) -> Result<(), String> {
+            if stage == self.stage && !self.failed.replace(true) {
+                Err("injected failure".to_owned())
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -963,11 +1210,13 @@ mod tests {
     fn test_item(content: &str, now: OffsetDateTime) -> MemoryItem {
         MemoryItem {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: crate::model::MemoryScope::default(),
             id: MemoryId::new_v7(),
             content: content.to_owned(),
             kind: MemoryKind::Fact,
             compaction: None,
             consolidation: None,
+            promotion: None,
             embedding_ref: None,
             provenance: Provenance::new(SourceKind::User, None, "retrieval-test"),
             timestamps: TemporalBounds::open_from(now, now),
@@ -977,6 +1226,200 @@ mod tests {
             base_significance: 1.0,
             credence_floor: Tier::Warm,
             access_events: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn fault_injection_keeps_strict_failures_closed_and_reports_partial_stages() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(1);
+        let mut first = test_item("first", OffsetDateTime::UNIX_EPOCH);
+        let mut second = test_item("second", OffsetDateTime::UNIX_EPOCH);
+
+        store
+            .write_embedded(
+                &mut first,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "test",
+                "model",
+                "v1",
+            )
+            .expect("first item should write");
+        store
+            .write_embedded(
+                &mut second,
+                &mut vector_index,
+                &[1.0, 1.0],
+                "test",
+                "model",
+                "v1",
+            )
+            .expect("second item should write");
+        let query = [0.0, 0.0];
+
+        for stage in [
+            RecallUnavailableStage::VectorSearch,
+            RecallUnavailableStage::StorageHydration,
+        ] {
+            let fault = FailingRecallStage { stage };
+            let error = recall(
+                &store,
+                &vector_index,
+                &RecallRequest::new(&query, 2, now).with_fault_injector(&fault),
+            )
+            .expect_err("foundational recall stages should fail closed");
+
+            assert!(
+                matches!(error, RecallError::StageUnavailable { stage: actual } if actual == stage)
+            );
+        }
+
+        let graph_fault = FailingRecallStage {
+            stage: RecallUnavailableStage::GraphExpansion,
+        };
+        let graph_result = recall_with_degradation(
+            &store,
+            &vector_index,
+            &RecallRequest::new(&query, 2, now).with_fault_injector(&graph_fault),
+        )
+        .expect("graph expansion can degrade");
+
+        assert_eq!(graph_result.candidates.len(), 2);
+        assert_eq!(
+            graph_result.unavailable_stages,
+            vec![RecallUnavailableStage::GraphExpansion]
+        );
+
+        let sanitization_fault = FailFirstRecallStage {
+            stage: RecallUnavailableStage::Sanitization,
+            failed: Cell::new(false),
+        };
+        let sanitization_result = recall_with_degradation(
+            &store,
+            &vector_index,
+            &RecallRequest::new(&query, 2, now).with_fault_injector(&sanitization_fault),
+        )
+        .expect("sanitization can degrade without returning unsanitized content");
+
+        assert_eq!(sanitization_result.candidates.len(), 1);
+        assert_eq!(
+            sanitization_result.unavailable_stages,
+            vec![RecallUnavailableStage::Sanitization]
+        );
+    }
+
+    #[test]
+    fn scoped_recall_uses_the_scope_index_and_excludes_other_scopes() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let scope =
+            MemoryScope::repository(ScopeId::new("repo-a").expect("repository should validate"));
+        let other_scope =
+            MemoryScope::repository(ScopeId::new("repo-b").expect("repository should validate"));
+        let mut allowed = test_item("allowed", now);
+        allowed.scope = scope.clone();
+        let mut denied = test_item("denied", now);
+        denied.scope = other_scope;
+
+        store
+            .write_embedded(
+                &mut allowed,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "scope-test",
+                "scope-test",
+                "v1",
+            )
+            .expect("allowed item should write");
+        store
+            .write_embedded(
+                &mut denied,
+                &mut vector_index,
+                &[0.0, 0.0],
+                "scope-test",
+                "scope-test",
+                "v1",
+            )
+            .expect("denied item should write");
+
+        let candidates = recall(
+            &store,
+            &vector_index,
+            &RecallRequest::new(&[0.0, 0.0], 2, now).with_scope(&scope),
+        )
+        .expect("scoped recall should succeed");
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].id, allowed.id);
+    }
+
+    proptest! {
+        #[test]
+        fn scoped_recall_never_surfaces_or_records_cross_scope_ids(outside_count in 1_usize..6) {
+            let file = NamedTempFile::new().expect("tempfile should be created");
+            let store = RedbMemoryStore::open(file.path()).expect("store should open");
+            let mut vector_index = HnswVectorIndex::with_capacity(2, outside_count + 2);
+            let now = OffsetDateTime::UNIX_EPOCH;
+            let scope = MemoryScope::repository(
+                ScopeId::new("property-repo-a").expect("scope should validate"),
+            );
+            let outside_scope = MemoryScope::repository(
+                ScopeId::new("property-repo-b").expect("scope should validate"),
+            );
+            let mut allowed = test_item("allowed", now);
+            allowed.scope = scope.clone();
+            store
+                .write_embedded(
+                    &mut allowed,
+                    &mut vector_index,
+                    &[0.0, 0.0],
+                    "scope-property",
+                    "scope-property",
+                    "v1",
+                )
+                .expect("allowed item should write");
+            let mut outside_ids = Vec::new();
+            for index in 0..outside_count {
+                let mut outside = test_item(&format!("outside-{index}"), now);
+                outside.scope = outside_scope.clone();
+                store
+                    .write_embedded(
+                        &mut outside,
+                        &mut vector_index,
+                        &[0.0, 0.0],
+                        "scope-property",
+                        "scope-property",
+                        "v1",
+                    )
+                    .expect("outside item should write");
+                outside_ids.push(outside.id);
+            }
+            let provider = StaticRelatedMemoryProvider {
+                related: BTreeMap::from([(allowed.id, outside_ids.clone())]),
+            };
+            let query = [0.0, 0.0];
+            let candidates = recall(
+                &store,
+                &vector_index,
+                &RecallRequest::new(&query, outside_count + 1, now)
+                    .with_scope(&scope)
+                    .with_related_memory_provider(&provider),
+            )
+            .expect("scoped recall should succeed");
+
+            prop_assert!(candidates.iter().all(|candidate| candidate.item.scope == scope));
+            for outside_id in outside_ids {
+                let outside = store
+                    .get(outside_id)
+                    .expect("outside item should read")
+                    .expect("outside item should exist");
+                prop_assert!(outside.access_events.is_empty());
+            }
         }
     }
 

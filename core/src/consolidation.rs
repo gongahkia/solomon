@@ -398,11 +398,13 @@ fn synthesized_memory(
 
     MemoryItem {
         schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+        scope: crate::model::MemoryScope::default(),
         id: MemoryId::new_v7(),
         content,
         kind: MemoryKind::Fact,
         compaction: None,
         consolidation: Some(lineage),
+        promotion: None,
         embedding_ref: None,
         provenance: Provenance::new(
             SourceKind::Agent,
@@ -605,11 +607,13 @@ mod tests {
     fn memory(content: &str, consolidation: Option<ConsolidationRef>) -> MemoryItem {
         MemoryItem {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
+            scope: crate::model::MemoryScope::default(),
             id: MemoryId::new_v7(),
             content: content.to_owned(),
             kind: MemoryKind::Fact,
             compaction: None,
             consolidation,
+            promotion: None,
             embedding_ref: None,
             provenance: Provenance::new(SourceKind::User, None, "consolidation-test"),
             timestamps: TemporalBounds::open_from(

@@ -35,6 +35,13 @@ pub struct VectorSearchResult {
 
 /// Pluggable vector index contract.
 pub trait VectorIndex {
+    /// Returns the live vector count when the backend can report it.
+    ///
+    /// A zero value means the backend does not expose a count.
+    fn live_len(&self) -> usize {
+        0
+    }
+
     /// Adds or replaces the vector associated with `id`.
     ///
     /// # Errors
@@ -169,6 +176,10 @@ impl HnswVectorIndex {
 }
 
 impl VectorIndex for HnswVectorIndex {
+    fn live_len(&self) -> usize {
+        self.slots_by_id.len()
+    }
+
     fn add(&mut self, id: MemoryId, vector: &[f32]) -> Result<(), VectorIndexError> {
         self.ensure_dimensions(vector)?;
 

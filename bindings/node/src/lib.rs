@@ -14,11 +14,13 @@ use shibahama_core::api::{
 };
 use shibahama_core::model::{
     AccessOutcome, ConsolidationAction, CredenceTier, HumanSignal, HumanSignalAction, MemoryId,
-    MemoryItem as CoreMemoryItem, MemoryKind, Provenance as CoreProvenance, SourceKind, Tier,
+    MemoryItem as CoreMemoryItem, MemoryKind, MemoryScope as CoreMemoryScope,
+    Provenance as CoreProvenance, ScopeId, ScopeVisibility, SourceKind, Tier,
 };
+use shibahama_core::policy::{CaptureIntent, CapturePolicyRequest, PolicyActorClass};
 use shibahama_core::retrieval::{
     RecallCandidate as CoreRecallCandidate, RecallCandidateCurrency, RecallCandidateSource,
-    RecallRankingConfig, RecallRequest,
+    RecallRankingConfig, RecallRequest, RecallUnavailableStage,
 };
 use shibahama_core::significance::SignificanceBreakdown as CoreSignificanceBreakdown;
 use shibahama_core::storage::{EventRecord, MemoryEvent, MemoryWriteEvent};
@@ -37,11 +39,20 @@ pub struct Provenance {
 
 #[napi(object)]
 #[derive(Clone)]
+pub struct MemoryScope {
+    pub repository: String,
+    pub team: Option<String>,
+    pub visibility: String,
+}
+
+#[napi(object)]
+#[derive(Clone)]
 pub struct MemoryItem {
     pub id: String,
     pub content: String,
     pub kind: String,
     pub provenance: Provenance,
+    pub scope: MemoryScope,
     pub tier: String,
     pub credence: String,
     pub significance: f64,
@@ -70,6 +81,13 @@ pub struct RecallCandidate {
     pub source: String,
     pub rank_score: f64,
     pub read_safety_findings: Vec<String>,
+}
+
+#[napi(object)]
+#[derive(Clone)]
+pub struct DegradedRecallResult {
+    pub candidates: Vec<RecallCandidate>,
+    pub unavailable_stages: Vec<String>,
 }
 
 #[napi(object)]
@@ -115,6 +133,7 @@ pub struct WriteOptions {
     pub index_name: Option<String>,
     pub model: Option<String>,
     pub model_version: Option<String>,
+    pub scope: Option<MemoryScope>,
 }
 
 #[napi(object)]
@@ -129,6 +148,15 @@ pub struct RecallOptions {
     pub significance_weight: Option<f64>,
     pub recency_weight: Option<f64>,
     pub graph_weight: Option<f64>,
+}
+
+#[napi(object)]
+#[derive(Default)]
+pub struct CapturePolicySimulationOptions {
+    pub actor: Option<String>,
+    pub intent: Option<String>,
+    pub confidence_percent: Option<u32>,
+    pub scope: Option<MemoryScope>,
 }
 
 /// Iterator over recall candidates.
@@ -185,6 +213,49 @@ impl Shibahama {
         self.inner.lock().is_ok()
     }
 
+    /// Simulates capture policy without writing memory or audit events.
+    #[napi]
+    pub fn simulate_capture_policy(
+        &self,
+        source_kind: String,
+        options: Option<CapturePolicySimulationOptions>,
+    ) -> Result<String> {
+        let options = options.unwrap_or_default();
+        let source_kind = parse_source_kind(&source_kind)?;
+        let scope = options.scope.map(parse_memory_scope).transpose()?.unwrap_or_default();
+        let request = CapturePolicyRequest {
+            actor: parse_policy_actor(options.actor.as_deref().unwrap_or("human"))?,
+            intent: parse_capture_intent(options.intent.as_deref().unwrap_or("manual"))?,
+            confidence_percent: options.confidence_percent.unwrap_or(100).try_into().map_err(|_| Error::from_reason("confidence_percent must be between 0 and 255"))?,
+        };
+        let inner = self.inner.lock().map_err(lock_error)?;
+
+        serde_json::to_string(&inner.simulate_capture_policy(source_kind, &scope, request))
+            .map_err(json_error)
+    }
+
+    /// Simulates recall policy without reading memory or writing access events.
+    #[napi]
+    pub fn simulate_recall_policy(
+        &self,
+        top_k: u32,
+        options: Option<RecallOptions>,
+        scope: Option<MemoryScope>,
+    ) -> Result<String> {
+        let options = options.unwrap_or_default();
+        let scope = scope.map(parse_memory_scope).transpose()?;
+        let inner = self.inner.lock().map_err(lock_error)?;
+        let simulation = inner.simulate_recall_policy(
+            top_k as usize,
+            options.max_context_tokens.map(|value| value as usize),
+            options.include_cold.unwrap_or(false),
+            options.include_instructions.unwrap_or(false),
+            scope.as_ref(),
+        );
+
+        serde_json::to_string(&simulation).map_err(json_error)
+    }
+
     /// Writes a memory, optionally indexing an embedding vector.
     ///
     /// # Errors
@@ -207,6 +278,9 @@ impl Shibahama {
             options.valid_from_unix,
             options.ingested_at_unix,
         )?;
+        if let Some(scope) = options.scope {
+            event = event.with_scope(parse_memory_scope(scope)?);
+        }
 
         match parse_memory_kind(kind)? {
             MemoryKind::Fact => {}
@@ -267,6 +341,38 @@ impl Shibahama {
         let candidates = inner.recall(&request).map_err(js_error)?;
 
         Ok(candidates.into_iter().map(RecallCandidate::from).collect())
+    }
+
+    /// Recalls usable candidates and reports unavailable optional stages.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when vector search or initial candidate materialization cannot complete.
+    #[napi]
+    pub fn recall_with_degradation(
+        &self,
+        query_vector: Vec<f64>,
+        top_k: u32,
+        options: Option<RecallOptions>,
+    ) -> Result<DegradedRecallResult> {
+        let query_vector = vector_to_f32(&query_vector)?;
+        let inner = self.inner.lock().map_err(lock_error)?;
+        let request = recall_request(&query_vector, top_k, options.as_ref())?;
+        let result = inner.recall_with_degradation(&request).map_err(js_error)?;
+
+        Ok(DegradedRecallResult {
+            candidates: result
+                .candidates
+                .into_iter()
+                .map(RecallCandidate::from)
+                .collect(),
+            unavailable_stages: result
+                .unavailable_stages
+                .into_iter()
+                .map(recall_unavailable_stage_str)
+                .map(str::to_owned)
+                .collect(),
+        })
     }
 
     /// Streams current fact memories for a query embedding.
@@ -593,6 +699,16 @@ impl From<CoreProvenance> for Provenance {
     }
 }
 
+impl From<CoreMemoryScope> for MemoryScope {
+    fn from(value: CoreMemoryScope) -> Self {
+        Self {
+            repository: value.repository.to_string(),
+            team: value.team.map(|team| team.to_string()),
+            visibility: scope_visibility_str(value.visibility).to_owned(),
+        }
+    }
+}
+
 impl From<CoreMemoryItem> for MemoryItem {
     fn from(value: CoreMemoryItem) -> Self {
         Self {
@@ -600,6 +716,7 @@ impl From<CoreMemoryItem> for MemoryItem {
             content: value.content,
             kind: memory_kind_str(value.kind).to_owned(),
             provenance: Provenance::from(value.provenance),
+            scope: MemoryScope::from(value.scope),
             tier: tier_str(value.tier).to_owned(),
             credence: credence_str(value.credence).to_owned(),
             significance: value.significance,
@@ -858,6 +975,33 @@ fn write_event(
     ))
 }
 
+fn parse_memory_scope(value: MemoryScope) -> Result<CoreMemoryScope> {
+    let repository =
+        ScopeId::new(value.repository).map_err(|error| Error::from_reason(error.to_string()))?;
+    match value.visibility.as_str() {
+        "repository" => {
+            if value.team.is_some() {
+                return Err(Error::from_reason(
+                    "repository scope must not specify a team",
+                ));
+            }
+            Ok(CoreMemoryScope::repository(repository))
+        }
+        "team" => Ok(CoreMemoryScope::team(
+            repository,
+            ScopeId::new(
+                value
+                    .team
+                    .ok_or_else(|| Error::from_reason("team scope requires a team"))?,
+            )
+            .map_err(|error| Error::from_reason(error.to_string()))?,
+        )),
+        _ => Err(Error::from_reason(
+            "scope.visibility must be `repository` or `team`",
+        )),
+    }
+}
+
 fn recall_request<'a>(
     query_vector: &'a [f32],
     top_k: u32,
@@ -997,6 +1141,29 @@ fn parse_source_kind(value: &str) -> Result<SourceKind> {
     }
 }
 
+fn parse_policy_actor(value: &str) -> Result<PolicyActorClass> {
+    match value {
+        "human" => Ok(PolicyActorClass::Human),
+        "agent" => Ok(PolicyActorClass::Agent),
+        "automation" => Ok(PolicyActorClass::Automation),
+        "service" => Ok(PolicyActorClass::Service),
+        _ => Err(Error::from_reason(
+            "actor must be `human`, `agent`, `automation`, or `service`",
+        )),
+    }
+}
+
+fn parse_capture_intent(value: &str) -> Result<CaptureIntent> {
+    match value {
+        "manual" => Ok(CaptureIntent::Manual),
+        "suggested" => Ok(CaptureIntent::Suggested),
+        "automatic" => Ok(CaptureIntent::Automatic),
+        _ => Err(Error::from_reason(
+            "intent must be `manual`, `suggested`, or `automatic`",
+        )),
+    }
+}
+
 fn parse_memory_kind(value: &str) -> Result<MemoryKind> {
     match value {
         "fact" => Ok(MemoryKind::Fact),
@@ -1040,6 +1207,9 @@ fn human_signal_action_str(value: HumanSignalAction) -> &'static str {
 fn event_kind(event: &MemoryEvent) -> &'static str {
     match event {
         MemoryEvent::MemoryWritten { .. } => "memory_written",
+        MemoryEvent::MemoryScopePromoted { .. } => "memory_scope_promoted",
+        MemoryEvent::ScopeAuthorizationDenied { .. } => "scope_authorization_denied",
+        MemoryEvent::PolicyDecisionRecorded { .. } => "policy_decision",
         MemoryEvent::MemoryInvalidated { .. } => "memory_invalidated",
         MemoryEvent::ReverificationFlagged { .. } => "reverification_flagged",
         MemoryEvent::AccessRecorded { .. } => "access_recorded",
@@ -1054,6 +1224,13 @@ fn event_kind(event: &MemoryEvent) -> &'static str {
 fn event_memory_ids(event: &MemoryEvent) -> Vec<String> {
     match event {
         MemoryEvent::MemoryWritten { item } => vec![item.id.to_string()],
+        MemoryEvent::MemoryScopePromoted {
+            source_id,
+            promoted_id,
+            ..
+        } => vec![source_id.to_string(), promoted_id.to_string()],
+        MemoryEvent::ScopeAuthorizationDenied { .. }
+        | MemoryEvent::PolicyDecisionRecorded { .. } => Vec::new(),
         MemoryEvent::MemoryInvalidated { id, .. }
         | MemoryEvent::ReverificationFlagged { id, .. }
         | MemoryEvent::AccessRecorded { id, .. }
@@ -1084,6 +1261,13 @@ fn event_memory_ids(event: &MemoryEvent) -> Vec<String> {
 fn event_touches_memory(record: &EventRecord, id: MemoryId) -> bool {
     match &record.event {
         MemoryEvent::MemoryWritten { item } => item.id == id,
+        MemoryEvent::MemoryScopePromoted {
+            source_id,
+            promoted_id,
+            ..
+        } => *source_id == id || *promoted_id == id,
+        MemoryEvent::ScopeAuthorizationDenied { .. }
+        | MemoryEvent::PolicyDecisionRecorded { .. } => false,
         MemoryEvent::MemoryInvalidated { id: event_id, .. }
         | MemoryEvent::ReverificationFlagged { id: event_id, .. }
         | MemoryEvent::AccessRecorded { id: event_id, .. }
@@ -1133,6 +1317,13 @@ fn tier_str(value: Tier) -> &'static str {
     }
 }
 
+fn scope_visibility_str(value: ScopeVisibility) -> &'static str {
+    match value {
+        ScopeVisibility::Repository => "repository",
+        ScopeVisibility::Team => "team",
+    }
+}
+
 fn credence_str(value: CredenceTier) -> &'static str {
     match value {
         CredenceTier::Unverified => "unverified",
@@ -1159,8 +1350,24 @@ fn candidate_source_str(value: RecallCandidateSource) -> String {
     }
 }
 
+fn recall_unavailable_stage_str(value: RecallUnavailableStage) -> &'static str {
+    match value {
+        RecallUnavailableStage::VectorSearch => "vector_search",
+        RecallUnavailableStage::StorageHydration => "storage_hydration",
+        RecallUnavailableStage::GraphExpansion => "graph_expansion",
+        RecallUnavailableStage::Sanitization => "sanitization",
+        RecallUnavailableStage::AccessRecording => "access_recording",
+    }
+}
+
 fn js_error(error: ShibahamaError) -> Error {
-    Error::from_reason(error.to_string())
+    Error::from_reason(structured_error_reason(error))
+}
+
+fn structured_error_reason(error: ShibahamaError) -> String {
+    serde_json::to_string(&error.metadata()).unwrap_or_else(|_| {
+        "{\"code\":\"SHIBA_INTERNAL\",\"severity\":\"fatal\",\"retryable\":false,\"detail\":\"internal error\"}".to_owned()
+    })
 }
 
 fn json_error(error: serde_json::Error) -> Error {

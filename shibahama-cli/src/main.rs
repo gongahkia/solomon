@@ -16,15 +16,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use shibahama_core::api::{
     ConsolidationPassReport, HumanCorrectionOutcome, HumanSignalOutcome, HumanSignalRequest,
-    Shibahama, WhyTrace, WriteEmbedding,
+    Shibahama, ShibahamaErrorMetadata, WhyTrace, WriteEmbedding,
 };
 use shibahama_core::model::{
     AccessOutcome, ConsolidationAction, ConsolidationWhy, CredenceTier, Entity, EntityId,
-    HumanSignal, HumanSignalAction, MemoryId, MemoryItem, MemoryKind, Provenance, Relation,
-    RelationId, SourceKind, TemporalBounds, Tier,
+    HumanSignal, HumanSignalAction, MemoryId, MemoryItem, MemoryKind, MemoryScope, Provenance,
+    Relation, RelationId, ScopeId, ScopeVisibility, SourceKind, TemporalBounds, Tier,
 };
 use shibahama_core::retrieval::{
     RecallCandidate, RecallCandidateCurrency, RecallCandidateSource, RecallRequest,
+    RecallUnavailableStage,
 };
 use shibahama_core::significance::SignificanceBreakdown;
 use shibahama_core::storage::{
@@ -357,11 +358,19 @@ struct ProvenanceDto {
 }
 
 #[derive(Serialize)]
+struct MemoryScopeDto {
+    repository: String,
+    team: Option<String>,
+    visibility: String,
+}
+
+#[derive(Serialize)]
 struct MemoryItemDto {
     id: String,
     content: String,
     kind: String,
     provenance: ProvenanceDto,
+    scope: MemoryScopeDto,
     tier: String,
     credence: String,
     significance: f64,
@@ -389,6 +398,12 @@ struct RecallCandidateDto {
     source: String,
     rank_score: f64,
     read_safety_findings: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct DegradedRecallDto {
+    candidates: Vec<RecallCandidateDto>,
+    unavailable_stages: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -571,6 +586,7 @@ struct TidelineGraphEdgeDto {
 #[derive(Serialize)]
 struct GraphEntityDto {
     id: String,
+    scope: MemoryScopeDto,
     entity_type: String,
     label: String,
     stable_key: String,
@@ -583,6 +599,7 @@ struct GraphEntityDto {
 #[derive(Serialize)]
 struct GraphRelationDto {
     id: String,
+    scope: MemoryScopeDto,
     relation_type: String,
     from_entity: String,
     to_entity: String,
@@ -612,7 +629,15 @@ struct ServerState {
 
 struct ServerRequestContext {
     namespace: String,
+    scope: MemoryScope,
     principal: &'static str,
+}
+
+#[derive(Clone, Deserialize)]
+struct ServerScopeRequest {
+    repository: String,
+    team: Option<String>,
+    visibility: String,
 }
 
 #[derive(Deserialize)]
@@ -628,6 +653,7 @@ struct ServerWriteRequest {
     index_name: Option<String>,
     model: Option<String>,
     model_version: Option<String>,
+    scope: Option<ServerScopeRequest>,
 }
 
 #[derive(Deserialize)]
@@ -745,60 +771,81 @@ struct ServerError {
     code: String,
     severity: &'static str,
     retryable: bool,
-    message: String,
+    detail: &'static str,
 }
 
 impl ServerError {
     fn internal(error: impl Display) -> Self {
         let message = error.to_string();
-        let code = shibahama_error_code(&message).unwrap_or("SHIBA_INTERNAL");
+        let Some(code) = shibahama_error_code(&message) else {
+            return Self {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "SHIBA_INTERNAL".to_owned(),
+                severity: "fatal",
+                retryable: false,
+                detail: "internal server error",
+            };
+        };
+        let Some(metadata) = ShibahamaErrorMetadata::for_code(code) else {
+            return Self {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "SHIBA_INTERNAL".to_owned(),
+                severity: "fatal",
+                retryable: false,
+                detail: "internal server error",
+            };
+        };
 
+        Self::from_metadata(server_status_for_error_code(code), metadata)
+    }
+
+    fn from_metadata(status: StatusCode, metadata: ShibahamaErrorMetadata) -> Self {
         Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: code.to_owned(),
-            severity: server_error_severity(code),
-            retryable: server_error_retryable(code),
-            message,
+            status,
+            code: metadata.code.to_owned(),
+            severity: metadata.severity.as_str(),
+            retryable: metadata.retryable,
+            detail: metadata.detail,
         }
     }
 
-    fn bad_request(error: impl Display) -> Self {
+    fn bad_request(_error: impl Display) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             code: "SHIBA_INVALID_REQUEST".to_owned(),
             severity: "fatal",
             retryable: false,
-            message: error.to_string(),
+            detail: "invalid request",
         }
     }
 
-    fn unauthorized(error: impl Display) -> Self {
+    fn unauthorized(_error: impl Display) -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
             code: "SHIBA_UNAUTHORIZED".to_owned(),
             severity: "fatal",
             retryable: false,
-            message: error.to_string(),
+            detail: "authorization denied",
         }
     }
 
-    fn not_found(error: impl Display) -> Self {
+    fn not_found(_error: impl Display) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
             code: "SHIBA_NOT_FOUND".to_owned(),
             severity: "fatal",
             retryable: false,
-            message: error.to_string(),
+            detail: "resource not found",
         }
     }
 
-    fn too_many_requests(error: impl Display) -> Self {
+    fn too_many_requests(_error: impl Display) -> Self {
         Self {
             status: StatusCode::TOO_MANY_REQUESTS,
             code: "SHIBA_RATE_LIMITED".to_owned(),
             severity: "recoverable",
             retryable: true,
-            message: error.to_string(),
+            detail: "request rate limited",
         }
     }
 }
@@ -808,10 +855,11 @@ impl IntoResponse for ServerError {
         (
             self.status,
             Json(json!({
-                "error": self.message,
+                "error": self.detail,
                 "code": self.code,
                 "severity": self.severity,
                 "retryable": self.retryable,
+                "detail": self.detail,
             })),
         )
             .into_response()
@@ -824,15 +872,13 @@ fn shibahama_error_code(message: &str) -> Option<&str> {
     Some(&message[start..end])
 }
 
-fn server_error_severity(code: &str) -> &'static str {
+fn server_status_for_error_code(code: &str) -> StatusCode {
     match code {
-        "SHIBA_RECALL" | "SHIBA_TASK" => "recoverable",
-        _ => "fatal",
+        "SHIBA_INVALID_REQUEST" | "SHIBA_VECTOR" => StatusCode::BAD_REQUEST,
+        "SHIBA_UNAUTHORIZED" => StatusCode::UNAUTHORIZED,
+        "SHIBA_RECALL" | "SHIBA_TASK" => StatusCode::SERVICE_UNAVAILABLE,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
-}
-
-fn server_error_retryable(code: &str) -> bool {
-    matches!(code, "SHIBA_RECALL" | "SHIBA_TASK")
 }
 
 fn main() -> ExitCode {
@@ -1124,6 +1170,7 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
         .route("/write", post(server_write))
         .route("/invalidate", post(server_invalidate))
         .route("/recall", post(server_recall))
+        .route("/recall/degraded", post(server_recall_degraded))
         .route("/timeline", post(server_timeline))
         .route("/reinforce", post(server_reinforce))
         .route("/consolidate", post(server_consolidate))
@@ -1180,9 +1227,11 @@ fn server_context(
 ) -> Result<ServerRequestContext, ServerError> {
     let principal = authorize_server_request(headers, state)?;
     let namespace = request_namespace(headers, state)?;
+    let scope = request_scope(headers, &namespace)?;
 
     Ok(ServerRequestContext {
         namespace,
+        scope,
         principal,
     })
 }
@@ -1246,6 +1295,23 @@ fn request_namespace(headers: &HeaderMap, state: &ServerState) -> Result<String,
     Ok(namespace.to_owned())
 }
 
+fn request_scope(headers: &HeaderMap, namespace: &str) -> Result<MemoryScope, ServerError> {
+    let request = ServerScopeRequest {
+        repository: namespace.to_owned(),
+        team: headers
+            .get("x-shibahama-scope-team")
+            .and_then(|value| value.to_str().ok())
+            .map(ToOwned::to_owned),
+        visibility: headers
+            .get("x-shibahama-scope-visibility")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("repository")
+            .to_owned(),
+    };
+
+    server_memory_scope(Some(&request), namespace)
+}
+
 fn validate_namespace(namespace: &str) -> CliResult<()> {
     let valid = !namespace.is_empty()
         && namespace.len() <= 128
@@ -1276,13 +1342,48 @@ fn namespaced_source_ref(namespace: &str, source_ref: Option<String>) -> String 
     }
 }
 
-fn memory_in_namespace(item: &MemoryItem, namespace: &str) -> bool {
-    let prefix = namespace_source_prefix(namespace);
+fn server_memory_scope(
+    request: Option<&ServerScopeRequest>,
+    namespace: &str,
+) -> Result<MemoryScope, ServerError> {
+    let Some(request) = request else {
+        return ScopeId::new(namespace)
+            .map(MemoryScope::repository)
+            .map_err(ServerError::bad_request);
+    };
+    let repository = ScopeId::new(&request.repository).map_err(ServerError::bad_request)?;
+    if repository.as_str() != namespace {
+        return Err(ServerError::bad_request(
+            "scope.repository must equal the request namespace",
+        ));
+    }
+    match request.visibility.as_str() {
+        "repository" => {
+            if request.team.is_some() {
+                return Err(ServerError::bad_request(
+                    "repository scope must not specify a team",
+                ));
+            }
+            Ok(MemoryScope::repository(repository))
+        }
+        "team" => Ok(MemoryScope::team(
+            repository,
+            ScopeId::new(
+                request
+                    .team
+                    .as_deref()
+                    .ok_or_else(|| ServerError::bad_request("team scope requires a team"))?,
+            )
+            .map_err(ServerError::bad_request)?,
+        )),
+        _ => Err(ServerError::bad_request(
+            "scope.visibility must be `repository` or `team`",
+        )),
+    }
+}
 
-    item.provenance
-        .source_ref
-        .as_deref()
-        .is_some_and(|source_ref| source_ref.starts_with(&prefix))
+fn memory_in_scope(item: &MemoryItem, scope: &MemoryScope) -> bool {
+    item.scope == *scope
 }
 
 fn optional_time_from_unix(value: Option<i64>) -> Result<Option<OffsetDateTime>, ServerError> {
@@ -1315,16 +1416,12 @@ fn parse_relation_id(value: &str) -> Result<RelationId, ServerError> {
         .map_err(ServerError::bad_request)
 }
 
-fn graph_namespace(attributes: &BTreeMap<String, String>) -> Option<&str> {
-    attributes.get("namespace").map(String::as_str)
+fn graph_entity_in_scope(entity: &Entity, scope: &MemoryScope) -> bool {
+    entity.scope == *scope
 }
 
-fn graph_entity_in_namespace(entity: &Entity, namespace: &str) -> bool {
-    graph_namespace(&entity.attributes) == Some(namespace)
-}
-
-fn graph_relation_in_namespace(relation: &Relation, namespace: &str) -> bool {
-    graph_namespace(&relation.attributes) == Some(namespace)
+fn graph_relation_in_scope(relation: &Relation, scope: &MemoryScope) -> bool {
+    relation.scope == *scope
 }
 
 fn namespace_graph_attributes(
@@ -1339,6 +1436,7 @@ fn namespace_graph_attributes(
 fn graph_entity_from_request(
     body: ServerGraphEntityRequest,
     namespace: &str,
+    scope: &MemoryScope,
 ) -> Result<Entity, ServerError> {
     let valid_from = now_or_unix(body.valid_from_unix)?;
     let ingested_at = body
@@ -1358,6 +1456,7 @@ fn graph_entity_from_request(
     if let Some(id) = body.id {
         entity.id = parse_entity_id(&id)?;
     }
+    entity = entity.with_scope(scope.clone());
     entity.attributes = namespace_graph_attributes(body.attributes, namespace);
 
     Ok(entity)
@@ -1366,6 +1465,7 @@ fn graph_entity_from_request(
 fn graph_relation_from_request(
     body: ServerGraphRelationRequest,
     namespace: &str,
+    scope: &MemoryScope,
 ) -> Result<Relation, ServerError> {
     let valid_from = now_or_unix(body.valid_from_unix)?;
     let ingested_at = body
@@ -1390,6 +1490,7 @@ fn graph_relation_from_request(
     if let Some(id) = body.id {
         relation.id = parse_relation_id(&id)?;
     }
+    relation = relation.with_scope(scope.clone());
     relation.supersedes = body
         .supersedes
         .as_deref()
@@ -1400,14 +1501,14 @@ fn graph_relation_from_request(
     Ok(relation)
 }
 
-fn filter_graph_snapshot_for_namespace(
+fn filter_graph_snapshot_for_scope(
     snapshot: shibahama_core::storage::GraphSnapshot,
-    namespace: &str,
+    scope: &MemoryScope,
 ) -> GraphSnapshotDto {
     let entities = snapshot
         .entities
         .into_iter()
-        .filter(|entity| graph_entity_in_namespace(entity, namespace))
+        .filter(|entity| graph_entity_in_scope(entity, scope))
         .collect::<Vec<_>>();
     let entity_ids = entities
         .iter()
@@ -1417,7 +1518,7 @@ fn filter_graph_snapshot_for_namespace(
         .relations
         .into_iter()
         .filter(|relation| {
-            graph_relation_in_namespace(relation, namespace)
+            graph_relation_in_scope(relation, scope)
                 && entity_ids.contains(&relation.from_entity)
                 && entity_ids.contains(&relation.to_entity)
         })
@@ -1430,15 +1531,15 @@ fn filter_graph_snapshot_for_namespace(
     }
 }
 
-fn filter_graph_traversal_for_namespace(
+fn filter_graph_traversal_for_scope(
     traversal: GraphTraversalResult,
-    namespace: &str,
+    scope: &MemoryScope,
     as_of: OffsetDateTime,
 ) -> GraphSnapshotDto {
     let entities = traversal
         .entities
         .into_iter()
-        .filter(|entity| graph_entity_in_namespace(entity, namespace))
+        .filter(|entity| graph_entity_in_scope(entity, scope))
         .collect::<Vec<_>>();
     let entity_ids = entities
         .iter()
@@ -1448,7 +1549,7 @@ fn filter_graph_traversal_for_namespace(
         .relations
         .into_iter()
         .filter(|relation| {
-            graph_relation_in_namespace(relation, namespace)
+            graph_relation_in_scope(relation, scope)
                 && entity_ids.contains(&relation.from_entity)
                 && entity_ids.contains(&relation.to_entity)
         })
@@ -1493,10 +1594,10 @@ fn server_json_result<T>(
     }
 }
 
-fn ensure_memory_in_namespace(
+fn ensure_memory_in_scope(
     engine: &Shibahama<HnswVectorIndex>,
     id: MemoryId,
-    namespace: &str,
+    scope: &MemoryScope,
 ) -> Result<MemoryItem, ServerError> {
     let Some(item) = engine
         .memory_items()
@@ -1507,79 +1608,61 @@ fn ensure_memory_in_namespace(
         return Err(ServerError::not_found(format!("memory {id} not found")));
     };
 
-    if memory_in_namespace(&item, namespace) {
+    if memory_in_scope(&item, scope) {
         Ok(item)
     } else {
         Err(ServerError::not_found(format!(
-            "memory {id} not found in namespace {namespace}"
+            "memory {id} not found in scope"
         )))
     }
 }
 
-fn event_records_for_namespace(
+fn event_records_for_scope(
     state: &ServerState,
-    namespace: &str,
+    scope: &MemoryScope,
     as_of: Option<OffsetDateTime>,
 ) -> Result<Vec<EventRecord>, ServerError> {
     let engine = state
         .engine
         .lock()
         .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
-    let namespace_memories = engine
-        .memory_items()
+    Ok(engine
+        .store()
+        .events_in_scope(scope)
         .map_err(ServerError::internal)?
         .into_iter()
-        .filter(|item| memory_in_namespace(item, namespace))
-        .filter(|item| as_of.is_none_or(|instant| memory_believed_at(item, instant)))
-        .collect::<Vec<_>>();
-    let namespace_ids = namespace_memories
-        .iter()
-        .map(|item| item.id)
-        .collect::<BTreeSet<_>>();
-
-    engine
-        .event_records()
-        .map_err(ServerError::internal)
-        .map(|records| {
-            records
-                .into_iter()
-                .filter(|record| as_of.is_none_or(|instant| record.recorded_at <= instant))
-                .filter(|record| event_touches_namespace(record, &namespace_ids, namespace))
-                .collect()
-        })
+        .filter(|record| as_of.is_none_or(|instant| record.recorded_at <= instant))
+        .collect())
 }
 
-fn tideline_snapshot_for_namespace(
+fn tideline_snapshot_for_scope(
     state: &ServerState,
     namespace: &str,
+    scope: &MemoryScope,
     as_of: Option<OffsetDateTime>,
 ) -> Result<TidelineSnapshotDto, ServerError> {
     let engine = state
         .engine
         .lock()
         .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
-    let namespace_memories = engine
-        .memory_items()
+    let scoped_memories = engine
+        .store()
+        .memory_items_in_scope(scope)
         .map_err(ServerError::internal)?
         .into_iter()
-        .filter(|item| memory_in_namespace(item, namespace))
         .filter(|item| as_of.is_none_or(|instant| memory_believed_at(item, instant)))
         .collect::<Vec<_>>();
-    let namespace_ids = namespace_memories
-        .iter()
-        .map(|item| item.id)
-        .collect::<BTreeSet<_>>();
     let event_records = engine
-        .event_records()
+        .store()
+        .events_in_scope(scope)
         .map_err(ServerError::internal)?
         .into_iter()
         .filter(|record| as_of.is_none_or(|instant| record.recorded_at <= instant))
-        .filter(|record| event_touches_namespace(record, &namespace_ids, namespace))
         .collect::<Vec<_>>();
     let last_sequence = event_records.last().map(|record| record.sequence);
-    let graph = tideline_graph(&namespace_memories, &event_records);
+    let graph = tideline_graph(&scoped_memories, &event_records);
     let event_count = event_records.len();
-    let memories = namespace_memories
+    let memories = scoped_memories
         .into_iter()
         .map(MemoryItemDto::from)
         .collect::<Vec<_>>();
@@ -1608,43 +1691,16 @@ fn memory_believed_at(item: &MemoryItem, as_of: OffsetDateTime) -> bool {
     item.timestamps.ingested_at <= as_of && item.timestamps.is_valid_at(as_of)
 }
 
-fn event_touches_namespace(
-    record: &EventRecord,
-    namespace_ids: &BTreeSet<MemoryId>,
-    namespace: &str,
-) -> bool {
-    match &record.event {
-        MemoryEvent::MemoryWritten { item } => memory_in_namespace(item, namespace),
-        MemoryEvent::MemoryInvalidated { id, .. }
-        | MemoryEvent::ReverificationFlagged { id, .. }
-        | MemoryEvent::AccessRecorded { id, .. }
-        | MemoryEvent::TierChanged { id, .. }
-        | MemoryEvent::ContentCompacted { id, .. } => namespace_ids.contains(id),
-        MemoryEvent::ReconstructionApplied {
-            superseded_id,
-            replacement_id,
-            ..
-        } => namespace_ids.contains(superseded_id) || namespace_ids.contains(replacement_id),
-        MemoryEvent::ConsolidationDecision {
-            input_ids,
-            output_id,
-            ..
-        } => {
-            input_ids.iter().any(|id| namespace_ids.contains(id))
-                || output_id.is_some_and(|id| namespace_ids.contains(&id))
-        }
-        MemoryEvent::HumanSignalRecorded { signal } => {
-            namespace_ids.contains(&signal.memory_id)
-                || signal
-                    .proposal_id
-                    .is_some_and(|id| namespace_ids.contains(&id))
-        }
-    }
-}
-
 fn event_touches_memory(record: &EventRecord, id: MemoryId) -> bool {
     match &record.event {
         MemoryEvent::MemoryWritten { item } => item.id == id,
+        MemoryEvent::MemoryScopePromoted {
+            source_id,
+            promoted_id,
+            ..
+        } => *source_id == id || *promoted_id == id,
+        MemoryEvent::ScopeAuthorizationDenied { .. }
+        | MemoryEvent::PolicyDecisionRecorded { .. } => false,
         MemoryEvent::MemoryInvalidated { id: event_id, .. }
         | MemoryEvent::ReverificationFlagged { id: event_id, .. }
         | MemoryEvent::AccessRecorded { id: event_id, .. }
@@ -1675,11 +1731,27 @@ fn tideline_event_from_record(record: EventRecord) -> TidelineEventDto {
 
     match record.event {
         MemoryEvent::MemoryWritten { item } => {
-            let mut event =
-                base_tideline_event(sequence, recorded_at, "memory_written", vec![item.id]);
-            event.tier_to = Some(tier_str(item.tier).to_owned());
-            event.valid_to_unix = item.timestamps.valid_to.map(OffsetDateTime::unix_timestamp);
-            event
+            tideline_memory_written_event(sequence, recorded_at, item)
+        }
+        MemoryEvent::MemoryScopePromoted {
+            source_id,
+            promoted_id,
+            actor,
+            rationale,
+            ..
+        } => tideline_scope_promotion_event(
+            sequence,
+            recorded_at,
+            source_id,
+            promoted_id,
+            actor,
+            rationale,
+        ),
+        MemoryEvent::ScopeAuthorizationDenied { principal, .. } => {
+            tideline_scope_authorization_denied_event(sequence, recorded_at, principal)
+        }
+        MemoryEvent::PolicyDecisionRecorded { .. } => {
+            base_tideline_event(sequence, recorded_at, "policy_decision", Vec::new())
         }
         MemoryEvent::MemoryInvalidated { id, valid_to } => {
             let mut event =
@@ -1758,6 +1830,51 @@ fn tideline_event_from_record(record: EventRecord) -> TidelineEventDto {
             event
         }
     }
+}
+
+fn tideline_memory_written_event(
+    sequence: u64,
+    recorded_at: OffsetDateTime,
+    item: Box<MemoryItem>,
+) -> TidelineEventDto {
+    let mut event = base_tideline_event(sequence, recorded_at, "memory_written", vec![item.id]);
+    event.tier_to = Some(tier_str(item.tier).to_owned());
+    event.valid_to_unix = item.timestamps.valid_to.map(OffsetDateTime::unix_timestamp);
+    event
+}
+
+fn tideline_scope_promotion_event(
+    sequence: u64,
+    recorded_at: OffsetDateTime,
+    source_id: MemoryId,
+    promoted_id: MemoryId,
+    actor: String,
+    rationale: String,
+) -> TidelineEventDto {
+    let mut event = base_tideline_event(
+        sequence,
+        recorded_at,
+        "memory_scope_promoted",
+        vec![source_id, promoted_id],
+    );
+    event.human_signal_actor = Some(actor);
+    event.human_signal_reason = Some(rationale);
+    event
+}
+
+fn tideline_scope_authorization_denied_event(
+    sequence: u64,
+    recorded_at: OffsetDateTime,
+    principal: String,
+) -> TidelineEventDto {
+    let mut event = base_tideline_event(
+        sequence,
+        recorded_at,
+        "scope_authorization_denied",
+        Vec::new(),
+    );
+    event.human_signal_actor = Some(principal);
+    event
 }
 
 fn base_tideline_event(
@@ -1843,6 +1960,9 @@ fn human_signal_action_str(action: HumanSignalAction) -> &'static str {
 fn event_kind(event: &MemoryEvent) -> &'static str {
     match event {
         MemoryEvent::MemoryWritten { .. } => "memory_written",
+        MemoryEvent::MemoryScopePromoted { .. } => "memory_scope_promoted",
+        MemoryEvent::ScopeAuthorizationDenied { .. } => "scope_authorization_denied",
+        MemoryEvent::PolicyDecisionRecorded { .. } => "policy_decision",
         MemoryEvent::MemoryInvalidated { .. } => "memory_invalidated",
         MemoryEvent::ReverificationFlagged { .. } => "reverification_flagged",
         MemoryEvent::AccessRecorded { .. } => "access_recorded",
@@ -1857,6 +1977,13 @@ fn event_kind(event: &MemoryEvent) -> &'static str {
 fn event_memory_ids(event: &MemoryEvent) -> Vec<String> {
     match event {
         MemoryEvent::MemoryWritten { item } => vec![item.id.to_string()],
+        MemoryEvent::MemoryScopePromoted {
+            source_id,
+            promoted_id,
+            ..
+        } => vec![source_id.to_string(), promoted_id.to_string()],
+        MemoryEvent::ScopeAuthorizationDenied { .. }
+        | MemoryEvent::PolicyDecisionRecorded { .. } => Vec::new(),
         MemoryEvent::MemoryInvalidated { id, .. }
         | MemoryEvent::ReverificationFlagged { id, .. }
         | MemoryEvent::AccessRecorded { id, .. }
@@ -2107,7 +2234,7 @@ async fn server_ready(
         let memories = engine.memory_items().map_err(ServerError::internal)?;
         let memory_count = memories
             .iter()
-            .filter(|item| memory_in_namespace(item, &context.namespace))
+            .filter(|item| memory_in_scope(item, &context.scope))
             .count();
 
         Ok((
@@ -2165,7 +2292,7 @@ async fn server_inspect(
         let all_memories = engine.memory_items().map_err(ServerError::internal)?;
         let memories = all_memories
             .iter()
-            .filter(|item| memory_in_namespace(item, &context.namespace))
+            .filter(|item| memory_in_scope(item, &context.scope))
             .cloned()
             .map(MemoryItemDto::from)
             .collect::<Vec<_>>();
@@ -2226,6 +2353,13 @@ async fn server_write(
             body.ingested_at_unix,
         )
         .map_err(ServerError::bad_request)?;
+        let scope = server_memory_scope(body.scope.as_ref(), &context.namespace)?;
+        if scope != context.scope {
+            return Err(ServerError::bad_request(
+                "write scope must match the request scope headers",
+            ));
+        }
+        event = event.with_scope(scope);
 
         if parse_memory_kind(body.kind.as_deref().unwrap_or("fact"))
             .map_err(ServerError::bad_request)?
@@ -2242,7 +2376,7 @@ async fn server_write(
             .memory_items()
             .map_err(ServerError::internal)?
             .iter()
-            .filter(|item| memory_in_namespace(item, &context.namespace))
+            .filter(|item| memory_in_scope(item, &context.scope))
             .count();
 
         if namespace_memory_count >= state.max_memories_per_namespace {
@@ -2319,7 +2453,7 @@ async fn server_invalidate(
             .lock()
             .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
 
-        ensure_memory_in_namespace(&engine, id, &context.namespace)?;
+        ensure_memory_in_scope(&engine, id, &context.scope)?;
         let applied = engine
             .invalidate(id, valid_to)
             .map_err(ServerError::internal)?;
@@ -2339,57 +2473,8 @@ async fn server_recall(
     Json(body): Json<ServerRecallRequest>,
 ) -> Result<Json<Vec<RecallCandidateDto>>, ServerError> {
     let context = server_context_or_log(&headers, &state, "POST", "/recall")?;
-    let result: Result<(Json<Vec<RecallCandidateDto>>, serde_json::Value), ServerError> = (|| {
-        let requested_top_k = body.top_k.unwrap_or(5);
-        let now = time_from_optional_unix(body.now_unix).map_err(ServerError::bad_request)?;
-        let namespace_prefix = namespace_source_prefix(&context.namespace);
-        let engine = state
-            .engine
-            .lock()
-            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
-        let all_memories = engine.memory_items().map_err(ServerError::internal)?;
-        let namespace_memory_count = all_memories
-            .iter()
-            .filter(|item| memory_in_namespace(item, &context.namespace))
-            .count();
-        let search_top_k = all_memories.len().max(requested_top_k);
-        let mut request = RecallRequest::new(&body.query_vector, search_top_k, now)
-            .with_source_ref_prefix(&namespace_prefix);
-
-        if let Some(raw_query_context) = body.raw_query_context.as_deref() {
-            request = request.with_raw_query_context(raw_query_context);
-        }
-        if body.include_cold.unwrap_or(false) {
-            request = request.include_cold();
-        }
-        if body.include_instructions.unwrap_or(false) {
-            request = request.include_instructions();
-        }
-        if let Some(max_context_tokens) = body.max_context_tokens {
-            request = request.with_max_context_tokens(max_context_tokens);
-        }
-
-        let mut candidates = engine.recall(&request).map_err(ServerError::internal)?;
-        candidates.truncate(requested_top_k);
-        let returned = candidates.len();
-        let candidates = candidates
-            .into_iter()
-            .map(RecallCandidateDto::from)
-            .collect::<Vec<_>>();
-
-        Ok((
-            Json(candidates),
-            json!({
-                "request_units": 1,
-                "query_dimensions": body.query_vector.len(),
-                "requested_top_k": requested_top_k,
-                "searched_top_k": search_top_k,
-                "max_context_tokens": body.max_context_tokens,
-                "namespace_memory_count": namespace_memory_count,
-                "returned": returned,
-            }),
-        ))
-    })();
+    let result = server_recall_execution(&state, &context, &body, false)
+        .map(|(candidates, _, cost)| (Json(candidates), cost));
 
     match result {
         Ok((response, cost)) => {
@@ -2420,6 +2505,128 @@ async fn server_recall(
     }
 }
 
+async fn server_recall_degraded(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerRecallRequest>,
+) -> Result<Json<DegradedRecallDto>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/recall/degraded")?;
+    let result = server_recall_execution(&state, &context, &body, true).map(
+        |(candidates, unavailable_stages, cost)| {
+            (
+                Json(DegradedRecallDto {
+                    candidates,
+                    unavailable_stages,
+                }),
+                cost,
+            )
+        },
+    );
+
+    match result {
+        Ok((response, cost)) => {
+            log_server_request(
+                "POST",
+                "/recall/degraded",
+                Some(&context.namespace),
+                context.principal,
+                StatusCode::OK,
+                cost,
+            );
+            Ok(response)
+        }
+        Err(error) => {
+            log_server_request(
+                "POST",
+                "/recall/degraded",
+                Some(&context.namespace),
+                context.principal,
+                error.status,
+                json!({
+                    "request_units": 1,
+                    "query_dimensions": body.query_vector.len(),
+                }),
+            );
+            Err(error)
+        }
+    }
+}
+
+fn server_recall_execution(
+    state: &ServerState,
+    context: &ServerRequestContext,
+    body: &ServerRecallRequest,
+    allow_degradation: bool,
+) -> Result<(Vec<RecallCandidateDto>, Vec<String>, serde_json::Value), ServerError> {
+    let requested_top_k = body.top_k.unwrap_or(5);
+    let now = time_from_optional_unix(body.now_unix).map_err(ServerError::bad_request)?;
+    let engine = state
+        .engine
+        .lock()
+        .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+    let all_memories = engine.memory_items().map_err(ServerError::internal)?;
+    let namespace_memory_count = all_memories
+        .iter()
+        .filter(|item| memory_in_scope(item, &context.scope))
+        .count();
+    let search_top_k = all_memories.len().max(requested_top_k);
+    let mut request =
+        RecallRequest::new(&body.query_vector, search_top_k, now).with_scope(&context.scope);
+
+    if let Some(raw_query_context) = body.raw_query_context.as_deref() {
+        request = request.with_raw_query_context(raw_query_context);
+    }
+    if body.include_cold.unwrap_or(false) {
+        request = request.include_cold();
+    }
+    if body.include_instructions.unwrap_or(false) {
+        request = request.include_instructions();
+    }
+    if let Some(max_context_tokens) = body.max_context_tokens {
+        request = request.with_max_context_tokens(max_context_tokens);
+    }
+
+    let (mut candidates, unavailable_stages) = if allow_degradation {
+        let result = engine
+            .recall_with_degradation(&request)
+            .map_err(ServerError::internal)?;
+        (
+            result.candidates,
+            result
+                .unavailable_stages
+                .into_iter()
+                .map(recall_unavailable_stage_str)
+                .map(str::to_owned)
+                .collect(),
+        )
+    } else {
+        (
+            engine.recall(&request).map_err(ServerError::internal)?,
+            Vec::new(),
+        )
+    };
+    candidates.truncate(requested_top_k);
+    let returned = candidates.len();
+    let candidates = candidates
+        .into_iter()
+        .map(RecallCandidateDto::from)
+        .collect::<Vec<_>>();
+
+    Ok((
+        candidates,
+        unavailable_stages,
+        json!({
+            "request_units": 1,
+            "query_dimensions": body.query_vector.len(),
+            "requested_top_k": requested_top_k,
+            "searched_top_k": search_top_k,
+            "max_context_tokens": body.max_context_tokens,
+            "namespace_memory_count": namespace_memory_count,
+            "returned": returned,
+        }),
+    ))
+}
+
 async fn server_timeline(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -2429,7 +2636,6 @@ async fn server_timeline(
     let result: Result<(Json<Vec<RecallCandidateDto>>, serde_json::Value), ServerError> = (|| {
         let requested_top_k = body.top_k.unwrap_or(5);
         let as_of = time_from_optional_unix(body.as_of_unix).map_err(ServerError::bad_request)?;
-        let namespace_prefix = namespace_source_prefix(&context.namespace);
         let engine = state
             .engine
             .lock()
@@ -2437,11 +2643,11 @@ async fn server_timeline(
         let all_memories = engine.memory_items().map_err(ServerError::internal)?;
         let namespace_memory_count = all_memories
             .iter()
-            .filter(|item| memory_in_namespace(item, &context.namespace))
+            .filter(|item| memory_in_scope(item, &context.scope))
             .count();
         let search_top_k = all_memories.len().max(requested_top_k);
-        let mut request = RecallRequest::new(&body.query_vector, search_top_k, as_of)
-            .with_source_ref_prefix(&namespace_prefix);
+        let mut request =
+            RecallRequest::new(&body.query_vector, search_top_k, as_of).with_scope(&context.scope);
 
         if let Some(raw_query_context) = body.raw_query_context.as_deref() {
             request = request.with_raw_query_context(raw_query_context);
@@ -2496,7 +2702,7 @@ async fn server_reinforce(
             .lock()
             .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
 
-        ensure_memory_in_namespace(&engine, id, &context.namespace)?;
+        ensure_memory_in_scope(&engine, id, &context.scope)?;
         let applied = engine
             .reinforce(id, outcome)
             .map_err(ServerError::internal)?;
@@ -2525,7 +2731,7 @@ async fn server_consolidate(
         let all_memories = engine.memory_items().map_err(ServerError::internal)?;
         let store_wide = all_memories
             .iter()
-            .any(|item| !memory_in_namespace(item, &context.namespace));
+            .any(|item| !memory_in_scope(item, &context.scope));
 
         if store_wide && body.allow_store_wide != Some(true) {
             return Err(ServerError::bad_request(
@@ -2618,7 +2824,7 @@ fn server_human_signal(
             .lock()
             .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
 
-        ensure_memory_in_namespace(&engine, id, &context.namespace)?;
+        ensure_memory_in_scope(&engine, id, &context.scope)?;
 
         let response = match action {
             HumanSignalAction::Challenge => engine
@@ -2677,7 +2883,7 @@ async fn server_events(
     let context = server_context_or_log(&headers, &state, "GET", "/events")?;
     let result: Result<(Json<EventLogDto>, serde_json::Value), ServerError> = (|| {
         let as_of = optional_time_from_unix(query.as_of_unix)?;
-        let mut events = event_records_for_namespace(&state, &context.namespace, as_of)?
+        let mut events = event_records_for_scope(&state, &context.scope, as_of)?
             .into_iter()
             .map(EventRecordDto::from)
             .collect::<Vec<_>>();
@@ -2717,13 +2923,14 @@ async fn server_audit(
             .lock()
             .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
 
-        ensure_memory_in_namespace(&engine, id, &context.namespace)?;
+        ensure_memory_in_scope(&engine, id, &context.scope)?;
         let why = engine
             .why_at(id, now)
             .map_err(ServerError::internal)?
             .map(WhyTraceDto::from);
         let events = engine
-            .event_records()
+            .store()
+            .events_in_scope(&context.scope)
             .map_err(ServerError::internal)?
             .into_iter()
             .filter(|record| event_touches_memory(record, id))
@@ -2761,7 +2968,7 @@ async fn server_why(
         let trace = engine
             .why_at(id, now)
             .map_err(ServerError::internal)?
-            .filter(|trace| memory_in_namespace(&trace.item, &context.namespace))
+            .filter(|trace| memory_in_scope(&trace.item, &context.scope))
             .map(WhyTraceDto::from);
         let found = trace.is_some();
 
@@ -2813,11 +3020,11 @@ async fn server_graph_snapshot(
             .engine
             .lock()
             .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
-        let snapshot = filter_graph_snapshot_for_namespace(
+        let snapshot = filter_graph_snapshot_for_scope(
             engine
                 .graph_snapshot(as_of)
                 .map_err(ServerError::internal)?,
-            &context.namespace,
+            &context.scope,
         );
         let entity_count = snapshot.entities.len();
         let relation_count = snapshot.relations.len();
@@ -2842,7 +3049,7 @@ async fn server_put_graph_entity(
 ) -> Result<Json<GraphEntityDto>, ServerError> {
     let context = server_context_or_log(&headers, &state, "POST", "/graph/entities")?;
     let result: Result<(Json<GraphEntityDto>, serde_json::Value), ServerError> = (|| {
-        let entity = graph_entity_from_request(body, &context.namespace)?;
+        let entity = graph_entity_from_request(body, &context.namespace, &context.scope)?;
         let engine = state
             .engine
             .lock()
@@ -2851,7 +3058,7 @@ async fn server_put_graph_entity(
             .graph_entity(entity.id)
             .map_err(ServerError::internal)?
             .as_ref()
-            .is_some_and(|existing| !graph_entity_in_namespace(existing, &context.namespace))
+            .is_some_and(|existing| !graph_entity_in_scope(existing, &context.scope))
         {
             return Err(ServerError::not_found(format!(
                 "graph entity {} not found in namespace {}",
@@ -2886,7 +3093,7 @@ async fn server_get_graph_entity(
         let entity = engine
             .graph_entity(id)
             .map_err(ServerError::internal)?
-            .filter(|entity| graph_entity_in_namespace(entity, &context.namespace))
+            .filter(|entity| graph_entity_in_scope(entity, &context.scope))
             .map(GraphEntityDto::from);
         let found = entity.is_some();
 
@@ -2913,7 +3120,7 @@ async fn server_delete_graph_entity(
         let entity = engine
             .graph_entity(id)
             .map_err(ServerError::internal)?
-            .filter(|entity| graph_entity_in_namespace(entity, &context.namespace))
+            .filter(|entity| graph_entity_in_scope(entity, &context.scope))
             .map(|mut entity| {
                 entity.timestamps = entity.timestamps.closed_at(valid_to);
                 engine
@@ -2940,7 +3147,7 @@ async fn server_put_graph_relation(
 ) -> Result<Json<GraphRelationDto>, ServerError> {
     let context = server_context_or_log(&headers, &state, "POST", "/graph/relations")?;
     let result: Result<(Json<GraphRelationDto>, serde_json::Value), ServerError> = (|| {
-        let relation = graph_relation_from_request(body, &context.namespace)?;
+        let relation = graph_relation_from_request(body, &context.namespace, &context.scope)?;
         let engine = state
             .engine
             .lock()
@@ -2949,7 +3156,7 @@ async fn server_put_graph_relation(
             .graph_relation(relation.id)
             .map_err(ServerError::internal)?
             .as_ref()
-            .is_some_and(|existing| !graph_relation_in_namespace(existing, &context.namespace))
+            .is_some_and(|existing| !graph_relation_in_scope(existing, &context.scope))
         {
             return Err(ServerError::not_found(format!(
                 "graph relation {} not found in namespace {}",
@@ -2961,7 +3168,7 @@ async fn server_put_graph_relation(
                 .memory_items()
                 .map_err(ServerError::internal)?
                 .iter()
-                .any(|item| item.id == memory_id && memory_in_namespace(item, &context.namespace));
+                .any(|item| item.id == memory_id && memory_in_scope(item, &context.scope));
             if !memory_in_scope {
                 return Err(ServerError::not_found(format!(
                     "memory {memory_id} not found in namespace {}",
@@ -2978,7 +3185,7 @@ async fn server_put_graph_relation(
                     "superseded graph relation {supersedes} not found"
                 )));
             };
-            if !graph_relation_in_namespace(&existing, &context.namespace) {
+            if !graph_relation_in_scope(&existing, &context.scope) {
                 return Err(ServerError::not_found(format!(
                     "graph relation {supersedes} not found in namespace {}",
                     context.namespace
@@ -2994,7 +3201,7 @@ async fn server_put_graph_relation(
                     "graph entity {entity_id} not found"
                 )));
             };
-            if !graph_entity_in_namespace(&entity, &context.namespace) {
+            if !graph_entity_in_scope(&entity, &context.scope) {
                 return Err(ServerError::not_found(format!(
                     "graph entity {entity_id} not found in namespace {}",
                     context.namespace
@@ -3029,7 +3236,7 @@ async fn server_get_graph_relation(
         let relation = engine
             .graph_relation(id)
             .map_err(ServerError::internal)?
-            .filter(|relation| graph_relation_in_namespace(relation, &context.namespace))
+            .filter(|relation| graph_relation_in_scope(relation, &context.scope))
             .map(GraphRelationDto::from);
         let found = relation.is_some();
 
@@ -3060,7 +3267,7 @@ async fn server_delete_graph_relation(
         let relation = engine
             .graph_relation(id)
             .map_err(ServerError::internal)?
-            .filter(|relation| graph_relation_in_namespace(relation, &context.namespace))
+            .filter(|relation| graph_relation_in_scope(relation, &context.scope))
             .map(|mut relation| {
                 relation.timestamps = relation.timestamps.closed_at(valid_to);
                 engine
@@ -3090,7 +3297,8 @@ async fn server_graph_traverse(
         let start_entity = parse_entity_id(&body.start_entity)?;
         let as_of = body.as_of_unix.map(required_time_from_unix).transpose()?;
         let traversal_as_of = as_of.unwrap_or_else(OffsetDateTime::now_utc);
-        let mut request = GraphTraversalRequest::new(start_entity, body.max_hops.unwrap_or(1));
+        let mut request = GraphTraversalRequest::new(start_entity, body.max_hops.unwrap_or(1))
+            .with_scope(context.scope.clone());
 
         if let Some(relation_types) = body.relation_types {
             request = request.with_relation_types(relation_types);
@@ -3111,17 +3319,17 @@ async fn server_graph_traverse(
                 "graph entity {start_entity} not found"
             )));
         };
-        if !graph_entity_in_namespace(&start, &context.namespace) {
+        if !graph_entity_in_scope(&start, &context.scope) {
             return Err(ServerError::not_found(format!(
                 "graph entity {start_entity} not found in namespace {}",
                 context.namespace
             )));
         }
-        let traversal = filter_graph_traversal_for_namespace(
+        let traversal = filter_graph_traversal_for_scope(
             engine
                 .traverse_graph(&request)
                 .map_err(ServerError::internal)?,
-            &context.namespace,
+            &context.scope,
             traversal_as_of,
         );
         let entity_count = traversal.entities.len();
@@ -3148,7 +3356,8 @@ async fn server_tideline_snapshot(
     let context = server_context_or_log(&headers, &state, "GET", "/tideline/snapshot")?;
     let result: Result<(Json<TidelineSnapshotDto>, serde_json::Value), ServerError> = (|| {
         let as_of = optional_time_from_unix(query.as_of_unix)?;
-        let snapshot = tideline_snapshot_for_namespace(&state, &context.namespace, as_of)?;
+        let snapshot =
+            tideline_snapshot_for_scope(&state, &context.namespace, &context.scope, as_of)?;
         let cost = json!({
             "request_units": 1,
             "memories_returned": snapshot.memory_count,
@@ -3192,7 +3401,8 @@ async fn server_tideline_recording(
     let context = server_context_or_log(&headers, &state, "GET", "/tideline/recording")?;
     let result: Result<(Json<TidelineSnapshotDto>, serde_json::Value), ServerError> = (|| {
         let as_of = optional_time_from_unix(query.as_of_unix)?;
-        let snapshot = tideline_snapshot_for_namespace(&state, &context.namespace, as_of)?;
+        let snapshot =
+            tideline_snapshot_for_scope(&state, &context.namespace, &context.scope, as_of)?;
         let cost = json!({
             "request_units": 1,
             "recording_schema_version": snapshot.schema_version,
@@ -3248,19 +3458,28 @@ async fn server_tideline_live(
 
     let state_for_stream = state.clone();
     let namespace = context.namespace;
+    let scope = context.scope;
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let stream = IntervalStream::new(interval).map(move |_| {
-        let event = match tideline_snapshot_for_namespace(&state_for_stream, &namespace, as_of) {
+        let event = match tideline_snapshot_for_scope(&state_for_stream, &namespace, &scope, as_of)
+        {
             Ok(snapshot) => match serde_json::to_string(&snapshot) {
                 Ok(data) => SseEvent::default().event("snapshot").data(data),
                 Err(error) => SseEvent::default()
                     .event("error")
                     .data(json!({ "error": error.to_string() }).to_string()),
             },
-            Err(error) => SseEvent::default()
-                .event("error")
-                .data(json!({ "error": error.message }).to_string()),
+            Err(error) => SseEvent::default().event("error").data(
+                json!({
+                    "error": error.detail,
+                    "code": error.code,
+                    "severity": error.severity,
+                    "retryable": error.retryable,
+                    "detail": error.detail,
+                })
+                .to_string(),
+            ),
         };
 
         Ok(event)
@@ -3424,6 +3643,13 @@ fn tier_str(value: Tier) -> &'static str {
     }
 }
 
+fn scope_visibility_str(value: ScopeVisibility) -> &'static str {
+    match value {
+        ScopeVisibility::Repository => "repository",
+        ScopeVisibility::Team => "team",
+    }
+}
+
 fn credence_str(value: CredenceTier) -> &'static str {
     match value {
         CredenceTier::Unverified => "unverified",
@@ -3447,6 +3673,16 @@ fn candidate_source_str(value: RecallCandidateSource) -> String {
         RecallCandidateSource::GraphExpansion { anchor } => {
             format!("graph_expansion:{anchor}")
         }
+    }
+}
+
+fn recall_unavailable_stage_str(value: RecallUnavailableStage) -> &'static str {
+    match value {
+        RecallUnavailableStage::VectorSearch => "vector_search",
+        RecallUnavailableStage::StorageHydration => "storage_hydration",
+        RecallUnavailableStage::GraphExpansion => "graph_expansion",
+        RecallUnavailableStage::Sanitization => "sanitization",
+        RecallUnavailableStage::AccessRecording => "access_recording",
     }
 }
 
@@ -3566,6 +3802,16 @@ impl From<Provenance> for ProvenanceDto {
     }
 }
 
+impl From<MemoryScope> for MemoryScopeDto {
+    fn from(value: MemoryScope) -> Self {
+        Self {
+            repository: value.repository.to_string(),
+            team: value.team.map(|team| team.to_string()),
+            visibility: scope_visibility_str(value.visibility).to_owned(),
+        }
+    }
+}
+
 impl From<MemoryItem> for MemoryItemDto {
     fn from(value: MemoryItem) -> Self {
         Self {
@@ -3573,6 +3819,7 @@ impl From<MemoryItem> for MemoryItemDto {
             content: value.content,
             kind: memory_kind_str(value.kind).to_owned(),
             provenance: ProvenanceDto::from(value.provenance),
+            scope: MemoryScopeDto::from(value.scope),
             tier: tier_str(value.tier).to_owned(),
             credence: credence_str(value.credence).to_owned(),
             significance: value.significance,
@@ -3670,6 +3917,7 @@ impl From<Entity> for GraphEntityDto {
     fn from(value: Entity) -> Self {
         Self {
             id: value.id.to_string(),
+            scope: MemoryScopeDto::from(value.scope),
             entity_type: value.entity_type,
             label: value.label,
             stable_key: value.stable_key,
@@ -3688,6 +3936,7 @@ impl From<Relation> for GraphRelationDto {
     fn from(value: Relation) -> Self {
         Self {
             id: value.id.to_string(),
+            scope: MemoryScopeDto::from(value.scope),
             relation_type: value.relation_type,
             from_entity: value.from_entity.to_string(),
             to_entity: value.to_entity.to_string(),
@@ -3824,6 +4073,7 @@ impl From<ConsolidationPassReport> for ConsolidationPassDto {
 #[cfg(test)]
 mod tests {
     use super::{ServerError, parse_vector};
+    use axum::http::StatusCode;
 
     #[test]
     fn parse_vector_accepts_commas_and_spaces() {
@@ -3837,10 +4087,12 @@ mod tests {
 
     #[test]
     fn server_errors_preserve_core_error_metadata() {
-        let error = ServerError::internal("[SHIBA_RECALL] recall operation failed");
+        let error = ServerError::internal("[SHIBA_VECTOR] dimension mismatch: expected 2, got 1");
 
-        assert_eq!(error.code, "SHIBA_RECALL");
-        assert_eq!(error.severity, "recoverable");
-        assert!(error.retryable);
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "SHIBA_VECTOR");
+        assert_eq!(error.severity, "fatal");
+        assert!(!error.retryable);
+        assert_eq!(error.detail, "vector index operation failed");
     }
 }

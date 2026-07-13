@@ -45,6 +45,14 @@ export declare class Shibahama {
    */
   recall(queryVector: Array<number>, topK: number, options?: RecallOptions | undefined | null): Array<RecallCandidate>
   /**
+   * Recalls usable candidates and reports unavailable optional stages.
+   *
+   * # Errors
+   *
+   * Returns an error when vector search or initial candidate materialization cannot complete.
+   */
+  recallWithDegradation(queryVector: Array<number>, topK: number, options?: RecallOptions | undefined | null): DegradedRecallResult
+  /**
    * Streams current fact memories for a query embedding.
    *
    * # Errors
@@ -161,11 +169,17 @@ export declare class Shibahama {
 /** Returns the versioned capability document as JSON. */
 export declare function capabilitiesJson(): string
 
+export interface DegradedRecallResult {
+  candidates: Array<RecallCandidate>
+  unavailableStages: Array<string>
+}
+
 export interface MemoryItem {
   id: string
   content: string
   kind: string
   provenance: Provenance
+  scope: MemoryScope
   tier: string
   credence: string
   significance: number
@@ -173,6 +187,12 @@ export interface MemoryItem {
   validFromUnix: number
   validToUnix?: number
   ingestedAtUnix: number
+}
+
+export interface MemoryScope {
+  repository: string
+  team?: string
+  visibility: string
 }
 
 export interface Provenance {
@@ -252,6 +272,7 @@ export interface WriteOptions {
   indexName?: string
   model?: string
   modelVersion?: string
+  scope?: MemoryScope
 }
 
 // Shibahama JavaScript shims
@@ -268,6 +289,7 @@ export interface ShibahamaError extends Error {
   code: string
   severity: "recoverable" | "fatal"
   retryable: boolean
+  detail: string
 }
 
 export type EmbedFunction = (text: string) => Array<number> | Promise<Array<number>>

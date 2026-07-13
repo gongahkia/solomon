@@ -26,6 +26,8 @@ from solomon.mcp.tools import MCPToolSpec, SolomonMCPRuntime, mcp_tool_specs, re
 from solomon.mcp.tools.helpers import _error_result
 from solomon.mcp.transport import MCPShutdownConfig, MCPTransportConfig, MCPTransportKind
 
+PROTECTED_RESOURCE_METADATA_PREFIX = "/.well-known/oauth-protected-resource"
+
 
 class SolomonMCPServerConfig(SolomonModel):
     name: str = "solomon"
@@ -36,13 +38,17 @@ class SolomonMCPServerConfig(SolomonModel):
 
 
 class MCPBearerAuthMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app: ASGIApp, expected_token: str) -> None:
+    def __init__(self, app: ASGIApp, expected_token: str, metadata_path: str) -> None:
         super().__init__(app)
         self.expected_token = expected_token
+        self.metadata_path = metadata_path
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if request.method == "GET" and request.url.path == self.metadata_path:
+            return await call_next(request)
         supplied = _bearer_token_from_header(request.headers.get("authorization"))
         if not bearer_token_matches(supplied, self.expected_token):
+            metadata_url = _request_url(request, self.metadata_path)
             return JSONResponse(
                 _error_result(
                     "scope_denied",
@@ -51,6 +57,7 @@ class MCPBearerAuthMiddleware(BaseHTTPMiddleware):
                     details={},
                 ),
                 status_code=401,
+                headers={"WWW-Authenticate": f'Bearer resource_metadata="{metadata_url}"'},
             )
         return await call_next(request)
 
@@ -119,10 +126,13 @@ def create_streamable_http_app(
     host: str = "127.0.0.1",
     port: int = 8141,
     expected_token: str | None = None,
+    auth: MCPAuthConfig | None = None,
 ) -> Starlette:
     return _with_bearer_auth(
         create_fastmcp_server(service, host=host, port=port).streamable_http_app(),
         expected_token=expected_token if expected_token is not None else token_from_env(),
+        auth=auth or MCPAuthConfig(),
+        resource_path="/mcp",
     )
 
 
@@ -132,10 +142,13 @@ def create_sse_app(
     host: str = "127.0.0.1",
     port: int = 8141,
     expected_token: str | None = None,
+    auth: MCPAuthConfig | None = None,
 ) -> Starlette:
     return _with_bearer_auth(
         create_fastmcp_server(service, host=host, port=port).sse_app(),
         expected_token=expected_token if expected_token is not None else token_from_env(),
+        auth=auth or MCPAuthConfig(),
+        resource_path="/sse",
     )
 
 
@@ -196,10 +209,35 @@ def main() -> None:
     run_stdio_server()
 
 
-def _with_bearer_auth(app: Starlette, *, expected_token: str | None) -> Starlette:
+def _with_bearer_auth(
+    app: Starlette,
+    *,
+    expected_token: str | None,
+    auth: MCPAuthConfig,
+    resource_path: str,
+) -> Starlette:
+    metadata_path = f"{PROTECTED_RESOURCE_METADATA_PREFIX}{resource_path}"
+
+    async def protected_resource_metadata(request: Request) -> JSONResponse:
+        payload: dict[str, object] = {
+            "resource": _request_url(request, resource_path),
+            "bearer_methods_supported": ["header"],
+            "resource_name": auth.resource_name,
+        }
+        if auth.authorization_servers:
+            payload["authorization_servers"] = list(auth.authorization_servers)
+        if auth.scopes:
+            payload["scopes_supported"] = list(auth.scopes)
+        return JSONResponse(payload)
+
+    app.add_route(metadata_path, protected_resource_metadata, methods=["GET"])
     if expected_token is not None:
-        app.add_middleware(MCPBearerAuthMiddleware, expected_token=expected_token)
+        app.add_middleware(MCPBearerAuthMiddleware, expected_token=expected_token, metadata_path=metadata_path)
     return app
+
+
+def _request_url(request: Request, path: str) -> str:
+    return str(request.url.replace(path=path, query=None))
 
 
 def _bearer_token_from_header(value: str | None) -> str | None:

@@ -5,6 +5,9 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from secrets import compare_digest
+from urllib.parse import urlparse
+
+from pydantic import Field, field_validator
 
 from solomon.api.schemas import SolomonModel
 
@@ -12,6 +15,18 @@ from solomon.api.schemas import SolomonModel
 class MCPAuthConfig(SolomonModel):
     credential_env_var: str = "SOLOMON_MCP_TOKEN"
     require_http_token: bool = True
+    authorization_servers: tuple[str, ...] = Field(default_factory=tuple)
+    scopes: tuple[str, ...] = Field(default_factory=tuple)
+    resource_name: str = "Solomon MCP"
+
+    @field_validator("authorization_servers")
+    @classmethod
+    def validate_authorization_servers(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        for value in values:
+            parsed = urlparse(value)
+            if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
+                raise ValueError("authorization server URLs must be absolute https URLs without query or fragment")
+        return values
 
 
 def token_from_env(config: MCPAuthConfig | None = None, env: Mapping[str, str] | None = None) -> str | None:

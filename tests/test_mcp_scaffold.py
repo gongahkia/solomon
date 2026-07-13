@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import anyio
+import httpx
 import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -20,6 +21,7 @@ from solomon.mcp.server import (
     available_tool_names,
     create_fastmcp_server,
     create_server_config,
+    create_sse_app,
     create_streamable_http_app,
     uvicorn_config_for_app,
 )
@@ -258,7 +260,14 @@ def test_uvicorn_config_uses_graceful_shutdown_timeout(tmp_path: Path) -> None:
 def test_streamable_http_app_enforces_bearer_token(tmp_path: Path) -> None:
     service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
     expected = "test-" + "mcp-token"
-    app = create_streamable_http_app(service, expected_token=expected)
+    app = create_streamable_http_app(
+        service,
+        expected_token=expected,
+        auth=MCPAuthConfig(
+            authorization_servers=("https://auth.example.test",),
+            scopes=("solomon.read", "solomon.write"),
+        ),
+    )
 
     async def call(headers: list[tuple[bytes, bytes]]) -> int:
         messages: list[Message] = []
@@ -292,6 +301,45 @@ def test_streamable_http_app_enforces_bearer_token(tmp_path: Path) -> None:
 
     assert anyio.run(call, []) == 401
     assert anyio.run(call, [(b"authorization", b"Bearer wrong")]) == 401
+
+
+def test_http_transports_publish_protected_resource_metadata(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    auth = MCPAuthConfig(authorization_servers=("https://auth.example.test",), scopes=("solomon.read",))
+    token = "test-" + "mcp-token"
+    app = create_streamable_http_app(service, expected_token=token, auth=auth)
+    sse_app = create_sse_app(service, expected_token=token, auth=auth)
+
+    async def call() -> None:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="https://mcp.example.test",
+        ) as client:
+            metadata = await client.get("/.well-known/oauth-protected-resource/mcp")
+            denied = await client.get("/mcp")
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=sse_app),
+            base_url="https://mcp.example.test",
+        ) as client:
+            sse_metadata = await client.get("/.well-known/oauth-protected-resource/sse")
+
+        assert metadata.status_code == 200
+        assert metadata.headers["content-type"].startswith("application/json")
+        assert metadata.json() == {
+            "resource": "https://mcp.example.test/mcp",
+            "authorization_servers": ["https://auth.example.test"],
+            "bearer_methods_supported": ["header"],
+            "scopes_supported": ["solomon.read"],
+            "resource_name": "Solomon MCP",
+        }
+        assert denied.status_code == 401
+        assert denied.headers["www-authenticate"] == (
+            'Bearer resource_metadata="https://mcp.example.test/.well-known/oauth-protected-resource/mcp"'
+        )
+        assert denied.json()["error"]["category"] == "authorization"
+        assert sse_metadata.json()["resource"] == "https://mcp.example.test/sse"
+
+    anyio.run(call)
 
 
 def _structured_payload(result: Any) -> dict[str, Any]:

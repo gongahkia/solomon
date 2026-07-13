@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import Field, field_validator
 
 from solomon.api.schemas import SolomonModel
+from solomon.connectors import ConnectorConfiguration
 from solomon.currency.models import _ensure_aware_utc, new_uuid7, now_utc
 
 
@@ -37,7 +38,7 @@ class DocumentSource(SolomonModel):
     kind: DocumentSourceKind
     root_ref: str = Field(min_length=1)
     enabled: bool = True
-    config: dict[str, Any] = Field(default_factory=dict)
+    config: ConnectorConfiguration = Field(default_factory=ConnectorConfiguration)
     created_at: datetime = Field(default_factory=now_utc)
     updated_at: datetime = Field(default_factory=now_utc)
 

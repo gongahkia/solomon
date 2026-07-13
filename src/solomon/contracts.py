@@ -9,6 +9,7 @@ from typing import Any, Protocol, runtime_checkable
 from pydantic import Field, field_validator
 
 from solomon.api.schemas import SolomonModel
+from solomon.connectors import ConnectorConfiguration
 from solomon.currency.models import _ensure_aware_utc, now_utc
 from solomon.sources.models import DocumentSource, DocumentSourceKind
 from solomon.workflow.models import AuthorityChangeEvent, ReviewTask
@@ -68,7 +69,7 @@ class AuthoritySource(ContractModel):
     kind: AuthoritySourceKind
     root_ref: str = Field(min_length=1)
     enabled: bool = True
-    config: dict[str, Any] = Field(default_factory=dict)
+    config: ConnectorConfiguration = Field(default_factory=ConnectorConfiguration)
 
 
 class AuthorityObservation(ContractModel):

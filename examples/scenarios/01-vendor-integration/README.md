@@ -26,6 +26,10 @@ Render the animated comparison:
 uv run python scripts/render_vendor_integration_gif.py
 ```
 
+Watch the [MP4 replay](../../../docs/assets/scenarios/vendor-integration/comparison.mp4) with
+[WebVTT captions](../../../docs/assets/scenarios/vendor-integration/comparison.vtt) and a
+[static frame](../../../docs/assets/scenarios/vendor-integration/comparison.png).
+
 Expected invariants:
 
 - the preflight call returns one current item before the authority change and no item after it;

@@ -2,14 +2,14 @@
 
 .git
 .venv
-.pytest_cache
 .mypy_cache
+.pytest_cache
 .ruff_cache
 __pycache__
 *.py[cod]
-.coverage
-htmlcov
+build
+dist
 solomon-data
 solomon-journal
-dist
-build
+secrets
+tests

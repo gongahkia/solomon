@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     telemetry_enabled: bool = False
     telemetry_service_name: str = Field(default="solomon", min_length=1, max_length=120)
     telemetry_otlp_endpoint: str | None = None
+    worker_source_sync_interval_seconds: int = Field(default=300, ge=5, le=86_400)
+    worker_source_sync_limit: int = Field(default=100, ge=1, le=10_000)
     local_model_url: str = "http://127.0.0.1:11434/api/generate"
     local_model_name: str = "qwen2.5-coder:1.5b"
     remote_model_url: str | None = None
@@ -151,6 +153,8 @@ class Settings(BaseSettings):
             "telemetry_enabled": self.telemetry_enabled,
             "telemetry_service_name": self.telemetry_service_name,
             "telemetry_otlp_configured": self.telemetry_otlp_endpoint is not None,
+            "worker_source_sync_interval_seconds": self.worker_source_sync_interval_seconds,
+            "worker_source_sync_limit": self.worker_source_sync_limit,
             "server_auto_provision_tenants": self.server_auto_provision_tenants,
             "oidc_configured": self.oidc_issuer is not None,
             "oidc_clock_skew_seconds": self.oidc_clock_skew_seconds,

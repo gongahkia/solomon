@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Annotated, cast
 
@@ -43,6 +44,7 @@ from solomon.graph.visualization import GraphFormat
 from solomon.mcp.server import run_sse_server, run_stdio_server, run_streamable_http_server
 from solomon.mcp.tools import SolomonMCPRuntime
 from solomon.telemetry import telemetry_from_settings
+from solomon.worker import sync_enabled_filesystem_sources
 
 
 def _example(command: str) -> str:
@@ -107,6 +109,35 @@ def health() -> None:
         "boundary": probe_boundary_client(settings.boundary_engine_path).model_dump(mode="json"),
     }
     _print_json(payload, sort_keys=True)
+
+
+@app.command("migrate", epilog=_example("uv run solomon migrate"))
+def migrate() -> None:
+    """Apply durable storage migrations and exit."""
+    settings = get_settings()
+    _ = _service()
+    backend = "postgres" if settings.database_url.startswith(("postgres://", "postgresql://")) else "sqlite"
+    _print_json({"status": "applied", "backend": backend}, sort_keys=True)
+
+
+@app.command("worker", epilog=_example("uv run solomon worker --once"))
+def worker(
+    once: Annotated[bool, typer.Option("--once", help="Run one source-sync cycle and exit.")] = False,
+    interval_seconds: Annotated[
+        int | None, typer.Option("--interval-seconds", min=5, help="Seconds between source-sync cycles.")
+    ] = None,
+    source_limit: Annotated[int | None, typer.Option("--source-limit", min=1, help="Maximum sources per cycle.")] = None,
+) -> None:
+    """Synchronize enabled filesystem document sources."""
+    settings = get_settings()
+    service = _service()
+    interval = interval_seconds or settings.worker_source_sync_interval_seconds
+    limit = source_limit or settings.worker_source_sync_limit
+    while True:
+        _print_json(sync_enabled_filesystem_sources(service, limit=limit).model_dump(), sort_keys=True)
+        if once:
+            return
+        time.sleep(interval)
 
 
 @mcp_app.command("serve", epilog=_example("uv run solomon mcp serve --http --host 127.0.0.1 --port 8141"))

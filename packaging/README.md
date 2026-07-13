@@ -5,6 +5,9 @@
 - `solomon-local.spec` is the PyInstaller entry for the offline local SKU.
 - Docker Compose files at the repository root are for the server SKU and use the in-process Solomon boundary by
   default. Set `SOLOMON_BOUNDARY_BASE_URL` only for an explicitly externalized boundary deployment.
+- `Dockerfile` and `docker-compose.production.yml` build a self-hosted server profile with pgvector, migrations,
+  API, console, and a filesystem-source worker. See the production Compose section in the root README for secret files
+  and the startup command.
 
 ## v0.1.0 release artifacts
 

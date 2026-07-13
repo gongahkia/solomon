@@ -91,6 +91,8 @@ def test_cli_help_includes_examples_for_visible_commands() -> None:
     commands = [
         ["diagnostics"],
         ["health"],
+        ["migrate"],
+        ["worker"],
         ["ingest"],
         ["recall"],
         ["preflight"],
@@ -151,6 +153,18 @@ def test_cli_backup_restore_and_recovery_drill(monkeypatch: pytest.MonkeyPatch, 
     drill = runner.invoke(app, ["recovery-drill", str(archive)])
     assert drill.exit_code == 0, drill.output
     assert json.loads(drill.output)["knowledge_items"] == 1
+
+
+def test_cli_migrate_and_worker_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _configure_cli_store(monkeypatch, tmp_path)
+
+    migrated = runner.invoke(app, ["migrate"])
+    worker = runner.invoke(app, ["worker", "--once"])
+
+    assert migrated.exit_code == 0, migrated.output
+    assert json.loads(migrated.output) == {"backend": "sqlite", "status": "applied"}
+    assert worker.exit_code == 0, worker.output
+    assert json.loads(worker.output) == {"attempted": 0, "failed": 0, "skipped": 0, "succeeded": 0}
 
 
 def test_cli_console_serve_dispatches_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:

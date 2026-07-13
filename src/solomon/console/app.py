@@ -84,6 +84,10 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
     app.state.oidc_validator = _console_oidc_validator(resolved_settings)
     app.mount("/console/static", StaticFiles(directory=str(STATIC_DIR)), name="console-static")
 
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
+
     @app.middleware("http")
     async def console_auth(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         if not _requires_console_auth(request.url.path):

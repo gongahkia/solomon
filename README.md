@@ -553,6 +553,35 @@ SOLOMON_SERVER_API_KEY=change-me docker compose -f docker-compose.server.yml up 
 curl -H 'Authorization: Bearer change-me' http://localhost:8140/health
 ```
 
+### Production Compose
+
+`docker-compose.production.yml` is the self-hosted production profile: Postgres with pgvector, one-shot migrations,
+the API, curator console, and a single filesystem-source worker. It keeps Postgres, durable Solomon state, and journals
+in named volumes; bind mounts are deliberately absent. The worker synchronizes enabled filesystem sources only; scale it
+only after introducing a source-level distributed lease.
+
+Create three files outside the checkout, each mode `0600`: `server_api_key`, `postgres_password`, and a Base64-encoded
+32-byte `content_encryption_key`. The content key reference is non-secret deployment metadata.
+
+```bash
+install -d -m 0700 /opt/solomon/secrets
+printf '%s\n' 'replace-with-a-long-random-api-key' > /opt/solomon/secrets/server_api_key
+printf '%s\n' 'replace-with-a-long-random-postgres-password' > /opt/solomon/secrets/postgres_password
+openssl rand -base64 32 > /opt/solomon/secrets/content_encryption_key
+chmod 0600 /opt/solomon/secrets/*
+
+export SOLOMON_SECRETS_DIR=/opt/solomon/secrets
+export SOLOMON_CONTENT_ENCRYPTION_KEY_REF='kms://firm-keyring/solomon-content/v1'
+docker compose -f docker-compose.production.yml --profile production up --build -d
+```
+
+The API and console default to loopback binds (`127.0.0.1:8140` and `127.0.0.1:8150`); put TLS termination in front
+of them before exposing either port. Validate the Compose model without starting services with:
+
+```bash
+scripts/check_production_compose.sh
+```
+
 ## Documentation
 
 - [`docs/architecture.md`](./docs/architecture.md): service architecture, deterministic primitive plans,

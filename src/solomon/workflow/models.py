@@ -57,6 +57,7 @@ class ReviewTask(SolomonModel):
     reason: str = Field(min_length=1)
     state: ReviewTaskState = ReviewTaskState.OPEN
     reviewer_id: str | None = None
+    recommended_reviewer_id: str | None = None
     assigned_by: str | None = None
     created_at: datetime = Field(default_factory=now_utc)
     updated_at: datetime = Field(default_factory=now_utc)

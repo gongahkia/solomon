@@ -15,6 +15,7 @@ from typing_extensions import Self
 
 from solomon.currency.models import CurrencyState, KnowledgeItem, now_utc
 from solomon.events import DomainEventEnvelope
+from solomon.store.migrations import apply_sqlite_migrations, sqlite_knowledge_store_migrations
 from solomon.store.outbox import OutboxRecord
 from solomon.store.types import KnowledgeEvent
 
@@ -54,61 +55,7 @@ class SQLiteKnowledgeStore:
         self.close()
 
     def initialize(self) -> None:
-        with self._conn:
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS knowledge_events (
-                    seq INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_id TEXT NOT NULL UNIQUE,
-                    event_type TEXT NOT NULL,
-                    item_id TEXT NOT NULL,
-                    occurred_at TEXT NOT NULL,
-                    payload_json TEXT NOT NULL
-                )
-                """
-            )
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS knowledge_items (
-                    item_id TEXT PRIMARY KEY,
-                    schema_version INTEGER NOT NULL,
-                    item_json TEXT NOT NULL,
-                    currency_state TEXT NOT NULL,
-                    valid_from TEXT NOT NULL,
-                    valid_to TEXT,
-                    ingested_at TEXT NOT NULL,
-                    successor_id TEXT,
-                    matter_id TEXT,
-                    client_id TEXT
-                )
-                """
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_knowledge_items_state ON knowledge_items(currency_state)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_knowledge_items_scope ON knowledge_items(matter_id, client_id)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_knowledge_events_time ON knowledge_events(occurred_at, seq)"
-            )
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS outbox_events (
-                    event_id TEXT PRIMARY KEY,
-                    event_type TEXT NOT NULL,
-                    available_at TEXT NOT NULL,
-                    delivered_at TEXT,
-                    delivery_attempts INTEGER NOT NULL,
-                    last_error TEXT,
-                    event_json TEXT NOT NULL
-                )
-                """
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_outbox_events_pending "
-                "ON outbox_events(delivered_at, available_at, event_id)"
-            )
+        apply_sqlite_migrations(self._conn, sqlite_knowledge_store_migrations())
 
     def write_item(self, item: KnowledgeItem) -> KnowledgeItem:
         with self._conn:

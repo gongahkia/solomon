@@ -26,6 +26,10 @@ from solomon.api.service import (
     AffirmRequest,
     AnswerRequest,
     AuthorityChangeRequest,
+    AuthorityEventRequest,
+    CandidateClaimDeferralRequest,
+    CandidateClaimPromotionRequest,
+    CandidateClaimRejectionRequest,
     ContestRequest,
     DependencyRequest,
     DependencySuggestionDecisionRequest,
@@ -36,7 +40,11 @@ from solomon.api.service import (
     PrimitivePlanRequest,
     RecallRequest,
     ReferenceExtractionRequest,
+    ReviewTaskAssignmentRequest,
+    ReviewTaskResolutionRequest,
+    ReviewTaskStartRequest,
     SolomonService,
+    SourceDocumentIngestRequest,
     StalenessPredictionRequest,
     VerificationRequest,
 )
@@ -66,6 +74,7 @@ from solomon.orchestrator.models import (
     RemoteZDREndpoint,
     RoutingPolicy,
 )
+from solomon.workflow.models import ReviewTaskState
 
 PUBLIC_PATHS = {"/health", "/ready", "/docs", "/redoc", "/openapi.json"}
 TENANT_MANAGEMENT_PREFIX = "/tenants"
@@ -289,6 +298,51 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def register_document_source(request: Request, payload: DocumentSourceRequest) -> dict[str, Any]:
         return active_service(request).register_document_source(payload).model_dump(mode="json")
 
+    @app.get("/sources/{source_id}/documents")
+    def source_documents(request: Request, source_id: str) -> list[dict[str, Any]]:
+        return [document.model_dump(mode="json") for document in active_service(request).source_documents(source_id)]
+
+    @app.post("/sources/{source_id}/documents")
+    def ingest_source_document(
+        request: Request,
+        source_id: str,
+        payload: SourceDocumentIngestRequest,
+    ) -> dict[str, Any]:
+        document, candidates = active_service(request).ingest_source_document(source_id, payload)
+        return {
+            "document": document.model_dump(mode="json"),
+            "candidate_claims": [candidate.model_dump(mode="json") for candidate in candidates],
+        }
+
+    @app.get("/source-documents/{document_id}/candidates")
+    def candidate_claims(request: Request, document_id: str) -> list[dict[str, Any]]:
+        candidates = active_service(request).candidate_claims(document_id)
+        return [candidate.model_dump(mode="json") for candidate in candidates]
+
+    @app.post("/candidate-claims/{candidate_id}/promote")
+    def promote_candidate_claim(
+        request: Request,
+        candidate_id: str,
+        payload: CandidateClaimPromotionRequest,
+    ) -> dict[str, Any]:
+        return active_service(request).promote_candidate_claim(candidate_id, payload).model_dump(mode="json")
+
+    @app.post("/candidate-claims/{candidate_id}/reject")
+    def reject_candidate_claim(
+        request: Request,
+        candidate_id: str,
+        payload: CandidateClaimRejectionRequest,
+    ) -> dict[str, Any]:
+        return active_service(request).reject_candidate_claim(candidate_id, payload).model_dump(mode="json")
+
+    @app.post("/candidate-claims/{candidate_id}/defer")
+    def defer_candidate_claim(
+        request: Request,
+        candidate_id: str,
+        payload: CandidateClaimDeferralRequest,
+    ) -> dict[str, Any]:
+        return active_service(request).defer_candidate_claim(candidate_id, payload).model_dump(mode="json")
+
     @app.post("/recall")
     def recall(request: Request, payload: RecallRequest) -> list[dict[str, Any]]:
         return active_service(request).recall(payload)
@@ -310,6 +364,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/authorities/{authority_id}/changes")
     def authority_change(request: Request, authority_id: str, payload: AuthorityChangeRequest) -> dict[str, Any]:
         return active_service(request).register_authority_change(authority_id, payload)
+
+    @app.post("/authority-events")
+    def authority_event(request: Request, payload: AuthorityEventRequest) -> dict[str, Any]:
+        return active_service(request).register_authority_event(payload)
+
+    @app.get("/review-tasks")
+    def review_tasks(
+        request: Request,
+        reviewer_id: str | None = None,
+        state: ReviewTaskState | None = None,
+    ) -> list[dict[str, Any]]:
+        tasks = active_service(request).review_tasks(reviewer_id=reviewer_id, state=state)
+        return [task.model_dump(mode="json") for task in tasks]
+
+    @app.post("/review-tasks/{task_id}/assign")
+    def assign_review_task(
+        request: Request,
+        task_id: str,
+        payload: ReviewTaskAssignmentRequest,
+    ) -> dict[str, Any]:
+        return active_service(request).assign_review_task(task_id, payload).model_dump(mode="json")
+
+    @app.post("/review-tasks/{task_id}/start")
+    def start_review_task(
+        request: Request,
+        task_id: str,
+        payload: ReviewTaskStartRequest,
+    ) -> dict[str, Any]:
+        return active_service(request).start_review_task(task_id, payload).model_dump(mode="json")
+
+    @app.post("/review-tasks/{task_id}/resolve")
+    def resolve_review_task(
+        request: Request,
+        task_id: str,
+        payload: ReviewTaskResolutionRequest,
+    ) -> dict[str, Any]:
+        return active_service(request).resolve_review_task(task_id, payload).model_dump(mode="json")
 
     @app.post("/contest/{item_id}")
     def contest(request: Request, item_id: str, payload: ContestRequest) -> dict[str, Any]:

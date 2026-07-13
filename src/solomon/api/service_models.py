@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from solomon.api.schemas import SolomonModel
 from solomon.connectors import ConnectorConfiguration
@@ -47,6 +47,42 @@ class DocumentSourceRequest(SolomonModel):
     config: ConnectorConfiguration = Field(default_factory=ConnectorConfiguration)
 
 
+class SourceDocumentIngestRequest(SolomonModel):
+    external_id: str = Field(min_length=1)
+    filename: str = Field(min_length=1)
+    mime_type: str | None = None
+    content: str | None = None
+    content_base64: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_content(self) -> SourceDocumentIngestRequest:
+        if (self.content is None) == (self.content_base64 is None):
+            raise ValueError("exactly one of content or content_base64 is required")
+        return self
+
+
+class CandidateClaimPromotionRequest(SolomonModel):
+    by: str = Field(min_length=1)
+    kind: KnowledgeKind = KnowledgeKind.NOTE
+    source_kind: SourceKind = SourceKind.MATTER_DOC
+    author: str | None = None
+    matter_id: str | None = None
+    client_id: str | None = None
+    conclusion: str | None = None
+    conclusion_polarity: ConclusionPolarity | None = None
+
+
+class CandidateClaimRejectionRequest(SolomonModel):
+    by: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class CandidateClaimDeferralRequest(SolomonModel):
+    by: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
 class RecallRequest(SolomonModel):
     query: str
     matter_id: str | None = None
@@ -63,6 +99,20 @@ class VerificationRequest(SolomonModel):
     source_ref: str | None = None
     successor_id: str | None = None
     recorded_at: datetime | None = None
+
+
+class ReviewTaskAssignmentRequest(SolomonModel):
+    reviewer_id: str = Field(min_length=1)
+    assigned_by: str = Field(min_length=1)
+
+
+class ReviewTaskStartRequest(SolomonModel):
+    reviewer_id: str = Field(min_length=1)
+
+
+class ReviewTaskResolutionRequest(SolomonModel):
+    reviewer_id: str = Field(min_length=1)
+    verification: VerificationRequest
 
 
 class VerificationAssignmentRequest(SolomonModel):
@@ -84,6 +134,16 @@ class VerificationReviewRequest(SolomonModel):
 class AuthorityChangeRequest(SolomonModel):
     new_version: str
     changed_at: str
+
+
+class AuthorityEventRequest(SolomonModel):
+    source_id: str = Field(min_length=1)
+    idempotency_key: str = Field(min_length=1)
+    authority_id: str = Field(min_length=1)
+    new_version: str = Field(min_length=1)
+    changed_at: datetime
+    evidence_url: str | None = None
+    evidence_sha256: str | None = None
 
 
 class ContestRequest(SolomonModel):
@@ -210,12 +270,20 @@ class PrimitivePlanExecution(SolomonModel):
 
 __all__ = [
     "IngestRequest",
-    "RecallRequest",
     "DocumentSourceRequest",
+    "SourceDocumentIngestRequest",
+    "CandidateClaimPromotionRequest",
+    "CandidateClaimRejectionRequest",
+    "CandidateClaimDeferralRequest",
+    "RecallRequest",
     "VerificationRequest",
+    "ReviewTaskAssignmentRequest",
+    "ReviewTaskStartRequest",
+    "ReviewTaskResolutionRequest",
     "VerificationAssignmentRequest",
     "VerificationReviewRequest",
     "AuthorityChangeRequest",
+    "AuthorityEventRequest",
     "ContestRequest",
     "ContestResponse",
     "AffirmRequest",

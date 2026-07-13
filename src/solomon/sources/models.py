@@ -37,6 +37,7 @@ class SourceChangeKind(str, Enum):
 
 class CandidateClaimStatus(str, Enum):
     PENDING = "pending"
+    DEFERRED = "deferred"
     PROMOTED = "promoted"
     REJECTED = "rejected"
 

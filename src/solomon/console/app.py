@@ -18,6 +18,9 @@ from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
 from solomon.api.service import (
+    CandidateClaimDeferralRequest,
+    CandidateClaimPromotionRequest,
+    CandidateClaimRejectionRequest,
     DependencySuggestionDecisionRequest,
     PinRequest,
     RecallRequest,
@@ -109,6 +112,10 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
             authority_id=authority_id,
             depth=depth,
         )
+
+    @app.get("/console/claims")
+    def claims(request: Request) -> Response:
+        return _render_claims(request, resolved_service)
 
     @app.get("/console/audit-pack")
     def audit_pack(request: Request, item_id: str | None = None, q: str | None = None) -> Response:
@@ -271,6 +278,36 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
             status_code=200 if error is None else 400,
         )
 
+    @app.post("/console/claims/{candidate_id}/{action}")
+    async def claim_action(request: Request, candidate_id: str, action: str) -> Response:
+        form = await request.form()
+        by = str(form.get("by") or request.state.console_user_id).strip()
+        reason = str(form.get("reason") or "").strip()
+        error = None
+        if not by:
+            error = "curator id is required"
+        elif action in {"reject", "defer"} and not reason:
+            error = "reason is required"
+        else:
+            try:
+                if action == "promote":
+                    resolved_service.promote_candidate_claim(candidate_id, CandidateClaimPromotionRequest(by=by))
+                elif action == "reject":
+                    resolved_service.reject_candidate_claim(
+                        candidate_id,
+                        CandidateClaimRejectionRequest(by=by, reason=reason),
+                    )
+                elif action == "defer":
+                    resolved_service.defer_candidate_claim(
+                        candidate_id,
+                        CandidateClaimDeferralRequest(by=by, reason=reason),
+                    )
+                else:
+                    error = "unsupported candidate action"
+            except (SolomonError, ValueError) as exc:
+                error = str(exc)
+        return _render_claims(request, resolved_service, error=error, status_code=200 if error is None else 400)
+
     @app.post("/console/dependencies/suggestions/{suggestion_id}/reject")
     async def reject_dependency(request: Request, suggestion_id: str) -> Response:
         form = await request.form()
@@ -343,6 +380,49 @@ def _render_verification(
             "error": error,
             "active_page": "verification",
         },
+    )
+
+
+def _render_claims(
+    request: Request,
+    service: SolomonService,
+    *,
+    error: str | None = None,
+    status_code: int = 200,
+) -> Response:
+    return TEMPLATES.TemplateResponse(
+        request,
+        "claims.html",
+        {"rows": _claim_rows(service), "error": error, "active_page": "claims"},
+        status_code=status_code,
+    )
+
+
+def _claim_rows(service: SolomonService) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for source in service.document_store.list_sources():
+        for document in service.document_store.list_documents(source.id):
+            for candidate in service.document_store.list_candidates(document.id):
+                entries = [
+                    entry.model_dump(mode="json")
+                    for entry in service.audit.list_entries()
+                    if entry.payload.get("candidate_id") == candidate.id
+                ]
+                rows.append(
+                    {
+                        "candidate": candidate.model_dump(mode="json"),
+                        "document": document.model_dump(mode="json"),
+                        "source": source.model_dump(mode="json"),
+                        "audit": entries,
+                    }
+                )
+    return sorted(
+        rows,
+        key=lambda row: (
+            row["candidate"]["status"] != "pending",
+            str(row["candidate"]["created_at"]),
+            str(row["candidate"]["id"]),
+        ),
     )
 
 

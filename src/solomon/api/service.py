@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from base64 import b64decode
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,10 @@ from solomon.api.service_models import (
     AnswerRequest,
     AnswerResponse,
     AuthorityChangeRequest,
+    AuthorityEventRequest,
+    CandidateClaimDeferralRequest,
+    CandidateClaimPromotionRequest,
+    CandidateClaimRejectionRequest,
     ContestRequest,
     ContestResponse,
     DependencyRequest,
@@ -28,6 +33,10 @@ from solomon.api.service_models import (
     PrimitiveStepResult,
     RecallRequest,
     ReferenceExtractionRequest,
+    ReviewTaskAssignmentRequest,
+    ReviewTaskResolutionRequest,
+    ReviewTaskStartRequest,
+    SourceDocumentIngestRequest,
     StalenessPredictionRequest,
     VerificationAssignmentRequest,
     VerificationRequest,
@@ -45,7 +54,7 @@ from solomon.credence.policy import CredenceLedger, CredencePolicy
 from solomon.currency.cache import CurrencyEvaluationCache
 from solomon.currency.contradiction import ContradictionSignal, contradictions_for_item
 from solomon.currency.engine import VerificationPolicy, record_verification
-from solomon.currency.models import KnowledgeItem
+from solomon.currency.models import KnowledgeItem, KnowledgeKind, now_utc
 from solomon.currency.prediction import StalenessRiskReport
 from solomon.currency.report import (
     CurrencyMovementReport,
@@ -54,16 +63,19 @@ from solomon.currency.report import (
     render_currency_report_pdf,
 )
 from solomon.currency.verification import verification_history
-from solomon.errors import NotFoundError
+from solomon.errors import BadRequestError, NotFoundError
 from solomon.graph.models import DependencyEdge
 from solomon.graph.suggestions import DependencySuggestion, ReferenceExtraction, SuggestionDecision
 from solomon.graph.visualization import GraphFormat
 from solomon.orchestrator.models import ModelRequest, ModelRouter, RoutedModelResult
 from solomon.orchestrator.retrieval import RetrievalOrchestrator
-from solomon.sources.models import DocumentSource
-from solomon.sources.store import SQLiteDocumentStore
+from solomon.sources.extract import candidate_claims_from_text, extract_document_bytes
+from solomon.sources.models import CandidateClaim, CandidateClaimStatus, DocumentSource, SourceDocument
+from solomon.sources.store import CandidateClaimNotFoundError, SourceDocumentNotFoundError, SQLiteDocumentStore
 from solomon.store.factory import create_storage_bundle
 from solomon.store.sqlite import ItemNotFoundError
+from solomon.workflow.models import AuthorityChangeEvent, ReviewTask, ReviewTaskPriority, ReviewTaskState
+from solomon.workflow.store import SQLiteWorkflowStore
 
 
 class SolomonService:
@@ -101,8 +113,9 @@ class SolomonService:
             index=self.index,
             credence=self.credence,
         )
-        self.document_store = SQLiteDocumentStore(data_dir / "sources.sqlite3")
         self.audit = AuditJournal(journal_dir / "journal.jsonl")
+        self.document_store = SQLiteDocumentStore(data_dir / "sources.sqlite3")
+        self.workflow_store = SQLiteWorkflowStore(data_dir / "workflow.sqlite3")
         self.attestation_key = attestation_key
         self.boundary = boundary or SolomonBoundary()
         self._ingestion = IngestionService(self)
@@ -142,6 +155,154 @@ class SolomonService:
             {"source_id": stored.id, "kind": stored.kind.value, "root_ref_sha256": digest(stored.root_ref)},
         )
         return stored
+
+    def source_documents(self, source_id: str) -> list[SourceDocument]:
+        self.document_store.get_source(source_id)
+        return self.document_store.list_documents(source_id)
+
+    def ingest_source_document(
+        self,
+        source_id: str,
+        request: SourceDocumentIngestRequest,
+    ) -> tuple[SourceDocument, list[CandidateClaim]]:
+        source = self.document_store.get_source(source_id)
+        if not source.enabled:
+            raise BadRequestError("document source is disabled")
+        try:
+            if request.content_base64 is not None:
+                raw = b64decode(request.content_base64, validate=True)
+            else:
+                if request.content is None:
+                    raise BadRequestError("content is required when content_base64 is omitted")
+                raw = request.content.encode("utf-8")
+        except ValueError as exc:
+            raise BadRequestError("content_base64 must be valid base64") from exc
+        extracted = extract_document_bytes(raw, filename=request.filename, mime_type=request.mime_type)
+        document = self.document_store.write_document(
+            SourceDocument(
+                source_id=source_id,
+                external_id=request.external_id,
+                filename=request.filename,
+                mime_type=extracted.mime_type,
+                content=extracted.text,
+                extraction_state=extracted.state,
+                extraction_reason=extracted.reason,
+                metadata={**request.metadata, "extraction": extracted.metadata},
+            )
+        )
+        candidates = self.document_store.list_candidates(document.id)
+        if document.extraction_state.value == "ready" and not candidates:
+            candidates = [
+                self.document_store.add_candidate(
+                    CandidateClaim(document_id=document.id, content=content, start_offset=start, end_offset=end)
+                )
+                for content, start, end in candidate_claims_from_text(document.content)
+            ]
+        self.audit.append(
+            "source_document_ingested",
+            {
+                "source_id": source_id,
+                "document_id": document.id,
+                "external_id_sha256": digest(document.external_id),
+                "version": document.version,
+                "content_sha256": document.content_sha256,
+                "extraction_state": document.extraction_state.value,
+                "candidate_count": len(candidates),
+            },
+        )
+        return document, candidates
+
+    def candidate_claims(self, document_id: str) -> list[CandidateClaim]:
+        self.document_store.get_document(document_id)
+        return self.document_store.list_candidates(document_id)
+
+    def promote_candidate_claim(self, candidate_id: str, request: CandidateClaimPromotionRequest) -> KnowledgeItem:
+        try:
+            candidate = self.document_store.get_candidate(candidate_id)
+        except CandidateClaimNotFoundError as exc:
+            raise NotFoundError(f"candidate claim not found: {candidate_id}") from exc
+        if candidate.status is not CandidateClaimStatus.PENDING:
+            raise BadRequestError("only pending candidate claims can be promoted")
+        try:
+            document = self.document_store.get_document(candidate.document_id)
+        except SourceDocumentNotFoundError as exc:
+            raise NotFoundError(f"source document not found: {candidate.document_id}") from exc
+        if document.extraction_state.value != "ready":
+            raise BadRequestError("candidate source document is not extractable")
+        item = self.ingest(
+            IngestRequest(
+                kind=request.kind,
+                content=candidate.content,
+                source_kind=request.source_kind,
+                source_ref=f"source-document:{document.source_id}:{document.external_id}:v{document.version}",
+                author=request.author or request.by,
+                matter_id=request.matter_id,
+                client_id=request.client_id,
+                conclusion=request.conclusion,
+                conclusion_polarity=request.conclusion_polarity,
+            )
+        )
+        self.document_store.update_candidate(
+            candidate.model_copy(
+                update={
+                    "status": CandidateClaimStatus.PROMOTED,
+                    "promotion_item_id": item.id,
+                    "decision_by": request.by,
+                    "decided_at": now_utc(),
+                }
+            )
+        )
+        self.audit.append(
+            "candidate_claim_promoted",
+            {"candidate_id": candidate_id, "document_id": document.id, "item_id": item.id, "by": request.by},
+        )
+        return item
+
+    def reject_candidate_claim(self, candidate_id: str, request: CandidateClaimRejectionRequest) -> CandidateClaim:
+        try:
+            candidate = self.document_store.get_candidate(candidate_id)
+        except CandidateClaimNotFoundError as exc:
+            raise NotFoundError(f"candidate claim not found: {candidate_id}") from exc
+        if candidate.status is not CandidateClaimStatus.PENDING:
+            raise BadRequestError("only pending candidate claims can be rejected")
+        rejected = self.document_store.update_candidate(
+            candidate.model_copy(
+                update={
+                    "status": CandidateClaimStatus.REJECTED,
+                    "decision_by": request.by,
+                    "decision_reason": request.reason,
+                    "decided_at": now_utc(),
+                }
+            )
+        )
+        self.audit.append(
+            "candidate_claim_rejected",
+            {"candidate_id": candidate_id, "document_id": candidate.document_id, "by": request.by},
+        )
+        return rejected
+
+    def defer_candidate_claim(self, candidate_id: str, request: CandidateClaimDeferralRequest) -> CandidateClaim:
+        try:
+            candidate = self.document_store.get_candidate(candidate_id)
+        except CandidateClaimNotFoundError as exc:
+            raise NotFoundError(f"candidate claim not found: {candidate_id}") from exc
+        if candidate.status is not CandidateClaimStatus.PENDING:
+            raise BadRequestError("only pending candidate claims can be deferred")
+        deferred = self.document_store.update_candidate(
+            candidate.model_copy(
+                update={
+                    "status": CandidateClaimStatus.DEFERRED,
+                    "decision_by": request.by,
+                    "decision_reason": request.reason,
+                    "decided_at": now_utc(),
+                }
+            )
+        )
+        self.audit.append(
+            "candidate_claim_deferred",
+            {"candidate_id": candidate_id, "document_id": candidate.document_id, "by": request.by},
+        )
+        return deferred
 
     def recall(self, request: RecallRequest) -> list[dict[str, Any]]:
         return self._recall.recall(request)
@@ -193,6 +354,107 @@ class SolomonService:
 
     def register_authority_change(self, authority_id: str, request: AuthorityChangeRequest) -> dict[str, Any]:
         return self._authority.register_authority_change(authority_id, request)
+
+    def register_authority_event(self, request: AuthorityEventRequest) -> dict[str, Any]:
+        event, created = self.workflow_store.record_authority_event(
+            AuthorityChangeEvent(
+                source_id=request.source_id,
+                idempotency_key=request.idempotency_key,
+                authority_id=request.authority_id,
+                new_version=request.new_version,
+                changed_at=request.changed_at,
+                evidence_url=request.evidence_url,
+                evidence_sha256=request.evidence_sha256,
+            )
+        )
+        if not created:
+            existing_tasks = [
+                task.model_dump(mode="json")
+                for task in self.workflow_store.list_review_tasks()
+                if task.event_id == event.id
+            ]
+            return {
+                "event": event.model_dump(mode="json"),
+                "duplicate": True,
+                "impact": None,
+                "review_tasks": existing_tasks,
+            }
+        impact = self.register_authority_change(
+            event.authority_id,
+            AuthorityChangeRequest(new_version=event.new_version, changed_at=event.changed_at.isoformat()),
+        )
+        review_tasks: list[ReviewTask] = []
+        for item_id in impact["stale_item_ids"]:
+            item = self._get_item(str(item_id))
+            review_tasks.append(
+                self.workflow_store.create_review_task(
+                    ReviewTask(
+                        event_id=event.id,
+                        item_id=item.id,
+                        priority=_review_priority(item),
+                        reason=f"authority {event.authority_id} changed to {event.new_version}",
+                    )
+                )
+            )
+        self.audit.append(
+            "authority_event_registered",
+            {
+                "event_id": event.id,
+                "source_id": event.source_id,
+                "authority_id": event.authority_id,
+                "new_version": event.new_version,
+                "review_task_ids": [task.id for task in review_tasks],
+            },
+            occurred_at=event.received_at,
+        )
+        return {
+            "event": event.model_dump(mode="json"),
+            "duplicate": False,
+            "impact": impact,
+            "review_tasks": [task.model_dump(mode="json") for task in review_tasks],
+        }
+
+    def review_tasks(
+        self,
+        *,
+        reviewer_id: str | None = None,
+        state: ReviewTaskState | None = None,
+    ) -> list[ReviewTask]:
+        return self.workflow_store.list_review_tasks(reviewer_id=reviewer_id, state=state)
+
+    def assign_review_task(self, task_id: str, request: ReviewTaskAssignmentRequest) -> ReviewTask:
+        try:
+            task = self.workflow_store.assign(task_id, reviewer_id=request.reviewer_id, assigned_by=request.assigned_by)
+        except KeyError as exc:
+            raise NotFoundError(f"review task not found: {task_id}") from exc
+        self.audit.append(
+            "review_task_assigned",
+            {"task_id": task.id, "item_id": task.item_id, "reviewer_id": task.reviewer_id, "by": request.assigned_by},
+        )
+        return task
+
+    def start_review_task(self, task_id: str, request: ReviewTaskStartRequest) -> ReviewTask:
+        try:
+            task = self.workflow_store.start(task_id, reviewer_id=request.reviewer_id)
+        except KeyError as exc:
+            raise NotFoundError(f"review task not found: {task_id}") from exc
+        self.audit.append("review_task_started", {"task_id": task.id, "by": request.reviewer_id})
+        return task
+
+    def resolve_review_task(self, task_id: str, request: ReviewTaskResolutionRequest) -> ReviewTask:
+        try:
+            task = self.workflow_store.get_review_task(task_id)
+        except KeyError as exc:
+            raise NotFoundError(f"review task not found: {task_id}") from exc
+        if task.reviewer_id != request.reviewer_id:
+            raise BadRequestError("only the assigned reviewer can resolve this task")
+        self.record_verification(task.item_id, request.verification)
+        task = self.workflow_store.resolve(task_id, reviewer_id=request.reviewer_id)
+        self.audit.append(
+            "review_task_resolved",
+            {"task_id": task.id, "item_id": task.item_id, "by": request.reviewer_id},
+        )
+        return task
 
     def contest(self, item_id: str, request: ContestRequest) -> ContestResponse:
         return self._ingestion.contest(item_id, request)
@@ -393,15 +655,31 @@ class SolomonService:
             self.audit.log_credence_change(entry)
 
 
+def _review_priority(item: KnowledgeItem) -> ReviewTaskPriority:
+    if item.kind in {KnowledgeKind.ADVICE, KnowledgeKind.HOUSE_VIEW}:
+        return ReviewTaskPriority.URGENT
+    if item.kind is KnowledgeKind.POSITION:
+        return ReviewTaskPriority.HIGH
+    return ReviewTaskPriority.NORMAL
+
+
 __all__ = [
     "SolomonService",
     "IngestRequest",
     "DocumentSourceRequest",
+    "SourceDocumentIngestRequest",
+    "CandidateClaimDeferralRequest",
+    "CandidateClaimPromotionRequest",
+    "CandidateClaimRejectionRequest",
     "RecallRequest",
     "VerificationRequest",
+    "ReviewTaskAssignmentRequest",
+    "ReviewTaskResolutionRequest",
+    "ReviewTaskStartRequest",
     "VerificationAssignmentRequest",
     "VerificationReviewRequest",
     "AuthorityChangeRequest",
+    "AuthorityEventRequest",
     "ContestRequest",
     "ContestResponse",
     "AffirmRequest",

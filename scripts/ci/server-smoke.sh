@@ -195,4 +195,85 @@ request POST /graph/traverse "{\"start_entity\":\"${project_id}\",\"max_hops\":1
 request DELETE "/graph/relations/${relation_id}?valid_to_unix=10" >/dev/null
 request DELETE "/graph/entities/${claim_id}?valid_to_unix=10" >/dev/null
 
+mcp_init_headers="$tmpdir/mcp-init.headers"
+mcp_init_body="$tmpdir/mcp-init.json"
+curl -fsS -D "$mcp_init_headers" -o "$mcp_init_body" \
+  -X POST \
+  -H 'accept: application/json, text/event-stream' \
+  -H 'content-type: application/json' \
+  -H "x-api-key: ${api_key}" \
+  -H "x-shibahama-namespace: ${namespace}" \
+  -H 'x-shibahama-scope-visibility: repository' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}' \
+  "${base}/mcp"
+mcp_session="$(awk 'tolower($1)=="mcp-session-id:" {gsub("\r", "", $2); print $2}' "$mcp_init_headers")"
+python3 -c 'import json,sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+assert payload["result"]["protocolVersion"] == "2025-11-25"' "$mcp_init_body"
+if [[ -z "$mcp_session" ]]; then
+  echo "MCP initialization did not return a session" >&2
+  exit 1
+fi
+mcp_headers=(
+  -H 'accept: application/json, text/event-stream'
+  -H 'content-type: application/json'
+  -H "x-api-key: ${api_key}"
+  -H "x-shibahama-namespace: ${namespace}"
+  -H 'x-shibahama-scope-visibility: repository'
+  -H "mcp-session-id: ${mcp_session}"
+  -H 'mcp-protocol-version: 2025-11-25'
+)
+if [[ "$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'accept: application/json, text/event-stream' -H 'content-type: application/json' -H "x-shibahama-namespace: ${namespace}" -H 'x-shibahama-scope-visibility: repository' --data '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}' "${base}/mcp")" != "401" ]]; then
+  echo "MCP missing authentication was accepted" >&2
+  exit 1
+fi
+if [[ "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${mcp_headers[@]}" --data '{"jsonrpc":"2.0","method":"notifications/initialized"}' "${base}/mcp")" != "202" ]]; then
+  echo "MCP initialized notification was not accepted" >&2
+  exit 1
+fi
+mcp_tools="$tmpdir/mcp-tools.json"
+curl -fsS -o "$mcp_tools" -X POST "${mcp_headers[@]}" --data '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' "${base}/mcp"
+python3 -c 'import json,sys
+tools = json.load(open(sys.argv[1], encoding="utf-8"))["result"]["tools"]
+assert len(tools) == 7
+assert all(tool["inputSchema"]["x-shibahama-schema-version"] == 1 for tool in tools)' "$mcp_tools"
+mcp_write="$tmpdir/mcp-write.json"
+curl -fsS -o "$mcp_write" -X POST "${mcp_headers[@]}" --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"shibahama_memory_write_v1","arguments":{"schemaVersion":1,"scope":{"repository":"smoke","team":null,"visibility":"repository"},"actor":"human","actorId":"api_key","content":"MCP server smoke memory","vector":[1,0],"sourceKind":"user","validFromUnix":0,"ingestedAtUnix":0}}}' "${base}/mcp"
+mcp_memory_id="$(python3 -c 'import json,sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+assert payload["result"]["isError"] is False
+assert payload["result"]["structuredContent"]["result"]["policyOutcome"] == "allowed"
+print(payload["result"]["structuredContent"]["result"]["memory"]["id"])' "$mcp_write")"
+mcp_recall="$tmpdir/mcp-recall.json"
+curl -fsS -o "$mcp_recall" -X POST "${mcp_headers[@]}" --data '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"shibahama_memory_recall_v1","arguments":{"schemaVersion":1,"scope":{"repository":"smoke","team":null,"visibility":"repository"},"queryVector":[1,0],"topK":1,"nowUnix":0}}}' "${base}/mcp"
+python3 -c 'import json,sys
+memory_id, payload = sys.argv[1:]
+payload = json.load(open(payload, encoding="utf-8"))
+assert payload["result"]["isError"] is False
+assert payload["result"]["structuredContent"]["result"]["candidates"][0]["id"] == memory_id' "$mcp_memory_id" "$mcp_recall"
+if [[ "$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'accept: application/json, text/event-stream' -H 'content-type: application/json' -H "x-api-key: ${api_key}" -H "x-shibahama-namespace: ${namespace}" -H 'x-shibahama-scope-visibility: team' -H 'x-shibahama-scope-team: team-smoke' -H "mcp-session-id: ${mcp_session}" -H 'mcp-protocol-version: 2025-11-25' --data '{"jsonrpc":"2.0","id":3,"method":"tools/list"}' "${base}/mcp")" != "403" ]]; then
+  echo "MCP session accepted a changed scope" >&2
+  exit 1
+fi
+if [[ "$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'accept: application/json, text/event-stream' -H 'content-type: application/json' -H "x-api-key: ${api_key}" -H "x-shibahama-namespace: ${namespace}" -H 'x-shibahama-scope-visibility: repository' -H "mcp-session-id: ${mcp_session}" -H 'mcp-protocol-version: unsupported' --data '{"jsonrpc":"2.0","id":4,"method":"tools/list"}' "${base}/mcp")" != "400" ]]; then
+  echo "MCP unsupported protocol version was accepted" >&2
+  exit 1
+fi
+if [[ "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${mcp_headers[@]}" --data '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2}}' "${base}/mcp")" != "202" ]]; then
+  echo "MCP cancellation notification was not accepted" >&2
+  exit 1
+fi
+if [[ "$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'origin: https://attacker.invalid' -H 'accept: application/json, text/event-stream' -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}' "${base}/mcp")" != "403" ]]; then
+  echo "MCP origin validation failed" >&2
+  exit 1
+fi
+if [[ "$(curl -sS -o /dev/null -w '%{http_code}' -X GET -H 'accept: text/event-stream' -H "x-api-key: ${api_key}" -H "x-shibahama-namespace: ${namespace}" -H 'x-shibahama-scope-visibility: repository' "${base}/mcp")" != "405" ]]; then
+  echo "MCP GET fallback did not return 405" >&2
+  exit 1
+fi
+if [[ "$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "x-api-key: ${api_key}" -H "x-shibahama-namespace: ${namespace}" -H 'x-shibahama-scope-visibility: repository' -H "mcp-session-id: ${mcp_session}" -H 'mcp-protocol-version: 2025-11-25' "${base}/mcp")" != "204" ]]; then
+  echo "MCP session deletion failed" >&2
+  exit 1
+fi
+
 echo "server smoke passed"

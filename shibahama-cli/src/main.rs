@@ -5,10 +5,12 @@
 #![allow(clippy::needless_pass_by_value)]
 
 mod mcp;
+mod mcp_tools;
 
+use axum::body::Bytes;
 use axum::extract::{Path as AxumPath, Query, State};
-use axum::http::header::AUTHORIZATION;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, ORIGIN};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -314,6 +316,8 @@ struct ServeCommand {
 
 #[derive(Args)]
 struct McpCommand {
+    #[command(flatten)]
+    store: StoreArgs,
     /// Repository scope fixed for this MCP server process.
     #[arg(long)]
     scope_repository: String,
@@ -642,6 +646,7 @@ struct GraphSnapshotDto {
 #[derive(Clone)]
 struct ServerState {
     engine: Arc<Mutex<Shibahama<HnswVectorIndex>>>,
+    mcp_sessions: Arc<Mutex<BTreeMap<String, mcp::McpSession>>>,
     path: String,
     default_namespace: String,
     api_key: Option<String>,
@@ -1189,10 +1194,13 @@ fn serve(command: ServeCommand) -> CliResult<()> {
 fn serve_mcp(command: McpCommand) -> CliResult<()> {
     let scope = mcp_memory_scope(&command)?;
     let principal = mcp_principal(&command.principal)?;
+    let mut engine = open_engine(&command.store, None)?;
+    let mut backend = mcp_tools::McpEngineBackend::new(&mut engine);
 
-    Ok(mcp::serve_stdio(mcp::McpServerContext::new(
-        scope, principal,
-    ))?)
+    Ok(mcp::serve_stdio_with_backend(
+        mcp::McpServerContext::new(scope, principal),
+        &mut backend,
+    )?)
 }
 
 fn mcp_memory_scope(command: &McpCommand) -> CliResult<MemoryScope> {
@@ -1244,6 +1252,7 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
         .filter(|value| !value.is_empty());
     let state = ServerState {
         engine: Arc::new(Mutex::new(engine)),
+        mcp_sessions: Arc::new(Mutex::new(BTreeMap::new())),
         path: command.store.path.display().to_string(),
         default_namespace: command.namespace,
         api_key,
@@ -1251,6 +1260,12 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
     };
     let app = Router::new()
         .route("/healthz", get(server_health))
+        .route(
+            "/mcp",
+            post(server_mcp_post)
+                .get(server_mcp_get)
+                .delete(server_mcp_delete),
+        )
         .route("/capabilities", get(server_capabilities))
         .route("/readyz", get(server_ready))
         .route("/inspect", get(server_inspect))
@@ -2344,6 +2359,219 @@ fn log_server_request(
     });
 
     eprintln!("{record}");
+}
+
+async fn server_mcp_post(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if !mcp_origin_is_allowed(&headers) {
+        return mcp_transport_error(StatusCode::FORBIDDEN, -32000, "Origin rejected");
+    }
+    if !mcp_accepts(&headers, "application/json") || !mcp_accepts(&headers, "text/event-stream") {
+        return mcp_transport_error(
+            StatusCode::NOT_ACCEPTABLE,
+            -32000,
+            "Accept must include application/json and text/event-stream",
+        );
+    }
+    let context = match server_context_or_log(&headers, &state, "POST", "/mcp") {
+        Ok(context) => mcp::McpServerContext::new(context.scope, context.principal.to_owned()),
+        Err(error) => return error.into_response(),
+    };
+    let Ok(message) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return mcp_transport_error(StatusCode::BAD_REQUEST, -32700, "Parse error");
+    };
+
+    if mcp::is_initialize_request(&message) {
+        if headers.contains_key("mcp-session-id") {
+            return mcp_transport_error(
+                StatusCode::BAD_REQUEST,
+                -32000,
+                "Initialize must not include MCP-Session-Id",
+            );
+        }
+        let mut session = mcp::McpSession::new(context);
+        let Some(response) = session.handle(message) else {
+            return mcp_transport_error(
+                StatusCode::BAD_REQUEST,
+                -32600,
+                "Invalid initialize request",
+            );
+        };
+        if response.get("result").is_none() {
+            return mcp_json_response(StatusCode::OK, response, None);
+        }
+        let session_id = Uuid::now_v7().to_string();
+        let Ok(mut sessions) = state.mcp_sessions.lock() else {
+            return mcp_transport_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                -32603,
+                "Internal error",
+            );
+        };
+        sessions.insert(session_id.clone(), session);
+        return mcp_json_response(StatusCode::OK, response, Some(&session_id));
+    }
+
+    if !mcp_protocol_version_is_current(&headers) {
+        return mcp_transport_error(
+            StatusCode::BAD_REQUEST,
+            -32000,
+            "Unsupported MCP protocol version",
+        );
+    }
+    let Some(session_id) = headers
+        .get("mcp-session-id")
+        .and_then(|value| value.to_str().ok())
+    else {
+        return mcp_transport_error(
+            StatusCode::BAD_REQUEST,
+            -32000,
+            "MCP-Session-Id is required",
+        );
+    };
+    let Ok(mut sessions) = state.mcp_sessions.lock() else {
+        return mcp_transport_error(StatusCode::INTERNAL_SERVER_ERROR, -32603, "Internal error");
+    };
+    let Some(session) = sessions.get_mut(session_id) else {
+        return mcp_transport_error(StatusCode::NOT_FOUND, -32000, "MCP session not found");
+    };
+    if !session.matches_context(&context) {
+        return mcp_transport_error(
+            StatusCode::FORBIDDEN,
+            -32000,
+            "MCP session context mismatch",
+        );
+    }
+    let Ok(mut engine) = state.engine.lock() else {
+        return mcp_transport_error(StatusCode::INTERNAL_SERVER_ERROR, -32603, "Internal error");
+    };
+    let mut backend = mcp_tools::McpEngineBackend::new(&mut engine);
+    match session.handle_with(message, &mut backend) {
+        Some(response) => mcp_json_response(StatusCode::OK, response, None),
+        None => StatusCode::ACCEPTED.into_response(),
+    }
+}
+
+async fn server_mcp_get(State(state): State<ServerState>, headers: HeaderMap) -> Response {
+    if !mcp_origin_is_allowed(&headers) {
+        return mcp_transport_error(StatusCode::FORBIDDEN, -32000, "Origin rejected");
+    }
+    if !mcp_accepts(&headers, "text/event-stream") {
+        return mcp_transport_error(
+            StatusCode::NOT_ACCEPTABLE,
+            -32000,
+            "Accept must include text/event-stream",
+        );
+    }
+    if let Err(error) = server_context_or_log(&headers, &state, "GET", "/mcp") {
+        return error.into_response();
+    }
+    StatusCode::METHOD_NOT_ALLOWED.into_response()
+}
+
+async fn server_mcp_delete(State(state): State<ServerState>, headers: HeaderMap) -> Response {
+    if !mcp_origin_is_allowed(&headers) {
+        return mcp_transport_error(StatusCode::FORBIDDEN, -32000, "Origin rejected");
+    }
+    if !mcp_protocol_version_is_current(&headers) {
+        return mcp_transport_error(
+            StatusCode::BAD_REQUEST,
+            -32000,
+            "Unsupported MCP protocol version",
+        );
+    }
+    let context = match server_context_or_log(&headers, &state, "DELETE", "/mcp") {
+        Ok(context) => mcp::McpServerContext::new(context.scope, context.principal.to_owned()),
+        Err(error) => return error.into_response(),
+    };
+    let Some(session_id) = headers
+        .get("mcp-session-id")
+        .and_then(|value| value.to_str().ok())
+    else {
+        return mcp_transport_error(
+            StatusCode::BAD_REQUEST,
+            -32000,
+            "MCP-Session-Id is required",
+        );
+    };
+    let Ok(mut sessions) = state.mcp_sessions.lock() else {
+        return mcp_transport_error(StatusCode::INTERNAL_SERVER_ERROR, -32603, "Internal error");
+    };
+    let Some(session) = sessions.get(session_id) else {
+        return mcp_transport_error(StatusCode::NOT_FOUND, -32000, "MCP session not found");
+    };
+    if !session.matches_context(&context) {
+        return mcp_transport_error(
+            StatusCode::FORBIDDEN,
+            -32000,
+            "MCP session context mismatch",
+        );
+    }
+    sessions.remove(session_id);
+    StatusCode::NO_CONTENT.into_response()
+}
+
+fn mcp_origin_is_allowed(headers: &HeaderMap) -> bool {
+    headers.get(ORIGIN).is_none()
+}
+
+fn mcp_accepts(headers: &HeaderMap, expected: &str) -> bool {
+    headers
+        .get(ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|accepted| {
+            accepted.split(',').any(|entry| {
+                entry
+                    .split(';')
+                    .next()
+                    .is_some_and(|mime| mime.trim().eq_ignore_ascii_case(expected))
+            })
+        })
+}
+
+fn mcp_protocol_version_is_current(headers: &HeaderMap) -> bool {
+    headers
+        .get("mcp-protocol-version")
+        .and_then(|value| value.to_str().ok())
+        == Some(mcp::PROTOCOL_VERSION)
+}
+
+fn mcp_json_response(
+    status: StatusCode,
+    body: serde_json::Value,
+    session_id: Option<&str>,
+) -> Response {
+    let mut response = (status, Json(body)).into_response();
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/json; charset=utf-8"),
+    );
+    if let Some(session_id) = session_id {
+        let Ok(session_id) = HeaderValue::from_str(session_id) else {
+            return mcp_transport_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                -32603,
+                "Internal error",
+            );
+        };
+        response.headers_mut().insert("mcp-session-id", session_id);
+    }
+    response
+}
+
+fn mcp_transport_error(status: StatusCode, code: i64, message: &str) -> Response {
+    mcp_json_response(
+        status,
+        json!({
+            "jsonrpc": "2.0",
+            "id": null,
+            "error": { "code": code, "message": message },
+        }),
+        None,
+    )
 }
 
 async fn server_health() -> Json<serde_json::Value> {

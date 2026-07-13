@@ -1507,6 +1507,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shibahama-core",
+ "tempfile",
  "time",
  "tokio",
  "tokio-stream",

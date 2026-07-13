@@ -6,8 +6,60 @@ use serde_json::{Map, Value, json};
 use shibahama_core::model::MemoryScope;
 use std::io::{self, BufRead, Write};
 
-const PROTOCOL_VERSION: &str = "2025-11-25";
+/// Active MCP protocol revision implemented by Shibahama.
+pub const PROTOCOL_VERSION: &str = "2025-11-25";
 const NOT_INITIALIZED: i64 = -32002;
+
+/// Versioned MCP memory-tool capability advertised after initialization.
+pub const MEMORY_TOOLS_CAPABILITY: &str = "shibahama_memory_tools_v1";
+
+/// Safe application error returned inside an MCP tool result.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct McpToolError {
+    code: String,
+    detail: String,
+    retryable: bool,
+}
+
+impl McpToolError {
+    /// Creates content-safe error data for one failed tool call.
+    #[must_use]
+    pub fn new(code: impl Into<String>, detail: impl Into<String>, retryable: bool) -> Self {
+        Self {
+            code: code.into(),
+            detail: detail.into(),
+            retryable,
+        }
+    }
+}
+
+/// Backend used by a transport-neutral MCP session to execute memory tools.
+pub trait McpToolBackend {
+    /// Executes `name` with validated JSON object `arguments` in immutable transport `context`.
+    fn call(
+        &mut self,
+        context: &McpServerContext,
+        name: &str,
+        arguments: &Map<String, Value>,
+    ) -> Result<Value, McpToolError>;
+}
+
+struct UnsupportedMcpToolBackend;
+
+impl McpToolBackend for UnsupportedMcpToolBackend {
+    fn call(
+        &mut self,
+        _context: &McpServerContext,
+        _name: &str,
+        _arguments: &Map<String, Value>,
+    ) -> Result<Value, McpToolError> {
+        Err(McpToolError::new(
+            "SHIBA_UNSUPPORTED",
+            "memory tools are unavailable for this transport",
+            false,
+        ))
+    }
+}
 
 /// Fixed principal and scope context for one MCP stdio process.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -22,6 +74,18 @@ impl McpServerContext {
     pub fn new(scope: MemoryScope, principal: String) -> Self {
         Self { scope, principal }
     }
+
+    /// Returns the immutable scope for the active transport session.
+    #[must_use]
+    pub const fn scope(&self) -> &MemoryScope {
+        &self.scope
+    }
+
+    /// Returns the immutable principal identity for the active transport session.
+    #[must_use]
+    pub fn principal(&self) -> &str {
+        &self.principal
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -31,26 +95,27 @@ enum Lifecycle {
     Ready,
 }
 
-/// Runs the newline-delimited JSON MCP stdio server until standard input closes.
+/// Runs the stdio server with a backend that executes advertised memory tools.
 ///
 /// # Errors
 ///
 /// Returns an error when reading from standard input or writing a protocol response fails.
-pub fn serve_stdio(context: McpServerContext) -> io::Result<()> {
+pub fn serve_stdio_with_backend(
+    context: McpServerContext,
+    backend: &mut dyn McpToolBackend,
+) -> io::Result<()> {
     let stdin = io::stdin();
     let stdout = io::stdout();
-    serve_stdio_io(stdin.lock(), stdout.lock(), context)
+    serve_stdio_io_with_backend(stdin.lock(), stdout.lock(), context, backend)
 }
 
-fn serve_stdio_io<R: BufRead, W: Write>(
+fn serve_stdio_io_with_backend<R: BufRead, W: Write>(
     reader: R,
     writer: W,
     context: McpServerContext,
+    backend: &mut dyn McpToolBackend,
 ) -> io::Result<()> {
-    let mut server = McpServer {
-        context,
-        lifecycle: Lifecycle::Uninitialized,
-    };
+    let mut server = McpSession::new(context);
     let mut writer = writer;
 
     for line in reader.lines() {
@@ -59,7 +124,7 @@ fn serve_stdio_io<R: BufRead, W: Write>(
             continue;
         }
         let response = match serde_json::from_str::<Value>(&line) {
-            Ok(message) => server.handle(message),
+            Ok(message) => server.handle_with(message, backend),
             Err(_) => Some(protocol_error(Value::Null, -32700, "Parse error", None)),
         };
         if let Some(response) = response {
@@ -72,13 +137,42 @@ fn serve_stdio_io<R: BufRead, W: Write>(
     Ok(())
 }
 
-struct McpServer {
+/// Stateful lifecycle dispatcher shared by MCP transports.
+pub struct McpSession {
     context: McpServerContext,
     lifecycle: Lifecycle,
 }
 
-impl McpServer {
-    fn handle(&mut self, message: Value) -> Option<Value> {
+impl McpSession {
+    /// Creates one uninitialized MCP session with immutable transport context.
+    #[must_use]
+    pub fn new(context: McpServerContext) -> Self {
+        Self {
+            context,
+            lifecycle: Lifecycle::Uninitialized,
+        }
+    }
+
+    /// Returns whether `context` matches the immutable session binding.
+    #[must_use]
+    pub fn matches_context(&self, context: &McpServerContext) -> bool {
+        &self.context == context
+    }
+
+    /// Handles one JSON-RPC message and returns a response for requests only.
+    #[must_use]
+    pub fn handle(&mut self, message: Value) -> Option<Value> {
+        let mut backend = UnsupportedMcpToolBackend;
+        self.handle_with(message, &mut backend)
+    }
+
+    /// Handles one JSON-RPC message with a transport-specific memory-tool backend.
+    #[must_use]
+    pub fn handle_with(
+        &mut self,
+        message: Value,
+        backend: &mut dyn McpToolBackend,
+    ) -> Option<Value> {
         let Some(object) = message.as_object() else {
             return Some(protocol_error(Value::Null, -32600, "Invalid Request", None));
         };
@@ -114,7 +208,7 @@ impl McpServer {
             ("ping", Some(id)) => Some(protocol_result(id, json!({}))),
             ("tools/list", Some(id)) => {
                 if self.lifecycle == Lifecycle::Ready {
-                    Some(protocol_result(id, json!({ "tools": [] })))
+                    Some(protocol_result(id, json!({ "tools": tool_definitions() })))
                 } else {
                     Some(protocol_error(
                         id,
@@ -123,6 +217,17 @@ impl McpServer {
                         None,
                     ))
                 }
+            }
+            ("tools/call", Some(id)) => {
+                if self.lifecycle != Lifecycle::Ready {
+                    return Some(protocol_error(
+                        id,
+                        NOT_INITIALIZED,
+                        "Server not initialized",
+                        None,
+                    ));
+                }
+                Some(self.call_tool(id, params, backend))
             }
             (_, Some(id)) if self.lifecycle != Lifecycle::Ready => Some(protocol_error(
                 id,
@@ -165,6 +270,7 @@ impl McpServer {
                     "tools": {},
                     "experimental": {
                         "shibahama": {
+                            "capabilities": [MEMORY_TOOLS_CAPABILITY],
                             "principal": self.context.principal,
                             "scope": self.context.scope,
                         }
@@ -178,6 +284,230 @@ impl McpServer {
             }),
         )
     }
+
+    fn call_tool(&mut self, id: Value, params: Value, backend: &mut dyn McpToolBackend) -> Value {
+        let Some(params) = params.as_object() else {
+            return protocol_error(id, -32602, "Invalid params", None);
+        };
+        let Some(name) = params.get("name").and_then(Value::as_str) else {
+            return protocol_error(id, -32602, "Invalid params", None);
+        };
+        let Some(arguments) = params.get("arguments").and_then(Value::as_object) else {
+            return protocol_error(id, -32602, "Invalid params", None);
+        };
+        if !tool_definitions()
+            .iter()
+            .any(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
+        {
+            return protocol_error(id, -32601, "Method not found", None);
+        }
+        match backend.call(&self.context, name, arguments) {
+            Ok(structured_content) => protocol_result(id, tool_result(structured_content, false)),
+            Err(error) => protocol_result(
+                id,
+                tool_result(
+                    json!({
+                        "schemaVersion": 1,
+                        "error": {
+                            "code": error.code,
+                            "detail": error.detail,
+                            "retryable": error.retryable,
+                        }
+                    }),
+                    true,
+                ),
+            ),
+        }
+    }
+}
+
+/// Returns whether a JSON-RPC message is an `initialize` request.
+#[must_use]
+pub fn is_initialize_request(message: &Value) -> bool {
+    message
+        .as_object()
+        .is_some_and(|object| object.get("method") == Some(&Value::String("initialize".to_owned())))
+}
+
+/// Returns the versioned memory-tool definitions advertised through `tools/list`.
+#[must_use]
+pub fn tool_definitions() -> Vec<Value> {
+    vec![
+        tool_definition(
+            "shibahama_memory_write_v1",
+            "Write a scoped memory with explicit actor and capture-policy metadata.",
+            json!({
+                "content": { "type": "string", "minLength": 1 },
+                "vector": { "type": "array", "items": { "type": "number" } },
+                "sourceKind": { "enum": ["user", "agent", "file", "web", "tool"] },
+                "sourceRef": { "type": ["string", "null"] },
+                "validFromUnix": { "type": "integer" },
+                "ingestedAtUnix": { "type": "integer" },
+                "kind": { "enum": ["fact", "instruction"] },
+                "indexName": { "type": "string" },
+                "model": { "type": "string" },
+                "modelVersion": { "type": "string" },
+                "confidencePercent": { "type": "integer", "minimum": 0, "maximum": 100 },
+            }),
+            json!({ "memory": { "type": "object" }, "policyOutcome": { "const": "allowed" } }),
+            false,
+            &[
+                "content",
+                "vector",
+                "sourceKind",
+                "validFromUnix",
+                "ingestedAtUnix",
+            ],
+        ),
+        tool_definition(
+            "shibahama_memory_recall_v1",
+            "Recall safe current memories in the fixed session scope.",
+            json!({
+                "queryVector": { "type": "array", "items": { "type": "number" } },
+                "topK": { "type": "integer", "minimum": 1 },
+                "nowUnix": { "type": "integer" },
+                "includeCold": { "type": "boolean" },
+                "includeInstructions": { "type": "boolean" },
+                "maxContextTokens": { "type": "integer", "minimum": 1 },
+            }),
+            json!({ "candidates": { "type": "array" }, "policyOutcome": { "type": "object" } }),
+            true,
+            &["queryVector", "topK", "nowUnix"],
+        ),
+        tool_definition(
+            "shibahama_memory_explain_v1",
+            "Explain provenance, currency, tier, and significance for one scoped memory.",
+            json!({ "memoryId": { "type": "string" }, "nowUnix": { "type": "integer" } }),
+            json!({ "trace": { "type": ["object", "null"] } }),
+            true,
+            &["memoryId", "nowUnix"],
+        ),
+        tool_definition(
+            "shibahama_memory_timeline_v1",
+            "Replay scoped memory recall at an explicit valid-time instant.",
+            json!({
+                "queryVector": { "type": "array", "items": { "type": "number" } },
+                "topK": { "type": "integer", "minimum": 1 },
+                "asOfUnix": { "type": "integer" },
+            }),
+            json!({ "candidates": { "type": "array" }, "policyOutcome": { "type": "object" } }),
+            true,
+            &["queryVector", "topK", "asOfUnix"],
+        ),
+        tool_definition(
+            "shibahama_memory_review_v1",
+            "Inspect or decide a scoped review candidate with explicit reviewer identity.",
+            json!({
+                "operation": { "enum": ["list", "decide"] },
+                "candidateId": { "type": "string" },
+                "action": { "enum": ["approve", "reject", "defer"] },
+                "rationale": { "type": "string" },
+                "reviewedAtUnix": { "type": "integer" },
+            }),
+            json!({ "queue": { "type": "array" }, "decision": { "type": "object" } }),
+            false,
+            &["operation"],
+        ),
+        tool_definition(
+            "shibahama_memory_promote_v1",
+            "Copy one repository-local memory into an approved team scope.",
+            json!({
+                "memoryId": { "type": "string" },
+                "team": { "type": "string" },
+                "rationale": { "type": "string" },
+                "promotedAtUnix": { "type": "integer" },
+            }),
+            json!({ "promotion": { "type": ["object", "null"] }, "policyOutcome": { "type": "string" } }),
+            false,
+            &["memoryId", "team", "rationale", "promotedAtUnix"],
+        ),
+        tool_definition(
+            "shibahama_memory_erase_v1",
+            "Soft-invalidate one scoped memory; append-only history is retained.",
+            json!({ "memoryId": { "type": "string" }, "validToUnix": { "type": "integer" } }),
+            json!({ "applied": { "type": "boolean" }, "effect": { "const": "soft_invalidation" } }),
+            false,
+            &["memoryId", "validToUnix"],
+        ),
+    ]
+}
+
+fn tool_definition(
+    name: &str,
+    description: &str,
+    properties: Value,
+    output_properties: Value,
+    read_only: bool,
+    required_tool_fields: &[&str],
+) -> Value {
+    let mut properties = properties.as_object().cloned().unwrap_or_default();
+    properties.insert("schemaVersion".to_owned(), json!({ "const": 1 }));
+    properties.insert(
+        "scope".to_owned(),
+        json!({
+            "type": "object",
+            "properties": {
+                "repository": { "type": "string" },
+                "team": { "type": ["string", "null"] },
+                "visibility": { "enum": ["repository", "team"] },
+            },
+            "required": ["repository", "team", "visibility"],
+            "additionalProperties": false,
+        }),
+    );
+    if !read_only {
+        properties.insert(
+            "actor".to_owned(),
+            json!({ "enum": ["human", "agent", "automation", "service"] }),
+        );
+        properties.insert(
+            "actorId".to_owned(),
+            json!({ "type": "string", "minLength": 1 }),
+        );
+    }
+    let mut required = vec![
+        Value::String("schemaVersion".to_owned()),
+        Value::String("scope".to_owned()),
+    ];
+    if !read_only {
+        required.extend([
+            Value::String("actor".to_owned()),
+            Value::String("actorId".to_owned()),
+        ]);
+    }
+    required.extend(
+        required_tool_fields
+            .iter()
+            .map(|field| Value::String((*field).to_owned())),
+    );
+    json!({
+        "name": name,
+        "description": description,
+        "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": false,
+            "x-shibahama-schema-version": 1,
+            "x-shibahama-capability": MEMORY_TOOLS_CAPABILITY,
+        },
+        "outputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "schemaVersion": { "const": 1 },
+                "result": output_properties,
+            },
+            "required": ["schemaVersion", "result"],
+            "additionalProperties": false,
+            "x-shibahama-schema-version": 1,
+        },
+        "annotations": {
+            "readOnlyHint": read_only,
+            "destructiveHint": !read_only,
+        },
+    })
 }
 
 fn valid_request_id(id: &Value) -> bool {
@@ -204,6 +534,17 @@ fn cancellation_request_id(params: &Value) -> Option<&Value> {
 
 fn protocol_result(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
+}
+
+fn tool_result(structured_content: Value, is_error: bool) -> Value {
+    let text = serde_json::to_string(&structured_content).unwrap_or_else(|_| {
+        "{\"schemaVersion\":1,\"error\":{\"code\":\"SHIBA_INTERNAL\"}}".to_owned()
+    });
+    json!({
+        "content": [{ "type": "text", "text": text }],
+        "structuredContent": structured_content,
+        "isError": is_error,
+    })
 }
 
 fn protocol_error(id: Value, code: i64, message: &str, data: Option<Value>) -> Value {
@@ -253,7 +594,9 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let mut output = Vec::new();
-        serve_stdio_io(input.as_bytes(), &mut output, context()).expect("server should run");
+        let mut backend = UnsupportedMcpToolBackend;
+        serve_stdio_io_with_backend(input.as_bytes(), &mut output, context(), &mut backend)
+            .expect("server should run");
         String::from_utf8(output)
             .expect("output is utf-8")
             .lines()
@@ -280,7 +623,15 @@ mod tests {
             output[0]["result"]["capabilities"]["experimental"]["shibahama"]["scope"]["repository"],
             "repo"
         );
-        assert_eq!(output[1]["result"]["tools"], json!([]));
+        let tools = output[1]["result"]["tools"]
+            .as_array()
+            .expect("tools should be an array");
+        assert_eq!(tools.len(), 7);
+        assert!(tools.iter().all(|tool| {
+            tool["inputSchema"]["x-shibahama-schema-version"] == 1
+                && tool["outputSchema"]["x-shibahama-schema-version"] == 1
+                && tool["inputSchema"]["x-shibahama-capability"] == MEMORY_TOOLS_CAPABILITY
+        }));
     }
 
     #[test]
@@ -295,7 +646,9 @@ mod tests {
             "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"unknown\"}\n"
         );
         let mut output = Vec::new();
-        serve_stdio_io(input.as_bytes(), &mut output, context()).expect("server should run");
+        let mut backend = UnsupportedMcpToolBackend;
+        serve_stdio_io_with_backend(input.as_bytes(), &mut output, context(), &mut backend)
+            .expect("server should run");
         let output = String::from_utf8(output).expect("output is utf-8");
         let responses = output
             .lines()

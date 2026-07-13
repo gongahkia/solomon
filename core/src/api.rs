@@ -1511,6 +1511,34 @@ impl<V: VectorIndex> Shibahama<V> {
         Ok(item)
     }
 
+    /// Writes and indexes a memory after evaluating explicit capture-policy metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when scope policy, capture policy, vector indexing, or persistence fails.
+    pub fn write_with_embedding_and_capture_policy(
+        &mut self,
+        event: MemoryWriteEvent,
+        embedding: WriteEmbedding<'_>,
+        request: CapturePolicyRequest,
+    ) -> Result<MemoryItem, ShibahamaError> {
+        self.require_scope_context()?;
+        let audit = self.prepare_capture_policy(&event, request)?;
+        let mut item = event.into_item_with_policy(self.config.ingest_credence);
+
+        self.store.write_embedded(
+            &mut item,
+            &mut self.vector_index,
+            embedding.vector,
+            embedding.index_name,
+            embedding.model,
+            embedding.model_version,
+        )?;
+        self.store.record_policy_decision(audit)?;
+
+        Ok(item)
+    }
+
     /// Embeds and writes memory through a provider after metadata and dimension validation.
     ///
     /// # Errors
@@ -2575,6 +2603,31 @@ impl<V: VectorIndex> Shibahama<V> {
         Ok(candidates)
     }
 
+    /// Replays timeline recall and returns the applied policy decision and context-budget use.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when scope policy, timeline retrieval, storage, or access recording fails.
+    pub fn timeline_with_policy_report(
+        &self,
+        request: &RecallRequest<'_>,
+    ) -> Result<PolicyRecallResult, ShibahamaError> {
+        self.require_scope_context()?;
+        let (request, decision) = self.policy_recall_request(request)?;
+        let candidates = timeline(&self.store, &self.vector_index, &request)?;
+        let context_tokens_used = candidates
+            .iter()
+            .map(|candidate| candidate.item.content.split_whitespace().count())
+            .sum();
+        self.record_recall_policy(&decision, &request, &candidates)?;
+
+        Ok(PolicyRecallResult {
+            candidates,
+            decision,
+            context_tokens_used,
+        })
+    }
+
     /// Replays timeline recall and returns an owning iterator over ranked candidates.
     ///
     /// # Errors
@@ -2900,6 +2953,22 @@ impl<V: VectorIndex> ScopedShibahama<'_, V> {
         self.engine.write_with_capture_policy(event, request)
     }
 
+    /// Writes and indexes a memory under explicit capture-policy metadata in this scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when event scope, policy, vector indexing, or persistence fails.
+    pub fn write_with_embedding_and_capture_policy(
+        &mut self,
+        event: MemoryWriteEvent,
+        embedding: WriteEmbedding<'_>,
+        request: CapturePolicyRequest,
+    ) -> Result<MemoryItem, ShibahamaError> {
+        self.ensure_event_scope(&event)?;
+        self.engine
+            .write_with_embedding_and_capture_policy(event, embedding, request)
+    }
+
     /// Queues a suggestion only when its proposed scope matches this context.
     ///
     /// # Errors
@@ -3030,6 +3099,19 @@ impl<V: VectorIndex> ScopedShibahama<'_, V> {
         request: &RecallRequest<'_>,
     ) -> Result<Vec<RecallCandidate>, ShibahamaError> {
         self.engine.timeline(&self.scoped_request(request)?)
+    }
+
+    /// Replays this scope at a historical instant and returns the applied policy report.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a conflicting scope is supplied or timeline retrieval fails.
+    pub fn timeline_with_policy_report(
+        &mut self,
+        request: &RecallRequest<'_>,
+    ) -> Result<PolicyRecallResult, ShibahamaError> {
+        self.engine
+            .timeline_with_policy_report(&self.scoped_request(request)?)
     }
 
     /// Invalidates one memory only when its id belongs to this scope.
@@ -4054,6 +4136,61 @@ mod tests {
             audits
                 .iter()
                 .all(|audit| audit.source_kind == Some(SourceKind::File))
+        );
+    }
+
+    #[test]
+    fn policy_aware_embedded_write_preserves_capture_actor() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let config = ShibahamaConfig {
+            capture_policy: CapturePolicy {
+                mode: crate::policy::CaptureMode::Automatic,
+                actors: crate::policy::ActorClassPolicy {
+                    automation: true,
+                    ..crate::policy::ActorClassPolicy::default()
+                },
+                ..CapturePolicy::default()
+            },
+            ..ShibahamaConfig::default()
+        };
+        let mut shibahama =
+            Shibahama::open_with_config(file.path(), HnswVectorIndex::with_capacity(2, 8), config)
+                .expect("api should open");
+        let item = shibahama
+            .write_with_embedding_and_capture_policy(
+                api_endpoint_event("policy embedded", OffsetDateTime::UNIX_EPOCH),
+                WriteEmbedding {
+                    vector: &[1.0, 0.0],
+                    index_name: "test",
+                    model: "test",
+                    model_version: "v1",
+                },
+                CapturePolicyRequest {
+                    actor: crate::policy::PolicyActorClass::Automation,
+                    intent: crate::policy::CaptureIntent::Automatic,
+                    confidence_percent: 100,
+                },
+            )
+            .expect("policy-aware embedded write should work");
+
+        assert!(
+            shibahama
+                .store()
+                .stored_embeddings()
+                .expect("embeddings should read")
+                .iter()
+                .any(|embedding| embedding.memory_id == item.id)
+        );
+        assert!(
+            shibahama
+                .event_records()
+                .expect("events should read")
+                .iter()
+                .any(|event| matches!(
+                    event.event,
+                    MemoryEvent::PolicyDecisionRecorded { ref record }
+                        if record.actor == Some(crate::policy::PolicyActorClass::Automation)
+                ))
         );
     }
 

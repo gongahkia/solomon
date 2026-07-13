@@ -360,6 +360,15 @@ completion, and post-review MCP context recall.
 uv run python scripts/evaluate_end_to_end.py --output ./artifacts/end-to-end-evaluation.json
 ```
 
+## Pilot-Readiness Gates
+
+Release verification runs security, local recall-performance, encrypted-restore, source/review workflow, and
+MCP unsafe-reuse gates. It emits a self-hosted JSON report and exits nonzero when any selected gate fails.
+
+```bash
+uv run python scripts/release_quality_gates.py --output ./artifacts/release-quality-gates.json
+```
+
 ## Regulator-ready by construction
 
 Every model-backed answer carries a reproducible primitive plan, source provenance, currency state,

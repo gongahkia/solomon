@@ -153,7 +153,7 @@ class SQLiteWorkflowStore:
             params.append(state.value)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self._conn.execute(
-            f"SELECT task_json FROM review_tasks {where} ORDER BY created_at, task_id",  # noqa: S608
+            f"SELECT task_json FROM review_tasks {where} ORDER BY created_at, task_id",  # noqa: S608  # nosec B608
             params,
         ).fetchall()
         return [ReviewTask.model_validate_json(str(row["task_json"])) for row in rows]

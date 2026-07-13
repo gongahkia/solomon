@@ -734,6 +734,8 @@ def _oidc_principal(identity: OIDCIdentity, tenant_id: str | None, settings: Set
 
 
 def _admin_principal(settings: Settings, supplied_api_key: str | None) -> AuthPrincipal | None:
+    if settings.server_auth_mode != "legacy-api-key" and settings.oidc_issuer is not None:
+        return None
     if not static_secret_matches(settings.server_api_key, supplied_api_key):
         return None
     return AuthPrincipal(
@@ -751,6 +753,8 @@ def _tenant_principal(
     tenant_id: str,
     supplied_api_key: str | None,
 ) -> AuthPrincipal | None:
+    if settings.server_auth_mode != "legacy-api-key" and settings.oidc_issuer is not None:
+        return None
     admin = _admin_principal(settings, supplied_api_key)
     if admin is not None:
         return admin

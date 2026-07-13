@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     boundary_timeout_seconds: float = 30.0
     jurisdiction: str = "SG"
     server_api_key: str | None = None
+    server_auth_mode: str = Field(default="oidc", pattern="^(oidc|legacy-api-key)$")
     server_auto_provision_tenants: bool = True
     oidc_issuer: str | None = None
     oidc_audience: str | None = None
@@ -70,8 +71,8 @@ class Settings(BaseSettings):
         self.jurisdiction = _normalized_jurisdiction(self.jurisdiction)
         if self.sku == "local" and self.allow_remote_egress:
             raise ValueError("solomon-local cannot enable remote egress")
-        if self.sku == "server" and not self.server_api_key:
-            raise ValueError("server SKU requires SOLOMON_SERVER_API_KEY")
+        if self.sku == "server" and self.server_auth_mode == "legacy-api-key" and not self.server_api_key:
+            raise ValueError("legacy API-key mode requires SOLOMON_SERVER_API_KEY")
         if (self.oidc_issuer is None) != (self.oidc_audience is None):
             raise ValueError("OIDC issuer and audience must be configured together")
         if self.oidc_issuer is not None:
@@ -88,6 +89,9 @@ class Settings(BaseSettings):
             )
             if invalid_role_mapping:
                 raise ValueError("OIDC role mappings must map non-empty claim values to Solomon roles")
+        oidc_configuration_missing = self.oidc_issuer is None and not self.server_api_key
+        if self.sku == "server" and self.server_auth_mode == "oidc" and oidc_configuration_missing:
+            raise ValueError("OIDC server mode requires issuer, audience, and role mappings")
         if self.zero_egress_mode and self.allow_remote_egress:
             raise ValueError("zero-egress mode conflicts with remote egress")
         if self.sku == "server" and self.allow_remote_egress and not self.remote_model_url:
@@ -114,6 +118,7 @@ class Settings(BaseSettings):
             "boundary_base_url": self.boundary_base_url,
             "boundary_api_key_configured": self.boundary_api_key is not None,
             "server_api_key_configured": self.server_api_key is not None,
+            "server_auth_mode": self.server_auth_mode,
             "boundary_timeout_seconds": self.boundary_timeout_seconds,
             "jurisdiction": self.jurisdiction,
             "database_url": self.database_url,
@@ -152,7 +157,12 @@ def local_settings(**overrides: Any) -> Settings:
 
 
 def server_settings(**overrides: Any) -> Settings:
-    defaults: dict[str, Any] = {"sku": "server", "zero_egress_mode": False, "server_api_key": "test-server-key"}
+    defaults: dict[str, Any] = {
+        "sku": "server",
+        "zero_egress_mode": False,
+        "server_api_key": "test-server-key",
+        "server_auth_mode": "legacy-api-key",
+    }
     defaults.update(overrides)
     return Settings(**defaults)
 

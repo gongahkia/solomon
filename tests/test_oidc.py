@@ -201,7 +201,7 @@ def test_oidc_http_authentication_audits_identity_and_denial(tmp_path: Path) -> 
             server_auto_provision_tenants=False,
             oidc_issuer=ISSUER,
             oidc_audience=AUDIENCE,
-            oidc_role_mappings={"firm-lawyer": "lawyer"},
+            oidc_role_mappings={"firm-admin": "admin", "firm-lawyer": "lawyer"},
         )
     )
     app.state.oidc_validator = _validator(transport)
@@ -212,9 +212,18 @@ def test_oidc_http_authentication_audits_identity_and_denial(tmp_path: Path) -> 
         roles=["firm-lawyer"],
     )
 
-    async def exercise() -> tuple[httpx.Response, httpx.Response, httpx.Response]:
+    async def exercise() -> tuple[httpx.Response, httpx.Response, httpx.Response, httpx.Response]:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-            created = await client.post("/tenants", headers={"x-api-key": "admin-secret"}, json={"tenant_id": "oidc"})
+            static_rejected = await client.post(
+                "/tenants",
+                headers={"x-api-key": "admin-secret"},
+                json={"tenant_id": "static-rejected"},
+            )
+            created = await client.post(
+                "/tenants",
+                headers={"Authorization": f"Bearer {_token(private_key, 'first', roles=['firm-admin'])}"},
+                json={"tenant_id": "oidc"},
+            )
             allowed = await client.post(
                 "/recall",
                 headers={
@@ -233,15 +242,20 @@ def test_oidc_http_authentication_audits_identity_and_denial(tmp_path: Path) -> 
                 },
                 json={"query": "nothing"},
             )
-            return created, allowed, denied
+            return static_rejected, created, allowed, denied
 
-    created, allowed, denied = asyncio.run(exercise())
+    static_rejected, created, allowed, denied = asyncio.run(exercise())
 
+    assert static_rejected.status_code == 401
     assert created.status_code == 201
     assert allowed.status_code == 200
     assert denied.status_code == 401
     entries = [
-        entry for entry in app.state.service.audit.list_entries() if entry.event_type == "oidc_authentication"
+        entry
+        for entry in app.state.service.audit.list_entries()
+        if entry.event_type == "oidc_authentication"
+        and entry.attribution is not None
+        and entry.attribution.correlation_id in {"oidc-allowed", "oidc-denied"}
     ]
     decisions = [
         (entry.payload["decision"], entry.attribution.actor_id, entry.attribution.correlation_id)

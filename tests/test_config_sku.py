@@ -36,8 +36,8 @@ def test_server_sku_requires_explicit_remote_model_for_egress() -> None:
     assert settings.allow_remote_egress is True
 
 
-def test_server_sku_requires_admin_api_key() -> None:
-    with pytest.raises(ValueError, match="requires SOLOMON_SERVER_API_KEY"):
+def test_server_sku_requires_oidc_or_legacy_api_key() -> None:
+    with pytest.raises(ValueError, match="OIDC server mode requires"):
         Settings(sku="server", zero_egress_mode=False)
 
 

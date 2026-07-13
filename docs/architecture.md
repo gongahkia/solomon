@@ -61,8 +61,9 @@ dependencies; reviewers and lawyers perform verification/contestability actions;
 
 ## Server Auth
 
-`solomon-server` requires `SOLOMON_SERVER_API_KEY`. Requests may present credentials through `Authorization:
-Bearer <token>` or `x-api-key`. The server maps credentials to an authenticated principal:
+`solomon-server` requires OIDC issuer/audience/role mapping or the legacy `SOLOMON_SERVER_API_KEY` path. OIDC
+servers reject static credentials and map validated bearer tokens to principals. Legacy deployments may present
+credentials through `Authorization: Bearer <token>` or `x-api-key`; the server maps those credentials to a principal:
 
 - the server admin key gets `admin:*`, `tenant:manage`, `tenant:read`, `tenant:write`, and `diagnostics:read`;
 - tenant keys are stored only as PBKDF2-SHA256 hashes and default to `tenant:read` plus `tenant:write`;

@@ -428,6 +428,9 @@ uv run pyinstaller packaging/solomon-local.spec --noconfirm --clean
 `solomon-server` enables API-key auth, tenant isolation, optional Postgres storage, and optional remote
 ZDR model routing.
 
+Server deployments should configure OIDC. A server with only `SOLOMON_SERVER_API_KEY` uses the retained
+legacy API-key compatibility path; set `SOLOMON_SERVER_AUTH_MODE=legacy-api-key` explicitly during migration.
+
 Run a local server:
 
 ```bash

@@ -4,7 +4,7 @@
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 project_root = Path(SPECPATH).parent
 src_root = project_root / "src"
@@ -13,8 +13,8 @@ a = Analysis(
     [str(src_root / "solomon" / "cli" / "main.py")],
     pathex=[str(src_root)],
     binaries=[],
-    datas=collect_data_files("rfc3987_syntax"),
-    hiddenimports=[],
+    datas=collect_data_files("rfc3987_syntax") + collect_data_files("courts_db") + collect_data_files("reporters_db"),
+    hiddenimports=collect_submodules("eyecite"),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

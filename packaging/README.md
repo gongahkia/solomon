@@ -31,3 +31,10 @@ Expected outputs:
 - `dist/solomon-0.1.0.tar.gz`
 - `dist/solomon-0.1.0-py3-none-any.whl`
 - `dist/solomon-local`
+
+CI builds the binary on macOS and Linux, then runs the stale-house-view flow headlessly and compares its semantic
+output with the configured server-SKU CLI:
+
+```bash
+uv run python scripts/smoke_local_binary.py --binary dist/solomon-local
+```

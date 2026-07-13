@@ -194,4 +194,21 @@ def retrieval_index_migrations(
                 """,
             ),
         ),
+        SchemaMigration(
+            scope=scope,
+            version=3,
+            name="lexical-candidate-tokens",
+            sqlite_statements=(),
+            postgres_statements=(
+                f"""
+                ALTER TABLE {table("retrieval_index")}
+                ADD COLUMN IF NOT EXISTS lexical_tokens_json TEXT NOT NULL DEFAULT '[]'
+                """,
+                f"""
+                UPDATE {table("retrieval_index")}
+                SET lexical_tokens_json = tokens_json
+                WHERE lexical_tokens_json = '[]'
+                """,
+            ),
+        ),
     )

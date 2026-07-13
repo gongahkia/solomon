@@ -19,6 +19,7 @@ from solomon.graph.store import GraphStore
 from solomon.orchestrator.retrieval import (
     EmbeddingStrategy,
     IndexedHit,
+    LexicalHit,
     MatterContext,
     RecallOptions,
     RetrievalOrchestrator,
@@ -64,9 +65,10 @@ def _orchestrator(tmp_path: Path) -> RetrievalOrchestrator:
 
 
 class _StaticIndex:
-    def __init__(self, hits: list[IndexedHit]) -> None:
+    def __init__(self, hits: list[IndexedHit], *, lexical_hits: list[LexicalHit]) -> None:
         self.strategy = EmbeddingStrategy(name="static", version="1")
         self.hits = hits
+        self.lexical_hits = lexical_hits
 
     def upsert_item(self, item: KnowledgeItem, *, indexed_at: datetime | None = None) -> KnowledgeItem:
         return item
@@ -79,6 +81,9 @@ class _StaticIndex:
 
     def search(self, query: str, *, limit: int = 20) -> list[IndexedHit]:
         return self.hits[:limit]
+
+    def search_lexical(self, query: str, *, limit: int = 20) -> list[LexicalHit]:
+        return self.lexical_hits[:limit]
 
     def close(self) -> None:
         return None
@@ -198,6 +203,19 @@ def test_vector_retrieval_matches_legal_domain_synonyms(tmp_path: Path) -> None:
     assert results[0].similarity > 0
 
 
+def test_lexical_index_uses_raw_terms_not_semantic_aliases(tmp_path: Path) -> None:
+    index = SQLiteRetrievalIndex(tmp_path / "solomon.sqlite3")
+    item = _item("item-1", "law governs the structure")
+
+    index.upsert_item(item)
+
+    hits = index.search_lexical("law")
+
+    assert hits[0].item_id == "item-1"
+    assert hits[0].terms == ["law"]
+    assert index.search_lexical("regulation") == []
+
+
 def test_reembed_pipeline_updates_items_when_strategy_version_changes(tmp_path: Path) -> None:
     db = tmp_path / "solomon.sqlite3"
     item = _item("item-1", "structure x regulation r")
@@ -260,7 +278,8 @@ def test_recall_fuses_semantic_and_lexical_ranks_with_evidence(tmp_path: Path) -
             [
                 IndexedHit(item_id="semantic-only", similarity=0.99, embedding_ref="static:1"),
                 IndexedHit(item_id="exact", similarity=0.01, embedding_ref="static:1"),
-            ]
+            ],
+            lexical_hits=[LexicalHit(item_id="exact", match_ratio=1.0, terms=["citadel", "clause", "priority"])],
         ),
         credence=CredenceLedger(),
     )
@@ -286,7 +305,12 @@ def test_recall_includes_lexical_only_candidate_with_evidence(tmp_path: Path) ->
     orchestrator = RetrievalOrchestrator(
         store=store,
         graph=graph,
-        index=_StaticIndex([IndexedHit(item_id="semantic-only", similarity=0.99, embedding_ref="static:1")]),
+        index=_StaticIndex(
+            [IndexedHit(item_id="semantic-only", similarity=0.99, embedding_ref="static:1")],
+            lexical_hits=[
+                LexicalHit(item_id="lexical-only", match_ratio=1.0, terms=["citadel", "clause", "priority"])
+            ],
+        ),
         credence=CredenceLedger(),
     )
 

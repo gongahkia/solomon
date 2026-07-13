@@ -66,12 +66,19 @@ class IndexedHit(SolomonModel):
     embedding_ref: str
 
 
+class LexicalHit(SolomonModel):
+    item_id: str
+    match_ratio: float
+    terms: list[str]
+
+
 class SQLiteRetrievalIndex:
     def __init__(self, path: Path | str, *, strategy: EmbeddingStrategy | None = None) -> None:
         self.path = Path(path)
         self.strategy = strategy or EmbeddingStrategy()
         self._vector_cache: dict[str, tuple[str, list[float]]] = {}
         self._search_cache: dict[tuple[str, int, str], list[IndexedHit]] = {}
+        self._lexical_search_cache: dict[tuple[str, int], list[LexicalHit]] = {}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
@@ -85,6 +92,7 @@ class SQLiteRetrievalIndex:
                     item_id TEXT PRIMARY KEY,
                     embedding_ref TEXT NOT NULL,
                     tokens_json TEXT NOT NULL,
+                    lexical_tokens_json TEXT NOT NULL DEFAULT '[]',
                     vector_json TEXT NOT NULL DEFAULT '[]',
                     indexed_at TEXT NOT NULL
                 )
@@ -93,6 +101,11 @@ class SQLiteRetrievalIndex:
             columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(retrieval_index)").fetchall()}
             if "vector_json" not in columns:
                 self._conn.execute("ALTER TABLE retrieval_index ADD COLUMN vector_json TEXT NOT NULL DEFAULT '[]'")
+            if "lexical_tokens_json" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE retrieval_index ADD COLUMN lexical_tokens_json TEXT NOT NULL DEFAULT '[]'"
+                )
+                self._conn.execute("UPDATE retrieval_index SET lexical_tokens_json = tokens_json")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_retrieval_ref ON retrieval_index(embedding_ref)")
 
     def close(self) -> None:
@@ -103,23 +116,35 @@ class SQLiteRetrievalIndex:
 
         embedding_ref = self.strategy.ref
         tokens = sorted(semantic_tokens(item.content))
+        lexical_tokens = sorted(tokenize(item.content))
         vector = _embed_tokens(tokens, dimensions=self.strategy.dimensions)
         timestamp = indexed_at or now_utc()
         with self._conn:
             self._conn.execute(
                 """
-                INSERT INTO retrieval_index (item_id, embedding_ref, tokens_json, vector_json, indexed_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO retrieval_index (
+                    item_id, embedding_ref, tokens_json, lexical_tokens_json, vector_json, indexed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(item_id) DO UPDATE SET
                     embedding_ref = excluded.embedding_ref,
                     tokens_json = excluded.tokens_json,
+                    lexical_tokens_json = excluded.lexical_tokens_json,
                     vector_json = excluded.vector_json,
                     indexed_at = excluded.indexed_at
                 """,
-                (item.id, embedding_ref, json.dumps(tokens), json.dumps(vector), timestamp.isoformat()),
+                (
+                    item.id,
+                    embedding_ref,
+                    json.dumps(tokens),
+                    json.dumps(lexical_tokens),
+                    json.dumps(vector),
+                    timestamp.isoformat(),
+                ),
             )
         self._vector_cache[item.id] = (embedding_ref, vector)
         self._search_cache.clear()
+        self._lexical_search_cache.clear()
         return item.model_copy(update={"embedding_ref": embedding_ref})
 
     def batch_upsert(self, items: list[KnowledgeItem]) -> list[KnowledgeItem]:
@@ -159,6 +184,31 @@ class SQLiteRetrievalIndex:
                 hits.append(IndexedHit(item_id=item_id, similarity=score, embedding_ref=embedding_ref))
         limited_hits = sorted(hits, key=lambda hit: (hit.similarity, hit.item_id), reverse=True)[:limit]
         self._search_cache[cache_key] = limited_hits
+        return list(limited_hits)
+
+    def search_lexical(self, query: str, *, limit: int = 20) -> list[LexicalHit]:
+        cache_key = (query, limit)
+        if cached_hits := self._lexical_search_cache.get(cache_key):
+            return list(cached_hits)
+        query_terms = tokenize(query)
+        if not query_terms:
+            return []
+        rows = self._conn.execute(
+            "SELECT item_id, lexical_tokens_json FROM retrieval_index ORDER BY item_id"
+        ).fetchall()
+        hits: list[LexicalHit] = []
+        for row in rows:
+            matched_terms = sorted(query_terms & set(json.loads(str(row["lexical_tokens_json"]))))
+            if matched_terms:
+                hits.append(
+                    LexicalHit(
+                        item_id=str(row["item_id"]),
+                        match_ratio=len(matched_terms) / len(query_terms),
+                        terms=matched_terms,
+                    )
+                )
+        limited_hits = sorted(hits, key=lambda hit: (hit.match_ratio, hit.item_id), reverse=True)[:limit]
+        self._lexical_search_cache[cache_key] = limited_hits
         return list(limited_hits)
 
 
@@ -208,13 +258,6 @@ class RetrievalScoreExplanation(SolomonModel):
 
 
 @dataclass(frozen=True)
-class _LexicalHit:
-    item_id: str
-    match_ratio: float
-    terms: tuple[str, ...]
-
-
-@dataclass(frozen=True)
 class _FusedHit:
     item_id: str
     embedding_ref: str
@@ -236,6 +279,8 @@ class RetrievalIndexProtocol(Protocol):
     def embedding_refs(self, item_ids: list[str]) -> dict[str, str]: ...
 
     def search(self, query: str, *, limit: int = 20) -> list[IndexedHit]: ...
+
+    def search_lexical(self, query: str, *, limit: int = 20) -> list[LexicalHit]: ...
 
     def close(self) -> None: ...
 
@@ -304,12 +349,14 @@ class RetrievalOrchestrator:
         resolved_options = options or RecallOptions()
         candidate_limit = max(resolved_options.limit * 4, resolved_options.limit)
         semantic_hits = self.index.search(query, limit=candidate_limit)
+        lexical_hits = self.index.search_lexical(query, limit=candidate_limit)
+        candidate_item_ids = list(dict.fromkeys([hit.item_id for hit in semantic_hits + lexical_hits]))
         matter_id = matter_context.matter_id if matter_context else None
         client_id = matter_context.client_id if matter_context else None
-        scoped_items = self.store.get_many(matter_id=matter_id, client_id=client_id)
+        scoped_items = self.store.get_many(candidate_item_ids, matter_id=matter_id, client_id=client_id)
         hits = _fuse_hits(
             semantic_hits,
-            _lexical_hits(query, scoped_items, limit=candidate_limit),
+            lexical_hits,
             allowed_item_ids={item.id for item in scoped_items},
             rrf_k=resolved_options.rrf_k,
         )
@@ -471,27 +518,9 @@ class RetrievalOrchestrator:
         return deduped
 
 
-def _lexical_hits(query: str, items: list[KnowledgeItem], *, limit: int) -> list[_LexicalHit]:
-    query_terms = tokenize(query)
-    if not query_terms:
-        return []
-    hits: list[_LexicalHit] = []
-    for item in items:
-        matched_terms = tuple(sorted(query_terms & tokenize(item.content)))
-        if matched_terms:
-            hits.append(
-                _LexicalHit(
-                    item_id=item.id,
-                    match_ratio=len(matched_terms) / len(query_terms),
-                    terms=matched_terms,
-                )
-            )
-    return sorted(hits, key=lambda hit: (hit.match_ratio, hit.item_id), reverse=True)[:limit]
-
-
 def _fuse_hits(
     semantic_hits: list[IndexedHit],
-    lexical_hits: list[_LexicalHit],
+    lexical_hits: list[LexicalHit],
     *,
     allowed_item_ids: set[str],
     rrf_k: int,
@@ -501,7 +530,11 @@ def _fuse_hits(
         hit.item_id: (rank, hit)
         for rank, hit in enumerate(allowed_semantic_hits, start=1)
     }
-    lexical_by_id = {hit.item_id: (rank, hit) for rank, hit in enumerate(lexical_hits, start=1)}
+    allowed_lexical_hits = [hit for hit in lexical_hits if hit.item_id in allowed_item_ids]
+    lexical_by_id = {
+        hit.item_id: (rank, hit)
+        for rank, hit in enumerate(allowed_lexical_hits, start=1)
+    }
     fused: list[_FusedHit] = []
     for item_id in semantic_by_id.keys() | lexical_by_id.keys():
         semantic = semantic_by_id.get(item_id)
@@ -518,7 +551,7 @@ def _fuse_hits(
                 semantic_similarity=semantic[1].similarity if semantic else 0.0,
                 lexical_rank=lexical_rank,
                 lexical_match_ratio=lexical[1].match_ratio if lexical else 0.0,
-                lexical_terms=lexical[1].terms if lexical else (),
+                lexical_terms=tuple(lexical[1].terms) if lexical else (),
             )
         )
     return sorted(

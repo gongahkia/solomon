@@ -191,7 +191,7 @@ def test_postgres_retrieval_migrates_legacy_vectors_and_dual_writes_embeddings(t
     assert legacy is not None and str(legacy["embedding"]) == legacy_vector
     assert current is not None and len(json.loads(str(current["embedding"]))) == 256
     assert indexed.embedding_ref == "hashed-token-vector:1"
-    assert [int(row["version"]) for row in migrations] == [1, 2]
+    assert [int(row["version"]) for row in migrations] == [1, 2, 3]
     assert hnsw_index is not None
 
 
@@ -215,8 +215,10 @@ def test_postgres_retrieval_applies_pgvector_migrations_per_schema(tmp_path: Pat
     assert [(str(row["scope"]), int(row["version"])) for row in scopes] == [
         ("postgres-retrieval-index:public", 1),
         ("postgres-retrieval-index:public", 2),
+        ("postgres-retrieval-index:public", 3),
         ("postgres-retrieval-index:tenant_a", 1),
         ("postgres-retrieval-index:tenant_a", 2),
+        ("postgres-retrieval-index:tenant_a", 3),
     ]
     assert tenant_embedding is not None
 

@@ -12,9 +12,11 @@ from solomon.currency.models import KnowledgeItem, now_utc
 from solomon.orchestrator.retrieval import (
     EmbeddingStrategy,
     IndexedHit,
+    LexicalHit,
     _cosine_similarity,
     _embed_tokens,
     semantic_tokens,
+    tokenize,
 )
 from solomon.store.migrations import apply_postgres_migrations
 from solomon.store.postgres.connection import (
@@ -68,6 +70,7 @@ class PostgresRetrievalIndex:
     def upsert_item(self, item: KnowledgeItem, *, indexed_at: datetime | None = None) -> KnowledgeItem:
         embedding_ref = self.strategy.ref
         tokens = sorted(semantic_tokens(item.content))
+        lexical_tokens = sorted(tokenize(item.content))
         vector = _embed_tokens(tokens, dimensions=self.strategy.dimensions)
         vector_literal = json.dumps(vector, separators=(",", ":"))
         timestamp = indexed_at or now_utc()
@@ -75,16 +78,25 @@ class PostgresRetrievalIndex:
             self._execute(
                 f"""
                 INSERT INTO {self._table("retrieval_index")}
-                (item_id, embedding_ref, tokens_json, vector_json, embedding, indexed_at)
-                VALUES (%s, %s, %s, %s, %s::vector, %s)
+                (item_id, embedding_ref, tokens_json, lexical_tokens_json, vector_json, embedding, indexed_at)
+                VALUES (%s, %s, %s, %s, %s, %s::vector, %s)
                 ON CONFLICT(item_id) DO UPDATE SET
                     embedding_ref = EXCLUDED.embedding_ref,
                     tokens_json = EXCLUDED.tokens_json,
+                    lexical_tokens_json = EXCLUDED.lexical_tokens_json,
                     vector_json = EXCLUDED.vector_json,
                     embedding = EXCLUDED.embedding,
                     indexed_at = EXCLUDED.indexed_at
                 """,
-                (item.id, embedding_ref, json.dumps(tokens), vector_literal, vector_literal, timestamp.isoformat()),
+                (
+                    item.id,
+                    embedding_ref,
+                    json.dumps(tokens),
+                    json.dumps(lexical_tokens),
+                    vector_literal,
+                    vector_literal,
+                    timestamp.isoformat(),
+                ),
             )
         return item.model_copy(update={"embedding_ref": embedding_ref})
 
@@ -129,6 +141,30 @@ class PostgresRetrievalIndex:
                     )
                 )
         return sorted(hits, key=lambda hit: (hit.similarity, hit.item_id), reverse=True)[:limit]
+
+    def search_lexical(self, query: str, *, limit: int = 20) -> list[LexicalHit]:
+        query_terms = tokenize(query)
+        if not query_terms:
+            return []
+        rows = self._execute(
+            f"""
+            SELECT item_id, lexical_tokens_json
+            FROM {self._table("retrieval_index")}
+            ORDER BY item_id
+            """
+        ).fetchall()
+        hits: list[LexicalHit] = []
+        for row in rows:
+            matched_terms = sorted(query_terms & set(json.loads(str(row_value(row, "lexical_tokens_json")))))
+            if matched_terms:
+                hits.append(
+                    LexicalHit(
+                        item_id=str(row_value(row, "item_id")),
+                        match_ratio=len(matched_terms) / len(query_terms),
+                        terms=matched_terms,
+                    )
+                )
+        return sorted(hits, key=lambda hit: (hit.match_ratio, hit.item_id), reverse=True)[:limit]
 
     def close(self) -> None:
         self._conn.close()

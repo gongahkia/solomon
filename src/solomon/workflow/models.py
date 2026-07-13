@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from pydantic import Field, field_validator
 
@@ -30,10 +31,12 @@ class AuthorityChangeEvent(SolomonModel):
     source_id: str = Field(min_length=1)
     idempotency_key: str = Field(min_length=1)
     authority_id: str = Field(min_length=1)
+    previous_version: str | None = None
     new_version: str = Field(min_length=1)
     changed_at: datetime
     evidence_url: str | None = None
     evidence_sha256: str | None = None
+    diff: dict[str, Any] = Field(default_factory=dict)
     received_at: datetime = Field(default_factory=now_utc)
 
     @field_validator("changed_at", "received_at")

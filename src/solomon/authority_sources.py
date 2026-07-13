@@ -293,6 +293,17 @@ class SQLiteAuthoritySourceRegistry:
             for row in rows
         ]
 
+    def poll_queue_depths(self) -> dict[str, int]:
+        row = self._conn.execute(
+            """
+            SELECT
+                SUM(CASE WHEN delivered_at IS NULL AND dead_lettered_at IS NULL THEN 1 ELSE 0 END) AS pending,
+                SUM(CASE WHEN dead_lettered_at IS NOT NULL THEN 1 ELSE 0 END) AS dead_letter
+            FROM authority_poll_outbox
+            """
+        ).fetchone()
+        return {"pending": int(row["pending"] or 0), "dead_letter": int(row["dead_letter"] or 0)}
+
     def requeue_dead_letter(self, event_id: str, *, available_at: datetime | None = None) -> OutboxRecord:
         retry_at = _ensure_aware_utc(available_at or now_utc())
         with self._conn:

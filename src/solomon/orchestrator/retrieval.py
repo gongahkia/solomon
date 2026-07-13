@@ -7,6 +7,7 @@ import json
 import re
 import sqlite3
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -209,6 +210,16 @@ class RetrievalIndexProtocol(Protocol):
     def close(self) -> None: ...
 
 
+class RetrievalMetricsObserver(Protocol):
+    def observe_retrieval(
+        self,
+        *,
+        candidates: int,
+        returned: int,
+        withheld_by_currency_state: Mapping[CurrencyState, int],
+    ) -> None: ...
+
+
 @dataclass(frozen=True)
 class MatterContext:
     matter_id: str | None = None
@@ -228,6 +239,7 @@ class RetrievalOrchestrator:
         self.graph = graph
         self.index = index
         self.credence = credence or CredenceLedger()
+        self.metrics_observer: RetrievalMetricsObserver | None = None
 
     def index_items(self, items: list[KnowledgeItem]) -> list[KnowledgeItem]:
         indexed = self.index.batch_upsert(items)
@@ -262,14 +274,23 @@ class RetrievalOrchestrator:
         resolved_options = options or RecallOptions()
         hits = self.index.search(query, limit=max(resolved_options.limit * 4, resolved_options.limit))
         if not hits:
+            self._observe_retrieval(candidates=0, results=[], withheld_by_currency_state={})
             return []
         hit_by_id = {hit.item_id: hit for hit in hits}
         item_ids = [hit.item_id for hit in hits]
         matter_id = matter_context.matter_id if matter_context else None
         client_id = matter_context.client_id if matter_context else None
         items = self.store.get_many(item_ids, matter_id=matter_id, client_id=client_id)
+        withheld_by_currency_state: dict[CurrencyState, int] = {}
         if not resolved_options.review_mode:
-            items = [item for item in items if evaluate_currency(item).currency_state is CurrencyState.LIVE]
+            live_items: list[KnowledgeItem] = []
+            for item in items:
+                state = evaluate_currency(item).currency_state
+                if state is CurrencyState.LIVE:
+                    live_items.append(item)
+                else:
+                    withheld_by_currency_state[state] = withheld_by_currency_state.get(state, 0) + 1
+            items = live_items
         items = self._dedupe(items) if resolved_options.dedupe_near_identical else items
         centrality = self.graph.centrality(item.id for item in items)
         candidates = [
@@ -286,7 +307,28 @@ class RetrievalOrchestrator:
             for candidate in ranked
         ]
         ranked_results = sorted(results, key=lambda result: result.score, reverse=True)
-        return self._apply_limit_and_budget(ranked_results, resolved_options)
+        selected = self._apply_limit_and_budget(ranked_results, resolved_options)
+        self._observe_retrieval(
+            candidates=len(item_ids),
+            results=selected,
+            withheld_by_currency_state=withheld_by_currency_state,
+        )
+        return selected
+
+    def _observe_retrieval(
+        self,
+        *,
+        candidates: int,
+        results: list[RecallResult],
+        withheld_by_currency_state: Mapping[CurrencyState, int],
+    ) -> None:
+        if self.metrics_observer is None:
+            return
+        self.metrics_observer.observe_retrieval(
+            candidates=candidates,
+            returned=len(results),
+            withheld_by_currency_state=withheld_by_currency_state,
+        )
 
     def timeline(
         self,

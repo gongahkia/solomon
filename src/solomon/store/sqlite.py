@@ -287,6 +287,10 @@ class SQLiteKnowledgeStore:
             update={"delivered_at": completed_at, "delivery_attempts": recorded.delivery_attempts + 1}
         )
 
+    def outbox_queue_depth(self) -> int:
+        row = self._conn.execute("SELECT COUNT(*) AS count FROM outbox_events WHERE delivered_at IS NULL").fetchone()
+        return int(row["count"])
+
     def snapshot(self, destination: Path | str) -> Path:
         target = Path(destination)
         target.parent.mkdir(parents=True, exist_ok=True)

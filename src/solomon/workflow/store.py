@@ -158,6 +158,10 @@ class SQLiteWorkflowStore:
         ).fetchall()
         return [ReviewTask.model_validate_json(str(row["task_json"])) for row in rows]
 
+    def review_task_state_counts(self) -> dict[str, int]:
+        rows = self._conn.execute("SELECT state, COUNT(*) AS count FROM review_tasks GROUP BY state").fetchall()
+        return {str(row["state"]): int(row["count"]) for row in rows}
+
     def assign(self, task_id: str, *, reviewer_id: str, assigned_by: str) -> ReviewTask:
         task = self.get_review_task(task_id)
         if task.state is ReviewTaskState.RESOLVED:

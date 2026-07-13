@@ -395,6 +395,23 @@ class SQLiteDocumentStore:
         ).fetchall()
         return [SourceSyncRun.model_validate_json(str(row["run_json"])) for row in rows]
 
+    def sync_source_state_counts(self) -> dict[str, int]:
+        rows = self._conn.execute(
+            """
+            SELECT COALESCE(run.state, 'never') AS state, COUNT(*) AS count
+            FROM document_sources AS source
+            LEFT JOIN source_sync_runs AS run ON run.run_id = (
+                SELECT latest.run_id
+                FROM source_sync_runs AS latest
+                WHERE latest.source_id = source.source_id
+                ORDER BY latest.started_at DESC, latest.run_id DESC
+                LIMIT 1
+            )
+            GROUP BY state
+            """
+        ).fetchall()
+        return {str(row["state"]): int(row["count"]) for row in rows}
+
     def _latest_document(self, source_id: str, external_id: str) -> SourceDocument | None:
         row = self._conn.execute(
             """

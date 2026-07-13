@@ -335,6 +335,20 @@ journal. Run backups during a brief writer quiescence when cross-database point-
 The commands intentionally reject Postgres deployments; use a database-native Postgres backup until a
 coordinated server-storage backup contract is available.
 
+## Prometheus Metrics
+
+Every FastAPI deployment exposes unauthenticated Prometheus text metrics at `GET /metrics` for its scrape target.
+The endpoint exports health, durable queue/dead-letter depth, review-task state, latest source-sync state, HTTP and
+scrape latency histograms, retrieval volume, and currency-state context withholding. It intentionally excludes
+tenant IDs, client IDs, matter IDs, source references, query text, and document content from metric labels.
+
+```bash
+curl -fsS http://127.0.0.1:8140/metrics
+```
+
+The exporter is process-local and uses the open-source `prometheus-client` library; it needs no managed observability
+vendor. Scrapes use SQL aggregate gauges, and audit-journal verification is cached for 30 seconds.
+
 ## Regulator-ready by construction
 
 Every model-backed answer carries a reproducible primitive plan, source provenance, currency state,

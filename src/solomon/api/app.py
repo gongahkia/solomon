@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
 from solomon import __version__
@@ -67,6 +67,7 @@ from solomon.config import (
 from solomon.errors import SolomonError
 from solomon.graph.suggestions import SuggestionDecision
 from solomon.graph.visualization import GraphFormat
+from solomon.observability import SolomonMetrics, request_started
 from solomon.orchestrator.models import (
     LocalModelEndpoint,
     ModelEndpoint,
@@ -77,7 +78,7 @@ from solomon.orchestrator.models import (
 )
 from solomon.workflow.models import ReviewTaskState
 
-PUBLIC_PATHS = {"/health", "/ready", "/docs", "/redoc", "/openapi.json"}
+PUBLIC_PATHS = {"/health", "/ready", "/metrics", "/docs", "/redoc", "/openapi.json"}
 TENANT_MANAGEMENT_PREFIX = "/tenants"
 DEFAULT_DATABASE_URL = str(Settings.model_fields["database_url"].default)
 
@@ -132,6 +133,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
     )
     tenant_services: dict[str, SolomonService] = {}
+    metrics = SolomonMetrics()
+    metrics.attach(service)
 
     def service_for_tenant(tenant_id: str) -> SolomonService:
         existing = tenant_services.get(tenant_id)
@@ -147,6 +150,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             credence_policy=cp, credence_policy_version=resolved_settings.credence_policy_version,
             boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
         )
+        metrics.attach(tenant_service)
         tenant_services[tenant_id] = tenant_service
         return tenant_service
 
@@ -167,6 +171,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.service = service
     app.state.router = _model_router_from_settings(resolved_settings)
     app.state.tenant_registry = tenant_registry
+    app.state.metrics = metrics
 
     def active_router() -> ModelRouter:
         resolved = getattr(app.state, "router", None)
@@ -228,6 +233,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request.state.principal = principal
         return await call_next(request)
 
+    @app.middleware("http")
+    async def metrics_middleware(request: Request, call_next: Any) -> Any:
+        started_at = request_started()
+        try:
+            response = await call_next(request)
+        except Exception:
+            if request.url.path != "/metrics":
+                metrics.observe_http(
+                    method=request.method,
+                    path=request.url.path,
+                    status=500,
+                    elapsed_seconds=request_started() - started_at,
+                )
+            raise
+        if request.url.path != "/metrics":
+            metrics.observe_http(
+                method=request.method,
+                path=request.url.path,
+                status=response.status_code,
+                elapsed_seconds=request_started() - started_at,
+            )
+        return response
+
     @app.exception_handler(SolomonError)
     def solomon_error_handler(_request: Request, exc: SolomonError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content={"error": exc.error_payload()})
@@ -255,6 +283,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def ready() -> ReadyResponse:
         boundary = probe_boundary_client(resolved_settings.boundary_engine_path)
         return ReadyResponse(ready=boundary.importable, boundary_client_importable=boundary.importable)
+
+    @app.get("/metrics", include_in_schema=False)
+    def prometheus_metrics() -> Response:
+        payload, content_type = metrics.render([service, *tenant_services.values()])
+        return Response(content=payload, media_type=content_type)
 
     @app.get("/diagnostics", response_model=DiagnosticsResponse)
     def diagnostics() -> DiagnosticsResponse:

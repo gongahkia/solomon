@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from hmac import compare_digest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -24,6 +24,9 @@ from solomon.api.service import (
     DependencySuggestionDecisionRequest,
     PinRequest,
     RecallRequest,
+    ReviewTaskAssignmentRequest,
+    ReviewTaskResolutionRequest,
+    ReviewTaskStartRequest,
     SolomonService,
     VerificationAssignmentRequest,
     VerificationRequest,
@@ -41,6 +44,7 @@ from solomon.currency.models import CredenceTier, CurrencyState, KnowledgeItem, 
 from solomon.currency.report import CurrencyMovementReport, ReportScopeKind, render_currency_report_pdf
 from solomon.errors import SolomonError
 from solomon.graph.suggestions import DependencySuggestion, SuggestionDecision
+from solomon.workflow.models import ReviewTaskPriority, ReviewTaskState
 
 DEFAULT_DATABASE_URL = str(Settings.model_fields["database_url"].default)
 PACKAGE_DIR = Path(__file__).parent
@@ -116,6 +120,10 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
     @app.get("/console/claims")
     def claims(request: Request) -> Response:
         return _render_claims(request, resolved_service)
+
+    @app.get("/console/reviews")
+    def reviews(request: Request, state: ReviewTaskState | None = None) -> Response:
+        return _render_reviews(request, resolved_service, state=state)
 
     @app.get("/console/audit-pack")
     def audit_pack(request: Request, item_id: str | None = None, q: str | None = None) -> Response:
@@ -308,6 +316,41 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
                 error = str(exc)
         return _render_claims(request, resolved_service, error=error, status_code=200 if error is None else 400)
 
+    @app.post("/console/reviews/{task_id}/{action}")
+    async def review_action(request: Request, task_id: str, action: str) -> Response:
+        form = await request.form()
+        reviewer_id = str(form.get("reviewer_id") or "").strip()
+        error = None
+        try:
+            if action == "assign":
+                resolved_service.assign_review_task(
+                    task_id,
+                    ReviewTaskAssignmentRequest(
+                        reviewer_id=reviewer_id,
+                        assigned_by=str(form.get("assigned_by") or request.state.console_user_id),
+                    ),
+                )
+            elif action == "start":
+                resolved_service.start_review_task(task_id, ReviewTaskStartRequest(reviewer_id=reviewer_id))
+            elif action == "resolve":
+                resolved_service.resolve_review_task(
+                    task_id,
+                    ReviewTaskResolutionRequest(
+                        reviewer_id=reviewer_id,
+                        verification=VerificationRequest(
+                            by=reviewer_id,
+                            outcome=VerificationOutcome(str(form.get("outcome") or "reaffirm")),
+                            basis=str(form.get("basis") or "").strip() or None,
+                            source_ref=str(form.get("source_ref") or "").strip() or None,
+                        ),
+                    ),
+                )
+            else:
+                error = "unsupported review action"
+        except (SolomonError, ValueError) as exc:
+            error = str(exc)
+        return _render_reviews(request, resolved_service, error=error, status_code=200 if error is None else 400)
+
     @app.post("/console/dependencies/suggestions/{suggestion_id}/reject")
     async def reject_dependency(request: Request, suggestion_id: str) -> Response:
         form = await request.form()
@@ -396,6 +439,49 @@ def _render_claims(
         {"rows": _claim_rows(service), "error": error, "active_page": "claims"},
         status_code=status_code,
     )
+
+
+def _render_reviews(
+    request: Request,
+    service: SolomonService,
+    *,
+    state: ReviewTaskState | None = None,
+    error: str | None = None,
+    status_code: int = 200,
+) -> Response:
+    return TEMPLATES.TemplateResponse(
+        request,
+        "reviews.html",
+        {"rows": _review_task_rows(service, state=state), "error": error, "active_page": "reviews"},
+        status_code=status_code,
+    )
+
+
+def _review_task_rows(service: SolomonService, *, state: ReviewTaskState | None) -> list[dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    rows: list[dict[str, Any]] = []
+    for task in service.review_tasks(state=state):
+        event = service.workflow_store.get_authority_event(task.event_id)
+        trace = service.why(task.item_id)
+        due_at = task.created_at + _review_sla(task.priority)
+        rows.append(
+            {
+                "task": task.model_dump(mode="json"),
+                "event": event.model_dump(mode="json"),
+                "item": trace.item.model_dump(mode="json"),
+                "due_at": due_at.isoformat(),
+                "overdue": task.state is not ReviewTaskState.RESOLVED and due_at < now,
+            }
+        )
+    return sorted(rows, key=lambda row: (not row["overdue"], row["due_at"], row["task"]["id"]))
+
+
+def _review_sla(priority: ReviewTaskPriority) -> timedelta:
+    return {
+        ReviewTaskPriority.URGENT: timedelta(days=1),
+        ReviewTaskPriority.HIGH: timedelta(days=3),
+        ReviewTaskPriority.NORMAL: timedelta(days=7),
+    }[priority]
 
 
 def _claim_rows(service: SolomonService) -> list[dict[str, Any]]:

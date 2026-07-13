@@ -140,10 +140,12 @@ class AuthorityEventRequest(SolomonModel):
     source_id: str = Field(min_length=1)
     idempotency_key: str = Field(min_length=1)
     authority_id: str = Field(min_length=1)
+    previous_version: str | None = None
     new_version: str = Field(min_length=1)
     changed_at: datetime
     evidence_url: str | None = None
     evidence_sha256: str | None = None
+    diff: dict[str, Any] = Field(default_factory=dict)
 
 
 class ContestRequest(SolomonModel):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from base64 import b64decode
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -49,8 +50,10 @@ from solomon.api.services.common import digest
 from solomon.api.services.ingestion import IngestionService
 from solomon.api.services.recall import RecallService
 from solomon.audit.journal import AuditJournal
+from solomon.authority_polling import AuthorityPollBatch, AuthorityPollOutbox
+from solomon.authority_sources import SQLiteAuthoritySourceRegistry
 from solomon.boundary.solomon import SolomonBoundary
-from solomon.contracts import AdapterHealth
+from solomon.contracts import AdapterHealth, AuthoritySource, AuthoritySourceAdapter, AuthoritySourceKind
 from solomon.credence.policy import CredenceLedger, CredencePolicy
 from solomon.currency.cache import CurrencyEvaluationCache
 from solomon.currency.contradiction import ContradictionSignal, contradictions_for_item
@@ -132,6 +135,7 @@ class SolomonService:
         )
         self.audit = AuditJournal(journal_dir / "journal.jsonl")
         self.document_store = SQLiteDocumentStore(data_dir / "sources.sqlite3")
+        self.authority_sources = SQLiteAuthoritySourceRegistry(data_dir / "authority-sources.sqlite3")
         self.workflow_store = SQLiteWorkflowStore(data_dir / "workflow.sqlite3")
         self.attestation_key = attestation_key
         self.boundary = boundary or SolomonBoundary()
@@ -454,18 +458,46 @@ class SolomonService:
     def register_authority_change(self, authority_id: str, request: AuthorityChangeRequest) -> dict[str, Any]:
         return self._authority.register_authority_change(authority_id, request)
 
+    def register_authority_source(self, source: AuthoritySource) -> AuthoritySource:
+        return self.authority_sources.register(source)
+
+    def schedule_authority_polls(self, *, as_of: datetime | None = None) -> list[str]:
+        return AuthorityPollOutbox(
+            registry=self.authority_sources,
+            adapters={},
+            consume_event=self._register_polled_authority_event,
+        ).schedule_due(as_of=as_of)
+
+    def run_authority_polls(
+        self,
+        adapters: Mapping[AuthoritySourceKind, AuthoritySourceAdapter],
+        *,
+        as_of: datetime | None = None,
+        limit: int = 100,
+    ) -> AuthorityPollBatch:
+        return AuthorityPollOutbox(
+            registry=self.authority_sources,
+            adapters=adapters,
+            consume_event=self._register_polled_authority_event,
+        ).run_due(as_of=as_of, limit=limit)
+
     def register_authority_event(self, request: AuthorityEventRequest) -> dict[str, Any]:
-        event, created = self.workflow_store.record_authority_event(
+        return self._register_polled_authority_event(
             AuthorityChangeEvent(
                 source_id=request.source_id,
                 idempotency_key=request.idempotency_key,
                 authority_id=request.authority_id,
+                previous_version=request.previous_version,
                 new_version=request.new_version,
                 changed_at=request.changed_at,
                 evidence_url=request.evidence_url,
                 evidence_sha256=request.evidence_sha256,
+                diff=request.diff,
             )
         )
+
+    def _register_polled_authority_event(self, authority_event: AuthorityChangeEvent) -> dict[str, Any]:
+        event, created = self.workflow_store.record_authority_event(authority_event)
         if not created:
             existing_tasks = [
                 task.model_dump(mode="json")

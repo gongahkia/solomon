@@ -10,6 +10,7 @@ from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.graph.suggestions import SuggestionDecision
 from solomon.mcp.tools.helpers import (
+    _append_mcp_call,
     _audit_metadata,
     _currency_state_for_mcp,
     _mcp_log_payload,
@@ -66,8 +67,8 @@ def verify_position(
             ),
         )
     currency = runtime.service.evaluate_currency(knowledge_item_id)
-    entry = runtime.service.audit.append(
-        "mcp_call",
+    entry = _append_mcp_call(
+        runtime.service,
         _mcp_log_payload(
             "solomon.verify_position",
             caller_id=caller_id,
@@ -126,8 +127,8 @@ def ingest(
     if "error" in review:
         return review
     suggestions = runtime.service.dependency_suggestions(item_id=item.id, decision=SuggestionDecision.PENDING)
-    entry = runtime.service.audit.append(
-        "mcp_call",
+    entry = _append_mcp_call(
+        runtime.service,
         _mcp_log_payload(
             "solomon.ingest",
             caller_id=caller_id,

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from solomon.graph.suggestions import SuggestionDecision
 from solomon.mcp.tools.helpers import (
+    _append_mcp_call,
     _audit_metadata,
     _currency_state_for_mcp,
     _filter_impact_scope,
@@ -51,8 +52,8 @@ def preflight_context(
             "boundary": rejected_boundary_metadata(review),
             "audit": None,
         }
-    entry = runtime.service.audit.append(
-        "mcp_call",
+    entry = _append_mcp_call(
+        runtime.service,
         _mcp_log_payload(
             "solomon.preflight_context",
             caller_id=caller_id,

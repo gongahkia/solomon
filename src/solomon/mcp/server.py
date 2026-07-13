@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Callable
+
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 from starlette.applications import Starlette
@@ -21,12 +24,13 @@ from solomon.config import (
     get_settings,
     verification_policy_from_settings,
 )
-from solomon.mcp.auth import MCPAuthConfig, bearer_token_matches, token_from_env
+from solomon.mcp.auth import MCPAuthConfig, MCPPrincipal, authorized_mcp_call, bearer_token_matches, token_from_env
 from solomon.mcp.tools import MCPToolSpec, SolomonMCPRuntime, mcp_tool_specs, register_solomon_tools
 from solomon.mcp.tools.helpers import _error_result
 from solomon.mcp.transport import MCPShutdownConfig, MCPTransportConfig, MCPTransportKind
 
 PROTECTED_RESOURCE_METADATA_PREFIX = "/.well-known/oauth-protected-resource"
+MCPIdentityResolver = Callable[[str], MCPPrincipal | None]
 
 
 class SolomonMCPServerConfig(SolomonModel):
@@ -38,28 +42,59 @@ class SolomonMCPServerConfig(SolomonModel):
 
 
 class MCPBearerAuthMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app: ASGIApp, expected_token: str, metadata_path: str) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        expected_token: str | None,
+        auth: MCPAuthConfig,
+        metadata_path: str,
+        identity_resolver: MCPIdentityResolver | None = None,
+    ) -> None:
         super().__init__(app)
         self.expected_token = expected_token
+        self.auth = auth
         self.metadata_path = metadata_path
+        self.identity_resolver = identity_resolver
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         if request.method == "GET" and request.url.path == self.metadata_path:
             return await call_next(request)
         supplied = _bearer_token_from_header(request.headers.get("authorization"))
-        if not bearer_token_matches(supplied, self.expected_token):
-            metadata_url = _request_url(request, self.metadata_path)
-            return JSONResponse(
-                _error_result(
-                    "scope_denied",
-                    "missing or invalid bearer token",
-                    retryable=False,
-                    details={},
-                ),
-                status_code=401,
-                headers={"WWW-Authenticate": f'Bearer resource_metadata="{metadata_url}"'},
-            )
-        return await call_next(request)
+        if self.expected_token is not None and not bearer_token_matches(supplied, self.expected_token):
+            return _mcp_auth_error(request, self.metadata_path)
+        if supplied is None and (self.identity_resolver is not None or self.auth.require_identity):
+            return _mcp_auth_error(request, self.metadata_path)
+        principal = self._principal_for(supplied)
+        if principal is None and (self.identity_resolver is not None or self.auth.require_identity):
+            return _mcp_auth_error(request, self.metadata_path)
+        correlation_id = request.headers.get("x-correlation-id") or f"mcp:http:{uuid.uuid4().hex}"
+        with authorized_mcp_call(principal, correlation_id):
+            return await call_next(request)
+
+    def _principal_for(self, supplied: str | None) -> MCPPrincipal | None:
+        if self.identity_resolver is not None and supplied is not None:
+            try:
+                return self.identity_resolver(supplied)
+            except Exception:  # noqa: BLE001
+                return None
+        if self.expected_token is not None:
+            return self.auth.resolved_static_principal()
+        return None
+
+
+def _mcp_auth_error(request: Request, metadata_path: str) -> JSONResponse:
+    metadata_url = _request_url(request, metadata_path)
+    return JSONResponse(
+        _error_result(
+            "scope_denied",
+            "missing or invalid bearer token",
+            retryable=False,
+            details={},
+        ),
+        status_code=401,
+        headers={"WWW-Authenticate": f'Bearer resource_metadata="{metadata_url}"'},
+    )
 
 
 def create_server_config(
@@ -86,6 +121,7 @@ def create_fastmcp_server(
     name: str = "solomon",
     host: str = "127.0.0.1",
     port: int = 8141,
+    runtime: SolomonMCPRuntime | None = None,
 ) -> FastMCP:
     server = FastMCP(
         name,
@@ -96,7 +132,7 @@ def create_fastmcp_server(
         sse_path="/sse",
         message_path="/messages/",
     )
-    register_solomon_tools(server, SolomonMCPRuntime(service))
+    register_solomon_tools(server, runtime or SolomonMCPRuntime(service))
     return server
 
 
@@ -116,7 +152,18 @@ def service_from_settings() -> SolomonService:
 
 
 def run_stdio_server(service: SolomonService | None = None) -> None:
-    server = create_fastmcp_server(service or service_from_settings(), name="solomon", host="127.0.0.1")
+    auth = MCPAuthConfig.from_env()
+    resolved_service = service or service_from_settings()
+    server = create_fastmcp_server(
+        resolved_service,
+        name="solomon",
+        host="127.0.0.1",
+        runtime=SolomonMCPRuntime(
+            resolved_service,
+            principal=auth.static_principal,
+            require_identity=auth.require_identity,
+        ),
+    )
     server.run("stdio")
 
 
@@ -127,12 +174,20 @@ def create_streamable_http_app(
     port: int = 8141,
     expected_token: str | None = None,
     auth: MCPAuthConfig | None = None,
+    identity_resolver: MCPIdentityResolver | None = None,
 ) -> Starlette:
+    resolved_auth = auth or MCPAuthConfig.from_env()
     return _with_bearer_auth(
-        create_fastmcp_server(service, host=host, port=port).streamable_http_app(),
+        create_fastmcp_server(
+            service,
+            host=host,
+            port=port,
+            runtime=SolomonMCPRuntime(service, require_identity=resolved_auth.require_identity),
+        ).streamable_http_app(),
         expected_token=expected_token if expected_token is not None else token_from_env(),
-        auth=auth or MCPAuthConfig(),
+        auth=resolved_auth,
         resource_path="/mcp",
+        identity_resolver=identity_resolver,
     )
 
 
@@ -143,12 +198,20 @@ def create_sse_app(
     port: int = 8141,
     expected_token: str | None = None,
     auth: MCPAuthConfig | None = None,
+    identity_resolver: MCPIdentityResolver | None = None,
 ) -> Starlette:
+    resolved_auth = auth or MCPAuthConfig.from_env()
     return _with_bearer_auth(
-        create_fastmcp_server(service, host=host, port=port).sse_app(),
+        create_fastmcp_server(
+            service,
+            host=host,
+            port=port,
+            runtime=SolomonMCPRuntime(service, require_identity=resolved_auth.require_identity),
+        ).sse_app(),
         expected_token=expected_token if expected_token is not None else token_from_env(),
-        auth=auth or MCPAuthConfig(),
+        auth=resolved_auth,
         resource_path="/sse",
+        identity_resolver=identity_resolver,
     )
 
 
@@ -215,6 +278,7 @@ def _with_bearer_auth(
     expected_token: str | None,
     auth: MCPAuthConfig,
     resource_path: str,
+    identity_resolver: MCPIdentityResolver | None,
 ) -> Starlette:
     metadata_path = f"{PROTECTED_RESOURCE_METADATA_PREFIX}{resource_path}"
 
@@ -231,8 +295,14 @@ def _with_bearer_auth(
         return JSONResponse(payload)
 
     app.add_route(metadata_path, protected_resource_metadata, methods=["GET"])
-    if expected_token is not None:
-        app.add_middleware(MCPBearerAuthMiddleware, expected_token=expected_token, metadata_path=metadata_path)
+    if expected_token is not None or identity_resolver is not None or auth.require_identity:
+        app.add_middleware(
+            MCPBearerAuthMiddleware,
+            expected_token=expected_token,
+            auth=auth,
+            metadata_path=metadata_path,
+            identity_resolver=identity_resolver,
+        )
     return app
 
 
@@ -251,6 +321,7 @@ def _bearer_token_from_header(value: str | None) -> str | None:
 
 __all__ = [
     "MCPBearerAuthMiddleware",
+    "MCPIdentityResolver",
     "SolomonMCPServerConfig",
     "available_tool_names",
     "create_fastmcp_server",

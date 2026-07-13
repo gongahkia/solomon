@@ -253,4 +253,7 @@ Output:
 
 ## Implementation notes
 
-[Inference] The MCP layer should stay thin: validate schema, enforce auth/scope/rate limits, run boundary preflight, call `SolomonService`, write MCP audit metadata, and serialize. Currency, graph traversal, dependency suggestion, and audit-pack assembly remain owned by existing Solomon modules.
+The MCP layer validates schema, binds authenticated identity before tool execution, enforces role/tool/matter/client
+permissions and per-principal limits, runs boundary preflight, calls `SolomonService`, writes attributed MCP audit
+metadata, and serializes. A caller-provided `caller_id` cannot override a bound identity. Currency, graph traversal,
+dependency suggestion, and audit-pack assembly remain owned by existing Solomon modules.

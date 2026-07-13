@@ -29,11 +29,27 @@ Replace `/absolute/path/to/solomon` with this repo path. The server command is:
 uv --directory /absolute/path/to/solomon run python -m solomon.mcp.server
 ```
 
-Stdio does not need bearer auth. It reads these env vars:
+Stdio has no HTTP bearer exchange; bind a trusted launch identity when authorization is required. It reads these env
+vars:
 
 - `SOLOMON_DATA_DIR`
 - `SOLOMON_JOURNAL_DIR`
 - `SOLOMON_DATABASE_URL`
+- `SOLOMON_MCP_PRINCIPAL_JSON` — trusted principal JSON with `subject`, `role`, `scopes`, `matter_ids`, and `client_ids`.
+- `SOLOMON_MCP_REQUIRE_IDENTITY=true` — refuse unbound calls.
+
+For HTTP/SSE, combine `SOLOMON_MCP_TOKEN` with the same principal JSON. `solomon.read`, `solomon.write`, and
+`solomon.audit` are distinct tool scopes; `solomon.admin` grants all three. A scoped principal must explicitly provide
+its permitted matter/client scope. `audit_pack` and firm/practice-area currency reports require unrestricted scope
+because their current export formats are global. Caller-supplied `caller_id` is ignored when an identity is bound.
+
+```bash
+export SOLOMON_MCP_PRINCIPAL_JSON='{"subject":"lawyer-a","role":"lawyer","scopes":["solomon.read"],"matter_ids":["matter-a"],"client_ids":["client-a"]}'
+export SOLOMON_MCP_REQUIRE_IDENTITY=true
+```
+
+Embedding hosts can supply a validated bearer-to-principal resolver to the HTTP/SSE app factory; the MCP layer does
+not parse unvalidated token claims.
 
 ## Claude Code
 

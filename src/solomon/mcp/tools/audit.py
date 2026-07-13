@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any
 
-from solomon.mcp.tools.helpers import _mcp_log_payload, _scope_error_for_item
+from solomon.mcp.tools.helpers import _append_mcp_call, _mcp_log_payload, _scope_error_for_item
 
 if TYPE_CHECKING:
     from solomon.mcp.tools.runtime import SolomonMCPRuntime
@@ -37,8 +37,8 @@ def audit_pack(
     with TemporaryDirectory(prefix="solomon-mcp-audit-") as temp_dir:
         pack_dir = runtime.service.export_audit_pack(Path(temp_dir))
         manifest = (pack_dir / "manifest.json").read_text(encoding="utf-8")
-    entry = runtime.service.audit.append(
-        "mcp_call",
+    entry = _append_mcp_call(
+        runtime.service,
         _mcp_log_payload(
             "solomon.audit_pack",
             caller_id=caller_id,

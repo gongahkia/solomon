@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from solomon.api.service import SolomonService
+from solomon.audit.journal import AuditAttribution, AuditEntry
 from solomon.currency.models import KnowledgeItem
 from solomon.errors import (
     BadRequestError,
@@ -20,6 +21,7 @@ from solomon.errors import (
     SolomonError,
     UpstreamError,
 )
+from solomon.mcp.auth import current_mcp_call
 from solomon.mcp.logging import MCPCallLogRecord, MCPCallStatus, hash_mcp_input
 
 
@@ -50,8 +52,8 @@ def _log_mcp_call(
     error_code: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> None:
-    service.audit.append(
-        "mcp_call",
+    _append_mcp_call(
+        service,
         _mcp_log_payload(
             tool_name,
             caller_id=caller_id,
@@ -66,6 +68,16 @@ def _log_mcp_call(
         ),
     )
 
+
+def _append_mcp_call(service: SolomonService, payload: dict[str, Any]) -> AuditEntry:
+    context = current_mcp_call()
+    attribution = (
+        AuditAttribution(actor_id=context.principal.subject, correlation_id=context.correlation_id)
+        if context is not None and context.principal is not None
+        else None
+    )
+    return service.audit.append("mcp_call", payload, attribution=attribution)
+
 def _mcp_log_payload(
     tool_name: str,
     *,
@@ -79,6 +91,14 @@ def _mcp_log_payload(
     error_code: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    context = current_mcp_call()
+    resolved_metadata = dict(metadata or {})
+    if context is not None and context.principal is not None:
+        caller_id = context.principal.subject
+        resolved_metadata["identity"] = {
+            "roles": sorted({context.principal.role, *context.principal.roles}),
+            "scopes": sorted(context.principal.scopes),
+        }
     payload = MCPCallLogRecord(
         tool_name=tool_name,
         input_sha256=hash_mcp_input(input_payload or {}),
@@ -89,7 +109,7 @@ def _mcp_log_payload(
         currency_outcome=currency_outcome,
         boundary_outcome=boundary_outcome,
         error_code=error_code,
-        metadata=metadata or {},
+        metadata=resolved_metadata,
     )
     return payload.model_dump(mode="json")
 
@@ -126,8 +146,8 @@ def _review_mcp_output(
     findings = _response_value(response, "findings", [])
     finding_count = len(findings) if isinstance(findings, list) else 0
     if classification in service.boundary.policy.unsafe_classifications:
-        service.audit.append(
-            "mcp_call",
+        _append_mcp_call(
+            service,
             _mcp_log_payload(
                 tool_name,
                 matter_id=matter_id,

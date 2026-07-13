@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, cast
 
 from solomon.currency.report import ReportScopeKind, render_currency_report_pdf
-from solomon.mcp.tools.helpers import _error_result, _mcp_log_payload
+from solomon.mcp.tools.helpers import _append_mcp_call, _error_result, _mcp_log_payload
 
 if TYPE_CHECKING:
     from solomon.mcp.tools.runtime import SolomonMCPRuntime
@@ -65,8 +65,8 @@ def currency_report(
             manifest = (pack_dir / "manifest.json").read_text(encoding="utf-8")
             report_json = (pack_dir / "currency-report.json").read_text(encoding="utf-8")
         pack = {"manifest_json": manifest, "report_json": report_json}
-    entry = runtime.service.audit.append(
-        "mcp_call",
+    entry = _append_mcp_call(
+        runtime.service,
         _mcp_log_payload(
             "solomon.currency_report",
             caller_id=caller_id,

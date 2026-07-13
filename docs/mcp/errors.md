@@ -28,6 +28,10 @@ Rules:
 - `details` never includes raw firm content, privileged text, mapping tables, or secrets.
 - every error is audit-logged with tool name, caller, scope, and input hash.
 
+`authorization_denied` covers a missing bound identity, an insufficient tool scope or role, an out-of-scope matter or
+client, or a restricted caller requesting a global export. The response does not disclose the principal's permitted
+scope set.
+
 ## Codes
 
 ### `boundary_rejected`

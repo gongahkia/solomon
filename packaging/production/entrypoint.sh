@@ -38,7 +38,7 @@ fi
 
 if [ "$(id -u)" -eq 0 ]; then
     mkdir -p /var/lib/solomon/data /var/lib/solomon/journal
-    chown -R solomon:solomon /var/lib/solomon
+    chown -R solomon:solomon /var/lib/solomon/data /var/lib/solomon/journal
     exec setpriv --reuid=10001 --regid=10001 --init-groups -- "$@"
 fi
 

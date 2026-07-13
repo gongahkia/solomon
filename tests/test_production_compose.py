@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).parents[1]
 
 
@@ -28,8 +27,8 @@ def test_production_compose_declares_required_services_and_secrets() -> None:
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("docker") is None, reason="docker is required for Compose schema validation")
 def test_production_compose_validates_with_docker() -> None:
-    result = subprocess.run(
-        ["sh", "scripts/check_production_compose.sh"],
+    result = subprocess.run(  # noqa: S603 - test invokes a repository-controlled script
+        ["/bin/sh", str(ROOT / "scripts/check_production_compose.sh")],
         cwd=ROOT,
         check=False,
         capture_output=True,

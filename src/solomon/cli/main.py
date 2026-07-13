@@ -126,7 +126,9 @@ def worker(
     interval_seconds: Annotated[
         int | None, typer.Option("--interval-seconds", min=5, help="Seconds between source-sync cycles.")
     ] = None,
-    source_limit: Annotated[int | None, typer.Option("--source-limit", min=1, help="Maximum sources per cycle.")] = None,
+    source_limit: Annotated[
+        int | None, typer.Option("--source-limit", min=1, help="Maximum sources per cycle.")
+    ] = None,
 ) -> None:
     """Synchronize enabled filesystem document sources."""
     settings = get_settings()

@@ -74,14 +74,22 @@ class FakeCursor:
 
 
 class FakePostgres:
-    def __init__(self) -> None:
+    def __init__(self, *, mapping_rows: bool = False) -> None:
         self.state: dict[int, tuple[str, str]] = {}
         self.statements: list[str] = []
+        self.mapping_rows = mapping_rows
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> FakeCursor:
         normalized = " ".join(sql.split())
         self.statements.append(normalized)
         if normalized.startswith("SELECT version, name, fingerprint"):
+            if self.mapping_rows:
+                return FakeCursor(
+                    [
+                        {"version": version, "name": state[0], "fingerprint": state[1]}
+                        for version, state in sorted(self.state.items())
+                    ]
+                )
             return FakeCursor([(version, *state) for version, state in sorted(self.state.items())])
         if normalized.startswith("INSERT INTO schema_migrations"):
             self.state[int(params[1])] = (str(params[2]), str(params[3]))
@@ -96,3 +104,11 @@ def test_postgres_migrations_apply_in_order_and_skip_already_applied_versions():
     assert apply_postgres_migrations(postgres.execute, migrations) == []
     assert [version for version in sorted(postgres.state)] == [1, 2]
     assert postgres.statements.count("CREATE TABLE first_table (id BIGINT PRIMARY KEY)") == 1
+
+
+def test_postgres_migrations_support_dictionary_rows():
+    postgres = FakePostgres(mapping_rows=True)
+    migrations = _migrations()
+
+    assert apply_postgres_migrations(postgres.execute, migrations) == list(migrations)
+    assert apply_postgres_migrations(postgres.execute, migrations) == []

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, Literal
@@ -219,7 +219,7 @@ def _sqlite_state(connection: Any, scope: str | None) -> dict[int, tuple[str, st
         "SELECT version, name, fingerprint FROM schema_migrations WHERE scope = ? ORDER BY version",
         (scope,),
     ).fetchall()
-    return {int(row[0]): (str(row[1]), str(row[2])) for row in rows}
+    return {version: state for version, state in (_migration_row_values(row) for row in rows)}
 
 
 def _postgres_state(execute: PostgresExecute, scope: str | None) -> dict[int, tuple[str, str]]:
@@ -229,7 +229,13 @@ def _postgres_state(execute: PostgresExecute, scope: str | None) -> dict[int, tu
         "SELECT version, name, fingerprint FROM schema_migrations WHERE scope = %s ORDER BY version",
         (scope,),
     ).fetchall()
-    return {int(row[0]): (str(row[1]), str(row[2])) for row in rows}
+    return {version: state for version, state in (_migration_row_values(row) for row in rows)}
+
+
+def _migration_row_values(row: Any) -> tuple[int, tuple[str, str]]:
+    if isinstance(row, Mapping):
+        return int(row["version"]), (str(row["name"]), str(row["fingerprint"]))
+    return int(row[0]), (str(row[1]), str(row[2]))
 
 
 __all__ = [

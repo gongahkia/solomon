@@ -13,9 +13,13 @@ WORKDIR /app
 COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml README.md uv.lock ./
 COPY src ./src
-RUN groupadd --gid 10001 solomon \
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends build-essential \
+    && groupadd --gid 10001 solomon \
     && useradd --uid 10001 --gid 10001 --create-home --home-dir /nonexistent --shell /usr/sbin/nologin solomon \
-    && uv sync --locked --no-dev --extra server
+    && uv sync --locked --no-dev --extra server \
+    && apt-get purge --yes --auto-remove build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY packaging/production/entrypoint.sh /usr/local/bin/solomon-entrypoint
 RUN chmod 0555 /usr/local/bin/solomon-entrypoint \

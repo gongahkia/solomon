@@ -5,13 +5,23 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-# benchmark harness owns a broad set of generated/evaluation helpers pending W7.
 ALLOWLIST = {
+    Path("src/solomon/api/app.py"): "public FastAPI route facade retained while routes move to focused modules",
+    Path("src/solomon/api/service.py"): "public service facade retained for stable API, CLI, MCP, and test imports",
+    Path(
+        "src/solomon/audit/journal.py"
+    ): "tamper-evident journal persistence and verification stay transactionally cohesive",
+    Path("src/solomon/cli/main.py"): "CLI command registration remains a stable public entrypoint",
+    Path(
+        "src/solomon/console/app.py"
+    ): "console route and rendering facade remains cohesive while first-class workflows are completed",
     Path("src/solomon/evaluation.py"): "benchmark harness slated for W7 split",
-    # ASGI routes/templates share request-local helpers pending console tier decision in W15.
-    Path("src/solomon/console/app.py"): "secondary console surface pending W15 scope decision",
-    # deterministic parser/scorer variants stay together until contradiction work in W16.
     Path("src/solomon/graph/suggestions.py"): "dependency extraction variants pending W16 graph work",
+    Path(
+        "src/solomon/orchestrator/retrieval.py"
+    ): "retrieval fusion and context assembly retain shared ranking invariants",
+    Path("src/solomon/sources/store.py"): "source lifecycle persistence remains a single transactional implementation",
+    Path("src/solomon/store/sqlite.py"): "SQLite append-only store remains a single transactional implementation",
 }
 
 

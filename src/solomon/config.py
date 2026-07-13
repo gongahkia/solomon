@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./solomon-data/solomon.sqlite3"
     content_encryption_key_ref: str | None = Field(default=None, min_length=1, max_length=256)
     content_encryption_key: SecretStr | None = None
+    retention_default_days: int | None = Field(default=None, ge=1, le=36_500)
     local_model_url: str = "http://127.0.0.1:11434/api/generate"
     local_model_name: str = "qwen2.5-coder:1.5b"
     remote_model_url: str | None = None
@@ -137,6 +138,7 @@ class Settings(BaseSettings):
             "database_url": self.database_url,
             "content_encryption_configured": self.content_encryption_key is not None,
             "content_encryption_key_ref": self.content_encryption_key_ref,
+            "retention_default_days": self.retention_default_days,
             "server_auto_provision_tenants": self.server_auto_provision_tenants,
             "oidc_configured": self.oidc_issuer is not None,
             "oidc_clock_skew_seconds": self.oidc_clock_skew_seconds,

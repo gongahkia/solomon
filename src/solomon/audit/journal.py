@@ -255,15 +255,30 @@ class AuditJournal:
     def log_credence_change(self, entry: CredenceAuditEntry) -> AuditEntry:
         return self.append("credence_change", entry.model_dump(mode="json"))
 
-    def record_erasure_tombstone(self, *, subject_ref: str, lawful_basis: str, by: str) -> AuditEntry:
+    def record_erasure_tombstone(
+        self,
+        *,
+        subject_ref: str,
+        lawful_basis: str,
+        by: str,
+        attribution: AuditAttribution | None = None,
+        request_id: str | None = None,
+        affected_item_count: int | None = None,
+    ) -> AuditEntry:
+        payload: dict[str, Any] = {
+            "subject_ref_sha256": hashlib.sha256(subject_ref.encode("utf-8")).hexdigest(),
+            "lawful_basis": lawful_basis,
+            "by": by,
+            "mode": "tombstone-without-knowledge-delete",
+        }
+        if request_id is not None:
+            payload["request_id"] = request_id
+        if affected_item_count is not None:
+            payload["affected_item_count"] = affected_item_count
         return self.append(
             "erasure_tombstone",
-            {
-                "subject_ref_sha256": hashlib.sha256(subject_ref.encode("utf-8")).hexdigest(),
-                "lawful_basis": lawful_basis,
-                "by": by,
-                "mode": "tombstone-without-knowledge-delete",
-            },
+            payload,
+            attribution=attribution,
         )
 
     def export_pack(self, directory: Path | str) -> AuditPack:

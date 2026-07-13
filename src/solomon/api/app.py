@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -90,6 +91,7 @@ from solomon.orchestrator.models import (
     RemoteZDREndpoint,
     RoutingPolicy,
 )
+from solomon.retention import ErasureRecord, LegalHoldRecord, RetentionScope
 from solomon.workflow.models import ReviewTaskState
 
 PUBLIC_PATHS = {"/health", "/ready", "/metrics", "/docs", "/redoc", "/openapi.json"}
@@ -151,6 +153,23 @@ class ServicePrincipalCredentialResponse(ServicePrincipalResponse):
     credential: str
 
 
+class LegalHoldRequest(BaseModel):
+    scope: RetentionScope
+    scope_id: str = Field(min_length=1)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class ErasureRequest(BaseModel):
+    scope: RetentionScope
+    scope_id: str = Field(min_length=1)
+    subject_ref: str = Field(min_length=1)
+    lawful_basis: str = Field(min_length=1, max_length=500)
+
+
+class RetentionRunRequest(BaseModel):
+    as_of: datetime | None = None
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
     tenant_registry = TenantRegistry(resolved_settings.data_dir / "tenants" / "registry.json")
@@ -170,6 +189,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         credence_policy=cp, credence_policy_version=resolved_settings.credence_policy_version,
         embedding_provider=embedding_provider,
         content_cipher=content_cipher,
+        retention_default_days=resolved_settings.retention_default_days,
         boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
     )
     tenant_services: dict[str, SolomonService] = {}
@@ -190,6 +210,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             credence_policy=cp, credence_policy_version=resolved_settings.credence_policy_version,
             embedding_provider=embedding_provider,
             content_cipher=content_cipher,
+            retention_default_days=resolved_settings.retention_default_days,
             boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
         )
         metrics.attach(tenant_service)
@@ -201,6 +222,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if isinstance(resolved, SolomonService):
             return resolved
         return service
+
+    def retention_service(tenant_id: str | None) -> SolomonService:
+        if resolved_settings.sku != "server":
+            return service
+        if tenant_id is None or not is_valid_tenant_id(tenant_id):
+            raise HTTPException(status_code=400, detail="valid tenant_id is required")
+        record = tenant_registry.get(tenant_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="tenant not found")
+        return service_for_tenant(tenant_id)
 
     app = FastAPI(
         title="Solomon",
@@ -467,6 +498,63 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="service principal not found") from exc
         _record_service_principal_lifecycle(service, request, "revoked", record)
         return _service_principal_response(record)
+
+    @app.get("/retention/legal-holds", response_model=list[LegalHoldRecord])
+    def legal_holds(
+        request: Request,
+        active_only: bool = False,
+        tenant_id: str | None = None,
+    ) -> list[LegalHoldRecord]:
+        target = retention_service(tenant_id)
+        with target.authorized_as(_retention_principal(request), _request_correlation_id(request)):
+            return target.legal_holds(active_only=active_only)
+
+    @app.post("/retention/legal-holds", response_model=LegalHoldRecord, status_code=201)
+    def create_legal_hold(
+        request: Request,
+        payload: LegalHoldRequest,
+        tenant_id: str | None = None,
+    ) -> LegalHoldRecord:
+        target = retention_service(tenant_id)
+        with target.authorized_as(_retention_principal(request), _request_correlation_id(request)):
+            return target.create_legal_hold(scope=payload.scope, scope_id=payload.scope_id, reason=payload.reason)
+
+    @app.post("/retention/legal-holds/{hold_id}/release", response_model=LegalHoldRecord)
+    def release_legal_hold(request: Request, hold_id: str, tenant_id: str | None = None) -> LegalHoldRecord:
+        target = retention_service(tenant_id)
+        with target.authorized_as(_retention_principal(request), _request_correlation_id(request)):
+            return target.release_legal_hold(hold_id)
+
+    @app.get("/retention/erasures", response_model=list[ErasureRecord])
+    def erasure_requests(request: Request, tenant_id: str | None = None) -> list[ErasureRecord]:
+        target = retention_service(tenant_id)
+        with target.authorized_as(_retention_principal(request), _request_correlation_id(request)):
+            return target.erasure_requests()
+
+    @app.post("/retention/erasures", response_model=ErasureRecord, status_code=201)
+    def erase_retention_scope(
+        request: Request,
+        payload: ErasureRequest,
+        tenant_id: str | None = None,
+    ) -> ErasureRecord:
+        target = retention_service(tenant_id)
+        with target.authorized_as(_retention_principal(request), _request_correlation_id(request)):
+            return target.erase_retention_scope(
+                scope=payload.scope,
+                scope_id=payload.scope_id,
+                subject_ref=payload.subject_ref,
+                lawful_basis=payload.lawful_basis,
+            )
+
+    @app.post("/retention/run", response_model=list[ErasureRecord])
+    def apply_retention(
+        request: Request,
+        payload: RetentionRunRequest,
+        tenant_id: str | None = None,
+    ) -> list[ErasureRecord]:
+        target = retention_service(tenant_id)
+        with target.authorized_as(_retention_principal(request), _request_correlation_id(request)):
+            return target.apply_retention(as_of=payload.as_of)
 
     @app.post("/ingest")
     def ingest(request: Request, payload: IngestRequest) -> dict[str, Any]:
@@ -738,6 +826,8 @@ def _is_admin_path(path: str) -> bool:
         or path.startswith(f"{TENANT_MANAGEMENT_PREFIX}/")
         or path == "/service-principals"
         or path.startswith("/service-principals/")
+        or path == "/retention"
+        or path.startswith("/retention/")
     )
 
 
@@ -800,6 +890,22 @@ def _oidc_principal_for_request(
 
 def _correlation_id(request: Request) -> str:
     return request.headers.get("x-correlation-id") or uuid.uuid4().hex
+
+
+def _request_correlation_id(request: Request) -> str:
+    return getattr(request.state, "correlation_id", None) or _correlation_id(request)
+
+
+def _retention_principal(request: Request) -> AuthPrincipal:
+    principal = getattr(request.state, "principal", None)
+    if isinstance(principal, AuthPrincipal):
+        return principal
+    return AuthPrincipal(
+        subject="local-admin",
+        role="admin",
+        tenant_id=None,
+        scopes=ADMIN_AUTH_SCOPES,
+    )
 
 
 def _record_oidc_decision(

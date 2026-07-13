@@ -141,6 +141,10 @@ Runtime and diagnostics:
 - `POST /service-principals`
 - `POST /service-principals/{principal_id}/rotate`
 - `POST /service-principals/{principal_id}/revoke`
+- `GET|POST /retention/legal-holds`
+- `POST /retention/legal-holds/{hold_id}/release`
+- `GET|POST /retention/erasures`
+- `POST /retention/run`
 
 Knowledge, recall, and answers:
 
@@ -476,6 +480,19 @@ uv run uvicorn solomon.api.app:create_app --factory --host 0.0.0.0 --port 8140
 
 Changing the reference or key prevents startup from reading existing encrypted content; restore the matching key
 before rotating data through an approved migration.
+
+Retention is opt-in. `SOLOMON_RETENTION_DEFAULT_DAYS` selects the age threshold; an administrator invokes
+`POST /retention/run` to process due items. Retention and erasure operate on an `item`, `matter`, or `client` scope.
+An active legal hold blocks the full request. Completed logical erasure replaces current queryable content with a
+retention marker and retires the item; the append-only historical evidence remains intact. Server requests require
+the target `tenant_id` query parameter.
+
+```bash
+curl -X POST 'http://localhost:8140/retention/legal-holds?tenant_id=tenant-a' \
+  -H 'x-api-key: change-me' \
+  -H 'content-type: application/json' \
+  -d '{"scope":"matter","scope_id":"matter-123","reason":"litigation preservation"}'
+```
 
 Create tenant-bound integration credentials with an admin principal. The generated credential is shown only on
 creation or rotation; keep it in a secret manager. Solomon stores only a PBKDF2-SHA256 hash, requires the bound

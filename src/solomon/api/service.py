@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from base64 import b64decode
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -66,7 +67,7 @@ from solomon.credence.policy import CredenceLedger, CredencePolicy
 from solomon.currency.cache import CurrencyEvaluationCache
 from solomon.currency.contradiction import ContradictionSignal, contradictions_for_item
 from solomon.currency.engine import VerificationPolicy, record_verification
-from solomon.currency.models import KnowledgeItem, KnowledgeKind, now_utc
+from solomon.currency.models import CurrencyState, KnowledgeItem, KnowledgeKind, now_utc
 from solomon.currency.prediction import StalenessRiskReport
 from solomon.currency.report import (
     CurrencyMovementReport,
@@ -81,6 +82,7 @@ from solomon.graph.suggestions import DependencySuggestion, ReferenceExtraction,
 from solomon.graph.visualization import GraphFormat
 from solomon.orchestrator.models import ModelRequest, ModelRouter, RoutedModelResult
 from solomon.orchestrator.retrieval import RetrievalEmbeddingProvider, RetrievalOrchestrator
+from solomon.retention import ErasureRecord, LegalHoldNotFoundError, LegalHoldRecord, RetentionRegistry, RetentionScope
 from solomon.sources.extract import candidate_claims_from_text, extract_document_bytes
 from solomon.sources.filesystem import FilesystemDocumentSourceAdapter
 from solomon.sources.models import (
@@ -121,6 +123,12 @@ SERVICE_ACCESS: dict[str, ServiceAccess] = {
     "promote_candidate_claim": "curate",
     "reject_candidate_claim": "curate",
     "defer_candidate_claim": "curate",
+    "legal_holds": "review",
+    "create_legal_hold": "review",
+    "release_legal_hold": "review",
+    "erasure_requests": "review",
+    "erase_retention_scope": "review",
+    "apply_retention": "review",
     "recall": "read",
     "answer": "read",
     "complete_model_request": "read",
@@ -187,6 +195,7 @@ class SolomonService:
         credence_policy_version: str = "credence-policy.v1",
         embedding_provider: RetrievalEmbeddingProvider | None = None,
         content_cipher: ContentEnvelopeCipher | None = None,
+        retention_default_days: int | None = None,
     ) -> None:
         data_dir.mkdir(parents=True, exist_ok=True)
         journal_dir.mkdir(parents=True, exist_ok=True)
@@ -211,6 +220,8 @@ class SolomonService:
         )
         self.audit = AuditJournal(journal_dir / "journal.jsonl")
         self.document_store = SQLiteDocumentStore(data_dir / "sources.sqlite3", content_cipher=content_cipher)
+        self.retention_registry = RetentionRegistry(data_dir / "retention" / "registry.json")
+        self.retention_default_days = retention_default_days
         self.authority_sources = SQLiteAuthoritySourceRegistry(data_dir / "authority-sources.sqlite3")
         self.workflow_store = SQLiteWorkflowStore(data_dir / "workflow.sqlite3")
         self.attestation_key = attestation_key
@@ -291,6 +302,169 @@ class SolomonService:
             },
             attribution=AuditAttribution(actor_id=actor_id, correlation_id=correlation_id),
         )
+
+    def _audit_retention(self, event_type: str, payload: dict[str, Any]) -> AuditAttribution:
+        authorization = _service_authorization.get()
+        actor_id = authorization.principal.subject if authorization is not None else "system:retention"
+        correlation_id = (
+            authorization.correlation_id if authorization is not None else f"retention:{uuid.uuid4().hex}"
+        )
+        attribution = AuditAttribution(actor_id=actor_id, correlation_id=correlation_id)
+        self.audit.append(event_type, payload, attribution=attribution)
+        return attribution
+
+    def legal_holds(self, *, active_only: bool = False) -> list[LegalHoldRecord]:
+        return self.retention_registry.list_holds(active_only=active_only)
+
+    def create_legal_hold(self, *, scope: RetentionScope, scope_id: str, reason: str) -> LegalHoldRecord:
+        hold = self.retention_registry.create_hold(scope=scope, scope_id=scope_id, reason=reason)
+        self._audit_retention(
+            "legal_hold_created",
+            {
+                "decision": "allowed",
+                "hold_id": hold.hold_id,
+                "scope": hold.scope,
+                "scope_id_sha256": digest(hold.scope_id),
+                "reason_sha256": digest(hold.reason),
+            },
+        )
+        return hold
+
+    def release_legal_hold(self, hold_id: str) -> LegalHoldRecord:
+        try:
+            hold = self.retention_registry.release_hold(hold_id)
+        except LegalHoldNotFoundError as exc:
+            raise NotFoundError("legal hold not found") from exc
+        self._audit_retention(
+            "legal_hold_released",
+            {"decision": "allowed", "hold_id": hold.hold_id, "scope": hold.scope},
+        )
+        return hold
+
+    def erasure_requests(self) -> list[ErasureRecord]:
+        return self.retention_registry.list_erasures()
+
+    def erase_retention_scope(
+        self,
+        *,
+        scope: RetentionScope,
+        scope_id: str,
+        subject_ref: str,
+        lawful_basis: str,
+    ) -> ErasureRecord:
+        return self._erase_retention_scope(
+            scope=scope,
+            scope_id=scope_id,
+            subject_ref=subject_ref,
+            lawful_basis=lawful_basis,
+        )
+
+    def apply_retention(self, *, as_of: datetime | None = None) -> list[ErasureRecord]:
+        if self.retention_default_days is None:
+            raise BadRequestError("retention policy is not configured")
+        cutoff = (as_of or now_utc()).timestamp() - self.retention_default_days * 86_400
+        records: list[ErasureRecord] = []
+        for item in self.store.get_many():
+            if item.ingested_at.timestamp() > cutoff or _is_erased_for_retention(item):
+                continue
+            records.append(
+                self._erase_retention_scope(
+                    scope="item",
+                    scope_id=item.id,
+                    subject_ref=f"retention:{item.id}",
+                    lawful_basis="configured-retention",
+                )
+            )
+        self._audit_retention(
+            "retention_policy_applied",
+            {
+                "decision": "allowed",
+                "retention_default_days": self.retention_default_days,
+                "erased_count": sum(record.state == "erased" for record in records),
+                "held_count": sum(record.state == "held" for record in records),
+            },
+        )
+        return records
+
+    def _erase_retention_scope(
+        self,
+        *,
+        scope: RetentionScope,
+        scope_id: str,
+        subject_ref: str,
+        lawful_basis: str,
+    ) -> ErasureRecord:
+        items = _retention_scope_items(self.store.get_many(), scope=scope, scope_id=scope_id)
+        holds = self.retention_registry.matching_holds(items)
+        if holds:
+            record = self.retention_registry.record_erasure(
+                scope=scope,
+                scope_id=scope_id,
+                subject_ref=subject_ref,
+                lawful_basis=lawful_basis,
+                state="held",
+                affected_item_ids=[item.id for item in items],
+                legal_hold_ids=[hold.hold_id for hold in holds],
+            )
+            self._audit_retention(
+                "erasure_blocked_by_legal_hold",
+                {
+                    "decision": "denied",
+                    "request_id": record.request_id,
+                    "scope": scope,
+                    "scope_id_sha256": digest(scope_id),
+                    "affected_item_count": len(items),
+                    "legal_hold_count": len(holds),
+                },
+            )
+            return record
+        erased_items = [item for item in items if not _is_erased_for_retention(item)]
+        now = now_utc()
+        for item in erased_items:
+            metadata = dict(item.metadata)
+            metadata["retention"] = {
+                "state": "erased",
+                "subject_ref_sha256": hashlib.sha256(subject_ref.encode("utf-8")).hexdigest(),
+                "lawful_basis": lawful_basis,
+                "erased_at": now.isoformat(),
+            }
+            erased = item.model_copy(
+                update={
+                    "content": "[erased under retention policy]",
+                    "currency_state": CurrencyState.RETIRED,
+                    "metadata": metadata,
+                }
+            )
+            self.store.update_item(erased, event_type="knowledge_item_erased", occurred_at=now)
+            self.index.upsert_item(erased)
+        record = self.retention_registry.record_erasure(
+            scope=scope,
+            scope_id=scope_id,
+            subject_ref=subject_ref,
+            lawful_basis=lawful_basis,
+            state="erased",
+            affected_item_ids=[item.id for item in erased_items],
+        )
+        attribution = self._audit_retention(
+            "erasure_completed",
+            {
+                "decision": "allowed",
+                "request_id": record.request_id,
+                "scope": scope,
+                "scope_id_sha256": digest(scope_id),
+                "affected_item_count": len(erased_items),
+                "subject_ref_sha256": record.subject_ref_sha256,
+            },
+        )
+        self.audit.record_erasure_tombstone(
+            subject_ref=subject_ref,
+            lawful_basis=lawful_basis,
+            by=attribution.actor_id or "system:retention",
+            attribution=attribution,
+            request_id=record.request_id,
+            affected_item_count=len(erased_items),
+        )
+        return record
 
     def ingest(self, request: IngestRequest) -> KnowledgeItem:
         return self._ingestion.ingest(request)
@@ -980,6 +1154,24 @@ def _service_access_allowed(principal: AuthPrincipal, access: ServiceAccess) -> 
         return principal.has_scope(SOURCE_MANAGE_SCOPE)
     review_roles: tuple[AuthRole, ...] = ("admin", "reviewer", "lawyer")
     return any(principal.has_role(role) for role in review_roles)
+
+
+def _retention_scope_items(
+    items: list[KnowledgeItem],
+    *,
+    scope: RetentionScope,
+    scope_id: str,
+) -> list[KnowledgeItem]:
+    if scope == "item":
+        return [item for item in items if item.id == scope_id]
+    if scope == "matter":
+        return [item for item in items if item.matter_id == scope_id]
+    return [item for item in items if item.client_id == scope_id]
+
+
+def _is_erased_for_retention(item: KnowledgeItem) -> bool:
+    retention = item.metadata.get("retention")
+    return isinstance(retention, dict) and retention.get("state") == "erased"
 
 
 def _review_priority(item: KnowledgeItem) -> ReviewTaskPriority:

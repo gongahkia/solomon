@@ -115,6 +115,8 @@ def required_scope_for_request(method: str, path: str) -> str:
         or path.startswith("/tenants/")
         or path == "/service-principals"
         or path.startswith("/service-principals/")
+        or path == "/retention"
+        or path.startswith("/retention/")
     )
     if is_management_path:
         return TENANT_MANAGE_SCOPE

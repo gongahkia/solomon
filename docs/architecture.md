@@ -60,6 +60,14 @@ diagnostics, audit entries, or the database. Existing plaintext source-document 
 when encryption is enabled; unavailable references or authentication failures fail closed. Encryption decisions are
 metadata-only audit entries with actor and correlation ID.
 
+Retention is an explicit operator workflow, not an automatic deletion timer. `SOLOMON_RETENTION_DEFAULT_DAYS`
+enables `POST /retention/run`; administrators may also create item-, matter-, or client-scoped erasure requests.
+An active legal hold matching any target blocks the complete request and records a held state. A completed request
+retires each current item and replaces its queryable content with a retention marker, while the append-only event
+history remains intact for audit-chain verification. Legal-hold reasons, scope IDs, and subject references are hashed
+in audit entries; the durable registry keeps a subject-reference hash, request state, and affected item IDs. Server
+retention endpoints require an administrator and an explicit registered `tenant_id`.
+
 Optional server OIDC authentication requires `SOLOMON_OIDC_ISSUER` and `SOLOMON_OIDC_AUDIENCE`. The issuer must
 be HTTPS; Solomon obtains signing keys from its discovery document, caches JWKS entries, refreshes once for an
 unknown `kid`, and accepts only RS256 or ES256 JWTs with matching issuer, audience, expiry, and clock-skew checks.

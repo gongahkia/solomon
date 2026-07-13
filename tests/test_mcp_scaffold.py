@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import anyio
+import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from starlette.types import Message
@@ -99,6 +100,68 @@ def test_fastmcp_runtime_calls_service(tmp_path: Path) -> None:
         payload = _structured_payload(result)
         assert payload["knowledge_item_id"] == item.id
         assert payload["state"] == "live"
+
+    anyio.run(call)
+
+
+def test_fastmcp_tool_errors_use_stable_structured_envelopes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="structure x under regulation r section 12",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo",
+            matter_id="matter-a",
+            client_id="client-a",
+        )
+    )
+    server = create_fastmcp_server(service)
+
+    async def call() -> None:
+        validation = _structured_payload(
+            await server.call_tool(
+                "solomon.verify_position",
+                {
+                    "knowledge_item_id": item.id,
+                    "verifier_id": "lawyer-a",
+                    "decision": "unknown",
+                    "evidence_ref": "memo",
+                },
+            )
+        )
+        state = _structured_payload(await server.call_tool("solomon.check_currency", {"knowledge_item_id": "missing"}))
+        authorization = _structured_payload(
+            await server.call_tool(
+                "solomon.check_currency",
+                {"knowledge_item_id": item.id, "matter_id": "matter-b", "client_id": "client-b"},
+            )
+        )
+
+        def fail_search(*args: object, **kwargs: object) -> object:
+            raise ConnectionError("index unavailable")
+
+        monkeypatch.setattr(service.index, "search", fail_search)
+        upstream = _structured_payload(await server.call_tool("solomon.preflight_context", {"query": "structure"}))
+
+        assert validation["error"] == {
+            "category": "validation",
+            "code": "validation_failed",
+            "message": "MCP tool request failed validation",
+            "retryable": False,
+            "details": {},
+        }
+        assert state["error"]["category"] == "state"
+        assert state["error"]["code"] == "state_not_found"
+        assert authorization["error"]["category"] == "authorization"
+        assert authorization["error"]["code"] == "scope_denied"
+        assert upstream["error"] == {
+            "category": "upstream",
+            "code": "upstream_failure",
+            "message": "MCP tool upstream dependency failed",
+            "retryable": True,
+            "details": {},
+        }
 
     anyio.run(call)
 

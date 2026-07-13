@@ -23,6 +23,7 @@ from solomon.config import (
 )
 from solomon.mcp.auth import MCPAuthConfig, bearer_token_matches, token_from_env
 from solomon.mcp.tools import MCPToolSpec, SolomonMCPRuntime, mcp_tool_specs, register_solomon_tools
+from solomon.mcp.tools.helpers import _error_result
 from solomon.mcp.transport import MCPShutdownConfig, MCPTransportConfig, MCPTransportKind
 
 
@@ -43,7 +44,12 @@ class MCPBearerAuthMiddleware(BaseHTTPMiddleware):
         supplied = _bearer_token_from_header(request.headers.get("authorization"))
         if not bearer_token_matches(supplied, self.expected_token):
             return JSONResponse(
-                {"ok": False, "error": {"code": "scope_denied", "message": "missing or invalid bearer token"}},
+                _error_result(
+                    "scope_denied",
+                    "missing or invalid bearer token",
+                    retryable=False,
+                    details={},
+                ),
                 status_code=401,
             )
         return await call_next(request)

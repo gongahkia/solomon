@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from solomon.api.service import SolomonService
 from solomon.currency.models import KnowledgeItem
+from solomon.errors import BadRequestError, NotFoundError, PolicyRefusalError, SolomonError
 from solomon.mcp.logging import MCPCallLogRecord, MCPCallStatus, hash_mcp_input
 
 
@@ -208,8 +213,63 @@ def _response_value(response: object, field: str, default: Any) -> Any:
     value = getattr(response, field, default)
     return getattr(value, "value", value)
 
-def _error_result(code: str, message: str, *, retryable: bool, details: dict[str, Any]) -> dict[str, Any]:
-    return {"ok": False, "error": {"code": code, "message": message, "retryable": retryable, "details": details}}
+def structured_tool_errors(function: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+    @wraps(function)
+    def invoke(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        try:
+            return function(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001
+            return _exception_error_result(exc)
+
+    return invoke
+
+
+def _error_result(
+    code: str,
+    message: str,
+    *,
+    retryable: bool,
+    details: dict[str, Any],
+    category: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": {
+            "category": category or _error_category(code),
+            "code": code,
+            "message": message,
+            "retryable": retryable,
+            "details": details,
+        },
+    }
+
+
+def _exception_error_result(exc: Exception) -> dict[str, Any]:
+    if isinstance(exc, ValidationError | ValueError | BadRequestError):
+        return _error_result("validation_failed", "MCP tool request failed validation", retryable=False, details={})
+    if isinstance(exc, PolicyRefusalError):
+        return _error_result("authorization_denied", "MCP tool request was denied", retryable=False, details={})
+    if isinstance(exc, NotFoundError | KeyError):
+        return _error_result("state_not_found", "MCP tool requested unavailable state", retryable=False, details={})
+    if isinstance(exc, TimeoutError | ConnectionError | OSError):
+        return _error_result("upstream_failure", "MCP tool upstream dependency failed", retryable=True, details={})
+    if isinstance(exc, SolomonError):
+        return _error_result("internal_failure", "MCP tool request failed", retryable=False, details={})
+    return _error_result("internal_failure", "MCP tool request failed", retryable=False, details={})
+
+
+def _error_category(code: str) -> str:
+    if code in {"invalid_request", "bad_request", "validation_failed"}:
+        return "validation"
+    if code in {"scope_denied", "authorization_denied", "policy_refusal"}:
+        return "authorization"
+    if code in {"not_found", "state_not_found", "invalid_state"}:
+        return "state"
+    if code in {"upstream_failure", "boundary_rejected"}:
+        return "upstream"
+    if code == "rate_limited":
+        return "rate_limit"
+    return "internal"
 
 def _audit_metadata(seq: int, entry_hash: str, journal_path: Path) -> dict[str, str]:
     return {"entry_id": str(seq), "entry_hash": entry_hash, "journal_path": str(journal_path)}

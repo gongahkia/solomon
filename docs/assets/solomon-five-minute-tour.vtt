@@ -1,0 +1,61 @@
+WEBVTT
+
+1
+00:00:00.000 --> 00:00:23.333
+Solomon in five minutes
+Currency infrastructure for verified legal knowledge
+
+2
+00:00:23.333 --> 00:00:46.267
+The problem is not retrieval alone
+A useful memo can still be unsafe to reuse
+
+3
+00:00:46.267 --> 00:01:10.067
+Start with a knowledge record
+Provenance, valid time, ingestion time, scope, and verification
+
+4
+00:01:10.067 --> 00:01:33.933
+Model dependencies as evidence
+Internal positions can depend on authorities and other positions
+
+5
+00:01:33.933 --> 00:01:59.933
+When an authority moves
+Solomon propagates a review obligation, not a legal conclusion
+
+6
+00:01:59.933 --> 00:02:27.667
+Use the verification desk
+Assign, inspect evidence, reaffirm, supersede, retire, or pin
+
+7
+00:02:27.667 --> 00:02:56.333
+Protect the model boundary
+Review, minimise, pseudonymise, and fail closed
+
+8
+00:02:56.333 --> 00:03:23.667
+Give MCP hosts current context
+Preflight context excludes stale firm material by default
+
+9
+00:03:23.667 --> 00:03:51.200
+Keep an audit trail without copying content
+Hash-chained metadata supports reconstruction and review
+
+10
+00:03:51.200 --> 00:04:16.600
+Report the impact to partners
+Currency reports turn events into a review queue
+
+11
+00:04:16.600 --> 00:04:44.933
+Exercise realistic scenarios
+Vendor, Big Law, in-house GC, and boutique workflows
+
+12
+00:04:44.933 --> 00:05:15.467
+Use Solomon as a control plane
+Flag uncertainty, preserve evidence, keep lawyers in control

@@ -85,6 +85,9 @@ uv run solomon console serve --host 127.0.0.1 --port 8150
 
 See [`docs/console/`](./docs/console/) for supported workflows and screenshots.
 
+Watch the [narrated five-minute tour](./docs/assets/solomon-five-minute-tour.mp4) with
+[WebVTT chapter captions](./docs/assets/solomon-five-minute-tour.vtt).
+
 ## CLI And SDK
 
 ### Power users / dev loop

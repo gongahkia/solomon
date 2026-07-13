@@ -7,6 +7,8 @@ from typing import Any, cast
 from solomon.api.service_models import AnswerRequest, AnswerResponse, PrimitivePlanRequest, PrimitivePlanStep
 from solomon.api.services.base import ServiceDelegate
 from solomon.api.services.common import build_answer_prompt, digest, plan_explainability_summary
+from solomon.audit.journal import AuditAttribution
+from solomon.boundary.solomon import BoundaryRefusedError, BoundaryUnavailableError
 from solomon.currency.models import KnowledgeItem, Matter
 from solomon.errors import PolicyRefusalError
 from solomon.orchestrator.models import ModelRequest, ModelRouter, RoutedModelResult
@@ -94,7 +96,24 @@ class AnswerService(ServiceDelegate):
         *,
         matter: Matter | None = None,
     ) -> RoutedModelResult:
-        context = self.boundary.sanitize_context(request.prompt, matter_id=request.matter_id)
+        prompt_sha256 = digest(request.prompt)
+        correlation_id = f"model:{prompt_sha256[:16]}"
+        try:
+            context = self.boundary.sanitize_context(request.prompt, matter_id=request.matter_id)
+        except (BoundaryRefusedError, BoundaryUnavailableError) as exc:
+            self.audit.append(
+                "model_egress_refused",
+                {
+                    "matter_id": request.matter_id,
+                    "decision": "refused",
+                    "reason": (
+                        "boundary_unavailable" if isinstance(exc, BoundaryUnavailableError) else "boundary_refused"
+                    ),
+                    "prompt_sha256": prompt_sha256,
+                },
+                attribution=AuditAttribution(actor_id="system:model-gateway", correlation_id=correlation_id),
+            )
+            raise
         routed = router.complete(request.model_copy(update={"prompt": context.sanitized_text}), matter=matter)
         demasked = self.boundary.reidentify_response(context.context_id, routed.response.text)
         response = routed.response.model_copy(
@@ -119,11 +138,13 @@ class AnswerService(ServiceDelegate):
                 "matter_id": request.matter_id,
                 "endpoint": routed.audit.endpoint.value,
                 "crossed_boundary": routed.audit.crossed_boundary,
+                "decision": "allowed",
                 "prompt_sha256": routed.audit.prompt_sha256,
                 "prompt_chars": routed.audit.prompt_chars,
                 "mapping_count": context.mapping_count,
                 "mapping_flushed": demasked.mapping_flushed,
             },
+            attribution=AuditAttribution(actor_id="system:model-gateway", correlation_id=correlation_id),
         )
         return RoutedModelResult(response=response, audit=routed.audit)
 

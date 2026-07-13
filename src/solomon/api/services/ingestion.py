@@ -15,6 +15,7 @@ from solomon.api.service_models import (
 )
 from solomon.api.services.base import ServiceDelegate
 from solomon.api.services.common import digest
+from solomon.audit.journal import AuditAttribution
 from solomon.currency.models import (
     CredenceTier,
     CurrencyState,
@@ -65,6 +66,19 @@ class IngestionService(ServiceDelegate):
         item = self._seed_verification_from_source(item)
         item = self.index.upsert_item(item)
         self.store.write_item(item)
+        if hardened.findings:
+            self.audit.append(
+                "stored_content_hardened",
+                {
+                    "item_id": item.id,
+                    "decision": item.content_role.value,
+                    "findings": hardened.findings,
+                },
+                attribution=AuditAttribution(
+                    actor_id=request.author or f"source:{request.source_kind.value}",
+                    correlation_id=f"knowledge_item:{item.id}",
+                ),
+            )
         self._create_dependency_suggestions(item)
         return item
 

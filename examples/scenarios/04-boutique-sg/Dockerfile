@@ -13,4 +13,4 @@ COPY . .
 
 RUN uv sync --locked --extra dev
 
-CMD ["uv", "run", "uvicorn", "solomon.console.app:create_console_app", "--factory", "--host", "0.0.0.0", "--port", "8150"]
+CMD ["sh", "-c", "uv run python examples/scenarios/04-boutique-sg/seed_console.py && SOLOMON_DATA_DIR=/app/data SOLOMON_JOURNAL_DIR=/app/journal uv run uvicorn solomon.console.app:create_console_app --factory --host 0.0.0.0 --port 8150"]

@@ -8,8 +8,8 @@ services:
     ports:
       - "8150:8150"
     volumes:
-      - boutique-data:/app/solomon-data
-      - boutique-journal:/app/solomon-journal
+      - boutique-data:/app/data
+      - boutique-journal:/app/journal
 
 volumes:
   boutique-data:

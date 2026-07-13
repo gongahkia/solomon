@@ -20,7 +20,8 @@ Expected invariants:
 - four privacy memos become `StalePendingReverification`; and
 - the audit journal verifies.
 
-The Compose console walkthrough and recording remain open work.
+The [Compose-console replay](../../../docs/assets/scenarios/boutique-sg/compose-console.mp4) shows the seeded review
+queue; [WebVTT captions](../../../docs/assets/scenarios/boutique-sg/compose-console.vtt) accompany it.
 
 For the one-container local console demo, start Compose from this directory and open
 `http://127.0.0.1:8150/console`:

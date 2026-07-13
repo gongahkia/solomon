@@ -23,7 +23,7 @@ def _seed() -> dict[str, Any]:
     return loaded
 
 
-def run_scenario(root: Path) -> dict[str, Any]:
+def _seed_scenario(root: Path) -> tuple[dict[str, Any], SolomonService, dict[str, str], int, list[str], Any]:
     seed = _seed()
     memos = seed["memos"]
     authorities = seed["authority_anchors"]
@@ -76,11 +76,16 @@ def run_scenario(root: Path) -> dict[str, Any]:
     states = [service.evaluate_currency(memo_ids[str(memo)])["currency_state"] for memo in stale_memos]
     if states != ["StalePendingReverification"] * 4:
         raise RuntimeError("privacy authority change must stale four linked memos")
+    return seed, service, memo_ids, linked_memos, [str(memo) for memo in stale_memos], impact
+
+
+def run_scenario(root: Path) -> dict[str, Any]:
+    seed, service, memo_ids, linked_memos, stale_memos, impact = _seed_scenario(root)
     return {
         "firm": seed["firm"],
         "lawyer_count": seed["lawyer_count"],
         "seeded_memos": len(memo_ids),
-        "authority_anchors": authorities,
+        "authority_anchors": seed["authority_anchors"],
         "linked_memos": linked_memos,
         "authority_change": impact,
         "stale_memos": stale_memos,

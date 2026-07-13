@@ -10,6 +10,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, cast
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -17,6 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
+from solomon.api.auth import AuthPrincipal, AuthRole, mapped_oidc_roles, primary_role, scopes_for_roles
+from solomon.api.oidc import OIDCIdentity, OIDCValidationError, OIDCValidator
 from solomon.api.service import (
     CandidateClaimDeferralRequest,
     CandidateClaimPromotionRequest,
@@ -31,6 +34,7 @@ from solomon.api.service import (
     VerificationAssignmentRequest,
     VerificationRequest,
 )
+from solomon.audit.journal import AuditAttribution
 from solomon.boundary.solomon import SolomonBoundary
 from solomon.config import (
     Settings,
@@ -50,6 +54,9 @@ DEFAULT_DATABASE_URL = str(Settings.model_fields["database_url"].default)
 PACKAGE_DIR = Path(__file__).parent
 TEMPLATES = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
 STATIC_DIR = PACKAGE_DIR / "static"
+CONSOLE_READ_ROLES = frozenset({"admin", "curator", "reviewer", "lawyer"})
+CONSOLE_CURATE_ROLES = frozenset({"admin", "curator"})
+CONSOLE_REVIEW_ROLES = frozenset({"admin", "reviewer", "lawyer"})
 
 
 def create_console_app(*, settings: Settings | None = None, service: SolomonService | None = None) -> FastAPI:
@@ -68,21 +75,31 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
     app = FastAPI(title="Solomon Console")
     app.state.service = resolved_service
     app.state.console_user_id = resolved_settings.console_user_id
+    app.state.oidc_validator = _console_oidc_validator(resolved_settings)
     app.mount("/console/static", StaticFiles(directory=str(STATIC_DIR)), name="console-static")
 
     @app.middleware("http")
     async def console_auth(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        if _requires_console_auth(request.url.path, token=resolved_settings.console_bearer_token) and not _has_bearer(
-            request,
-            resolved_settings.console_bearer_token,
-        ):
+        if not _requires_console_auth(request.url.path):
+            return await call_next(request)
+        correlation_id = request.headers.get("x-correlation-id") or uuid4().hex
+        principal = _console_principal(request, resolved_settings, app.state.oidc_validator)
+        if principal is None:
+            _record_console_decision(resolved_service, None, correlation_id, request.url.path, "denied")
             return JSONResponse(
-                {"detail": "missing or invalid bearer token"},
+                {"detail": "missing or invalid console credentials"},
                 status_code=401,
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        request.state.console_user_id = resolved_settings.console_user_id
-        return await call_next(request)
+        if not _console_role_allowed(principal, request.url.path):
+            _record_console_decision(resolved_service, principal, correlation_id, request.url.path, "denied")
+            return JSONResponse({"detail": "console role is not authorized"}, status_code=403)
+        request.state.console_user_id = principal.subject
+        request.state.principal = principal
+        request.state.correlation_id = correlation_id
+        _record_console_decision(resolved_service, principal, correlation_id, request.url.path, "allowed")
+        with resolved_service.authorized_as(principal, correlation_id):
+            return await call_next(request)
 
     @app.get("/", include_in_schema=False)
     def root() -> RedirectResponse:
@@ -571,17 +588,100 @@ def _claim_rows(service: SolomonService) -> list[dict[str, Any]]:
     )
 
 
-def _requires_console_auth(path: str, *, token: str | None) -> bool:
-    if token is None:
-        return False
+def _requires_console_auth(path: str) -> bool:
     return (path == "/console" or path.startswith("/console/")) and not path.startswith("/console/static/")
 
 
-def _has_bearer(request: Request, token: str | None) -> bool:
-    if token is None:
-        return True
+def _console_oidc_validator(settings: Settings) -> OIDCValidator | None:
+    if settings.oidc_issuer is None or settings.oidc_audience is None:
+        return None
+    return OIDCValidator(
+        issuer=settings.oidc_issuer,
+        audience=settings.oidc_audience,
+        clock_skew_seconds=settings.oidc_clock_skew_seconds,
+        cache_seconds=settings.oidc_jwks_cache_seconds,
+    )
+
+
+def _console_principal(
+    request: Request,
+    settings: Settings,
+    validator: OIDCValidator | None,
+) -> AuthPrincipal | None:
     scheme, _, supplied = request.headers.get("authorization", "").partition(" ")
-    return scheme.lower() == "bearer" and bool(supplied) and compare_digest(supplied, token)
+    if scheme.lower() != "bearer" or not supplied:
+        if validator is not None or settings.console_bearer_token is not None or settings.sku != "local":
+            return None
+        role: AuthRole = "admin"
+        roles = frozenset({role})
+        return AuthPrincipal(
+            subject=settings.console_user_id,
+            role=role,
+            tenant_id=None,
+            scopes=scopes_for_roles(roles),
+            roles=roles,
+        )
+    if validator is None:
+        if settings.console_bearer_token is None or not compare_digest(supplied, settings.console_bearer_token):
+            return None
+        role = cast(AuthRole, settings.console_role)
+        roles = frozenset({role})
+        return AuthPrincipal(
+            subject=settings.console_user_id,
+            role=role,
+            tenant_id=None,
+            scopes=scopes_for_roles(roles),
+            roles=roles,
+        )
+    try:
+        identity = validator.validate(supplied)
+    except OIDCValidationError:
+        return None
+    return _oidc_console_principal(identity, settings)
+
+
+def _oidc_console_principal(identity: OIDCIdentity, settings: Settings) -> AuthPrincipal | None:
+    roles = mapped_oidc_roles(
+        identity.claims,
+        claim_name=settings.oidc_role_claim,
+        mappings=settings.oidc_role_mappings,
+    )
+    if not roles:
+        return None
+    return AuthPrincipal(
+        subject=identity.subject,
+        role=primary_role(roles),
+        tenant_id=None,
+        scopes=scopes_for_roles(roles),
+        roles=roles,
+    )
+
+
+def _console_role_allowed(principal: AuthPrincipal, path: str) -> bool:
+    roles = principal.roles or frozenset({principal.role})
+    if path.startswith(("/console/sources", "/console/claims", "/console/dependencies")):
+        return bool(roles & CONSOLE_CURATE_ROLES)
+    if path.startswith(("/console/verification", "/console/reviews")):
+        return bool(roles & CONSOLE_REVIEW_ROLES)
+    return bool(roles & CONSOLE_READ_ROLES)
+
+
+def _record_console_decision(
+    service: SolomonService,
+    principal: AuthPrincipal | None,
+    correlation_id: str,
+    path: str,
+    decision: str,
+) -> None:
+    roles = principal.roles if principal is not None else frozenset()
+    service.audit.append(
+        "console_authorization",
+        {"path": path, "decision": decision, "roles": sorted(roles)},
+        attribution=AuditAttribution(
+            actor_id=principal.subject if principal is not None else None,
+            correlation_id=correlation_id,
+        ),
+    )
 
 
 def _review_rows(service: SolomonService) -> list[dict[str, Any]]:

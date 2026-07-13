@@ -59,6 +59,11 @@ content-returning or mutating service operation applies a centralized `read`, `w
 before invoking domain logic, then writes a metadata-only allow/deny audit entry. Curators manage sources and
 dependencies; reviewers and lawyers perform verification/contestability actions; integrations remain read-only.
 
+The console uses the same OIDC claim mapping in server mode; its legacy bearer path has an explicitly configured
+console identity and role. Sources, claims, and dependencies are curator screens, verification and review actions
+are reviewer/lawyer screens, and every console decision records actor, roles, decision, and correlation ID. Local
+development retains an in-process admin identity when no console bearer or OIDC configuration is present.
+
 ## Server Auth
 
 `solomon-server` requires OIDC issuer/audience/role mapping or the legacy `SOLOMON_SERVER_API_KEY` path. OIDC

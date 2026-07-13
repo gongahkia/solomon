@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     credence_load_bearing_minimum: str = "Verified"
     console_user_id: str = "dev"
     console_bearer_token: str | None = None
+    console_role: str = Field(default="curator", pattern="^(admin|curator|reviewer|lawyer|integration)$")
 
     @model_validator(mode="after")
     def validate_egress_policy(self) -> Settings:
@@ -92,6 +93,8 @@ class Settings(BaseSettings):
         oidc_configuration_missing = self.oidc_issuer is None and not self.server_api_key
         if self.sku == "server" and self.server_auth_mode == "oidc" and oidc_configuration_missing:
             raise ValueError("OIDC server mode requires issuer, audience, and role mappings")
+        if self.console_role not in OIDC_AUTH_ROLES:
+            raise ValueError("console role must be a Solomon role")
         if self.zero_egress_mode and self.allow_remote_egress:
             raise ValueError("zero-egress mode conflicts with remote egress")
         if self.sku == "server" and self.allow_remote_egress and not self.remote_model_url:
@@ -149,6 +152,7 @@ class Settings(BaseSettings):
             "credence_load_bearing_minimum": self.credence_load_bearing_minimum,
             "console_user_id": self.console_user_id,
             "console_bearer_token_configured": self.console_bearer_token is not None,
+            "console_role": self.console_role,
         }
 
 

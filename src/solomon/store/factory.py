@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 from solomon.graph.store import GraphStore
 from solomon.graph.types import DependencyGraphProtocol
-from solomon.orchestrator.retrieval import RetrievalIndexProtocol, SQLiteRetrievalIndex
+from solomon.orchestrator.retrieval import RetrievalEmbeddingProvider, RetrievalIndexProtocol, SQLiteRetrievalIndex
 from solomon.store.postgres import ConnectCallable, PostgresGraphStore, PostgresKnowledgeStore, PostgresRetrievalIndex
 from solomon.store.sqlite import SQLiteKnowledgeStore
 from solomon.store.types import KnowledgeStoreProtocol
@@ -41,6 +41,7 @@ def create_storage_bundle(
     *,
     postgres_connect: ConnectCallable | None = None,
     postgres_schema: str | None = None,
+    embedding_provider: RetrievalEmbeddingProvider | None = None,
 ) -> StorageBundle:
     parsed = urlparse(database_url)
     if parsed.scheme in {"", "sqlite"}:
@@ -48,13 +49,18 @@ def create_storage_bundle(
         return StorageBundle(
             store=SQLiteKnowledgeStore(path),
             graph=GraphStore(path),
-            index=SQLiteRetrievalIndex(path),
+            index=SQLiteRetrievalIndex(path, provider=embedding_provider),
         )
     if _is_postgres_url(database_url):
         return StorageBundle(
             store=PostgresKnowledgeStore(database_url, connect=postgres_connect, schema=postgres_schema),
             graph=PostgresGraphStore(database_url, connect=postgres_connect, schema=postgres_schema),
-            index=PostgresRetrievalIndex(database_url, connect=postgres_connect, schema=postgres_schema),
+            index=PostgresRetrievalIndex(
+                database_url,
+                connect=postgres_connect,
+                schema=postgres_schema,
+                provider=embedding_provider,
+            ),
         )
     raise UnsupportedStoreBackend(f"unsupported store backend: {parsed.scheme}")
 

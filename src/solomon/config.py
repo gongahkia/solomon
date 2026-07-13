@@ -5,14 +5,20 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from solomon.boundary.solomon import BoundaryPolicy
 from solomon.credence.policy import CredencePolicy
 from solomon.currency.engine import VerificationPolicy
 from solomon.currency.models import CredenceTier
+from solomon.orchestrator.retrieval import (
+    HashedEmbeddingProvider,
+    OpenAICompatibleEmbeddingProvider,
+    RetrievalEmbeddingProvider,
+)
 
 
 class Settings(BaseSettings):
@@ -37,6 +43,12 @@ class Settings(BaseSettings):
     remote_model_api_key: str | None = None
     allow_remote_egress: bool = False
     zero_egress_mode: bool = True
+    embedding_provider: str = Field(default="local-hashed", pattern="^(local-hashed|openai-compatible)$")
+    embedding_remote_url: str | None = None
+    embedding_remote_model: str = "text-embedding-3-small"
+    embedding_remote_api_key: SecretStr | None = None
+    embedding_dimensions: int = Field(default=256, ge=1, le=2000)
+    allow_remote_embedding_egress: bool = False
     verification_attestation_key: str | None = None
     verification_policy_version: str = "verification-policy.v1"
     verification_default_max_age_days: int = Field(default=365, ge=1)
@@ -57,6 +69,17 @@ class Settings(BaseSettings):
             raise ValueError("zero-egress mode conflicts with remote egress")
         if self.sku == "server" and self.allow_remote_egress and not self.remote_model_url:
             raise ValueError("server remote egress requires SOLOMON_REMOTE_MODEL_URL")
+        if self.embedding_provider == "local-hashed" and self.allow_remote_embedding_egress:
+            raise ValueError("remote embedding egress requires the openai-compatible provider")
+        if self.embedding_provider == "openai-compatible":
+            if self.sku != "server":
+                raise ValueError("solomon-local cannot enable remote embedding egress")
+            if self.zero_egress_mode or not self.allow_remote_embedding_egress:
+                raise ValueError("remote embedding egress requires explicit opt-in outside zero-egress mode")
+            if not self.embedding_remote_url or not self.embedding_remote_api_key:
+                raise ValueError("remote embedding egress requires URL and API key")
+            if urlparse(self.embedding_remote_url).scheme not in {"http", "https"}:
+                raise ValueError("remote embedding URL must use http or https")
         return self
 
     def public_diagnostics(self) -> dict[str, Any]:
@@ -80,6 +103,12 @@ class Settings(BaseSettings):
             "remote_model_api_key_configured": self.remote_model_api_key is not None,
             "allow_remote_egress": self.allow_remote_egress,
             "zero_egress_mode": self.zero_egress_mode,
+            "embedding_provider": self.embedding_provider,
+            "embedding_remote_configured": self.embedding_remote_url is not None,
+            "embedding_remote_model": self.embedding_remote_model,
+            "embedding_remote_api_key_configured": self.embedding_remote_api_key is not None,
+            "embedding_dimensions": self.embedding_dimensions,
+            "allow_remote_embedding_egress": self.allow_remote_embedding_egress,
             "verification_attestation_key_configured": self.verification_attestation_key is not None,
             "verification_policy_version": self.verification_policy_version,
             "verification_default_max_age_days": self.verification_default_max_age_days,
@@ -99,6 +128,20 @@ def server_settings(**overrides: Any) -> Settings:
     defaults: dict[str, Any] = {"sku": "server", "zero_egress_mode": False, "server_api_key": "test-server-key"}
     defaults.update(overrides)
     return Settings(**defaults)
+
+
+def embedding_provider_from_settings(settings: Settings) -> RetrievalEmbeddingProvider:
+    if settings.embedding_provider == "openai-compatible":
+        api_key = settings.embedding_remote_api_key
+        if settings.embedding_remote_url is None or api_key is None:
+            raise ValueError("remote embedding provider configuration is incomplete")
+        return OpenAICompatibleEmbeddingProvider(
+            url=settings.embedding_remote_url,
+            api_key=api_key,
+            model=settings.embedding_remote_model,
+            dimensions=settings.embedding_dimensions,
+        )
+    return HashedEmbeddingProvider()
 
 
 def verification_policy_from_settings(settings: Settings) -> VerificationPolicy:

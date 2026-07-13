@@ -7,6 +7,8 @@ Zero egress means Solomon must keep model calls on a local endpoint unless remot
 ## Enforcement
 
 - `Settings.validate_egress_policy` rejects `allow_remote_egress=true` when `zero_egress_mode=true`.
+- Remote embeddings require the separate `allow_remote_embedding_egress=true` opt-in, an OpenAI-compatible endpoint,
+  and an API key; local SKU and zero-egress mode reject that configuration.
 - `_model_router_from_settings` builds `RoutingPolicy(remote_allowed=settings.allow_remote_egress and settings.remote_model_url is not None, zero_egress_mode=settings.zero_egress_mode)`.
 - `ModelRouter.decide` routes to `EndpointKind.LOCAL` when `zero_egress_mode` is true.
 - `AnswerService.complete_model_request` calls `SolomonBoundary.sanitize_context` before `ModelRouter.complete`.

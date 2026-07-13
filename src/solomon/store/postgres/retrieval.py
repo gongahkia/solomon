@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
+from solomon.contracts import EmbeddingRequest
 from solomon.currency.models import KnowledgeItem, now_utc
 from solomon.orchestrator.retrieval import (
     EmbeddingStrategy,
+    HashedEmbeddingProvider,
     IndexedHit,
     LexicalHit,
+    RetrievalEmbeddingProvider,
     _cosine_similarity,
-    _embed_tokens,
     semantic_tokens,
     tokenize,
 )
@@ -45,10 +48,14 @@ class PostgresRetrievalIndex:
         connect: ConnectCallable | None = None,
         schema: str | None = None,
         strategy: EmbeddingStrategy | None = None,
+        provider: RetrievalEmbeddingProvider | None = None,
     ) -> None:
         self.dsn = dsn
         self.schema = normalize_schema(schema)
-        self.strategy = strategy or EmbeddingStrategy()
+        if strategy is not None and provider is not None:
+            raise ValueError("set either an embedding strategy or provider")
+        self.provider = provider or HashedEmbeddingProvider(strategy=strategy)
+        self.strategy = self.provider.strategy
         if self.strategy.dimensions != POSTGRES_VECTOR_DIMENSIONS:
             raise ValueError(f"Postgres retrieval requires {POSTGRES_VECTOR_DIMENSIONS}-dimensional embeddings")
         self._conn = (connect or default_connect)(dsn)
@@ -71,7 +78,7 @@ class PostgresRetrievalIndex:
         embedding_ref = self.strategy.ref
         tokens = sorted(semantic_tokens(item.content))
         lexical_tokens = sorted(tokenize(item.content))
-        vector = _embed_tokens(tokens, dimensions=self.strategy.dimensions)
+        vector = self._embed_text(item.content)
         vector_literal = json.dumps(vector, separators=(",", ":"))
         timestamp = indexed_at or now_utc()
         with self._transaction():
@@ -118,10 +125,9 @@ class PostgresRetrievalIndex:
         return {str(row_value(row, "item_id")): str(row_value(row, "embedding_ref")) for row in rows}
 
     def search(self, query: str, *, limit: int = 20) -> list[IndexedHit]:
-        query_tokens = semantic_tokens(query)
-        if not query_tokens:
+        if not tokenize(query):
             return []
-        query_vector = _embed_tokens(sorted(query_tokens), dimensions=self.strategy.dimensions)
+        query_vector = self._embed_text(query)
         rows = self._execute(
             f"""
             SELECT item_id, embedding_ref, vector_json
@@ -165,6 +171,15 @@ class PostgresRetrievalIndex:
                     )
                 )
         return sorted(hits, key=lambda hit: (hit.match_ratio, hit.item_id), reverse=True)[:limit]
+
+    def _embed_text(self, text: str) -> list[float]:
+        response = self.provider.embed(EmbeddingRequest(model=self.strategy.ref, texts=[text]))
+        if len(response.vectors) != 1:
+            raise ValueError("embedding provider returned an unexpected vector count")
+        vector = response.vectors[0]
+        if len(vector) != self.strategy.dimensions or not all(math.isfinite(value) for value in vector):
+            raise ValueError("embedding provider returned an invalid vector")
+        return vector
 
     def close(self) -> None:
         self._conn.close()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import sqlite3
 from collections import defaultdict
@@ -13,9 +14,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from pydantic import Field
+import httpx
+from pydantic import Field, SecretStr
 
 from solomon.api.schemas import SolomonModel
+from solomon.contracts import EmbeddingProvider, EmbeddingRequest, EmbeddingResponse
 from solomon.credence.policy import CredenceLedger, RetrievalCandidate
 from solomon.currency.contradiction import contradictions_for_item
 from solomon.currency.engine import evaluate_currency
@@ -60,6 +63,74 @@ class EmbeddingStrategy(SolomonModel):
         return f"{self.name}:{self.version}"
 
 
+class RetrievalEmbeddingProvider(EmbeddingProvider, Protocol):
+    strategy: EmbeddingStrategy
+
+
+class HashedEmbeddingProvider:
+    def __init__(self, *, strategy: EmbeddingStrategy | None = None) -> None:
+        self.strategy = strategy or EmbeddingStrategy()
+
+    def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+        if request.model != self.strategy.ref:
+            raise ValueError("embedding request model does not match the configured provider")
+        return EmbeddingResponse(
+            model=self.strategy.ref,
+            vectors=[
+                _embed_tokens(sorted(semantic_tokens(text)), dimensions=self.strategy.dimensions)
+                for text in request.texts
+            ],
+        )
+
+
+class OpenAICompatibleEmbeddingProvider:
+    def __init__(
+        self,
+        *,
+        url: str,
+        api_key: str | SecretStr,
+        model: str,
+        dimensions: int = 256,
+        timeout: float = 30.0,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self.url = url
+        self._api_key = api_key if isinstance(api_key, SecretStr) else SecretStr(api_key)
+        self.model = model
+        self.strategy = EmbeddingStrategy(name="openai-compatible", version=model, dimensions=dimensions)
+        self.timeout = timeout
+        self.transport = transport
+
+    def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+        if request.model != self.strategy.ref:
+            raise ValueError("embedding request model does not match the configured provider")
+        with httpx.Client(transport=self.transport, timeout=self.timeout) as client:
+            response = client.post(
+                self.url,
+                json={
+                    "model": self.model,
+                    "input": request.texts,
+                    "encoding_format": "float",
+                    "dimensions": self.strategy.dimensions,
+                },
+                headers={"Accept": "application/json", "Authorization": f"Bearer {self._api_key.get_secret_value()}"},
+            )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("embedding provider response must be an object")
+        rows = payload.get("data")
+        if not isinstance(rows, list):
+            raise ValueError("embedding provider response is missing data")
+        vectors: list[list[float]] = []
+        for row in sorted(rows, key=lambda value: int(value.get("index", -1)) if isinstance(value, dict) else -1):
+            embedding = row.get("embedding") if isinstance(row, dict) else None
+            if not isinstance(embedding, list) or not all(isinstance(value, (int, float)) for value in embedding):
+                raise ValueError("embedding provider response contains an invalid vector")
+            vectors.append([float(value) for value in embedding])
+        return EmbeddingResponse(model=str(payload.get("model", self.model)), vectors=vectors)
+
+
 class IndexedHit(SolomonModel):
     item_id: str
     similarity: float
@@ -73,9 +144,18 @@ class LexicalHit(SolomonModel):
 
 
 class SQLiteRetrievalIndex:
-    def __init__(self, path: Path | str, *, strategy: EmbeddingStrategy | None = None) -> None:
+    def __init__(
+        self,
+        path: Path | str,
+        *,
+        strategy: EmbeddingStrategy | None = None,
+        provider: RetrievalEmbeddingProvider | None = None,
+    ) -> None:
         self.path = Path(path)
-        self.strategy = strategy or EmbeddingStrategy()
+        if strategy is not None and provider is not None:
+            raise ValueError("set either an embedding strategy or provider")
+        self.provider = provider or HashedEmbeddingProvider(strategy=strategy)
+        self.strategy = self.provider.strategy
         self._vector_cache: dict[str, tuple[str, list[float]]] = {}
         self._search_cache: dict[tuple[str, int, str], list[IndexedHit]] = {}
         self._lexical_search_cache: dict[tuple[str, int], list[LexicalHit]] = {}
@@ -112,43 +192,14 @@ class SQLiteRetrievalIndex:
         self._conn.close()
 
     def upsert_item(self, item: KnowledgeItem, *, indexed_at: datetime | None = None) -> KnowledgeItem:
-        from solomon.currency.models import now_utc
-
-        embedding_ref = self.strategy.ref
-        tokens = sorted(semantic_tokens(item.content))
-        lexical_tokens = sorted(tokenize(item.content))
-        vector = _embed_tokens(tokens, dimensions=self.strategy.dimensions)
-        timestamp = indexed_at or now_utc()
-        with self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO retrieval_index (
-                    item_id, embedding_ref, tokens_json, lexical_tokens_json, vector_json, indexed_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(item_id) DO UPDATE SET
-                    embedding_ref = excluded.embedding_ref,
-                    tokens_json = excluded.tokens_json,
-                    lexical_tokens_json = excluded.lexical_tokens_json,
-                    vector_json = excluded.vector_json,
-                    indexed_at = excluded.indexed_at
-                """,
-                (
-                    item.id,
-                    embedding_ref,
-                    json.dumps(tokens),
-                    json.dumps(lexical_tokens),
-                    json.dumps(vector),
-                    timestamp.isoformat(),
-                ),
-            )
-        self._vector_cache[item.id] = (embedding_ref, vector)
-        self._search_cache.clear()
-        self._lexical_search_cache.clear()
-        return item.model_copy(update={"embedding_ref": embedding_ref})
+        vector = self._embed_texts([item.content])[0]
+        return self._upsert_item(item, vector, indexed_at=indexed_at)
 
     def batch_upsert(self, items: list[KnowledgeItem]) -> list[KnowledgeItem]:
-        return [self.upsert_item(item) for item in items]
+        if not items:
+            return []
+        vectors = self._embed_texts([item.content for item in items])
+        return [self._upsert_item(item, vector) for item, vector in zip(items, vectors, strict=True)]
 
     def embedding_refs(self, item_ids: list[str]) -> dict[str, str]:
         if not item_ids:
@@ -164,10 +215,9 @@ class SQLiteRetrievalIndex:
         cache_key = (query, limit, self.strategy.ref)
         if cached_hits := self._search_cache.get(cache_key):
             return list(cached_hits)
-        query_tokens = semantic_tokens(query)
-        if not query_tokens:
+        if not tokenize(query):
             return []
-        query_terms = _nonzero_terms(_embed_tokens(sorted(query_tokens), dimensions=self.strategy.dimensions))
+        query_terms = _nonzero_terms(self._embed_texts([query])[0])
         rows = self._conn.execute(
             "SELECT item_id, embedding_ref, vector_json FROM retrieval_index ORDER BY item_id"
         ).fetchall()
@@ -210,6 +260,52 @@ class SQLiteRetrievalIndex:
         limited_hits = sorted(hits, key=lambda hit: (hit.match_ratio, hit.item_id), reverse=True)[:limit]
         self._lexical_search_cache[cache_key] = limited_hits
         return list(limited_hits)
+
+    def _embed_texts(self, texts: list[str]) -> list[list[float]]:
+        response = self.provider.embed(EmbeddingRequest(model=self.strategy.ref, texts=texts))
+        if len(response.vectors) != len(texts):
+            raise ValueError("embedding provider returned an unexpected vector count")
+        for vector in response.vectors:
+            if len(vector) != self.strategy.dimensions or not all(math.isfinite(value) for value in vector):
+                raise ValueError("embedding provider returned an invalid vector")
+        return response.vectors
+
+    def _upsert_item(
+        self,
+        item: KnowledgeItem,
+        vector: list[float],
+        *,
+        indexed_at: datetime | None = None,
+    ) -> KnowledgeItem:
+        from solomon.currency.models import now_utc
+
+        embedding_ref = self.strategy.ref
+        tokens = sorted(semantic_tokens(item.content))
+        lexical_tokens = sorted(tokenize(item.content))
+        timestamp = indexed_at or now_utc()
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO retrieval_index (
+                    item_id, embedding_ref, tokens_json, lexical_tokens_json, vector_json, indexed_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(item_id) DO UPDATE SET embedding_ref = excluded.embedding_ref,
+                    tokens_json = excluded.tokens_json, lexical_tokens_json = excluded.lexical_tokens_json,
+                    vector_json = excluded.vector_json, indexed_at = excluded.indexed_at
+                """,
+                (
+                    item.id,
+                    embedding_ref,
+                    json.dumps(tokens),
+                    json.dumps(lexical_tokens),
+                    json.dumps(vector),
+                    timestamp.isoformat(),
+                ),
+            )
+        self._vector_cache[item.id] = (embedding_ref, vector)
+        self._search_cache.clear()
+        self._lexical_search_cache.clear()
+        return item.model_copy(update={"embedding_ref": embedding_ref})
 
 
 class RecallWeights(SolomonModel):

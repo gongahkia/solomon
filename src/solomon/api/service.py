@@ -76,7 +76,7 @@ from solomon.graph.models import DependencyEdge
 from solomon.graph.suggestions import DependencySuggestion, ReferenceExtraction, SuggestionDecision
 from solomon.graph.visualization import GraphFormat
 from solomon.orchestrator.models import ModelRequest, ModelRouter, RoutedModelResult
-from solomon.orchestrator.retrieval import RetrievalOrchestrator
+from solomon.orchestrator.retrieval import RetrievalEmbeddingProvider, RetrievalOrchestrator
 from solomon.sources.extract import candidate_claims_from_text, extract_document_bytes
 from solomon.sources.filesystem import FilesystemDocumentSourceAdapter
 from solomon.sources.models import (
@@ -117,12 +117,14 @@ class SolomonService:
         verification_policy_version: str = "verification-policy.v1",
         credence_policy: CredencePolicy | None = None,
         credence_policy_version: str = "credence-policy.v1",
+        embedding_provider: RetrievalEmbeddingProvider | None = None,
     ) -> None:
         data_dir.mkdir(parents=True, exist_ok=True)
         journal_dir.mkdir(parents=True, exist_ok=True)
         storage = create_storage_bundle(
             database_url or str(data_dir / "solomon.sqlite3"),
             postgres_schema=postgres_schema,
+            embedding_provider=embedding_provider,
         )
         self.store = storage.store
         self.graph = storage.graph

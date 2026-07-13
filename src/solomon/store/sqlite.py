@@ -7,12 +7,15 @@ import sqlite3
 import time
 from collections.abc import Iterable
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 from typing_extensions import Self
 
 from solomon.currency.models import CurrencyState, KnowledgeItem, now_utc
+from solomon.events import DomainEventEnvelope
+from solomon.store.outbox import OutboxRecord
 from solomon.store.types import KnowledgeEvent
 
 
@@ -22,6 +25,10 @@ class StoreError(RuntimeError):
 
 class ItemNotFoundError(StoreError):
     """Raised when a requested knowledge item is missing."""
+
+
+class OutboxEventNotFoundError(StoreError):
+    """Raised when a requested outbox event is missing."""
 
 
 class SQLiteKnowledgeStore:
@@ -84,6 +91,23 @@ class SQLiteKnowledgeStore:
             )
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_knowledge_events_time ON knowledge_events(occurred_at, seq)"
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS outbox_events (
+                    event_id TEXT PRIMARY KEY,
+                    event_type TEXT NOT NULL,
+                    available_at TEXT NOT NULL,
+                    delivered_at TEXT,
+                    delivery_attempts INTEGER NOT NULL,
+                    last_error TEXT,
+                    event_json TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_outbox_events_pending "
+                "ON outbox_events(delivered_at, available_at, event_id)"
             )
 
     def write_item(self, item: KnowledgeItem) -> KnowledgeItem:
@@ -269,6 +293,52 @@ class SQLiteKnowledgeStore:
             for row in rows
         ]
 
+    def pending_outbox_events(
+        self,
+        *,
+        limit: int = 100,
+        available_before: datetime | None = None,
+    ) -> list[OutboxRecord]:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        cutoff = (available_before or now_utc()).isoformat()
+        rows = self._conn.execute(
+            """
+            SELECT event_json, available_at, delivered_at, delivery_attempts, last_error
+            FROM outbox_events
+            WHERE delivered_at IS NULL AND available_at <= ?
+            ORDER BY available_at, event_id
+            LIMIT ?
+            """,
+            (cutoff, limit),
+        ).fetchall()
+        return [self._outbox_record(row) for row in rows]
+
+    def mark_outbox_delivered(self, event_id: str, *, delivered_at: datetime | None = None) -> OutboxRecord:
+        row = self._conn.execute(
+            "SELECT event_json, available_at, delivered_at, delivery_attempts, last_error "
+            "FROM outbox_events WHERE event_id = ?",
+            (event_id,),
+        ).fetchone()
+        if row is None:
+            raise OutboxEventNotFoundError(event_id)
+        recorded = self._outbox_record(row)
+        if recorded.delivered_at is not None:
+            return recorded
+        completed_at = delivered_at or now_utc()
+        with self._conn:
+            self._conn.execute(
+                """
+                UPDATE outbox_events
+                SET delivered_at = ?, delivery_attempts = delivery_attempts + 1, last_error = NULL
+                WHERE event_id = ?
+                """,
+                (completed_at.isoformat(), event_id),
+            )
+        return recorded.model_copy(
+            update={"delivered_at": completed_at, "delivery_attempts": recorded.delivery_attempts + 1}
+        )
+
     def snapshot(self, destination: Path | str) -> Path:
         target = Path(destination)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -282,6 +352,15 @@ class SQLiteKnowledgeStore:
         payload = {
             "schema": "solomon.snapshot.v1",
             "events": [dict(row) for row in rows],
+            "outbox_events": [
+                dict(row)
+                for row in self._conn.execute(
+                    """
+                    SELECT event_id, event_type, available_at, delivered_at, delivery_attempts, last_error, event_json
+                    FROM outbox_events ORDER BY available_at, event_id
+                    """
+                ).fetchall()
+            ],
         }
         target.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         return target
@@ -306,6 +385,23 @@ class SQLiteKnowledgeStore:
                         event["item_id"],
                         event["occurred_at"],
                         event["payload_json"],
+                    ),
+                )
+            for event in raw.get("outbox_events", []):
+                target._conn.execute(
+                    """
+                    INSERT OR IGNORE INTO outbox_events
+                    (event_id, event_type, available_at, delivered_at, delivery_attempts, last_error, event_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event["event_id"],
+                        event["event_type"],
+                        event["available_at"],
+                        event["delivered_at"],
+                        event["delivery_attempts"],
+                        event["last_error"],
+                        event["event_json"],
                     ),
                 )
             target.rebuild_current_state()
@@ -390,19 +486,72 @@ class SQLiteKnowledgeStore:
         occurred_at: datetime,
         payload: dict[str, Any],
     ) -> None:
-        event_id = f"{item_id}:{event_type}:{occurred_at.isoformat()}:{len(json.dumps(payload, sort_keys=True))}"
+        event = self._domain_event(event_type=event_type, item_id=item_id, occurred_at=occurred_at, payload=payload)
         self._conn.execute(
             """
             INSERT INTO knowledge_events (event_id, event_type, item_id, occurred_at, payload_json)
             VALUES (?, ?, ?, ?, ?)
             """,
             (
-                event_id,
+                event.event_id,
                 event_type,
                 item_id,
                 occurred_at.isoformat(),
                 json.dumps(payload, sort_keys=True, separators=(",", ":")),
             ),
+        )
+        self._enqueue_outbox(event)
+
+    @staticmethod
+    def _domain_event(
+        *,
+        event_type: str,
+        item_id: str,
+        occurred_at: datetime,
+        payload: dict[str, Any],
+    ) -> DomainEventEnvelope:
+        payload_sha256 = DomainEventEnvelope.payload_digest(payload)
+        identity = f"knowledge_item:{item_id}:{event_type}:{occurred_at.isoformat()}:{payload_sha256}"
+        event_id = sha256(identity.encode("utf-8")).hexdigest()
+        return DomainEventEnvelope(
+            event_id=event_id,
+            event_type=event_type,
+            aggregate_type="knowledge_item",
+            aggregate_id=item_id,
+            actor_id="system:knowledge-store",
+            correlation_id=f"knowledge_item:{item_id}",
+            idempotency_key=event_id,
+            occurred_at=occurred_at,
+            payload=payload,
+        )
+
+    def _enqueue_outbox(self, event: DomainEventEnvelope) -> None:
+        record = OutboxRecord(event=event, available_at=event.occurred_at)
+        self._conn.execute(
+            """
+            INSERT INTO outbox_events
+            (event_id, event_type, available_at, delivered_at, delivery_attempts, last_error, event_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event.event_id,
+                event.event_type,
+                record.available_at.isoformat(),
+                None,
+                record.delivery_attempts,
+                None,
+                event.model_dump_json(),
+            ),
+        )
+
+    @staticmethod
+    def _outbox_record(row: sqlite3.Row) -> OutboxRecord:
+        return OutboxRecord(
+            event=DomainEventEnvelope.model_validate_json(str(row["event_json"])),
+            available_at=datetime.fromisoformat(str(row["available_at"])),
+            delivered_at=datetime.fromisoformat(str(row["delivered_at"])) if row["delivered_at"] else None,
+            delivery_attempts=int(row["delivery_attempts"]),
+            last_error=str(row["last_error"]) if row["last_error"] is not None else None,
         )
 
     def _upsert_current(self, item: KnowledgeItem, *, table: str = "knowledge_items") -> None:

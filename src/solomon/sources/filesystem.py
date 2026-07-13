@@ -71,7 +71,13 @@ def _patterns(value: object, *, default: tuple[str, ...], setting: str) -> tuple
 
 def _matches(relative_path: str, patterns: tuple[str, ...]) -> bool:
     path = PurePosixPath(relative_path)
-    return any(pattern == "**/*" or path.match(pattern) or fnmatchcase(relative_path, pattern) for pattern in patterns)
+    return any(
+        pattern == "**/*"
+        or path.match(pattern)
+        or (pattern.startswith("**/") and path.match(pattern.removeprefix("**/")))
+        or fnmatchcase(relative_path, pattern)
+        for pattern in patterns
+    )
 
 
 def _cursor(parts: list[str]) -> str:

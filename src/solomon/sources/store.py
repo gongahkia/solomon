@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from solomon.contracts import SyncCheckpoint
 from solomon.currency.models import now_utc
 from solomon.sources.models import (
     CandidateClaim,
@@ -91,6 +92,15 @@ class SQLiteDocumentStore:
                 "CREATE INDEX IF NOT EXISTS idx_candidate_claims_document "
                 "ON candidate_claims(document_id, status, created_at)"
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS source_sync_cursors (
+                    source_id TEXT PRIMARY KEY,
+                    checkpoint_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
 
     def upsert_source(self, source: DocumentSource) -> DocumentSource:
         with self._conn:
@@ -133,6 +143,11 @@ class SQLiteDocumentStore:
             latest is not None
             and latest.content_sha256 == document.content_sha256
             and latest.deleted_at == document.deleted_at
+            and latest.filename == document.filename
+            and latest.mime_type == document.mime_type
+            and latest.extraction_state == document.extraction_state
+            and latest.extraction_reason == document.extraction_reason
+            and latest.metadata == document.metadata
         ):
             return latest
         if latest is not None:
@@ -267,6 +282,29 @@ class SQLiteDocumentStore:
         if result.rowcount == 0:
             raise CandidateClaimNotFoundError(candidate.id)
         return candidate
+
+    def get_sync_checkpoint(self, source_id: str) -> SyncCheckpoint | None:
+        self.get_source(source_id)
+        row = self._conn.execute(
+            "SELECT checkpoint_json FROM source_sync_cursors WHERE source_id = ?",
+            (source_id,),
+        ).fetchone()
+        return SyncCheckpoint.model_validate_json(str(row["checkpoint_json"])) if row is not None else None
+
+    def set_sync_checkpoint(self, checkpoint: SyncCheckpoint) -> SyncCheckpoint:
+        self.get_source(checkpoint.source_id)
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO source_sync_cursors (source_id, checkpoint_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(source_id) DO UPDATE SET
+                    checkpoint_json = excluded.checkpoint_json,
+                    updated_at = excluded.updated_at
+                """,
+                (checkpoint.source_id, checkpoint.model_dump_json(), now_utc().isoformat()),
+            )
+        return checkpoint
 
     def _latest_document(self, source_id: str, external_id: str) -> SourceDocument | None:
         row = self._conn.execute(

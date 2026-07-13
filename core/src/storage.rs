@@ -4915,7 +4915,9 @@ fn relation_matches_traversal(relation: &Relation, request: &GraphTraversalReque
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encryption::Aes256GcmEncryption;
+    use crate::encryption::{
+        Aes256GcmEncryption, EnvelopeEncryption, LocalKeyProvider, envelope_key_metadata,
+    };
     use crate::model::{
         AccessOutcome, CURRENT_MEMORY_SCHEMA_VERSION, CredenceTier, Provenance, ScopeId,
         SourceKind, TemporalBounds,
@@ -6607,6 +6609,74 @@ mod tests {
             RedbMemoryStore::open_with_encryption(&path, Aes256GcmEncryption::new([12_u8; 32])),
             Err(StorageError::Encryption(_))
         ));
+        assert!(matches!(
+            RedbMemoryStore::open(&path),
+            Err(StorageError::Encryption(_))
+        ));
+    }
+
+    #[test]
+    fn envelope_encrypted_store_assigns_distinct_metadata_to_each_semantic_record() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let path = file.path().to_path_buf();
+        let first = test_item("first envelope-record payload");
+        let second = test_item("second envelope-record payload");
+
+        let store = RedbMemoryStore::open_with_encryption(
+            &path,
+            EnvelopeEncryption::new(LocalKeyProvider::new("development-kek", [31_u8; 32])),
+        )
+        .expect("envelope store should open");
+        let first_event = store.write(&first).expect("first item should write");
+        let second_event = store.write(&second).expect("second item should write");
+        let first_key = first.id.to_string();
+        let second_key = second.id.to_string();
+        let read_txn = store.db.begin_read().expect("read txn should begin");
+        let item_table = read_txn
+            .open_table(MEMORY_ITEMS_TABLE)
+            .expect("item table should open");
+        let event_table = read_txn
+            .open_table(EVENT_LOG_TABLE)
+            .expect("event table should open");
+        let first_item = item_table
+            .get(first_key.as_str())
+            .expect("first item should read")
+            .expect("first item should exist")
+            .value()
+            .to_vec();
+        let second_item = item_table
+            .get(second_key.as_str())
+            .expect("second item should read")
+            .expect("second item should exist")
+            .value()
+            .to_vec();
+        let first_event = event_table
+            .get(first_event.sequence)
+            .expect("first event should read")
+            .expect("first event should exist")
+            .value()
+            .to_vec();
+        let second_event = event_table
+            .get(second_event.sequence)
+            .expect("second event should read")
+            .expect("second event should exist")
+            .value()
+            .to_vec();
+        let metadata = [first_item, second_item, first_event, second_event]
+            .iter()
+            .map(|record| envelope_key_metadata(record).expect("metadata should parse"))
+            .collect::<Vec<_>>();
+
+        assert!(metadata.iter().all(
+            |entry| entry.provider == "local-aes-256-gcm" && entry.key_id == "development-kek"
+        ));
+        assert_ne!(metadata[0].wrapped_data_key, metadata[1].wrapped_data_key);
+        assert_ne!(metadata[0].wrapped_data_key, metadata[2].wrapped_data_key);
+        assert_ne!(metadata[2].wrapped_data_key, metadata[3].wrapped_data_key);
+        drop(event_table);
+        drop(item_table);
+        drop(read_txn);
+        drop(store);
         assert!(matches!(
             RedbMemoryStore::open(&path),
             Err(StorageError::Encryption(_))

@@ -71,20 +71,16 @@ jobs:
       - name: Node binding smoke test
         run: scripts/ci/node-binding-smoke.sh
 
-      - name: Embedded, HTTP, and MCP SDK contract
-        run: node scripts/ci/sdk-contract.mjs
+      - name: Release-gating MCP compatibility matrix
+        run: node scripts/ci/mcp-compatibility.mjs
 
-      - name: Claude Code MCP configuration fixture
-        run: node scripts/ci/claude-code-mcp-fixture.mjs
-
-      - name: Codex MCP configuration fixture
-        run: node scripts/ci/codex-mcp-fixture.mjs
-
-      - name: Pi extension API load
-        run: npm exec --yes --package @earendil-works/pi-coding-agent@0.80.6 -- pi --offline --no-session --approve --no-extensions --extension .pi/extensions/shibahama-mcp.ts --list-models
-
-      - name: Pi MCP configuration fixture
-        run: node scripts/ci/pi-mcp-fixture.mjs
+      - name: Upload MCP compatibility matrix
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: mcp-compatibility-${{ matrix.os }}
+          path: target/mcp-compatibility.json
+          if-no-files-found: error
 
       - name: Golden parity suite
         run: scripts/ci/golden-parity.sh

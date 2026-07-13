@@ -2,6 +2,14 @@
 
 Typed client for Solomon MCP tools over streamable HTTP.
 
+## Install from this repository
+
+Until the package is released to a registry, install it from a local checkout:
+
+```bash
+npm install /absolute/path/to/solomon/packages/solomon-ts
+```
+
 ```ts
 import { SolomonClient } from "@solomon/sdk";
 

@@ -28,10 +28,10 @@ contested. It does not decide the law or replace lawyer review.
 ## Demonstrations
 
 - [Stale house-view scenario](https://github.com/gongahkia/solomon/tree/main/examples/scenarios/stale-house-view)
-- [Vendor integration scenario](https://github.com/gongahkia/solomon/tree/main/examples/scenarios/01-vendor-integration)
+- [MCP-host scenario](https://github.com/gongahkia/solomon/tree/main/examples/scenarios/01-vendor-integration)
 - [Curator console walkthroughs](./console/index.md)
 
-![Vendor integration comparison](./assets/vendor-integration-demo.gif)
+![MCP-host comparison](./assets/vendor-integration-demo.gif)
 
 ## Jurisdictions
 

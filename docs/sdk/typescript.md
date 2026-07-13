@@ -13,9 +13,8 @@ If MCP bearer auth is configured, pass the same token to the client.
 ## Install from the repo
 
 ```bash
-cd packages/solomon-ts
-npm run typecheck
-npm run build
+# run in the consuming project
+npm install /absolute/path/to/solomon/packages/solomon-ts
 ```
 
 ## Use the client
@@ -51,7 +50,7 @@ console.log(context.items);
 | `solomon.dependency_suggestions` | `dependencySuggestions()` |
 | `solomon.impact` | `impact()` |
 
-## Vendor preflight example
+## MCP host preflight example
 
 ```ts
 const context = await solomon.preflightContext({

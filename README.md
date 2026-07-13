@@ -101,7 +101,7 @@ uv run solomon dependency-suggestions
 uv run solomon recall "structure X regulation"
 ```
 
-The Python and TypeScript client quickstarts are in [`docs/sdk/`](./docs/sdk/).
+The Python client quickstart and the source-installable TypeScript MCP client are in [`docs/sdk/`](./docs/sdk/).
 
 ## What Solomon Does
 

@@ -11,10 +11,12 @@ use shibahama_core::api::{
     ConsolidationPassReport, HumanCorrectionOutcome, HumanSignalOutcome, HumanSignalRequest,
     Shibahama, ShibahamaError, WhyTrace, WriteEmbedding,
 };
+use shibahama_core::extraction::ExtractionCandidate;
 use shibahama_core::model::{
     AccessOutcome, ConsolidationAction, CredenceTier, HumanSignal, HumanSignalAction, MemoryId,
     MemoryItem, MemoryKind, MemoryScope, Provenance, ScopeId, ScopeVisibility, SourceKind, Tier,
 };
+use shibahama_core::policy::{CaptureIntent, CapturePolicyRequest, PolicyActorClass};
 use shibahama_core::retrieval::{
     RecallCandidate, RecallCandidateCurrency, RecallCandidateSource, RecallRankingConfig,
     RecallRequest, RecallUnavailableStage, RelatedMemoryProvider,
@@ -292,6 +294,83 @@ impl PyShibahama {
         Ok(Self {
             inner: Mutex::new(inner),
         })
+    }
+
+    /// Simulates capture policy without writing memory or audit events.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when policy input or scope metadata is invalid.
+    #[pyo3(signature = (
+        source_kind,
+        actor = "human",
+        intent = "manual",
+        confidence_percent = 100,
+        scope_repository = "default",
+        scope_team = None,
+        scope_visibility = "repository"
+    ))]
+    pub fn simulate_capture_policy(
+        &self,
+        source_kind: &str,
+        actor: &str,
+        intent: &str,
+        confidence_percent: u8,
+        scope_repository: &str,
+        scope_team: Option<String>,
+        scope_visibility: &str,
+    ) -> PyResult<String> {
+        let scope = parse_memory_scope(scope_repository, scope_team, scope_visibility)?;
+        let request = CapturePolicyRequest {
+            actor: parse_policy_actor(actor)?,
+            intent: parse_capture_intent(intent)?,
+            confidence_percent,
+        };
+        let inner = self.inner.lock().map_err(lock_error)?;
+
+        serde_json::to_string(&inner.simulate_capture_policy(
+            parse_source_kind(source_kind)?,
+            &scope,
+            request,
+        ))
+        .map_err(json_error)
+    }
+
+    /// Simulates recall policy without reading memory or writing access events.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when scope metadata is invalid.
+    #[pyo3(signature = (
+        top_k,
+        max_context_tokens = None,
+        include_cold = false,
+        include_instructions = false,
+        scope_repository = "default",
+        scope_team = None,
+        scope_visibility = "repository"
+    ))]
+    pub fn simulate_recall_policy(
+        &self,
+        top_k: usize,
+        max_context_tokens: Option<usize>,
+        include_cold: bool,
+        include_instructions: bool,
+        scope_repository: &str,
+        scope_team: Option<String>,
+        scope_visibility: &str,
+    ) -> PyResult<String> {
+        let scope = parse_memory_scope(scope_repository, scope_team, scope_visibility)?;
+        let inner = self.inner.lock().map_err(lock_error)?;
+
+        serde_json::to_string(&inner.simulate_recall_policy(
+            top_k,
+            max_context_tokens,
+            include_cold,
+            include_instructions,
+            Some(&scope),
+        ))
+        .map_err(json_error)
     }
 
     /// Writes a memory, optionally indexing an embedding vector.
@@ -1127,12 +1206,24 @@ fn capabilities_json() -> PyResult<String> {
     serde_json::to_string(&shibahama_core::capabilities()).map_err(json_error)
 }
 
+/// Parses and canonicalizes one typed extraction candidate without persisting it.
+#[pyfunction]
+fn canonicalize_extraction_candidate_json(value: &str) -> PyResult<String> {
+    let candidate: ExtractionCandidate = serde_json::from_str(value).map_err(json_error)?;
+
+    serde_json::to_string(&candidate).map_err(json_error)
+}
+
 /// Python extension module entry point.
 #[pymodule]
 fn _shibahama(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("__version__", shibahama_core::version())?;
     module.add_function(wrap_pyfunction!(version, module)?)?;
     module.add_function(wrap_pyfunction!(capabilities_json, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        canonicalize_extraction_candidate_json,
+        module
+    )?)?;
     module.add_class::<PyProvenance>()?;
     module.add_class::<PyMemoryScope>()?;
     module.add_class::<PyMemoryItem>()?;
@@ -1273,6 +1364,29 @@ fn parse_source_kind(value: &str) -> PyResult<SourceKind> {
         "tool" => Ok(SourceKind::Tool),
         _ => Err(PyValueError::new_err(
             "source_kind must be one of: user, agent, file, web, tool",
+        )),
+    }
+}
+
+fn parse_policy_actor(value: &str) -> PyResult<PolicyActorClass> {
+    match value {
+        "human" => Ok(PolicyActorClass::Human),
+        "agent" => Ok(PolicyActorClass::Agent),
+        "automation" => Ok(PolicyActorClass::Automation),
+        "service" => Ok(PolicyActorClass::Service),
+        _ => Err(PyValueError::new_err(
+            "actor must be `human`, `agent`, `automation`, or `service`",
+        )),
+    }
+}
+
+fn parse_capture_intent(value: &str) -> PyResult<CaptureIntent> {
+    match value {
+        "manual" => Ok(CaptureIntent::Manual),
+        "suggested" => Ok(CaptureIntent::Suggested),
+        "automatic" => Ok(CaptureIntent::Automatic),
+        _ => Err(PyValueError::new_err(
+            "intent must be `manual`, `suggested`, or `automatic`",
         )),
     }
 }

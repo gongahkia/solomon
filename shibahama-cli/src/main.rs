@@ -23,6 +23,7 @@ use shibahama_core::model::{
     HumanSignal, HumanSignalAction, MemoryId, MemoryItem, MemoryKind, MemoryScope, Provenance,
     Relation, RelationId, ScopeId, ScopeVisibility, SourceKind, TemporalBounds, Tier,
 };
+use shibahama_core::policy::{CaptureIntent, CapturePolicyRequest, PolicyActorClass};
 use shibahama_core::retrieval::{
     RecallCandidate, RecallCandidateCurrency, RecallCandidateSource, RecallRequest,
     RecallUnavailableStage,
@@ -668,6 +669,22 @@ struct ServerRecallRequest {
 }
 
 #[derive(Deserialize)]
+struct ServerCapturePolicySimulationRequest {
+    source_kind: Option<String>,
+    actor: Option<String>,
+    intent: Option<String>,
+    confidence_percent: Option<u8>,
+}
+
+#[derive(Deserialize)]
+struct ServerRecallPolicySimulationRequest {
+    top_k: Option<usize>,
+    include_cold: Option<bool>,
+    include_instructions: Option<bool>,
+    max_context_tokens: Option<usize>,
+}
+
+#[derive(Deserialize)]
 struct ServerInvalidateRequest {
     memory_id: String,
     valid_to_unix: i64,
@@ -1168,6 +1185,14 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
         .route("/readyz", get(server_ready))
         .route("/inspect", get(server_inspect))
         .route("/write", post(server_write))
+        .route(
+            "/policy/simulate/capture",
+            post(server_simulate_capture_policy),
+        )
+        .route(
+            "/policy/simulate/recall",
+            post(server_simulate_recall_policy),
+        )
         .route("/invalidate", post(server_invalidate))
         .route("/recall", post(server_recall))
         .route("/recall/degraded", post(server_recall_degraded))
@@ -1725,6 +1750,7 @@ fn event_touches_memory(record: &EventRecord, id: MemoryId) -> bool {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn tideline_event_from_record(record: EventRecord) -> TidelineEventDto {
     let sequence = record.sequence;
     let recorded_at = record.recorded_at;
@@ -2335,6 +2361,67 @@ async fn server_inspect(
             Err(error)
         }
     }
+}
+
+async fn server_simulate_capture_policy(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerCapturePolicySimulationRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/policy/simulate/capture")?;
+    let result: Result<(Json<serde_json::Value>, serde_json::Value), ServerError> = (|| {
+        let source_kind = parse_source_kind(body.source_kind.as_deref().unwrap_or("user"))
+            .map_err(ServerError::bad_request)?;
+        let request = CapturePolicyRequest {
+            actor: parse_policy_actor(body.actor.as_deref().unwrap_or("human"))
+                .map_err(ServerError::bad_request)?,
+            intent: parse_capture_intent(body.intent.as_deref().unwrap_or("manual"))
+                .map_err(ServerError::bad_request)?,
+            confidence_percent: body.confidence_percent.unwrap_or(100),
+        };
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let simulation = engine.simulate_capture_policy(source_kind, &context.scope, request);
+        let response = serde_json::to_value(simulation).map_err(ServerError::internal)?;
+
+        Ok((
+            Json(response),
+            json!({ "request_units": 1, "dry_run": true }),
+        ))
+    })();
+
+    server_json_result("POST", "/policy/simulate/capture", &context, result)
+}
+
+async fn server_simulate_recall_policy(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerRecallPolicySimulationRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/policy/simulate/recall")?;
+    let result: Result<(Json<serde_json::Value>, serde_json::Value), ServerError> = (|| {
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let simulation = engine.simulate_recall_policy(
+            body.top_k.unwrap_or(8),
+            body.max_context_tokens,
+            body.include_cold.unwrap_or(false),
+            body.include_instructions.unwrap_or(false),
+            Some(&context.scope),
+        );
+        let response = serde_json::to_value(simulation).map_err(ServerError::internal)?;
+
+        Ok((
+            Json(response),
+            json!({ "request_units": 1, "dry_run": true }),
+        ))
+    })();
+
+    server_json_result("POST", "/policy/simulate/recall", &context, result)
 }
 
 async fn server_write(
@@ -3604,6 +3691,29 @@ fn parse_source_kind(value: &str) -> CliResult<SourceKind> {
         "tool" => Ok(SourceKind::Tool),
         _ => Err(Box::new(CliError(
             "source-kind must be one of: user, agent, file, web, tool".to_owned(),
+        ))),
+    }
+}
+
+fn parse_policy_actor(value: &str) -> CliResult<PolicyActorClass> {
+    match value {
+        "human" => Ok(PolicyActorClass::Human),
+        "agent" => Ok(PolicyActorClass::Agent),
+        "automation" => Ok(PolicyActorClass::Automation),
+        "service" => Ok(PolicyActorClass::Service),
+        _ => Err(Box::new(CliError(
+            "actor must be `human`, `agent`, `automation`, or `service`".to_owned(),
+        ))),
+    }
+}
+
+fn parse_capture_intent(value: &str) -> CliResult<CaptureIntent> {
+    match value {
+        "manual" => Ok(CaptureIntent::Manual),
+        "suggested" => Ok(CaptureIntent::Suggested),
+        "automatic" => Ok(CaptureIntent::Automatic),
+        _ => Err(Box::new(CliError(
+            "intent must be `manual`, `suggested`, or `automatic`".to_owned(),
         ))),
     }
 }

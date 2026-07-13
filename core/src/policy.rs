@@ -856,6 +856,7 @@ fn resolve_permission(
 mod tests {
     use super::*;
     use crate::model::ScopeId;
+    use proptest::prelude::*;
 
     #[test]
     fn policies_are_versioned_and_serializable() -> Result<(), serde_json::Error> {
@@ -1034,5 +1035,74 @@ mod tests {
                 PolicyLayerSource::Session,
             ]
         );
+    }
+
+    proptest! {
+        #[test]
+        fn automatic_capture_never_bypasses_denied_actor_source_scope_or_confidence(
+            allow_actor in any::<bool>(),
+            allow_source in any::<bool>(),
+            allow_scope in any::<bool>(),
+            minimum_confidence in 0u8..=100,
+            confidence in 0u8..=100,
+        ) {
+            let scope = MemoryScope::repository(ScopeId::new("property-repo").expect("constant scope should validate"));
+            let policy = CapturePolicy {
+                mode: CaptureMode::Automatic,
+                actors: ActorClassPolicy {
+                    automation: allow_actor,
+                    ..ActorClassPolicy::default()
+                },
+                sources: SourceKindPolicy {
+                    agent: allow_source,
+                    ..SourceKindPolicy::default()
+                },
+                scopes: ScopePolicy {
+                    repository: allow_scope,
+                    ..ScopePolicy::default()
+                },
+                minimum_confidence_percent: minimum_confidence,
+                ..CapturePolicy::default()
+            };
+            let decision = policy.evaluate(
+                CapturePolicyRequest {
+                    actor: PolicyActorClass::Automation,
+                    intent: CaptureIntent::Automatic,
+                    confidence_percent: confidence,
+                },
+                SourceKind::Agent,
+                &scope,
+            );
+
+            if !allow_actor || !allow_source || !allow_scope || confidence < minimum_confidence {
+                prop_assert_eq!(decision.outcome, CaptureDecisionOutcome::Deny);
+            } else {
+                prop_assert_eq!(decision.outcome, CaptureDecisionOutcome::Allow);
+            }
+        }
+
+        #[test]
+        fn recall_limits_never_expand_past_policy(
+            max_candidates in 0usize..64,
+            max_tokens in 0usize..4096,
+            requested_candidates in 0usize..128,
+            requested_tokens in proptest::option::of(0usize..8192),
+            allow_cold in any::<bool>(),
+            allow_instructions in any::<bool>(),
+        ) {
+            let policy = RecallPolicy {
+                max_candidates,
+                max_context_tokens: max_tokens,
+                allow_cold,
+                allow_instructions,
+                ..RecallPolicy::default()
+            };
+            let decision = policy.decide(requested_candidates, requested_tokens, true, true);
+
+            prop_assert!(decision.effective_candidates <= max_candidates);
+            prop_assert!(decision.effective_context_tokens <= max_tokens);
+            prop_assert_eq!(decision.include_cold, allow_cold);
+            prop_assert_eq!(decision.include_instructions, allow_instructions);
+        }
     }
 }

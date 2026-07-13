@@ -18,6 +18,7 @@ Currency = Literal["current", "not_yet_valid", "invalidated"]
 __version__: str
 
 def version() -> str: ...
+def canonicalize_extraction_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]: ...
 
 class ShibahamaError(RuntimeError):
     code: str
@@ -102,6 +103,26 @@ class RecallStream(Iterator[RecallCandidate]):
 
 class Shibahama:
     def __init__(self, path: str, dimensions: int, capacity: int = 1024) -> None: ...
+    def simulate_capture_policy(
+        self,
+        source_kind: SourceKind,
+        actor: Literal["human", "agent", "automation", "service"] = "human",
+        intent: Literal["manual", "suggested", "automatic"] = "manual",
+        confidence_percent: int = 100,
+        scope_repository: str = "default",
+        scope_team: str | None = None,
+        scope_visibility: Literal["repository", "team"] = "repository",
+    ) -> dict[str, Any]: ...
+    def simulate_recall_policy(
+        self,
+        top_k: int,
+        max_context_tokens: int | None = None,
+        include_cold: bool = False,
+        include_instructions: bool = False,
+        scope_repository: str = "default",
+        scope_team: str | None = None,
+        scope_visibility: Literal["repository", "team"] = "repository",
+    ) -> dict[str, Any]: ...
     def write(
         self,
         content: str,

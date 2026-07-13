@@ -7,6 +7,7 @@ use crate::consolidation::{
     ConsolidationPolicy, OfflineConsolidationConfig, PlannedConsolidationDecision,
     plan_offline_consolidation,
 };
+use crate::embedding::{EmbeddingProvider, EmbeddingPurpose, validate_embedding};
 use crate::learned_policy::{
     ContextualBanditExperimentConfig, ContextualBanditExperimentReport, OfflinePolicyDecision,
     OfflinePolicyEvaluationConfig, OfflinePolicyEvaluationReport, PolicyEvaluationError,
@@ -1167,8 +1168,7 @@ impl<V: VectorIndex> Shibahama<V> {
                 include_cold,
                 include_instructions,
             ),
-            scope_allowed: scope
-                .is_none_or(|scope| self.config.recall_policy.scopes.allows(scope)),
+            scope_allowed: scope.is_none_or(|scope| self.config.recall_policy.scopes.allows(scope)),
         }
     }
 
@@ -1278,6 +1278,40 @@ impl<V: VectorIndex> Shibahama<V> {
         self.store.record_policy_decision(audit)?;
 
         Ok(item)
+    }
+
+    /// Embeds and writes memory through a provider after metadata and dimension validation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error before persistence when provider metadata/output is incompatible.
+    pub fn write_with_provider(
+        &mut self,
+        event: MemoryWriteEvent,
+        provider: &dyn EmbeddingProvider,
+        index_name: &str,
+    ) -> Result<MemoryItem, ShibahamaError> {
+        let metadata = provider.metadata();
+        if metadata.dimensions != self.vector_index.dimensions() {
+            return Err(ShibahamaError::InvalidRequest(
+                "embedding provider dimensions do not match vector index".to_owned(),
+            ));
+        }
+        let vector = provider
+            .embed(&event.content, EmbeddingPurpose::Document)
+            .map_err(|error| ShibahamaError::InvalidRequest(error.detail))?;
+        validate_embedding(&metadata, EmbeddingPurpose::Document, &vector)
+            .map_err(|error| ShibahamaError::InvalidRequest(error.detail))?;
+
+        self.write_with_embedding(
+            event,
+            WriteEmbedding {
+                vector: &vector,
+                index_name,
+                model: &metadata.model,
+                model_version: &metadata.version,
+            },
+        )
     }
 
     /// Writes a memory event after evaluating caller-supplied capture policy metadata.
@@ -1507,6 +1541,34 @@ impl<V: VectorIndex> Shibahama<V> {
         })
     }
 
+    /// Embeds text through a provider and recalls using the same policy path as supplied vectors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error before retrieval when provider metadata/output is incompatible.
+    pub fn recall_text_with_provider(
+        &self,
+        query: &str,
+        top_k: usize,
+        now: OffsetDateTime,
+        provider: &dyn EmbeddingProvider,
+    ) -> Result<Vec<RecallCandidate>, ShibahamaError> {
+        let metadata = provider.metadata();
+        if metadata.dimensions != self.vector_index.dimensions() {
+            return Err(ShibahamaError::InvalidRequest(
+                "embedding provider dimensions do not match vector index".to_owned(),
+            ));
+        }
+        let vector = provider
+            .embed(query, EmbeddingPurpose::Query)
+            .map_err(|error| ShibahamaError::InvalidRequest(error.detail))?;
+        validate_embedding(&metadata, EmbeddingPurpose::Query, &vector)
+            .map_err(|error| ShibahamaError::InvalidRequest(error.detail))?;
+        let request = self.recall_request(&vector, top_k, now);
+
+        self.recall(&request)
+    }
+
     /// Recalls usable candidates while reporting unavailable optional stages.
     ///
     /// # Errors
@@ -1536,11 +1598,12 @@ impl<V: VectorIndex> Shibahama<V> {
             request.scope,
         );
         if !simulation.scope_allowed {
-            self.store.record_policy_decision(simulation.decision.audit_record(
-                request.scope,
-                PolicyAuditDisposition::Denied,
-                None,
-            ))?;
+            self.store
+                .record_policy_decision(simulation.decision.audit_record(
+                    request.scope,
+                    PolicyAuditDisposition::Denied,
+                    None,
+                ))?;
             return Err(ShibahamaError::AuthorizationDenied);
         }
         let decision = simulation.decision;
@@ -3474,8 +3537,7 @@ mod tests {
             confidence_percent: 100,
         };
 
-        let capture =
-            shibahama.simulate_capture_policy(SourceKind::Agent, &scope, capture_request);
+        let capture = shibahama.simulate_capture_policy(SourceKind::Agent, &scope, capture_request);
         let recall = shibahama.simulate_recall_policy(20, Some(5_000), true, true, Some(&scope));
 
         assert_eq!(
@@ -3500,6 +3562,73 @@ mod tests {
         assert_eq!(
             shibahama.memory_items().expect("items should read"),
             before_items
+        );
+    }
+
+    #[test]
+    fn provider_embeddings_match_supplied_vectors_and_reject_dimension_mismatch_before_write() {
+        struct FixedProvider {
+            vector: Vec<f32>,
+            dimensions: usize,
+        }
+
+        impl EmbeddingProvider for FixedProvider {
+            fn metadata(&self) -> crate::embedding::EmbeddingModelMetadata {
+                crate::embedding::EmbeddingModelMetadata {
+                    provider: "test".to_owned(),
+                    model: "fixed".to_owned(),
+                    version: "v1".to_owned(),
+                    dimensions: self.dimensions,
+                    capabilities: vec![
+                        crate::embedding::EmbeddingCapability::Document,
+                        crate::embedding::EmbeddingCapability::Query,
+                    ],
+                }
+            }
+
+            fn embed(
+                &self,
+                _text: &str,
+                _purpose: EmbeddingPurpose,
+            ) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+                Ok(self.vector.clone())
+            }
+        }
+
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let mut shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("api should open");
+        let provider = FixedProvider {
+            vector: vec![1.0, 0.0],
+            dimensions: 2,
+        };
+        let item = shibahama
+            .write_with_provider(
+                api_endpoint_event("provider memory", OffsetDateTime::UNIX_EPOCH),
+                &provider,
+                "provider-test",
+            )
+            .expect("provider write should work");
+        let candidates = shibahama
+            .recall_text_with_provider("provider query", 1, OffsetDateTime::UNIX_EPOCH, &provider)
+            .expect("provider recall should work");
+        let bad_provider = FixedProvider {
+            vector: vec![1.0, 0.0, 0.0],
+            dimensions: 3,
+        };
+
+        assert_eq!(candidates[0].id, item.id);
+        assert!(matches!(
+            shibahama.write_with_provider(
+                api_endpoint_event("must not persist", OffsetDateTime::UNIX_EPOCH),
+                &bad_provider,
+                "provider-test",
+            ),
+            Err(ShibahamaError::InvalidRequest(_))
+        ));
+        assert_eq!(
+            shibahama.memory_items().expect("items should read").len(),
+            1
         );
     }
 

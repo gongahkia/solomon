@@ -20,6 +20,10 @@ export declare class Shibahama {
   constructor(path: string, dimensions: number, capacity?: number | undefined | null)
   /** Returns true when the native engine lock is healthy. */
   isOpen(): boolean
+  /** Simulates capture policy without writing memory or audit events. */
+  simulateCapturePolicy(sourceKind: string, options?: CapturePolicySimulationOptions | undefined | null): string
+  /** Simulates recall policy without reading memory or writing access events. */
+  simulateRecallPolicy(topK: number, options?: RecallOptions | undefined | null, scope?: MemoryScope | undefined | null): string
   /**
    * Writes a memory, optionally indexing an embedding vector.
    *
@@ -166,8 +170,18 @@ export declare class Shibahama {
   correctJson(memoryId: string, proposedContent: string, reason?: string | undefined | null, actor?: string | undefined | null, timestampUnix?: number | undefined | null): string
 }
 
+/** Parses and canonicalizes one typed extraction candidate without persisting it. */
+export declare function canonicalizeExtractionCandidateJson(value: string): string
+
 /** Returns the versioned capability document as JSON. */
 export declare function capabilitiesJson(): string
+
+export interface CapturePolicySimulationOptions {
+  actor?: string
+  intent?: string
+  confidencePercent?: number
+  scope?: MemoryScope
+}
 
 export interface DegradedRecallResult {
   candidates: Array<RecallCandidate>

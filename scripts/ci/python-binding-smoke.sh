@@ -36,6 +36,20 @@ assert "recall" in capabilities["capabilities"]
 assert capabilities["memory_schema_version"] >= 1
 assert (Path("bindings/python/python/shibahama/__init__.pyi")).is_file()
 assert (Path("bindings/python/python/shibahama/py.typed")).is_file()
+extraction_candidate = {
+    "content": "storage is append-only",
+    "kind": "Fact",
+    "validity": {
+        "valid_from_unix": 0,
+        "valid_to_unix": None,
+        "ingested_at_unix": 0,
+    },
+    "evidence_spans": [{"evidence_index": 0, "start": 0, "end": 7}],
+    "confidence_percent": 80,
+    "rationale": "fixture",
+    "suggested_scope": {"repository": "repo", "team": None, "visibility": "repository"},
+}
+assert shibahama.canonicalize_extraction_candidate(extraction_candidate) == extraction_candidate
 
 with tempfile.NamedTemporaryFile() as invalid_db:
     invalid_engine = shibahama.Shibahama(invalid_db.name, 2)
@@ -62,6 +76,17 @@ with tempfile.NamedTemporaryFile() as invalid_db:
 
 with tempfile.NamedTemporaryFile() as db:
     engine = shibahama.Shibahama(db.name, 2)
+    simulation_events = engine.event_records()["event_count"]
+    capture_simulation = engine.simulate_capture_policy(
+        "agent", actor="automation", intent="automatic"
+    )
+    recall_simulation = engine.simulate_recall_policy(
+        20, max_context_tokens=5000, include_cold=True, include_instructions=True
+    )
+    assert capture_simulation["decision"]["outcome"] == "deny"
+    assert recall_simulation["decision"]["effective_candidates"] == 8
+    assert recall_simulation["decision"]["effective_context_tokens"] == 2048
+    assert engine.event_records()["event_count"] == simulation_events
     item = engine.write(
         "Python binding memory",
         vector=[0.0, 0.0],

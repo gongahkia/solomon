@@ -18,6 +18,7 @@ from ._shibahama import (
     SignificanceBreakdown,
     WhyTrace,
     capabilities_json,
+    canonicalize_extraction_candidate_json,
     version,
 )
 
@@ -25,6 +26,11 @@ from ._shibahama import (
 def capabilities() -> dict[str, Any]:
     """Return the versioned capability document for this build."""
     return json.loads(capabilities_json())
+
+
+def canonicalize_extraction_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
+    """Round-trip a typed extraction candidate without persisting it."""
+    return json.loads(canonicalize_extraction_candidate_json(json.dumps(candidate)))
 
 
 class ShibahamaError(RuntimeError):
@@ -89,6 +95,52 @@ class Shibahama:
     def __init__(self, path: str, dimensions: int, capacity: int = 1024) -> None:
         """Open an embedded Shibahama store with the built-in HNSW vector index."""
         self._inner = _NativeShibahama(path, dimensions, capacity)
+
+    def simulate_capture_policy(
+        self,
+        source_kind: str,
+        actor: str = "human",
+        intent: str = "manual",
+        confidence_percent: int = 100,
+        scope_repository: str = "default",
+        scope_team: str | None = None,
+        scope_visibility: str = "repository",
+    ) -> dict[str, Any]:
+        """Preview a capture-policy decision without mutation."""
+        return json.loads(
+            self._inner.simulate_capture_policy(
+                source_kind,
+                actor,
+                intent,
+                confidence_percent,
+                scope_repository,
+                scope_team,
+                scope_visibility,
+            )
+        )
+
+    def simulate_recall_policy(
+        self,
+        top_k: int,
+        max_context_tokens: int | None = None,
+        include_cold: bool = False,
+        include_instructions: bool = False,
+        scope_repository: str = "default",
+        scope_team: str | None = None,
+        scope_visibility: str = "repository",
+    ) -> dict[str, Any]:
+        """Preview a recall-policy decision without mutation."""
+        return json.loads(
+            self._inner.simulate_recall_policy(
+                top_k,
+                max_context_tokens,
+                include_cold,
+                include_instructions,
+                scope_repository,
+                scope_team,
+                scope_visibility,
+            )
+        )
 
     def write(
         self,

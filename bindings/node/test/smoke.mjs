@@ -6,7 +6,13 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import shibahama, { LangChainMemory, Shibahama, capabilities, version } from "../index.mjs";
+import shibahama, {
+  LangChainMemory,
+  Shibahama,
+  capabilities,
+  canonicalizeExtractionCandidateJson,
+  version,
+} from "../index.mjs";
 
 const require = createRequire(import.meta.url);
 const cjs = require("../index.cjs");
@@ -23,6 +29,39 @@ try {
   assert.deepEqual(cjs.capabilities(), capabilities());
   assert.equal(engine.isOpen(), true);
   assert.equal(cjsEngine.isOpen(), true);
+  const extractionCandidate = {
+    content: "storage is append-only",
+    kind: "Fact",
+    validity: {
+      valid_from_unix: 0,
+      valid_to_unix: null,
+      ingested_at_unix: 0,
+    },
+    evidence_spans: [{ evidence_index: 0, start: 0, end: 7 }],
+    confidence_percent: 80,
+    rationale: "fixture",
+    suggested_scope: { repository: "repo", team: null, visibility: "repository" },
+  };
+  assert.deepEqual(
+    JSON.parse(canonicalizeExtractionCandidateJson(JSON.stringify(extractionCandidate))),
+    extractionCandidate,
+  );
+
+  const simulationEvents = engine.eventRecords().eventCount;
+  const captureSimulation = JSON.parse(
+    engine.simulateCapturePolicy("agent", { actor: "automation", intent: "automatic" }),
+  );
+  const recallSimulation = JSON.parse(
+    engine.simulateRecallPolicy(20, {
+      includeCold: true,
+      includeInstructions: true,
+      maxContextTokens: 5000,
+    }),
+  );
+  assert.equal(captureSimulation.decision.outcome, "deny");
+  assert.equal(recallSimulation.decision.effective_candidates, 8);
+  assert.equal(recallSimulation.decision.effective_context_tokens, 2048);
+  assert.equal(engine.eventRecords().eventCount, simulationEvents);
 
   try {
     engine.write("invalid vector", { vector: [0] });

@@ -92,6 +92,19 @@ if [[ "$(json_field schema_version <<<"$capabilities_json")" != "1" ]]; then
   exit 1
 fi
 
+capture_simulation="$(request POST /policy/simulate/capture '{"source_kind":"agent","actor":"automation","intent":"automatic"}')"
+recall_simulation="$(request POST /policy/simulate/recall '{"top_k":20,"max_context_tokens":5000,"include_cold":true,"include_instructions":true}')"
+python3 -c 'import json,sys
+capture, recall = map(json.loads, sys.argv[1:])
+assert capture["decision"]["outcome"] == "deny"
+assert recall["decision"]["effective_candidates"] == 8
+assert recall["decision"]["effective_context_tokens"] == 2048' \
+  "$capture_simulation" "$recall_simulation"
+if [[ "$(json_field memory_count <<<"$(request GET /inspect)")" != "0" ]]; then
+  echo "policy simulation mutated memory state" >&2
+  exit 1
+fi
+
 item_json="$(request_team POST /write '{"content":"Server smoke memory","vector":[1,0],"source_kind":"user","source_ref":"server-smoke","valid_from_unix":0,"ingested_at_unix":0,"scope":{"repository":"smoke","team":"team-smoke","visibility":"team"}}')"
 memory_id="$(json_field id <<<"$item_json")"
 if [[ "$(json_field scope.repository <<<"$item_json")" != "$namespace" || "$(json_field scope.team <<<"$item_json")" != "team-smoke" || "$(json_field scope.visibility <<<"$item_json")" != "team" ]]; then

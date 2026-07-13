@@ -12,6 +12,7 @@ use shibahama_core::api::{
     ConsolidationPassReport, HumanCorrectionOutcome, HumanSignalOutcome, HumanSignalRequest,
     Shibahama as CoreShibahama, ShibahamaError, WhyTrace as CoreWhyTrace, WriteEmbedding,
 };
+use shibahama_core::extraction::ExtractionCandidate;
 use shibahama_core::model::{
     AccessOutcome, ConsolidationAction, CredenceTier, HumanSignal, HumanSignalAction, MemoryId,
     MemoryItem as CoreMemoryItem, MemoryKind, MemoryScope as CoreMemoryScope,
@@ -222,11 +223,19 @@ impl Shibahama {
     ) -> Result<String> {
         let options = options.unwrap_or_default();
         let source_kind = parse_source_kind(&source_kind)?;
-        let scope = options.scope.map(parse_memory_scope).transpose()?.unwrap_or_default();
+        let scope = options
+            .scope
+            .map(parse_memory_scope)
+            .transpose()?
+            .unwrap_or_default();
         let request = CapturePolicyRequest {
             actor: parse_policy_actor(options.actor.as_deref().unwrap_or("human"))?,
             intent: parse_capture_intent(options.intent.as_deref().unwrap_or("manual"))?,
-            confidence_percent: options.confidence_percent.unwrap_or(100).try_into().map_err(|_| Error::from_reason("confidence_percent must be between 0 and 255"))?,
+            confidence_percent: options
+                .confidence_percent
+                .unwrap_or(100)
+                .try_into()
+                .map_err(|_| Error::from_reason("confidence_percent must be between 0 and 255"))?,
         };
         let inner = self.inner.lock().map_err(lock_error)?;
 
@@ -953,6 +962,14 @@ pub fn version() -> String {
 #[napi]
 pub fn capabilities_json() -> Result<String> {
     serde_json::to_string(&shibahama_core::capabilities()).map_err(json_error)
+}
+
+/// Parses and canonicalizes one typed extraction candidate without persisting it.
+#[napi]
+pub fn canonicalize_extraction_candidate_json(value: String) -> Result<String> {
+    let candidate: ExtractionCandidate = serde_json::from_str(&value).map_err(json_error)?;
+
+    serde_json::to_string(&candidate).map_err(json_error)
 }
 
 fn write_event(

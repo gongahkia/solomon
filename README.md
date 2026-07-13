@@ -77,7 +77,7 @@ Detailed host setup, seed data, and a smoke prompt: [`docs/mcp/install.md`](./do
 
 ## Curator Console
 
-Run the thin curator console for dependency review, verification, and audit-pack inspection:
+Run the curator console for dependency review, verification, and audit-pack inspection:
 
 ```bash
 uv run solomon console serve --host 127.0.0.1 --port 8150

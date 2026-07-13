@@ -48,8 +48,8 @@ before procurement or integration decisions.
 
 Solomon runs as an MCP server, FastAPI service, or CLI. An MCP host calls deterministic tools such as
 `preflight_context`, `why`, `impact`, and `audit_pack`; the host retains responsibility for prompting, drafting,
-and human review. The curator console is secondary: it gives knowledge teams a focused review surface for
-dependencies, verification, and audit evidence.
+and human review. The curator console is a first-class review surface for knowledge teams to manage dependencies,
+verification, and audit evidence.
 
 ## Non-claims
 

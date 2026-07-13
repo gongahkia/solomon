@@ -218,10 +218,9 @@ an older search result because the answer feels incomplete.
 
 A second pattern is a reviewer cockpit. A curator uses the console or API to inspect stale queues after a source
 change. The relevant work is not bulk drafting. It is checking the change, reading dependency paths, assigning review,
-and recording an outcome. The console is intentionally secondary to the MCP surface, but its value is to make the
-human state transitions visible enough to operate. A well-designed review queue shows the affected item, scope,
-authority change, prior verification, owner, and reason rather than asking a reviewer to reconstruct them from raw
-documents.
+and recording an outcome. The console is a first-class peer to the MCP surface for human state transitions. A
+well-designed review queue shows the affected item, scope, authority change, prior verification, owner, and reason
+rather than asking a reviewer to reconstruct them from raw documents.
 
 A third pattern is audit-first reporting. A practice lead or client-governance function can request a currency report
 for a matter, client, practice area, or period. The report should be treated as a record of knowledge governance: what
@@ -384,10 +383,10 @@ the in-process boundary. A server SKU adds API-key authentication, tenant isolat
 configured remote model routing. Neither mode removes the firm's responsibility to validate model vendors, access
 control, retention, transfer, client engagement terms, conflicts, supervision, or incident response.
 
-The curator console is a secondary operational surface. It supports verification queues, dependency suggestions,
-audit-pack viewing, and currency reports. The CLI and FastAPI surface enable automation and service integration. MCP
-is the primary host-facing surface. This ordering matters: the system's value is the verified-currency contract, not a
-claim to replace existing document management, practice management, research, or drafting products.
+The curator console is a first-class operational surface. It supports verification queues, dependency suggestions,
+audit-pack viewing, and currency reports. The CLI and FastAPI surface enable automation and service integration, while
+MCP provides a generic host-facing surface. The system's value is the verified-currency contract, not a claim to
+replace existing document management, practice management, research, or drafting products.
 
 Governance should define who can ingest material, confirm dependencies, affirm positions, apply pins, and access audit
 packs. It should specify what source records are required, how quickly authority changes are assessed, how conflicts

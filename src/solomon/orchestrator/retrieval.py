@@ -211,7 +211,15 @@ class SQLiteRetrievalIndex:
         ).fetchall()
         return {str(row["item_id"]): str(row["embedding_ref"]) for row in rows}
 
-    def search(self, query: str, *, limit: int = 20) -> list[IndexedHit]:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[IndexedHit]:
+        _ = matter_id, client_id
         cache_key = (query, limit, self.strategy.ref)
         if cached_hits := self._search_cache.get(cache_key):
             return list(cached_hits)
@@ -236,7 +244,15 @@ class SQLiteRetrievalIndex:
         self._search_cache[cache_key] = limited_hits
         return list(limited_hits)
 
-    def search_lexical(self, query: str, *, limit: int = 20) -> list[LexicalHit]:
+    def search_lexical(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[LexicalHit]:
+        _ = matter_id, client_id
         cache_key = (query, limit)
         if cached_hits := self._lexical_search_cache.get(cache_key):
             return list(cached_hits)
@@ -374,9 +390,23 @@ class RetrievalIndexProtocol(Protocol):
 
     def embedding_refs(self, item_ids: list[str]) -> dict[str, str]: ...
 
-    def search(self, query: str, *, limit: int = 20) -> list[IndexedHit]: ...
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[IndexedHit]: ...
 
-    def search_lexical(self, query: str, *, limit: int = 20) -> list[LexicalHit]: ...
+    def search_lexical(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[LexicalHit]: ...
 
     def close(self) -> None: ...
 
@@ -444,11 +474,21 @@ class RetrievalOrchestrator:
     ) -> list[RecallResult]:
         resolved_options = options or RecallOptions()
         candidate_limit = max(resolved_options.limit * 4, resolved_options.limit)
-        semantic_hits = self.index.search(query, limit=candidate_limit)
-        lexical_hits = self.index.search_lexical(query, limit=candidate_limit)
-        candidate_item_ids = list(dict.fromkeys([hit.item_id for hit in semantic_hits + lexical_hits]))
         matter_id = matter_context.matter_id if matter_context else None
         client_id = matter_context.client_id if matter_context else None
+        semantic_hits = self.index.search(
+            query,
+            limit=candidate_limit,
+            matter_id=matter_id,
+            client_id=client_id,
+        )
+        lexical_hits = self.index.search_lexical(
+            query,
+            limit=candidate_limit,
+            matter_id=matter_id,
+            client_id=client_id,
+        )
+        candidate_item_ids = list(dict.fromkeys([hit.item_id for hit in semantic_hits + lexical_hits]))
         scoped_items = self.store.get_many(candidate_item_ids, matter_id=matter_id, client_id=client_id)
         hits = _fuse_hits(
             semantic_hits,

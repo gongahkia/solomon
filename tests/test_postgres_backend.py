@@ -27,7 +27,14 @@ def _dt(year: int, month: int, day: int) -> datetime:
     return datetime(year, month, day, tzinfo=timezone.utc)
 
 
-def _item(item_id: str, content: str, ingested_at: datetime | None = None) -> KnowledgeItem:
+def _item(
+    item_id: str,
+    content: str,
+    ingested_at: datetime | None = None,
+    *,
+    matter_id: str | None = None,
+    client_id: str | None = None,
+) -> KnowledgeItem:
     timestamp = ingested_at or _dt(2024, 1, 1)
     return KnowledgeItem(
         id=item_id,
@@ -39,6 +46,8 @@ def _item(item_id: str, content: str, ingested_at: datetime | None = None) -> Kn
         credence_tier=CredenceTier.FIRM_AUTHORITATIVE,
         last_verified_at=timestamp,
         verified_by="Partner A",
+        matter_id=matter_id,
+        client_id=client_id,
     )
 
 
@@ -110,6 +119,39 @@ def test_postgres_graph_index_and_retrieval_match_sqlite_workflow(tmp_path: Path
     assert recall[0].item.id == "item-1"
     assert impact.stale_item_ids == ["item-1"]
     assert store.get_item("item-1").currency_state is CurrencyState.STALE_PENDING_REVERIFICATION
+
+
+def test_postgres_hybrid_candidates_filter_scope_before_fusion(tmp_path: Path) -> None:
+    dsn = "postgresql://unit/solomon"
+    store = PostgresKnowledgeStore(dsn, connect=lambda _dsn: _connect(tmp_path))
+    graph = PostgresGraphStore(dsn, connect=lambda _dsn: _connect(tmp_path))
+    index = PostgresRetrievalIndex(dsn, connect=lambda _dsn: _connect(tmp_path))
+    in_scope = _item(
+        "in-scope",
+        "citadel priority clause",
+        matter_id="matter-a",
+        client_id="client-a",
+    )
+    out_of_scope = _item(
+        "out-of-scope",
+        "citadel priority clause",
+        matter_id="matter-b",
+        client_id="client-b",
+    )
+    store.write_item(in_scope)
+    store.write_item(out_of_scope)
+    index.batch_upsert([in_scope, out_of_scope])
+    orchestrator = RetrievalOrchestrator(store=store, graph=graph, index=index)
+
+    results = orchestrator.recall(
+        "citadel priority clause",
+        matter_context=MatterContext(matter_id="matter-a", client_id="client-a"),
+        options=RecallOptions(review_mode=True, dedupe_near_identical=False),
+    )
+
+    assert [result.item.id for result in results] == ["in-scope"]
+    assert results[0].score_explanation.semantic_rank == 1
+    assert results[0].score_explanation.lexical_rank == 1
 
 
 def test_postgres_graph_store_persists_dependency_suggestions(tmp_path: Path) -> None:
@@ -186,13 +228,18 @@ def test_postgres_retrieval_migrates_legacy_vectors_and_dual_writes_embeddings(t
         "SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
         ("idx_retrieval_embedding_hnsw",),
     ).fetchone()
+    full_text_index = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
+        ("idx_retrieval_content_tsv",),
+    ).fetchone()
 
-    assert columns >= {"embedding", "vector_json"}
+    assert columns >= {"content_tsv", "embedding", "vector_json"}
     assert legacy is not None and str(legacy["embedding"]) == legacy_vector
     assert current is not None and len(json.loads(str(current["embedding"]))) == 256
     assert indexed.embedding_ref == "hashed-token-vector:1"
-    assert [int(row["version"]) for row in migrations] == [1, 2, 3]
+    assert [int(row["version"]) for row in migrations] == [1, 2, 3, 4]
     assert hnsw_index is not None
+    assert full_text_index is not None
 
 
 def test_postgres_retrieval_applies_pgvector_migrations_per_schema(tmp_path: Path) -> None:
@@ -216,9 +263,11 @@ def test_postgres_retrieval_applies_pgvector_migrations_per_schema(tmp_path: Pat
         ("postgres-retrieval-index:public", 1),
         ("postgres-retrieval-index:public", 2),
         ("postgres-retrieval-index:public", 3),
+        ("postgres-retrieval-index:public", 4),
         ("postgres-retrieval-index:tenant_a", 1),
         ("postgres-retrieval-index:tenant_a", 2),
         ("postgres-retrieval-index:tenant_a", 3),
+        ("postgres-retrieval-index:tenant_a", 4),
     ]
     assert tenant_embedding is not None
 

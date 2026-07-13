@@ -31,6 +31,8 @@ backends preserve the same event-log contract: knowledge is written through appe
 into current state, dependency edges are bi-temporal, and the retrieval index stores deterministic hashed
 vectors. Postgres stores these as `pgvector` `vector(256)` values, with a transactional backfill migration and
 HNSW cosine index; deployments must install the self-hosted extension and grant the startup role `CREATE EXTENSION`.
+Postgres retrieval joins the tenant knowledge projection before full-text and vector candidate ranking, then fuses
+those scoped candidates with the same currency and credence controls used locally.
 Supersession closes `valid_to`, links the successor, and leaves the predecessor queryable in review or historical modes.
 
 In server mode, tenants are tracked in a durable registry at `data_dir/tenants/registry.json`. Admin requests

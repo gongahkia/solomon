@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 import re
 import sqlite3
 from pathlib import Path
@@ -16,6 +18,8 @@ class FakePostgresConnection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(path)
         self._conn.row_factory = sqlite3.Row
+        self._conn.create_function("vector_cosine_distance", 2, _vector_cosine_distance)
+        self._conn.create_function("tsv_matches", 2, _tsv_matches)
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         if "CREATE EXTENSION IF NOT EXISTS vector" in sql:
@@ -48,12 +52,51 @@ def _translate(sql: str) -> str:
     translated = translated.replace("BIGSERIAL PRIMARY KEY", "INTEGER PRIMARY KEY AUTOINCREMENT")
     translated = translated.replace(" ADD COLUMN IF NOT EXISTS ", " ADD COLUMN ")
     translated = re.sub(r"::vector(?:\([0-9]+\))?", "", translated)
+    translated = translated.replace("::tsvector", "")
+    translated = re.sub(r"to_tsvector\('simple', ([A-Za-z_][A-Za-z0-9_]*)\)", r"\1", translated)
+    translated = re.sub(r"to_tsvector\('simple', \?\)", "?", translated)
+    translated = re.sub(
+        r"ts_rank_cd\([^,]+, plainto_tsquery\('simple', \?\)\)",
+        "(? * 0 + 1.0)",
+        translated,
+    )
+    translated = re.sub(
+        r"([A-Za-z_]+\.content_tsv) @@ plainto_tsquery\('simple', \?\)",
+        r"tsv_matches(\1, ?)",
+        translated,
+    )
+    translated = re.sub(
+        r"([A-Za-z_]+\.embedding) <=> \?",
+        r"vector_cosine_distance(\1, ?)",
+        translated,
+    )
     translated = re.sub(
         r"(CREATE INDEX IF NOT EXISTS .+? ON .+?) USING hnsw \(embedding vector_cosine_ops\)",
         r"\1(embedding)",
         translated,
         flags=re.DOTALL,
     )
+    translated = re.sub(
+        r"(CREATE INDEX IF NOT EXISTS .+? ON .+?) USING gin \(content_tsv\)",
+        r"\1(content_tsv)",
+        translated,
+        flags=re.DOTALL,
+    )
     translated = re.sub(r"\bEXCLUDED\.", "excluded.", translated)
     translated = re.sub(r"\bTRUNCATE TABLE\s+([A-Za-z0-9_\".]+)", r"DELETE FROM \1", translated)
     return translated
+
+
+def _vector_cosine_distance(left: str, right: str) -> float:
+    left_vector = json.loads(left)
+    right_vector = json.loads(right)
+    magnitude = math.sqrt(sum(value * value for value in left_vector) * sum(value * value for value in right_vector))
+    if magnitude == 0:
+        return 1.0
+    return 1.0 - sum(a * b for a, b in zip(left_vector, right_vector, strict=True)) / magnitude
+
+
+def _tsv_matches(content: str, query: str) -> bool:
+    content_terms = set(re.findall(r"[A-Za-z0-9_§.-]+", content.lower()))
+    query_terms = set(re.findall(r"[A-Za-z0-9_§.-]+", query.lower()))
+    return query_terms.issubset(content_terms)

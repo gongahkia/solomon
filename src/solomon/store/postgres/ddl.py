@@ -211,4 +211,25 @@ def retrieval_index_migrations(
                 """,
             ),
         ),
+        SchemaMigration(
+            scope=scope,
+            version=4,
+            name="full-text-candidates",
+            sqlite_statements=(),
+            postgres_statements=(
+                f"""
+                ALTER TABLE {table("retrieval_index")}
+                ADD COLUMN IF NOT EXISTS content_tsv tsvector NOT NULL DEFAULT ''::tsvector
+                """,
+                f"""
+                UPDATE {table("retrieval_index")}
+                SET content_tsv = to_tsvector('simple', tokens_json)
+                WHERE content_tsv = ''::tsvector
+                """,
+                f"""
+                CREATE INDEX IF NOT EXISTS {index('idx_retrieval_content_tsv')}
+                ON {table("retrieval_index")} USING gin (content_tsv)
+                """,
+            ),
+        ),
     )

@@ -17,7 +17,6 @@ from solomon.orchestrator.retrieval import (
     IndexedHit,
     LexicalHit,
     RetrievalEmbeddingProvider,
-    _cosine_similarity,
     semantic_tokens,
     tokenize,
 )
@@ -85,13 +84,17 @@ class PostgresRetrievalIndex:
             self._execute(
                 f"""
                 INSERT INTO {self._table("retrieval_index")}
-                (item_id, embedding_ref, tokens_json, lexical_tokens_json, vector_json, embedding, indexed_at)
-                VALUES (%s, %s, %s, %s, %s, %s::vector, %s)
+                (
+                    item_id, embedding_ref, tokens_json, lexical_tokens_json,
+                    vector_json, content_tsv, embedding, indexed_at
+                )
+                VALUES (%s, %s, %s, %s, %s, to_tsvector('simple', %s), %s::vector, %s)
                 ON CONFLICT(item_id) DO UPDATE SET
                     embedding_ref = EXCLUDED.embedding_ref,
                     tokens_json = EXCLUDED.tokens_json,
                     lexical_tokens_json = EXCLUDED.lexical_tokens_json,
                     vector_json = EXCLUDED.vector_json,
+                    content_tsv = EXCLUDED.content_tsv,
                     embedding = EXCLUDED.embedding,
                     indexed_at = EXCLUDED.indexed_at
                 """,
@@ -101,6 +104,7 @@ class PostgresRetrievalIndex:
                     json.dumps(tokens),
                     json.dumps(lexical_tokens),
                     vector_literal,
+                    item.content,
                     vector_literal,
                     timestamp.isoformat(),
                 ),
@@ -124,53 +128,87 @@ class PostgresRetrievalIndex:
         ).fetchall()
         return {str(row_value(row, "item_id")): str(row_value(row, "embedding_ref")) for row in rows}
 
-    def search(self, query: str, *, limit: int = 20) -> list[IndexedHit]:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[IndexedHit]:
         if not tokenize(query):
             return []
         query_vector = self._embed_text(query)
+        vector_literal = json.dumps(query_vector, separators=(",", ":"))
+        scope_sql, scope_params = self._scope_clause(matter_id=matter_id, client_id=client_id)
         rows = self._execute(
             f"""
-            SELECT item_id, embedding_ref, vector_json
-            FROM {self._table("retrieval_index")}
-            ORDER BY item_id
-            """
+            SELECT retrieval.item_id, retrieval.embedding_ref,
+                1 - (retrieval.embedding <=> %s::vector) AS similarity
+            FROM {self._table("retrieval_index")} AS retrieval
+            INNER JOIN {self._table("knowledge_items")} AS knowledge
+                ON knowledge.item_id = retrieval.item_id
+            WHERE retrieval.embedding_ref = %s {scope_sql}
+            ORDER BY retrieval.embedding <=> %s::vector, retrieval.item_id
+            LIMIT %s
+            """,
+            (vector_literal, self.strategy.ref, *scope_params, vector_literal, limit),
         ).fetchall()
-        hits: list[IndexedHit] = []
-        for row in rows:
-            score = _cosine_similarity(query_vector, json.loads(str(row_value(row, "vector_json"))))
-            if score > 0:
-                hits.append(
-                    IndexedHit(
-                        item_id=str(row_value(row, "item_id")),
-                        similarity=score,
-                        embedding_ref=str(row_value(row, "embedding_ref")),
-                    )
-                )
-        return sorted(hits, key=lambda hit: (hit.similarity, hit.item_id), reverse=True)[:limit]
+        return [
+            IndexedHit(
+                item_id=str(row_value(row, "item_id")),
+                similarity=float(row_value(row, "similarity")),
+                embedding_ref=str(row_value(row, "embedding_ref")),
+            )
+            for row in rows
+            if float(row_value(row, "similarity")) > 0
+        ]
 
-    def search_lexical(self, query: str, *, limit: int = 20) -> list[LexicalHit]:
+    def search_lexical(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[LexicalHit]:
         query_terms = tokenize(query)
         if not query_terms:
             return []
+        scope_sql, scope_params = self._scope_clause(matter_id=matter_id, client_id=client_id)
         rows = self._execute(
             f"""
-            SELECT item_id, lexical_tokens_json
-            FROM {self._table("retrieval_index")}
-            ORDER BY item_id
-            """
+            SELECT retrieval.item_id,
+                ts_rank_cd(retrieval.content_tsv, plainto_tsquery('simple', %s)) AS match_ratio
+            FROM {self._table("retrieval_index")} AS retrieval
+            INNER JOIN {self._table("knowledge_items")} AS knowledge
+                ON knowledge.item_id = retrieval.item_id
+            WHERE retrieval.content_tsv @@ plainto_tsquery('simple', %s) {scope_sql}
+            ORDER BY match_ratio DESC, retrieval.item_id DESC
+            LIMIT %s
+            """,
+            (query, query, *scope_params, limit),
         ).fetchall()
-        hits: list[LexicalHit] = []
-        for row in rows:
-            matched_terms = sorted(query_terms & set(json.loads(str(row_value(row, "lexical_tokens_json")))))
-            if matched_terms:
-                hits.append(
-                    LexicalHit(
-                        item_id=str(row_value(row, "item_id")),
-                        match_ratio=len(matched_terms) / len(query_terms),
-                        terms=matched_terms,
-                    )
-                )
-        return sorted(hits, key=lambda hit: (hit.match_ratio, hit.item_id), reverse=True)[:limit]
+        return [
+            LexicalHit(
+                item_id=str(row_value(row, "item_id")),
+                match_ratio=float(row_value(row, "match_ratio")),
+                terms=sorted(query_terms),
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def _scope_clause(*, matter_id: str | None, client_id: str | None) -> tuple[str, tuple[str, ...]]:
+        clauses: list[str] = []
+        params: list[str] = []
+        if matter_id is not None:
+            clauses.append("knowledge.matter_id = %s")
+            params.append(matter_id)
+        if client_id is not None:
+            clauses.append("knowledge.client_id = %s")
+            params.append(client_id)
+        return (f" AND {' AND '.join(clauses)}" if clauses else "", tuple(params))
 
     def _embed_text(self, text: str) -> list[float]:
         response = self.provider.embed(EmbeddingRequest(model=self.strategy.ref, texts=[text]))

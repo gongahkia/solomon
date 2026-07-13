@@ -79,10 +79,26 @@ class _StaticIndex:
     def embedding_refs(self, item_ids: list[str]) -> dict[str, str]:
         return {}
 
-    def search(self, query: str, *, limit: int = 20) -> list[IndexedHit]:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[IndexedHit]:
+        _ = query, matter_id, client_id
         return self.hits[:limit]
 
-    def search_lexical(self, query: str, *, limit: int = 20) -> list[LexicalHit]:
+    def search_lexical(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[LexicalHit]:
+        _ = query, matter_id, client_id
         return self.lexical_hits[:limit]
 
     def close(self) -> None:

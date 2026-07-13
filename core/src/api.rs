@@ -19,6 +19,7 @@ use crate::model::{
     MemoryItem, MemoryScope, Provenance, Relation, RelationId, ScopeAuthorizationAction, ScopeId,
     SourceKind, Tier,
 };
+use crate::observability::{ObservabilityOperation, ObservabilityRecord};
 use crate::policy::{
     CapturePolicy, CapturePolicyRequest, CapturePolicySimulation, EffectivePolicy,
     PolicyAuditDisposition, PolicyAuditRecord, PolicyError, PolicyLayerSet, RecallPolicy,
@@ -37,6 +38,9 @@ use crate::retrieval::{
     RecallError, RecallRankingConfig, RecallRequest, RecallStalenessConfig, recall,
     recall_with_degradation, timeline,
 };
+use crate::review::{
+    ReviewAction, ReviewCandidate, ReviewCandidateId, ReviewDecision, ReviewQueueItem,
+};
 use crate::significance::{SignificanceBreakdown, SignificanceConfig};
 use crate::storage::{
     ConsolidationDecisionRecord, EventRecord, GraphSnapshot, GraphTraversalRequest,
@@ -53,6 +57,7 @@ use std::path::Path;
 use std::path::PathBuf;
 #[cfg(feature = "tokio")]
 use std::sync::Arc;
+use std::time::Instant;
 use thiserror::Error;
 use time::OffsetDateTime;
 
@@ -368,6 +373,8 @@ impl ShibahamaErrorMetadata {
 pub struct ShibahamaConfig {
     /// Whether callers must use an explicit [`ScopedShibahama`] context.
     pub scope_mode: ScopeMode,
+    /// Whether the automatic-capture worker may execute after capture-policy evaluation.
+    pub automatic_capture_enabled: bool,
     /// Transparent significance scoring and tier-promotion thresholds.
     pub significance: SignificanceConfig,
     /// Default recall ranking weights.
@@ -620,6 +627,52 @@ pub struct HumanSignalOutcome {
     pub signal: HumanSignal,
     /// Durable event records emitted by the call.
     pub records: HumanSignalRecord,
+}
+
+/// Caller metadata for one explicit candidate-review action.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReviewDecisionRequest {
+    /// Approval, rejection, or non-terminal deferral.
+    pub action: ReviewAction,
+    /// Policy actor class of the reviewer.
+    pub actor: crate::policy::PolicyActorClass,
+    /// Human or attributable agent performing the review.
+    pub reviewer: String,
+    /// Content-free explanation for the decision.
+    pub rationale: String,
+    /// Time the reviewer made the decision.
+    pub reviewed_at: OffsetDateTime,
+}
+
+impl ReviewDecisionRequest {
+    /// Creates explicit review-decision metadata.
+    #[must_use]
+    pub fn new(
+        action: ReviewAction,
+        actor: crate::policy::PolicyActorClass,
+        reviewer: impl Into<String>,
+        rationale: impl Into<String>,
+        reviewed_at: OffsetDateTime,
+    ) -> Self {
+        Self {
+            action,
+            actor,
+            reviewer: reviewer.into(),
+            rationale: rationale.into(),
+            reviewed_at,
+        }
+    }
+}
+
+/// Durable result of reviewing one queued candidate.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReviewOutcome {
+    /// Recorded review decision.
+    pub decision: ReviewDecision,
+    /// Normal memory materialized only for approval.
+    pub memory: Option<MemoryItem>,
+    /// Durable events emitted by the operation.
+    pub records: Vec<EventRecord>,
 }
 
 /// Result for a human correction routed through quarantine and corroboration.
@@ -1253,6 +1306,184 @@ impl<V: VectorIndex> Shibahama<V> {
         Ok(item)
     }
 
+    /// Queues a policy-approved extraction suggestion without promoting it to memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when candidate validation fails, capture policy does not require review,
+    /// or durable queue insertion fails.
+    pub fn enqueue_review_candidate(
+        &self,
+        candidate: ReviewCandidate,
+        actor: crate::policy::PolicyActorClass,
+    ) -> Result<EventRecord, ShibahamaError> {
+        self.require_scope_context()?;
+        candidate
+            .validate()
+            .map_err(|error| ShibahamaError::InvalidRequest(error.to_string()))?;
+        let request = CapturePolicyRequest {
+            actor,
+            intent: crate::policy::CaptureIntent::Suggested,
+            confidence_percent: candidate.candidate.confidence_percent,
+        };
+        let mut source_kinds = Vec::new();
+        for span in &candidate.candidate.evidence_spans {
+            let source_kind = candidate
+                .evidence
+                .get(span.evidence_index)
+                .ok_or_else(|| {
+                    ShibahamaError::InvalidRequest(
+                        "review candidate references unknown source evidence".to_owned(),
+                    )
+                })?
+                .source_kind;
+            if !source_kinds.contains(&source_kind) {
+                source_kinds.push(source_kind);
+            }
+        }
+        if source_kinds.is_empty() {
+            return Err(ShibahamaError::InvalidRequest(
+                "review candidate has no supporting source evidence".to_owned(),
+            ));
+        }
+        let audits = source_kinds
+            .into_iter()
+            .map(|source_kind| {
+                let decision = self
+                    .simulate_capture_policy(
+                        source_kind,
+                        &candidate.candidate.suggested_scope,
+                        request,
+                    )
+                    .decision;
+                (
+                    decision,
+                    decision.audit_record(
+                        request,
+                        source_kind,
+                        &candidate.candidate.suggested_scope,
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        if let Some(decision) = audits
+            .iter()
+            .map(|(decision, _)| *decision)
+            .find(|decision| {
+                decision.outcome != crate::policy::CaptureDecisionOutcome::RequireApproval
+            })
+        {
+            for (_, audit) in audits {
+                self.store.record_policy_decision(audit)?;
+            }
+            return Err(match decision.require_allowed() {
+                Err(error) => error.into(),
+                Ok(()) => ShibahamaError::InvalidRequest(
+                    "review candidates require a policy approval gate".to_owned(),
+                ),
+            });
+        }
+        let record = self.store.enqueue_review_candidate(candidate)?;
+        for (_, audit) in audits {
+            self.store.record_policy_decision(audit)?;
+        }
+
+        Ok(record)
+    }
+
+    /// Returns all durable candidate-review state visible to this engine mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an explicit scope context is required or queue replay fails.
+    pub fn review_queue(&self) -> Result<Vec<ReviewQueueItem>, ShibahamaError> {
+        self.require_scope_context()?;
+        Ok(self.store.review_queue(None)?)
+    }
+
+    /// Records one human or attributable-agent decision for a queued candidate.
+    ///
+    /// Approval materializes a normal scoped memory and its approval event atomically; rejection
+    /// and deferral record no memory content.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when candidate state, policy, reviewer metadata, or storage is invalid.
+    pub fn review_candidate(
+        &self,
+        candidate_id: ReviewCandidateId,
+        request: ReviewDecisionRequest,
+    ) -> Result<ReviewOutcome, ShibahamaError> {
+        self.require_scope_context()?;
+        let queued = self
+            .store
+            .review_queue(None)?
+            .into_iter()
+            .find(|queued| queued.candidate.id == candidate_id)
+            .ok_or_else(|| ShibahamaError::InvalidRequest("unknown review candidate".to_owned()))?;
+        if queued
+            .decisions
+            .last()
+            .is_some_and(crate::review::ReviewDecision::is_terminal)
+        {
+            return Err(ShibahamaError::InvalidRequest(
+                "review candidate is already resolved".to_owned(),
+            ));
+        }
+
+        let candidate = queued.candidate;
+        if request.action == ReviewAction::Approve {
+            let event = candidate
+                .approved_write_event(&request.reviewer)
+                .map_err(|error| ShibahamaError::InvalidRequest(error.to_string()))?;
+            let audit = self.prepare_capture_policy(
+                &event,
+                CapturePolicyRequest {
+                    actor: request.actor,
+                    intent: crate::policy::CaptureIntent::Manual,
+                    confidence_percent: 100,
+                },
+            )?;
+            let item = event.into_item_with_policy(self.config.ingest_credence);
+            let decision = ReviewDecision {
+                candidate_id,
+                scope: candidate.candidate.suggested_scope.clone(),
+                action: request.action,
+                reviewed_by: request.reviewer,
+                reviewer_actor: request.actor,
+                rationale: request.rationale,
+                reviewed_at: request.reviewed_at,
+                approved_memory_id: Some(item.id),
+            };
+            let (memory_record, decision_record) = self
+                .store
+                .approve_review_candidate(&item, decision.clone())?;
+            self.store.record_policy_decision(audit)?;
+            return Ok(ReviewOutcome {
+                decision,
+                memory: Some(item),
+                records: vec![memory_record, decision_record],
+            });
+        }
+        let decision = ReviewDecision {
+            candidate_id,
+            scope: candidate.candidate.suggested_scope,
+            action: request.action,
+            reviewed_by: request.reviewer,
+            reviewer_actor: request.actor,
+            rationale: request.rationale,
+            reviewed_at: request.reviewed_at,
+            approved_memory_id: None,
+        };
+        let record = self.store.record_review_decision(decision.clone())?;
+
+        Ok(ReviewOutcome {
+            decision,
+            memory: None,
+            records: vec![record],
+        })
+    }
+
     /// Writes a memory event and indexes its embedding.
     ///
     /// # Errors
@@ -1291,6 +1522,8 @@ impl<V: VectorIndex> Shibahama<V> {
         provider: &dyn EmbeddingProvider,
         index_name: &str,
     ) -> Result<MemoryItem, ShibahamaError> {
+        let started = Instant::now();
+        let scope = event.scope.clone();
         let metadata = provider.metadata();
         if metadata.dimensions != self.vector_index.dimensions() {
             return Err(ShibahamaError::InvalidRequest(
@@ -1303,7 +1536,7 @@ impl<V: VectorIndex> Shibahama<V> {
         validate_embedding(&metadata, EmbeddingPurpose::Document, &vector)
             .map_err(|error| ShibahamaError::InvalidRequest(error.detail))?;
 
-        self.write_with_embedding(
+        let item = self.write_with_embedding(
             event,
             WriteEmbedding {
                 vector: &vector,
@@ -1311,7 +1544,59 @@ impl<V: VectorIndex> Shibahama<V> {
                 model: &metadata.model,
                 model_version: &metadata.version,
             },
-        )
+        )?;
+        self.store.record_observability(ObservabilityRecord {
+            operation: ObservabilityOperation::ProviderCapture,
+            duration_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+            item_count: 1,
+            provider: Some(metadata.provider),
+            model: Some(metadata.model),
+            policy_outcome: None,
+            error_code: None,
+            scope: Some(scope),
+        })?;
+        Ok(item)
+    }
+
+    /// Embeds and writes memory after enforcing explicit capture-policy metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error before persistence when policy, provider metadata, or output dimensions are
+    /// incompatible; otherwise returns an error when indexing or durable storage fails.
+    pub fn write_with_provider_and_capture_policy(
+        &mut self,
+        event: MemoryWriteEvent,
+        provider: &dyn EmbeddingProvider,
+        index_name: &str,
+        request: CapturePolicyRequest,
+    ) -> Result<MemoryItem, ShibahamaError> {
+        self.require_scope_context()?;
+        let audit = self.prepare_capture_policy(&event, request)?;
+        let metadata = provider.metadata();
+        if metadata.dimensions != self.vector_index.dimensions() {
+            return Err(ShibahamaError::InvalidRequest(
+                "embedding provider dimensions do not match vector index".to_owned(),
+            ));
+        }
+        let vector = provider
+            .embed(&event.content, EmbeddingPurpose::Document)
+            .map_err(|error| ShibahamaError::InvalidRequest(error.detail))?;
+        validate_embedding(&metadata, EmbeddingPurpose::Document, &vector)
+            .map_err(|error| ShibahamaError::InvalidRequest(error.detail))?;
+        let mut item = event.into_item_with_policy(self.config.ingest_credence);
+
+        self.store.write_embedded(
+            &mut item,
+            &mut self.vector_index,
+            &vector,
+            index_name,
+            metadata.model,
+            metadata.version,
+        )?;
+        self.store.record_policy_decision(audit)?;
+
+        Ok(item)
     }
 
     /// Writes a memory event after evaluating caller-supplied capture policy metadata.
@@ -1553,6 +1838,7 @@ impl<V: VectorIndex> Shibahama<V> {
         now: OffsetDateTime,
         provider: &dyn EmbeddingProvider,
     ) -> Result<Vec<RecallCandidate>, ShibahamaError> {
+        let started = Instant::now();
         let metadata = provider.metadata();
         if metadata.dimensions != self.vector_index.dimensions() {
             return Err(ShibahamaError::InvalidRequest(
@@ -1566,7 +1852,18 @@ impl<V: VectorIndex> Shibahama<V> {
             .map_err(|error| ShibahamaError::InvalidRequest(error.detail))?;
         let request = self.recall_request(&vector, top_k, now);
 
-        self.recall(&request)
+        let candidates = self.recall(&request)?;
+        self.store.record_observability(ObservabilityRecord {
+            operation: ObservabilityOperation::ProviderRecall,
+            duration_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+            item_count: candidates.len(),
+            provider: Some(metadata.provider),
+            model: Some(metadata.model),
+            policy_outcome: None,
+            error_code: None,
+            scope: None,
+        })?;
+        Ok(candidates)
     }
 
     /// Recalls usable candidates while reporting unavailable optional stages.
@@ -2481,6 +2778,71 @@ impl<V: VectorIndex> ScopedShibahama<'_, V> {
         self.engine.write(event)
     }
 
+    /// Writes a memory under explicit capture-policy metadata in this scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when event scope, policy, or persistence is invalid.
+    pub fn write_with_capture_policy(
+        &mut self,
+        event: MemoryWriteEvent,
+        request: CapturePolicyRequest,
+    ) -> Result<MemoryItem, ShibahamaError> {
+        self.ensure_event_scope(&event)?;
+        self.engine.write_with_capture_policy(event, request)
+    }
+
+    /// Queues a suggestion only when its proposed scope matches this context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the suggested scope differs or queueing is denied.
+    pub fn enqueue_review_candidate(
+        &mut self,
+        candidate: ReviewCandidate,
+        actor: crate::policy::PolicyActorClass,
+    ) -> Result<EventRecord, ShibahamaError> {
+        if candidate.candidate.suggested_scope != self.scope {
+            return Err(ShibahamaError::InvalidRequest(
+                "review candidate scope conflicts with the active scope context".to_owned(),
+            ));
+        }
+        self.engine.enqueue_review_candidate(candidate, actor)
+    }
+
+    /// Returns review candidates and decisions in this context only.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when durable review state cannot be replayed.
+    pub fn review_queue(&mut self) -> Result<Vec<ReviewQueueItem>, ShibahamaError> {
+        Ok(self.engine.store.review_queue(Some(&self.scope))?)
+    }
+
+    /// Reviews one candidate only when it belongs to this context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the candidate is outside this scope or review cannot be recorded.
+    pub fn review_candidate(
+        &mut self,
+        candidate_id: ReviewCandidateId,
+        request: ReviewDecisionRequest,
+    ) -> Result<ReviewOutcome, ShibahamaError> {
+        if !self
+            .engine
+            .store
+            .review_queue(Some(&self.scope))?
+            .iter()
+            .any(|candidate| candidate.candidate.id == candidate_id)
+        {
+            return Err(ShibahamaError::InvalidRequest(
+                "review candidate is outside the active scope context".to_owned(),
+            ));
+        }
+        self.engine.review_candidate(candidate_id, request)
+    }
+
     /// Writes and indexes a memory only when its scope matches this context.
     ///
     /// # Errors
@@ -2493,6 +2855,23 @@ impl<V: VectorIndex> ScopedShibahama<'_, V> {
     ) -> Result<MemoryItem, ShibahamaError> {
         self.ensure_event_scope(&event)?;
         self.engine.write_with_embedding(event, embedding)
+    }
+
+    /// Embeds and writes a memory under explicit capture-policy metadata in this scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when event scope, policy, provider, index, or storage is invalid.
+    pub fn write_with_provider_and_capture_policy(
+        &mut self,
+        event: MemoryWriteEvent,
+        provider: &dyn EmbeddingProvider,
+        index_name: &str,
+        request: CapturePolicyRequest,
+    ) -> Result<MemoryItem, ShibahamaError> {
+        self.ensure_event_scope(&event)?;
+        self.engine
+            .write_with_provider_and_capture_policy(event, provider, index_name, request)
     }
 
     /// Recalls only memories in this scope.
@@ -2518,6 +2897,19 @@ impl<V: VectorIndex> ScopedShibahama<'_, V> {
     ) -> Result<PolicyRecallResult, ShibahamaError> {
         self.engine
             .recall_with_policy_report(&self.scoped_request(request)?)
+    }
+
+    /// Recalls this scope while reporting unavailable optional stages.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when required recall stages fail.
+    pub fn recall_with_degradation(
+        &mut self,
+        request: &RecallRequest<'_>,
+    ) -> Result<DegradedRecallResult, ShibahamaError> {
+        self.engine
+            .recall_with_degradation(&self.scoped_request(request)?)
     }
 
     /// Replays only memories in this scope at a historical instant.
@@ -3211,8 +3603,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::extraction::{CandidateValidity, EvidenceSpan, ExtractionCandidate, SourceEvidence};
     use crate::model::{
-        ConsolidationAction, HumanSignalAction, MemoryScope, Provenance, ScopeId, SourceKind,
+        ConsolidationAction, HumanSignalAction, MemoryKind, MemoryScope, Provenance, ScopeId,
+        SourceKind,
     };
     #[cfg(feature = "tokio")]
     use crate::read_safety::DefaultSanitizingGateway;
@@ -3314,6 +3708,38 @@ mod tests {
         event.tier = Tier::Warm;
         event.credence_floor = Tier::Warm;
         event
+    }
+
+    fn reviewable_candidate(content: &str) -> ReviewCandidate {
+        ReviewCandidate {
+            id: ReviewCandidateId::new_v7(),
+            candidate: ExtractionCandidate {
+                content: content.to_owned(),
+                kind: MemoryKind::Fact,
+                validity: CandidateValidity {
+                    valid_from_unix: 0,
+                    valid_to_unix: Some(60),
+                    ingested_at_unix: 0,
+                },
+                evidence_spans: vec![EvidenceSpan {
+                    evidence_index: 0,
+                    start: 0,
+                    end: 8,
+                }],
+                confidence_percent: 90,
+                rationale: "bounded evidence supports this fact".to_owned(),
+                suggested_scope: MemoryScope::repository(
+                    ScopeId::new("review-repo").expect("constant scope"),
+                ),
+            },
+            evidence: vec![SourceEvidence {
+                source_kind: SourceKind::File,
+                source_ref: "file:src/lib.rs".to_owned(),
+                content: "verified source evidence".to_owned(),
+            }],
+            submitted_by: "extractor".to_owned(),
+            submitted_at: OffsetDateTime::UNIX_EPOCH,
+        }
     }
 
     fn write_api_endpoint_memory(
@@ -3524,6 +3950,185 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
+    fn review_queue_defers_rejects_and_atomically_promotes_approved_candidates() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let config = ShibahamaConfig {
+            capture_policy: CapturePolicy {
+                mode: crate::policy::CaptureMode::Suggest,
+                actors: crate::policy::ActorClassPolicy {
+                    agent: true,
+                    ..crate::policy::ActorClassPolicy::default()
+                },
+                ..CapturePolicy::default()
+            },
+            ..ShibahamaConfig::default()
+        };
+        let shibahama =
+            Shibahama::open_with_config(file.path(), HnswVectorIndex::with_capacity(2, 8), config)
+                .expect("api should open");
+        let approved = reviewable_candidate("approved review candidate");
+        let approved_id = approved.id;
+        shibahama
+            .enqueue_review_candidate(approved, crate::policy::PolicyActorClass::Agent)
+            .expect("suggestion should queue");
+        assert!(
+            shibahama
+                .memory_items()
+                .expect("memory should read")
+                .is_empty()
+        );
+
+        let deferred = shibahama
+            .review_candidate(
+                approved_id,
+                ReviewDecisionRequest::new(
+                    ReviewAction::Defer,
+                    crate::policy::PolicyActorClass::Agent,
+                    "reviewer",
+                    "need maintainer confirmation",
+                    OffsetDateTime::UNIX_EPOCH,
+                ),
+            )
+            .expect("deferral should record");
+        assert!(deferred.memory.is_none());
+
+        let approved = shibahama
+            .review_candidate(
+                approved_id,
+                ReviewDecisionRequest::new(
+                    ReviewAction::Approve,
+                    crate::policy::PolicyActorClass::Agent,
+                    "reviewer",
+                    "source is sufficient",
+                    OffsetDateTime::UNIX_EPOCH + Duration::seconds(1),
+                ),
+            )
+            .expect("approval should promote");
+        let memory = approved.memory.expect("approval writes memory");
+        assert_eq!(memory.provenance.ingested_by, "review:reviewer");
+        assert_eq!(memory.scope.repository.as_str(), "review-repo");
+        assert_eq!(
+            memory.timestamps.valid_to,
+            Some(OffsetDateTime::UNIX_EPOCH + Duration::seconds(60))
+        );
+        assert_eq!(approved.records.len(), 2);
+        assert!(matches!(
+            approved.records[0].event,
+            MemoryEvent::MemoryWritten { .. }
+        ));
+        assert!(matches!(
+            approved.records[1].event,
+            MemoryEvent::ReviewDecisionRecorded {
+                ref decision
+            } if decision.approved_memory_id == Some(memory.id)
+        ));
+
+        let rejected = reviewable_candidate("rejected review candidate");
+        let rejected_id = rejected.id;
+        shibahama
+            .enqueue_review_candidate(rejected, crate::policy::PolicyActorClass::Agent)
+            .expect("second suggestion should queue");
+        let rejected = shibahama
+            .review_candidate(
+                rejected_id,
+                ReviewDecisionRequest::new(
+                    ReviewAction::Reject,
+                    crate::policy::PolicyActorClass::Agent,
+                    "reviewer",
+                    "evidence is insufficient",
+                    OffsetDateTime::UNIX_EPOCH + Duration::seconds(2),
+                ),
+            )
+            .expect("rejection should record");
+        assert!(rejected.memory.is_none());
+        assert_eq!(
+            shibahama.memory_items().expect("memory should read").len(),
+            1
+        );
+        let queue = shibahama.review_queue().expect("queue should replay");
+        assert_eq!(queue.len(), 2);
+        let approved_queue = queue
+            .iter()
+            .find(|queued| queued.candidate.id == approved_id)
+            .expect("approved candidate should remain inspectable");
+        let rejected_queue = queue
+            .iter()
+            .find(|queued| queued.candidate.id == rejected_id)
+            .expect("rejected candidate should remain inspectable");
+        assert_eq!(approved_queue.decisions.len(), 2);
+        assert_eq!(approved_queue.decisions[0].action, ReviewAction::Defer);
+        assert_eq!(approved_queue.decisions[1].action, ReviewAction::Approve);
+        assert_eq!(rejected_queue.decisions[0].action, ReviewAction::Reject);
+
+        drop(shibahama);
+        let reopened =
+            Shibahama::open_with_config(file.path(), HnswVectorIndex::with_capacity(2, 8), config)
+                .expect("api should reopen");
+        assert_eq!(
+            reopened.review_queue().expect("queue should persist").len(),
+            2
+        );
+        assert_eq!(
+            reopened
+                .memory_items()
+                .expect("memory should persist")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn review_queue_fails_closed_when_any_supporting_source_is_disallowed() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let config = ShibahamaConfig {
+            capture_policy: CapturePolicy {
+                mode: crate::policy::CaptureMode::Suggest,
+                actors: crate::policy::ActorClassPolicy {
+                    agent: true,
+                    ..crate::policy::ActorClassPolicy::default()
+                },
+                sources: crate::policy::SourceKindPolicy {
+                    web: false,
+                    ..crate::policy::SourceKindPolicy::default()
+                },
+                ..CapturePolicy::default()
+            },
+            ..ShibahamaConfig::default()
+        };
+        let shibahama =
+            Shibahama::open_with_config(file.path(), HnswVectorIndex::with_capacity(2, 8), config)
+                .expect("api should open");
+        let mut candidate = reviewable_candidate("mixed-source candidate");
+        candidate.evidence.push(SourceEvidence {
+            source_kind: SourceKind::Web,
+            source_ref: "web:unsupported".to_owned(),
+            content: "web source".to_owned(),
+        });
+        candidate.candidate.evidence_spans.push(EvidenceSpan {
+            evidence_index: 1,
+            start: 0,
+            end: 3,
+        });
+
+        let error = shibahama
+            .enqueue_review_candidate(candidate, crate::policy::PolicyActorClass::Agent)
+            .expect_err("disallowed supporting source must block queueing");
+        assert!(matches!(
+            error,
+            ShibahamaError::PolicyDenied(PolicyError::CaptureDenied {
+                reason: crate::policy::CaptureDecisionReason::SourceNotAllowed
+            })
+        ));
+        assert!(
+            shibahama
+                .review_queue()
+                .expect("queue should read")
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn policy_simulation_matches_live_decisions_without_mutation() {
         let file = NamedTempFile::new().expect("tempfile should be created");
         let shibahama = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
@@ -3618,6 +4223,22 @@ mod tests {
         };
 
         assert_eq!(candidates[0].id, item.id);
+        let telemetry = shibahama
+            .event_records()
+            .expect("events should read")
+            .into_iter()
+            .filter_map(|event| match event.event {
+                MemoryEvent::ObservabilityRecorded { record } => Some(record),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(telemetry.len(), 2);
+        assert!(telemetry.iter().all(|record| {
+            record.provider.as_deref() == Some("test")
+                && record.model.as_deref() == Some("fixed")
+                && record.error_code.is_none()
+                && record.item_count > 0
+        }));
         assert!(matches!(
             shibahama.write_with_provider(
                 api_endpoint_event("must not persist", OffsetDateTime::UNIX_EPOCH),

@@ -6,15 +6,18 @@ use serde::Serialize;
 
 pub mod anomaly;
 pub mod api;
+pub mod capture_worker;
 pub mod collector;
 pub mod config;
 pub mod consolidation;
+pub mod context_worker;
 pub mod dedup;
 pub mod embedding;
 pub mod encryption;
 pub mod extraction;
 pub mod learned_policy;
 pub mod model;
+pub mod observability;
 pub mod policy;
 pub mod read_safety;
 pub mod reconstruction;

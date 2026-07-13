@@ -1227,6 +1227,10 @@ fn event_kind(event: &MemoryEvent) -> &'static str {
         MemoryEvent::MemoryScopePromoted { .. } => "memory_scope_promoted",
         MemoryEvent::ScopeAuthorizationDenied { .. } => "scope_authorization_denied",
         MemoryEvent::PolicyDecisionRecorded { .. } => "policy_decision",
+        MemoryEvent::ReviewCandidateQueued { .. } => "review_candidate_queued",
+        MemoryEvent::ReviewDecisionRecorded { .. } => "review_decision",
+        MemoryEvent::AutomaticCaptureRecorded { .. } => "automatic_capture",
+        MemoryEvent::ObservabilityRecorded { .. } => "observability",
         MemoryEvent::MemoryInvalidated { .. } => "memory_invalidated",
         MemoryEvent::ReverificationFlagged { .. } => "reverification_flagged",
         MemoryEvent::AccessRecorded { .. } => "access_recorded",
@@ -1247,7 +1251,17 @@ fn event_memory_ids(event: &MemoryEvent) -> Vec<String> {
             ..
         } => vec![source_id.to_string(), promoted_id.to_string()],
         MemoryEvent::ScopeAuthorizationDenied { .. }
-        | MemoryEvent::PolicyDecisionRecorded { .. } => Vec::new(),
+        | MemoryEvent::PolicyDecisionRecorded { .. }
+        | MemoryEvent::ReviewCandidateQueued { .. }
+        | MemoryEvent::ObservabilityRecorded { .. } => Vec::new(),
+        MemoryEvent::ReviewDecisionRecorded { decision } => decision
+            .approved_memory_id
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        MemoryEvent::AutomaticCaptureRecorded { record } => {
+            record.memory_id.iter().map(ToString::to_string).collect()
+        }
         MemoryEvent::MemoryInvalidated { id, .. }
         | MemoryEvent::ReverificationFlagged { id, .. }
         | MemoryEvent::AccessRecorded { id, .. }
@@ -1284,7 +1298,15 @@ fn event_touches_memory(record: &EventRecord, id: MemoryId) -> bool {
             ..
         } => *source_id == id || *promoted_id == id,
         MemoryEvent::ScopeAuthorizationDenied { .. }
-        | MemoryEvent::PolicyDecisionRecorded { .. } => false,
+        | MemoryEvent::PolicyDecisionRecorded { .. }
+        | MemoryEvent::ReviewCandidateQueued { .. }
+        | MemoryEvent::ObservabilityRecorded { .. } => false,
+        MemoryEvent::ReviewDecisionRecorded { decision } => decision
+            .approved_memory_id
+            .is_some_and(|memory_id| memory_id == id),
+        MemoryEvent::AutomaticCaptureRecorded { record } => {
+            record.memory_id.is_some_and(|memory_id| memory_id == id)
+        }
         MemoryEvent::MemoryInvalidated { id: event_id, .. }
         | MemoryEvent::ReverificationFlagged { id: event_id, .. }
         | MemoryEvent::AccessRecorded { id: event_id, .. }

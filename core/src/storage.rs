@@ -5,6 +5,7 @@
 use crate::anomaly::{
     AnomalyConfig, AnomalyFlag, detect_contradiction_bursts, inspect_suspicious_provenance,
 };
+use crate::capture_worker::AutomaticCaptureAuditRecord;
 use crate::encryption::{EncryptionAtRest, EncryptionError, NoopEncryption};
 use crate::model::{
     AccessEvent, AccessOutcome, CURRENT_MEMORY_SCHEMA_VERSION, CompactionRef, ConsolidationAction,
@@ -12,7 +13,11 @@ use crate::model::{
     MemoryId, MemoryItem, MemoryKind, MemoryScope, Provenance, Relation, RelationId,
     ScopeAuthorizationAction, ScopePromotionRef, ScopeVisibility, SourceKind, TemporalBounds, Tier,
 };
+use crate::observability::ObservabilityRecord;
 use crate::policy::PolicyAuditRecord;
+use crate::review::{
+    ReviewCandidate, ReviewCandidateId, ReviewDecision, ReviewError, ReviewQueueItem,
+};
 use crate::significance::{SignificanceBreakdown, SignificanceConfig, SignificanceFunction};
 use crate::vector::{VectorIndex, VectorIndexError};
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
@@ -158,6 +163,26 @@ pub enum MemoryEvent {
     PolicyDecisionRecorded {
         /// Evaluated policy metadata and outcome.
         record: PolicyAuditRecord,
+    },
+    /// An extraction candidate and bounded evidence were queued for explicit review.
+    ReviewCandidateQueued {
+        /// Candidate awaiting review.
+        candidate: ReviewCandidate,
+    },
+    /// A human or attributable agent recorded a review decision.
+    ReviewDecisionRecorded {
+        /// Durable review decision metadata.
+        decision: ReviewDecision,
+    },
+    /// Content-free audit record for one automatic capture step.
+    AutomaticCaptureRecorded {
+        /// Policy and evidence provenance metadata.
+        record: AutomaticCaptureAuditRecord,
+    },
+    /// Content-free provider or policy observability record.
+    ObservabilityRecorded {
+        /// Redaction-safe operational metadata.
+        record: ObservabilityRecord,
     },
     /// A memory item was soft-invalidated.
     MemoryInvalidated {
@@ -607,6 +632,8 @@ pub struct MemoryWriteEvent {
     pub provenance: Provenance,
     /// Start of the interval where the fact is claimed valid.
     pub valid_from: OffsetDateTime,
+    /// Optional end of the interval where the fact is claimed valid.
+    pub valid_to: Option<OffsetDateTime>,
     /// Time at which Shibahama accepted the observation.
     pub ingested_at: OffsetDateTime,
     /// Initial accessibility tier.
@@ -636,6 +663,7 @@ impl MemoryWriteEvent {
             kind: MemoryKind::Fact,
             provenance,
             valid_from,
+            valid_to: None,
             ingested_at,
             tier,
             credence: None,
@@ -648,6 +676,13 @@ impl MemoryWriteEvent {
     #[must_use]
     pub const fn as_instruction(mut self) -> Self {
         self.kind = MemoryKind::Instruction;
+        self
+    }
+
+    /// Closes the materialized memory's valid-time interval at `valid_to`.
+    #[must_use]
+    pub const fn with_valid_to(mut self, valid_to: OffsetDateTime) -> Self {
+        self.valid_to = Some(valid_to);
         self
     }
 
@@ -668,6 +703,7 @@ impl MemoryWriteEvent {
             kind: MemoryKind::Fact,
             provenance,
             valid_from,
+            valid_to: None,
             ingested_at,
             tier,
             credence: Some(credence),
@@ -705,7 +741,12 @@ impl MemoryWriteEvent {
             promotion: None,
             embedding_ref: None,
             provenance: self.provenance,
-            timestamps: TemporalBounds::open_from(self.valid_from, self.ingested_at),
+            timestamps: self.valid_to.map_or_else(
+                || TemporalBounds::open_from(self.valid_from, self.ingested_at),
+                |valid_to| {
+                    TemporalBounds::open_from(self.valid_from, self.ingested_at).closed_at(valid_to)
+                },
+            ),
             tier: self.tier,
             credence,
             significance: self.significance,
@@ -1324,6 +1365,276 @@ impl RedbMemoryStore {
         self.append_event(MemoryEvent::PolicyDecisionRecorded { record })
     }
 
+    /// Adds a validated extraction candidate to the durable review queue.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when candidate validation or durable event append fails.
+    pub fn enqueue_review_candidate(
+        &self,
+        candidate: ReviewCandidate,
+    ) -> Result<EventRecord, StorageError> {
+        candidate.validate().map_err(review_storage_error)?;
+        if self
+            .review_queue(None)?
+            .iter()
+            .any(|item| item.candidate.id == candidate.id)
+        {
+            return Err(StorageError::InvariantViolation(
+                "review candidate id already exists".to_owned(),
+            ));
+        }
+        self.append_event(MemoryEvent::ReviewCandidateQueued { candidate })
+    }
+
+    /// Replays durable review candidates and their ordered decisions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the event log cannot be read or contains invalid review state.
+    pub fn review_queue(
+        &self,
+        scope: Option<&MemoryScope>,
+    ) -> Result<Vec<ReviewQueueItem>, StorageError> {
+        if let Some(scope) = scope {
+            scope
+                .validate()
+                .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        }
+        let mut items = BTreeMap::<ReviewCandidateId, ReviewQueueItem>::new();
+        for record in self.events()? {
+            match record.event {
+                MemoryEvent::ReviewCandidateQueued { candidate } => {
+                    candidate.validate().map_err(review_storage_error)?;
+                    if items
+                        .insert(
+                            candidate.id,
+                            ReviewQueueItem {
+                                candidate,
+                                decisions: Vec::new(),
+                            },
+                        )
+                        .is_some()
+                    {
+                        return Err(StorageError::InvariantViolation(
+                            "review queue contains a duplicate candidate id".to_owned(),
+                        ));
+                    }
+                }
+                MemoryEvent::ReviewDecisionRecorded { decision } => {
+                    let item = items.get_mut(&decision.candidate_id).ok_or_else(|| {
+                        StorageError::InvariantViolation(
+                            "review decision references an unknown candidate".to_owned(),
+                        )
+                    })?;
+                    decision
+                        .validate_for(&item.candidate)
+                        .map_err(review_storage_error)?;
+                    if item
+                        .decisions
+                        .last()
+                        .is_some_and(ReviewDecision::is_terminal)
+                    {
+                        return Err(StorageError::InvariantViolation(
+                            "review queue contains a decision after terminal resolution".to_owned(),
+                        ));
+                    }
+                    item.decisions.push(decision);
+                }
+                _ => {}
+            }
+        }
+        Ok(items
+            .into_values()
+            .filter(|item| {
+                scope.is_none_or(|scope| item.candidate.candidate.suggested_scope == *scope)
+            })
+            .collect())
+    }
+
+    /// Records one validated review decision for a queued candidate.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the candidate is unknown, terminal, or durable append fails.
+    pub fn record_review_decision(
+        &self,
+        decision: ReviewDecision,
+    ) -> Result<EventRecord, StorageError> {
+        let queue = self.review_queue(None)?;
+        let item = queue
+            .iter()
+            .find(|item| item.candidate.id == decision.candidate_id)
+            .ok_or_else(|| {
+                StorageError::InvariantViolation(
+                    "review decision references an unknown candidate".to_owned(),
+                )
+            })?;
+        decision
+            .validate_for(&item.candidate)
+            .map_err(review_storage_error)?;
+        if item
+            .decisions
+            .last()
+            .is_some_and(ReviewDecision::is_terminal)
+        {
+            return Err(StorageError::InvariantViolation(
+                "review candidate is already resolved".to_owned(),
+            ));
+        }
+        self.append_event(MemoryEvent::ReviewDecisionRecorded { decision })
+    }
+
+    /// Atomically materializes an approved candidate and records its approval decision.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when queue state is invalid, the approval does not match its candidate,
+    /// or either durable event cannot be committed.
+    pub fn approve_review_candidate(
+        &self,
+        item: &MemoryItem,
+        decision: ReviewDecision,
+    ) -> Result<(EventRecord, EventRecord), StorageError> {
+        let queue = self.review_queue(None)?;
+        let queued = queue
+            .iter()
+            .find(|queued| queued.candidate.id == decision.candidate_id)
+            .ok_or_else(|| {
+                StorageError::InvariantViolation(
+                    "review approval references an unknown candidate".to_owned(),
+                )
+            })?;
+        decision
+            .validate_for(&queued.candidate)
+            .map_err(review_storage_error)?;
+        if decision.approved_memory_id != Some(item.id)
+            || decision.action != crate::review::ReviewAction::Approve
+            || item.scope != queued.candidate.candidate.suggested_scope
+        {
+            return Err(StorageError::InvariantViolation(
+                "review approval does not match the queued candidate".to_owned(),
+            ));
+        }
+        if queued
+            .decisions
+            .last()
+            .is_some_and(ReviewDecision::is_terminal)
+        {
+            return Err(StorageError::InvariantViolation(
+                "review candidate is already resolved".to_owned(),
+            ));
+        }
+
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let (memory_sequence, decision_sequence) = {
+            let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+            let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let mut scope_table = write_txn
+                .open_table(MEMORY_SCOPE_INDEX_TABLE)
+                .map_err(embed)?;
+            let item_key = item.id.to_string();
+            if item_table.get(item_key.as_str()).map_err(embed)?.is_some() {
+                return Err(StorageError::InvariantViolation(
+                    "review approval would overwrite an existing memory".to_owned(),
+                ));
+            }
+            let memory_sequence = event_table.len().map_err(embed)?;
+            let recorded_at = OffsetDateTime::now_utc();
+            let memory_record = EventRecord {
+                sequence: memory_sequence,
+                recorded_at,
+                event: MemoryEvent::MemoryWritten {
+                    item: Box::new(item.clone()),
+                },
+            };
+            let memory_key = Self::event_key(memory_sequence);
+            let memory_bytes =
+                self.encode_json(StorageTableName::EventLog, &memory_key, &memory_record)?;
+            event_table
+                .insert(memory_sequence, memory_bytes.as_slice())
+                .map_err(embed)?;
+
+            let decision_sequence = memory_sequence + 1;
+            let decision_record = EventRecord {
+                sequence: decision_sequence,
+                recorded_at,
+                event: MemoryEvent::ReviewDecisionRecorded { decision },
+            };
+            let decision_key = Self::event_key(decision_sequence);
+            let decision_bytes =
+                self.encode_json(StorageTableName::EventLog, &decision_key, &decision_record)?;
+            event_table
+                .insert(decision_sequence, decision_bytes.as_slice())
+                .map_err(embed)?;
+
+            let item_bytes =
+                self.encode_json(StorageTableName::MemoryItems, item_key.as_bytes(), item)?;
+            item_table
+                .insert(item_key.as_str(), item_bytes.as_slice())
+                .map_err(embed)?;
+            self.index_memory_scope(&mut scope_table, item)?;
+
+            (memory_sequence, decision_sequence)
+        };
+        write_txn.commit().map_err(embed)?;
+        let memory = self.event(memory_sequence)?.ok_or_else(|| {
+            StorageError::Embedded("committed review memory event was not readable".to_owned())
+        })?;
+        let decision = self.event(decision_sequence)?.ok_or_else(|| {
+            StorageError::Embedded("committed review decision event was not readable".to_owned())
+        })?;
+
+        Ok((memory, decision))
+    }
+
+    /// Appends a content-free automatic-capture audit record.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when durable event append fails.
+    pub fn record_automatic_capture(
+        &self,
+        record: AutomaticCaptureAuditRecord,
+    ) -> Result<EventRecord, StorageError> {
+        self.append_event(MemoryEvent::AutomaticCaptureRecorded { record })
+    }
+
+    /// Appends a redaction-safe provider or policy observability record.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when durable event append fails.
+    pub fn record_observability(
+        &self,
+        record: ObservabilityRecord,
+    ) -> Result<EventRecord, StorageError> {
+        self.append_event(MemoryEvent::ObservabilityRecorded { record })
+    }
+
+    /// Returns idempotency keys with a terminal automatic-capture outcome.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the event log cannot be read.
+    pub fn automatic_capture_terminal_keys(&self) -> Result<BTreeSet<String>, StorageError> {
+        Ok(self
+            .events()?
+            .into_iter()
+            .filter_map(|event| match event.event {
+                MemoryEvent::AutomaticCaptureRecorded { record }
+                    if record.disposition.is_terminal() =>
+                {
+                    Some(record.idempotency_key)
+                }
+                _ => None,
+            })
+            .collect())
+    }
+
     /// Ingests a caller-supplied write event and vector embedding.
     ///
     /// # Errors
@@ -1625,7 +1936,11 @@ impl RedbMemoryStore {
                 | MemoryEvent::ConsolidationDecision { .. }
                 | MemoryEvent::MemoryScopePromoted { .. }
                 | MemoryEvent::ScopeAuthorizationDenied { .. }
-                | MemoryEvent::PolicyDecisionRecorded { .. } => {}
+                | MemoryEvent::PolicyDecisionRecorded { .. }
+                | MemoryEvent::ReviewCandidateQueued { .. }
+                | MemoryEvent::ReviewDecisionRecorded { .. }
+                | MemoryEvent::AutomaticCaptureRecorded { .. }
+                | MemoryEvent::ObservabilityRecorded { .. } => {}
             }
         }
 
@@ -4550,7 +4865,20 @@ fn event_belongs_to_memory_ids(
             .scope
             .as_ref()
             .is_some_and(|record_scope| record_scope == scope),
+        MemoryEvent::ReviewCandidateQueued { candidate } => {
+            candidate.candidate.suggested_scope == *scope
+        }
+        MemoryEvent::ReviewDecisionRecorded { decision } => decision.scope == *scope,
+        MemoryEvent::AutomaticCaptureRecorded { record } => record.scope == *scope,
+        MemoryEvent::ObservabilityRecorded { record } => record
+            .scope
+            .as_ref()
+            .is_some_and(|record_scope| record_scope == scope),
     }
+}
+
+fn review_storage_error(error: ReviewError) -> StorageError {
+    StorageError::InvariantViolation(error.to_string())
 }
 
 fn compression(error: impl std::fmt::Display) -> StorageError {

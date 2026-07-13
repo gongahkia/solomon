@@ -94,7 +94,7 @@ pub enum ProviderKind {
 pub struct PolicyRuntimeConfig {
     /// Require explicit scope contexts at public core boundaries.
     pub require_explicit_scope: bool,
-    /// Automatic capture is disabled until a later policy module authorizes it.
+    /// Enable the automatic-capture worker in addition to its capture-policy checks.
     pub automatic_capture_enabled: bool,
 }
 
@@ -193,7 +193,6 @@ impl RuntimeConfig {
             || self.provider.model.trim().is_empty()
             || self.provider.dimensions == 0
             || self.observability.include_content
-            || self.policy.automatic_capture_enabled
         {
             return Err(RuntimeConfigError::InvalidValue);
         }
@@ -228,6 +227,7 @@ impl RuntimeConfig {
             } else {
                 ScopeMode::LocalSingleStore
             },
+            automatic_capture_enabled: self.policy.automatic_capture_enabled,
             ..ShibahamaConfig::default()
         }
     }
@@ -302,6 +302,15 @@ mod tests {
             unsafe_config.validate(),
             Err(RuntimeConfigError::InvalidValue)
         );
+    }
+
+    #[test]
+    fn runtime_config_can_explicitly_enable_automatic_capture() {
+        let mut config = valid_config();
+        config.policy.automatic_capture_enabled = true;
+
+        config.validate().expect("automatic capture can be enabled");
+        assert!(config.engine_config().automatic_capture_enabled);
     }
 
     #[test]

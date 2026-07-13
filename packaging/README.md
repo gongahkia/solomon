@@ -32,6 +32,8 @@ Expected outputs:
 - `dist/solomon-0.1.0-py3-none-any.whl`
 - `dist/solomon-local`
 
+Python package release setup and the TestPyPI/PyPI runbooks are in [`docs/release.md`](../docs/release.md).
+
 CI builds the binary on macOS and Linux, then runs the stale-house-view flow headlessly and compares its semantic
 output with the configured server-SKU CLI:
 

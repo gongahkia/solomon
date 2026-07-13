@@ -17,10 +17,12 @@ from pydantic import BaseModel, Field
 from solomon import __version__
 from solomon.api.auth import (
     ADMIN_AUTH_SCOPES,
-    DEFAULT_TENANT_SCOPES,
     AuthPrincipal,
     extract_api_key,
+    mapped_oidc_roles,
+    primary_role,
     required_scope_for_request,
+    scopes_for_roles,
     static_secret_matches,
     validate_auth_scopes,
 )
@@ -205,6 +207,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if _is_admin_path(path):
                 principal = _admin_principal(resolved_settings, supplied_api_key)
                 if principal is None:
+                    principal = _oidc_principal_for_request(
+                        request,
+                        app.state.oidc_validator,
+                        resolved_settings,
+                        service,
+                        tenant_id=None,
+                        required_scope=required_scope,
+                    )
+                if principal is None:
                     return _auth_error()
                 if not principal.has_scope(required_scope):
                     return _forbidden_error(required_scope)
@@ -234,25 +245,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             principal = _tenant_principal(resolved_settings, tenant_registry, record, tenant_id, supplied_api_key)
             if principal is None:
-                oidc_identity = _validate_oidc_request(request, app.state.oidc_validator)
-                if oidc_identity is not None:
-                    request.state.correlation_id = _correlation_id(request)
-                    _record_oidc_decision(
-                        service,
-                        decision="allowed",
-                        tenant_id=tenant_id,
-                        correlation_id=request.state.correlation_id,
-                        actor_id=oidc_identity.subject,
-                    )
-                    principal = _oidc_principal(oidc_identity, tenant_id)
-                elif _bearer_token(request) is not None and app.state.oidc_validator is not None:
-                    correlation_id = _correlation_id(request)
-                    _record_oidc_decision(
-                        service,
-                        decision="denied",
-                        tenant_id=tenant_id,
-                        correlation_id=correlation_id,
-                    )
+                principal = _oidc_principal_for_request(
+                    request,
+                    app.state.oidc_validator,
+                    resolved_settings,
+                    service,
+                    tenant_id=tenant_id,
+                    required_scope=required_scope,
+                )
             if principal is None:
                 return _auth_error()
             if not principal.has_scope(required_scope):
@@ -666,6 +666,32 @@ def _validate_oidc_request(request: Request, validator: OIDCValidator | None) ->
         return None
 
 
+def _oidc_principal_for_request(
+    request: Request,
+    validator: OIDCValidator | None,
+    settings: Settings,
+    service: SolomonService,
+    *,
+    tenant_id: str | None,
+    required_scope: str,
+) -> AuthPrincipal | None:
+    if _bearer_token(request) is None or validator is None:
+        return None
+    correlation_id = _correlation_id(request)
+    request.state.correlation_id = correlation_id
+    identity = _validate_oidc_request(request, validator)
+    principal = _oidc_principal(identity, tenant_id, settings) if identity is not None else None
+    _record_oidc_decision(
+        service,
+        decision="allowed" if principal is not None and principal.has_scope(required_scope) else "denied",
+        tenant_id=tenant_id,
+        correlation_id=correlation_id,
+        actor_id=identity.subject if identity is not None else None,
+        roles=principal.roles if principal is not None else frozenset(),
+    )
+    return principal
+
+
 def _correlation_id(request: Request) -> str:
     return request.headers.get("x-correlation-id") or uuid.uuid4().hex
 
@@ -674,23 +700,32 @@ def _record_oidc_decision(
     service: SolomonService,
     *,
     decision: str,
-    tenant_id: str,
+    tenant_id: str | None,
     correlation_id: str,
     actor_id: str | None = None,
+    roles: frozenset[str] = frozenset(),
 ) -> None:
     service.audit.append(
         "oidc_authentication",
-        {"decision": decision, "tenant_id": tenant_id},
+        {"decision": decision, "tenant_id": tenant_id, "roles": sorted(roles)},
         attribution=AuditAttribution(actor_id=actor_id, correlation_id=correlation_id),
     )
 
 
-def _oidc_principal(identity: OIDCIdentity, tenant_id: str) -> AuthPrincipal:
+def _oidc_principal(identity: OIDCIdentity, tenant_id: str | None, settings: Settings) -> AuthPrincipal | None:
+    roles = mapped_oidc_roles(
+        identity.claims,
+        claim_name=settings.oidc_role_claim,
+        mappings=settings.oidc_role_mappings,
+    )
+    if not roles:
+        return None
     return AuthPrincipal(
         subject=identity.subject,
-        role="tenant",
+        role=primary_role(roles),
         tenant_id=tenant_id,
-        scopes=frozenset(DEFAULT_TENANT_SCOPES),
+        scopes=scopes_for_roles(roles),
+        roles=roles,
     )
 
 

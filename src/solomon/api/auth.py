@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import hmac
 from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
-AuthRole = Literal["admin", "tenant"]
+AuthRole = Literal["admin", "curator", "reviewer", "lawyer", "integration", "tenant"]
 
 ADMIN_SCOPE = "admin:*"
 TENANT_READ_SCOPE = "tenant:read"
@@ -28,6 +28,16 @@ KNOWN_AUTH_SCOPES = frozenset(
 )
 ADMIN_AUTH_SCOPES = frozenset(KNOWN_AUTH_SCOPES)
 DEFAULT_TENANT_SCOPES = (TENANT_READ_SCOPE, TENANT_WRITE_SCOPE)
+OIDC_AUTH_ROLES: frozenset[AuthRole] = frozenset({"admin", "curator", "reviewer", "lawyer", "integration"})
+ROLE_PRECEDENCE: tuple[AuthRole, ...] = ("admin", "curator", "reviewer", "lawyer", "integration", "tenant")
+ROLE_SCOPES: dict[AuthRole, frozenset[str]] = {
+    "admin": ADMIN_AUTH_SCOPES,
+    "curator": frozenset({TENANT_READ_SCOPE, TENANT_WRITE_SCOPE, SOURCE_MANAGE_SCOPE}),
+    "reviewer": frozenset(DEFAULT_TENANT_SCOPES),
+    "lawyer": frozenset(DEFAULT_TENANT_SCOPES),
+    "integration": frozenset({TENANT_READ_SCOPE}),
+    "tenant": frozenset(DEFAULT_TENANT_SCOPES),
+}
 
 _TENANT_READ_POST_PATHS = {
     "/answer",
@@ -44,9 +54,44 @@ class AuthPrincipal:
     role: AuthRole
     tenant_id: str | None
     scopes: frozenset[str]
+    roles: frozenset[AuthRole] = field(default_factory=frozenset)
 
     def has_scope(self, required_scope: str) -> bool:
         return ADMIN_SCOPE in self.scopes or required_scope in self.scopes
+
+    def has_role(self, role: AuthRole) -> bool:
+        return self.role == role or role in self.roles
+
+
+def mapped_oidc_roles(
+    claims: Mapping[str, Any],
+    *,
+    claim_name: str,
+    mappings: Mapping[str, str],
+) -> frozenset[AuthRole]:
+    raw_roles = claims.get(claim_name)
+    if isinstance(raw_roles, str):
+        claim_roles = (raw_roles,)
+    elif isinstance(raw_roles, list) and all(isinstance(role, str) for role in raw_roles):
+        claim_roles = tuple(raw_roles)
+    else:
+        return frozenset()
+    return frozenset(
+        mapped_role
+        for claim_role in claim_roles
+        if (mapped_role := mappings.get(claim_role)) in OIDC_AUTH_ROLES
+    )
+
+
+def primary_role(roles: frozenset[AuthRole]) -> AuthRole:
+    for role in ROLE_PRECEDENCE:
+        if role in roles:
+            return role
+    raise ValueError("at least one role is required")
+
+
+def scopes_for_roles(roles: frozenset[AuthRole]) -> frozenset[str]:
+    return frozenset(scope for role in roles for scope in ROLE_SCOPES[role])
 
 
 def extract_api_key(headers: Mapping[str, str]) -> str | None:

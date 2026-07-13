@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from solomon.api.auth import OIDC_AUTH_ROLES
 from solomon.boundary.solomon import BoundaryPolicy
 from solomon.credence.policy import CredencePolicy
 from solomon.currency.engine import VerificationPolicy
@@ -38,6 +39,8 @@ class Settings(BaseSettings):
     oidc_audience: str | None = None
     oidc_clock_skew_seconds: int = Field(default=60, ge=0, le=300)
     oidc_jwks_cache_seconds: int = Field(default=300, ge=1, le=3600)
+    oidc_role_claim: str = Field(default="roles", min_length=1)
+    oidc_role_mappings: dict[str, str] = Field(default_factory=dict)
     database_url: str = "sqlite:///./solomon-data/solomon.sqlite3"
     local_model_url: str = "http://127.0.0.1:11434/api/generate"
     local_model_name: str = "qwen2.5-coder:1.5b"
@@ -77,6 +80,14 @@ class Settings(BaseSettings):
             issuer = urlparse(self.oidc_issuer)
             if issuer.scheme != "https" or not issuer.netloc or issuer.query or issuer.fragment:
                 raise ValueError("OIDC issuer must be an HTTPS URL without query or fragment")
+            if not self.oidc_role_mappings:
+                raise ValueError("OIDC requires at least one role mapping")
+            invalid_role_mapping = any(
+                not claim_value or mapped_role not in OIDC_AUTH_ROLES
+                for claim_value, mapped_role in self.oidc_role_mappings.items()
+            )
+            if invalid_role_mapping:
+                raise ValueError("OIDC role mappings must map non-empty claim values to Solomon roles")
         if self.zero_egress_mode and self.allow_remote_egress:
             raise ValueError("zero-egress mode conflicts with remote egress")
         if self.sku == "server" and self.allow_remote_egress and not self.remote_model_url:
@@ -109,6 +120,8 @@ class Settings(BaseSettings):
             "server_auto_provision_tenants": self.server_auto_provision_tenants,
             "oidc_configured": self.oidc_issuer is not None,
             "oidc_clock_skew_seconds": self.oidc_clock_skew_seconds,
+            "oidc_role_claim": self.oidc_role_claim,
+            "oidc_role_mapping_count": len(self.oidc_role_mappings),
             "local_model_url": self.local_model_url,
             "local_model_name": self.local_model_name,
             "remote_model_configured": self.remote_model_url is not None,

@@ -447,6 +447,16 @@ SOLOMON_DATABASE_URL=postgresql://solomon:solomon@localhost:5432/solomon \
 uv run uvicorn solomon.api.app:create_app --factory --host 0.0.0.0 --port 8140
 ```
 
+OIDC is server-only and requires an HTTPS issuer, audience, and explicit JSON claim mapping. This example maps
+the IdP's `roles` values to Solomon roles; unmatched or malformed values are denied.
+
+```bash
+SOLOMON_OIDC_ISSUER=https://idp.example \
+SOLOMON_OIDC_AUDIENCE=solomon-api \
+SOLOMON_OIDC_ROLE_CLAIM=roles \
+SOLOMON_OIDC_ROLE_MAPPINGS='{"firm-admin":"admin","firm-lawyer":"lawyer","connector":"integration"}'
+```
+
 Postgres retrieval requires the self-hosted `pgvector` extension. Startup runs `CREATE EXTENSION IF NOT EXISTS vector`,
 validates it, and applies the transactional `vector(256)`/HNSW migration; the database role therefore needs that
 extension installed and creation privilege.

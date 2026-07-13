@@ -48,8 +48,10 @@ does not share tables.
 Optional server OIDC authentication requires `SOLOMON_OIDC_ISSUER` and `SOLOMON_OIDC_AUDIENCE`. The issuer must
 be HTTPS; Solomon obtains signing keys from its discovery document, caches JWKS entries, refreshes once for an
 unknown `kid`, and accepts only RS256 or ES256 JWTs with matching issuer, audience, expiry, and clock-skew checks.
-Validated identities receive default tenant read/write scopes until claim-to-role mapping is configured. OIDC
-authentication decisions are hash-chained audit entries with actor ID (when validated), decision, and request
+`SOLOMON_OIDC_ROLE_CLAIM` defaults to `roles`, and `SOLOMON_OIDC_ROLE_MAPPINGS` is a required JSON object mapping
+exact claim values to `admin`, `curator`, `reviewer`, `lawyer`, or `integration`; unmapped or malformed claims are
+denied. Roles resolve in a fixed admin-to-integration precedence and their scopes are combined. OIDC authentication
+decisions are hash-chained audit entries with actor ID (when validated), canonical roles, decision, and request
 correlation ID; bearer tokens and claim bodies are not recorded.
 
 ## Server Auth

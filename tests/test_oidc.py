@@ -14,6 +14,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, generate_private_key
 
 from solomon.api.app import create_app
+from solomon.api.auth import mapped_oidc_roles, primary_role, scopes_for_roles
 from solomon.api.oidc import OIDCValidationError, OIDCValidator
 from solomon.config import Settings
 
@@ -200,6 +201,7 @@ def test_oidc_http_authentication_audits_identity_and_denial(tmp_path: Path) -> 
             server_auto_provision_tenants=False,
             oidc_issuer=ISSUER,
             oidc_audience=AUDIENCE,
+            oidc_role_mappings={"firm-lawyer": "lawyer"},
         )
     )
     app.state.oidc_validator = _validator(transport)
@@ -207,6 +209,7 @@ def test_oidc_http_authentication_audits_identity_and_denial(tmp_path: Path) -> 
         private_key,
         "first",
         exp=datetime.now(timezone.utc) - timedelta(minutes=2),
+        roles=["firm-lawyer"],
     )
 
     async def exercise() -> tuple[httpx.Response, httpx.Response, httpx.Response]:
@@ -215,7 +218,7 @@ def test_oidc_http_authentication_audits_identity_and_denial(tmp_path: Path) -> 
             allowed = await client.post(
                 "/recall",
                 headers={
-                    "Authorization": f"Bearer {_token(private_key, 'first')}",
+                    "Authorization": f"Bearer {_token(private_key, 'first', roles=['firm-lawyer'])}",
                     "x-tenant-id": "oidc",
                     "x-correlation-id": "oidc-allowed",
                 },
@@ -263,3 +266,165 @@ def test_oidc_settings_reject_local_and_insecure_configuration(tmp_path: Path) -
             data_dir=tmp_path / "data",
             journal_dir=tmp_path / "journal",
         )
+
+
+def test_oidc_settings_require_valid_role_mappings(tmp_path: Path) -> None:
+    values = {
+        "sku": "server",
+        "zero_egress_mode": False,
+        "server_api_key": "admin-secret",
+        "oidc_issuer": ISSUER,
+        "oidc_audience": AUDIENCE,
+        "data_dir": tmp_path / "data",
+        "journal_dir": tmp_path / "journal",
+    }
+
+    with pytest.raises(ValueError, match="at least one role mapping"):
+        Settings(**values)
+    with pytest.raises(ValueError, match="Solomon roles"):
+        Settings(**values, oidc_role_mappings={"firm-owner": "owner"})
+
+
+def test_oidc_settings_parse_json_role_mappings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("SOLOMON_SKU", "server")
+    monkeypatch.setenv("SOLOMON_SERVER_API_KEY", "admin-secret")
+    monkeypatch.setenv("SOLOMON_OIDC_ISSUER", ISSUER)
+    monkeypatch.setenv("SOLOMON_OIDC_AUDIENCE", AUDIENCE)
+    monkeypatch.setenv("SOLOMON_OIDC_ROLE_MAPPINGS", '{"firm-lawyer":"lawyer"}')
+
+    settings = Settings(_env_file=None, data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+
+    assert settings.oidc_role_mappings == {"firm-lawyer": "lawyer"}
+
+
+def test_oidc_role_mapping_is_exact_and_deterministic() -> None:
+    mappings = {
+        "firm-admin": "admin",
+        "firm-curator": "curator",
+        "firm-reviewer": "reviewer",
+        "firm-lawyer": "lawyer",
+        "connector": "integration",
+    }
+
+    roles = mapped_oidc_roles(
+        {"roles": ["connector", "firm-lawyer", "firm-curator", "unknown"]},
+        claim_name="roles",
+        mappings=mappings,
+    )
+
+    assert roles == frozenset({"integration", "lawyer", "curator"})
+    assert primary_role(roles) == "curator"
+    assert scopes_for_roles(roles) == frozenset({"tenant:read", "tenant:write", "source:manage"})
+    assert mapped_oidc_roles({"roles": "FIRM-ADMIN"}, claim_name="roles", mappings=mappings) == frozenset()
+    assert mapped_oidc_roles({"roles": ["firm-admin", 1]}, claim_name="roles", mappings=mappings) == frozenset()
+
+
+def test_oidc_mapped_roles_authorize_server_routes_and_audit_denials(tmp_path: Path) -> None:
+    private_key = _private_key()
+    app = create_app(
+        Settings(
+            sku="server",
+            zero_egress_mode=False,
+            data_dir=tmp_path / "data",
+            journal_dir=tmp_path / "journal",
+            server_api_key="admin-secret",
+            server_auto_provision_tenants=False,
+            oidc_issuer=ISSUER,
+            oidc_audience=AUDIENCE,
+            oidc_role_mappings={
+                "firm-admin": "admin",
+                "firm-curator": "curator",
+                "firm-reviewer": "reviewer",
+                "firm-lawyer": "lawyer",
+                "connector": "integration",
+            },
+        )
+    )
+    app.state.oidc_validator = _validator(DiscoveryTransport([_jwk(private_key, "first")]))
+
+    def headers(role: str, correlation_id: str) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {_token(private_key, 'first', roles=[role])}",
+            "x-tenant-id": "rbac",
+            "x-correlation-id": correlation_id,
+        }
+
+    async def exercise() -> dict[str, httpx.Response]:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+            created = await client.post(
+                "/tenants",
+                headers=headers("firm-admin", "role-admin"),
+                json={"tenant_id": "rbac"},
+            )
+            curator_source = await client.post(
+                "/sources",
+                headers=headers("firm-curator", "role-curator"),
+                json={
+                    "source_id": "oidc-source",
+                    "name": "OIDC source",
+                    "kind": "filesystem",
+                    "root_ref": "/knowledge",
+                },
+            )
+            reviewer_source = await client.post(
+                "/sources",
+                headers=headers("firm-reviewer", "role-reviewer"),
+                json={"source_id": "denied-source", "name": "Denied", "kind": "filesystem", "root_ref": "/knowledge"},
+            )
+            lawyer_ingest = await client.post(
+                "/ingest",
+                headers=headers("firm-lawyer", "role-lawyer"),
+                json={
+                    "kind": "position",
+                    "content": "mapped lawyer position",
+                    "source_kind": "partner",
+                    "source_ref": "oidc",
+                },
+            )
+            integration_recall = await client.post(
+                "/recall",
+                headers=headers("connector", "role-integration-read"),
+                json={"query": "mapped lawyer"},
+            )
+            integration_ingest = await client.post(
+                "/ingest",
+                headers=headers("connector", "role-integration-write"),
+                json={"kind": "position", "content": "denied", "source_kind": "partner", "source_ref": "oidc"},
+            )
+            unmapped_recall = await client.post(
+                "/recall",
+                headers=headers("unknown", "role-unmapped"),
+                json={"query": "mapped lawyer"},
+            )
+        return {
+            "created": created,
+            "curator_source": curator_source,
+            "reviewer_source": reviewer_source,
+            "lawyer_ingest": lawyer_ingest,
+            "integration_recall": integration_recall,
+            "integration_ingest": integration_ingest,
+            "unmapped_recall": unmapped_recall,
+        }
+
+    responses = asyncio.run(exercise())
+
+    assert responses["created"].status_code == 201
+    assert responses["curator_source"].status_code == 200
+    assert responses["reviewer_source"].status_code == 403
+    assert responses["lawyer_ingest"].status_code == 200
+    assert responses["integration_recall"].status_code == 200
+    assert responses["integration_ingest"].status_code == 403
+    assert responses["unmapped_recall"].status_code == 401
+    entries = {
+        entry.attribution.correlation_id: entry
+        for entry in app.state.service.audit.list_entries()
+        if entry.event_type == "oidc_authentication"
+    }
+    assert entries["role-admin"].payload == {"decision": "allowed", "tenant_id": None, "roles": ["admin"]}
+    assert entries["role-reviewer"].payload == {"decision": "denied", "tenant_id": "rbac", "roles": ["reviewer"]}
+    assert entries["role-unmapped"].payload == {"decision": "denied", "tenant_id": "rbac", "roles": []}
+    assert entries["role-unmapped"].attribution.actor_id == "lawyer-1"
+    journal = (tmp_path / "journal" / "journal.jsonl").read_text(encoding="utf-8")
+    assert "firm-admin" not in journal
+    assert "firm-curator" not in journal
+    assert '"connector"' not in journal

@@ -7,7 +7,10 @@
 
 <p align="center">
   <a href="https://github.com/gongahkia/solomon/actions/workflows/ci.yml"><img alt="ci" src="https://img.shields.io/github/actions/workflow/status/gongahkia/solomon/ci.yml?branch=main&style=flat-square"></a>
+  <img alt="mcp compatible" src="https://img.shields.io/badge/MCP-compatible-7C3AED?style=flat-square">
   <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square">
+  <img alt="coverage gate" src="https://img.shields.io/badge/coverage%20gate-%E2%89%A590%25-brightgreen?style=flat-square">
+  <img alt="sbom" src="https://img.shields.io/badge/SBOM-CycloneDX-blue?style=flat-square">
   <img alt="api" src="https://img.shields.io/badge/API-FastAPI-009688?style=flat-square">
   <img alt="runtime" src="https://img.shields.io/badge/runtime-offline--default-lightgrey?style=flat-square">
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square">

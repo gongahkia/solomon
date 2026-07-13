@@ -12,7 +12,14 @@ from pydantic import ValidationError
 
 from solomon.api.service import SolomonService
 from solomon.currency.models import KnowledgeItem
-from solomon.errors import BadRequestError, NotFoundError, PolicyRefusalError, SolomonError
+from solomon.errors import (
+    BadRequestError,
+    ConflictError,
+    NotFoundError,
+    PolicyRefusalError,
+    SolomonError,
+    UpstreamError,
+)
 from solomon.mcp.logging import MCPCallLogRecord, MCPCallStatus, hash_mcp_input
 
 
@@ -251,6 +258,15 @@ def _exception_error_result(exc: Exception) -> dict[str, Any]:
         return _error_result("authorization_denied", "MCP tool request was denied", retryable=False, details={})
     if isinstance(exc, NotFoundError | KeyError):
         return _error_result("state_not_found", "MCP tool requested unavailable state", retryable=False, details={})
+    if isinstance(exc, ConflictError):
+        return _error_result(
+            "invalid_state",
+            "MCP tool request conflicts with current state",
+            retryable=False,
+            details={},
+        )
+    if isinstance(exc, UpstreamError):
+        return _error_result("upstream_failure", "MCP tool upstream dependency failed", retryable=True, details={})
     if isinstance(exc, TimeoutError | ConnectionError | OSError):
         return _error_result("upstream_failure", "MCP tool upstream dependency failed", retryable=True, details={})
     if isinstance(exc, SolomonError):

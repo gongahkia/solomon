@@ -8,13 +8,37 @@ import httpx
 
 
 class SolomonAPIError(RuntimeError):
-    def __init__(self, message: str, *, status_code: int) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        code: str | None = None,
+        category: str | None = None,
+        retryable: bool | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.code = code
+        self.category = category
+        self.retryable = retryable
 
 
 def _raise_for_error(response: httpx.Response) -> None:
     if response.is_error:
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            raise SolomonAPIError(
+                error["message"],
+                status_code=response.status_code,
+                code=error.get("code") if isinstance(error.get("code"), str) else None,
+                category=error.get("category") if isinstance(error.get("category"), str) else None,
+                retryable=error.get("retryable") if isinstance(error.get("retryable"), bool) else None,
+            )
         raise SolomonAPIError(response.text, status_code=response.status_code)
 
 
@@ -86,4 +110,3 @@ class AsyncSolomonClient:
         response = await self._client.get(f"/why/{item_id}")
         _raise_for_error(response)
         return dict(response.json())
-

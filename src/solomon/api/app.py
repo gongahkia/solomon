@@ -9,6 +9,7 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
@@ -229,7 +230,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(SolomonError)
     def solomon_error_handler(_request: Request, exc: SolomonError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content={"error": {"code": exc.code, "message": exc.message}})
+        return JSONResponse(status_code=exc.status_code, content={"error": exc.error_payload()})
+
+    @app.exception_handler(RequestValidationError)
+    def request_validation_error_handler(_request: Request, _exc: RequestValidationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "category": "validation",
+                    "code": "validation_failed",
+                    "message": "request validation failed",
+                    "retryable": False,
+                    "details": {},
+                }
+            },
+        )
 
     @app.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:

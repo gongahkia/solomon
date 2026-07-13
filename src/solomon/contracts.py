@@ -149,6 +149,8 @@ class WebhookDeliveryResult(ContractModel):
     delivery_id: str = Field(min_length=1)
     status_code: int = Field(ge=100, le=599)
     delivered_at: datetime = Field(default_factory=now_utc)
+    attempts: int = Field(default=1, ge=1)
+    idempotent_replay: bool = False
 
     @field_validator("delivered_at")
     @classmethod

@@ -24,6 +24,33 @@ def test_production_compose_declares_required_services_and_secrets() -> None:
     assert "POSTGRES_PASSWORD_FILE" in compose
 
 
+def test_production_surface_ci_matrix_and_smoke_harness() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    smoke = ROOT / "scripts" / "production_compose_smoke.sh"
+
+    assert smoke.is_file()
+    assert smoke.stat().st_mode & 0o111
+    for fragment in (
+        "typescript-sdk:",
+        "npm test",
+        "postgres-pgvector-migrations:",
+        "pgvector/pgvector:0.8.2-pg16-bookworm",
+        "tests/test_migrations.py tests/test_postgres_live_integration.py",
+        "production-compose-smoke:",
+        "scripts/production_compose_smoke.sh",
+        "helm-template:",
+        "azure/setup-helm@v5",
+        "scripts/check_helm_chart.sh",
+    ):
+        assert fragment in workflow
+    for fragment in (
+        "up --build --detach --wait --wait-timeout 240",
+        "curl --fail --silent --show-error",
+        "down --volumes --remove-orphans",
+    ):
+        assert fragment in smoke.read_text(encoding="utf-8")
+
+
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("docker") is None, reason="docker is required for Compose schema validation")
 def test_production_compose_validates_with_docker() -> None:

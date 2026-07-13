@@ -582,6 +582,12 @@ of them before exposing either port. Validate the Compose model without starting
 scripts/check_production_compose.sh
 ```
 
+Run the full local production smoke test (build, pgvector, migrations, API, console, and worker) with:
+
+```bash
+scripts/production_compose_smoke.sh
+```
+
 ### Kubernetes Helm
 
 [`charts/solomon`](./charts/solomon/) deploys the server services with OIDC, a migration hook, API, console, worker,

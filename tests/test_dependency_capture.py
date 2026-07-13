@@ -188,10 +188,7 @@ def test_extract_defined_terms_and_citations_after_boundary_sanitization() -> No
 
 def test_reference_parser_uses_eyecite_for_full_case_and_law_citations() -> None:
     extraction = extract_defined_terms_and_citations(
-        content=(
-            "The brief cites Bush v. Gore, 531 U.S. 98, 99-100 (2000), "
-            "then Mass. Gen. Laws ch. 1, § 2."
-        )
+        content=("The brief cites Bush v. Gore, 531 U.S. 98, 99-100 (2000), then Mass. Gen. Laws ch. 1, § 2.")
     )
 
     citations = {citation.normalized_id: citation for citation in extraction.citations}
@@ -209,7 +206,7 @@ def test_reference_parser_uses_eyecite_for_full_case_and_law_citations() -> None
 def test_reference_parser_handles_defined_terms_and_non_us_case_grammar() -> None:
     extraction = extract_defined_terms_and_citations(
         content=(
-            "A regulated payment institution (\"Payment Institution\") must keep records. "
+            'A regulated payment institution ("Payment Institution") must keep records. '
             "The analysis distinguishes Alpha Pte Ltd v. Beta LLC [2024] SGHC 12."
         )
     )

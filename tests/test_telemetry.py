@@ -20,7 +20,7 @@ from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.mcp.tools.runtime import SolomonMCPRuntime
 from solomon.sources.models import DocumentSourceKind
-from solomon.telemetry import SolomonTelemetry
+from solomon.telemetry import SolomonTelemetry, telemetry_from_settings
 from solomon.webhooks import HMACWebhookDispatcher, SQLiteWebhookDeliveryStore
 
 
@@ -138,9 +138,31 @@ def test_telemetry_marks_failures_and_validates_self_hosted_endpoint() -> None:
     failure = exporter.get_finished_spans()[-1]
     assert failure.status.status_code.name == "ERROR"
     assert "failed operation" not in str(failure.events)
-    assert Settings(
-        telemetry_enabled=True,
-        telemetry_otlp_endpoint="http://127.0.0.1:4318/v1/traces",
-    ).public_diagnostics()["telemetry_otlp_configured"] is True
+    assert (
+        Settings(
+            telemetry_enabled=True,
+            telemetry_otlp_endpoint="http://127.0.0.1:4318/v1/traces",
+        ).public_diagnostics()["telemetry_otlp_configured"]
+        is True
+    )
     with pytest.raises(ValueError, match="requires SOLOMON_TELEMETRY_ENABLED"):
         Settings(telemetry_otlp_endpoint="http://127.0.0.1:4318/v1/traces")
+
+
+def test_telemetry_disabled_and_otlp_configuration_paths() -> None:
+    disabled = SolomonTelemetry()
+    with disabled.span("solomon.test.disabled") as span:
+        assert span is None
+    assert disabled.force_flush() is True
+    disabled.shutdown()
+
+    configured = telemetry_from_settings(
+        enabled=True,
+        service_name="solomon-test",
+        otlp_endpoint="http://127.0.0.1:4318/v1/traces",
+    )
+    assert configured.provider is not None
+    configured.shutdown()
+
+    with pytest.raises(ValueError, match="absolute HTTP"):
+        SolomonTelemetry(enabled=True, otlp_endpoint="mailto:telemetry@example.test")

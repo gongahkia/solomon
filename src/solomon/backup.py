@@ -99,8 +99,10 @@ def create_encrypted_backup(
         archive = work_dir / "backup.tar"
         archive_manifest = _write_archive(staged, archive)
         encrypted = work_dir / "backup.enc"
-        artifact = EncryptedArtifactStore(passphrase=passphrase).encrypt_file(archive, encrypted).model_copy(
-            update={"path": str(target)}
+        artifact = (
+            EncryptedArtifactStore(passphrase=passphrase)
+            .encrypt_file(archive, encrypted)
+            .model_copy(update={"path": str(target)})
         )
         manifest = EncryptedBackupManifest(
             encrypted_artifact=artifact,

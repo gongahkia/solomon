@@ -33,7 +33,5 @@ def test_jurisdiction_profiles_preserve_minimum_findings(text: str) -> None:
     client = BoundaryClient()
 
     for code in ("SG", "MY", "UK", "EU"):
-        response = client.review(
-            request={"text": text, "source_jurisdiction": code, "destination_jurisdiction": code}
-        )
+        response = client.review(request={"text": text, "source_jurisdiction": code, "destination_jurisdiction": code})
         assert expected_kind in {finding.kind for finding in response.findings}

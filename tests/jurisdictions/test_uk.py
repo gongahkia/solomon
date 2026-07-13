@@ -8,10 +8,7 @@ from solomon.boundary.engine.client import BoundaryClient
 def test_uk_identifiers_are_detected_when_a_review_route_includes_uk() -> None:
     response = BoundaryClient().review(
         request={
-            "text": (
-                "NI AB 12 34 56 C; UTR 1234567890; Companies House number 01234567; "
-                "NHS number 943 476 5919."
-            ),
+            "text": ("NI AB 12 34 56 C; UTR 1234567890; Companies House number 01234567; NHS number 943 476 5919."),
             "source_jurisdiction": "UK",
             "destination_jurisdiction": "EU",
         }

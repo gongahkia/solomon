@@ -323,9 +323,7 @@ def test_recall_includes_lexical_only_candidate_with_evidence(tmp_path: Path) ->
         graph=graph,
         index=_StaticIndex(
             [IndexedHit(item_id="semantic-only", similarity=0.99, embedding_ref="static:1")],
-            lexical_hits=[
-                LexicalHit(item_id="lexical-only", match_ratio=1.0, terms=["citadel", "clause", "priority"])
-            ],
+            lexical_hits=[LexicalHit(item_id="lexical-only", match_ratio=1.0, terms=["citadel", "clause", "priority"])],
         ),
         credence=CredenceLedger(),
     )

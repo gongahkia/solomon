@@ -31,6 +31,10 @@ def test_typed_domain_errors_have_stable_codes_categories_and_retryability() -> 
     assert UpstreamError("unavailable").error_payload()["retryable"] is True
     assert isinstance(domain_error_from_exception(ConnectionError("down")), UpstreamError)
     assert isinstance(domain_error_from_exception(KeyError("missing")), NotFoundError)
+    original = ConflictError("conflict")
+    assert domain_error_from_exception(original) is original
+    assert isinstance(domain_error_from_exception(ValueError("invalid")), BadRequestError)
+    assert domain_error_from_exception(RuntimeError("unexpected")).message == "internal request failure"
 
 
 def test_http_validation_and_domain_errors_use_structured_envelopes(tmp_path: Path) -> None:

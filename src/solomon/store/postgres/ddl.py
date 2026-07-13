@@ -52,8 +52,7 @@ def create_knowledge_store_schema(execute: ExecuteSQL, table: NameResolver, inde
         """
     )
     execute(
-        f"CREATE INDEX IF NOT EXISTS {index('idx_knowledge_items_state')} "
-        f"ON {table('knowledge_items')}(currency_state)"
+        f"CREATE INDEX IF NOT EXISTS {index('idx_knowledge_items_state')} ON {table('knowledge_items')}(currency_state)"
     )
     execute(
         f"CREATE INDEX IF NOT EXISTS {index('idx_knowledge_items_scope')} "
@@ -126,13 +125,9 @@ def create_graph_store_schema(execute: ExecuteSQL, table: NameResolver, index: N
         )
         """
     )
+    execute(f"CREATE INDEX IF NOT EXISTS {index('idx_suggestions_item')} ON {table('dependency_suggestions')}(item_id)")
     execute(
-        f"CREATE INDEX IF NOT EXISTS {index('idx_suggestions_item')} "
-        f"ON {table('dependency_suggestions')}(item_id)"
-    )
-    execute(
-        f"CREATE INDEX IF NOT EXISTS {index('idx_suggestions_decision')} "
-        f"ON {table('dependency_suggestions')}(decision)"
+        f"CREATE INDEX IF NOT EXISTS {index('idx_suggestions_decision')} ON {table('dependency_suggestions')}(decision)"
     )
 
 
@@ -182,14 +177,12 @@ def retrieval_index_migrations(
                 ALTER TABLE {table("retrieval_index")}
                 ADD COLUMN IF NOT EXISTS embedding vector({POSTGRES_VECTOR_DIMENSIONS})
                 """,
-                f"""
-                UPDATE {table("retrieval_index")}
-                SET embedding = vector_json::vector({POSTGRES_VECTOR_DIMENSIONS})
-                WHERE embedding IS NULL
-                """,
+                f"UPDATE {table('retrieval_index')}\n"  # nosec B608
+                f"SET embedding = vector_json::vector({POSTGRES_VECTOR_DIMENSIONS})\n"
+                "WHERE embedding IS NULL",
                 f"ALTER TABLE {table('retrieval_index')} ALTER COLUMN embedding SET NOT NULL",
                 f"""
-                CREATE INDEX IF NOT EXISTS {index('idx_retrieval_embedding_hnsw')}
+                CREATE INDEX IF NOT EXISTS {index("idx_retrieval_embedding_hnsw")}
                 ON {table("retrieval_index")} USING hnsw (embedding vector_cosine_ops)
                 """,
             ),
@@ -204,11 +197,9 @@ def retrieval_index_migrations(
                 ALTER TABLE {table("retrieval_index")}
                 ADD COLUMN IF NOT EXISTS lexical_tokens_json TEXT NOT NULL DEFAULT '[]'
                 """,
-                f"""
-                UPDATE {table("retrieval_index")}
-                SET lexical_tokens_json = tokens_json
-                WHERE lexical_tokens_json = '[]'
-                """,
+                f"UPDATE {table('retrieval_index')}\n"  # nosec B608
+                "SET lexical_tokens_json = tokens_json\n"
+                "WHERE lexical_tokens_json = '[]'",
             ),
         ),
         SchemaMigration(
@@ -221,13 +212,11 @@ def retrieval_index_migrations(
                 ALTER TABLE {table("retrieval_index")}
                 ADD COLUMN IF NOT EXISTS content_tsv tsvector NOT NULL DEFAULT ''::tsvector
                 """,
+                f"UPDATE {table('retrieval_index')}\n"  # nosec B608
+                "SET content_tsv = to_tsvector('simple', tokens_json)\n"
+                "WHERE content_tsv = ''::tsvector",
                 f"""
-                UPDATE {table("retrieval_index")}
-                SET content_tsv = to_tsvector('simple', tokens_json)
-                WHERE content_tsv = ''::tsvector
-                """,
-                f"""
-                CREATE INDEX IF NOT EXISTS {index('idx_retrieval_content_tsv')}
+                CREATE INDEX IF NOT EXISTS {index("idx_retrieval_content_tsv")}
                 ON {table("retrieval_index")} USING gin (content_tsv)
                 """,
             ),

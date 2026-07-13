@@ -40,4 +40,3 @@ def assert_recall_budget(measurement: LatencyMeasurement, budget: LatencyBudget)
 
 def estimate_local_memory_bytes(items: list[KnowledgeItem]) -> int:
     return sum(sys.getsizeof(item.model_dump_json()) for item in items)
-

@@ -80,8 +80,7 @@ class SQLiteAuthoritySourceRegistry:
                 """
             )
             columns = {
-                str(row["name"])
-                for row in self._conn.execute("PRAGMA table_info(authority_poll_outbox)").fetchall()
+                str(row["name"]) for row in self._conn.execute("PRAGMA table_info(authority_poll_outbox)").fetchall()
             }
             if "dead_lettered_at" not in columns:
                 self._conn.execute("ALTER TABLE authority_poll_outbox ADD COLUMN dead_lettered_at TEXT")

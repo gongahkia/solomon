@@ -333,9 +333,7 @@ class SolomonService:
     def _audit_retention(self, event_type: str, payload: dict[str, Any]) -> AuditAttribution:
         authorization = _service_authorization.get()
         actor_id = authorization.principal.subject if authorization is not None else "system:retention"
-        correlation_id = (
-            authorization.correlation_id if authorization is not None else f"retention:{uuid.uuid4().hex}"
-        )
+        correlation_id = authorization.correlation_id if authorization is not None else f"retention:{uuid.uuid4().hex}"
         attribution = AuditAttribution(actor_id=actor_id, correlation_id=correlation_id)
         self.audit.append(event_type, payload, attribution=attribution)
         return attribution
@@ -600,9 +598,8 @@ class SolomonService:
             raise NotFoundError(str(exc)) from exc
         except (OSError, ValueError) as exc:
             raise BadRequestError(str(exc)) from exc
-        if (
-            document.extraction_state is DocumentExtractionState.READY
-            and not self.document_store.list_candidates(document.id)
+        if document.extraction_state is DocumentExtractionState.READY and not self.document_store.list_candidates(
+            document.id
         ):
             candidates: list[CandidateClaim] = []
             for content, start, end in candidate_claims_from_text(document.content):

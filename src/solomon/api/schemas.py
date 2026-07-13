@@ -7,4 +7,3 @@ from pydantic import BaseModel, ConfigDict
 
 class SolomonModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
-

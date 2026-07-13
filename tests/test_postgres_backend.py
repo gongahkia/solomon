@@ -20,6 +20,8 @@ from solomon.store.postgres import (
     PostgresRetrievalIndex,
     PostgresVectorExtensionError,
 )
+from solomon.store.postgres.connection import quote_identifier
+from solomon.store.sqlite import StoreError
 from tests.postgres_fake import FakePostgresConnection
 
 
@@ -55,6 +57,11 @@ def _connect(tmp_path: Path) -> FakePostgresConnection:
     return FakePostgresConnection(tmp_path / "postgres.sqlite3")
 
 
+def test_postgres_identifier_quoting_rejects_sql_fragments() -> None:
+    with pytest.raises(StoreError, match="invalid SQL identifier"):
+        quote_identifier("retrieval_index; DROP TABLE knowledge_items; --")
+
+
 def test_postgres_knowledge_store_preserves_append_only_store_semantics(tmp_path: Path) -> None:
     store = PostgresKnowledgeStore("postgresql://unit/solomon", connect=lambda _dsn: _connect(tmp_path))
     predecessor = _item("item-1", "2023 house view", _dt(2023, 1, 1))
@@ -67,9 +74,7 @@ def test_postgres_knowledge_store_preserves_append_only_store_semantics(tmp_path
     assert store.get_item("item-1").successor_id == "item-2"
     assert {item.id for item in store.get_many()} == {"item-1", "item-2"}
     assert store.get_many(include_states={CurrencyState.LIVE}) == [written_successor]
-    assert [(item.id, item.currency_state) for item in store.as_of(_dt(2024, 1, 1))] == [
-        ("item-1", CurrencyState.LIVE)
-    ]
+    assert [(item.id, item.currency_state) for item in store.as_of(_dt(2024, 1, 1))] == [("item-1", CurrencyState.LIVE)]
 
     snapshot = store.snapshot(tmp_path / "snapshot.json")
     restored = PostgresKnowledgeStore.restore(

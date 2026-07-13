@@ -191,8 +191,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         journal_dir=resolved_settings.journal_dir,
         attestation_key=resolved_settings.verification_attestation_key,
         database_url=_service_database_url(resolved_settings, resolved_settings.data_dir),
-        verification_policy=vp, verification_policy_version=resolved_settings.verification_policy_version,
-        credence_policy=cp, credence_policy_version=resolved_settings.credence_policy_version,
+        verification_policy=vp,
+        verification_policy_version=resolved_settings.verification_policy_version,
+        credence_policy=cp,
+        credence_policy_version=resolved_settings.credence_policy_version,
         embedding_provider=embedding_provider,
         content_cipher=content_cipher,
         retention_default_days=resolved_settings.retention_default_days,
@@ -213,8 +215,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             attestation_key=resolved_settings.verification_attestation_key,
             database_url=_service_database_url(resolved_settings, resolved_settings.data_dir / "tenants" / tenant_id),
             postgres_schema=_postgres_schema_for_tenant(resolved_settings, tenant_id),
-            verification_policy=vp, verification_policy_version=resolved_settings.verification_policy_version,
-            credence_policy=cp, credence_policy_version=resolved_settings.credence_policy_version,
+            verification_policy=vp,
+            verification_policy_version=resolved_settings.verification_policy_version,
+            credence_policy=cp,
+            credence_policy_version=resolved_settings.credence_policy_version,
             embedding_provider=embedding_provider,
             content_cipher=content_cipher,
             retention_default_days=resolved_settings.retention_default_days,
@@ -1093,4 +1097,6 @@ def _service_principal_response(record: ServicePrincipalRecord) -> ServicePrinci
         updated_at=record.updated_at.isoformat(),
         scopes=record.scopes,
     )
+
+
 app = create_app()

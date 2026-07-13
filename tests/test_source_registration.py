@@ -17,7 +17,9 @@ def test_source_registration_validates_roots_and_reuses_caller_source_id(tmp_pat
     with pytest.raises(ValueError, match="absolute path"):
         DocumentSource(name="relative", kind=DocumentSourceKind.FILESYSTEM, root_ref="knowledge")
     with pytest.raises(ValueError, match="Microsoft Graph"):
-        DocumentSource(name="wrong graph", kind=DocumentSourceKind.MICROSOFT_GRAPH, root_ref="https://example.test/v1.0/sites")
+        DocumentSource(
+            name="wrong graph", kind=DocumentSourceKind.MICROSOFT_GRAPH, root_ref="https://example.test/v1.0/sites"
+        )
 
     service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
     request = DocumentSourceRequest(

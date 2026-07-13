@@ -31,9 +31,7 @@ class MCPShutdownConfig(SolomonModel):
 
     @classmethod
     def from_env(cls) -> MCPShutdownConfig:
-        return cls(
-            graceful_shutdown_seconds=int(os.environ.get("SOLOMON_MCP_GRACEFUL_SHUTDOWN_SECONDS", "10"))
-        )
+        return cls(graceful_shutdown_seconds=int(os.environ.get("SOLOMON_MCP_GRACEFUL_SHUTDOWN_SECONDS", "10")))
 
 
 __all__ = ["MCPShutdownConfig", "MCPTransportConfig", "MCPTransportKind"]

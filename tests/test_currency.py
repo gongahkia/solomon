@@ -63,8 +63,7 @@ def test_evaluate_currency_uses_dependency_staleness_verification_and_validity()
         is CurrencyState.STALE_PENDING_REVERIFICATION
     )
     assert (
-        evaluate_currency(superseded, as_of=_dt(2026, 1, 1), policy=policy).currency_state
-        is CurrencyState.SUPERSEDED
+        evaluate_currency(superseded, as_of=_dt(2026, 1, 1), policy=policy).currency_state is CurrencyState.SUPERSEDED
     )
     assert verification_due(_item("item-3"), as_of=_dt(2026, 1, 1), policy=policy) is True
 

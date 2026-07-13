@@ -182,7 +182,9 @@ def test_document_sources_validate_filesystem_and_microsoft_graph_root_reference
     with pytest.raises(ValueError, match="absolute path"):
         DocumentSource(name="relative", kind=DocumentSourceKind.FILESYSTEM, root_ref="knowledge")
     with pytest.raises(ValueError, match="Microsoft Graph"):
-        DocumentSource(name="wrong graph", kind=DocumentSourceKind.MICROSOFT_GRAPH, root_ref="https://example.test/v1.0/sites")
+        DocumentSource(
+            name="wrong graph", kind=DocumentSourceKind.MICROSOFT_GRAPH, root_ref="https://example.test/v1.0/sites"
+        )
     graph = DocumentSource(
         name="microsoft 365",
         kind=DocumentSourceKind.MICROSOFT_GRAPH,

@@ -71,8 +71,7 @@ def test_mcp_bound_identity_authorizes_scope_and_audits_actual_actor(tmp_path: P
 
     assert result["state"] == "live"
     entries = [
-        json.loads(line)
-        for line in (tmp_path / "journal" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in (tmp_path / "journal" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     entry = next(entry for entry in reversed(entries) if entry["event_type"] == "mcp_call")
     assert entry["attribution"]["actor_id"] == "lawyer-a"

@@ -244,10 +244,7 @@ class PostgresGraphStore:
         occurred_at: datetime,
     ) -> None:
         payload = {"suggestion": suggestion.model_dump(mode="json")}
-        event_id = (
-            f"{suggestion.id}:{event_type}:{occurred_at.isoformat()}:"
-            f"{len(json.dumps(payload, sort_keys=True))}"
-        )
+        event_id = f"{suggestion.id}:{event_type}:{occurred_at.isoformat()}:{len(json.dumps(payload, sort_keys=True))}"
         self._execute(
             f"""
             INSERT INTO {self._table("dependency_suggestion_events")}

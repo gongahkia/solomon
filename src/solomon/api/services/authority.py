@@ -302,10 +302,14 @@ class AuthorityService(ServiceDelegate):
 
     def impact_query(self, authority_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
         timestamp = as_of or self._deterministic_store_timestamp()
-        return CurrencyPropagator(graph=self.graph, store=self.store).impact_query(
-            authority_id,
-            as_of=timestamp,
-        ).model_dump(mode="json")
+        return (
+            CurrencyPropagator(graph=self.graph, store=self.store)
+            .impact_query(
+                authority_id,
+                as_of=timestamp,
+            )
+            .model_dump(mode="json")
+        )
 
     def dependency_graph(
         self,
@@ -356,9 +360,7 @@ class AuthorityService(ServiceDelegate):
             )
         stored: list[DependencySuggestion] = []
         existing_edges = {
-            (edge.target_id, edge.edge_type)
-            for edge in self.graph.get_dependencies(item.id)
-            if edge.valid_to is None
+            (edge.target_id, edge.edge_type) for edge in self.graph.get_dependencies(item.id) if edge.valid_to is None
         }
         existing_suggestions = {
             (suggestion.suggested_edge.target_id, suggestion.suggested_edge.edge_type)
@@ -381,7 +383,7 @@ class AuthorityService(ServiceDelegate):
                     "source": stored_suggestion.source,
                     "authority_ref_sha256": digest(stored_suggestion.authority_ref),
                 },
-        )
+            )
         return stored
 
     def detect_contradictions(

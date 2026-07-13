@@ -163,9 +163,7 @@ def review_text(
                 category="PII",
             )
         )
-        findings.extend(
-            _find(UK_UTR_RE, text, kind="uk_utr", severity="high", jurisdiction="UK", category="PII")
-        )
+        findings.extend(_find(UK_UTR_RE, text, kind="uk_utr", severity="high", jurisdiction="UK", category="PII"))
         findings.extend(
             _find(
                 UK_COMPANIES_HOUSE_RE,
@@ -178,9 +176,7 @@ def review_text(
         )
         findings.extend(_find_uk_nhs_numbers(text))
     if "MY" in {source_pack.code, destination_pack.code}:
-        findings.extend(
-            _find(MY_MYKAD_RE, text, kind="my_mykad", severity="high", jurisdiction="MY", category="PII")
-        )
+        findings.extend(_find(MY_MYKAD_RE, text, kind="my_mykad", severity="high", jurisdiction="MY", category="PII"))
         findings.extend(
             _find(
                 MY_SSM_REGISTRATION_RE,

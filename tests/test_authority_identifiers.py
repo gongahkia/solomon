@@ -10,8 +10,12 @@ from solomon.contracts import AuthoritySource, AuthoritySourceKind
 
 def test_authority_identifiers_are_idempotent_within_a_source_without_cross_source_conflation(tmp_path):
     store = SQLiteAuthorityIdentifierStore(tmp_path / "authorities.sqlite3")
-    first_source = AuthoritySource(id="official-gazette", name="official", kind=AuthoritySourceKind.API, root_ref="https://gov.test")
-    second_source = AuthoritySource(id="publisher-copy", name="publisher", kind=AuthoritySourceKind.API, root_ref="https://publisher.test")
+    first_source = AuthoritySource(
+        id="official-gazette", name="official", kind=AuthoritySourceKind.API, root_ref="https://gov.test"
+    )
+    second_source = AuthoritySource(
+        id="publisher-copy", name="publisher", kind=AuthoritySourceKind.API, root_ref="https://publisher.test"
+    )
 
     first = store.resolve(first_source, "HTTPS://EXAMPLE.TEST:443/regulations/12#section")
     repeated = store.resolve(first_source, "https://example.test/regulations/12")

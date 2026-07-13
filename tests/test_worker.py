@@ -41,3 +41,29 @@ def test_worker_rejects_invalid_limit(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="limit must be at least one"):
         sync_enabled_filesystem_sources(service, limit=0)
+
+
+def test_worker_counts_sync_failures_and_limit_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    service.register_document_source(
+        DocumentSourceRequest(name="first", kind=DocumentSourceKind.FILESYSTEM, root_ref=str(source_root))
+    )
+    service.register_document_source(
+        DocumentSourceRequest(name="second", kind=DocumentSourceKind.FILESYSTEM, root_ref=str(source_root))
+    )
+
+    def fail_sync(_source_id: str) -> object:
+        from solomon.errors import SolomonError
+
+        raise SolomonError("test sync failure")
+
+    monkeypatch.setattr(service, "sync_document_source", fail_sync)
+
+    batch = sync_enabled_filesystem_sources(service, limit=1)
+
+    assert batch.attempted == 1
+    assert batch.succeeded == 0
+    assert batch.failed == 1
+    assert batch.skipped == 1

@@ -191,9 +191,7 @@ class SQLiteDocumentStore:
         ):
             return latest
         if latest is not None:
-            document = document.model_copy(
-                update={"version": latest.version + 1, "previous_version_id": latest.id}
-            )
+            document = document.model_copy(update={"version": latest.version + 1, "previous_version_id": latest.id})
         with self._conn:
             self._conn.execute(
                 """

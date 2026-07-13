@@ -258,8 +258,7 @@ def test_oidc_http_authentication_audits_identity_and_denial(tmp_path: Path) -> 
         and entry.attribution.correlation_id in {"oidc-allowed", "oidc-denied"}
     ]
     decisions = [
-        (entry.payload["decision"], entry.attribution.actor_id, entry.attribution.correlation_id)
-        for entry in entries
+        (entry.payload["decision"], entry.attribution.actor_id, entry.attribution.correlation_id) for entry in entries
     ]
     assert decisions == [
         ("allowed", "lawyer-1", "oidc-allowed"),

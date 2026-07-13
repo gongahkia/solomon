@@ -76,4 +76,3 @@ class ImpactResult(SolomonModel):
     changed_dependency_id: str
     stale_item_ids: list[str]
     reasons: dict[str, list[StalenessReason]]
-

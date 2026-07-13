@@ -30,6 +30,7 @@ def _parse_datetime(value: str | None) -> datetime | None:
         return None
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
+
 def _currency_state_for_mcp(value: str) -> str:
     return {
         "Live": "live",
@@ -37,6 +38,7 @@ def _currency_state_for_mcp(value: str) -> str:
         "Superseded": "superseded",
         "Retired": "retired",
     }[value]
+
 
 def _log_mcp_call(
     service: SolomonService,
@@ -78,6 +80,7 @@ def _append_mcp_call(service: SolomonService, payload: dict[str, Any]) -> AuditE
     )
     return service.audit.append("mcp_call", payload, attribution=attribution)
 
+
 def _mcp_log_payload(
     tool_name: str,
     *,
@@ -112,6 +115,7 @@ def _mcp_log_payload(
         metadata=resolved_metadata,
     )
     return payload.model_dump(mode="json")
+
 
 def _review_mcp_output(
     service: SolomonService,
@@ -168,6 +172,7 @@ def _review_mcp_output(
         )
     return {"status": "passed", "classification": classification, "finding_count": finding_count, "context_id": None}
 
+
 def _scope_error_for_item(
     service: SolomonService,
     item_id: str,
@@ -183,6 +188,7 @@ def _scope_error_for_item(
     if client_id is not None and resolved_item.client_id != client_id:
         return _scope_denied(item_id, matter_id=matter_id, client_id=client_id, caller_id=caller_id)
     return None
+
 
 def _filter_impact_scope(
     service: SolomonService,
@@ -206,6 +212,7 @@ def _filter_impact_scope(
         filtered_reasons[item_id] = reasons.get(item_id, [])
     return filtered_ids, filtered_reasons
 
+
 def _scope_denied(
     item_id: str,
     *,
@@ -225,6 +232,7 @@ def _scope_denied(
         },
     )
 
+
 def _content_text(payload: object) -> str:
     if isinstance(payload, str):
         return payload
@@ -238,11 +246,13 @@ def _content_text(payload: object) -> str:
         return "\n\n".join(chunks)
     return ""
 
+
 def _response_value(response: object, field: str, default: Any) -> Any:
     if isinstance(response, dict):
         return response.get(field, default)
     value = getattr(response, field, default)
     return getattr(value, "value", value)
+
 
 def structured_tool_errors(function: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
     @wraps(function)
@@ -311,8 +321,10 @@ def _error_category(code: str) -> str:
         return "rate_limit"
     return "internal"
 
+
 def _audit_metadata(seq: int, entry_hash: str, journal_path: Path) -> dict[str, str]:
     return {"entry_id": str(seq), "entry_hash": entry_hash, "journal_path": str(journal_path)}
+
 
 def _sha256(value: str) -> str:
     import hashlib

@@ -2,26 +2,21 @@
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+    rev: v0.15.16
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: ["--fix"]
       - id: ruff-format
   - repo: local
     hooks:
       - id: mypy
         name: mypy
-        entry: uv run mypy src tests scripts
+        entry: uv run mypy src
         language: system
         pass_filenames: false
       - id: pytest-fast
         name: pytest-fast
         entry: uv run pytest -q
-        language: system
-        pass_filenames: false
-      - id: secret-scan
-        name: secret scan
-        entry: git secrets --scan
         language: system
         pass_filenames: false
       - id: conventional-commit

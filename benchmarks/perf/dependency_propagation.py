@@ -124,9 +124,7 @@ def main() -> int:
     sizes = [int(value) for value in args.sizes.split(",")]
     if not sizes or any(size < 1 for size in sizes) or args.samples < 1:
         raise SystemExit("sizes and samples must be positive")
-    results: list[dict[str, Any]] = [
-        measure_propagation(size, args.samples, progress=args.progress) for size in sizes
-    ]
+    results: list[dict[str, Any]] = [measure_propagation(size, args.samples, progress=args.progress) for size in sizes]
     payload = {"benchmark": "dependency_propagation", "authority_id": AUTHORITY_ID, "results": results}
     print(json.dumps(payload, indent=2, sort_keys=True))
     if args.max_p95_ms is not None:

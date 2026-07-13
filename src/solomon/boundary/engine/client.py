@@ -171,6 +171,7 @@ class BoundaryClient:
         if self.fail:
             raise RuntimeError("vendored boundary engine unavailable")
 
+
 def _resolve_text(payload: Mapping[str, Any], text: str | None) -> str:
     if payload.get("text") is not None:
         return str(payload["text"])

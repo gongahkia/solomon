@@ -453,11 +453,7 @@ class RetrievalOrchestrator:
         considered_ids = [item.id for item in items]
         indexed_refs = self.index.embedding_refs(considered_ids)
         target_ref = self.index.strategy.ref
-        stale = [
-            item
-            for item in items
-            if item.embedding_ref != target_ref or indexed_refs.get(item.id) != target_ref
-        ]
+        stale = [item for item in items if item.embedding_ref != target_ref or indexed_refs.get(item.id) != target_ref]
         self.index_items(stale)
         return ReembedReport(
             embedding_ref=target_ref,
@@ -581,8 +577,7 @@ class RetrievalOrchestrator:
         ]
         ranked = self.credence.rank(candidates)
         results = [
-            self._build_result(candidate, hits[candidate.item.id], resolved_options.weights)
-            for candidate in ranked
+            self._build_result(candidate, hits[candidate.item.id], resolved_options.weights) for candidate in ranked
         ]
         return self._apply_limit_and_budget(results, resolved_options)
 
@@ -601,9 +596,7 @@ class RetrievalOrchestrator:
         centrality_score = min(candidate.centrality / 10.0, 1.0)
         fusion_score = hit.similarity if isinstance(hit, IndexedHit) else hit.fusion_score
         score = (
-            fusion_score * weights.similarity
-            + credence_rank * weights.credence
-            + centrality_score * weights.centrality
+            fusion_score * weights.similarity + credence_rank * weights.credence + centrality_score * weights.centrality
         )
         return RecallResult(
             item=item,
@@ -662,15 +655,9 @@ def _fuse_hits(
     rrf_k: int,
 ) -> list[_FusedHit]:
     allowed_semantic_hits = [hit for hit in semantic_hits if hit.item_id in allowed_item_ids]
-    semantic_by_id = {
-        hit.item_id: (rank, hit)
-        for rank, hit in enumerate(allowed_semantic_hits, start=1)
-    }
+    semantic_by_id = {hit.item_id: (rank, hit) for rank, hit in enumerate(allowed_semantic_hits, start=1)}
     allowed_lexical_hits = [hit for hit in lexical_hits if hit.item_id in allowed_item_ids]
-    lexical_by_id = {
-        hit.item_id: (rank, hit)
-        for rank, hit in enumerate(allowed_lexical_hits, start=1)
-    }
+    lexical_by_id = {hit.item_id: (rank, hit) for rank, hit in enumerate(allowed_lexical_hits, start=1)}
     fused: list[_FusedHit] = []
     for item_id in semantic_by_id.keys() | lexical_by_id.keys():
         semantic = semantic_by_id.get(item_id)

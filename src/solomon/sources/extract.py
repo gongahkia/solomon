@@ -97,8 +97,7 @@ def _extract_docx(data: bytes, mime_type: str) -> ExtractedDocument:
         )
     namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
     paragraphs = [
-        "".join(node.text or "" for node in paragraph.iter(f"{namespace}t"))
-        for paragraph in root.iter(f"{namespace}p")
+        "".join(node.text or "" for node in paragraph.iter(f"{namespace}t")) for paragraph in root.iter(f"{namespace}p")
     ]
     return _ready(
         "\n\n".join(value for value in paragraphs if value),
@@ -131,7 +130,9 @@ def _extract_pdf(data: bytes, mime_type: str) -> ExtractedDocument:
         )
 
 
-def _mime_for_filename(filename: str) -> Literal[
+def _mime_for_filename(
+    filename: str,
+) -> Literal[
     "text/plain",
     "text/html",
     "application/pdf",

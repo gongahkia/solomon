@@ -172,11 +172,7 @@ def _forecast_score(
     history_weight = min(historical_change_count / 3.0, 1.0)
     return min(
         1.0,
-        urgency * 0.55
-        + graph_weight * 0.15
-        + status_weight * 0.15
-        + confidence_weight * 0.10
-        + history_weight * 0.05,
+        urgency * 0.55 + graph_weight * 0.15 + status_weight * 0.15 + confidence_weight * 0.10 + history_weight * 0.05,
     )
 
 

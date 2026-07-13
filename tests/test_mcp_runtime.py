@@ -371,9 +371,7 @@ def test_mcp_audit_pack_contains_verifiable_manifest(tmp_path: Path) -> None:
     manifest = json.loads(pack["pack"]["manifest_json"])
     unsigned_manifest = dict(manifest)
     supplied_hash = unsigned_manifest.pop("manifest_sha256")
-    computed_hash = hashlib.sha256(
-        json.dumps(unsigned_manifest, sort_keys=True, indent=2).encode("utf-8")
-    ).hexdigest()
+    computed_hash = hashlib.sha256(json.dumps(unsigned_manifest, sort_keys=True, indent=2).encode("utf-8")).hexdigest()
 
     assert manifest["schema"] == "solomon.audit_pack.v1"
     assert manifest["journal_file"] == "journal.jsonl"
@@ -404,8 +402,7 @@ def test_mcp_call_logging_records_required_fields(tmp_path: Path) -> None:
     )
 
     entries = [
-        json.loads(line)
-        for line in (tmp_path / "journal" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in (tmp_path / "journal" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     mcp_entries = [entry for entry in entries if entry["event_type"] == "mcp_call"]
     payload = mcp_entries[-1]["payload"]

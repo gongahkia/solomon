@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -103,3 +104,75 @@ def test_backup_refuses_invalid_audit_journal(tmp_path: Path) -> None:
             destination=tmp_path / "invalid-journal.enc",
             passphrase=TEST_PASSPHRASE,
         )
+
+
+def test_backup_rejects_missing_or_unsafe_input_paths(tmp_path: Path) -> None:
+    with pytest.raises(BackupError, match="data directory"):
+        create_encrypted_backup(
+            data_dir=tmp_path / "missing-data",
+            journal_dir=tmp_path / "missing-journal",
+            destination=tmp_path / "backup.enc",
+            passphrase=TEST_PASSPHRASE,
+        )
+
+    data_dir = tmp_path / "data"
+    journal_dir = tmp_path / "journal"
+    data_dir.mkdir()
+    journal_dir.mkdir()
+    existing = tmp_path / "existing.enc"
+    existing.write_text("existing", encoding="utf-8")
+    with pytest.raises(BackupError, match="destination"):
+        create_encrypted_backup(
+            data_dir=data_dir,
+            journal_dir=journal_dir,
+            destination=existing,
+            passphrase=TEST_PASSPHRASE,
+        )
+    with pytest.raises(BackupError, match="passphrase"):
+        create_encrypted_backup(
+            data_dir=data_dir,
+            journal_dir=journal_dir,
+            destination=tmp_path / "empty-passphrase.enc",
+            passphrase="",
+        )
+
+    unsafe_data_dir = tmp_path / "unsafe-data"
+    unsafe_data_dir.mkdir()
+    (unsafe_data_dir / "linked.txt").symlink_to(tmp_path / "target.txt")
+    with pytest.raises(BackupError, match="symlinked"):
+        create_encrypted_backup(
+            data_dir=unsafe_data_dir,
+            journal_dir=journal_dir,
+            destination=tmp_path / "unsafe.enc",
+            passphrase=TEST_PASSPHRASE,
+        )
+
+
+def test_restore_rejects_missing_or_invalid_archive_before_extracting(tmp_path: Path) -> None:
+    with pytest.raises(BackupError, match="does not exist"):
+        restore_encrypted_backup(tmp_path / "missing.enc", tmp_path / "restored", passphrase=TEST_PASSPHRASE)
+
+    archive = tmp_path / "invalid.enc"
+    archive.write_text("not an encrypted archive", encoding="utf-8")
+    with pytest.raises(BackupError, match="passphrase"):
+        restore_encrypted_backup(archive, tmp_path / "empty-passphrase", passphrase="")
+    with pytest.raises(BackupError, match="manifest"):
+        restore_encrypted_backup(archive, tmp_path / "invalid-manifest", passphrase=TEST_PASSPHRASE)
+
+
+def test_restore_rejects_decrypted_archive_digest_drift(tmp_path: Path) -> None:
+    _seed_service(tmp_path)
+    archive = tmp_path / "backup.enc"
+    create_encrypted_backup(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        destination=archive,
+        passphrase=TEST_PASSPHRASE,
+    )
+    manifest_path = archive.with_name(f"{archive.name}.manifest.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["archive_sha256"] = "0" * 64
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(BackupError, match="decrypted backup digest"):
+        restore_encrypted_backup(archive, tmp_path / "drifted", passphrase=TEST_PASSPHRASE)

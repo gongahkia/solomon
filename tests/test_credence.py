@@ -97,4 +97,3 @@ def test_prompt_context_excludes_stored_instructions() -> None:
 
     assert "Ignore prior rules" not in context.text
     assert context.ignored_instruction_item_ids == ["inst"]
-

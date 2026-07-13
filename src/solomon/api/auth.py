@@ -77,9 +77,7 @@ def mapped_oidc_roles(
     else:
         return frozenset()
     return frozenset(
-        mapped_role
-        for claim_role in claim_roles
-        if (mapped_role := mappings.get(claim_role)) in OIDC_AUTH_ROLES
+        mapped_role for claim_role in claim_roles if (mapped_role := mappings.get(claim_role)) in OIDC_AUTH_ROLES
     )
 
 

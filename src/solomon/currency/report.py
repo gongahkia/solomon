@@ -281,11 +281,7 @@ def _stale_rows(
 ) -> list[CurrencyReportItem]:
     reasons = [reason for reason in event_item.metadata.get("staleness_reasons", []) if isinstance(reason, dict)]
     event_time = _ensure_aware_utc(event_at)
-    reasons = [
-        reason
-        for reason in reasons
-        if _reason_time(reason) is None or _reason_time(reason) == event_time
-    ]
+    reasons = [reason for reason in reasons if _reason_time(reason) is None or _reason_time(reason) == event_time]
     if not reasons:
         return [
             _row(

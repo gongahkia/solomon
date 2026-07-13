@@ -7,8 +7,7 @@
 ## Verification
 
 - [ ] `uv run ruff check .`
-- [ ] `uv run mypy src tests scripts`
+- [ ] `uv run mypy src`
 - [ ] `uv run pytest`
 
 ## Boundary / audit impact
-

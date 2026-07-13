@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 {{- include "solomon.validate" . }}
 {{- if not .Values.persistence.existingClaim }}
 apiVersion: v1

@@ -27,8 +27,7 @@ def test_source_claim_and_review_task_routes(tmp_path):
                     "external_id": "memo-1",
                     "filename": "memo.txt",
                     "content": (
-                        "First reusable proposition about Structure X.\n\n"
-                        "Second proposition requires human review."
+                        "First reusable proposition about Structure X.\n\nSecond proposition requires human review."
                     ),
                 },
             )

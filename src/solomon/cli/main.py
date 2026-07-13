@@ -53,7 +53,7 @@ def _example(command: str) -> str:
 
 app = typer.Typer(
     help="Solomon command-line interface.",
-    epilog=_example("uv run solomon preflight \"structure X regulation\""),
+    epilog=_example('uv run solomon preflight "structure X regulation"'),
 )
 mcp_app = typer.Typer(help="Run Solomon MCP transports.", epilog=_example("uv run solomon mcp serve"))
 console_app = typer.Typer(

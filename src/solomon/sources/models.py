@@ -71,9 +71,7 @@ class DocumentSource(SolomonModel):
         elif self.kind is DocumentSourceKind.MICROSOFT_GRAPH:
             parsed = urlparse(self.root_ref)
             valid_graph_url = (
-                parsed.scheme == "https"
-                and parsed.netloc == "graph.microsoft.com"
-                and parsed.path.startswith("/v1.0/")
+                parsed.scheme == "https" and parsed.netloc == "graph.microsoft.com" and parsed.path.startswith("/v1.0/")
             )
             if not valid_graph_url:
                 raise ValueError("Microsoft Graph source root_ref must be an https://graph.microsoft.com/v1.0/ URL")

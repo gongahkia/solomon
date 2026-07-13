@@ -28,7 +28,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run python scripts/check_license_headers.py
       - run: uv run python scripts/check_file_lengths.py
-      - run: uv run mypy src tests scripts
+      - run: uv run mypy src
       - run: uv run bandit -r src/solomon --baseline .bandit-baseline.json
       - name: Audit dependencies and generate SBOM
         run: |

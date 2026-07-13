@@ -62,9 +62,7 @@ class SQLiteWorkflowStore:
                 )
                 """
             )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_review_tasks_state ON review_tasks(state, created_at)"
-            )
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_review_tasks_state ON review_tasks(state, created_at)")
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_review_tasks_reviewer ON review_tasks(reviewer_id, state)"
             )

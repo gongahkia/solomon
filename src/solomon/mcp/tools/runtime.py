@@ -98,10 +98,13 @@ class SolomonMCPRuntime:
     ) -> dict[str, Any]:
         principal = self._principal()
         correlation_id = f"mcp:{uuid.uuid4().hex}"
-        with self.service.telemetry.span(
-            "solomon.mcp.tool",
-            attributes={"solomon.mcp.tool": tool_name},
-        ), authorized_mcp_call(principal, correlation_id):
+        with (
+            self.service.telemetry.span(
+                "solomon.mcp.tool",
+                attributes={"solomon.mcp.tool": tool_name},
+            ),
+            authorized_mcp_call(principal, correlation_id),
+        ):
             denial = self._authorization_error(
                 tool_name,
                 principal=principal,

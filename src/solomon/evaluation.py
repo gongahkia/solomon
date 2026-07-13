@@ -774,9 +774,7 @@ def run_external_law_monitoring_benchmark(
     cases: list[ExternalLawMonitorCase] | None = None,
 ) -> ExternalLawMonitoringResult:
     resolved_cases = cases or default_external_law_monitor_cases()
-    expected_changed_authority_ids = {
-        case.after.authority_id for case in resolved_cases if case.expected_changed
-    }
+    expected_changed_authority_ids = {case.after.authority_id for case in resolved_cases if case.expected_changed}
     detected_authority_ids: set[str] = set()
     false_positive_authority_ids: set[str] = set()
     unchanged_expected = 0
@@ -1055,9 +1053,7 @@ def _run_end_to_end_case(case: EndToEndEvaluationCase) -> EndToEndCaseResult:
         graph_impact_recall=impact_query_recall(expected_stale, actual_stale),
         stale_context_leakage_rate=len(leaked_stale) / len(expected_stale),
         source_to_review_completed=resolved.state.value == "resolved",
-        mcp_context_recalled_after_review=any(
-            str(result["item"]["id"]) == item.id for result in after_review["items"]
-        ),
+        mcp_context_recalled_after_review=any(str(result["item"]["id"]) == item.id for result in after_review["items"]),
     )
 
 

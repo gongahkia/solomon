@@ -31,9 +31,7 @@ def test_console_source_operations_syncs_and_retries_extraction(tmp_path: Path) 
             synced = await client.post(f"/console/sources/{source.id}/sync")
             failed_document = service.document_store.list_latest_documents(source.id)[0]
             memo.write_text("Reusable proposition with enough source detail for review.", encoding="utf-8")
-            retried = await client.post(
-                f"/console/sources/{source.id}/documents/{failed_document.id}/retry-extraction"
-            )
+            retried = await client.post(f"/console/sources/{source.id}/documents/{failed_document.id}/retry-extraction")
             return initial, synced, retried
 
     initial, synced, retried = asyncio.run(exercise())

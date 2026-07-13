@@ -65,6 +65,29 @@ def test_migration_runner_rejects_unordered_or_unknown_database_state():
         apply_sqlite_migrations(connection, migrations)
 
 
+def test_sqlite_migrations_roll_back_failed_fresh_batch() -> None:
+    connection = sqlite3.connect(":memory:")
+    migrations = (
+        SchemaMigration(
+            scope="test-schema",
+            version=1,
+            name="failing-migration",
+            sqlite_statements=("CREATE TABLE transient_table (id INTEGER PRIMARY KEY)", "not valid SQL"),
+            postgres_statements=(),
+        ),
+    )
+
+    with pytest.raises(sqlite3.OperationalError):
+        apply_sqlite_migrations(connection, migrations)
+
+    assert (
+        connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('schema_migrations', 'transient_table')"
+        ).fetchall()
+        == []
+    )
+
+
 @dataclass
 class FakeCursor:
     rows: list[tuple[Any, ...]]

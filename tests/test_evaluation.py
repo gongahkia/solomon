@@ -41,10 +41,13 @@ def test_synthetic_corpus_and_metrics() -> None:
 
     assert corpus.expected_stale_item_ids == {"item-0", "item-2", "item-4"}
     assert stale_surface_rate([stale_item, corpus.items[1]]) == 0.5
-    assert time_to_flag(
-        datetime(2025, 1, 1, tzinfo=timezone.utc),
-        datetime(2025, 1, 1, 0, 0, 2, tzinfo=timezone.utc),
-    ) == 2.0
+    assert (
+        time_to_flag(
+            datetime(2025, 1, 1, tzinfo=timezone.utc),
+            datetime(2025, 1, 1, 0, 0, 2, tzinfo=timezone.utc),
+        )
+        == 2.0
+    )
     assert impact_query_recall({"a", "b"}, {"b", "c"}) == 0.5
 
 

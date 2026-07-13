@@ -554,6 +554,8 @@ def _load_ed25519_private_key(private_key_pem: str) -> Ed25519PrivateKey:
     if not isinstance(key, Ed25519PrivateKey):
         raise ValueError("private key must be Ed25519")
     return key
+
+
 def _load_ed25519_public_key(public_key_pem: str) -> Ed25519PublicKey:
     key = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
     if not isinstance(key, Ed25519PublicKey):

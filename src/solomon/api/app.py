@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import uuid
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -16,12 +17,14 @@ from pydantic import BaseModel, Field
 from solomon import __version__
 from solomon.api.auth import (
     ADMIN_AUTH_SCOPES,
+    DEFAULT_TENANT_SCOPES,
     AuthPrincipal,
     extract_api_key,
     required_scope_for_request,
     static_secret_matches,
     validate_auth_scopes,
 )
+from solomon.api.oidc import OIDCIdentity, OIDCValidationError, OIDCValidator
 from solomon.api.report_routes import register_currency_report_routes
 from solomon.api.service import (
     AffirmRequest,
@@ -56,6 +59,7 @@ from solomon.api.tenancy import (
     TenantRegistry,
     is_valid_tenant_id,
 )
+from solomon.audit.journal import AuditAttribution
 from solomon.boundary.solomon import BoundaryImportStatus, SolomonBoundary, probe_boundary_client
 from solomon.config import (
     Settings,
@@ -176,6 +180,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.router = _model_router_from_settings(resolved_settings)
     app.state.tenant_registry = tenant_registry
     app.state.metrics = metrics
+    app.state.oidc_validator = _oidc_validator_from_settings(resolved_settings)
 
     def active_router() -> ModelRouter:
         resolved = getattr(app.state, "router", None)
@@ -228,6 +233,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     content={"error": {"code": "tenant_suspended", "message": "tenant is suspended"}},
                 )
             principal = _tenant_principal(resolved_settings, tenant_registry, record, tenant_id, supplied_api_key)
+            if principal is None:
+                oidc_identity = _validate_oidc_request(request, app.state.oidc_validator)
+                if oidc_identity is not None:
+                    request.state.correlation_id = _correlation_id(request)
+                    _record_oidc_decision(
+                        service,
+                        decision="allowed",
+                        tenant_id=tenant_id,
+                        correlation_id=request.state.correlation_id,
+                        actor_id=oidc_identity.subject,
+                    )
+                    principal = _oidc_principal(oidc_identity, tenant_id)
+                elif _bearer_token(request) is not None and app.state.oidc_validator is not None:
+                    correlation_id = _correlation_id(request)
+                    _record_oidc_decision(
+                        service,
+                        decision="denied",
+                        tenant_id=tenant_id,
+                        correlation_id=correlation_id,
+                    )
             if principal is None:
                 return _auth_error()
             if not principal.has_scope(required_scope):
@@ -610,6 +635,65 @@ def _is_admin_path(path: str) -> bool:
     return path == "/diagnostics" or path == TENANT_MANAGEMENT_PREFIX or path.startswith(f"{TENANT_MANAGEMENT_PREFIX}/")
 
 
+def _oidc_validator_from_settings(settings: Settings) -> OIDCValidator | None:
+    if settings.oidc_issuer is None or settings.oidc_audience is None:
+        return None
+    return OIDCValidator(
+        issuer=settings.oidc_issuer,
+        audience=settings.oidc_audience,
+        clock_skew_seconds=settings.oidc_clock_skew_seconds,
+        cache_seconds=settings.oidc_jwks_cache_seconds,
+    )
+
+
+def _bearer_token(request: Request) -> str | None:
+    authorization = request.headers.get("authorization")
+    if authorization is None:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+def _validate_oidc_request(request: Request, validator: OIDCValidator | None) -> OIDCIdentity | None:
+    token = _bearer_token(request)
+    if token is None or validator is None:
+        return None
+    try:
+        return validator.validate(token)
+    except OIDCValidationError:
+        return None
+
+
+def _correlation_id(request: Request) -> str:
+    return request.headers.get("x-correlation-id") or uuid.uuid4().hex
+
+
+def _record_oidc_decision(
+    service: SolomonService,
+    *,
+    decision: str,
+    tenant_id: str,
+    correlation_id: str,
+    actor_id: str | None = None,
+) -> None:
+    service.audit.append(
+        "oidc_authentication",
+        {"decision": decision, "tenant_id": tenant_id},
+        attribution=AuditAttribution(actor_id=actor_id, correlation_id=correlation_id),
+    )
+
+
+def _oidc_principal(identity: OIDCIdentity, tenant_id: str) -> AuthPrincipal:
+    return AuthPrincipal(
+        subject=identity.subject,
+        role="tenant",
+        tenant_id=tenant_id,
+        scopes=frozenset(DEFAULT_TENANT_SCOPES),
+    )
+
+
 def _admin_principal(settings: Settings, supplied_api_key: str | None) -> AuthPrincipal | None:
     if not static_secret_matches(settings.server_api_key, supplied_api_key):
         return None
@@ -644,7 +728,7 @@ def _tenant_principal(
 def _auth_error() -> JSONResponse:
     return JSONResponse(
         status_code=401,
-        content={"error": {"code": "unauthorized", "message": "invalid or missing API key"}},
+        content={"error": {"code": "unauthorized", "message": "invalid or missing credentials"}},
     )
 
 

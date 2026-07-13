@@ -45,6 +45,13 @@ Tenant storage stays isolated after registry admission. SQLite deployments use p
 directories. When Postgres is configured, each tenant is mapped to a sanitized Postgres schema so tenant data
 does not share tables.
 
+Optional server OIDC authentication requires `SOLOMON_OIDC_ISSUER` and `SOLOMON_OIDC_AUDIENCE`. The issuer must
+be HTTPS; Solomon obtains signing keys from its discovery document, caches JWKS entries, refreshes once for an
+unknown `kid`, and accepts only RS256 or ES256 JWTs with matching issuer, audience, expiry, and clock-skew checks.
+Validated identities receive default tenant read/write scopes until claim-to-role mapping is configured. OIDC
+authentication decisions are hash-chained audit entries with actor ID (when validated), decision, and request
+correlation ID; bearer tokens and claim bodies are not recorded.
+
 ## Server Auth
 
 `solomon-server` requires `SOLOMON_SERVER_API_KEY`. Requests may present credentials through `Authorization:

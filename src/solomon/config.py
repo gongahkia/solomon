@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     jurisdiction: str = "SG"
     server_api_key: str | None = None
     server_auto_provision_tenants: bool = True
+    oidc_issuer: str | None = None
+    oidc_audience: str | None = None
+    oidc_clock_skew_seconds: int = Field(default=60, ge=0, le=300)
+    oidc_jwks_cache_seconds: int = Field(default=300, ge=1, le=3600)
     database_url: str = "sqlite:///./solomon-data/solomon.sqlite3"
     local_model_url: str = "http://127.0.0.1:11434/api/generate"
     local_model_name: str = "qwen2.5-coder:1.5b"
@@ -65,6 +69,14 @@ class Settings(BaseSettings):
             raise ValueError("solomon-local cannot enable remote egress")
         if self.sku == "server" and not self.server_api_key:
             raise ValueError("server SKU requires SOLOMON_SERVER_API_KEY")
+        if (self.oidc_issuer is None) != (self.oidc_audience is None):
+            raise ValueError("OIDC issuer and audience must be configured together")
+        if self.oidc_issuer is not None:
+            if self.sku != "server":
+                raise ValueError("OIDC is available only for the server SKU")
+            issuer = urlparse(self.oidc_issuer)
+            if issuer.scheme != "https" or not issuer.netloc or issuer.query or issuer.fragment:
+                raise ValueError("OIDC issuer must be an HTTPS URL without query or fragment")
         if self.zero_egress_mode and self.allow_remote_egress:
             raise ValueError("zero-egress mode conflicts with remote egress")
         if self.sku == "server" and self.allow_remote_egress and not self.remote_model_url:
@@ -95,6 +107,8 @@ class Settings(BaseSettings):
             "jurisdiction": self.jurisdiction,
             "database_url": self.database_url,
             "server_auto_provision_tenants": self.server_auto_provision_tenants,
+            "oidc_configured": self.oidc_issuer is not None,
+            "oidc_clock_skew_seconds": self.oidc_clock_skew_seconds,
             "local_model_url": self.local_model_url,
             "local_model_name": self.local_model_name,
             "remote_model_configured": self.remote_model_url is not None,

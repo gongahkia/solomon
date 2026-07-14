@@ -64,6 +64,7 @@ from stonks_cli.vnext.durable_scheduled_execution_deduplication import (
     ScheduledExecutionSlot,
 )
 from stonks_cli.vnext.durable_task_queue import DurableTask, DurableTaskQueue, create_durable_task
+from stonks_cli.vnext.encrypted_backup import EncryptedBackup, export_encrypted_backup, generate_backup_key
 from stonks_cli.vnext.errors import (
     OpenDContextIncompatibleError,
     OpenDDataEntitlementMissingError,
@@ -570,4 +571,7 @@ __all__ = [
     "load_operator_acknowledgement_log",
     "record_operator_acknowledgement",
     "save_operator_acknowledgement_log",
+    "EncryptedBackup",
+    "export_encrypted_backup",
+    "generate_backup_key",
 ]

@@ -242,6 +242,7 @@ from stonks_cli.vnext.score_components import ScoreComponent
 from stonks_cli.vnext.sector_limits import SectorConcentrationLimit, enforce_sector_concentration_limits
 from stonks_cli.vnext.sgd_portfolio_nav import SGDPortfolioNAV, calculate_sgd_portfolio_nav
 from stonks_cli.vnext.single_asset_limits import SingleAssetExposureLimit, enforce_single_asset_limits
+from stonks_cli.vnext.single_run_lease import SingleRunLease, SingleRunLeaseStore
 from stonks_cli.vnext.snapshot_cache import IdempotentSnapshotCache
 from stonks_cli.vnext.source_citations import SOURCE_CITATION_SCHEMA_VERSION, SourceCitation
 from stonks_cli.vnext.stablecoin_rail import StablecoinRailAllocation
@@ -423,6 +424,8 @@ __all__ = [
     "SecretReference",
     "ServiceContainer",
     "SingleAssetExposureLimit",
+    "SingleRunLease",
+    "SingleRunLeaseStore",
     "SOURCE_CITATION_SCHEMA_VERSION",
     "SourceCitation",
     "SQLiteConnectionFactory",

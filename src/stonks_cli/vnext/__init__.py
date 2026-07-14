@@ -108,6 +108,7 @@ from stonks_cli.vnext.moomoo import (
     resolve_moomoo_us_equity_symbol,
     select_moomoo_account,
 )
+from stonks_cli.vnext.opend_fixture import RecordedOpenDCall, RecordedOpenDFixtureAdapter
 from stonks_cli.vnext.rate_limit import ReadOnlyRateLimiter
 from stonks_cli.vnext.retry import IdempotentReadRetryPolicy, retry_idempotent_read
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
@@ -181,6 +182,8 @@ __all__ = [
     "OpenDError",
     "OpenDQuotaExceededError",
     "OpenDResponseMalformedError",
+    "RecordedOpenDCall",
+    "RecordedOpenDFixtureAdapter",
     "PACKAGE_BOUNDARIES",
     "PackageBoundary",
     "RUN_IDENTITY_VERSION",

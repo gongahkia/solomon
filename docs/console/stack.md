@@ -103,10 +103,10 @@ Test rules:
 
 ## Risks
 
-- HTMX partial contracts can get messy if screen count grows past the three committed views.
+- HTMX partial contracts can get messy if the workflow count grows past the seven committed workflows.
 - Jinja templates need disciplined component partials to avoid large HTML files.
 - Graph visualization may need a small client-side library later; keep it isolated to Dependency Review.
 
 ## Revisit trigger
 
-Reconsider SvelteKit if the console grows beyond the three screens, needs offline editing, complex graph interaction, or a public multi-user product UI.
+Reconsider SvelteKit if the console grows beyond the seven committed workflows, needs offline editing, complex graph interaction, or a public multi-user product UI.

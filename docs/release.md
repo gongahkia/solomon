@@ -37,4 +37,15 @@ environment before cutting a production release.
 The package is not published merely by pushing a tag. The PyPI workflow starts only after publishing the GitHub
 Release, and it fails before upload when its tag and `project.version` differ.
 
-The TypeScript package remains unpublished until its npm scope is decided.
+The TypeScript package remains unpublished pending npm scope/package ownership and release approval.
+
+## npm
+
+`@solomon/sdk` is release-ready but unpublished. `.github/workflows/npm-publish.yml` runs on a published GitHub
+Release or a manually selected existing tag. It verifies that the tag is `v<package.version>`, runs the package tests
+and pack dry-run, then requires the protected `npm` environment before OIDC publication.
+
+Before the first publish, establish ownership of the `@solomon` scope and package on npm. Configure the package's npm
+Trusted Publisher with owner `gongahkia`, repository `solomon`, workflow filename `npm-publish.yml`, environment
+`npm`, and allowed action `npm publish`. npm documents that trusted-publisher configuration requires an existing
+package; after initial package ownership is established, use the OIDC workflow rather than a stored publish token.

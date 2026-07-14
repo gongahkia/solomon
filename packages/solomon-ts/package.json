@@ -4,6 +4,15 @@
   "description": "TypeScript client for Solomon MCP tools over streamable HTTP.",
   "type": "module",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gongahkia/solomon",
+    "directory": "packages/solomon-ts"
+  },
+  "homepage": "https://github.com/gongahkia/solomon/tree/main/packages/solomon-ts",
+  "bugs": {
+    "url": "https://github.com/gongahkia/solomon/issues"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -16,6 +25,10 @@
     "dist",
     "README.md"
   ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepack": "npm run build",

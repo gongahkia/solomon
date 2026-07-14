@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: Publish TypeScript SDK
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v<package.version> tag to publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Test and publish npm package
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@solomon/sdk
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: packages/solomon-ts
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm ci
+      - name: Validate release tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          node --input-type=module - <<'NODE'
+          import { readFileSync } from "node:fs";
+
+          const version = JSON.parse(readFileSync("package.json", "utf8")).version;
+          const expectedTag = `v${version}`;
+          if (process.env.RELEASE_TAG !== expectedTag) {
+            throw new Error(`release tag must be ${expectedTag}, got ${process.env.RELEASE_TAG}`);
+          }
+          NODE
+      - run: npm test
+      - run: npm pack --dry-run
+      - run: npm publish --access public

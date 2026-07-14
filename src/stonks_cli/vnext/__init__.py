@@ -91,6 +91,7 @@ from stonks_cli.vnext.errors import (
     VNextExternalDataError,
     VNextInvariantError,
 )
+from stonks_cli.vnext.event_audit import ImmutableEventAudit, ImmutableEventAuditReport
 from stonks_cli.vnext.events import (
     EVENT_SCHEMA_VERSION,
     EventSeverity,
@@ -393,6 +394,8 @@ __all__ = [
     "HistoricalStorageCompaction",
     "IdempotentSnapshotCache",
     "IdempotentReadRetryPolicy",
+    "ImmutableEventAudit",
+    "ImmutableEventAuditReport",
     "LifecycleHook",
     "LifecycleState",
     "LIVE_CONFIGURATION_VERSION",

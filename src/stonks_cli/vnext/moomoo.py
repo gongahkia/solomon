@@ -6,7 +6,7 @@ import socket
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from importlib import metadata, util
 
@@ -15,6 +15,7 @@ from stonks_cli.vnext.errors import VNextConfigurationError, VNextExecutionDenie
 _LOCAL_OPEND_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _MOOMOO_TIMESTAMP_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f")
 _MOOMOO_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,6})?$")
+_MOOMOO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 @dataclass(frozen=True)
@@ -665,6 +666,142 @@ def _parse_moomoo_timestamp(value: object) -> datetime:
         except ValueError:
             pass
     raise ValueError("Moomoo timestamp is invalid")
+
+
+@dataclass(frozen=True)
+class MoomooCashFlow:
+    account_id: str
+    cashflow_id: int
+    clearing_date: str
+    settlement_date: str
+    currency: str
+    cashflow_type: str
+    direction: str
+    amount: float
+    remark: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.account_id, str) or not self.account_id:
+            raise ValueError("Moomoo cash-flow account ID must be non-empty")
+        if not isinstance(self.cashflow_id, int) or isinstance(self.cashflow_id, bool) or self.cashflow_id < 0:
+            raise ValueError("Moomoo cash-flow ID must be a non-negative integer")
+        _parse_moomoo_date(self.clearing_date)
+        _parse_moomoo_date(self.settlement_date)
+        if not all(isinstance(value, str) and value for value in (self.currency, self.cashflow_type, self.direction)):
+            raise ValueError("Moomoo cash-flow fields must be non-empty")
+        if not isinstance(self.amount, float) or not math.isfinite(self.amount):
+            raise ValueError("Moomoo cash-flow amount must be finite")
+        if not isinstance(self.remark, str):
+            raise ValueError("Moomoo cash-flow remark must be a string")
+
+
+@dataclass(frozen=True)
+class MoomooReadOnlyCashFlowClient:
+    contract: MoomooOpenDProcessContract
+    context_factory: Callable[[str, int], object]
+    success_code: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.contract, MoomooOpenDProcessContract):
+            raise TypeError("OpenD process contract is required")
+        if not callable(self.context_factory):
+            raise TypeError("Moomoo cash-flow context factory must be callable")
+        if not isinstance(self.success_code, int) or isinstance(self.success_code, bool):
+            raise ValueError("Moomoo SDK success code must be an integer")
+
+    def list_cash_flows(self, account: MoomooAccount, clearing_date: str) -> tuple[MoomooCashFlow, ...]:
+        if not isinstance(account, MoomooAccount) or not account.account_id.isdecimal():
+            raise VNextExternalDataError("Moomoo selected account is malformed")
+        if account.trading_environment != "REAL":
+            raise VNextExternalDataError("Moomoo cash flow is unavailable for non-live accounts")
+        try:
+            _parse_moomoo_date(clearing_date)
+        except ValueError as error:
+            raise VNextExternalDataError("Moomoo cash-flow clearing date is malformed") from error
+        try:
+            context = self.context_factory(self.contract.host, self.contract.port)
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo cash-flow context unavailable") from error
+        try:
+            getter = getattr(context, "get_acc_cash_flow", None)
+            if not callable(getter):
+                raise VNextExternalDataError("Moomoo cash-flow context is incompatible")
+            response = getter(clearing_date=clearing_date, trd_env=account.trading_environment, acc_id=int(account.account_id))
+            if not isinstance(response, tuple) or len(response) != 2 or response[0] != self.success_code:
+                raise VNextExternalDataError("Moomoo cash flow is unavailable")
+            return _normalize_moomoo_cash_flows(account.account_id, clearing_date, response[1])
+        except VNextExternalDataError:
+            raise
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo cash flow is malformed") from error
+        finally:
+            closer = getattr(context, "close", None)
+            if not callable(closer):
+                raise VNextExternalDataError("Moomoo cash-flow context is incompatible")
+            try:
+                closer()
+            except Exception as error:
+                raise VNextExternalDataError("Moomoo cash-flow context close failed") from error
+
+
+def _normalize_moomoo_cash_flows(
+    account_id: str, requested_clearing_date: str, raw_cash_flows: object
+) -> tuple[MoomooCashFlow, ...]:
+    records = raw_cash_flows
+    to_dict = getattr(raw_cash_flows, "to_dict", None)
+    if callable(to_dict):
+        records = to_dict("records")
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        raise ValueError("Moomoo cash flows must be a sequence")
+    cash_flows: list[MoomooCashFlow] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("Moomoo cash-flow record must be an object")
+        cashflow_id = record.get("cashflow_id")
+        clearing_date = record.get("clearing_date")
+        settlement_date = record.get("settlement_date")
+        currency = record.get("currency")
+        cashflow_type = record.get("cashflow_type")
+        direction = record.get("cashflow_direction")
+        remark = record.get("cashflow_remark")
+        if clearing_date != requested_clearing_date:
+            raise ValueError("Moomoo cash-flow record has unexpected clearing date")
+        if not isinstance(cashflow_id, int) or isinstance(cashflow_id, bool):
+            raise ValueError("Moomoo cash-flow record has invalid ID")
+        if not all(isinstance(value, str) for value in (clearing_date, settlement_date, currency, cashflow_type, direction, remark)):
+            raise ValueError("Moomoo cash-flow record has invalid fields")
+        cash_flows.append(
+            MoomooCashFlow(
+                account_id,
+                cashflow_id,
+                clearing_date,
+                settlement_date,
+                currency,
+                cashflow_type,
+                direction,
+                _finite_cash_flow_amount(record),
+                remark,
+            )
+        )
+    if len({cash_flow.cashflow_id for cash_flow in cash_flows}) != len(cash_flows):
+        raise ValueError("Moomoo cash-flow IDs must be unique")
+    return tuple(cash_flows)
+
+
+def _finite_cash_flow_amount(record: Mapping[object, object]) -> float:
+    value = record.get("cashflow_amount")
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError("Moomoo cash-flow record has invalid amount")
+    return float(value)
+
+
+def _parse_moomoo_date(value: object) -> date:
+    if not isinstance(value, str) or not _MOOMOO_DATE_PATTERN.fullmatch(value):
+        raise ValueError("Moomoo dates must use YYYY-MM-DD")
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as error:
+        raise ValueError("Moomoo date is invalid") from error
 
 
 @dataclass(frozen=True)

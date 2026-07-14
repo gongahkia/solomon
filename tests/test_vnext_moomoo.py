@@ -12,6 +12,7 @@ from stonks_cli.vnext.moomoo import (
     LocalOpenDReadOnlyClient,
     MoomooAccount,
     MoomooAccountBalance,
+    MoomooCashFlow,
     MoomooHistoricalOrder,
     MoomooOpenDProcessContract,
     MoomooOpenOrder,
@@ -19,6 +20,7 @@ from stonks_cli.vnext.moomoo import (
     MoomooPosition,
     MoomooReadOnlyAccountClient,
     MoomooReadOnlyBalanceClient,
+    MoomooReadOnlyCashFlowClient,
     MoomooReadOnlyOpenOrderClient,
     MoomooReadOnlyOrderHistoryClient,
     MoomooReadOnlyPositionClient,
@@ -403,3 +405,68 @@ def test_moomoo_read_only_order_history_client_rejects_malformed_records():
         client.list_order_history(
             MoomooAccount("100", 0, "REAL"), MoomooOrderHistoryWindow("2026-01-01 00:00:00", "2026-01-02 00:00:00")
         )
+
+
+def test_moomoo_read_only_cash_flow_client_reads_live_account_by_clearing_date():
+    class Context:
+        closed = False
+        kwargs: dict[str, object] = {}
+
+        def get_acc_cash_flow(self, **kwargs):
+            self.kwargs = kwargs
+            return 0, [
+                {
+                    "cashflow_id": 10,
+                    "clearing_date": "2026-01-01",
+                    "settlement_date": "2026-01-03",
+                    "currency": "USD",
+                    "cashflow_type": "Fund Redemption",
+                    "cashflow_direction": "IN",
+                    "cashflow_amount": 2300,
+                    "cashflow_remark": "fixture",
+                }
+            ]
+
+        def close(self) -> None:
+            self.closed = True
+
+    context = Context()
+    client = MoomooReadOnlyCashFlowClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: context)
+
+    assert client.list_cash_flows(MoomooAccount("100", 0, "REAL"), "2026-01-01") == (
+        MoomooCashFlow("100", 10, "2026-01-01", "2026-01-03", "USD", "Fund Redemption", "IN", 2300.0, "fixture"),
+    )
+    assert context.kwargs == {"clearing_date": "2026-01-01", "trd_env": "REAL", "acc_id": 100}
+    assert context.closed is True
+    assert not hasattr(client, "place_order")
+
+
+def test_moomoo_read_only_cash_flow_client_rejects_unsupported_or_malformed_broker_data():
+    class Context:
+        called = False
+
+        def get_acc_cash_flow(self, **kwargs):
+            self.called = True
+            return 0, [
+                {
+                    "cashflow_id": 10,
+                    "clearing_date": "2026-01-01",
+                    "settlement_date": "2026-01-03",
+                    "currency": "USD",
+                    "cashflow_type": "Fund Redemption",
+                    "cashflow_direction": "IN",
+                    "cashflow_amount": float("nan"),
+                    "cashflow_remark": "fixture",
+                }
+            ]
+
+        def close(self) -> None:
+            pass
+
+    context = Context()
+    client = MoomooReadOnlyCashFlowClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: context)
+    with pytest.raises(VNextExternalDataError):
+        client.list_cash_flows(MoomooAccount("100", 0, "SIMULATE"), "2026-01-01")
+    assert context.called is False
+    with pytest.raises(VNextExternalDataError):
+        client.list_cash_flows(MoomooAccount("100", 0, "REAL"), "2026-01-01")

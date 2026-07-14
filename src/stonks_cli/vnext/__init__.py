@@ -1,6 +1,7 @@
 """Isolated vNext decision-support package namespace."""
 
 from stonks_cli.vnext.account_import import import_moomoo_accounts
+from stonks_cli.vnext.asset_class_limits import AssetClassExposureLimit, enforce_asset_class_exposure_limits
 from stonks_cli.vnext.asset_returns import AssetReturnSeries, DailyAssetReturn, calculate_asset_returns
 from stonks_cli.vnext.boundaries import PACKAGE_BOUNDARIES, PackageBoundary, VNextPackage, validate_package_boundaries
 from stonks_cli.vnext.capabilities import Capability, CapabilityRegistry
@@ -217,6 +218,7 @@ __all__ = [
     "CostBasis",
     "ApplicationLifecycle",
     "AssetReturnSeries",
+    "AssetClassExposureLimit",
     "Capability",
     "CapabilityRegistry",
     "CashBalance",
@@ -411,6 +413,7 @@ __all__ = [
     "detect_crypto_universe_changes",
     "deserialize_structured_event",
     "enforce_private_file",
+    "enforce_asset_class_exposure_limits",
     "ensure_private_directory",
     "load_run_identity",
     "load_crypto_universe_history",

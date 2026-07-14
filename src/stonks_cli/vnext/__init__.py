@@ -11,6 +11,11 @@ from stonks_cli.vnext.crypto_market_cap import (
     CryptoMarketCapProvider,
     fetch_crypto_market_caps,
 )
+from stonks_cli.vnext.crypto_universe_changes import (
+    CryptoUniverseChanges,
+    CryptoUniverseRankChange,
+    detect_crypto_universe_changes,
+)
 from stonks_cli.vnext.crypto_universe_snapshot import (
     CRYPTO_UNIVERSE_SNAPSHOT_VERSION,
     CryptoUniverseSnapshot,
@@ -154,6 +159,8 @@ __all__ = [
     "CryptoMarketCapProvider",
     "CryptoResearchVenue",
     "CryptoUniverseSnapshot",
+    "CryptoUniverseChanges",
+    "CryptoUniverseRankChange",
     "CryptoVenueAssetSupport",
     "CRYPTO_UNIVERSE_SNAPSHOT_VERSION",
     "DEFAULT_STABLECOIN_PROVIDER_ASSET_IDS",
@@ -268,6 +275,7 @@ __all__ = [
     "deterministic_fixture_event_jsonl",
     "deterministic_fixture_events",
     "deterministic_fixture_run",
+    "detect_crypto_universe_changes",
     "deserialize_structured_event",
     "enforce_private_file",
     "ensure_private_directory",

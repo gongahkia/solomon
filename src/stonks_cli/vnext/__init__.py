@@ -110,6 +110,7 @@ from stonks_cli.vnext.fx_reference_rates import (
 from stonks_cli.vnext.health import HealthCheck, HealthReport, HealthResult, HealthStatus, run_health_checks
 from stonks_cli.vnext.holdings_import import import_moomoo_holdings
 from stonks_cli.vnext.lifecycle import ApplicationLifecycle, LifecycleHook, LifecycleState
+from stonks_cli.vnext.liquidity_constraints import enforce_minimum_liquidity_constraints
 from stonks_cli.vnext.llm_summary_boundary import LLM_SUMMARY_OPERATION, LLMSummaryBoundary, create_llm_summary_boundary
 from stonks_cli.vnext.market_calendar import (
     NYSECashEquityCalendar2026,
@@ -420,6 +421,7 @@ __all__ = [
     "deserialize_structured_event",
     "enforce_private_file",
     "enforce_asset_class_exposure_limits",
+    "enforce_minimum_liquidity_constraints",
     "enforce_single_asset_limits",
     "enforce_sector_concentration_limits",
     "ensure_private_directory",

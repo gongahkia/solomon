@@ -9,8 +9,8 @@ use reqwest::blocking::Client;
 use reqwest::redirect::Policy;
 use serde::Deserialize;
 use serde_json::Value;
-use std::fs;
 use std::fmt::{self, Display, Formatter};
+use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -98,15 +98,6 @@ pub struct OidcAuthenticator {
 }
 
 impl OidcAuthenticator {
-    /// Discovers OIDC metadata and initializes the JWKS cache.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when discovery or the provider key set cannot be securely validated.
-    pub fn discover(config: OidcConfig) -> Result<Self, OidcError> {
-        Self::discover_with_ca_certificate(config, None)
-    }
-
     /// Discovers OIDC metadata with an optional additional PEM root certificate.
     ///
     /// # Errors
@@ -128,9 +119,15 @@ impl OidcAuthenticator {
     ) -> Result<Self, OidcError> {
         let issuer_url = validate_issuer_url(&config.issuer)?;
         let discovery_url = discovery_url(&issuer_url);
+        let issuer_path_discovery_url = issuer_path_discovery_url(&issuer_url);
         let discovery: OidcDiscoveryDocument =
-            serde_json::from_value(fetcher.fetch_json(&discovery_url)?)
-                .map_err(|_| OidcError::Discovery)?;
+            serde_json::from_value(fetcher.fetch_json(&discovery_url).or_else(|_| {
+                if issuer_path_discovery_url == discovery_url {
+                    return Err(OidcError::Discovery);
+                }
+                fetcher.fetch_json(&issuer_path_discovery_url)
+            })?)
+            .map_err(|_| OidcError::Discovery)?;
 
         if discovery.issuer != config.issuer {
             return Err(OidcError::Discovery);
@@ -262,39 +259,49 @@ trait OidcDocumentFetcher: Send + Sync {
 }
 
 struct HttpOidcDocumentFetcher {
-    client: Client,
+    ca_certificate: Option<Certificate>,
 }
 
 impl HttpOidcDocumentFetcher {
     fn new(ca_certificate: Option<&Path>) -> Result<Self, OidcError> {
-        let mut builder = Client::builder()
-            .https_only(true)
-            .redirect(Policy::none())
-            .timeout(Duration::from_secs(5));
-        if let Some(path) = ca_certificate {
-            let pem = fs::read(path).map_err(|_| OidcError::Configuration)?;
-            let certificate = Certificate::from_pem(&pem).map_err(|_| OidcError::Configuration)?;
+        let ca_certificate = ca_certificate
+            .map(|path| {
+                let pem = fs::read(path).map_err(|_| OidcError::Configuration)?;
+                Certificate::from_pem(&pem).map_err(|_| OidcError::Configuration)
+            })
+            .transpose()?;
 
-            builder = builder.add_root_certificate(certificate);
-        }
-        let client = builder
-            .build()
-            .map_err(|_| OidcError::Configuration)?;
-
-        Ok(Self { client })
+        Ok(Self { ca_certificate })
     }
 }
 
 impl OidcDocumentFetcher for HttpOidcDocumentFetcher {
     fn fetch_json(&self, url: &Url) -> Result<Value, OidcError> {
-        self.client
-            .get(url.clone())
-            .send()
-            .map_err(|_| OidcError::Discovery)?
-            .error_for_status()
-            .map_err(|_| OidcError::Discovery)?
-            .json()
-            .map_err(|_| OidcError::Discovery)
+        let url = url.clone();
+        let ca_certificate = self.ca_certificate.clone();
+
+        std::thread::spawn(move || {
+            let mut builder = Client::builder()
+                .https_only(true)
+                .redirect(Policy::none())
+                .timeout(Duration::from_secs(5));
+            if let Some(certificate) = ca_certificate {
+                builder = builder.add_root_certificate(certificate);
+            }
+
+            builder
+                .build()
+                .map_err(|_| OidcError::Discovery)?
+                .get(url)
+                .send()
+                .map_err(|_| OidcError::Discovery)?
+                .error_for_status()
+                .map_err(|_| OidcError::Discovery)?
+                .json()
+                .map_err(|_| OidcError::Discovery)
+        })
+        .join()
+        .map_err(|_| OidcError::Discovery)?
     }
 }
 
@@ -345,6 +352,17 @@ fn discovery_url(issuer: &Url) -> Url {
     let issuer_path = issuer.path().trim_end_matches('/');
 
     url.set_path(&format!("/.well-known/openid-configuration{issuer_path}"));
+    url.set_query(None);
+    url.set_fragment(None);
+
+    url
+}
+
+fn issuer_path_discovery_url(issuer: &Url) -> Url {
+    let mut url = issuer.clone();
+    let issuer_path = issuer.path().trim_end_matches('/');
+
+    url.set_path(&format!("{issuer_path}/.well-known/openid-configuration"));
     url.set_query(None);
     url.set_fragment(None);
 
@@ -478,6 +496,11 @@ mod tests {
         jwks_reads: AtomicUsize,
     }
 
+    struct IssuerPathDiscoveryFetcher {
+        discovery: Value,
+        jwks: Value,
+    }
+
     impl OidcDocumentFetcher for FakeFetcher {
         fn fetch_json(&self, url: &Url) -> Result<Value, OidcError> {
             if url.path().starts_with("/.well-known/") {
@@ -488,6 +511,19 @@ mod tests {
                 .get(index.min(self.jwks_documents.len().saturating_sub(1)))
                 .cloned()
                 .ok_or(OidcError::KeySet)
+        }
+    }
+
+    impl OidcDocumentFetcher for IssuerPathDiscoveryFetcher {
+        fn fetch_json(&self, url: &Url) -> Result<Value, OidcError> {
+            if url.path() == "/tenant/.well-known/openid-configuration" {
+                return Ok(self.discovery.clone());
+            }
+            if url.path().starts_with("/.well-known/") {
+                return Err(OidcError::Discovery);
+            }
+
+            Ok(self.jwks.clone())
         }
     }
 
@@ -551,6 +587,22 @@ mod tests {
             discovery_url(&issuer).as_str(),
             "https://issuer.example/.well-known/openid-configuration/tenant/v1"
         );
+    }
+
+    #[test]
+    fn discovery_accepts_issuer_path_compatibility_endpoint() {
+        let fetcher = Arc::new(IssuerPathDiscoveryFetcher {
+            discovery: json!({
+                "issuer": "https://issuer.example/tenant",
+                "jwks_uri": "https://issuer.example/keys",
+                "id_token_signing_alg_values_supported": ["ES256"],
+            }),
+            jwks: jwks_document("legacy-key"),
+        });
+        let config = OidcConfig::new("https://issuer.example/tenant", "shibahama", "sub")
+            .expect("OIDC config should validate");
+
+        assert!(OidcAuthenticator::discover_with_fetcher(config, fetcher).is_ok());
     }
 
     #[test]

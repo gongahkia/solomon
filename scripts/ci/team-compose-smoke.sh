@@ -8,6 +8,8 @@ tmpdir="$(mktemp -d)"
 project="shibahama-team-smoke-$$"
 compose_file="$ROOT/docker/compose.yml"
 env_file="$tmpdir/runtime.env"
+tls_dir="$tmpdir/oidc-tls"
+realm_file="$tmpdir/shibahama-realm.json"
 namespace="team-compose"
 bootstrap_secret="$(openssl rand -hex 32)"
 recovery_secret="$(openssl rand -hex 32)"
@@ -22,7 +24,10 @@ compose() {
 }
 
 curl_in_network() {
-  docker run --rm --network "${project}_default" "$curl_image" "$@"
+  docker run --rm \
+    --network "${project}_default" \
+    --volume "$tls_dir/ca.crt:/tls/ca.crt:ro" \
+    "$curl_image" --cacert /tls/ca.crt "$@"
 }
 
 cleanup() {
@@ -37,10 +42,44 @@ cleanup() {
 }
 trap cleanup EXIT
 
+install -d -m 0700 "$tls_dir"
+openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 7 \
+  -addext 'basicConstraints=critical,CA:TRUE' \
+  -keyout "$tls_dir/ca.key" \
+  -out "$tls_dir/ca.crt" \
+  -subj '/CN=shibahama-compose-smoke-ca'
+openssl req -newkey rsa:2048 -nodes \
+  -keyout "$tls_dir/server.key" \
+  -out "$tls_dir/server.csr" \
+  -subj '/CN=keycloak'
+printf 'subjectAltName=DNS:keycloak\nextendedKeyUsage=serverAuth\n' >"$tls_dir/server.ext"
+openssl x509 -req -sha256 -days 7 \
+  -in "$tls_dir/server.csr" \
+  -CA "$tls_dir/ca.crt" \
+  -CAkey "$tls_dir/ca.key" \
+  -CAcreateserial \
+  -out "$tls_dir/server.crt" \
+  -extfile "$tls_dir/server.ext"
+python3 - "$ROOT/docker/keycloak/shibahama-realm.json" "$realm_file" "$oidc_username" "$oidc_password" <<'PY'
+import json
+import pathlib
+import sys
+
+realm = json.loads(pathlib.Path(sys.argv[1]).read_text())
+realm["users"] = [{
+    "username": sys.argv[3],
+    "enabled": True,
+    "credentials": [{"type": "password", "value": sys.argv[4], "temporary": False}],
+}]
+pathlib.Path(sys.argv[2]).write_text(json.dumps(realm))
+PY
+
 {
   printf 'KEYCLOAK_ADMIN_USERNAME=admin\n'
   printf 'KEYCLOAK_ADMIN_PASSWORD=%s\n' "$keycloak_admin_password"
   printf 'KEYCLOAK_DATABASE_PASSWORD=%s\n' "$keycloak_database_password"
+  printf 'KEYCLOAK_REALM_IMPORT_FILE=%s\n' "$realm_file"
+  printf 'OIDC_TLS_DIR=%s\n' "$tls_dir"
   printf 'SHIBAHAMA_ADMIN_BOOTSTRAP_SECRET=%s\n' "$bootstrap_secret"
   printf 'SHIBAHAMA_ADMIN_RECOVERY_SECRET=%s\n' "$recovery_secret"
   printf 'SHIBAHAMA_DIMENSIONS=2\n'
@@ -50,27 +89,22 @@ trap cleanup EXIT
 } >"$env_file"
 
 compose up --build --detach --wait --wait-timeout 180
-compose exec -T keycloak /opt/keycloak/bin/kcadm.sh config credentials \
-  --server http://keycloak:8080 \
-  --realm master \
-  --user admin \
-  --password "$keycloak_admin_password"
-compose exec -T keycloak /opt/keycloak/bin/kcadm.sh create users \
-  --realm shibahama \
-  --set "username=$oidc_username" \
-  --set enabled=true
-compose exec -T keycloak /opt/keycloak/bin/kcadm.sh set-password \
-  --realm shibahama \
-  --username "$oidc_username" \
-  --new-password "$oidc_password"
 
-token_json="$(curl_in_network -fsS -X POST \
+token_json="$(curl_in_network -sS -X POST \
   --data-urlencode client_id=shibahama \
   --data-urlencode grant_type=password \
   --data-urlencode "username=$oidc_username" \
   --data-urlencode "password=$oidc_password" \
-  http://keycloak:8080/realms/shibahama/protocol/openid-connect/token)"
-access_token="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' <<<"$token_json")"
+  https://keycloak:8443/realms/shibahama/protocol/openid-connect/token)"
+access_token="$(python3 -c 'import json,sys
+record = json.load(sys.stdin)
+token = record.get("access_token")
+if not isinstance(token, str) or not token:
+    raise SystemExit(
+        f"OIDC password grant failed: {record.get('error', 'unknown error')} "
+        f"{record.get('error_description', '')}"
+    )
+print(token)' <<<"$token_json")"
 
 bootstrap="$(curl_in_network -fsS -X POST \
   -H "Authorization: Bearer $access_token" \

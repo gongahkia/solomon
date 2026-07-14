@@ -30,14 +30,18 @@ services:
       KC_DB_URL_HOST: keycloak-db
       KC_DB_USERNAME: keycloak
       KC_HEALTH_ENABLED: "true"
-      KC_HOSTNAME: http://keycloak:8080
+      KC_HOSTNAME: https://keycloak:8443
+      KC_HTTP_ENABLED: "true"
+      KC_HTTPS_CERTIFICATE_FILE: /opt/keycloak/conf/tls/server.crt
+      KC_HTTPS_CERTIFICATE_KEY_FILE: /opt/keycloak/conf/tls/server.key
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000'"]
       interval: 5s
       timeout: 3s
       retries: 30
     volumes:
-      - ./keycloak/shibahama-realm.json:/opt/keycloak/data/import/shibahama-realm.json:ro
+      - ${KEYCLOAK_REALM_IMPORT_FILE:-./keycloak/shibahama-realm.json}:/opt/keycloak/data/import/shibahama-realm.json:ro
+      - ${OIDC_TLS_DIR:?OIDC_TLS_DIR is required}:/opt/keycloak/conf/tls:ro
 
   shibahama:
     build:
@@ -54,7 +58,8 @@ services:
       SHIBAHAMA_ENCRYPTION_KEY: ${SHIBAHAMA_ENCRYPTION_KEY:?SHIBAHAMA_ENCRYPTION_KEY is required}
       SHIBAHAMA_NAMESPACE: ${SHIBAHAMA_NAMESPACE:-team-compose}
       SHIBAHAMA_OIDC_AUDIENCE: shibahama
-      SHIBAHAMA_OIDC_ISSUER: http://keycloak:8080/realms/shibahama
+      SHIBAHAMA_OIDC_CA_CERT_PATH: /etc/shibahama-oidc/ca.crt
+      SHIBAHAMA_OIDC_ISSUER: https://keycloak:8443/realms/shibahama
       SHIBAHAMA_RBAC_ENFORCE: "true"
     healthcheck:
       test: ["CMD", "/usr/local/bin/busybox", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8765/healthz"]
@@ -68,6 +73,7 @@ services:
       - /tmp:rw,noexec,nosuid,size=16m
     volumes:
       - shibahama-data:/var/lib/shibahama
+      - ${OIDC_TLS_DIR:?OIDC_TLS_DIR is required}/ca.crt:/etc/shibahama-oidc/ca.crt:ro
 
 volumes:
   keycloak-data:

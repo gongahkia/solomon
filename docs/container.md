@@ -24,6 +24,7 @@ authenticated control path.
 | `SHIBAHAMA_OIDC_ISSUER` | OIDC mode | — | Exact OIDC issuer; requires audience. |
 | `SHIBAHAMA_OIDC_AUDIENCE` | OIDC mode | — | OIDC audience/client identifier; requires issuer. |
 | `SHIBAHAMA_OIDC_PRINCIPAL_CLAIM` | no | `sub` | OIDC claim used for the opaque principal. |
+| `SHIBAHAMA_OIDC_CA_CERT_PATH` | no | — | Additional PEM root trusted only for OIDC discovery and JWKS. |
 | `SHIBAHAMA_DATA_PATH` | no | `/var/lib/shibahama/shibahama.redb` | Absolute durable-store path. |
 | `SHIBAHAMA_BIND` | no | `0.0.0.0:8765` | Service socket address. |
 | `SHIBAHAMA_NAMESPACE` | no | `default` | Default repository namespace. |

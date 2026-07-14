@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import socket
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib import metadata, util
@@ -92,6 +92,84 @@ def check_moomoo_sdk_compatibility(
     if module is None:
         return MoomooSdkCompatibility(MoomooSdkStatus.INCOMPATIBLE, "sdk_module_unavailable", None)
     return MoomooSdkCompatibility(MoomooSdkStatus.COMPATIBLE, "sdk_compatible", version.strip())
+
+
+@dataclass(frozen=True)
+class MoomooAccount:
+    account_id: str
+    account_index: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.account_id, str) or not self.account_id:
+            raise ValueError("Moomoo account ID must be non-empty")
+        if not isinstance(self.account_index, int) or isinstance(self.account_index, bool) or self.account_index < 0:
+            raise ValueError("Moomoo account index must be a non-negative integer")
+
+
+@dataclass(frozen=True)
+class MoomooReadOnlyAccountClient:
+    contract: MoomooOpenDProcessContract
+    context_factory: Callable[[str, int], object]
+    success_code: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.contract, MoomooOpenDProcessContract):
+            raise TypeError("OpenD process contract is required")
+        if not callable(self.context_factory):
+            raise TypeError("Moomoo account context factory must be callable")
+        if not isinstance(self.success_code, int) or isinstance(self.success_code, bool):
+            raise ValueError("Moomoo SDK success code must be an integer")
+
+    def list_accounts(self) -> tuple[MoomooAccount, ...]:
+        try:
+            context = self.context_factory(self.contract.host, self.contract.port)
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo account context unavailable") from error
+        try:
+            getter = getattr(context, "get_acc_list", None)
+            if not callable(getter):
+                raise VNextExternalDataError("Moomoo account context is incompatible")
+            response = getter()
+            if not isinstance(response, tuple) or len(response) != 2 or response[0] != self.success_code:
+                raise VNextExternalDataError("Moomoo account list is unavailable")
+            return _normalize_moomoo_accounts(response[1])
+        except VNextExternalDataError:
+            raise
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo account list is malformed") from error
+        finally:
+            closer = getattr(context, "close", None)
+            if not callable(closer):
+                raise VNextExternalDataError("Moomoo account context is incompatible")
+            try:
+                closer()
+            except Exception as error:
+                raise VNextExternalDataError("Moomoo account context close failed") from error
+
+
+def _normalize_moomoo_accounts(raw_accounts: object) -> tuple[MoomooAccount, ...]:
+    records = raw_accounts
+    to_dict = getattr(raw_accounts, "to_dict", None)
+    if callable(to_dict):
+        records = to_dict("records")
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        raise ValueError("Moomoo account records must be a sequence")
+    accounts: list[MoomooAccount] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("Moomoo account record must be an object")
+        account_id = record.get("acc_id")
+        account_index = record.get("acc_index")
+        if isinstance(account_id, bool) or not isinstance(account_id, (str, int)):
+            raise ValueError("Moomoo account record has invalid ID")
+        if not isinstance(account_index, int) or isinstance(account_index, bool) or account_index < 0:
+            raise ValueError("Moomoo account record has invalid index")
+        accounts.append(MoomooAccount(str(account_id), account_index))
+    if len({account.account_id for account in accounts}) != len(accounts):
+        raise ValueError("Moomoo account IDs must be unique")
+    if len({account.account_index for account in accounts}) != len(accounts):
+        raise ValueError("Moomoo account indices must be unique")
+    return tuple(sorted(accounts, key=lambda account: (account.account_index, account.account_id)))
 
 
 @dataclass(frozen=True)

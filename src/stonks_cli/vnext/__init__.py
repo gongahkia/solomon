@@ -53,7 +53,9 @@ from stonks_cli.vnext.migrations import Migration, MigrationRegistry, MigrationR
 from stonks_cli.vnext.moomoo import (
     LocalOpenDReadOnlyClient,
     LocalOpenDReadOnlyConnection,
+    MoomooAccount,
     MoomooOpenDProcessContract,
+    MoomooReadOnlyAccountClient,
     MoomooSdkCompatibility,
     MoomooSdkStatus,
     OpenDEndpointProbe,
@@ -88,6 +90,8 @@ __all__ = [
     "MigrationRegistry",
     "MigrationRunner",
     "MoomooOpenDProcessContract",
+    "MoomooAccount",
+    "MoomooReadOnlyAccountClient",
     "MoomooSdkCompatibility",
     "MoomooSdkStatus",
     "OpenDEndpointProbe",

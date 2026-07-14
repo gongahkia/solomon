@@ -9,7 +9,9 @@ import pytest
 from stonks_cli.vnext.errors import VNextExecutionDeniedError, VNextExternalDataError
 from stonks_cli.vnext.moomoo import (
     LocalOpenDReadOnlyClient,
+    MoomooAccount,
     MoomooOpenDProcessContract,
+    MoomooReadOnlyAccountClient,
     MoomooSdkStatus,
     OpenDEndpointStatus,
     check_moomoo_sdk_compatibility,
@@ -126,3 +128,47 @@ def test_moomoo_sdk_compatibility_fails_closed_for_missing_or_malformed_sdk():
     assert (missing.status, missing.code, missing.version) == (MoomooSdkStatus.NOT_INSTALLED, "sdk_not_installed", None)
     assert (malformed.status, malformed.code, malformed.version) == (MoomooSdkStatus.INCOMPATIBLE, "sdk_invalid_version", None)
     assert (absent_module.status, absent_module.code, absent_module.version) == (MoomooSdkStatus.INCOMPATIBLE, "sdk_module_unavailable", None)
+
+
+def test_moomoo_read_only_account_client_reads_sorts_and_closes_context():
+    class Context:
+        closed = False
+
+        def get_acc_list(self):
+            return 0, [{"acc_id": "200", "acc_index": 1}, {"acc_id": 100, "acc_index": 0}]
+
+        def close(self) -> None:
+            self.closed = True
+
+    context = Context()
+    client = MoomooReadOnlyAccountClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: context)
+
+    assert client.list_accounts() == (MoomooAccount("100", 0), MoomooAccount("200", 1))
+    assert context.closed is True
+    assert not hasattr(client, "place_order")
+
+
+def test_moomoo_read_only_account_client_fails_closed_for_broker_failure_or_malformed_data():
+    class FailureContext:
+        closed = False
+
+        def get_acc_list(self):
+            return 1, "broker failure"
+
+        def close(self) -> None:
+            self.closed = True
+
+    class MalformedContext:
+        closed = False
+
+        def get_acc_list(self):
+            return 0, [{"acc_id": "100", "acc_index": "zero"}]
+
+        def close(self) -> None:
+            self.closed = True
+
+    for context in (FailureContext(), MalformedContext()):
+        client = MoomooReadOnlyAccountClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: context)
+        with pytest.raises(VNextExternalDataError):
+            client.list_accounts()
+        assert context.closed is True

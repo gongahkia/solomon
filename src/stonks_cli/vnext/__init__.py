@@ -68,6 +68,7 @@ from stonks_cli.vnext.events import (
     serialize_structured_event,
 )
 from stonks_cli.vnext.exchange_time import ExchangeTimeZone, normalize_exchange_timestamp
+from stonks_cli.vnext.explanation_evidence import ExplanationEvidenceBundle, build_explanation_evidence_bundle
 from stonks_cli.vnext.filesystem import (
     PRIVATE_DIRECTORY_MODE,
     PRIVATE_FILE_MODE,
@@ -222,6 +223,7 @@ __all__ = [
     "EventSeverity",
     "ExchangeTimeZone",
     "EVENT_SCHEMA_VERSION",
+    "ExplanationEvidenceBundle",
     "FIXTURE_EVENT_IDS",
     "FIXTURE_RUN_ID",
     "FIXTURE_RUN_STARTED_AT",
@@ -326,6 +328,7 @@ __all__ = [
     "as_utc",
     "attach_market_data_provenance",
     "append_crypto_universe_history",
+    "build_explanation_evidence_bundle",
     "create_run_identity",
     "import_moomoo_accounts",
     "ingest_daily_closing_prices",

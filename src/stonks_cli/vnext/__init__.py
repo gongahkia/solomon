@@ -58,6 +58,7 @@ from stonks_cli.vnext.daily_operator_reports import (
 )
 from stonks_cli.vnext.data_confidence import DataConfidenceScore, calculate_data_confidence_score
 from stonks_cli.vnext.database import SQLiteConnectionFactory
+from stonks_cli.vnext.database_integrity import DatabaseIntegrityReport, ForeignKeyViolation, check_database_integrity
 from stonks_cli.vnext.durable_scheduled_execution_deduplication import (
     DurableScheduledExecutionDeduplicator,
     ScheduledExecutionSlot,
@@ -311,6 +312,7 @@ __all__ = [
     "DEFAULT_STABLECOIN_PROVIDER_ASSET_IDS",
     "DailyAssetReturn",
     "DataConfidenceScore",
+    "DatabaseIntegrityReport",
     "DailyDrawdown",
     "DailyClosingPriceIngestion",
     "DailyOperatorReportSchedule",
@@ -324,6 +326,7 @@ __all__ = [
     "ExplanationEvidenceBundle",
     "InteractiveExplanationViewer",
     "FXReferenceRate",
+    "ForeignKeyViolation",
     "FXReferenceRateBatch",
     "FXReferenceRateProvider",
     "FXConversionCostEstimate",
@@ -485,6 +488,7 @@ __all__ = [
     "calculate_cost_basis",
     "calculate_cross_asset_correlations",
     "calculate_data_confidence_score",
+    "check_database_integrity",
     "calculate_momentum_factor",
     "calculate_mean_reversion_factor",
     "calculate_portfolio_exposure",

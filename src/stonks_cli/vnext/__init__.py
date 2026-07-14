@@ -155,6 +155,7 @@ from stonks_cli.vnext.generated_report_hash import GeneratedReportHash, hash_gen
 from stonks_cli.vnext.health import HealthCheck, HealthReport, HealthResult, HealthStatus, run_health_checks
 from stonks_cli.vnext.historical_storage import HistoricalStorageCompaction, compact_historical_storage
 from stonks_cli.vnext.holdings_import import import_moomoo_holdings
+from stonks_cli.vnext.interrupted_run_recovery import InterruptedRunRecovery, recover_interrupted_run
 from stonks_cli.vnext.lifecycle import ApplicationLifecycle, LifecycleHook, LifecycleState
 from stonks_cli.vnext.liquidity_constraints import enforce_minimum_liquidity_constraints
 from stonks_cli.vnext.live_configuration import (
@@ -428,6 +429,7 @@ __all__ = [
     "IdempotentReadRetryPolicy",
     "ImmutableEventAudit",
     "ImmutableEventAuditReport",
+    "InterruptedRunRecovery",
     "ImportedPortfolioReconciliation",
     "BrokerSnapshotDifference",
     "BrokerSnapshotReconciliation",
@@ -654,6 +656,7 @@ __all__ = [
     "select_moomoo_account",
     "runtime_directories",
     "retry_idempotent_read",
+    "recover_interrupted_run",
     "probe_local_opend",
     "run_health_checks",
     "rank_weighted_assets",

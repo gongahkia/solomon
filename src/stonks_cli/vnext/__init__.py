@@ -165,6 +165,7 @@ from stonks_cli.vnext.moomoo import (
 )
 from stonks_cli.vnext.non_llm_explanation import NonLLMExplanation, build_non_llm_explanation
 from stonks_cli.vnext.opend_fixture import RecordedOpenDCall, RecordedOpenDFixtureAdapter
+from stonks_cli.vnext.portfolio_domain import PortfolioAssetClass, PortfolioHolding, PortfolioSnapshot
 from stonks_cli.vnext.price_data import (
     CanonicalDailyClose,
     CanonicalPriceDataProvider,
@@ -302,6 +303,9 @@ __all__ = [
     "RecordedOpenDFixtureAdapter",
     "PACKAGE_BOUNDARIES",
     "PackageBoundary",
+    "PortfolioAssetClass",
+    "PortfolioHolding",
+    "PortfolioSnapshot",
     "RUN_IDENTITY_VERSION",
     "RUNTIME_ROOT_ENV",
     "RunIdentity",

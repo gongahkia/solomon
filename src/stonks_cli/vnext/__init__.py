@@ -287,6 +287,10 @@ from stonks_cli.vnext.transactions_import import (
 )
 from stonks_cli.vnext.trend_factor import TrendFactor, calculate_trend_factor
 from stonks_cli.vnext.usd_portfolio_nav import USDPortfolioNAV, calculate_usd_portfolio_nav
+from stonks_cli.vnext.venue_due_diligence import (
+    VenueDueDiligenceEvidence,
+    VenueDueDiligenceOutcome,
+)
 from stonks_cli.vnext.weekly_operator_reports import (
     WEEKLY_OPERATOR_REPORT_JOB_ID,
     WeeklyOperatorReportSchedule,
@@ -487,6 +491,8 @@ __all__ = [
     "VNextExternalDataError",
     "VNextInvariantError",
     "VNextPackage",
+    "VenueDueDiligenceEvidence",
+    "VenueDueDiligenceOutcome",
     "as_utc",
     "attach_market_data_provenance",
     "append_crypto_universe_history",

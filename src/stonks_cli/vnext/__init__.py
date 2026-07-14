@@ -180,6 +180,7 @@ from stonks_cli.vnext.stablecoins import (
     StablecoinStatus,
     classify_stablecoins,
 )
+from stonks_cli.vnext.trend_factor import TrendFactor, calculate_trend_factor
 
 __all__ = [
     "Clock",
@@ -295,6 +296,7 @@ __all__ = [
     "StablecoinClassification",
     "StablecoinClassifier",
     "StablecoinStatus",
+    "TrendFactor",
     "RuntimeDirectories",
     "RuntimeDirectory",
     "SystemUTCClock",
@@ -325,6 +327,7 @@ __all__ = [
     "calculate_asset_returns",
     "calculate_realized_volatility",
     "calculate_rolling_drawdown",
+    "calculate_trend_factor",
     "classify_stablecoins",
     "normalize_moomoo_instruments",
     "normalize_moomoo_corporate_actions",

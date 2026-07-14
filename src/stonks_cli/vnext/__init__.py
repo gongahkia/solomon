@@ -300,6 +300,11 @@ from stonks_cli.vnext.single_asset_limits import SingleAssetExposureLimit, enfor
 from stonks_cli.vnext.single_run_lease import SingleRunLease, SingleRunLeaseStore
 from stonks_cli.vnext.snapshot_cache import IdempotentSnapshotCache
 from stonks_cli.vnext.source_citations import SOURCE_CITATION_SCHEMA_VERSION, SourceCitation
+from stonks_cli.vnext.source_disagreement import (
+    SourceDisagreementReport,
+    SourceObservation,
+    detect_source_disagreement,
+)
 from stonks_cli.vnext.stablecoin_rail import StablecoinRailAllocation
 from stonks_cli.vnext.stablecoins import (
     DEFAULT_STABLECOIN_PROVIDER_ASSET_IDS,
@@ -529,6 +534,8 @@ __all__ = [
     "SingleRunLeaseStore",
     "SOURCE_CITATION_SCHEMA_VERSION",
     "SourceCitation",
+    "SourceDisagreementReport",
+    "SourceObservation",
     "SQLiteConnectionFactory",
     "StablecoinClassification",
     "StablecoinClassifier",
@@ -606,6 +613,7 @@ __all__ = [
     "deterministic_fixture_events",
     "deterministic_fixture_run",
     "detect_crypto_universe_changes",
+    "detect_source_disagreement",
     "deserialize_structured_event",
     "enforce_private_file",
     "enforce_asset_class_exposure_limits",

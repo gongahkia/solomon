@@ -24,8 +24,10 @@ from stonks_cli.vnext.moomoo import (
     MoomooReadOnlyOpenOrderClient,
     MoomooReadOnlyOrderHistoryClient,
     MoomooReadOnlyPositionClient,
+    MoomooReadOnlyUSQuoteClient,
     MoomooSdkStatus,
     MoomooTradeUnlockState,
+    MoomooUSQuote,
     OpenDEndpointStatus,
     check_moomoo_sdk_compatibility,
     probe_local_opend,
@@ -470,3 +472,89 @@ def test_moomoo_read_only_cash_flow_client_rejects_unsupported_or_malformed_brok
     assert context.called is False
     with pytest.raises(VNextExternalDataError):
         client.list_cash_flows(MoomooAccount("100", 0, "REAL"), "2026-01-01")
+
+
+def test_moomoo_read_only_us_quote_client_reads_preexisting_subscriptions_only():
+    class Context:
+        closed = False
+        symbols: list[str] = []
+
+        def get_stock_quote(self, symbols):
+            self.symbols = symbols
+            return 0, [
+                {
+                    "code": "US.MSFT",
+                    "data_date": "2026-01-01",
+                    "data_time": "09:30:01.250",
+                    "last_price": 400,
+                    "open_price": 398,
+                    "high_price": 401,
+                    "low_price": 397,
+                    "prev_close_price": 399,
+                    "volume": 1000,
+                    "turnover": 400000,
+                    "suspension": False,
+                },
+                {
+                    "code": "US.AAPL",
+                    "data_date": "2026-01-01",
+                    "data_time": "09:30:01.250",
+                    "last_price": 200,
+                    "open_price": 198,
+                    "high_price": 201,
+                    "low_price": 197,
+                    "prev_close_price": 199,
+                    "volume": 2000,
+                    "turnover": 400000,
+                    "suspension": False,
+                },
+            ]
+
+        def close(self) -> None:
+            self.closed = True
+
+    context = Context()
+    client = MoomooReadOnlyUSQuoteClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: context)
+
+    assert client.list_quotes(("US.AAPL", "US.MSFT")) == (
+        MoomooUSQuote("US.AAPL", "2026-01-01", "09:30:01.250", 200.0, 198.0, 201.0, 197.0, 199.0, 2000.0, 400000.0, False),
+        MoomooUSQuote("US.MSFT", "2026-01-01", "09:30:01.250", 400.0, 398.0, 401.0, 397.0, 399.0, 1000.0, 400000.0, False),
+    )
+    assert context.symbols == ["US.AAPL", "US.MSFT"]
+    assert context.closed is True
+    assert not hasattr(client, "subscribe")
+
+
+@pytest.mark.parametrize("symbols", [(), ("SG.D05",), ("US.AAPL", "US.AAPL")])
+def test_moomoo_read_only_us_quote_client_rejects_invalid_symbol_requests(symbols):
+    client = MoomooReadOnlyUSQuoteClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: object())
+
+    with pytest.raises(VNextExternalDataError):
+        client.list_quotes(symbols)
+
+
+def test_moomoo_read_only_us_quote_client_rejects_incomplete_or_nonfinite_data():
+    class Context:
+        def get_stock_quote(self, symbols):
+            return 0, [
+                {
+                    "code": "US.AAPL",
+                    "data_date": "2026-01-01",
+                    "data_time": "09:30:01",
+                    "last_price": float("nan"),
+                    "open_price": 198,
+                    "high_price": 201,
+                    "low_price": 197,
+                    "prev_close_price": 199,
+                    "volume": 2000,
+                    "turnover": 400000,
+                    "suspension": False,
+                }
+            ]
+
+        def close(self) -> None:
+            pass
+
+    client = MoomooReadOnlyUSQuoteClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
+    with pytest.raises(VNextExternalDataError):
+        client.list_quotes(("US.AAPL", "US.MSFT"))

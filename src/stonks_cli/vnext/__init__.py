@@ -271,6 +271,7 @@ from stonks_cli.vnext.realized_volatility import (
     calculate_realized_volatility,
 )
 from stonks_cli.vnext.rebalance_drift import RebalanceDrift, RebalanceTarget, calculate_rebalance_drift
+from stonks_cli.vnext.reconciliation import ReconciliationPosition, ReconciliationSnapshot
 from stonks_cli.vnext.report_input_hash import ReportInputHash, hash_report_input_data
 from stonks_cli.vnext.report_output_hash import ReportOutputHash, hash_report_output_data
 from stonks_cli.vnext.retry import IdempotentReadRetryPolicy, retry_idempotent_read
@@ -485,6 +486,8 @@ __all__ = [
     "RUNTIME_ROOT_ENV",
     "RunIdentity",
     "ReadOnlyRateLimiter",
+    "ReconciliationPosition",
+    "ReconciliationSnapshot",
     "RebalanceDrift",
     "RebalanceTarget",
     "ReportInputHash",

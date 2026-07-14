@@ -192,6 +192,7 @@ from stonks_cli.vnext.risk_adjusted_performance import RiskAdjustedPerformance, 
 from stonks_cli.vnext.rolling_drawdown import DailyDrawdown, RollingDrawdownSeries, calculate_rolling_drawdown
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
 from stonks_cli.vnext.score_components import ScoreComponent
+from stonks_cli.vnext.sgd_portfolio_nav import SGDPortfolioNAV, calculate_sgd_portfolio_nav
 from stonks_cli.vnext.snapshot_cache import IdempotentSnapshotCache
 from stonks_cli.vnext.source_citations import SOURCE_CITATION_SCHEMA_VERSION, SourceCitation
 from stonks_cli.vnext.stablecoins import (
@@ -338,6 +339,7 @@ __all__ = [
     "RollingDrawdownSeries",
     "ScoreComponent",
     "SGXCashEquityCalendar2026",
+    "SGDPortfolioNAV",
     "SGMarketSession",
     "SGMarketSessionStatus",
     "SecretReference",
@@ -391,6 +393,7 @@ __all__ = [
     "calculate_realized_volatility",
     "calculate_risk_adjusted_performance",
     "calculate_rolling_drawdown",
+    "calculate_sgd_portfolio_nav",
     "calculate_trend_factor",
     "classify_stablecoins",
     "normalize_moomoo_instruments",

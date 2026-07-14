@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from stonks_cli.config import load_config
+from stonks_cli.config import AppConfig, load_config, redacted_config_data, save_config
 
 
 def test_load_config_defaults_when_missing(monkeypatch, tmp_path):
@@ -93,3 +93,48 @@ def test_carrymirror_defaults_keep_live_disabled(monkeypatch, tmp_path):
     assert set(cfg.carrymirror.alert_events) == {"kill_switch", "ledger_mismatch", "service_restart", "stale_data"}
     assert "bybit" in cfg.legal_policy.blocked_venue_ids
     assert "whalemirror_live_target_selection" in cfg.legal_policy.blocked_strategy_classes
+
+
+def test_legacy_config_migrates_to_current_schema(monkeypatch, tmp_path):
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({"tickers": ["aapl"]}), encoding="utf-8")
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
+
+    cfg = load_config()
+
+    assert cfg.schema_version == 2
+    assert cfg.tickers == ["aapl"]
+
+
+def test_future_config_schema_is_rejected(monkeypatch, tmp_path):
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({"schema_version": 3}), encoding="utf-8")
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
+
+    with pytest.raises(ValueError, match="unsupported future schema_version:3"):
+        load_config()
+
+
+def test_vnext_defaults_fail_closed():
+    cfg = AppConfig()
+
+    assert cfg.vnext.enabled is False
+    assert cfg.vnext.moomoo.enabled is False
+    assert cfg.vnext.moomoo.read_only is True
+    assert cfg.vnext.operator.execution_mode == "disabled"
+    assert cfg.vnext.operator.broker_app_only is True
+
+
+def test_redacted_config_hides_sensitive_values():
+    cfg = AppConfig(api_keys={"alpaca_api_key": "exposed", "alpaca_secret_key": "also-exposed"})
+    data = redacted_config_data(cfg)
+
+    assert data["api_keys"] == "***REDACTED***"
+    assert data["carrymirror"]["telegram_bot_token_env"] == "***REDACTED***"
+
+
+def test_save_config_uses_owner_only_permissions(tmp_path):
+    path = tmp_path / "config.json"
+    save_config(AppConfig(), path)
+
+    assert path.stat().st_mode & 0o777 == 0o600

@@ -3,7 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from stonks_cli import __version__
-from stonks_cli.config import config_path, load_config, save_config, save_default_config, update_config_field
+from stonks_cli.config import (
+    config_path,
+    load_config,
+    redacted_config_json,
+    save_config,
+    save_default_config,
+    update_config_field,
+)
 
 
 def do_version() -> str:
@@ -68,19 +75,23 @@ def do_config_init(path: Path | None) -> Path:
 
 def do_config_show() -> str:
     cfg = load_config()
-    return cfg.model_dump_json(indent=2)
+    return redacted_config_json(cfg, indent=2)
 
 
 def do_config_set(field_path: str, value) -> str:
     cfg = load_config()
     updated = update_config_field(cfg, field_path, value)
     save_config(updated)
-    return updated.model_dump_json(indent=2)
+    return redacted_config_json(updated, indent=2)
 
 
 def do_config_validate() -> dict[str, object]:
     cfg = load_config()
     return {
+        "schema_version": cfg.schema_version,
         "tickers": list(cfg.tickers or []),
         "strategy": cfg.strategy,
+        "vnext_enabled": cfg.vnext.enabled,
+        "vnext_execution_mode": cfg.vnext.operator.execution_mode,
+        "vnext_broker_read_only": cfg.vnext.moomoo.read_only,
     }

@@ -13,5 +13,8 @@ def test_config_validate_reports_tickers_and_strategy(monkeypatch, tmp_path):
     )
     monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
     out = do_config_validate()
+    assert out["schema_version"] == 2
     assert out["tickers"] == ["aapl"]
     assert "strategy" in out
+    assert out["vnext_execution_mode"] == "disabled"
+    assert out["vnext_broker_read_only"] is True

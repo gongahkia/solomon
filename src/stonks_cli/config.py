@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -212,6 +212,58 @@ class LegalPolicyConfig(BaseModel):
     )
 
 
+class MoomooConfig(BaseModel):
+    """Read-only local OpenD connection settings for the vNext workflow."""
+
+    model_config = ConfigDict(extra="ignore")
+    enabled: bool = False
+    read_only: Literal[True] = True
+    host: str = "127.0.0.1"
+    port: int = Field(default=11111, ge=1, le=65535)
+    account_id: str | None = None
+
+
+class CryptoUniverseConfig(BaseModel):
+    """Deterministic crypto research universe; it does not enable execution."""
+
+    model_config = ConfigDict(extra="ignore")
+    top_n_by_market_cap: int = Field(default=10, ge=1, le=100)
+    include_stablecoins: bool = True
+    min_liquidity_usd: float = Field(default=0.0, ge=0.0)
+
+
+class VNextResearchConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    enabled: bool = False
+    crypto_universe: CryptoUniverseConfig = Field(default_factory=CryptoUniverseConfig)
+    cadence: Literal["daily", "weekly"] = "daily"
+    llm_summary_enabled: bool = False
+
+
+class TelegramConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    enabled: bool = False
+    bot_token_env: str = "STONKS_CLI_TELEGRAM_BOT_TOKEN"
+    chat_id_env: str = "STONKS_CLI_TELEGRAM_CHAT_ID"
+
+
+class VNextOperatorConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    broker_app_only: Literal[True] = True
+    execution_mode: Literal["disabled"] = "disabled"
+    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+
+
+class VNextConfig(BaseModel):
+    """Fail-closed configuration for the SG decision-support pivot."""
+
+    model_config = ConfigDict(extra="ignore")
+    enabled: bool = False
+    moomoo: MoomooConfig = Field(default_factory=MoomooConfig)
+    research: VNextResearchConfig = Field(default_factory=VNextResearchConfig)
+    operator: VNextOperatorConfig = Field(default_factory=VNextOperatorConfig)
+
+
 class TuiConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     refresh_interval: int = Field(default=60, ge=5, le=3600)
@@ -221,6 +273,7 @@ class TuiConfig(BaseModel):
 
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
+    schema_version: Literal[2] = 2
     tickers: list[str] = Field(default_factory=lambda: ["AAPL.US", "MSFT.US"])
     data: DataConfig = Field(default_factory=DataConfig)
     ticker_overrides: dict[str, TickerOverride] = Field(default_factory=dict)
@@ -250,6 +303,7 @@ class AppConfig(BaseModel):
     whalemirror: WhaleMirrorConfig = Field(default_factory=WhaleMirrorConfig)
     carrymirror: CarryMirrorConfig = Field(default_factory=CarryMirrorConfig)
     legal_policy: LegalPolicyConfig = Field(default_factory=LegalPolicyConfig)
+    vnext: VNextConfig = Field(default_factory=VNextConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
 
 
@@ -262,23 +316,20 @@ def load_config() -> AppConfig:
     path = config_path()
     if not path.exists():
         return AppConfig()
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = migrate_config_data(json.loads(path.read_text(encoding="utf-8")))
     cfg = AppConfig.model_validate(data)
     return cfg
 
 
 def save_default_config(path: Path | None = None) -> Path:
     path = path or config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    cfg = AppConfig()
-    path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+    _write_config(path, AppConfig())
     return path
 
 
 def save_config(cfg: AppConfig, path: Path | None = None) -> Path:
     path = path or config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+    _write_config(path, cfg)
     return path
 
 
@@ -301,3 +352,57 @@ def update_config_field(cfg: AppConfig, dotted_path: str, value) -> AppConfig:
         raise KeyError(f"unknown config path: {dotted_path}")
     cur[leaf] = value
     return AppConfig.model_validate(data)
+
+
+def migrate_config_data(data: Any) -> dict[str, Any]:
+    """Migrate supported on-disk config versions to the current schema."""
+
+    if not isinstance(data, dict):
+        raise ValueError("config root must be an object")
+    migrated = dict(data)
+    version = migrated.get("schema_version", 1)
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise ValueError("schema_version must be an integer")
+    if version == 1:
+        migrated["schema_version"] = 2
+        return migrated
+    if version == 2:
+        return migrated
+    raise ValueError(f"unsupported future schema_version:{version}")
+
+
+def redacted_config_data(cfg: AppConfig) -> dict[str, Any]:
+    """Return config data safe for terminal and log output."""
+
+    return _redact_value(cfg.model_dump(mode="json"))
+
+
+def redacted_config_json(cfg: AppConfig, *, indent: int | None = None) -> str:
+    return json.dumps(redacted_config_data(cfg), indent=indent, sort_keys=True)
+
+
+def _write_config(path: Path, cfg: AppConfig) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def _redact_value(value: Any, *, key: str = "") -> Any:
+    if _is_sensitive_key(key):
+        return "***REDACTED***" if value is not None else None
+    if isinstance(value, dict):
+        return {str(item_key): _redact_value(item_value, key=str(item_key)) for item_key, item_value in value.items()}
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    return value
+
+
+def _is_sensitive_key(key: str) -> bool:
+    normalized = key.lower()
+    return normalized == "api_keys" or any(
+        marker in normalized
+        for marker in ("token", "secret", "passphrase", "private_key", "api_key", "password", "smtp_url")
+    )

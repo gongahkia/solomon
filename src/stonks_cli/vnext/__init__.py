@@ -58,6 +58,7 @@ from stonks_cli.vnext.daily_operator_reports import (
 )
 from stonks_cli.vnext.data_confidence import DataConfidenceScore, calculate_data_confidence_score
 from stonks_cli.vnext.database import SQLiteConnectionFactory
+from stonks_cli.vnext.durable_task_queue import DurableTask, DurableTaskQueue, create_durable_task
 from stonks_cli.vnext.errors import (
     OpenDContextIncompatibleError,
     OpenDDataEntitlementMissingError,
@@ -306,6 +307,8 @@ __all__ = [
     "DailyDrawdown",
     "DailyClosingPriceIngestion",
     "DailyOperatorReportSchedule",
+    "DurableTask",
+    "DurableTaskQueue",
     "DAILY_OPERATOR_REPORT_JOB_ID",
     "EventSeverity",
     "ExchangeTimeZone",
@@ -447,6 +450,7 @@ __all__ = [
     "build_explanation_evidence_bundle",
     "build_non_llm_explanation",
     "create_run_identity",
+    "create_durable_task",
     "import_moomoo_accounts",
     "import_moomoo_holdings",
     "import_moomoo_transactions",

@@ -111,6 +111,7 @@ from stonks_cli.vnext.market_data_provenance import (
 )
 from stonks_cli.vnext.market_data_refresh import MoomooQuote, refresh_moomoo_market_data
 from stonks_cli.vnext.market_status import MarketStatus, MarketStatusReport, MarketStatusService, MarketVenue
+from stonks_cli.vnext.mean_reversion_factor import MeanReversionFactor, calculate_mean_reversion_factor
 from stonks_cli.vnext.migrations import Migration, MigrationRegistry, MigrationRunner
 from stonks_cli.vnext.momentum_factor import MomentumFactor, calculate_momentum_factor
 from stonks_cli.vnext.moomoo import (
@@ -238,6 +239,7 @@ __all__ = [
     "MarketStatusReport",
     "MarketStatusService",
     "MarketVenue",
+    "MeanReversionFactor",
     "MarketDataProvenance",
     "MoomooOpenDProcessContract",
     "NYSECashEquityCalendar2026",
@@ -328,6 +330,7 @@ __all__ = [
     "check_moomoo_sdk_compatibility",
     "calculate_asset_returns",
     "calculate_momentum_factor",
+    "calculate_mean_reversion_factor",
     "calculate_realized_volatility",
     "calculate_rolling_drawdown",
     "calculate_trend_factor",

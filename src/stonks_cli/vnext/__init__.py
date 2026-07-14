@@ -193,6 +193,7 @@ from stonks_cli.vnext.realized_volatility import (
 )
 from stonks_cli.vnext.rebalance_drift import RebalanceDrift, RebalanceTarget, calculate_rebalance_drift
 from stonks_cli.vnext.retry import IdempotentReadRetryPolicy, retry_idempotent_read
+from stonks_cli.vnext.reviewed_order_ticket import OrderTicketSide, OrderTicketType, ReviewedOrderTicket
 from stonks_cli.vnext.risk_adjusted_performance import RiskAdjustedPerformance, calculate_risk_adjusted_performance
 from stonks_cli.vnext.rolling_drawdown import DailyDrawdown, RollingDrawdownSeries, calculate_rolling_drawdown
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
@@ -330,6 +331,8 @@ __all__ = [
     "OpenDError",
     "OpenDQuotaExceededError",
     "OpenDResponseMalformedError",
+    "OrderTicketSide",
+    "OrderTicketType",
     "ProvenancedCryptoMarketCapBatch",
     "RecordedOpenDCall",
     "RecordedOpenDFixtureAdapter",
@@ -348,6 +351,7 @@ __all__ = [
     "RebalanceDrift",
     "RebalanceTarget",
     "RealizedVolatility",
+    "ReviewedOrderTicket",
     "RiskAdjustedPerformance",
     "RollingDrawdownSeries",
     "ScoreComponent",

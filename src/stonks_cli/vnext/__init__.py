@@ -46,6 +46,7 @@ from stonks_cli.vnext.foundation import (
     resolve_environment_secret,
     save_run_identity,
 )
+from stonks_cli.vnext.health import HealthCheck, HealthReport, HealthResult, HealthStatus, run_health_checks
 from stonks_cli.vnext.lifecycle import ApplicationLifecycle, LifecycleHook, LifecycleState
 from stonks_cli.vnext.migrations import Migration, MigrationRegistry, MigrationRunner
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
@@ -59,6 +60,10 @@ __all__ = [
     "FIXTURE_RUN_ID",
     "FIXTURE_RUN_STARTED_AT",
     "FrozenUTCClock",
+    "HealthCheck",
+    "HealthReport",
+    "HealthResult",
+    "HealthStatus",
     "LifecycleHook",
     "LifecycleState",
     "PRIVATE_DIRECTORY_MODE",
@@ -99,5 +104,6 @@ __all__ = [
     "save_run_identity",
     "serialize_structured_event",
     "runtime_directories",
+    "run_health_checks",
     "validate_package_boundaries",
 ]

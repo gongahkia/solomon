@@ -73,6 +73,7 @@ from stonks_cli.vnext.events import (
     deserialize_structured_event,
     serialize_structured_event,
 )
+from stonks_cli.vnext.exchange_lot_size import validate_exchange_lot_size
 from stonks_cli.vnext.exchange_time import ExchangeTimeZone, normalize_exchange_timestamp
 from stonks_cli.vnext.explanation_evidence import ExplanationEvidenceBundle, build_explanation_evidence_bundle
 from stonks_cli.vnext.filesystem import (
@@ -457,6 +458,7 @@ __all__ = [
     "rank_weighted_assets",
     "render_broker_app_order_ticket",
     "validate_package_boundaries",
+    "validate_exchange_lot_size",
     "verify_source_citation",
     "WeightedAssetRank",
 ]

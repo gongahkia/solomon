@@ -11,6 +11,12 @@ from stonks_cli.vnext.crypto_market_cap import (
     CryptoMarketCapProvider,
     fetch_crypto_market_caps,
 )
+from stonks_cli.vnext.crypto_metadata import (
+    CryptoAssetMetadata,
+    CryptoAssetMetadataProvider,
+    CryptoAssetPlatform,
+    ingest_crypto_asset_metadata,
+)
 from stonks_cli.vnext.crypto_universe_changes import (
     CryptoUniverseChanges,
     CryptoUniverseRankChange,
@@ -164,6 +170,9 @@ __all__ = [
     "CryptoMarketCapAsset",
     "CryptoMarketCapBatch",
     "CryptoMarketCapProvider",
+    "CryptoAssetMetadata",
+    "CryptoAssetMetadataProvider",
+    "CryptoAssetPlatform",
     "CryptoResearchVenue",
     "CryptoUniverseSnapshot",
     "CryptoUniverseChanges",
@@ -272,6 +281,7 @@ __all__ = [
     "append_crypto_universe_history",
     "create_run_identity",
     "import_moomoo_accounts",
+    "ingest_crypto_asset_metadata",
     "create_crypto_universe_snapshot",
     "create_structured_event",
     "fetch_crypto_market_caps",

@@ -10,6 +10,13 @@ from stonks_cli.vnext.crypto_market_cap import (
     CryptoMarketCapProvider,
     fetch_crypto_market_caps,
 )
+from stonks_cli.vnext.crypto_universe_snapshot import (
+    CRYPTO_UNIVERSE_SNAPSHOT_VERSION,
+    CryptoUniverseSnapshot,
+    create_crypto_universe_snapshot,
+    load_crypto_universe_snapshot,
+    save_crypto_universe_snapshot,
+)
 from stonks_cli.vnext.database import SQLiteConnectionFactory
 from stonks_cli.vnext.errors import (
     OpenDContextIncompatibleError,
@@ -132,6 +139,8 @@ __all__ = [
     "CryptoMarketCapAsset",
     "CryptoMarketCapBatch",
     "CryptoMarketCapProvider",
+    "CryptoUniverseSnapshot",
+    "CRYPTO_UNIVERSE_SNAPSHOT_VERSION",
     "EventSeverity",
     "ExchangeTimeZone",
     "EVENT_SCHEMA_VERSION",
@@ -227,6 +236,7 @@ __all__ = [
     "as_utc",
     "create_run_identity",
     "import_moomoo_accounts",
+    "create_crypto_universe_snapshot",
     "create_structured_event",
     "fetch_crypto_market_caps",
     "check_moomoo_sdk_compatibility",
@@ -240,6 +250,7 @@ __all__ = [
     "enforce_private_file",
     "ensure_private_directory",
     "load_run_identity",
+    "load_crypto_universe_snapshot",
     "resolve_environment_secret",
     "read_moomoo_trade_unlock_state_without_secrets",
     "refresh_moomoo_market_data",
@@ -247,6 +258,7 @@ __all__ = [
     "resolve_moomoo_us_equity_symbol",
     "resolve_moomoo_sgx_equity_symbol",
     "save_run_identity",
+    "save_crypto_universe_snapshot",
     "serialize_structured_event",
     "select_moomoo_account",
     "runtime_directories",

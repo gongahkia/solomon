@@ -65,6 +65,7 @@ from stonks_cli.vnext.market_calendar import (
     USMarketSession,
     USMarketSessionStatus,
 )
+from stonks_cli.vnext.market_data_refresh import MoomooQuote, refresh_moomoo_market_data
 from stonks_cli.vnext.market_status import MarketStatus, MarketStatusReport, MarketStatusService, MarketVenue
 from stonks_cli.vnext.migrations import Migration, MigrationRegistry, MigrationRunner
 from stonks_cli.vnext.moomoo import (
@@ -178,6 +179,7 @@ __all__ = [
     "MoomooSGQuote",
     "MoomooUSQuote",
     "MoomooPosition",
+    "MoomooQuote",
     "OpenDEndpointProbe",
     "OpenDEndpointStatus",
     "OpenDContextIncompatibleError",
@@ -230,6 +232,7 @@ __all__ = [
     "load_run_identity",
     "resolve_environment_secret",
     "read_moomoo_trade_unlock_state_without_secrets",
+    "refresh_moomoo_market_data",
     "require_moomoo_data_entitlement",
     "resolve_moomoo_us_equity_symbol",
     "resolve_moomoo_sgx_equity_symbol",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import platform
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from stonks_cli.errors import ExitCodes, StonksError
 from stonks_cli.legal_policy import enforce_legal_policy
 from stonks_cli.logging_utils import LoggingConfig, configure_logging
 from stonks_cli.vnext.account_import import import_moomoo_accounts
+from stonks_cli.vnext.market_data_refresh import refresh_moomoo_market_data
 from stonks_cli.whalemirror.attribution import (
     DEFAULT_ATTRIBUTION_FIXTURE,
     rank_wallets_from_fixture,
@@ -246,6 +248,28 @@ def broker_account_import() -> None:
                         }
                         for account in accounts
                     ],
+                }
+            )
+        )
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@broker_app.command("market-data-refresh")
+def broker_market_data_refresh(
+    symbols: list[str] = typer.Option(..., "--symbol", "-s", help="Canonical Moomoo symbol; repeat for each quote"),
+) -> None:
+    """Refresh pre-entitled Moomoo US and SG quotes without subscribing."""
+    try:
+        config = load_config()
+        quotes = refresh_moomoo_market_data(config, symbols)
+        Console().print_json(
+            json.dumps(
+                {
+                    "broker": "moomoo",
+                    "endpoint": f"{config.vnext.moomoo.host}:{config.vnext.moomoo.port}",
+                    "read_only": True,
+                    "quotes": [asdict(quote) for quote in quotes],
                 }
             )
         )

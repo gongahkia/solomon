@@ -51,6 +51,8 @@ from stonks_cli.vnext.health import HealthCheck, HealthReport, HealthResult, Hea
 from stonks_cli.vnext.lifecycle import ApplicationLifecycle, LifecycleHook, LifecycleState
 from stonks_cli.vnext.migrations import Migration, MigrationRegistry, MigrationRunner
 from stonks_cli.vnext.moomoo import (
+    LocalOpenDReadOnlyClient,
+    LocalOpenDReadOnlyConnection,
     MoomooOpenDProcessContract,
     OpenDEndpointProbe,
     OpenDEndpointStatus,
@@ -75,6 +77,8 @@ __all__ = [
     "HealthStatus",
     "LifecycleHook",
     "LifecycleState",
+    "LocalOpenDReadOnlyClient",
+    "LocalOpenDReadOnlyConnection",
     "PRIVATE_DIRECTORY_MODE",
     "PRIVATE_FILE_MODE",
     "Migration",

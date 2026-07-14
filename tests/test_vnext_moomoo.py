@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import socket
+import threading
 
 import pytest
 
-from stonks_cli.vnext.errors import VNextExecutionDeniedError
-from stonks_cli.vnext.moomoo import MoomooOpenDProcessContract, OpenDEndpointStatus, probe_local_opend
+from stonks_cli.vnext.errors import VNextExecutionDeniedError, VNextExternalDataError
+from stonks_cli.vnext.moomoo import (
+    LocalOpenDReadOnlyClient,
+    MoomooOpenDProcessContract,
+    OpenDEndpointStatus,
+    probe_local_opend,
+)
 
 
 def test_moomoo_opend_process_contract_is_operator_managed_and_read_only():
@@ -66,3 +72,33 @@ def test_local_opend_probe_fails_closed_when_endpoint_is_unavailable():
 def test_local_opend_probe_rejects_malformed_timeout(timeout_seconds):
     with pytest.raises(ValueError):
         probe_local_opend(MoomooOpenDProcessContract("127.0.0.1", 11111), timeout_seconds=timeout_seconds)
+
+
+def test_local_opend_socket_client_only_receives_data():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        _, port = listener.getsockname()
+
+        def send_fixture() -> None:
+            connection, _ = listener.accept()
+            with connection:
+                connection.sendall(b"fixture-response")
+
+        thread = threading.Thread(target=send_fixture)
+        thread.start()
+        client = LocalOpenDReadOnlyClient(MoomooOpenDProcessContract("127.0.0.1", port))
+        with client.connect() as connection:
+            assert connection.receive() == b"fixture-response"
+            assert not hasattr(connection, "send")
+        thread.join(timeout=1)
+        assert not thread.is_alive()
+
+
+def test_local_opend_socket_client_fails_closed_when_unavailable():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        _, port = listener.getsockname()
+
+    with pytest.raises(VNextExternalDataError):
+        LocalOpenDReadOnlyClient(MoomooOpenDProcessContract("127.0.0.1", port), timeout_seconds=0.1).connect()

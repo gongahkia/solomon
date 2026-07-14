@@ -552,9 +552,11 @@ class MoomooHistoricalOrder:
     order_id: str
     symbol: str
     status: str
+    side: str
     quantity: float
     dealt_quantity: float
     price: float
+    dealt_average_price: float
     currency: str
     created_at: str
     updated_at: str
@@ -562,12 +564,16 @@ class MoomooHistoricalOrder:
     def __post_init__(self) -> None:
         if not all(
             isinstance(value, str) and value
-            for value in (self.account_id, self.order_id, self.symbol, self.status, self.currency)
+            for value in (self.account_id, self.order_id, self.symbol, self.status, self.side, self.currency)
         ):
             raise ValueError("Moomoo historical order identifiers must be non-empty")
-        for value in (self.quantity, self.dealt_quantity, self.price):
+        for value in (self.quantity, self.dealt_quantity, self.price, self.dealt_average_price):
             if not isinstance(value, float) or not math.isfinite(value):
                 raise ValueError("Moomoo historical order values must be finite floats")
+        if self.quantity < 0 or self.dealt_quantity < 0 or self.dealt_quantity > self.quantity:
+            raise ValueError("Moomoo historical order quantities are invalid")
+        if self.price < 0 or self.dealt_average_price < 0:
+            raise ValueError("Moomoo historical order prices are invalid")
         if _parse_moomoo_timestamp(self.updated_at) < _parse_moomoo_timestamp(self.created_at):
             raise ValueError("Moomoo historical order update predates creation")
 
@@ -638,12 +644,13 @@ def _normalize_moomoo_historical_orders(account_id: str, raw_orders: object) -> 
         order_id = record.get("order_id")
         symbol = record.get("code")
         status = record.get("order_status")
+        side = record.get("trd_side")
         currency = record.get("currency")
         created_at = record.get("create_time")
         updated_at = record.get("updated_time")
         if not all(
             isinstance(value, str) and value
-            for value in (order_id, symbol, status, currency, created_at, updated_at)
+            for value in (order_id, symbol, status, side, currency, created_at, updated_at)
         ):
             raise ValueError("Moomoo historical-order record has invalid fields")
         orders.append(
@@ -652,9 +659,11 @@ def _normalize_moomoo_historical_orders(account_id: str, raw_orders: object) -> 
                 order_id,
                 symbol,
                 status,
+                side,
                 _finite_open_order_value(record, "qty"),
                 _finite_open_order_value(record, "dealt_qty"),
                 _finite_open_order_value(record, "price"),
+                _finite_open_order_value(record, "dealt_avg_price"),
                 currency,
                 created_at,
                 updated_at,

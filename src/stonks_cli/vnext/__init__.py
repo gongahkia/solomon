@@ -194,6 +194,11 @@ from stonks_cli.vnext.stablecoins import (
     StablecoinStatus,
     classify_stablecoins,
 )
+from stonks_cli.vnext.transactions_import import (
+    PortfolioTransaction,
+    PortfolioTransactionSide,
+    import_moomoo_transactions,
+)
 from stonks_cli.vnext.trend_factor import TrendFactor, calculate_trend_factor
 from stonks_cli.vnext.weighted_ranker import WeightedAssetRank, rank_weighted_assets
 
@@ -311,6 +316,8 @@ __all__ = [
     "PortfolioAssetClass",
     "PortfolioHolding",
     "PortfolioSnapshot",
+    "PortfolioTransaction",
+    "PortfolioTransactionSide",
     "RUN_IDENTITY_VERSION",
     "RUNTIME_ROOT_ENV",
     "RunIdentity",
@@ -352,6 +359,7 @@ __all__ = [
     "create_run_identity",
     "import_moomoo_accounts",
     "import_moomoo_holdings",
+    "import_moomoo_transactions",
     "ingest_daily_closing_prices",
     "ingest_crypto_asset_metadata",
     "create_crypto_universe_snapshot",

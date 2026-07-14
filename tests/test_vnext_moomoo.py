@@ -355,9 +355,11 @@ def test_moomoo_read_only_order_history_client_reads_explicit_window_with_stable
                     "order_id": "old",
                     "code": "US.AAPL",
                     "order_status": "CANCELLED_ALL",
+                    "trd_side": "BUY",
                     "qty": 2,
                     "dealt_qty": 0,
                     "price": 200,
+                    "dealt_avg_price": 0,
                     "currency": "USD",
                     "create_time": "2026-01-01 09:30:00",
                     "updated_time": "2026-01-01 09:31:00",
@@ -373,7 +375,7 @@ def test_moomoo_read_only_order_history_client_reads_explicit_window_with_stable
 
     assert client.list_order_history(MoomooAccount("100", 0, "REAL"), window) == (
         MoomooHistoricalOrder(
-            "100", "old", "US.AAPL", "CANCELLED_ALL", 2.0, 0.0, 200.0, "USD", "2026-01-01 09:30:00", "2026-01-01 09:31:00"
+            "100", "old", "US.AAPL", "CANCELLED_ALL", "BUY", 2.0, 0.0, 200.0, 0.0, "USD", "2026-01-01 09:30:00", "2026-01-01 09:31:00"
         ),
     )
     assert context.kwargs == {
@@ -403,9 +405,11 @@ def test_moomoo_read_only_order_history_client_rejects_malformed_records():
                     "order_id": "old",
                     "code": "US.AAPL",
                     "order_status": "CANCELLED_ALL",
+                    "trd_side": "BUY",
                     "qty": 2,
                     "dealt_qty": 0,
                     "price": 200,
+                    "dealt_avg_price": 0,
                     "currency": "USD",
                     "create_time": "2026-01-01 09:31:00",
                     "updated_time": "2026-01-01 09:30:00",

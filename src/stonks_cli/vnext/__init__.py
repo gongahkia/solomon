@@ -190,6 +190,7 @@ from stonks_cli.vnext.realized_volatility import (
     RealizedVolatility,
     calculate_realized_volatility,
 )
+from stonks_cli.vnext.rebalance_drift import RebalanceDrift, RebalanceTarget, calculate_rebalance_drift
 from stonks_cli.vnext.retry import IdempotentReadRetryPolicy, retry_idempotent_read
 from stonks_cli.vnext.risk_adjusted_performance import RiskAdjustedPerformance, calculate_risk_adjusted_performance
 from stonks_cli.vnext.rolling_drawdown import DailyDrawdown, RollingDrawdownSeries, calculate_rolling_drawdown
@@ -343,6 +344,8 @@ __all__ = [
     "RUNTIME_ROOT_ENV",
     "RunIdentity",
     "ReadOnlyRateLimiter",
+    "RebalanceDrift",
+    "RebalanceTarget",
     "RealizedVolatility",
     "RiskAdjustedPerformance",
     "RollingDrawdownSeries",
@@ -405,6 +408,7 @@ __all__ = [
     "calculate_mean_reversion_factor",
     "calculate_portfolio_exposure",
     "calculate_realized_volatility",
+    "calculate_rebalance_drift",
     "calculate_risk_adjusted_performance",
     "calculate_rolling_drawdown",
     "calculate_sgd_portfolio_nav",

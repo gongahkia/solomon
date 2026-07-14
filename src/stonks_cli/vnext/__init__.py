@@ -186,6 +186,7 @@ from stonks_cli.vnext.stablecoins import (
     classify_stablecoins,
 )
 from stonks_cli.vnext.trend_factor import TrendFactor, calculate_trend_factor
+from stonks_cli.vnext.weighted_ranker import WeightedAssetRank, rank_weighted_assets
 
 __all__ = [
     "Clock",
@@ -371,5 +372,7 @@ __all__ = [
     "retry_idempotent_read",
     "probe_local_opend",
     "run_health_checks",
+    "rank_weighted_assets",
     "validate_package_boundaries",
+    "WeightedAssetRank",
 ]

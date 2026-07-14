@@ -29,6 +29,31 @@ class VNextExternalDataError(VNextApplicationError):
     exit_code = ExitCodes.PROVIDER_ERROR
 
 
+class OpenDError(VNextExternalDataError):
+    public_code = "vnext.opend.error"
+    public_message = "OpenD data access failed."
+
+
+class OpenDEndpointUnavailableError(OpenDError):
+    public_code = "vnext.opend.endpoint_unavailable"
+    public_message = "OpenD endpoint is unavailable."
+
+
+class OpenDContextIncompatibleError(OpenDError):
+    public_code = "vnext.opend.context_incompatible"
+    public_message = "OpenD context is incompatible."
+
+
+class OpenDQuotaExceededError(OpenDError):
+    public_code = "vnext.opend.quota_exceeded"
+    public_message = "OpenD request quota is unavailable."
+
+
+class OpenDResponseMalformedError(OpenDError):
+    public_code = "vnext.opend.response_malformed"
+    public_message = "OpenD response is malformed."
+
+
 class VNextInvariantError(VNextApplicationError):
     public_code = "vnext.invariant.failed"
     public_message = "A vNext safety invariant failed."

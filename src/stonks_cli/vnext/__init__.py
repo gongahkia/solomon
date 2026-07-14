@@ -5,6 +5,11 @@ from stonks_cli.vnext.capabilities import Capability, CapabilityRegistry
 from stonks_cli.vnext.container import ServiceContainer
 from stonks_cli.vnext.database import SQLiteConnectionFactory
 from stonks_cli.vnext.errors import (
+    OpenDContextIncompatibleError,
+    OpenDEndpointUnavailableError,
+    OpenDError,
+    OpenDQuotaExceededError,
+    OpenDResponseMalformedError,
     VNextApplicationError,
     VNextConfigurationError,
     VNextExecutionDeniedError,
@@ -166,6 +171,11 @@ __all__ = [
     "MoomooPosition",
     "OpenDEndpointProbe",
     "OpenDEndpointStatus",
+    "OpenDContextIncompatibleError",
+    "OpenDEndpointUnavailableError",
+    "OpenDError",
+    "OpenDQuotaExceededError",
+    "OpenDResponseMalformedError",
     "PACKAGE_BOUNDARIES",
     "PackageBoundary",
     "RUN_IDENTITY_VERSION",

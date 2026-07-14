@@ -10,7 +10,12 @@ from datetime import date, datetime
 from enum import StrEnum
 from importlib import metadata, util
 
-from stonks_cli.vnext.errors import VNextConfigurationError, VNextExecutionDeniedError, VNextExternalDataError
+from stonks_cli.vnext.errors import (
+    OpenDDataEntitlementMissingError,
+    VNextConfigurationError,
+    VNextExecutionDeniedError,
+    VNextExternalDataError,
+)
 
 _LOCAL_OPEND_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _MOOMOO_TIMESTAMP_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f")
@@ -1295,6 +1300,16 @@ class MoomooMarketDataEntitlements:
             raise ValueError("Moomoo market-data subscriptions are invalid")
         if len({subscription.data_type for subscription in self.subscriptions}) != len(self.subscriptions):
             raise ValueError("Moomoo market-data subscription types must be unique")
+
+
+def require_moomoo_data_entitlement(entitlements: MoomooMarketDataEntitlements, data_type: str, symbols: Sequence[str]) -> None:
+    if not isinstance(entitlements, MoomooMarketDataEntitlements) or not isinstance(data_type, str) or not data_type:
+        raise OpenDDataEntitlementMissingError("Moomoo data entitlement is malformed")
+    if not isinstance(symbols, Sequence) or isinstance(symbols, (str, bytes)) or not symbols or not all(isinstance(symbol, str) and symbol for symbol in symbols):
+        raise OpenDDataEntitlementMissingError("Moomoo data entitlement symbols are malformed")
+    subscription = next((item for item in entitlements.subscriptions if item.data_type == data_type), None)
+    if subscription is None or not set(symbols).issubset(subscription.symbols):
+        raise OpenDDataEntitlementMissingError("Moomoo data entitlement is missing")
 
 
 @dataclass(frozen=True)

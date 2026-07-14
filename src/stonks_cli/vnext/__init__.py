@@ -6,6 +6,7 @@ from stonks_cli.vnext.container import ServiceContainer
 from stonks_cli.vnext.database import SQLiteConnectionFactory
 from stonks_cli.vnext.errors import (
     OpenDContextIncompatibleError,
+    OpenDDataEntitlementMissingError,
     OpenDEndpointUnavailableError,
     OpenDError,
     OpenDQuotaExceededError,
@@ -104,6 +105,7 @@ from stonks_cli.vnext.moomoo import (
     normalize_moomoo_instruments,
     probe_local_opend,
     read_moomoo_trade_unlock_state_without_secrets,
+    require_moomoo_data_entitlement,
     resolve_moomoo_sgx_equity_symbol,
     resolve_moomoo_us_equity_symbol,
     select_moomoo_account,
@@ -178,6 +180,7 @@ __all__ = [
     "OpenDEndpointProbe",
     "OpenDEndpointStatus",
     "OpenDContextIncompatibleError",
+    "OpenDDataEntitlementMissingError",
     "OpenDEndpointUnavailableError",
     "OpenDError",
     "OpenDQuotaExceededError",
@@ -225,6 +228,7 @@ __all__ = [
     "load_run_identity",
     "resolve_environment_secret",
     "read_moomoo_trade_unlock_state_without_secrets",
+    "require_moomoo_data_entitlement",
     "resolve_moomoo_us_equity_symbol",
     "resolve_moomoo_sgx_equity_symbol",
     "save_run_identity",

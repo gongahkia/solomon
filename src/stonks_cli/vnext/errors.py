@@ -49,6 +49,11 @@ class OpenDQuotaExceededError(OpenDError):
     public_message = "OpenD request quota is unavailable."
 
 
+class OpenDDataEntitlementMissingError(OpenDError):
+    public_code = "vnext.opend.data_entitlement_missing"
+    public_message = "Required OpenD data entitlement is unavailable."
+
+
 class OpenDResponseMalformedError(OpenDError):
     public_code = "vnext.opend.response_malformed"
     public_message = "OpenD response is malformed."

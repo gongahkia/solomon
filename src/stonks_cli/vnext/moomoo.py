@@ -56,6 +56,35 @@ class MoomooSdkStatus(StrEnum):
     INCOMPATIBLE = "incompatible"
 
 
+class MoomooTradeUnlockState(StrEnum):
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class MoomooTradeUnlockEvidence:
+    state: MoomooTradeUnlockState
+    code: str
+    secret_used: bool
+    state_mutated: bool
+
+    def __post_init__(self) -> None:
+        if self.state is not MoomooTradeUnlockState.UNKNOWN:
+            raise ValueError("Moomoo trade unlock state must remain unknown without a read API")
+        if self.code != "state_not_observable_without_secret_or_mutation":
+            raise ValueError("invalid Moomoo trade unlock evidence code")
+        if self.secret_used or self.state_mutated:
+            raise VNextExecutionDeniedError("Moomoo unlock evidence must not use secrets or mutate state")
+
+
+def read_moomoo_trade_unlock_state_without_secrets() -> MoomooTradeUnlockEvidence:
+    return MoomooTradeUnlockEvidence(
+        MoomooTradeUnlockState.UNKNOWN,
+        "state_not_observable_without_secret_or_mutation",
+        secret_used=False,
+        state_mutated=False,
+    )
+
+
 @dataclass(frozen=True)
 class MoomooSdkCompatibility:
     status: MoomooSdkStatus

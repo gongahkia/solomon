@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import socket
 import threading
 from importlib import metadata
@@ -13,9 +14,11 @@ from stonks_cli.vnext.moomoo import (
     MoomooOpenDProcessContract,
     MoomooReadOnlyAccountClient,
     MoomooSdkStatus,
+    MoomooTradeUnlockState,
     OpenDEndpointStatus,
     check_moomoo_sdk_compatibility,
     probe_local_opend,
+    read_moomoo_trade_unlock_state_without_secrets,
     select_moomoo_account,
 )
 
@@ -129,6 +132,16 @@ def test_moomoo_sdk_compatibility_fails_closed_for_missing_or_malformed_sdk():
     assert (missing.status, missing.code, missing.version) == (MoomooSdkStatus.NOT_INSTALLED, "sdk_not_installed", None)
     assert (malformed.status, malformed.code, malformed.version) == (MoomooSdkStatus.INCOMPATIBLE, "sdk_invalid_version", None)
     assert (absent_module.status, absent_module.code, absent_module.version) == (MoomooSdkStatus.INCOMPATIBLE, "sdk_module_unavailable", None)
+
+
+def test_moomoo_trade_unlock_state_is_explicitly_unknown_without_secret_or_mutation():
+    evidence = read_moomoo_trade_unlock_state_without_secrets()
+
+    assert evidence.state is MoomooTradeUnlockState.UNKNOWN
+    assert evidence.code == "state_not_observable_without_secret_or_mutation"
+    assert evidence.secret_used is False
+    assert evidence.state_mutated is False
+    assert inspect.signature(read_moomoo_trade_unlock_state_without_secrets).parameters == {}
 
 
 def test_moomoo_read_only_account_client_reads_sorts_and_closes_context():

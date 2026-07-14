@@ -271,6 +271,7 @@ from stonks_cli.vnext.realized_volatility import (
     calculate_realized_volatility,
 )
 from stonks_cli.vnext.rebalance_drift import RebalanceDrift, RebalanceTarget, calculate_rebalance_drift
+from stonks_cli.vnext.report_input_hash import ReportInputHash, hash_report_input_data
 from stonks_cli.vnext.retry import IdempotentReadRetryPolicy, retry_idempotent_read
 from stonks_cli.vnext.reviewed_order_ticket import OrderTicketSide, OrderTicketType, ReviewedOrderTicket
 from stonks_cli.vnext.risk_adjusted_performance import RiskAdjustedPerformance, calculate_risk_adjusted_performance
@@ -485,6 +486,7 @@ __all__ = [
     "ReadOnlyRateLimiter",
     "RebalanceDrift",
     "RebalanceTarget",
+    "ReportInputHash",
     "RealizedVolatility",
     "ReviewedOrderTicket",
     "RiskAdjustedPerformance",
@@ -645,4 +647,5 @@ __all__ = [
     "export_encrypted_backup",
     "generate_backup_key",
     "hash_generated_report",
+    "hash_report_input_data",
 ]

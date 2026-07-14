@@ -31,6 +31,7 @@ from stonks_cli.vnext.foundation import (
     resolve_environment_secret,
     save_run_identity,
 )
+from stonks_cli.vnext.migrations import Migration, MigrationRegistry
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
 
 __all__ = [
@@ -38,6 +39,8 @@ __all__ = [
     "EventSeverity",
     "EVENT_SCHEMA_VERSION",
     "FrozenUTCClock",
+    "Migration",
+    "MigrationRegistry",
     "PACKAGE_BOUNDARIES",
     "PackageBoundary",
     "RUN_IDENTITY_VERSION",

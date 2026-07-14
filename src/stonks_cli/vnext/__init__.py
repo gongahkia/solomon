@@ -163,6 +163,7 @@ from stonks_cli.vnext.moomoo import (
     resolve_moomoo_us_equity_symbol,
     select_moomoo_account,
 )
+from stonks_cli.vnext.non_llm_explanation import NonLLMExplanation, build_non_llm_explanation
 from stonks_cli.vnext.opend_fixture import RecordedOpenDCall, RecordedOpenDFixtureAdapter
 from stonks_cli.vnext.price_data import (
     CanonicalDailyClose,
@@ -258,6 +259,7 @@ __all__ = [
     "MarketDataProvenance",
     "MoomooOpenDProcessContract",
     "NYSECashEquityCalendar2026",
+    "NonLLMExplanation",
     "MoomooOpenOrder",
     "MoomooAccount",
     "MoomooAccountBalance",
@@ -337,6 +339,7 @@ __all__ = [
     "attach_market_data_provenance",
     "append_crypto_universe_history",
     "build_explanation_evidence_bundle",
+    "build_non_llm_explanation",
     "create_run_identity",
     "import_moomoo_accounts",
     "ingest_daily_closing_prices",

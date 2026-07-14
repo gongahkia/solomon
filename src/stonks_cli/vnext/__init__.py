@@ -7,6 +7,7 @@ from stonks_cli.vnext.capabilities import Capability, CapabilityRegistry
 from stonks_cli.vnext.cash_ledger import CashBalance, CashLedger, CashLedgerEntry
 from stonks_cli.vnext.citation_verification import CitationVerification, verify_source_citation
 from stonks_cli.vnext.container import ServiceContainer
+from stonks_cli.vnext.cost_basis import CostBasis, calculate_cost_basis
 from stonks_cli.vnext.cross_asset_correlation import CrossAssetCorrelation, calculate_cross_asset_correlations
 from stonks_cli.vnext.crypto_liquidity import filter_crypto_universe_by_liquidity
 from stonks_cli.vnext.crypto_market_cap import (
@@ -204,6 +205,7 @@ from stonks_cli.vnext.weighted_ranker import WeightedAssetRank, rank_weighted_as
 
 __all__ = [
     "Clock",
+    "CostBasis",
     "ApplicationLifecycle",
     "AssetReturnSeries",
     "Capability",
@@ -371,6 +373,7 @@ __all__ = [
     "filter_crypto_universe_by_supported_venues",
     "check_moomoo_sdk_compatibility",
     "calculate_asset_returns",
+    "calculate_cost_basis",
     "calculate_cross_asset_correlations",
     "calculate_data_confidence_score",
     "calculate_momentum_factor",

@@ -155,6 +155,12 @@ from stonks_cli.vnext.moomoo import (
     select_moomoo_account,
 )
 from stonks_cli.vnext.opend_fixture import RecordedOpenDCall, RecordedOpenDFixtureAdapter
+from stonks_cli.vnext.price_data import (
+    CanonicalDailyClose,
+    CanonicalPriceDataProvider,
+    CanonicalPriceSeries,
+    fetch_canonical_daily_closes,
+)
 from stonks_cli.vnext.rate_limit import ReadOnlyRateLimiter
 from stonks_cli.vnext.retry import IdempotentReadRetryPolicy, retry_idempotent_read
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
@@ -172,6 +178,9 @@ __all__ = [
     "ApplicationLifecycle",
     "Capability",
     "CapabilityRegistry",
+    "CanonicalDailyClose",
+    "CanonicalPriceDataProvider",
+    "CanonicalPriceSeries",
     "CryptoMarketCapAsset",
     "CryptoMarketCapBatch",
     "CryptoMarketCapProvider",
@@ -293,6 +302,7 @@ __all__ = [
     "create_crypto_universe_snapshot",
     "create_structured_event",
     "fetch_crypto_market_caps",
+    "fetch_canonical_daily_closes",
     "filter_crypto_universe_by_liquidity",
     "filter_crypto_universe_by_supported_venues",
     "check_moomoo_sdk_compatibility",

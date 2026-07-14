@@ -27,6 +27,7 @@ from stonks_cli.errors import ExitCodes, StonksError
 from stonks_cli.legal_policy import enforce_legal_policy
 from stonks_cli.logging_utils import LoggingConfig, configure_logging
 from stonks_cli.vnext.account_import import import_moomoo_accounts
+from stonks_cli.vnext.crypto_universe_snapshot import load_crypto_universe_snapshot
 from stonks_cli.vnext.market_data_refresh import refresh_moomoo_market_data
 from stonks_cli.whalemirror.attribution import (
     DEFAULT_ATTRIBUTION_FIXTURE,
@@ -123,6 +124,17 @@ def _global_options(
 def _vnext_root(context: typer.Context) -> None:
     if context.invoked_subcommand is None:
         typer.echo(context.get_help())
+
+
+@vnext_app.command("crypto-universe")
+def vnext_crypto_universe(
+    snapshot: Path = typer.Option(..., "--snapshot", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
+) -> None:
+    """Render a private persisted crypto-universe snapshot."""
+    try:
+        typer.echo(json.dumps(load_crypto_universe_snapshot(snapshot).to_data(), sort_keys=True))
+    except Exception as error:
+        raise _exit_for_error(error)
 
 
 def _exit_for_error(e: Exception) -> typer.Exit:

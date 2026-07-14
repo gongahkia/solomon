@@ -8,7 +8,8 @@ def test_vnext_cli_root_renders_help_without_broker_submission_command():
 
     assert result.exit_code == 0
     assert "vNext decision-support commands; broker order submission is unavailable." in result.output
-    assert "Commands" not in result.output
+    assert "crypto-universe" in result.output
+    assert "order-submit" not in result.output
 
 
 def test_vnext_cli_root_help_is_available():

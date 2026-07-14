@@ -109,6 +109,7 @@ from stonks_cli.vnext.moomoo import (
     select_moomoo_account,
 )
 from stonks_cli.vnext.rate_limit import ReadOnlyRateLimiter
+from stonks_cli.vnext.retry import IdempotentReadRetryPolicy, retry_idempotent_read
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
 
 __all__ = [
@@ -127,6 +128,7 @@ __all__ = [
     "HealthReport",
     "HealthResult",
     "HealthStatus",
+    "IdempotentReadRetryPolicy",
     "LifecycleHook",
     "LifecycleState",
     "LocalOpenDReadOnlyClient",
@@ -224,6 +226,7 @@ __all__ = [
     "serialize_structured_event",
     "select_moomoo_account",
     "runtime_directories",
+    "retry_idempotent_read",
     "probe_local_opend",
     "run_health_checks",
     "validate_package_boundaries",

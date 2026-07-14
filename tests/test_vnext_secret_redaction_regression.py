@@ -21,7 +21,7 @@ def test_config_show_never_emits_top_level_or_nested_secret_values(tmp_path, mon
     )
     monkeypatch.setenv("STONKS_CLI_CONFIG", str(path))
 
-    result = CliRunner().invoke(app, ["config", "show"])
+    result = CliRunner().invoke(app, ["show-config"])
 
     assert result.exit_code == 0
     assert all(secret not in result.output for secret in secrets)

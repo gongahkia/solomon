@@ -33,7 +33,7 @@ def test_carry_scan_blocks_bybit_before_scanner_execution(tmp_path, monkeypatch)
     cfg_path.write_text(json.dumps({}), encoding="utf-8")
     monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
 
-    result = CliRunner().invoke(app, ["carry", "scan", "--venue", "bybit", "--json"])
+    result = CliRunner().invoke(app, ["scan-carry", "--venue", "bybit", "--json"])
 
     assert result.exit_code != 0
     assert "legal_policy_blocked_venue:bybit" in result.output

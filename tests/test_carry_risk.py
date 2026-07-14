@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from stonks_cli.carry.carry_paper import PaperCarryConfig, PaperCarryEngine
+from stonks_cli.carry.carry_risk import CarryRiskLimits, CarryRiskState, evaluate_carry_risk
 from stonks_cli.config import AppConfig
-from stonks_cli.whalemirror.carry_paper import PaperCarryConfig, PaperCarryEngine
-from stonks_cli.whalemirror.carry_risk import CarryRiskLimits, CarryRiskState, evaluate_carry_risk
-from stonks_cli.whalemirror.hyperliquid import HyperliquidCarryInput
-from stonks_cli.whalemirror.models import BasisSnapshot, CarryQuote, FundingSnapshot, Venue
+from stonks_cli.research.hyperliquid import HyperliquidCarryInput
+from stonks_cli.research.models import BasisSnapshot, CarryQuote, FundingSnapshot, Venue
 
 
 def test_carry_risk_blocks_stale_data():
@@ -66,13 +66,13 @@ def test_carry_paper_blocked_decision_includes_risk_names_and_inputs():
     assert engine.state.positions == {}
 
 
-def test_carrymirror_config_exposes_default_risk_limits():
+def test_carry_config_exposes_default_risk_limits():
     cfg = AppConfig()
 
-    assert cfg.carrymirror.max_data_age_seconds == 30.0
-    assert cfg.carrymirror.daily_drawdown_limit_pct == 0.005
-    assert cfg.carrymirror.weekly_drawdown_limit_pct == 0.015
-    assert cfg.carrymirror.global_drawdown_limit_pct == 0.03
+    assert cfg.carry.max_data_age_seconds == 30.0
+    assert cfg.carry.daily_drawdown_limit_pct == 0.005
+    assert cfg.carry.weekly_drawdown_limit_pct == 0.015
+    assert cfg.carry.global_drawdown_limit_pct == 0.03
 
 
 def _risk_state(**overrides) -> CarryRiskState:

@@ -4,10 +4,8 @@ import json
 
 from typer.testing import CliRunner
 
-from stonks_cli.cli import app
-from stonks_cli.config import AppConfig
-from stonks_cli.whalemirror.carry_audit import CarryReconciliationMismatch, CarryReconciliationReport
-from stonks_cli.whalemirror.carry_live import (
+from stonks_cli.carry.carry_audit import CarryReconciliationMismatch, CarryReconciliationReport
+from stonks_cli.carry.carry_live import (
     CarryLiveFillState,
     CarryLivePreflightEvidence,
     build_carry_live_entry_plan,
@@ -16,8 +14,10 @@ from stonks_cli.whalemirror.carry_live import (
     evaluate_carry_live_reconciliation,
     plan_carry_partial_fill_recovery,
 )
-from stonks_cli.whalemirror.hyperliquid import HyperliquidCarryInput
-from stonks_cli.whalemirror.models import BasisSnapshot, CarryDecision, CarryQuote, FundingSnapshot, Venue
+from stonks_cli.cli import app
+from stonks_cli.config import AppConfig
+from stonks_cli.research.hyperliquid import HyperliquidCarryInput
+from stonks_cli.research.models import BasisSnapshot, CarryDecision, CarryQuote, FundingSnapshot, Venue
 
 
 def test_carry_live_preflight_fails_closed_by_default(tmp_path):
@@ -39,7 +39,7 @@ def test_carry_live_preflight_fails_closed_by_default(tmp_path):
 def test_carry_live_preflight_passes_only_with_arm_cap_and_evidence(tmp_path):
     secrets = tmp_path / "carry-live.env"
     secrets.write_text("HYPERLIQUID_PRIVATE_KEY_ENV=EXAMPLE\n", encoding="utf-8")
-    cfg = AppConfig.model_validate({"carrymirror": {"live_armed": True, "max_total_live_usd": 100}})
+    cfg = AppConfig.model_validate({"carry": {"live_armed": True, "max_total_live_usd": 100}})
 
     result = evaluate_carry_live_preflight(
         cfg=cfg,
@@ -62,7 +62,7 @@ def test_carry_live_preflight_passes_only_with_arm_cap_and_evidence(tmp_path):
 def test_carry_live_preflight_blocks_manual_cap_mismatch(tmp_path):
     secrets = tmp_path / "carry-live.env"
     secrets.write_text("HYPERLIQUID_PRIVATE_KEY_ENV=EXAMPLE\n", encoding="utf-8")
-    cfg = AppConfig.model_validate({"carrymirror": {"live_armed": True, "max_total_live_usd": 50}})
+    cfg = AppConfig.model_validate({"carry": {"live_armed": True, "max_total_live_usd": 50}})
 
     result = evaluate_carry_live_preflight(
         cfg=cfg,
@@ -84,10 +84,10 @@ def test_carry_live_preflight_blocks_manual_cap_mismatch(tmp_path):
 
 def test_carry_live_cli_reports_preflight_blockers(tmp_path, monkeypatch):
     cfg_path = tmp_path / "config.json"
-    cfg_path.write_text(json.dumps({"carrymirror": {"live_armed": False}}), encoding="utf-8")
+    cfg_path.write_text(json.dumps({"carry": {"live_armed": False}}), encoding="utf-8")
     monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
 
-    result = CliRunner().invoke(app, ["carry", "live", "preflight", "--requested-notional-usd", "50", "--cap-usd", "50"])
+    result = CliRunner().invoke(app, ["preflight-carry-live", "--requested-notional-usd", "50", "--cap-usd", "50"])
 
     assert result.exit_code == 0
     payload = json.loads(result.output)

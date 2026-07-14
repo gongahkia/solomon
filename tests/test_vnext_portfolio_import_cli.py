@@ -26,7 +26,7 @@ def test_vnext_portfolio_import_cli_emits_canonical_read_only_holdings(monkeypat
 
     result = CliRunner().invoke(
         app,
-        ["vnext", "portfolio-import", "--account-id", "100", "--account-index", "0", "--trading-environment", "REAL", "--captured-at", "2026-07-14T12:00:00Z"],
+        ["import-portfolio", "--account-id", "100", "--account-index", "0", "--trading-environment", "REAL", "--captured-at", "2026-07-14T12:00:00Z"],
     )
 
     assert result.exit_code == 0
@@ -38,7 +38,7 @@ def test_vnext_portfolio_import_cli_emits_canonical_read_only_holdings(monkeypat
 def test_vnext_portfolio_import_cli_fails_closed_for_malformed_capture_time():
     result = CliRunner().invoke(
         app,
-        ["vnext", "portfolio-import", "--account-id", "100", "--account-index", "0", "--trading-environment", "REAL", "--captured-at", "bad-time"],
+        ["import-portfolio", "--account-id", "100", "--account-index", "0", "--trading-environment", "REAL", "--captured-at", "bad-time"],
     )
 
     assert result.exit_code == ExitCodes.USAGE_ERROR

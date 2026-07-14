@@ -4,10 +4,10 @@ import json
 
 from typer.testing import CliRunner
 
+from stonks_cli.carry.carry_paper import PaperCarryConfig, PaperCarryEngine
 from stonks_cli.cli import app
-from stonks_cli.whalemirror.carry_paper import PaperCarryConfig, PaperCarryEngine
-from stonks_cli.whalemirror.hyperliquid import HyperliquidCarryInput
-from stonks_cli.whalemirror.models import BasisSnapshot, CarryQuote, FundingSnapshot, Venue
+from stonks_cli.research.hyperliquid import HyperliquidCarryInput
+from stonks_cli.research.models import BasisSnapshot, CarryQuote, FundingSnapshot, Venue
 
 
 def test_paper_carry_enters_positive_funding_delta_neutral_position():
@@ -66,9 +66,7 @@ def test_carry_paper_run_cli_writes_state_report_and_ledger(tmp_path, monkeypatc
     result = CliRunner().invoke(
         app,
         [
-            "carry",
-            "paper",
-            "run",
+            "run-carry-paper",
             "--fixture",
             str(fixture),
             "--state-dir",
@@ -84,7 +82,7 @@ def test_carry_paper_run_cli_writes_state_report_and_ledger(tmp_path, monkeypatc
     payload = json.loads(result.output)
     assert payload["paper"] is True
     assert payload["summary"]["open_positions"] == 1
-    assert report.read_text(encoding="utf-8").startswith("# CarryMirror Paper Run")
+    assert report.read_text(encoding="utf-8").startswith("# Carry Paper Run")
     assert "paper_open" in ledger.read_text(encoding="utf-8")
     assert (state_dir / "carry-paper-state.json").exists()
 

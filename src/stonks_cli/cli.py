@@ -12,6 +12,15 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
+from stonks_cli.carry.carry_health import build_carry_health_report, render_carry_health_report
+from stonks_cli.carry.carry_live import CarryLivePreflightEvidence, evaluate_carry_live_preflight
+from stonks_cli.carry.carry_paper import PaperCarryConfig, run_paper_carry, write_paper_carry_artifacts
+from stonks_cli.carry.carry_scanner import (
+    CarryCostAssumptions,
+    CarryScanRow,
+    load_carry_inputs_fixture,
+    scan_hyperliquid_carry,
+)
 from stonks_cli.commands import (
     do_config_init,
     do_config_migrate,
@@ -26,6 +35,45 @@ from stonks_cli.config import load_config
 from stonks_cli.errors import ExitCodes, StonksError
 from stonks_cli.legal_policy import enforce_legal_policy
 from stonks_cli.logging_utils import LoggingConfig, configure_logging
+from stonks_cli.research.attribution import (
+    DEFAULT_ATTRIBUTION_FIXTURE,
+    rank_wallets_from_fixture,
+    render_wallet_ranking_markdown,
+)
+from stonks_cli.research.capture_analysis import analyze_capture_archive
+from stonks_cli.research.hyperliquid import HYPERLIQUID_WS_URL, HyperliquidOrderClient
+from stonks_cli.research.ingestion import (
+    DEFAULT_CAPTURE_FIXTURE,
+    DEFAULT_LIVE_CAPTURE_COINS,
+    DEFAULT_LIVE_CAPTURE_SECONDS,
+    build_live_capture_subscriptions,
+    capture_hyperliquid_to_files,
+    replay_capture_fixture,
+    runtime_host_metadata,
+    write_capture_jsonl,
+)
+from stonks_cli.research.ledger import (
+    DEFAULT_LEDGER_PATH,
+    DEFAULT_REPLAY_FIXTURE,
+    DEFAULT_TEARSHEET_PATH,
+    write_fixture_artifacts,
+)
+from stonks_cli.research.paper_analysis import (
+    DEFAULT_PAPER_MIRROR_FIXTURE,
+    PaperAnalysisConfig,
+    replay_paper_analysis_fixture,
+)
+from stonks_cli.research.validation_gates import (
+    CAPTURE_GATE,
+    assess_gate,
+    default_validation_dir,
+    gate_state_path,
+    load_gate_state,
+    record_capture_health,
+    record_capture_probe,
+    render_gate_report,
+    write_gate_report,
+)
 from stonks_cli.vnext.account_import import import_moomoo_accounts
 from stonks_cli.vnext.broker_app_order_ticket import render_broker_app_order_ticket
 from stonks_cli.vnext.crypto_universe_snapshot import load_crypto_universe_snapshot
@@ -42,86 +90,8 @@ from stonks_cli.vnext.score_components import ScoreComponent
 from stonks_cli.vnext.sgd_portfolio_nav import SGDPortfolioNAV
 from stonks_cli.vnext.usd_portfolio_nav import USDPortfolioNAV
 from stonks_cli.vnext.weighted_ranker import rank_weighted_assets
-from stonks_cli.whalemirror.attribution import (
-    DEFAULT_ATTRIBUTION_FIXTURE,
-    rank_wallets_from_fixture,
-    render_wallet_ranking_markdown,
-)
-from stonks_cli.whalemirror.capture_analysis import analyze_capture_archive
-from stonks_cli.whalemirror.carry_health import build_carry_health_report, render_carry_health_report
-from stonks_cli.whalemirror.carry_live import CarryLivePreflightEvidence, evaluate_carry_live_preflight
-from stonks_cli.whalemirror.carry_paper import PaperCarryConfig, run_paper_carry, write_paper_carry_artifacts
-from stonks_cli.whalemirror.carry_scanner import (
-    CarryCostAssumptions,
-    CarryScanRow,
-    load_carry_inputs_fixture,
-    scan_hyperliquid_carry,
-)
-from stonks_cli.whalemirror.hyperliquid import HYPERLIQUID_WS_URL, HyperliquidOrderClient
-from stonks_cli.whalemirror.ingestion import (
-    DEFAULT_CAPTURE_FIXTURE,
-    DEFAULT_LIVE_CAPTURE_COINS,
-    DEFAULT_LIVE_CAPTURE_SECONDS,
-    build_live_capture_subscriptions,
-    capture_hyperliquid_to_files,
-    replay_capture_fixture,
-    runtime_host_metadata,
-    write_capture_jsonl,
-)
-from stonks_cli.whalemirror.ledger import (
-    DEFAULT_LEDGER_PATH,
-    DEFAULT_REPLAY_FIXTURE,
-    DEFAULT_TEARSHEET_PATH,
-    write_fixture_artifacts,
-)
-from stonks_cli.whalemirror.paper_mirror import (
-    DEFAULT_PAPER_MIRROR_FIXTURE,
-    PaperMirrorConfig,
-    replay_paper_mirror_fixture,
-)
-from stonks_cli.whalemirror.validation_gates import (
-    CAPTURE_GATE,
-    DEFAULT_LIVE_VALIDATION_FIXTURE,
-    LIVE_GATE,
-    PAPER_GATE,
-    assess_gate,
-    default_validation_dir,
-    gate_state_path,
-    load_gate_state,
-    record_capture_health,
-    record_capture_probe,
-    record_live_evidence,
-    record_live_probe,
-    record_paper_evidence,
-    record_paper_probe,
-    render_gate_report,
-    write_gate_report,
-)
 
-app = typer.Typer(add_completion=True, help="WhaleMirror Hyperliquid paper-first observability CLI.")
-carry_app = typer.Typer(help="CarryMirror funding and basis scanner commands.")
-carry_live_app = typer.Typer(help="CarryMirror fail-closed tiny-live safety commands.")
-carry_paper_app = typer.Typer(help="CarryMirror paper carry simulation commands.")
-config_app = typer.Typer()
-broker_app = typer.Typer(help="Read-only broker import commands.")
-vnext_app = typer.Typer(help="vNext decision-support commands; broker order submission is unavailable.")
-whalemirror_app = typer.Typer(help="WhaleMirror Hyperliquid paper-first commands.")
-whalemirror_gates_app = typer.Typer(help="Restartable validation gate harnesses.")
-whalemirror_ingest_app = typer.Typer(help="Hyperliquid ingestion fixture and capture commands.")
-whalemirror_paper_app = typer.Typer(help="Paper mirror replay and risk-control commands.")
-whalemirror_wallets_app = typer.Typer(help="Venue-neutral wallet attribution commands.")
-
-app.add_typer(carry_app, name="carry")
-carry_app.add_typer(carry_live_app, name="live")
-carry_app.add_typer(carry_paper_app, name="paper")
-app.add_typer(config_app, name="config")
-app.add_typer(broker_app, name="broker")
-app.add_typer(vnext_app, name="vnext")
-app.add_typer(whalemirror_app, name="whalemirror")
-whalemirror_app.add_typer(whalemirror_gates_app, name="gates")
-whalemirror_app.add_typer(whalemirror_ingest_app, name="ingest")
-whalemirror_app.add_typer(whalemirror_paper_app, name="paper")
-whalemirror_app.add_typer(whalemirror_wallets_app, name="wallets")
+app = typer.Typer(add_completion=True, help="Stonks CLI paper-carry tools.")
 
 
 @app.callback()
@@ -133,13 +103,7 @@ def _global_options(
     configure_logging(LoggingConfig(verbose=verbose, quiet=quiet, structured=structured_logs))
 
 
-@vnext_app.callback(invoke_without_command=True)
-def _vnext_root(context: typer.Context) -> None:
-    if context.invoked_subcommand is None:
-        typer.echo(context.get_help())
-
-
-@vnext_app.command("crypto-universe")
+@app.command("universe-crypto")
 def vnext_crypto_universe(
     snapshot: Path = typer.Option(..., "--snapshot", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
 ) -> None:
@@ -150,7 +114,7 @@ def vnext_crypto_universe(
         raise _exit_for_error(error)
 
 
-@vnext_app.command("market-refresh")
+@app.command("refresh-market")
 def vnext_market_refresh(
     symbols: list[str] = typer.Option(..., "--symbol", "-s", help="Canonical Moomoo symbol; repeat for each quote"),
 ) -> None:
@@ -158,7 +122,7 @@ def vnext_market_refresh(
     _render_moomoo_market_data_refresh(symbols)
 
 
-@vnext_app.command("ranking")
+@app.command("rank")
 def vnext_ranking(
     components: Path = typer.Option(..., "--components", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
 ) -> None:
@@ -173,7 +137,7 @@ def vnext_ranking(
         raise _exit_for_error(error)
 
 
-@vnext_app.command("daily-report")
+@app.command("report-daily")
 def vnext_daily_report(
     report_input: Path = typer.Option(..., "--input", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
 ) -> None:
@@ -188,7 +152,7 @@ def vnext_daily_report(
         raise _exit_for_error(error)
 
 
-@vnext_app.command("portfolio-import")
+@app.command("import-portfolio")
 def vnext_portfolio_import(
     account_id: str = typer.Option(..., "--account-id"),
     account_index: int = typer.Option(..., "--account-index", min=0),
@@ -207,7 +171,7 @@ def vnext_portfolio_import(
         raise _exit_for_error(error)
 
 
-@vnext_app.command("portfolio-show")
+@app.command("show-portfolio")
 def vnext_portfolio_show(
     snapshot: Path = typer.Option(..., "--snapshot", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
 ) -> None:
@@ -218,7 +182,7 @@ def vnext_portfolio_show(
         raise _exit_for_error(error)
 
 
-@vnext_app.command("order-ticket")
+@app.command("ticket-order")
 def vnext_order_ticket(
     ticket_id: str = typer.Option(..., "--ticket-id"),
     account_id: str = typer.Option(..., "--account-id"),
@@ -278,7 +242,7 @@ def version() -> None:
 
 @app.command()
 def doctor() -> None:
-    """Diagnose the local WhaleMirror environment."""
+    """Diagnose the local stonks-cli environment."""
     try:
         results = do_doctor()
         console = Console()
@@ -298,7 +262,7 @@ def doctor() -> None:
         raise _exit_for_error(e)
 
 
-@config_app.command("where")
+@app.command("where-config")
 def config_where() -> None:
     """Show config file path."""
     try:
@@ -307,7 +271,7 @@ def config_where() -> None:
         raise _exit_for_error(e)
 
 
-@config_app.command("init")
+@app.command("init-config")
 def config_init(
     path: Path | None = typer.Option(None, "--path", help="Override config file path"),
 ) -> None:
@@ -318,7 +282,7 @@ def config_init(
         raise _exit_for_error(e)
 
 
-@config_app.command("migrate")
+@app.command("migrate-config")
 def config_migrate(
     path: Path | None = typer.Option(None, "--path", help="Override config file path"),
 ) -> None:
@@ -329,7 +293,7 @@ def config_migrate(
         raise _exit_for_error(e)
 
 
-@config_app.command("show")
+@app.command("show-config")
 def config_show() -> None:
     """Print current config as JSON."""
     try:
@@ -338,7 +302,7 @@ def config_show() -> None:
         raise _exit_for_error(e)
 
 
-@config_app.command("set")
+@app.command("set-config")
 def config_set(
     field: str = typer.Argument(..., help="Dotted config path (e.g., schedule.cron)"),
     value: str = typer.Argument(..., help="New value"),
@@ -350,7 +314,7 @@ def config_set(
         raise _exit_for_error(e)
 
 
-@config_app.command("validate")
+@app.command("validate-config")
 def config_validate(
     path: Path | None = typer.Option(None, "--path", help="Override config file path"),
 ) -> None:
@@ -364,7 +328,7 @@ def config_validate(
         raise typer.Exit(code=ExitCodes.BAD_CONFIG)
 
 
-@broker_app.command("account-import")
+@app.command("import-account")
 def broker_account_import() -> None:
     """Import account metadata from local operator-managed Moomoo OpenD."""
     try:
@@ -391,7 +355,7 @@ def broker_account_import() -> None:
         raise _exit_for_error(e)
 
 
-@broker_app.command("market-data-refresh")
+@app.command("refresh-market-data")
 def broker_market_data_refresh(
     symbols: list[str] = typer.Option(..., "--symbol", "-s", help="Canonical Moomoo symbol; repeat for each quote"),
 ) -> None:
@@ -542,10 +506,10 @@ def _load_portfolio_snapshot(path: Path) -> PortfolioSnapshot:
         raise ValueError("portfolio snapshot is malformed") from error
 
 
-# --- CarryMirror commands ---
+# --- Carry commands ---
 
 
-@carry_app.command("health")
+@app.command("health-carry")
 def carry_health(
     state_dir: Path = typer.Option(Path(".cache/carry-paper"), "--state-dir"),
     ledger: Path = typer.Option(Path(".cache/carry-paper/ledger.md"), "--ledger"),
@@ -555,7 +519,7 @@ def carry_health(
     skip_network: bool = typer.Option(False, "--skip-network", help="Skip network and venue API checks"),
     max_stream_age_seconds: float = typer.Option(120.0, "--max-stream-age-seconds", min=0.0),
 ) -> None:
-    """Check CarryMirror Pi paper-run host and artifact health."""
+    """Check Carry Pi paper-run host and artifact health."""
     try:
         report = build_carry_health_report(
             cfg=load_config(),
@@ -575,7 +539,7 @@ def carry_health(
         raise _exit_for_error(e)
 
 
-@carry_app.command("scan")
+@app.command("scan-carry")
 def carry_scan(
     venue: str = typer.Option("hyperliquid", "--venue", help="Carry venue; currently hyperliquid only"),
     paper: bool = typer.Option(True, "--paper/--no-paper", help="Paper scanner mode; live scan is blocked"),
@@ -615,7 +579,7 @@ def carry_scan(
         payload = {
             "venue": venue,
             "paper": True,
-            "min_net_apr": cfg.carrymirror.min_net_apr,
+            "min_net_apr": cfg.carry.min_net_apr,
             "rows": [row.to_dict() for row in rows],
         }
         console = Console()
@@ -627,7 +591,7 @@ def carry_scan(
         raise _exit_for_error(e)
 
 
-@carry_live_app.command("preflight")
+@app.command("preflight-carry-live")
 def carry_live_preflight(
     paper_gate_passed: bool = typer.Option(False, "--paper-gate-passed"),
     legal_review_recorded: bool = typer.Option(False, "--legal-review-recorded"),
@@ -657,7 +621,7 @@ def carry_live_preflight(
 
 
 def _render_carry_scan_table(rows: list[CarryScanRow]) -> Table:
-    table = Table(title="CarryMirror scan")
+    table = Table(title="Carry scan")
     table.add_column("Asset", no_wrap=True)
     table.add_column("Status", no_wrap=True)
     table.add_column("Direction", no_wrap=True)
@@ -692,7 +656,7 @@ def _parse_cli_time(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
-@carry_paper_app.command("run")
+@app.command("run-carry-paper")
 def carry_paper_run(
     venue: str = typer.Option("hyperliquid", "--venue", help="Carry venue; currently hyperliquid only"),
     paper: bool = typer.Option(True, "--paper/--no-paper", help="Paper mode; live execution is blocked"),
@@ -724,7 +688,7 @@ def carry_paper_run(
         )
         result = run_paper_carry(
             inputs=source_inputs,
-            min_net_apr=cfg.carrymirror.min_net_apr,
+            min_net_apr=cfg.carry.min_net_apr,
             config=PaperCarryConfig(
                 bankroll_usd=bankroll_usd,
                 position_notional_usd=position_notional_usd,
@@ -754,10 +718,10 @@ def carry_paper_run(
         raise _exit_for_error(e)
 
 
-# --- WhaleMirror commands ---
+# --- Research commands ---
 
-@whalemirror_app.command("ledger-demo")
-def whalemirror_ledger_demo(
+@app.command("demo-ledger")
+def research_ledger_demo(
     fixture: Path = typer.Option(DEFAULT_REPLAY_FIXTURE, "--fixture", exists=True, readable=True),
     ledger: Path = typer.Option(DEFAULT_LEDGER_PATH, "--ledger"),
     tearsheet: Path = typer.Option(DEFAULT_TEARSHEET_PATH, "--tearsheet"),
@@ -770,8 +734,8 @@ def whalemirror_ledger_demo(
         raise _exit_for_error(e)
 
 
-@whalemirror_ingest_app.command("replay")
-def whalemirror_ingest_replay(
+@app.command("replay-ingest")
+def research_ingest_replay(
     fixture: Path = typer.Option(DEFAULT_CAPTURE_FIXTURE, "--fixture", exists=True, readable=True),
     out: Path | None = typer.Option(None, "--out", help="Optional JSONL path for normalized trades"),
 ) -> None:
@@ -794,8 +758,8 @@ def whalemirror_ingest_replay(
         raise _exit_for_error(e)
 
 
-@whalemirror_ingest_app.command("analyze")
-def whalemirror_ingest_analyze(
+@app.command("analyze-ingest")
+def research_ingest_analyze(
     capture_dir: Path = typer.Option(..., "--capture-dir", exists=True, file_okay=False, readable=True),
     raw: Path | None = typer.Option(None, "--raw", exists=True, dir_okay=False, readable=True),
     normalized: Path | None = typer.Option(None, "--normalized", exists=True, dir_okay=False, readable=True),
@@ -832,8 +796,8 @@ def whalemirror_ingest_analyze(
         raise _exit_for_error(e)
 
 
-@whalemirror_ingest_app.command("run")
-def whalemirror_ingest_run(
+@app.command("run-ingest")
+def research_ingest_run(
     coins: list[str] = typer.Option(None, "--coin", help="Repeatable Hyperliquid trade coin, e.g. BTC or @107"),
     user_fill_wallets: list[str] = typer.Option(None, "--user-fill-wallet", help="Repeatable wallet for userFills"),
     user_funding_wallets: list[str] = typer.Option(
@@ -842,11 +806,11 @@ def whalemirror_ingest_run(
     all_mids: bool = typer.Option(True, "--all-mids/--no-all-mids", help="Include allMids; first dex includes spot mids"),
     all_mids_dex: str | None = typer.Option(None, "--all-mids-dex", help="Optional allMids dex selector"),
     duration_seconds: float = typer.Option(float(DEFAULT_LIVE_CAPTURE_SECONDS), "--duration-seconds", min=1.0),
-    raw_out: Path = typer.Option(Path(".cache/whalemirror-gates/captures/hyperliquid-raw.jsonl"), "--raw-out"),
-    out: Path = typer.Option(Path(".cache/whalemirror-gates/captures/hyperliquid-normalized.jsonl"), "--out"),
-    health: Path = typer.Option(Path(".cache/whalemirror-gates/reports/capture-health.json"), "--health"),
+    raw_out: Path = typer.Option(Path(".cache/validation-gates/captures/hyperliquid-raw.jsonl"), "--raw-out"),
+    out: Path = typer.Option(Path(".cache/validation-gates/captures/hyperliquid-normalized.jsonl"), "--out"),
+    health: Path = typer.Option(Path(".cache/validation-gates/reports/capture-health.json"), "--health"),
     state_dir: Path = typer.Option(default_validation_dir(), "--state-dir"),
-    report: Path = typer.Option(Path(".cache/whalemirror-gates/reports/capture-gate.md"), "--report"),
+    report: Path = typer.Option(Path(".cache/validation-gates/reports/capture-gate.md"), "--report"),
     ws_url: str = typer.Option(HYPERLIQUID_WS_URL, "--ws-url"),
     heartbeat_seconds: float = typer.Option(30.0, "--heartbeat-seconds", min=1.0),
     health_interval_seconds: float = typer.Option(300.0, "--health-interval-seconds", min=1.0),
@@ -859,7 +823,7 @@ def whalemirror_ingest_run(
     if not allow_non_linux and platform.system().lower() != "linux":
         raise _exit_for_error(
             ValueError(
-                "live WhaleMirror validation captures must run on the always-on Linux host; "
+                "live Research validation captures must run on the always-on Linux host; "
                 "use --allow-non-linux only for development smoke tests"
             )
         )
@@ -905,7 +869,7 @@ def whalemirror_ingest_run(
         Console().print_json(
             json.dumps(
                 {
-                    "state_path": str(gate_state_path(CAPTURE_GATE, state_dir=state_dir)),
+                    "state_path": str(gate_state_path(state_dir=state_dir)),
                     "report_path": str(report),
                     "raw_out_path": str(raw_out),
                     "out_path": str(out),
@@ -933,8 +897,8 @@ def whalemirror_ingest_run(
         raise _exit_for_error(e)
 
 
-@whalemirror_wallets_app.command("rank")
-def whalemirror_wallets_rank(
+@app.command("rank-wallet")
+def research_wallets_rank(
     fixture: Path = typer.Option(DEFAULT_ATTRIBUTION_FIXTURE, "--fixture", exists=True, readable=True),
     limit: int = typer.Option(100, "--limit", min=1, max=1000),
     markdown: bool = typer.Option(False, "--markdown", help="Render a markdown ranking table instead of JSON"),
@@ -957,8 +921,8 @@ def whalemirror_wallets_rank(
         raise _exit_for_error(e)
 
 
-@whalemirror_paper_app.command("replay")
-def whalemirror_paper_replay(
+@app.command("replay-paper")
+def research_paper_replay(
     fixture: Path = typer.Option(DEFAULT_PAPER_MIRROR_FIXTURE, "--fixture", exists=True, readable=True),
     rankings_fixture: Path = typer.Option(DEFAULT_ATTRIBUTION_FIXTURE, "--rankings-fixture", exists=True, readable=True),
     bankroll: float = typer.Option(1000.0, "--bankroll", min=0.0),
@@ -967,13 +931,13 @@ def whalemirror_paper_replay(
     stop_loss_pct: float = typer.Option(0.08, "--stop-loss-pct", min=0.0, max=1.0),
     cooldown_minutes: float = typer.Option(60.0, "--cooldown-minutes", min=0.0),
 ) -> None:
-    """Replay paper mirror decisions with size-down, stop-loss, and cooldown controls."""
+    """Replay paper trade analysis with sizing, stop-loss, and cooldown controls."""
     try:
         rankings = rank_wallets_from_fixture(rankings_fixture, limit=5)
-        replay = replay_paper_mirror_fixture(
+        replay = replay_paper_analysis_fixture(
             fixture_path=fixture,
             rankings=rankings,
-            config=PaperMirrorConfig(
+            config=PaperAnalysisConfig(
                 follower_bankroll_usd=bankroll,
                 max_position_fraction=max_position_fraction,
                 max_order_notional_usd=max_order_notional,
@@ -998,12 +962,12 @@ def whalemirror_paper_replay(
         raise _exit_for_error(e)
 
 
-@whalemirror_gates_app.command("capture-sample")
-def whalemirror_gates_capture_sample(
+@app.command("sample-capture-gate")
+def research_gates_capture_sample(
     fixture: Path = typer.Option(DEFAULT_CAPTURE_FIXTURE, "--fixture", exists=True, readable=True),
     state_dir: Path = typer.Option(default_validation_dir(), "--state-dir"),
-    capture_out_dir: Path = typer.Option(Path(".cache/whalemirror-gates/captures"), "--capture-out-dir"),
-    report: Path = typer.Option(Path(".cache/whalemirror-gates/capture-gate.md"), "--report"),
+    capture_out_dir: Path = typer.Option(Path(".cache/validation-gates/captures"), "--capture-out-dir"),
+    report: Path = typer.Option(Path(".cache/validation-gates/capture-gate.md"), "--report"),
     reset: bool = typer.Option(False, "--reset", help="Start a fresh gate state before recording this sample"),
 ) -> None:
     """Record a restartable #13 capture-health sample."""
@@ -1018,7 +982,7 @@ def whalemirror_gates_capture_sample(
         Console().print_json(
             json.dumps(
                 {
-                    "state_path": str(gate_state_path(CAPTURE_GATE, state_dir=state_dir)),
+                    "state_path": str(gate_state_path(state_dir=state_dir)),
                     "report_path": str(report),
                     "assessment": assess_gate(state).to_dict(),
                     "latest_evidence": state.evidence[-1].to_dict(),
@@ -1029,129 +993,9 @@ def whalemirror_gates_capture_sample(
         raise _exit_for_error(e)
 
 
-@whalemirror_gates_app.command("paper-sample")
-def whalemirror_gates_paper_sample(
-    fixture: Path = typer.Option(DEFAULT_PAPER_MIRROR_FIXTURE, "--fixture", exists=True, readable=True),
-    rankings_fixture: Path = typer.Option(DEFAULT_ATTRIBUTION_FIXTURE, "--rankings-fixture", exists=True, readable=True),
-    state_dir: Path = typer.Option(default_validation_dir(), "--state-dir"),
-    report: Path = typer.Option(Path(".cache/whalemirror-gates/paper-gate.md"), "--report"),
-    bankroll: float = typer.Option(1000.0, "--bankroll", min=0.0),
-    max_position_fraction: float = typer.Option(0.10, "--max-position-fraction", min=0.0, max=1.0),
-    max_order_notional: float = typer.Option(75.0, "--max-order-notional", min=0.0),
-    reset: bool = typer.Option(False, "--reset", help="Start a fresh gate state before recording this sample"),
-) -> None:
-    """Record a restartable #14 paper-mirror gate sample."""
-    try:
-        state = record_paper_probe(
-            state_dir=state_dir,
-            fixture_path=fixture,
-            rankings_fixture=rankings_fixture,
-            config=PaperMirrorConfig(
-                follower_bankroll_usd=bankroll,
-                max_position_fraction=max_position_fraction,
-                max_order_notional_usd=max_order_notional,
-            ),
-            reset=reset,
-        )
-        write_gate_report(state, report_path=report)
-        Console().print_json(
-            json.dumps(
-                {
-                    "state_path": str(gate_state_path(PAPER_GATE, state_dir=state_dir)),
-                    "report_path": str(report),
-                    "assessment": assess_gate(state).to_dict(),
-                    "latest_evidence": state.evidence[-1].to_dict(),
-                }
-            )
-        )
-    except Exception as e:
-        raise _exit_for_error(e)
-
-
-@whalemirror_gates_app.command("paper-record")
-def whalemirror_gates_paper_record(
-    evidence: Path = typer.Option(..., "--evidence", exists=True, dir_okay=False, readable=True),
-    state_dir: Path = typer.Option(default_validation_dir(), "--state-dir"),
-    report: Path = typer.Option(Path(".cache/whalemirror-gates/paper-gate.md"), "--report"),
-    reset: bool = typer.Option(False, "--reset", help="Start a fresh #14 gate state before recording evidence"),
-) -> None:
-    """Record operator-produced #14 Linux paper-run evidence."""
-    try:
-        payload = json.loads(evidence.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            raise ValueError("paper evidence must be a JSON object")
-        state = record_paper_evidence(state_dir=state_dir, paper_payload=payload, reset=reset)
-        write_gate_report(state, report_path=report)
-        Console().print_json(
-            json.dumps(
-                {
-                    "state_path": str(gate_state_path(PAPER_GATE, state_dir=state_dir)),
-                    "report_path": str(report),
-                    "assessment": assess_gate(state).to_dict(),
-                    "latest_evidence": state.evidence[-1].to_dict(),
-                }
-            )
-        )
-    except Exception as e:
-        raise _exit_for_error(e)
-
-
-@whalemirror_gates_app.command("live-sample")
-def whalemirror_gates_live_sample(
-    fixture: Path = typer.Option(DEFAULT_LIVE_VALIDATION_FIXTURE, "--fixture", exists=True, readable=True),
-    state_dir: Path = typer.Option(default_validation_dir(), "--state-dir"),
-    report: Path = typer.Option(Path(".cache/whalemirror-gates/live-gate.md"), "--report"),
-    reset: bool = typer.Option(False, "--reset", help="Start a fresh gate state before recording this sample"),
-) -> None:
-    """Record a restartable #10 latency, slippage, and scale-gate sample."""
-    try:
-        state = record_live_probe(state_dir=state_dir, fixture_path=fixture, reset=reset)
-        write_gate_report(state, report_path=report)
-        Console().print_json(
-            json.dumps(
-                {
-                    "state_path": str(gate_state_path(LIVE_GATE, state_dir=state_dir)),
-                    "report_path": str(report),
-                    "assessment": assess_gate(state).to_dict(),
-                    "latest_evidence": state.evidence[-1].to_dict(),
-                }
-            )
-        )
-    except Exception as e:
-        raise _exit_for_error(e)
-
-
-@whalemirror_gates_app.command("live-record")
-def whalemirror_gates_live_record(
-    evidence: Path = typer.Option(..., "--evidence", exists=True, dir_okay=False, readable=True),
-    state_dir: Path = typer.Option(default_validation_dir(), "--state-dir"),
-    report: Path = typer.Option(Path(".cache/whalemirror-gates/live-gate.md"), "--report"),
-    reset: bool = typer.Option(False, "--reset", help="Start a fresh #10 gate state before recording evidence"),
-) -> None:
-    """Record operator-produced #10 Linux live validation evidence."""
-    try:
-        payload = json.loads(evidence.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            raise ValueError("live evidence must be a JSON object")
-        state = record_live_evidence(state_dir=state_dir, live_payload=payload, reset=reset)
-        write_gate_report(state, report_path=report)
-        Console().print_json(
-            json.dumps(
-                {
-                    "state_path": str(gate_state_path(LIVE_GATE, state_dir=state_dir)),
-                    "report_path": str(report),
-                    "assessment": assess_gate(state).to_dict(),
-                    "latest_evidence": state.evidence[-1].to_dict(),
-                }
-            )
-        )
-    except Exception as e:
-        raise _exit_for_error(e)
-
-
-@whalemirror_gates_app.command("status")
-def whalemirror_gates_status(
-    gate: str = typer.Option("all", "--gate", help="all, capture, paper, live, capture-7d, paper-30d, or live-60d"),
+@app.command("status-gate")
+def research_gates_status(
+    gate: str = typer.Option("capture", "--gate", help="capture or capture-7d"),
     state_dir: Path = typer.Option(default_validation_dir(), "--state-dir"),
     markdown: bool = typer.Option(False, "--markdown", help="Render markdown reports instead of JSON"),
 ) -> None:
@@ -1159,11 +1003,10 @@ def whalemirror_gates_status(
     try:
         gate_ids = _resolve_gate_ids(gate)
         states = []
-        for gate_id in gate_ids:
-            path = gate_state_path(gate_id, state_dir=state_dir)
+        for _gate_id in gate_ids:
+            path = gate_state_path(state_dir=state_dir)
             if path.exists():
-                state = load_gate_state(gate_id, state_dir=state_dir)
-                states.append(state)
+                states.append(load_gate_state(state_dir=state_dir))
         if markdown:
             Console().print("\n".join(render_gate_report(state) for state in states))
         else:
@@ -1173,7 +1016,7 @@ def whalemirror_gates_status(
                         "state_dir": str(state_dir),
                         "gates": [
                             {
-                                "state_path": str(gate_state_path(state.gate_id, state_dir=state_dir)),
+                                "state_path": str(gate_state_path(state_dir=state_dir)),
                                 "assessment": assess_gate(state).to_dict(),
                             }
                             for state in states
@@ -1188,13 +1031,9 @@ def whalemirror_gates_status(
 def _resolve_gate_ids(gate: str) -> list[str]:
     normalized = gate.strip().lower()
     mapping = {
-        "all": [CAPTURE_GATE, PAPER_GATE, LIVE_GATE],
+        "all": [CAPTURE_GATE],
         "capture": [CAPTURE_GATE],
         "capture-7d": [CAPTURE_GATE],
-        "paper": [PAPER_GATE],
-        "paper-30d": [PAPER_GATE],
-        "live": [LIVE_GATE],
-        "live-60d": [LIVE_GATE],
     }
     if normalized not in mapping:
         raise ValueError(f"unsupported gate: {gate}")

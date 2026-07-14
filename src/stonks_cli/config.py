@@ -164,20 +164,7 @@ class PolymarketConfig(BaseModel):
     whale_trade_min_usd: float = Field(default=10000.0, ge=0.0) # threshold for whale-trade alerts
 
 
-class WhaleMirrorConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    enabled: bool = False
-    venue: Literal["hyperliquid"] = "hyperliquid"
-    paper: bool = True
-    decision_ledger_path: str = "docs/decision-ledger.md"
-    live_require_armed_env: bool = True
-    hyperliquid_live_armed_env: str = "STONKS_CLI_HYPERLIQUID_LIVE_ARMED"
-    live_phase1_budget_usd: float = Field(default=200.0, ge=0.0)
-    max_live_order_notional_usd: float = Field(default=50.0, ge=0.0)
-    scale_gate_green_weeks: int = Field(default=7, ge=1)
-
-
-class CarryMirrorConfig(BaseModel):
+class CarryConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     paper: bool = True
     live_armed: bool = False
@@ -226,7 +213,7 @@ class LegalPolicyConfig(BaseModel):
     )
     blocked_venue_ids: list[str] = Field(default_factory=lambda: ["bybit", "kalshi", "polymarket", "sportsbook", "sportsbooks"])
     blocked_strategy_classes: list[str] = Field(
-        default_factory=lambda: ["circumvention", "prediction_market", "sportsbook", "sports_betting", "whalemirror_live_target_selection"]
+        default_factory=lambda: ["circumvention", "prediction_market", "sportsbook", "sports_betting", "wallet_live_target_selection"]
     )
 
 
@@ -403,11 +390,17 @@ class AppConfig(BaseModel):
     )
     api_keys: ApiKeysConfig = Field(default_factory=ApiKeysConfig)
     polymarket: PolymarketConfig = Field(default_factory=PolymarketConfig)
-    whalemirror: WhaleMirrorConfig = Field(default_factory=WhaleMirrorConfig)
-    carrymirror: CarryMirrorConfig = Field(default_factory=CarryMirrorConfig)
+    carry: CarryConfig = Field(default_factory=CarryConfig)
     legal_policy: LegalPolicyConfig = Field(default_factory=LegalPolicyConfig)
     vnext: VNextConfig = Field(default_factory=VNextConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_retired_product_keys(cls, value: Any) -> Any:
+        if isinstance(value, dict) and {"whale" + "mirror", "carry" + "mirror"}.intersection(value):
+            raise ValueError("retired product config keys are unsupported")
+        return value
 
 
 def config_path() -> Path:

@@ -25,7 +25,7 @@ def test_vnext_daily_report_cli_renders_validated_portfolio_risk_report(tmp_path
     path.write_text(json.dumps(_input()), encoding="utf-8")
     monkeypatch.setattr(cli, "load_config", _enabled_config)
 
-    result = CliRunner().invoke(app, ["vnext", "daily-report", "--input", str(path)])
+    result = CliRunner().invoke(app, ["report-daily", "--input", str(path)])
 
     assert result.exit_code == 0
     assert result.output.startswith("DAILY REPORT\nPORTFOLIO RISK REPORT\n")
@@ -36,10 +36,10 @@ def test_vnext_daily_report_cli_fails_closed_for_disabled_or_malformed_input(tmp
     path = tmp_path / "daily-report.json"
     path.write_text("{}", encoding="utf-8")
 
-    result = CliRunner().invoke(app, ["vnext", "daily-report", "--input", str(path)])
+    result = CliRunner().invoke(app, ["report-daily", "--input", str(path)])
 
     assert result.exit_code == ExitCodes.BAD_CONFIG
     monkeypatch.setattr(cli, "load_config", _enabled_config)
-    result = CliRunner().invoke(app, ["vnext", "daily-report", "--input", str(path)])
+    result = CliRunner().invoke(app, ["report-daily", "--input", str(path)])
     assert result.exit_code == ExitCodes.USAGE_ERROR
     assert "input fields are invalid" in result.output

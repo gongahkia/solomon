@@ -35,15 +35,15 @@ def do_doctor() -> dict[str, str]:
         out["state_dir"] = str(default_state_dir())
     except Exception as e:
         out["paths"] = f"error: {e}"
-    try: # whalemirror guard check
-        from stonks_cli.whalemirror.guards import evaluate_execution_guards
-        from stonks_cli.whalemirror.models import MirrorMode, Venue
-        paper_guards = evaluate_execution_guards(venue=Venue.HYPERLIQUID, mode=MirrorMode.PAPER)
-        live_guards = evaluate_execution_guards(venue=Venue.HYPERLIQUID, mode=MirrorMode.LIVE)
-        out["whalemirror_paper_guards"] = "clear" if not paper_guards else "; ".join(paper_guards)
-        out["whalemirror_live_guards"] = "clear" if not live_guards else "; ".join(live_guards)
+    try: # research guard check
+        from stonks_cli.research.guards import evaluate_execution_guards
+        from stonks_cli.research.models import ExecutionMode, Venue
+        paper_guards = evaluate_execution_guards(venue=Venue.HYPERLIQUID, mode=ExecutionMode.PAPER)
+        live_guards = evaluate_execution_guards(venue=Venue.HYPERLIQUID, mode=ExecutionMode.LIVE)
+        out["research_paper_guards"] = "clear" if not paper_guards else "; ".join(paper_guards)
+        out["research_live_guards"] = "clear" if not live_guards else "; ".join(live_guards)
     except Exception as e:
-        out["whalemirror_guards"] = f"error: {e}"
+        out["research_guards"] = f"error: {e}"
     try: # plugin load status
         from stonks_cli.plugins import load_plugins_best_effort
         specs = tuple(cfg.plugins or [])

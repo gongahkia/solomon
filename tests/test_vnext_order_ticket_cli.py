@@ -6,8 +6,7 @@ from stonks_cli.errors import ExitCodes
 
 def _arguments() -> list[str]:
     return [
-        "vnext",
-        "order-ticket",
+        "ticket-order",
         "--ticket-id",
         "ticket-1",
         "--account-id",

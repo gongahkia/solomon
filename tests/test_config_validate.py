@@ -31,7 +31,7 @@ def test_config_migrate_cli_command(tmp_path):
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
 
-    result = CliRunner().invoke(app, ["config", "migrate", "--path", str(path)])
+    result = CliRunner().invoke(app, ["migrate-config", "--path", str(path)])
 
     assert result.exit_code == 0
     assert "Config migrated" in result.output
@@ -42,7 +42,7 @@ def test_config_validate_cli_emits_secret_safe_failure_json(tmp_path):
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"vnext": {"features": {"broker_data": "secret-value"}}}), encoding="utf-8")
 
-    result = CliRunner().invoke(app, ["config", "validate", "--path", str(path)])
+    result = CliRunner().invoke(app, ["validate-config", "--path", str(path)])
 
     assert result.exit_code == ExitCodes.BAD_CONFIG
     assert json.loads(result.output) == {"valid": False, "errors": [{"code": "schema_validation_error"}]}

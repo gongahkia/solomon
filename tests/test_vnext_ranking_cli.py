@@ -31,7 +31,7 @@ def test_vnext_ranking_cli_ranks_canonical_local_components_with_configured_weig
     path.write_text(json.dumps(_components()), encoding="utf-8")
     monkeypatch.setattr(cli, "load_config", _enabled_config)
 
-    result = CliRunner().invoke(app, ["vnext", "ranking", "--components", str(path)])
+    result = CliRunner().invoke(app, ["rank", "--components", str(path)])
 
     assert result.exit_code == 0
     assert json.loads(result.output) == [
@@ -44,11 +44,11 @@ def test_vnext_ranking_cli_fails_closed_for_disabled_or_malformed_input(tmp_path
     path = tmp_path / "components.json"
     path.write_text("[]", encoding="utf-8")
 
-    result = CliRunner().invoke(app, ["vnext", "ranking", "--components", str(path)])
+    result = CliRunner().invoke(app, ["rank", "--components", str(path)])
 
     assert result.exit_code == ExitCodes.BAD_CONFIG
     assert "not enabled" in result.output
     monkeypatch.setattr(cli, "load_config", _enabled_config)
-    result = CliRunner().invoke(app, ["vnext", "ranking", "--components", str(path)])
+    result = CliRunner().invoke(app, ["rank", "--components", str(path)])
     assert result.exit_code == ExitCodes.USAGE_ERROR
     assert "components are invalid" in result.output

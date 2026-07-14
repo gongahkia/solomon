@@ -1,9 +1,9 @@
 # Archived Polymarket Live Runbook
 
 > [!WARNING]
-> This document is historical reference only. Do not use it as execution guidance from Singapore. The active repo posture is WhaleMirror on SG-legal venues only; Polymarket, Kalshi, sportsbooks, and circumvention-based prediction-market execution are out of scope for SG users.
+> This document is historical reference only. Do not use it as execution guidance from Singapore. The active repo posture is stonks-cli on SG-legal venues only; Polymarket, Kalshi, sportsbooks, and circumvention-based prediction-market execution are out of scope for SG users.
 
-The notes below are retained so old implementation decisions can be audited while the repo pivots to WhaleMirror. They are not current operating instructions.
+The notes below are retained so old implementation decisions can be audited while the repo pivots to stonks-cli. They are not current operating instructions.
 
 ## Historical Install Notes
 

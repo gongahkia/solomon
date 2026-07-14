@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from stonks_cli.whalemirror.carry_audit import (
+from stonks_cli.carry.carry_audit import (
     carry_ledger_row,
     reconcile_carry_state,
     render_carry_ledger,
     render_carry_reconciliation_report,
 )
-from stonks_cli.whalemirror.carry_paper import PaperCarryConfig, PaperCarryEngine
-from stonks_cli.whalemirror.hyperliquid import HyperliquidCarryInput
-from stonks_cli.whalemirror.models import BasisSnapshot, CarryQuote, FundingSnapshot, Venue
+from stonks_cli.carry.carry_paper import PaperCarryConfig, PaperCarryEngine
+from stonks_cli.research.hyperliquid import HyperliquidCarryInput
+from stonks_cli.research.models import BasisSnapshot, CarryQuote, FundingSnapshot, Venue
 
 
 def test_carry_ledger_rows_cover_skip_entry_exit_and_kill():

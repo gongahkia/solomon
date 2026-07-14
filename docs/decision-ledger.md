@@ -29,8 +29,8 @@ The ledger is markdown-first for Phase 1. It can be generated or mirrored into a
 
 | Date | Decision | Rationale |
 | --- | --- | --- |
-| 2026-05-23 | #13 gate waived at 57.8h (target 168h) | Partial capture demonstrated zero ingestion errors across 3.2M+ normalized rows. Remaining 110h would not add signal given connector reliability evidence. Waiver recorded in `docs/whalemirror-partial-capture-2026-05.md`. |
-| 2026-05-23 | Phase 0 equity purge completed | Deleted `analysis/`, `charts/`, `data/`, `reporting/`, `polymarket/`, `portfolio/`, `formatting/`, `alerts/`, `scheduler/`, `pipeline.py`. CLI surface reduced to `version`, `doctor`, `config`, `whalemirror`. 62 tests pass, 0 fail. |
+| 2026-05-23 | #13 gate waived at 57.8h (target 168h) | Partial capture demonstrated zero ingestion errors across 3.2M+ normalized rows. Remaining 110h would not add signal given connector reliability evidence. Waiver recorded in `docs/research-partial-capture-2026-05.md`. |
+| 2026-05-23 | Phase 0 equity purge completed | Deleted `analysis/`, `charts/`, `data/`, `reporting/`, `polymarket/`, `portfolio/`, `formatting/`, `alerts/`, `scheduler/`, `pipeline.py`. CLI surface reduced to `version`, `doctor`, `config`, `research`. 62 tests pass, 0 fail. |
 
 ## Ledger Rules
 

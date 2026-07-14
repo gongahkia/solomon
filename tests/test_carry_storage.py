@@ -3,8 +3,8 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-from stonks_cli.whalemirror.carry_storage import CarryStorage, CarryStorageRetentionPolicy
-from stonks_cli.whalemirror.models import (
+from stonks_cli.carry.carry_storage import CarryStorage, CarryStorageRetentionPolicy
+from stonks_cli.research.models import (
     BasisSnapshot,
     CarryDecision,
     CarryPosition,

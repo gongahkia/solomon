@@ -15,7 +15,7 @@ def test_vnext_market_refresh_cli_emits_read_only_preentitled_quotes(monkeypatch
     quote = MoomooUSQuote("US.AAPL", "2026-01-01", "09:30:00", 200.0, 198.0, 201.0, 197.0, 199.0, 2000.0, 400000.0, False)
     monkeypatch.setattr(cli, "refresh_moomoo_market_data", lambda config, symbols: (quote,))
 
-    result = CliRunner().invoke(app, ["vnext", "market-refresh", "--symbol", "US.AAPL"])
+    result = CliRunner().invoke(app, ["refresh-market", "--symbol", "US.AAPL"])
 
     assert result.exit_code == 0
     payload = json.loads(result.output)
@@ -43,7 +43,7 @@ def test_vnext_market_refresh_cli_fails_closed_for_external_data(monkeypatch):
 
     monkeypatch.setattr(cli, "refresh_moomoo_market_data", fail)
 
-    result = CliRunner().invoke(app, ["vnext", "market-refresh", "--symbol", "US.AAPL"])
+    result = CliRunner().invoke(app, ["refresh-market", "--symbol", "US.AAPL"])
 
     assert result.exit_code == ExitCodes.PROVIDER_ERROR
     assert "Moomoo US quotes are malformed" in result.output

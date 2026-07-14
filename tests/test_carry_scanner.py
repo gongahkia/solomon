@@ -5,15 +5,15 @@ from datetime import UTC, datetime
 
 from typer.testing import CliRunner
 
-from stonks_cli.cli import app
-from stonks_cli.config import AppConfig
-from stonks_cli.whalemirror.carry_scanner import (
+from stonks_cli.carry.carry_scanner import (
     CarryCostAssumptions,
     calculate_carry_scan_row,
     scan_hyperliquid_carry,
 )
-from stonks_cli.whalemirror.hyperliquid import HyperliquidCarryInput
-from stonks_cli.whalemirror.models import BasisSnapshot, CarryQuote, FundingSnapshot, Venue
+from stonks_cli.cli import app
+from stonks_cli.config import AppConfig
+from stonks_cli.research.hyperliquid import HyperliquidCarryInput
+from stonks_cli.research.models import BasisSnapshot, CarryQuote, FundingSnapshot, Venue
 
 
 def test_carry_scanner_ranks_positive_opportunity():
@@ -67,7 +67,7 @@ def test_carry_scanner_blocks_missing_fields_without_estimating():
 
 def test_scan_hyperliquid_carry_uses_config_min_net_apr():
     cfg = AppConfig()
-    cfg.carrymirror.min_net_apr = 0.20
+    cfg.carry.min_net_apr = 0.20
 
     rows = scan_hyperliquid_carry(
         cfg=cfg,
@@ -87,7 +87,7 @@ def test_carry_scan_cli_outputs_json_from_fixture(tmp_path, monkeypatch):
 
     result = CliRunner().invoke(
         app,
-        ["carry", "scan", "--fixture", str(fixture), "--json", "--now", "2026-07-02T00:00:10Z"],
+        ["scan-carry", "--fixture", str(fixture), "--json", "--now", "2026-07-02T00:00:10Z"],
     )
 
     assert result.exit_code == 0
@@ -108,11 +108,11 @@ def test_carry_scan_cli_outputs_table_from_fixture(tmp_path, monkeypatch):
 
     result = CliRunner().invoke(
         app,
-        ["carry", "scan", "--fixture", str(fixture), "--now", "2026-07-02T00:00:10Z"],
+        ["scan-carry", "--fixture", str(fixture), "--now", "2026-07-02T00:00:10Z"],
     )
 
     assert result.exit_code == 0
-    assert "CarryMirror scan" in result.output
+    assert "Carry scan" in result.output
     assert "BTC" in result.output
     assert "candidate" in result.output
 

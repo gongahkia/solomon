@@ -1,6 +1,6 @@
 # vNext package boundaries
 
-`stonks_cli.vnext` isolates the decision-support pivot from existing WhaleMirror and CarryMirror code.
+`stonks_cli.vnext` isolates decision-support components from the research and carry packages.
 
 | Package | Allowed dependencies | Broker access |
 | --- | --- | --- |

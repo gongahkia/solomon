@@ -1,0 +1,19 @@
+[Unit]
+Description=stonks-cli 7-day Hyperliquid capture gate
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/stonks-cli
+Environment=STONKS_CLI_VALIDATION_GATE_ROOT=/var/lib/stonks-cli/validation-gates
+Environment="STONKS_CLI_CAPTURE_COINS=BTC ETH SOL"
+Environment=STONKS_CLI_CAPTURE_DURATION_SECONDS=604800
+ExecStart=/opt/stonks-cli/scripts/linux_capture_7d.sh
+Restart=on-failure
+RestartSec=30
+KillSignal=SIGINT
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

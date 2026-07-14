@@ -2,7 +2,7 @@
 
 Status: archived from the active product surface on 2026-05-17.
 
-The old equity-analysis, report-generation, stock-data provider, charting, and generic stock-MCP work is no longer an active WhaleMirror product surface. The code may remain temporarily as migration reference while Phase 1 replaces it with venue-neutral WhaleMirror primitives, but root CLI help, README quickstart paths, package extras, and MCP examples must not advertise it.
+The old equity-analysis, report-generation, stock-data provider, charting, and generic stock-MCP work is no longer an active `stonks-cli` surface. The code may remain temporarily as migration reference while venue-neutral primitives replace it, but root CLI help, README quickstart paths, package extras, and MCP examples must not advertise it.
 
 ## Archived Surfaces
 
@@ -15,4 +15,4 @@ The old equity-analysis, report-generation, stock-data provider, charting, and g
 
 ## Active Direction
 
-The visible CLI surface should point users at WhaleMirror, Hyperliquid dry-run/paper workflows, venue-neutral models, decision ledgers, and fixture-backed replay. Any future provider work should be added as a WhaleMirror venue adapter with explicit legal, custody, funding, slippage, and audit constraints.
+The visible CLI surface should point users at `stonks-cli`, Hyperliquid dry-run/paper workflows, venue-neutral models, decision ledgers, and fixture-backed replay. Any future provider work should be added as a venue adapter with explicit legal, custody, funding, slippage, and audit constraints.

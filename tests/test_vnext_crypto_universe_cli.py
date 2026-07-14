@@ -19,7 +19,7 @@ def test_crypto_universe_cli_renders_private_persisted_snapshot(tmp_path):
     )
     path = save_crypto_universe_snapshot(tmp_path, snapshot)
 
-    result = CliRunner().invoke(app, ["vnext", "crypto-universe", "--snapshot", str(path)])
+    result = CliRunner().invoke(app, ["universe-crypto", "--snapshot", str(path)])
 
     assert result.exit_code == 0
     assert json.loads(result.output) == snapshot.to_data()
@@ -30,7 +30,7 @@ def test_crypto_universe_cli_fails_closed_for_malformed_snapshot(tmp_path):
     path.write_text("not-json", encoding="utf-8")
     path.chmod(0o600)
 
-    result = CliRunner().invoke(app, ["vnext", "crypto-universe", "--snapshot", str(path)])
+    result = CliRunner().invoke(app, ["universe-crypto", "--snapshot", str(path)])
 
     assert result.exit_code == ExitCodes.USAGE_ERROR
     assert "cannot be loaded" in result.output

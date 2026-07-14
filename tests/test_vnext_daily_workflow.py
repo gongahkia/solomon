@@ -24,7 +24,7 @@ def test_daily_workflow_renders_validated_report_then_delivers_the_same_manual_m
     )
     monkeypatch.setattr(cli, "load_config", lambda: AppConfig.model_validate({"vnext": {"enabled": True, "features": {"operator_reports": True}}}))
 
-    report = CliRunner().invoke(app, ["vnext", "daily-report", "--input", str(path)])
+    report = CliRunner().invoke(app, ["report-daily", "--input", str(path)])
 
     calls = []
     message = render_telegram_report_template(report.output)

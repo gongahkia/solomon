@@ -21,7 +21,7 @@ def test_vnext_portfolio_show_cli_renders_canonical_read_only_snapshot(tmp_path)
     path = tmp_path / "portfolio.json"
     path.write_text(json.dumps(_snapshot()), encoding="utf-8")
 
-    result = CliRunner().invoke(app, ["vnext", "portfolio-show", "--snapshot", str(path)])
+    result = CliRunner().invoke(app, ["show-portfolio", "--snapshot", str(path)])
 
     assert result.exit_code == 0
     assert json.loads(result.output) == _snapshot()
@@ -31,7 +31,7 @@ def test_vnext_portfolio_show_cli_fails_closed_for_malformed_snapshot(tmp_path):
     path = tmp_path / "portfolio.json"
     path.write_text("{}", encoding="utf-8")
 
-    result = CliRunner().invoke(app, ["vnext", "portfolio-show", "--snapshot", str(path)])
+    result = CliRunner().invoke(app, ["show-portfolio", "--snapshot", str(path)])
 
     assert result.exit_code == ExitCodes.USAGE_ERROR
     assert "snapshot fields are invalid" in result.output

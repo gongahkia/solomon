@@ -17,7 +17,7 @@ from stonks_cli.vnext.moomoo import MoomooAccount, MoomooSdkCompatibility, Moomo
 def test_broker_account_import_cli_emits_read_only_accounts(monkeypatch):
     monkeypatch.setattr(cli, "import_moomoo_accounts", lambda config: (MoomooAccount("100", 0, "REAL"),))
 
-    result = CliRunner().invoke(app, ["broker", "account-import"])
+    result = CliRunner().invoke(app, ["import-account"])
 
     assert result.exit_code == 0
     assert json.loads(result.output) == {
@@ -34,14 +34,14 @@ def test_broker_account_import_cli_fails_closed_for_external_data(monkeypatch):
 
     monkeypatch.setattr(cli, "import_moomoo_accounts", fail)
 
-    result = CliRunner().invoke(app, ["broker", "account-import"])
+    result = CliRunner().invoke(app, ["import-account"])
 
     assert result.exit_code == ExitCodes.PROVIDER_ERROR
     assert "Moomoo account list is malformed" in result.output
 
 
 def test_broker_account_import_cli_requires_explicit_broker_configuration():
-    result = CliRunner().invoke(app, ["broker", "account-import"])
+    result = CliRunner().invoke(app, ["import-account"])
 
     assert result.exit_code == ExitCodes.BAD_CONFIG
     assert "account import is not enabled" in result.output

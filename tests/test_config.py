@@ -87,24 +87,31 @@ def test_config_accepts_akshare_provider(monkeypatch, tmp_path):
     assert load_config().data.provider == "akshare"
 
 
-def test_carrymirror_defaults_keep_live_disabled(monkeypatch, tmp_path):
+def test_carry_defaults_keep_live_disabled(monkeypatch, tmp_path):
     cfg_path = tmp_path / "config.json"
     monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
 
     cfg = load_config()
 
-    assert cfg.carrymirror.paper is True
-    assert cfg.carrymirror.live_armed is False
-    assert cfg.carrymirror.live_armed_env == "STONKS_CLI_CARRY_LIVE_ARMED"
-    assert cfg.carrymirror.live_secrets_path == "~/.config/stonks-cli/carry-live.env"
-    assert cfg.carrymirror.tiny_live_min_usd == 50.0
-    assert cfg.carrymirror.tiny_live_max_usd == 200.0
-    assert cfg.carrymirror.max_total_live_usd == 0.0
-    assert cfg.carrymirror.min_net_apr == 0.15
-    assert cfg.carrymirror.alert_sink == "disabled"
-    assert set(cfg.carrymirror.alert_events) == {"kill_switch", "ledger_mismatch", "service_restart", "stale_data"}
+    assert cfg.carry.paper is True
+    assert cfg.carry.live_armed is False
+    assert cfg.carry.live_armed_env == "STONKS_CLI_CARRY_LIVE_ARMED"
+    assert cfg.carry.live_secrets_path == "~/.config/stonks-cli/carry-live.env"
+    assert cfg.carry.tiny_live_min_usd == 50.0
+    assert cfg.carry.tiny_live_max_usd == 200.0
+    assert cfg.carry.max_total_live_usd == 0.0
+    assert cfg.carry.min_net_apr == 0.15
+    assert cfg.carry.alert_sink == "disabled"
+    assert set(cfg.carry.alert_events) == {"kill_switch", "ledger_mismatch", "service_restart", "stale_data"}
     assert "bybit" in cfg.legal_policy.blocked_venue_ids
-    assert "whalemirror_live_target_selection" in cfg.legal_policy.blocked_strategy_classes
+    assert "wallet_live_target_selection" in cfg.legal_policy.blocked_strategy_classes
+
+
+def test_retired_product_config_keys_are_rejected():
+    with pytest.raises(Exception):
+        AppConfig.model_validate({"whale" + "mirror": {}})
+    with pytest.raises(Exception):
+        AppConfig.model_validate({"carry" + "mirror": {}})
 
 
 def test_legacy_config_migrates_to_current_schema(monkeypatch, tmp_path):
@@ -320,7 +327,7 @@ def test_redacted_config_hides_sensitive_values():
     data = redacted_config_data(cfg)
 
     assert data["api_keys"] == "***REDACTED***"
-    assert data["carrymirror"]["telegram_bot_token_env"] == "***REDACTED***"
+    assert data["carry"]["telegram_bot_token_env"] == "***REDACTED***"
 
 
 def test_redacted_config_hides_nested_authentication_and_webhook_values():

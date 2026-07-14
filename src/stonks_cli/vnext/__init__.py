@@ -100,6 +100,12 @@ from stonks_cli.vnext.foundation import (
     resolve_environment_secret,
     save_run_identity,
 )
+from stonks_cli.vnext.fx_reference_rates import (
+    FXReferenceRate,
+    FXReferenceRateBatch,
+    FXReferenceRateProvider,
+    ingest_fx_reference_rates,
+)
 from stonks_cli.vnext.health import HealthCheck, HealthReport, HealthResult, HealthStatus, run_health_checks
 from stonks_cli.vnext.holdings_import import import_moomoo_holdings
 from stonks_cli.vnext.lifecycle import ApplicationLifecycle, LifecycleHook, LifecycleState
@@ -242,6 +248,9 @@ __all__ = [
     "ExchangeTimeZone",
     "EVENT_SCHEMA_VERSION",
     "ExplanationEvidenceBundle",
+    "FXReferenceRate",
+    "FXReferenceRateBatch",
+    "FXReferenceRateProvider",
     "FIXTURE_EVENT_IDS",
     "FIXTURE_RUN_ID",
     "FIXTURE_RUN_STARTED_AT",
@@ -362,6 +371,7 @@ __all__ = [
     "import_moomoo_accounts",
     "import_moomoo_holdings",
     "import_moomoo_transactions",
+    "ingest_fx_reference_rates",
     "ingest_daily_closing_prices",
     "ingest_crypto_asset_metadata",
     "create_crypto_universe_snapshot",

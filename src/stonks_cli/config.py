@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 CONFIG_SCHEMA_VERSION = 2
 
@@ -256,6 +256,17 @@ class VNextOperatorConfig(BaseModel):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
 
 
+class VNextFeatureFlags(BaseModel):
+    """Explicit opt-in flags for vNext read-only capabilities."""
+
+    model_config = ConfigDict(extra="forbid")
+    broker_data: StrictBool = False
+    crypto_research: StrictBool = False
+    portfolio: StrictBool = False
+    operator_reports: StrictBool = False
+    execution: Literal[False] = False
+
+
 class VNextConfig(BaseModel):
     """Fail-closed configuration for the SG decision-support pivot."""
 
@@ -264,6 +275,7 @@ class VNextConfig(BaseModel):
     moomoo: MoomooConfig = Field(default_factory=MoomooConfig)
     research: VNextResearchConfig = Field(default_factory=VNextResearchConfig)
     operator: VNextOperatorConfig = Field(default_factory=VNextOperatorConfig)
+    features: VNextFeatureFlags = Field(default_factory=VNextFeatureFlags)
 
 
 class TuiConfig(BaseModel):

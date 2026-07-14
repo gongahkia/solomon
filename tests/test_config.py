@@ -132,6 +132,24 @@ def test_config_schema_discriminator_is_serialized_and_rejects_legacy_value():
         AppConfig.model_validate({"schema_version": 1})
 
 
+def test_vnext_feature_flags_are_explicit_opt_in_with_execution_disabled():
+    flags = AppConfig().vnext.features
+
+    assert flags.model_dump() == {
+        "broker_data": False,
+        "crypto_research": False,
+        "portfolio": False,
+        "operator_reports": False,
+        "execution": False,
+    }
+    with pytest.raises(ValueError):
+        AppConfig.model_validate({"vnext": {"features": {"broker_data": "true"}}})
+    with pytest.raises(ValueError):
+        AppConfig.model_validate({"vnext": {"features": {"execution": True}}})
+    with pytest.raises(ValueError):
+        AppConfig.model_validate({"vnext": {"features": {"unknown": True}}})
+
+
 @pytest.mark.parametrize("data", [[], {"schema_version": True}, {"schema_version": "2"}])
 def test_malformed_config_version_fails_closed(data):
     with pytest.raises(ValueError, match="config root must be an object|schema_version must be an integer"):

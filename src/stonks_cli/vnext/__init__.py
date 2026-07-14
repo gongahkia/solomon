@@ -315,6 +315,11 @@ from stonks_cli.vnext.stablecoins import (
 )
 from stonks_cli.vnext.telegram_client import TelegramMessageReceipt, send_telegram_message
 from stonks_cli.vnext.telegram_configuration import TelegramDeliveryConfiguration, validate_telegram_configuration
+from stonks_cli.vnext.telegram_delivery_health import (
+    TelegramDeliveryHealth,
+    TelegramDeliveryHealthStatus,
+    monitor_telegram_delivery_health,
+)
 from stonks_cli.vnext.telegram_message_chunks import TELEGRAM_MAX_MESSAGE_CHARACTERS, chunk_telegram_message
 from stonks_cli.vnext.telegram_report_template import render_telegram_report_template
 from stonks_cli.vnext.transactional_snapshots import TransactionalSnapshot, TransactionalSnapshotStore
@@ -609,6 +614,7 @@ __all__ = [
     "normalize_moomoo_corporate_actions",
     "normalize_exchange_timestamp",
     "monitor_data_freshness",
+    "monitor_telegram_delivery_health",
     "deterministic_fixture_event_jsonl",
     "deterministic_fixture_events",
     "deterministic_fixture_run",
@@ -655,6 +661,8 @@ __all__ = [
     "render_portfolio_risk_report",
     "render_telegram_report_template",
     "TelegramDeliveryConfiguration",
+    "TelegramDeliveryHealth",
+    "TelegramDeliveryHealthStatus",
     "TelegramMessageReceipt",
     "TELEGRAM_MAX_MESSAGE_CHARACTERS",
     "validate_package_boundaries",

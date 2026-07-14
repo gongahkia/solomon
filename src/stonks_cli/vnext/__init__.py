@@ -208,6 +208,7 @@ from stonks_cli.vnext.transactions_import import (
     import_moomoo_transactions,
 )
 from stonks_cli.vnext.trend_factor import TrendFactor, calculate_trend_factor
+from stonks_cli.vnext.usd_portfolio_nav import USDPortfolioNAV, calculate_usd_portfolio_nav
 from stonks_cli.vnext.weighted_ranker import WeightedAssetRank, rank_weighted_assets
 
 __all__ = [
@@ -356,6 +357,7 @@ __all__ = [
     "SystemUTCClock",
     "StructuredEvent",
     "UTCDateTime",
+    "USDPortfolioNAV",
     "USMarketSession",
     "USMarketSessionStatus",
     "VNextApplicationError",
@@ -395,6 +397,7 @@ __all__ = [
     "calculate_rolling_drawdown",
     "calculate_sgd_portfolio_nav",
     "calculate_trend_factor",
+    "calculate_usd_portfolio_nav",
     "classify_stablecoins",
     "normalize_moomoo_instruments",
     "normalize_moomoo_corporate_actions",

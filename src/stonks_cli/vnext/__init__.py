@@ -180,6 +180,7 @@ from stonks_cli.vnext.rolling_drawdown import DailyDrawdown, RollingDrawdownSeri
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
 from stonks_cli.vnext.score_components import ScoreComponent
 from stonks_cli.vnext.snapshot_cache import IdempotentSnapshotCache
+from stonks_cli.vnext.source_citations import SOURCE_CITATION_SCHEMA_VERSION, SourceCitation
 from stonks_cli.vnext.stablecoins import (
     DEFAULT_STABLECOIN_PROVIDER_ASSET_IDS,
     StablecoinClassification,
@@ -307,6 +308,8 @@ __all__ = [
     "SGMarketSessionStatus",
     "SecretReference",
     "ServiceContainer",
+    "SOURCE_CITATION_SCHEMA_VERSION",
+    "SourceCitation",
     "SQLiteConnectionFactory",
     "StablecoinClassification",
     "StablecoinClassifier",

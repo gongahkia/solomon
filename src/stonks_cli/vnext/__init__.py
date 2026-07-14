@@ -10,6 +10,7 @@ from stonks_cli.vnext.citation_verification import CitationVerification, verify_
 from stonks_cli.vnext.container import ServiceContainer
 from stonks_cli.vnext.cost_basis import CostBasis, calculate_cost_basis
 from stonks_cli.vnext.cross_asset_correlation import CrossAssetCorrelation, calculate_cross_asset_correlations
+from stonks_cli.vnext.crypto_allocation_limit import enforce_crypto_allocation_limit
 from stonks_cli.vnext.crypto_liquidity import filter_crypto_universe_by_liquidity
 from stonks_cli.vnext.crypto_market_cap import (
     CryptoMarketCapAsset,
@@ -398,6 +399,7 @@ __all__ = [
     "fetch_crypto_market_caps",
     "fetch_canonical_daily_closes",
     "filter_crypto_universe_by_liquidity",
+    "enforce_crypto_allocation_limit",
     "filter_crypto_universe_by_supported_venues",
     "check_moomoo_sdk_compatibility",
     "calculate_asset_returns",

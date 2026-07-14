@@ -703,17 +703,36 @@ def test_moomoo_read_only_historical_candle_client_rejects_invalid_requests(symb
         client.list_daily_candles(symbol, start, end)
 
 
-def test_moomoo_read_only_historical_candle_client_rejects_pagination_or_malformed_data():
+def test_moomoo_read_only_historical_candle_client_follows_page_keys_and_rejects_repeated_keys():
     class Context:
+        calls = 0
+
         def request_history_kline(self, *args, **kwargs):
-            return 0, [], b"next-page"
+            self.calls += 1
+            if self.calls == 1:
+                return 0, [
+                    {"code": "SG.D05", "time_key": "2026-01-01 00:00:00", "open": 1, "close": 1, "high": 1, "low": 1, "volume": 1, "turnover": 1, "last_close": 1}
+                ], b"next-page"
+            return 0, [
+                {"code": "SG.D05", "time_key": "2026-01-02 00:00:00", "open": 1, "close": 1, "high": 1, "low": 1, "volume": 1, "turnover": 1, "last_close": 1}
+            ], None
 
         def close(self) -> None:
             pass
 
-    client = MoomooReadOnlyHistoricalCandleClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
-    with pytest.raises(VNextExternalDataError, match="pagination"):
-        client.list_daily_candles("SG.D05", "2026-01-01", "2026-01-01")
+    context = Context()
+    client = MoomooReadOnlyHistoricalCandleClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: context)
+    assert len(client.list_daily_candles("SG.D05", "2026-01-01", "2026-01-02")) == 2
+    assert context.calls == 2
+
+    class RepeatedKeyContext(Context):
+        def request_history_kline(self, *args, **kwargs):
+            return 0, [], b"repeat"
+
+    with pytest.raises(VNextExternalDataError, match="page key"):
+        MoomooReadOnlyHistoricalCandleClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: RepeatedKeyContext()).list_daily_candles(
+            "SG.D05", "2026-01-01", "2026-01-02"
+        )
 
 
 def test_moomoo_read_only_market_data_entitlement_client_reads_all_connection_status():

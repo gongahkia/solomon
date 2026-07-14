@@ -1138,6 +1138,7 @@ class MoomooReadOnlyHistoricalCandleClient:
     context_factory: Callable[[str, int], object]
     success_code: int = 0
     max_count: int = 1000
+    max_pages: int = 100
 
     def __post_init__(self) -> None:
         if not isinstance(self.contract, MoomooOpenDProcessContract):
@@ -1148,6 +1149,8 @@ class MoomooReadOnlyHistoricalCandleClient:
             raise ValueError("Moomoo SDK success code must be an integer")
         if not isinstance(self.max_count, int) or isinstance(self.max_count, bool) or not 1 <= self.max_count <= 1000:
             raise ValueError("Moomoo historical-candle max_count must be within 1..1000")
+        if not isinstance(self.max_pages, int) or isinstance(self.max_pages, bool) or not 1 <= self.max_pages <= 100:
+            raise ValueError("Moomoo historical-candle max_pages must be within 1..100")
 
     def list_daily_candles(self, symbol: str, start: str, end: str) -> tuple[MoomooHistoricalCandle, ...]:
         try:
@@ -1166,12 +1169,26 @@ class MoomooReadOnlyHistoricalCandleClient:
             getter = getattr(context, "request_history_kline", None)
             if not callable(getter):
                 raise VNextExternalDataError("Moomoo historical-candle context is incompatible")
-            response = getter(normalized_symbol, start=start, end=end, max_count=self.max_count)
-            if not isinstance(response, tuple) or len(response) != 3 or response[0] != self.success_code:
-                raise VNextExternalDataError("Moomoo historical candles are unavailable")
-            if response[2] is not None:
-                raise VNextExternalDataError("Moomoo historical candles require pagination")
-            return _normalize_moomoo_historical_candles(normalized_symbol, start_date, end_date, response[1])
+            candles: list[MoomooHistoricalCandle] = []
+            page_key: bytes | None = None
+            seen_page_keys: set[bytes] = set()
+            for _ in range(self.max_pages):
+                kwargs: dict[str, object] = {"start": start, "end": end, "max_count": self.max_count}
+                if page_key is not None:
+                    kwargs["page_req_key"] = page_key
+                response = getter(normalized_symbol, **kwargs)
+                if not isinstance(response, tuple) or len(response) != 3 or response[0] != self.success_code:
+                    raise VNextExternalDataError("Moomoo historical candles are unavailable")
+                candles.extend(_normalize_moomoo_historical_candles(normalized_symbol, start_date, end_date, response[1]))
+                next_page_key = response[2]
+                if next_page_key is None:
+                    _validate_chronological_candles(candles)
+                    return tuple(candles)
+                if not isinstance(next_page_key, bytes) or not next_page_key or next_page_key in seen_page_keys:
+                    raise VNextExternalDataError("Moomoo historical-candle page key is malformed")
+                seen_page_keys.add(next_page_key)
+                page_key = next_page_key
+            raise VNextExternalDataError("Moomoo historical-candle page limit exceeded")
         except VNextExternalDataError:
             raise
         except Exception as error:
@@ -1219,9 +1236,13 @@ def _normalize_moomoo_historical_candles(
                 _finite_candle_value(record, "last_close"),
             )
         )
+    _validate_chronological_candles(candles)
+    return tuple(candles)
+
+
+def _validate_chronological_candles(candles: Sequence[MoomooHistoricalCandle]) -> None:
     if any(next_candle.time_key <= candle.time_key for candle, next_candle in zip(candles, candles[1:], strict=False)):
         raise ValueError("Moomoo historical candles must be chronological")
-    return tuple(candles)
 
 
 def _finite_candle_value(record: Mapping[object, object], field: str) -> float:

@@ -1,6 +1,8 @@
+from itertools import permutations
+
 import pytest
 
-from stonks_cli.config import FactorWeightsConfig
+from stonks_cli.config import RESEARCH_FACTOR_IDS, FactorWeightsConfig
 from stonks_cli.vnext.score_components import ScoreComponent
 from stonks_cli.vnext.weighted_ranker import rank_weighted_assets
 
@@ -53,3 +55,18 @@ def test_weighted_ranker_breaks_equal_scores_by_canonical_asset_id_not_input_ord
     ranks = rank_weighted_assets(components, FactorWeightsConfig())
 
     assert [(item.provider_asset_id, item.rank) for item in ranks] == [("bitcoin", 1), ("ethereum", 2)]
+
+
+def test_weighted_ranker_is_invariant_to_all_asset_and_factor_input_orderings():
+    scores = {"alpha": 0.5, "beta": 0.8, "zeta": 0.8}
+    expected = (("beta", 1, 0.8), ("zeta", 2, 0.8), ("alpha", 3, 0.5))
+
+    for asset_ids in permutations(scores):
+        for factor_ids in permutations(RESEARCH_FACTOR_IDS):
+            components = tuple(
+                ScoreComponent("coingecko", asset_id, factor_id, scores[asset_id], scores[asset_id])
+                for asset_id in asset_ids
+                for factor_id in factor_ids
+            )
+
+            assert tuple((item.provider_asset_id, item.rank, item.weighted_score) for item in rank_weighted_assets(components, FactorWeightsConfig())) == expected

@@ -15,6 +15,8 @@ from stonks_cli.vnext.moomoo import (
     MoomooCashFlow,
     MoomooHistoricalCandle,
     MoomooHistoricalOrder,
+    MoomooMarketDataEntitlements,
+    MoomooMarketDataSubscription,
     MoomooOpenDProcessContract,
     MoomooOpenOrder,
     MoomooOrderHistoryWindow,
@@ -23,6 +25,7 @@ from stonks_cli.vnext.moomoo import (
     MoomooReadOnlyBalanceClient,
     MoomooReadOnlyCashFlowClient,
     MoomooReadOnlyHistoricalCandleClient,
+    MoomooReadOnlyMarketDataEntitlementClient,
     MoomooReadOnlyOpenOrderClient,
     MoomooReadOnlyOrderHistoryClient,
     MoomooReadOnlyPositionClient,
@@ -705,3 +708,51 @@ def test_moomoo_read_only_historical_candle_client_rejects_pagination_or_malform
     client = MoomooReadOnlyHistoricalCandleClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
     with pytest.raises(VNextExternalDataError, match="pagination"):
         client.list_daily_candles("SG.D05", "2026-01-01", "2026-01-01")
+
+
+def test_moomoo_read_only_market_data_entitlement_client_reads_all_connection_status():
+    class Context:
+        closed = False
+        kwargs: dict[str, object] = {}
+
+        def query_subscription(self, **kwargs):
+            self.kwargs = kwargs
+            return 0, {
+                "total_used": 4,
+                "own_used": 1,
+                "remain": 996,
+                "own_security_firm": "Moomoo SG",
+                "sub_list": {"TICKER": ["US.AAPL"], "QUOTE": ["SG.D05", "US.AAPL"]},
+            }
+
+        def close(self) -> None:
+            self.closed = True
+
+    context = Context()
+    client = MoomooReadOnlyMarketDataEntitlementClient(
+        MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: context
+    )
+
+    assert client.read_entitlements() == MoomooMarketDataEntitlements(
+        4,
+        1,
+        996,
+        "Moomoo SG",
+        (MoomooMarketDataSubscription("QUOTE", ("SG.D05", "US.AAPL")), MoomooMarketDataSubscription("TICKER", ("US.AAPL",))),
+    )
+    assert context.kwargs == {"is_all_conn": True}
+    assert context.closed is True
+    assert not hasattr(client, "subscribe")
+
+
+def test_moomoo_read_only_market_data_entitlement_client_rejects_malformed_quota_data():
+    class Context:
+        def query_subscription(self, **kwargs):
+            return 0, {"total_used": 1, "own_used": 2, "remain": 998, "own_security_firm": "Moomoo SG", "sub_list": {}}
+
+        def close(self) -> None:
+            pass
+
+    client = MoomooReadOnlyMarketDataEntitlementClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
+    with pytest.raises(VNextExternalDataError):
+        client.read_entitlements()

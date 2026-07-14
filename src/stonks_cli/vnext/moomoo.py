@@ -1225,6 +1225,112 @@ def _validate_moomoo_us_or_sg_symbol(symbol: object) -> str:
 
 
 @dataclass(frozen=True)
+class MoomooMarketDataSubscription:
+    data_type: str
+    symbols: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.data_type, str) or not self.data_type:
+            raise ValueError("Moomoo market-data subscription type must be non-empty")
+        if not isinstance(self.symbols, tuple) or not all(isinstance(symbol, str) and symbol for symbol in self.symbols):
+            raise ValueError("Moomoo market-data subscription symbols must be non-empty strings")
+        if len(set(self.symbols)) != len(self.symbols):
+            raise ValueError("Moomoo market-data subscription symbols must be unique")
+
+
+@dataclass(frozen=True)
+class MoomooMarketDataEntitlements:
+    total_used: int
+    own_used: int
+    remaining: int
+    security_firm: str
+    subscriptions: tuple[MoomooMarketDataSubscription, ...]
+
+    def __post_init__(self) -> None:
+        for value in (self.total_used, self.own_used, self.remaining):
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError("Moomoo market-data quotas must be non-negative integers")
+        if self.own_used > self.total_used:
+            raise ValueError("Moomoo own subscription quota exceeds total usage")
+        if not isinstance(self.security_firm, str) or not self.security_firm:
+            raise ValueError("Moomoo market-data security firm must be non-empty")
+        if not isinstance(self.subscriptions, tuple) or not all(
+            isinstance(subscription, MoomooMarketDataSubscription) for subscription in self.subscriptions
+        ):
+            raise ValueError("Moomoo market-data subscriptions are invalid")
+        if len({subscription.data_type for subscription in self.subscriptions}) != len(self.subscriptions):
+            raise ValueError("Moomoo market-data subscription types must be unique")
+
+
+@dataclass(frozen=True)
+class MoomooReadOnlyMarketDataEntitlementClient:
+    contract: MoomooOpenDProcessContract
+    context_factory: Callable[[str, int], object]
+    success_code: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.contract, MoomooOpenDProcessContract):
+            raise TypeError("OpenD process contract is required")
+        if not callable(self.context_factory):
+            raise TypeError("Moomoo entitlement context factory must be callable")
+        if not isinstance(self.success_code, int) or isinstance(self.success_code, bool):
+            raise ValueError("Moomoo SDK success code must be an integer")
+
+    def read_entitlements(self) -> MoomooMarketDataEntitlements:
+        try:
+            context = self.context_factory(self.contract.host, self.contract.port)
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo entitlement context unavailable") from error
+        try:
+            getter = getattr(context, "query_subscription", None)
+            if not callable(getter):
+                raise VNextExternalDataError("Moomoo entitlement context is incompatible")
+            response = getter(is_all_conn=True)
+            if not isinstance(response, tuple) or len(response) != 2 or response[0] != self.success_code:
+                raise VNextExternalDataError("Moomoo market-data entitlements are unavailable")
+            return _normalize_moomoo_market_data_entitlements(response[1])
+        except VNextExternalDataError:
+            raise
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo market-data entitlements are malformed") from error
+        finally:
+            closer = getattr(context, "close", None)
+            if not callable(closer):
+                raise VNextExternalDataError("Moomoo entitlement context is incompatible")
+            try:
+                closer()
+            except Exception as error:
+                raise VNextExternalDataError("Moomoo entitlement context close failed") from error
+
+
+def _normalize_moomoo_market_data_entitlements(raw_entitlements: object) -> MoomooMarketDataEntitlements:
+    if not isinstance(raw_entitlements, Mapping):
+        raise ValueError("Moomoo market-data entitlements must be an object")
+    total_used = raw_entitlements.get("total_used")
+    own_used = raw_entitlements.get("own_used")
+    remaining = raw_entitlements.get("remain")
+    security_firm = raw_entitlements.get("own_security_firm")
+    raw_subscriptions = raw_entitlements.get("sub_list")
+    if (
+        not isinstance(total_used, int)
+        or isinstance(total_used, bool)
+        or not isinstance(own_used, int)
+        or isinstance(own_used, bool)
+        or not isinstance(remaining, int)
+        or isinstance(remaining, bool)
+        or not isinstance(security_firm, str)
+        or not isinstance(raw_subscriptions, Mapping)
+    ):
+        raise ValueError("Moomoo market-data entitlements have invalid fields")
+    subscriptions: list[MoomooMarketDataSubscription] = []
+    for data_type, raw_symbols in raw_subscriptions.items():
+        if not isinstance(data_type, str) or not isinstance(raw_symbols, Sequence) or isinstance(raw_symbols, (str, bytes)):
+            raise ValueError("Moomoo market-data subscription is malformed")
+        subscriptions.append(MoomooMarketDataSubscription(data_type, tuple(raw_symbols)))
+    return MoomooMarketDataEntitlements(total_used, own_used, remaining, security_firm, tuple(sorted(subscriptions, key=lambda item: item.data_type)))
+
+
+@dataclass(frozen=True)
 class OpenDEndpointProbe:
     status: OpenDEndpointStatus
     code: str

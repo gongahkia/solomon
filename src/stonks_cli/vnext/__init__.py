@@ -4,6 +4,7 @@ from stonks_cli.vnext.account_import import import_moomoo_accounts
 from stonks_cli.vnext.asset_class_limits import AssetClassExposureLimit, enforce_asset_class_exposure_limits
 from stonks_cli.vnext.asset_returns import AssetReturnSeries, DailyAssetReturn, calculate_asset_returns
 from stonks_cli.vnext.boundaries import PACKAGE_BOUNDARIES, PackageBoundary, VNextPackage, validate_package_boundaries
+from stonks_cli.vnext.broker_app_order_ticket import render_broker_app_order_ticket
 from stonks_cli.vnext.capabilities import Capability, CapabilityRegistry
 from stonks_cli.vnext.cash_ledger import CashBalance, CashLedger, CashLedgerEntry
 from stonks_cli.vnext.citation_verification import CitationVerification, verify_source_citation
@@ -454,6 +455,7 @@ __all__ = [
     "probe_local_opend",
     "run_health_checks",
     "rank_weighted_assets",
+    "render_broker_app_order_ticket",
     "validate_package_boundaries",
     "verify_source_citation",
     "WeightedAssetRank",

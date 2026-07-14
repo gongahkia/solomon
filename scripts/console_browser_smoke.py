@@ -117,6 +117,19 @@ def _run_verification_flow(command: list[str], session: str, url: str) -> None:
     _require_text(reaffirmed, "memo-2026-01")
 
 
+def _run_navigation_smoke(command: list[str], session: str, base_url: str) -> None:
+    for path, heading in (
+        ("/console/claims", "Claim Promotion"),
+        ("/console/sources", "Sources"),
+        ("/console/reviews", "Review Tasks"),
+        ("/console/dependencies", "Dependency Review"),
+        ("/console/currency-report", "Currency Report"),
+        ("/console/audit-pack", "Audit Pack"),
+    ):
+        _run_cli(command, session, "open", f"{base_url}{path}")
+        _require_text(_snapshot(command, session), heading)
+
+
 def _cli_command(playwright_cli: Path | None) -> list[str]:
     if playwright_cli is not None:
         return [str(playwright_cli)]
@@ -174,7 +187,9 @@ def main() -> int:
         )
         try:
             _wait_for_server(f"http://127.0.0.1:{port}/health", server)
-            _run_verification_flow(command, session, f"http://127.0.0.1:{port}/console/verification")
+            base_url = f"http://127.0.0.1:{port}"
+            _run_verification_flow(command, session, f"{base_url}/console/verification")
+            _run_navigation_smoke(command, session, base_url)
         finally:
             try:
                 _run_cli(command, session, "close")

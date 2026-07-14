@@ -100,6 +100,7 @@ from stonks_cli.vnext.foundation import (
 )
 from stonks_cli.vnext.health import HealthCheck, HealthReport, HealthResult, HealthStatus, run_health_checks
 from stonks_cli.vnext.lifecycle import ApplicationLifecycle, LifecycleHook, LifecycleState
+from stonks_cli.vnext.llm_summary_boundary import LLM_SUMMARY_OPERATION, LLMSummaryBoundary, create_llm_summary_boundary
 from stonks_cli.vnext.market_calendar import (
     NYSECashEquityCalendar2026,
     SGMarketSession,
@@ -239,6 +240,8 @@ __all__ = [
     "IdempotentReadRetryPolicy",
     "LifecycleHook",
     "LifecycleState",
+    "LLM_SUMMARY_OPERATION",
+    "LLMSummaryBoundary",
     "LocalOpenDReadOnlyClient",
     "LocalOpenDReadOnlyConnection",
     "PRIVATE_DIRECTORY_MODE",
@@ -339,6 +342,7 @@ __all__ = [
     "ingest_daily_closing_prices",
     "ingest_crypto_asset_metadata",
     "create_crypto_universe_snapshot",
+    "create_llm_summary_boundary",
     "create_structured_event",
     "fetch_crypto_market_caps",
     "fetch_canonical_daily_closes",

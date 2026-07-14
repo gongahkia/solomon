@@ -13,6 +13,7 @@ from stonks_cli.vnext.moomoo import (
     MoomooAccount,
     MoomooAccountBalance,
     MoomooCashFlow,
+    MoomooHistoricalCandle,
     MoomooHistoricalOrder,
     MoomooOpenDProcessContract,
     MoomooOpenOrder,
@@ -21,6 +22,7 @@ from stonks_cli.vnext.moomoo import (
     MoomooReadOnlyAccountClient,
     MoomooReadOnlyBalanceClient,
     MoomooReadOnlyCashFlowClient,
+    MoomooReadOnlyHistoricalCandleClient,
     MoomooReadOnlyOpenOrderClient,
     MoomooReadOnlyOrderHistoryClient,
     MoomooReadOnlyPositionClient,
@@ -632,3 +634,74 @@ def test_moomoo_read_only_sg_quote_client_rejects_malformed_data():
     client = MoomooReadOnlySGQuoteClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
     with pytest.raises(VNextExternalDataError):
         client.list_quotes(("SG.D05",))
+
+
+def test_moomoo_read_only_historical_candle_client_reads_single_complete_page():
+    class Context:
+        closed = False
+        args: tuple[object, ...] = ()
+        kwargs: dict[str, object] = {}
+
+        def request_history_kline(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+            return 0, [
+                {
+                    "code": "US.AAPL",
+                    "time_key": "2026-01-01 00:00:00",
+                    "open": 100,
+                    "close": 101,
+                    "high": 102,
+                    "low": 99,
+                    "volume": 1000,
+                    "turnover": 101000,
+                    "last_close": 98,
+                },
+                {
+                    "code": "US.AAPL",
+                    "time_key": "2026-01-02 00:00:00",
+                    "open": 101,
+                    "close": 102,
+                    "high": 103,
+                    "low": 100,
+                    "volume": 1200,
+                    "turnover": 122400,
+                    "last_close": 101,
+                },
+            ], None
+
+        def close(self) -> None:
+            self.closed = True
+
+    context = Context()
+    client = MoomooReadOnlyHistoricalCandleClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: context)
+
+    assert client.list_daily_candles("US.AAPL", "2026-01-01", "2026-01-02") == (
+        MoomooHistoricalCandle("US.AAPL", "2026-01-01 00:00:00", 100.0, 101.0, 102.0, 99.0, 1000.0, 101000.0, 98.0),
+        MoomooHistoricalCandle("US.AAPL", "2026-01-02 00:00:00", 101.0, 102.0, 103.0, 100.0, 1200.0, 122400.0, 101.0),
+    )
+    assert context.args == ("US.AAPL",)
+    assert context.kwargs == {"start": "2026-01-01", "end": "2026-01-02", "max_count": 1000}
+    assert context.closed is True
+    assert not hasattr(client, "subscribe")
+
+
+@pytest.mark.parametrize("symbol,start,end", [("HK.00700", "2026-01-01", "2026-01-02"), ("US.AAPL", "2026-01-02", "2026-01-01")])
+def test_moomoo_read_only_historical_candle_client_rejects_invalid_requests(symbol, start, end):
+    client = MoomooReadOnlyHistoricalCandleClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: object())
+
+    with pytest.raises(VNextExternalDataError):
+        client.list_daily_candles(symbol, start, end)
+
+
+def test_moomoo_read_only_historical_candle_client_rejects_pagination_or_malformed_data():
+    class Context:
+        def request_history_kline(self, *args, **kwargs):
+            return 0, [], b"next-page"
+
+        def close(self) -> None:
+            pass
+
+    client = MoomooReadOnlyHistoricalCandleClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
+    with pytest.raises(VNextExternalDataError, match="pagination"):
+        client.list_daily_candles("SG.D05", "2026-01-01", "2026-01-01")

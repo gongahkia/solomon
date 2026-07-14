@@ -1089,6 +1089,142 @@ def _parse_moomoo_quote_time(value: object) -> None:
 
 
 @dataclass(frozen=True)
+class MoomooHistoricalCandle:
+    symbol: str
+    time_key: str
+    open_price: float
+    close_price: float
+    high_price: float
+    low_price: float
+    volume: float
+    turnover: float
+    last_close_price: float
+
+    def __post_init__(self) -> None:
+        _validate_moomoo_us_or_sg_symbol(self.symbol)
+        _parse_moomoo_timestamp(self.time_key)
+        for value in (
+            self.open_price,
+            self.close_price,
+            self.high_price,
+            self.low_price,
+            self.volume,
+            self.turnover,
+            self.last_close_price,
+        ):
+            if not isinstance(value, float) or not math.isfinite(value):
+                raise ValueError("Moomoo historical candle values must be finite floats")
+        if self.low_price > self.high_price or not self.low_price <= self.open_price <= self.high_price or not self.low_price <= self.close_price <= self.high_price:
+            raise ValueError("Moomoo historical candle prices are inconsistent")
+
+
+@dataclass(frozen=True)
+class MoomooReadOnlyHistoricalCandleClient:
+    contract: MoomooOpenDProcessContract
+    context_factory: Callable[[str, int], object]
+    success_code: int = 0
+    max_count: int = 1000
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.contract, MoomooOpenDProcessContract):
+            raise TypeError("OpenD process contract is required")
+        if not callable(self.context_factory):
+            raise TypeError("Moomoo historical-candle context factory must be callable")
+        if not isinstance(self.success_code, int) or isinstance(self.success_code, bool):
+            raise ValueError("Moomoo SDK success code must be an integer")
+        if not isinstance(self.max_count, int) or isinstance(self.max_count, bool) or not 1 <= self.max_count <= 1000:
+            raise ValueError("Moomoo historical-candle max_count must be within 1..1000")
+
+    def list_daily_candles(self, symbol: str, start: str, end: str) -> tuple[MoomooHistoricalCandle, ...]:
+        try:
+            normalized_symbol = _validate_moomoo_us_or_sg_symbol(symbol)
+            start_date = _parse_moomoo_date(start)
+            end_date = _parse_moomoo_date(end)
+        except ValueError as error:
+            raise VNextExternalDataError("Moomoo historical-candle request is malformed") from error
+        if end_date < start_date:
+            raise VNextExternalDataError("Moomoo historical-candle end precedes start")
+        try:
+            context = self.context_factory(self.contract.host, self.contract.port)
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo historical-candle context unavailable") from error
+        try:
+            getter = getattr(context, "request_history_kline", None)
+            if not callable(getter):
+                raise VNextExternalDataError("Moomoo historical-candle context is incompatible")
+            response = getter(normalized_symbol, start=start, end=end, max_count=self.max_count)
+            if not isinstance(response, tuple) or len(response) != 3 or response[0] != self.success_code:
+                raise VNextExternalDataError("Moomoo historical candles are unavailable")
+            if response[2] is not None:
+                raise VNextExternalDataError("Moomoo historical candles require pagination")
+            return _normalize_moomoo_historical_candles(normalized_symbol, start_date, end_date, response[1])
+        except VNextExternalDataError:
+            raise
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo historical candles are malformed") from error
+        finally:
+            closer = getattr(context, "close", None)
+            if not callable(closer):
+                raise VNextExternalDataError("Moomoo historical-candle context is incompatible")
+            try:
+                closer()
+            except Exception as error:
+                raise VNextExternalDataError("Moomoo historical-candle context close failed") from error
+
+
+def _normalize_moomoo_historical_candles(
+    symbol: str, start_date: date, end_date: date, raw_candles: object
+) -> tuple[MoomooHistoricalCandle, ...]:
+    records = raw_candles
+    to_dict = getattr(raw_candles, "to_dict", None)
+    if callable(to_dict):
+        records = to_dict("records")
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        raise ValueError("Moomoo historical candles must be a sequence")
+    candles: list[MoomooHistoricalCandle] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("Moomoo historical-candle record must be an object")
+        record_symbol = record.get("code")
+        time_key = record.get("time_key")
+        if not isinstance(record_symbol, str) or record_symbol != symbol or not isinstance(time_key, str):
+            raise ValueError("Moomoo historical-candle record has invalid fields")
+        candle_time = _parse_moomoo_timestamp(time_key)
+        if not start_date <= candle_time.date() <= end_date:
+            raise ValueError("Moomoo historical candle is outside requested bounds")
+        candles.append(
+            MoomooHistoricalCandle(
+                symbol,
+                time_key,
+                _finite_candle_value(record, "open"),
+                _finite_candle_value(record, "close"),
+                _finite_candle_value(record, "high"),
+                _finite_candle_value(record, "low"),
+                _finite_candle_value(record, "volume"),
+                _finite_candle_value(record, "turnover"),
+                _finite_candle_value(record, "last_close"),
+            )
+        )
+    if any(next_candle.time_key <= candle.time_key for candle, next_candle in zip(candles, candles[1:], strict=False)):
+        raise ValueError("Moomoo historical candles must be chronological")
+    return tuple(candles)
+
+
+def _finite_candle_value(record: Mapping[object, object], field: str) -> float:
+    value = record.get(field)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"Moomoo historical-candle record has invalid {field}")
+    return float(value)
+
+
+def _validate_moomoo_us_or_sg_symbol(symbol: object) -> str:
+    try:
+        return _validate_moomoo_us_symbol(symbol)
+    except ValueError:
+        return _validate_moomoo_sg_symbol(symbol)
+
+
+@dataclass(frozen=True)
 class OpenDEndpointProbe:
     status: OpenDEndpointStatus
     code: str

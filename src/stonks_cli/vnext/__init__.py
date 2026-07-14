@@ -4,6 +4,7 @@ from stonks_cli.vnext.account_import import import_moomoo_accounts
 from stonks_cli.vnext.asset_returns import AssetReturnSeries, DailyAssetReturn, calculate_asset_returns
 from stonks_cli.vnext.boundaries import PACKAGE_BOUNDARIES, PackageBoundary, VNextPackage, validate_package_boundaries
 from stonks_cli.vnext.capabilities import Capability, CapabilityRegistry
+from stonks_cli.vnext.citation_verification import CitationVerification, verify_source_citation
 from stonks_cli.vnext.container import ServiceContainer
 from stonks_cli.vnext.cross_asset_correlation import CrossAssetCorrelation, calculate_cross_asset_correlations
 from stonks_cli.vnext.crypto_liquidity import filter_crypto_universe_by_liquidity
@@ -197,6 +198,7 @@ __all__ = [
     "AssetReturnSeries",
     "Capability",
     "CapabilityRegistry",
+    "CitationVerification",
     "CanonicalDailyClose",
     "CanonicalPriceDataProvider",
     "CanonicalPriceSeries",
@@ -383,5 +385,6 @@ __all__ = [
     "run_health_checks",
     "rank_weighted_assets",
     "validate_package_boundaries",
+    "verify_source_citation",
     "WeightedAssetRank",
 ]

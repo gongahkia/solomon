@@ -1,6 +1,16 @@
 # Curator console
 
-Four server-rendered screens cover the portfolio console scope: verification review, dependency review, currency report, and audit-pack export.
+Seven server-rendered workflows form the operational console surface.
+
+| Workflow | Purpose | Required role |
+| --- | --- | --- |
+| Verification Desk | Reaffirm, supersede, retire, or pin positions needing review. | `admin`, `reviewer`, or `lawyer` |
+| Claims | Promote, reject, or defer source-extracted candidate claims. | `admin` or `curator` |
+| Sources | Inspect health and sync history; sync filesystem sources and retry rejected extraction. | `admin` or `curator` |
+| Reviews | Assign, start, and resolve authority-change review tasks. | `admin`, `reviewer`, or `lawyer` |
+| Dependencies | Confirm or reject dependency suggestions and inspect the graph. | `admin` or `curator` |
+| Currency Report | Filter movement by period and scope; export JSON or PDF. | any console read role |
+| Audit Pack | Inspect evidence and export an item audit pack. | any console read role |
 
 ## Verification Desk
 

@@ -242,6 +242,12 @@ from stonks_cli.vnext.paper_portfolio_accounting import (
 from stonks_cli.vnext.portfolio_domain import PortfolioAssetClass, PortfolioHolding, PortfolioSnapshot
 from stonks_cli.vnext.portfolio_exposure import PortfolioExposure, calculate_portfolio_exposure
 from stonks_cli.vnext.portfolio_risk_report import render_portfolio_risk_report
+from stonks_cli.vnext.pre_execution_risk import (
+    DefaultPreExecutionRiskEvaluator,
+    PreExecutionRiskAssessment,
+    PreExecutionRiskEvaluator,
+    PreExecutionRiskEvidence,
+)
 from stonks_cli.vnext.price_data import (
     CanonicalDailyClose,
     CanonicalPriceDataProvider,
@@ -443,6 +449,10 @@ __all__ = [
     "PaperPortfolioPosition",
     "PaperGateEvidence",
     "PaperGateOutcome",
+    "DefaultPreExecutionRiskEvaluator",
+    "PreExecutionRiskAssessment",
+    "PreExecutionRiskEvaluator",
+    "PreExecutionRiskEvidence",
     "PortfolioAssetClass",
     "PortfolioExposure",
     "PortfolioHolding",

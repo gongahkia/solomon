@@ -44,6 +44,7 @@ from stonks_cli.vnext.crypto_venues import (
     filter_crypto_universe_by_supported_venues,
 )
 from stonks_cli.vnext.daily_closing_prices import DailyClosingPriceIngestion, ingest_daily_closing_prices
+from stonks_cli.vnext.data_confidence import DataConfidenceScore, calculate_data_confidence_score
 from stonks_cli.vnext.database import SQLiteConnectionFactory
 from stonks_cli.vnext.errors import (
     OpenDContextIncompatibleError,
@@ -215,6 +216,7 @@ __all__ = [
     "CRYPTO_UNIVERSE_HISTORY_VERSION",
     "DEFAULT_STABLECOIN_PROVIDER_ASSET_IDS",
     "DailyAssetReturn",
+    "DataConfidenceScore",
     "DailyDrawdown",
     "DailyClosingPriceIngestion",
     "EventSeverity",
@@ -337,6 +339,7 @@ __all__ = [
     "check_moomoo_sdk_compatibility",
     "calculate_asset_returns",
     "calculate_cross_asset_correlations",
+    "calculate_data_confidence_score",
     "calculate_momentum_factor",
     "calculate_mean_reversion_factor",
     "calculate_realized_volatility",

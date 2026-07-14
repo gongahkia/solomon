@@ -62,11 +62,17 @@ class ApplicationLifecycle:
     def stop(self) -> None:
         if self._state is not LifecycleState.RUNNING:
             raise VNextInvariantError(f"lifecycle cannot stop from state:{self._state}")
+        errors: list[Exception] = []
         try:
             while self._started:
-                self._started.pop().stop()
+                try:
+                    self._started.pop().stop()
+                except Exception as error:
+                    errors.append(error)
         finally:
             self._state = LifecycleState.STOPPED
+        if errors:
+            raise VNextInvariantError("lifecycle shutdown encountered hook failures") from errors[0]
 
     def _rollback_started_hooks(self) -> None:
         while self._started:

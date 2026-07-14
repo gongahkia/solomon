@@ -49,3 +49,22 @@ def test_application_lifecycle_rejects_duplicate_and_invalid_state_transitions()
         lifecycle.start()
     with pytest.raises(VNextInvariantError, match="registered before startup"):
         lifecycle.register(LifecycleHook("reports", lambda: None, lambda: None))
+
+
+def test_application_lifecycle_gracefully_runs_all_shutdown_hooks_when_one_fails():
+    events: list[str] = []
+
+    def broken_stop() -> None:
+        events.append("stop:broken")
+        raise RuntimeError("stop failed")
+
+    lifecycle = ApplicationLifecycle()
+    lifecycle.register(LifecycleHook("database", lambda: events.append("start:database"), lambda: events.append("stop:database")))
+    lifecycle.register(LifecycleHook("reports", lambda: events.append("start:reports"), broken_stop))
+    lifecycle.start()
+
+    with pytest.raises(VNextInvariantError, match="shutdown encountered hook failures"):
+        lifecycle.stop()
+
+    assert lifecycle.state is LifecycleState.STOPPED
+    assert events == ["start:database", "start:reports", "stop:broken", "stop:database"]

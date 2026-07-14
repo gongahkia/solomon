@@ -112,6 +112,7 @@ from stonks_cli.vnext.market_data_provenance import (
 from stonks_cli.vnext.market_data_refresh import MoomooQuote, refresh_moomoo_market_data
 from stonks_cli.vnext.market_status import MarketStatus, MarketStatusReport, MarketStatusService, MarketVenue
 from stonks_cli.vnext.migrations import Migration, MigrationRegistry, MigrationRunner
+from stonks_cli.vnext.momentum_factor import MomentumFactor, calculate_momentum_factor
 from stonks_cli.vnext.moomoo import (
     LocalOpenDReadOnlyClient,
     LocalOpenDReadOnlyConnection,
@@ -232,6 +233,7 @@ __all__ = [
     "Migration",
     "MigrationRegistry",
     "MigrationRunner",
+    "MomentumFactor",
     "MarketStatus",
     "MarketStatusReport",
     "MarketStatusService",
@@ -325,6 +327,7 @@ __all__ = [
     "filter_crypto_universe_by_supported_venues",
     "check_moomoo_sdk_compatibility",
     "calculate_asset_returns",
+    "calculate_momentum_factor",
     "calculate_realized_volatility",
     "calculate_rolling_drawdown",
     "calculate_trend_factor",

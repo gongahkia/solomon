@@ -4,7 +4,7 @@ import asyncio
 import json
 import platform
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import typer
@@ -28,9 +28,14 @@ from stonks_cli.legal_policy import enforce_legal_policy
 from stonks_cli.logging_utils import LoggingConfig, configure_logging
 from stonks_cli.vnext.account_import import import_moomoo_accounts
 from stonks_cli.vnext.crypto_universe_snapshot import load_crypto_universe_snapshot
+from stonks_cli.vnext.data_confidence import DataConfidenceScore
 from stonks_cli.vnext.errors import VNextConfigurationError
 from stonks_cli.vnext.market_data_refresh import refresh_moomoo_market_data
+from stonks_cli.vnext.portfolio_exposure import PortfolioExposure
+from stonks_cli.vnext.portfolio_risk_report import render_portfolio_risk_report
 from stonks_cli.vnext.score_components import ScoreComponent
+from stonks_cli.vnext.sgd_portfolio_nav import SGDPortfolioNAV
+from stonks_cli.vnext.usd_portfolio_nav import USDPortfolioNAV
 from stonks_cli.vnext.weighted_ranker import rank_weighted_assets
 from stonks_cli.whalemirror.attribution import (
     DEFAULT_ATTRIBUTION_FIXTURE,
@@ -159,6 +164,21 @@ def vnext_ranking(
             raise VNextConfigurationError("vNext crypto-research ranking is not enabled")
         ranks = rank_weighted_assets(_load_score_components(components), config.vnext.research.factor_weights)
         typer.echo(json.dumps([asdict(rank) for rank in ranks], sort_keys=True))
+    except Exception as error:
+        raise _exit_for_error(error)
+
+
+@vnext_app.command("daily-report")
+def vnext_daily_report(
+    report_input: Path = typer.Option(..., "--input", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
+) -> None:
+    """Render a daily portfolio risk report from strict local input."""
+    try:
+        config = load_config()
+        if not config.vnext.enabled or not config.vnext.features.operator_reports:
+            raise VNextConfigurationError("vNext operator reports are not enabled")
+        exposure, nav, confidence = _load_daily_report_inputs(report_input)
+        typer.echo(f"DAILY REPORT\n{render_portfolio_risk_report(exposure, nav, confidence)}")
     except Exception as error:
         raise _exit_for_error(error)
 
@@ -350,6 +370,54 @@ def _load_score_components(path: Path) -> tuple[ScoreComponent, ...]:
         )
     except (TypeError, ValueError) as error:
         raise ValueError("ranking components are malformed") from error
+
+
+def _load_daily_report_inputs(path: Path) -> tuple[PortfolioExposure, SGDPortfolioNAV | USDPortfolioNAV, DataConfidenceScore]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("daily report input cannot be loaded") from error
+    if not isinstance(data, dict) or set(data) != {"exposure", "nav", "data_confidence"}:
+        raise ValueError("daily report input fields are invalid")
+    exposure_data, nav_data, confidence_data = data["exposure"], data["nav"], data["data_confidence"]
+    exposure_fields = {"account_id", "quote_currency", "long_exposure", "short_exposure", "gross_exposure", "net_exposure"}
+    nav_fields = {"account_id", "currency", "captured_at", "holdings_value", "cash_value", "net_asset_value"}
+    confidence_fields = {
+        "provider_id",
+        "evaluated_at",
+        "maximum_age_seconds",
+        "source_count",
+        "fresh_source_count",
+        "stale_source_urls",
+        "score",
+    }
+    if not isinstance(exposure_data, dict) or set(exposure_data) != exposure_fields:
+        raise ValueError("daily report exposure fields are invalid")
+    if not isinstance(nav_data, dict) or set(nav_data) != nav_fields:
+        raise ValueError("daily report NAV fields are invalid")
+    if not isinstance(confidence_data, dict) or set(confidence_data) != confidence_fields:
+        raise ValueError("daily report data-confidence fields are invalid")
+    try:
+        exposure = PortfolioExposure(**exposure_data)
+        captured_at = datetime.fromisoformat(nav_data["captured_at"])
+        if nav_data["currency"] == "SGD":
+            nav = SGDPortfolioNAV(nav_data["account_id"], captured_at, nav_data["holdings_value"], nav_data["cash_value"], nav_data["net_asset_value"])
+        elif nav_data["currency"] == "USD":
+            nav = USDPortfolioNAV(nav_data["account_id"], captured_at, nav_data["holdings_value"], nav_data["cash_value"], nav_data["net_asset_value"])
+        else:
+            raise ValueError("daily report NAV currency is invalid")
+        confidence = DataConfidenceScore(
+            confidence_data["provider_id"],
+            datetime.fromisoformat(confidence_data["evaluated_at"]),
+            timedelta(seconds=confidence_data["maximum_age_seconds"]),
+            confidence_data["source_count"],
+            confidence_data["fresh_source_count"],
+            tuple(confidence_data["stale_source_urls"]),
+            confidence_data["score"],
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError("daily report input is malformed") from error
+    return exposure, nav, confidence
 
 
 # --- CarryMirror commands ---

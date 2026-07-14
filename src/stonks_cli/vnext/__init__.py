@@ -5,6 +5,11 @@ from stonks_cli.vnext.alert_subscriptions import AlertSubscription
 from stonks_cli.vnext.asset_class_limits import AssetClassExposureLimit, enforce_asset_class_exposure_limits
 from stonks_cli.vnext.asset_returns import AssetReturnSeries, DailyAssetReturn, calculate_asset_returns
 from stonks_cli.vnext.boundaries import PACKAGE_BOUNDARIES, PackageBoundary, VNextPackage, validate_package_boundaries
+from stonks_cli.vnext.broker_submission import (
+    BLOCKED_BROKER_MUTATION_METHODS,
+    BLOCKED_BROKER_SUBMISSION_METHODS,
+    require_read_only_broker_method,
+)
 from stonks_cli.vnext.broker_app_order_ticket import render_broker_app_order_ticket
 from stonks_cli.vnext.capabilities import Capability, CapabilityRegistry
 from stonks_cli.vnext.cash_ledger import CashBalance, CashLedger, CashLedgerEntry
@@ -290,6 +295,8 @@ __all__ = [
     "ApplicationLifecycle",
     "AlertSubscription",
     "AssetReturnSeries",
+    "BLOCKED_BROKER_SUBMISSION_METHODS",
+    "BLOCKED_BROKER_MUTATION_METHODS",
     "AssetClassExposureLimit",
     "Capability",
     "CapabilityRegistry",
@@ -552,6 +559,7 @@ __all__ = [
     "rank_weighted_assets",
     "run_paper_portfolio_accounting",
     "render_broker_app_order_ticket",
+    "require_read_only_broker_method",
     "render_portfolio_risk_report",
     "render_telegram_report_template",
     "TelegramDeliveryConfiguration",

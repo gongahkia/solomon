@@ -3,9 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from stonks_cli.vnext.broker_submission import require_read_only_broker_method
 from stonks_cli.vnext.errors import VNextExecutionDeniedError, VNextExternalDataError
-
-_MUTATING_METHODS = frozenset({"modify_order", "place_order", "subscribe", "unlock_trade", "unsubscribe", "unsubscribe_all"})
 
 
 @dataclass(frozen=True)
@@ -16,8 +15,10 @@ class RecordedOpenDCall:
     response: object
 
     def __post_init__(self) -> None:
-        if not isinstance(self.method, str) or not self.method or self.method in _MUTATING_METHODS:
-            raise ValueError("recorded OpenD method must be a non-mutating name")
+        try:
+            require_read_only_broker_method(self.method)
+        except (TypeError, ValueError, VNextExecutionDeniedError) as error:
+            raise ValueError("recorded OpenD method must be a non-mutating name") from error
         if not isinstance(self.args, tuple) or not isinstance(self.kwargs, tuple):
             raise TypeError("recorded OpenD arguments must be tuples")
         if any(not isinstance(key, str) for key, _ in self.kwargs) or len({key for key, _ in self.kwargs}) != len(self.kwargs):
@@ -49,8 +50,7 @@ class RecordedOpenDContext:
         self._closed = False
 
     def __getattr__(self, method: str) -> Callable[..., object]:
-        if method in _MUTATING_METHODS:
-            raise VNextExecutionDeniedError("recorded OpenD context denies mutation")
+        require_read_only_broker_method(method)
         return lambda *args, **kwargs: self._invoke(method, args, kwargs)
 
     def close(self) -> None:

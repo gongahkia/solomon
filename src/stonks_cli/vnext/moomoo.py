@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import math
+import re
 import socket
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from importlib import metadata, util
 
 from stonks_cli.vnext.errors import VNextConfigurationError, VNextExecutionDeniedError, VNextExternalDataError
 
 _LOCAL_OPEND_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+_MOOMOO_TIMESTAMP_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f")
+_MOOMOO_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,6})?$")
 
 
 @dataclass(frozen=True)
@@ -519,6 +523,148 @@ def _finite_open_order_value(record: Mapping[object, object], field: str) -> flo
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise ValueError(f"Moomoo open-order record has invalid {field}")
     return float(value)
+
+
+@dataclass(frozen=True)
+class MoomooOrderHistoryWindow:
+    start: str
+    end: str
+
+    def __post_init__(self) -> None:
+        start = _parse_moomoo_timestamp(self.start)
+        end = _parse_moomoo_timestamp(self.end)
+        if end <= start:
+            raise ValueError("Moomoo order-history end must be after start")
+
+
+@dataclass(frozen=True)
+class MoomooHistoricalOrder:
+    account_id: str
+    order_id: str
+    symbol: str
+    status: str
+    quantity: float
+    dealt_quantity: float
+    price: float
+    currency: str
+    created_at: str
+    updated_at: str
+
+    def __post_init__(self) -> None:
+        if not all(
+            isinstance(value, str) and value
+            for value in (self.account_id, self.order_id, self.symbol, self.status, self.currency)
+        ):
+            raise ValueError("Moomoo historical order identifiers must be non-empty")
+        for value in (self.quantity, self.dealt_quantity, self.price):
+            if not isinstance(value, float) or not math.isfinite(value):
+                raise ValueError("Moomoo historical order values must be finite floats")
+        if _parse_moomoo_timestamp(self.updated_at) < _parse_moomoo_timestamp(self.created_at):
+            raise ValueError("Moomoo historical order update predates creation")
+
+
+@dataclass(frozen=True)
+class MoomooReadOnlyOrderHistoryClient:
+    contract: MoomooOpenDProcessContract
+    context_factory: Callable[[str, int], object]
+    success_code: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.contract, MoomooOpenDProcessContract):
+            raise TypeError("OpenD process contract is required")
+        if not callable(self.context_factory):
+            raise TypeError("Moomoo order-history context factory must be callable")
+        if not isinstance(self.success_code, int) or isinstance(self.success_code, bool):
+            raise ValueError("Moomoo SDK success code must be an integer")
+
+    def list_order_history(
+        self, account: MoomooAccount, window: MoomooOrderHistoryWindow
+    ) -> tuple[MoomooHistoricalOrder, ...]:
+        if not isinstance(account, MoomooAccount) or not account.account_id.isdecimal():
+            raise VNextExternalDataError("Moomoo selected account is malformed")
+        if not isinstance(window, MoomooOrderHistoryWindow):
+            raise VNextExternalDataError("Moomoo order-history window is malformed")
+        try:
+            context = self.context_factory(self.contract.host, self.contract.port)
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo order-history context unavailable") from error
+        try:
+            getter = getattr(context, "history_order_list_query", None)
+            if not callable(getter):
+                raise VNextExternalDataError("Moomoo order-history context is incompatible")
+            response = getter(
+                start=window.start,
+                end=window.end,
+                trd_env=account.trading_environment,
+                acc_id=int(account.account_id),
+            )
+            if not isinstance(response, tuple) or len(response) != 2 or response[0] != self.success_code:
+                raise VNextExternalDataError("Moomoo order history is unavailable")
+            return _normalize_moomoo_historical_orders(account.account_id, response[1])
+        except VNextExternalDataError:
+            raise
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo order history is malformed") from error
+        finally:
+            closer = getattr(context, "close", None)
+            if not callable(closer):
+                raise VNextExternalDataError("Moomoo order-history context is incompatible")
+            try:
+                closer()
+            except Exception as error:
+                raise VNextExternalDataError("Moomoo order-history context close failed") from error
+
+
+def _normalize_moomoo_historical_orders(account_id: str, raw_orders: object) -> tuple[MoomooHistoricalOrder, ...]:
+    records = raw_orders
+    to_dict = getattr(raw_orders, "to_dict", None)
+    if callable(to_dict):
+        records = to_dict("records")
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        raise ValueError("Moomoo historical orders must be a sequence")
+    orders: list[MoomooHistoricalOrder] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("Moomoo historical-order record must be an object")
+        order_id = record.get("order_id")
+        symbol = record.get("code")
+        status = record.get("order_status")
+        currency = record.get("currency")
+        created_at = record.get("create_time")
+        updated_at = record.get("updated_time")
+        if not all(
+            isinstance(value, str) and value
+            for value in (order_id, symbol, status, currency, created_at, updated_at)
+        ):
+            raise ValueError("Moomoo historical-order record has invalid fields")
+        orders.append(
+            MoomooHistoricalOrder(
+                account_id,
+                order_id,
+                symbol,
+                status,
+                _finite_open_order_value(record, "qty"),
+                _finite_open_order_value(record, "dealt_qty"),
+                _finite_open_order_value(record, "price"),
+                currency,
+                created_at,
+                updated_at,
+            )
+        )
+    if len({order.order_id for order in orders}) != len(orders):
+        raise ValueError("Moomoo historical-order IDs must be unique")
+    return tuple(orders)
+
+
+def _parse_moomoo_timestamp(value: object) -> datetime:
+    if not isinstance(value, str) or not _MOOMOO_TIMESTAMP_PATTERN.fullmatch(value):
+        raise ValueError("Moomoo timestamps must use YYYY-MM-DD HH:MM:SS[.ffffff]")
+    for timestamp_format in _MOOMOO_TIMESTAMP_FORMATS:
+        try:
+            return datetime.strptime(value, timestamp_format)
+        except ValueError:
+            pass
+    raise ValueError("Moomoo timestamp is invalid")
 
 
 @dataclass(frozen=True)

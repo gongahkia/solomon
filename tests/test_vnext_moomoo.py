@@ -12,12 +12,15 @@ from stonks_cli.vnext.moomoo import (
     LocalOpenDReadOnlyClient,
     MoomooAccount,
     MoomooAccountBalance,
+    MoomooHistoricalOrder,
     MoomooOpenDProcessContract,
     MoomooOpenOrder,
+    MoomooOrderHistoryWindow,
     MoomooPosition,
     MoomooReadOnlyAccountClient,
     MoomooReadOnlyBalanceClient,
     MoomooReadOnlyOpenOrderClient,
+    MoomooReadOnlyOrderHistoryClient,
     MoomooReadOnlyPositionClient,
     MoomooSdkStatus,
     MoomooTradeUnlockState,
@@ -321,3 +324,82 @@ def test_moomoo_read_only_open_order_client_rejects_malformed_records():
     client = MoomooReadOnlyOpenOrderClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
     with pytest.raises(VNextExternalDataError):
         client.list_open_orders(MoomooAccount("100", 0, "REAL"))
+
+
+def test_moomoo_read_only_order_history_client_reads_explicit_window_with_stable_account_id():
+    class Context:
+        closed = False
+        kwargs: dict[str, object] = {}
+
+        def history_order_list_query(self, **kwargs):
+            self.kwargs = kwargs
+            return 0, [
+                {
+                    "order_id": "old",
+                    "code": "US.AAPL",
+                    "order_status": "CANCELLED_ALL",
+                    "qty": 2,
+                    "dealt_qty": 0,
+                    "price": 200,
+                    "currency": "USD",
+                    "create_time": "2026-01-01 09:30:00",
+                    "updated_time": "2026-01-01 09:31:00",
+                }
+            ]
+
+        def close(self) -> None:
+            self.closed = True
+
+    context = Context()
+    client = MoomooReadOnlyOrderHistoryClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: context)
+    window = MoomooOrderHistoryWindow("2026-01-01 00:00:00", "2026-01-02 00:00:00")
+
+    assert client.list_order_history(MoomooAccount("100", 0, "REAL"), window) == (
+        MoomooHistoricalOrder(
+            "100", "old", "US.AAPL", "CANCELLED_ALL", 2.0, 0.0, 200.0, "USD", "2026-01-01 09:30:00", "2026-01-01 09:31:00"
+        ),
+    )
+    assert context.kwargs == {
+        "start": "2026-01-01 00:00:00",
+        "end": "2026-01-02 00:00:00",
+        "trd_env": "REAL",
+        "acc_id": 100,
+    }
+    assert context.closed is True
+    assert not hasattr(client, "place_order")
+
+
+@pytest.mark.parametrize(
+    "start,end",
+    [("2026-01-02 00:00:00", "2026-01-01 00:00:00"), ("2026-01-01", "2026-01-02 00:00:00")],
+)
+def test_moomoo_order_history_window_rejects_invalid_or_reversed_bounds(start, end):
+    with pytest.raises(ValueError):
+        MoomooOrderHistoryWindow(start, end)
+
+
+def test_moomoo_read_only_order_history_client_rejects_malformed_records():
+    class Context:
+        def history_order_list_query(self, **kwargs):
+            return 0, [
+                {
+                    "order_id": "old",
+                    "code": "US.AAPL",
+                    "order_status": "CANCELLED_ALL",
+                    "qty": 2,
+                    "dealt_qty": 0,
+                    "price": 200,
+                    "currency": "USD",
+                    "create_time": "2026-01-01 09:31:00",
+                    "updated_time": "2026-01-01 09:30:00",
+                }
+            ]
+
+        def close(self) -> None:
+            pass
+
+    client = MoomooReadOnlyOrderHistoryClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
+    with pytest.raises(VNextExternalDataError):
+        client.list_order_history(
+            MoomooAccount("100", 0, "REAL"), MoomooOrderHistoryWindow("2026-01-01 00:00:00", "2026-01-02 00:00:00")
+        )

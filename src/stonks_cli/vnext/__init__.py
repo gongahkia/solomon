@@ -46,17 +46,21 @@ from stonks_cli.vnext.foundation import (
     resolve_environment_secret,
     save_run_identity,
 )
+from stonks_cli.vnext.lifecycle import ApplicationLifecycle, LifecycleHook, LifecycleState
 from stonks_cli.vnext.migrations import Migration, MigrationRegistry, MigrationRunner
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
 
 __all__ = [
     "Clock",
+    "ApplicationLifecycle",
     "EventSeverity",
     "EVENT_SCHEMA_VERSION",
     "FIXTURE_EVENT_IDS",
     "FIXTURE_RUN_ID",
     "FIXTURE_RUN_STARTED_AT",
     "FrozenUTCClock",
+    "LifecycleHook",
+    "LifecycleState",
     "PRIVATE_DIRECTORY_MODE",
     "PRIVATE_FILE_MODE",
     "Migration",

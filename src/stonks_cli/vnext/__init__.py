@@ -253,6 +253,7 @@ from stonks_cli.vnext.paper_portfolio_accounting import (
 from stonks_cli.vnext.portfolio_domain import PortfolioAssetClass, PortfolioHolding, PortfolioSnapshot
 from stonks_cli.vnext.portfolio_exposure import PortfolioExposure, calculate_portfolio_exposure
 from stonks_cli.vnext.portfolio_risk_report import render_portfolio_risk_report
+from stonks_cli.vnext.position_variance import PositionVarianceAlert, alert_on_position_variance
 from stonks_cli.vnext.pre_execution_risk import (
     DefaultPreExecutionRiskEvaluator,
     PreExecutionRiskAssessment,
@@ -496,6 +497,7 @@ __all__ = [
     "PortfolioSnapshot",
     "PortfolioTransaction",
     "PortfolioTransactionSide",
+    "PositionVarianceAlert",
     "RUN_IDENTITY_VERSION",
     "RUNTIME_ROOT_ENV",
     "RunIdentity",
@@ -553,6 +555,7 @@ __all__ = [
     "VenueDueDiligenceOutcome",
     "as_utc",
     "alert_on_cash_balance_variance",
+    "alert_on_position_variance",
     "attach_market_data_provenance",
     "append_crypto_universe_history",
     "build_explanation_evidence_bundle",

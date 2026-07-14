@@ -13,9 +13,11 @@ from stonks_cli.vnext.moomoo import (
     MoomooAccount,
     MoomooAccountBalance,
     MoomooOpenDProcessContract,
+    MoomooOpenOrder,
     MoomooPosition,
     MoomooReadOnlyAccountClient,
     MoomooReadOnlyBalanceClient,
+    MoomooReadOnlyOpenOrderClient,
     MoomooReadOnlyPositionClient,
     MoomooSdkStatus,
     MoomooTradeUnlockState,
@@ -279,3 +281,43 @@ def test_moomoo_read_only_position_client_rejects_malformed_records():
     client = MoomooReadOnlyPositionClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
     with pytest.raises(VNextExternalDataError):
         client.list_positions(MoomooAccount("100", 0, "REAL"))
+
+
+def test_moomoo_read_only_open_order_client_preserves_chronological_read_output():
+    class Context:
+        closed = False
+        kwargs: dict[str, object] = {}
+
+        def order_list_query(self, **kwargs):
+            self.kwargs = kwargs
+            return 0, [
+                {"order_id": "old", "code": "US.AAPL", "order_status": "SUBMITTING", "qty": 2, "dealt_qty": 0, "price": 200, "currency": "USD"},
+                {"order_id": "new", "code": "US.MSFT", "order_status": "WAITING_SUBMIT", "qty": 3, "dealt_qty": 1, "price": 400, "currency": "USD"},
+            ]
+
+        def close(self) -> None:
+            self.closed = True
+
+    context = Context()
+    client = MoomooReadOnlyOpenOrderClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: context)
+
+    assert client.list_open_orders(MoomooAccount("100", 0, "REAL")) == (
+        MoomooOpenOrder("100", "old", "US.AAPL", "SUBMITTING", 2.0, 0.0, 200.0, "USD"),
+        MoomooOpenOrder("100", "new", "US.MSFT", "WAITING_SUBMIT", 3.0, 1.0, 400.0, "USD"),
+    )
+    assert context.kwargs == {"trd_env": "REAL", "acc_id": 100, "refresh_cache": False}
+    assert context.closed is True
+    assert not hasattr(client, "place_order")
+
+
+def test_moomoo_read_only_open_order_client_rejects_malformed_records():
+    class Context:
+        def order_list_query(self, **kwargs):
+            return 0, [{"order_id": "old", "code": "US.AAPL", "order_status": "SUBMITTING", "qty": 2, "dealt_qty": 0, "price": float("nan"), "currency": "USD"}]
+
+        def close(self) -> None:
+            pass
+
+    client = MoomooReadOnlyOpenOrderClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
+    with pytest.raises(VNextExternalDataError):
+        client.list_open_orders(MoomooAccount("100", 0, "REAL"))

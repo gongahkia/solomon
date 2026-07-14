@@ -419,6 +419,109 @@ def _finite_position_value(record: Mapping[object, object], field: str) -> float
 
 
 @dataclass(frozen=True)
+class MoomooOpenOrder:
+    account_id: str
+    order_id: str
+    symbol: str
+    status: str
+    quantity: float
+    dealt_quantity: float
+    price: float
+    currency: str
+
+    def __post_init__(self) -> None:
+        if not all(isinstance(value, str) and value for value in (self.account_id, self.order_id, self.symbol, self.status, self.currency)):
+            raise ValueError("Moomoo open order identifiers must be non-empty")
+        for value in (self.quantity, self.dealt_quantity, self.price):
+            if not isinstance(value, float) or not math.isfinite(value):
+                raise ValueError("Moomoo open order values must be finite floats")
+
+
+@dataclass(frozen=True)
+class MoomooReadOnlyOpenOrderClient:
+    contract: MoomooOpenDProcessContract
+    context_factory: Callable[[str, int], object]
+    success_code: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.contract, MoomooOpenDProcessContract):
+            raise TypeError("OpenD process contract is required")
+        if not callable(self.context_factory):
+            raise TypeError("Moomoo open-order context factory must be callable")
+        if not isinstance(self.success_code, int) or isinstance(self.success_code, bool):
+            raise ValueError("Moomoo SDK success code must be an integer")
+
+    def list_open_orders(self, account: MoomooAccount) -> tuple[MoomooOpenOrder, ...]:
+        if not isinstance(account, MoomooAccount) or not account.account_id.isdecimal():
+            raise VNextExternalDataError("Moomoo selected account is malformed")
+        try:
+            context = self.context_factory(self.contract.host, self.contract.port)
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo open-order context unavailable") from error
+        try:
+            getter = getattr(context, "order_list_query", None)
+            if not callable(getter):
+                raise VNextExternalDataError("Moomoo open-order context is incompatible")
+            response = getter(trd_env=account.trading_environment, acc_id=int(account.account_id), refresh_cache=False)
+            if not isinstance(response, tuple) or len(response) != 2 or response[0] != self.success_code:
+                raise VNextExternalDataError("Moomoo open orders are unavailable")
+            return _normalize_moomoo_open_orders(account.account_id, response[1])
+        except VNextExternalDataError:
+            raise
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo open orders are malformed") from error
+        finally:
+            closer = getattr(context, "close", None)
+            if not callable(closer):
+                raise VNextExternalDataError("Moomoo open-order context is incompatible")
+            try:
+                closer()
+            except Exception as error:
+                raise VNextExternalDataError("Moomoo open-order context close failed") from error
+
+
+def _normalize_moomoo_open_orders(account_id: str, raw_orders: object) -> tuple[MoomooOpenOrder, ...]:
+    records = raw_orders
+    to_dict = getattr(raw_orders, "to_dict", None)
+    if callable(to_dict):
+        records = to_dict("records")
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        raise ValueError("Moomoo open orders must be a sequence")
+    orders: list[MoomooOpenOrder] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("Moomoo open-order record must be an object")
+        order_id = record.get("order_id")
+        symbol = record.get("code")
+        status = record.get("order_status")
+        currency = record.get("currency")
+        if not all(isinstance(value, str) and value for value in (order_id, symbol, status, currency)):
+            raise ValueError("Moomoo open-order record has invalid identifiers")
+        orders.append(
+            MoomooOpenOrder(
+                account_id,
+                order_id,
+                symbol,
+                status,
+                _finite_open_order_value(record, "qty"),
+                _finite_open_order_value(record, "dealt_qty"),
+                _finite_open_order_value(record, "price"),
+                currency,
+            )
+        )
+    if len({order.order_id for order in orders}) != len(orders):
+        raise ValueError("Moomoo open-order IDs must be unique")
+    return tuple(orders)
+
+
+def _finite_open_order_value(record: Mapping[object, object], field: str) -> float:
+    value = record.get(field)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"Moomoo open-order record has invalid {field}")
+    return float(value)
+
+
+@dataclass(frozen=True)
 class OpenDEndpointProbe:
     status: OpenDEndpointStatus
     code: str

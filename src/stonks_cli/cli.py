@@ -33,6 +33,7 @@ from stonks_cli.vnext.errors import VNextConfigurationError
 from stonks_cli.vnext.holdings_import import import_moomoo_holdings
 from stonks_cli.vnext.market_data_refresh import refresh_moomoo_market_data
 from stonks_cli.vnext.moomoo import MoomooAccount
+from stonks_cli.vnext.portfolio_domain import PortfolioAssetClass, PortfolioHolding, PortfolioSnapshot
 from stonks_cli.vnext.portfolio_exposure import PortfolioExposure
 from stonks_cli.vnext.portfolio_risk_report import render_portfolio_risk_report
 from stonks_cli.vnext.score_components import ScoreComponent
@@ -199,27 +200,18 @@ def vnext_portfolio_import(
             MoomooAccount(account_id, account_index, trading_environment),
             datetime.fromisoformat(captured_at),
         )
-        typer.echo(
-            json.dumps(
-                {
-                    "provider_id": snapshot.provider_id,
-                    "account_id": snapshot.account_id,
-                    "captured_at": snapshot.captured_at.isoformat().replace("+00:00", "Z"),
-                    "holdings": [
-                        {
-                            "holding_id": holding.holding_id,
-                            "symbol": holding.symbol,
-                            "asset_class": holding.asset_class.value,
-                            "quantity": holding.quantity,
-                            "currency": holding.currency,
-                            "market_value": holding.market_value,
-                        }
-                        for holding in snapshot.holdings
-                    ],
-                },
-                sort_keys=True,
-            )
-        )
+        typer.echo(json.dumps(_portfolio_snapshot_to_data(snapshot), sort_keys=True))
+    except Exception as error:
+        raise _exit_for_error(error)
+
+
+@vnext_app.command("portfolio-show")
+def vnext_portfolio_show(
+    snapshot: Path = typer.Option(..., "--snapshot", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
+) -> None:
+    """Show a strict canonical portfolio snapshot without broker access."""
+    try:
+        typer.echo(json.dumps(_portfolio_snapshot_to_data(_load_portfolio_snapshot(snapshot)), sort_keys=True))
     except Exception as error:
         raise _exit_for_error(error)
 
@@ -459,6 +451,58 @@ def _load_daily_report_inputs(path: Path) -> tuple[PortfolioExposure, SGDPortfol
     except (TypeError, ValueError) as error:
         raise ValueError("daily report input is malformed") from error
     return exposure, nav, confidence
+
+
+def _portfolio_snapshot_to_data(snapshot: PortfolioSnapshot) -> dict[str, object]:
+    return {
+        "provider_id": snapshot.provider_id,
+        "account_id": snapshot.account_id,
+        "captured_at": snapshot.captured_at.isoformat().replace("+00:00", "Z"),
+        "holdings": [
+            {
+                "holding_id": holding.holding_id,
+                "symbol": holding.symbol,
+                "asset_class": holding.asset_class.value,
+                "quantity": holding.quantity,
+                "currency": holding.currency,
+                "market_value": holding.market_value,
+            }
+            for holding in snapshot.holdings
+        ],
+    }
+
+
+def _load_portfolio_snapshot(path: Path) -> PortfolioSnapshot:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("portfolio snapshot cannot be loaded") from error
+    fields = {"provider_id", "account_id", "captured_at", "holdings"}
+    holding_fields = {"holding_id", "symbol", "asset_class", "quantity", "currency", "market_value"}
+    if not isinstance(data, dict) or set(data) != fields or not isinstance(data["holdings"], list):
+        raise ValueError("portfolio snapshot fields are invalid")
+    if not all(isinstance(holding, dict) and set(holding) == holding_fields for holding in data["holdings"]):
+        raise ValueError("portfolio snapshot holding fields are invalid")
+    try:
+        return PortfolioSnapshot(
+            data["provider_id"],
+            data["account_id"],
+            datetime.fromisoformat(data["captured_at"]),
+            tuple(
+                PortfolioHolding(
+                    data["account_id"],
+                    holding["holding_id"],
+                    holding["symbol"],
+                    PortfolioAssetClass(holding["asset_class"]),
+                    holding["quantity"],
+                    holding["currency"],
+                    holding["market_value"],
+                )
+                for holding in data["holdings"]
+            ),
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError("portfolio snapshot is malformed") from error
 
 
 # --- CarryMirror commands ---

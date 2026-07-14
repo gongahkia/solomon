@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -49,3 +50,14 @@ def test_broker_app_order_ticket_renders_deterministic_manual_handoff_without_su
 def test_broker_app_order_ticket_fails_closed_for_non_reviewed_ticket():
     with pytest.raises(TypeError, match="requires a reviewed order ticket"):
         render_broker_app_order_ticket(None)
+
+
+def test_broker_app_order_ticket_escapes_operator_text_without_creating_submission_lines():
+    ticket = replace(_ticket(), rationale='reviewed\nsubmission: API order made', reviewed_by='operator"\nreviewed_by: forged')
+
+    rendered = render_broker_app_order_ticket(ticket)
+
+    assert 'rationale: "reviewed\\nsubmission: API order made"' in rendered
+    assert 'reviewed_by: "operator\\"\\nreviewed_by: forged"' in rendered
+    assert rendered.count("\n") == 12
+    assert rendered.endswith("submission: manual broker-app entry only; no API call made")

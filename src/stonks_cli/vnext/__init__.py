@@ -194,6 +194,7 @@ from stonks_cli.vnext.risk_adjusted_performance import RiskAdjustedPerformance, 
 from stonks_cli.vnext.rolling_drawdown import DailyDrawdown, RollingDrawdownSeries, calculate_rolling_drawdown
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
 from stonks_cli.vnext.score_components import ScoreComponent
+from stonks_cli.vnext.sector_limits import SectorConcentrationLimit, enforce_sector_concentration_limits
 from stonks_cli.vnext.sgd_portfolio_nav import SGDPortfolioNAV, calculate_sgd_portfolio_nav
 from stonks_cli.vnext.single_asset_limits import SingleAssetExposureLimit, enforce_single_asset_limits
 from stonks_cli.vnext.snapshot_cache import IdempotentSnapshotCache
@@ -344,6 +345,7 @@ __all__ = [
     "RiskAdjustedPerformance",
     "RollingDrawdownSeries",
     "ScoreComponent",
+    "SectorConcentrationLimit",
     "SGXCashEquityCalendar2026",
     "SGDPortfolioNAV",
     "SGMarketSession",
@@ -417,6 +419,7 @@ __all__ = [
     "enforce_private_file",
     "enforce_asset_class_exposure_limits",
     "enforce_single_asset_limits",
+    "enforce_sector_concentration_limits",
     "ensure_private_directory",
     "load_run_identity",
     "load_crypto_universe_history",

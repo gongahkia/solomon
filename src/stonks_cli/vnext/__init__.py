@@ -189,6 +189,15 @@ from stonks_cli.vnext.moomoo import (
     select_moomoo_account,
 )
 from stonks_cli.vnext.non_llm_explanation import NonLLMExplanation, build_non_llm_explanation
+from stonks_cli.vnext.notification_delivery_log import (
+    NOTIFICATION_DELIVERY_LOG_VERSION,
+    NotificationDeliveryLog,
+    NotificationDeliveryRecord,
+    NotificationDeliveryStatus,
+    append_notification_delivery_log,
+    load_notification_delivery_log,
+    save_notification_delivery_log,
+)
 from stonks_cli.vnext.opend_fixture import RecordedOpenDCall, RecordedOpenDFixtureAdapter
 from stonks_cli.vnext.paper_portfolio_accounting import (
     PaperPortfolioAccount,
@@ -512,4 +521,11 @@ __all__ = [
     "WeightedAssetRank",
     "WeeklyOperatorReportSchedule",
     "WEEKLY_OPERATOR_REPORT_JOB_ID",
+    "NOTIFICATION_DELIVERY_LOG_VERSION",
+    "NotificationDeliveryLog",
+    "NotificationDeliveryRecord",
+    "NotificationDeliveryStatus",
+    "append_notification_delivery_log",
+    "load_notification_delivery_log",
+    "save_notification_delivery_log",
 ]

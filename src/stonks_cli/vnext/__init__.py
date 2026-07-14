@@ -82,6 +82,7 @@ from stonks_cli.vnext.events import (
 from stonks_cli.vnext.exchange_lot_size import validate_exchange_lot_size
 from stonks_cli.vnext.exchange_time import ExchangeTimeZone, normalize_exchange_timestamp
 from stonks_cli.vnext.explanation_evidence import ExplanationEvidenceBundle, build_explanation_evidence_bundle
+from stonks_cli.vnext.explanation_viewer import InteractiveExplanationViewer
 from stonks_cli.vnext.filesystem import (
     PRIVATE_DIRECTORY_MODE,
     PRIVATE_FILE_MODE,
@@ -310,6 +311,7 @@ __all__ = [
     "ExchangeTimeZone",
     "EVENT_SCHEMA_VERSION",
     "ExplanationEvidenceBundle",
+    "InteractiveExplanationViewer",
     "FXReferenceRate",
     "FXReferenceRateBatch",
     "FXReferenceRateProvider",

@@ -161,3 +161,74 @@ def reconcile_imported_portfolio_state(
     if math.isclose(cash_delta, 0.0, rel_tol=0.0, abs_tol=tolerance):
         cash_delta = 0.0
     return ImportedPortfolioReconciliation(imported.snapshot_id, reference.snapshot_id, cash_delta, differences)
+
+
+@dataclass(frozen=True)
+class BrokerSnapshotDifference:
+    symbol: str
+    earlier_quantity: float
+    later_quantity: float
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.symbol, str) or not _SYMBOL_PATTERN.fullmatch(self.symbol):
+            raise ValueError("broker-snapshot difference symbol is invalid")
+        if not all(isinstance(value, float) and math.isfinite(value) and value >= 0 for value in (self.earlier_quantity, self.later_quantity)):
+            raise ValueError("broker-snapshot difference quantities are invalid")
+        if math.isclose(self.earlier_quantity, self.later_quantity, rel_tol=0.0, abs_tol=0.0):
+            raise ValueError("broker-snapshot difference must differ")
+
+    @property
+    def quantity_delta(self) -> float:
+        return math.fsum((self.later_quantity, -self.earlier_quantity))
+
+
+@dataclass(frozen=True)
+class BrokerSnapshotReconciliation:
+    earlier_snapshot_id: UUID
+    later_snapshot_id: UUID
+    cash_delta: float
+    position_differences: tuple[BrokerSnapshotDifference, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.earlier_snapshot_id, UUID) or not isinstance(self.later_snapshot_id, UUID):
+            raise TypeError("broker-snapshot reconciliation snapshot IDs must be UUIDs")
+        if self.earlier_snapshot_id == self.later_snapshot_id:
+            raise ValueError("broker-snapshot reconciliation snapshots must differ")
+        if not isinstance(self.cash_delta, float) or not math.isfinite(self.cash_delta):
+            raise ValueError("broker-snapshot reconciliation cash delta is invalid")
+        if not isinstance(self.position_differences, tuple) or not all(isinstance(item, BrokerSnapshotDifference) for item in self.position_differences):
+            raise ValueError("broker-snapshot reconciliation differences are invalid")
+        symbols = tuple(item.symbol for item in self.position_differences)
+        if symbols != tuple(sorted(symbols)) or len(set(symbols)) != len(symbols):
+            raise ValueError("broker-snapshot reconciliation differences are not canonical")
+
+    @property
+    def matches(self) -> bool:
+        return self.cash_delta == 0.0 and not self.position_differences
+
+
+def reconcile_broker_snapshots(
+    earlier: ReconciliationSnapshot,
+    later: ReconciliationSnapshot,
+    *,
+    tolerance: float = 1e-12,
+) -> BrokerSnapshotReconciliation:
+    if not isinstance(earlier, ReconciliationSnapshot) or not isinstance(later, ReconciliationSnapshot):
+        raise TypeError("broker-snapshot reconciliation requires snapshots")
+    if earlier.source_id != "broker.snapshot" or later.source_id != "broker.snapshot":
+        raise ValueError("broker-snapshot reconciliation sources are invalid")
+    if earlier.currency != later.currency or earlier.captured_at >= later.captured_at:
+        raise ValueError("broker-snapshot reconciliation snapshots are incompatible")
+    if not isinstance(tolerance, float) or not math.isfinite(tolerance) or tolerance < 0:
+        raise ValueError("broker-snapshot reconciliation tolerance is invalid")
+    earlier_positions = {position.symbol: position.quantity for position in earlier.positions}
+    later_positions = {position.symbol: position.quantity for position in later.positions}
+    differences = tuple(
+        BrokerSnapshotDifference(symbol, earlier_positions.get(symbol, 0.0), later_positions.get(symbol, 0.0))
+        for symbol in sorted(set(earlier_positions) | set(later_positions))
+        if not math.isclose(earlier_positions.get(symbol, 0.0), later_positions.get(symbol, 0.0), rel_tol=0.0, abs_tol=tolerance)
+    )
+    cash_delta = math.fsum((later.cash_balance, -earlier.cash_balance))
+    if math.isclose(cash_delta, 0.0, rel_tol=0.0, abs_tol=tolerance):
+        cash_delta = 0.0
+    return BrokerSnapshotReconciliation(earlier.snapshot_id, later.snapshot_id, cash_delta, differences)

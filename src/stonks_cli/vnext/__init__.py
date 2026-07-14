@@ -272,10 +272,13 @@ from stonks_cli.vnext.realized_volatility import (
 )
 from stonks_cli.vnext.rebalance_drift import RebalanceDrift, RebalanceTarget, calculate_rebalance_drift
 from stonks_cli.vnext.reconciliation import (
+    BrokerSnapshotDifference,
+    BrokerSnapshotReconciliation,
     ImportedPortfolioReconciliation,
     ReconciliationDifference,
     ReconciliationPosition,
     ReconciliationSnapshot,
+    reconcile_broker_snapshots,
     reconcile_imported_portfolio_state,
 )
 from stonks_cli.vnext.report_input_hash import ReportInputHash, hash_report_input_data
@@ -408,6 +411,8 @@ __all__ = [
     "ImmutableEventAudit",
     "ImmutableEventAuditReport",
     "ImportedPortfolioReconciliation",
+    "BrokerSnapshotDifference",
+    "BrokerSnapshotReconciliation",
     "LifecycleHook",
     "LifecycleState",
     "LIVE_CONFIGURATION_VERSION",
@@ -624,6 +629,7 @@ __all__ = [
     "probe_local_opend",
     "run_health_checks",
     "rank_weighted_assets",
+    "reconcile_broker_snapshots",
     "reconcile_imported_portfolio_state",
     "run_paper_portfolio_accounting",
     "render_broker_app_order_ticket",

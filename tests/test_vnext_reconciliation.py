@@ -8,6 +8,7 @@ import pytest
 from stonks_cli.vnext.reconciliation import (
     ReconciliationPosition,
     ReconciliationSnapshot,
+    reconcile_broker_snapshots,
     reconcile_imported_portfolio_state,
 )
 
@@ -107,6 +108,40 @@ def test_imported_portfolio_reconciliation_fails_closed_for_incompatible_externa
 
     with pytest.raises(ValueError, match="imported-portfolio reconciliation"):
         reconcile_imported_portfolio_state(imported, reference)
+
+
+def test_broker_snapshot_reconciliation_reports_change_between_two_read_only_snapshots():
+    earlier = _snapshot()
+    later = ReconciliationSnapshot(
+        UUID("00000000-0000-4000-8000-000000000004"),
+        "broker.snapshot",
+        earlier.captured_at.replace(hour=4),
+        "USD",
+        12.0,
+        (ReconciliationPosition("US.AAPL", 1.0), ReconciliationPosition("US.MSFT", 1.0)),
+    )
+
+    result = reconcile_broker_snapshots(earlier, later)
+
+    assert result.matches is False
+    assert result.cash_delta == 2.0
+    assert tuple((item.symbol, item.quantity_delta) for item in result.position_differences) == (("US.AAPL", -1.0),)
+
+
+@pytest.mark.parametrize("source_id,offset_hours", [("imported.portfolio", 1), ("broker.snapshot", 0)])
+def test_broker_snapshot_reconciliation_fails_closed_for_malformed_or_nonprogressing_snapshots(source_id, offset_hours):
+    earlier = _snapshot()
+    later = ReconciliationSnapshot(
+        UUID("00000000-0000-4000-8000-000000000004"),
+        source_id,
+        earlier.captured_at.replace(hour=3 + offset_hours),
+        "USD",
+        earlier.cash_balance,
+        earlier.positions,
+    )
+
+    with pytest.raises(ValueError, match="broker-snapshot reconciliation"):
+        reconcile_broker_snapshots(earlier, later)
 
 
 def _snapshot() -> ReconciliationSnapshot:

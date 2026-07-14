@@ -3,8 +3,10 @@ from __future__ import annotations
 import math
 import socket
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from importlib import metadata, util
 
 from stonks_cli.vnext.errors import VNextExecutionDeniedError, VNextExternalDataError
 
@@ -46,6 +48,50 @@ class MoomooOpenDProcessContract:
 class OpenDEndpointStatus(StrEnum):
     AVAILABLE = "available"
     UNAVAILABLE = "unavailable"
+
+
+class MoomooSdkStatus(StrEnum):
+    COMPATIBLE = "compatible"
+    NOT_INSTALLED = "not_installed"
+    INCOMPATIBLE = "incompatible"
+
+
+@dataclass(frozen=True)
+class MoomooSdkCompatibility:
+    status: MoomooSdkStatus
+    code: str
+    version: str | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, MoomooSdkStatus):
+            raise TypeError("Moomoo SDK status is invalid")
+        if self.status is MoomooSdkStatus.COMPATIBLE:
+            if self.code != "sdk_compatible" or not self.version:
+                raise ValueError("compatible Moomoo SDK check requires a version")
+        elif self.version is not None:
+            raise ValueError("incompatible Moomoo SDK check must not report a version")
+
+
+def check_moomoo_sdk_compatibility(
+    *,
+    distribution_version: Callable[[str], str] = metadata.version,
+    module_finder: Callable[[str], object | None] = util.find_spec,
+) -> MoomooSdkCompatibility:
+    try:
+        version = distribution_version("moomoo-api")
+    except metadata.PackageNotFoundError:
+        return MoomooSdkCompatibility(MoomooSdkStatus.NOT_INSTALLED, "sdk_not_installed", None)
+    except Exception:
+        return MoomooSdkCompatibility(MoomooSdkStatus.INCOMPATIBLE, "sdk_metadata_unavailable", None)
+    if not isinstance(version, str) or not version.strip():
+        return MoomooSdkCompatibility(MoomooSdkStatus.INCOMPATIBLE, "sdk_invalid_version", None)
+    try:
+        module = module_finder("moomoo")
+    except Exception:
+        return MoomooSdkCompatibility(MoomooSdkStatus.INCOMPATIBLE, "sdk_module_unavailable", None)
+    if module is None:
+        return MoomooSdkCompatibility(MoomooSdkStatus.INCOMPATIBLE, "sdk_module_unavailable", None)
+    return MoomooSdkCompatibility(MoomooSdkStatus.COMPATIBLE, "sdk_compatible", version.strip())
 
 
 @dataclass(frozen=True)

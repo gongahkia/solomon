@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import socket
 import threading
+from importlib import metadata
 
 import pytest
 
@@ -9,7 +10,9 @@ from stonks_cli.vnext.errors import VNextExecutionDeniedError, VNextExternalData
 from stonks_cli.vnext.moomoo import (
     LocalOpenDReadOnlyClient,
     MoomooOpenDProcessContract,
+    MoomooSdkStatus,
     OpenDEndpointStatus,
+    check_moomoo_sdk_compatibility,
     probe_local_opend,
 )
 
@@ -102,3 +105,24 @@ def test_local_opend_socket_client_fails_closed_when_unavailable():
 
     with pytest.raises(VNextExternalDataError):
         LocalOpenDReadOnlyClient(MoomooOpenDProcessContract("127.0.0.1", port), timeout_seconds=0.1).connect()
+
+
+def test_moomoo_sdk_compatibility_checks_official_distribution_and_module_without_importing_sdk():
+    result = check_moomoo_sdk_compatibility(distribution_version=lambda name: "9.1.0", module_finder=lambda name: object())
+
+    assert result.status is MoomooSdkStatus.COMPATIBLE
+    assert result.code == "sdk_compatible"
+    assert result.version == "9.1.0"
+
+
+def test_moomoo_sdk_compatibility_fails_closed_for_missing_or_malformed_sdk():
+    missing = check_moomoo_sdk_compatibility(
+        distribution_version=lambda name: (_ for _ in ()).throw(metadata.PackageNotFoundError()),
+        module_finder=lambda name: object(),
+    )
+    malformed = check_moomoo_sdk_compatibility(distribution_version=lambda name: "", module_finder=lambda name: object())
+    absent_module = check_moomoo_sdk_compatibility(distribution_version=lambda name: "9.1.0", module_finder=lambda name: None)
+
+    assert (missing.status, missing.code, missing.version) == (MoomooSdkStatus.NOT_INSTALLED, "sdk_not_installed", None)
+    assert (malformed.status, malformed.code, malformed.version) == (MoomooSdkStatus.INCOMPATIBLE, "sdk_invalid_version", None)
+    assert (absent_module.status, absent_module.code, absent_module.version) == (MoomooSdkStatus.INCOMPATIBLE, "sdk_module_unavailable", None)

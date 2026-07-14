@@ -54,8 +54,11 @@ from stonks_cli.vnext.moomoo import (
     LocalOpenDReadOnlyClient,
     LocalOpenDReadOnlyConnection,
     MoomooOpenDProcessContract,
+    MoomooSdkCompatibility,
+    MoomooSdkStatus,
     OpenDEndpointProbe,
     OpenDEndpointStatus,
+    check_moomoo_sdk_compatibility,
     probe_local_opend,
 )
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
@@ -85,6 +88,8 @@ __all__ = [
     "MigrationRegistry",
     "MigrationRunner",
     "MoomooOpenDProcessContract",
+    "MoomooSdkCompatibility",
+    "MoomooSdkStatus",
     "OpenDEndpointProbe",
     "OpenDEndpointStatus",
     "PACKAGE_BOUNDARIES",
@@ -109,6 +114,7 @@ __all__ = [
     "as_utc",
     "create_run_identity",
     "create_structured_event",
+    "check_moomoo_sdk_compatibility",
     "deterministic_fixture_event_jsonl",
     "deterministic_fixture_events",
     "deterministic_fixture_run",

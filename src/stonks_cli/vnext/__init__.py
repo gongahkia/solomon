@@ -100,6 +100,7 @@ from stonks_cli.vnext.foundation import (
     save_run_identity,
 )
 from stonks_cli.vnext.health import HealthCheck, HealthReport, HealthResult, HealthStatus, run_health_checks
+from stonks_cli.vnext.holdings_import import import_moomoo_holdings
 from stonks_cli.vnext.lifecycle import ApplicationLifecycle, LifecycleHook, LifecycleState
 from stonks_cli.vnext.llm_summary_boundary import LLM_SUMMARY_OPERATION, LLMSummaryBoundary, create_llm_summary_boundary
 from stonks_cli.vnext.market_calendar import (
@@ -350,6 +351,7 @@ __all__ = [
     "build_non_llm_explanation",
     "create_run_identity",
     "import_moomoo_accounts",
+    "import_moomoo_holdings",
     "ingest_daily_closing_prices",
     "ingest_crypto_asset_metadata",
     "create_crypto_universe_snapshot",

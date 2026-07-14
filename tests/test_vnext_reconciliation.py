@@ -5,7 +5,11 @@ from uuid import UUID
 
 import pytest
 
-from stonks_cli.vnext.reconciliation import ReconciliationPosition, ReconciliationSnapshot
+from stonks_cli.vnext.reconciliation import (
+    ReconciliationPosition,
+    ReconciliationSnapshot,
+    reconcile_imported_portfolio_state,
+)
 
 
 def test_reconciliation_schema_serializes_a_canonical_snapshot():
@@ -55,6 +59,54 @@ def test_reconciliation_schema_rejects_noncanonical_positions(positions):
             values["cash_balance"],
             positions,
         )
+
+
+def test_imported_portfolio_reconciliation_reports_cash_and_position_variance():
+    imported = ReconciliationSnapshot(
+        UUID("00000000-0000-4000-8000-000000000002"),
+        "imported.portfolio",
+        datetime(2026, 7, 14, 3, tzinfo=UTC),
+        "USD",
+        10.0,
+        (ReconciliationPosition("US.AAPL", 2.0),),
+    )
+    reference = ReconciliationSnapshot(
+        UUID("00000000-0000-4000-8000-000000000003"),
+        "broker.snapshot",
+        imported.captured_at,
+        "USD",
+        8.0,
+        (ReconciliationPosition("US.AAPL", 1.0), ReconciliationPosition("US.MSFT", 1.0)),
+    )
+
+    result = reconcile_imported_portfolio_state(imported, reference)
+
+    assert result.matches is False
+    assert result.cash_delta == 2.0
+    assert tuple((item.symbol, item.quantity_delta) for item in result.position_differences) == (("US.AAPL", 1.0), ("US.MSFT", -1.0))
+
+
+@pytest.mark.parametrize("imported_source,reference_currency", [("broker.snapshot", "USD"), ("imported.portfolio", "SGD")])
+def test_imported_portfolio_reconciliation_fails_closed_for_incompatible_external_snapshots(imported_source, reference_currency):
+    imported = ReconciliationSnapshot(
+        UUID("00000000-0000-4000-8000-000000000002"),
+        imported_source,
+        datetime(2026, 7, 14, 3, tzinfo=UTC),
+        "USD",
+        10.0,
+        (),
+    )
+    reference = ReconciliationSnapshot(
+        UUID("00000000-0000-4000-8000-000000000003"),
+        "broker.snapshot",
+        imported.captured_at,
+        reference_currency,
+        10.0,
+        (),
+    )
+
+    with pytest.raises(ValueError, match="imported-portfolio reconciliation"):
+        reconcile_imported_portfolio_state(imported, reference)
 
 
 def _snapshot() -> ReconciliationSnapshot:

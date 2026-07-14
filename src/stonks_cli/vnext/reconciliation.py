@@ -90,3 +90,74 @@ class ReconciliationSnapshot:
             )
         except (TypeError, ValueError) as error:
             raise ValueError("reconciliation snapshot is malformed") from error
+
+
+@dataclass(frozen=True)
+class ReconciliationDifference:
+    symbol: str
+    imported_quantity: float
+    reference_quantity: float
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.symbol, str) or not _SYMBOL_PATTERN.fullmatch(self.symbol):
+            raise ValueError("reconciliation difference symbol is invalid")
+        if not all(isinstance(value, float) and math.isfinite(value) and value >= 0 for value in (self.imported_quantity, self.reference_quantity)):
+            raise ValueError("reconciliation difference quantities are invalid")
+        if math.isclose(self.imported_quantity, self.reference_quantity, rel_tol=0.0, abs_tol=0.0):
+            raise ValueError("reconciliation difference must differ")
+
+    @property
+    def quantity_delta(self) -> float:
+        return math.fsum((self.imported_quantity, -self.reference_quantity))
+
+
+@dataclass(frozen=True)
+class ImportedPortfolioReconciliation:
+    imported_snapshot_id: UUID
+    reference_snapshot_id: UUID
+    cash_delta: float
+    position_differences: tuple[ReconciliationDifference, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.imported_snapshot_id, UUID) or not isinstance(self.reference_snapshot_id, UUID):
+            raise TypeError("imported-portfolio reconciliation snapshot IDs must be UUIDs")
+        if self.imported_snapshot_id == self.reference_snapshot_id:
+            raise ValueError("imported-portfolio reconciliation snapshots must differ")
+        if not isinstance(self.cash_delta, float) or not math.isfinite(self.cash_delta):
+            raise ValueError("imported-portfolio reconciliation cash delta is invalid")
+        if not isinstance(self.position_differences, tuple) or not all(isinstance(item, ReconciliationDifference) for item in self.position_differences):
+            raise ValueError("imported-portfolio reconciliation differences are invalid")
+        symbols = tuple(item.symbol for item in self.position_differences)
+        if symbols != tuple(sorted(symbols)) or len(set(symbols)) != len(symbols):
+            raise ValueError("imported-portfolio reconciliation differences are not canonical")
+
+    @property
+    def matches(self) -> bool:
+        return self.cash_delta == 0.0 and not self.position_differences
+
+
+def reconcile_imported_portfolio_state(
+    imported: ReconciliationSnapshot,
+    reference: ReconciliationSnapshot,
+    *,
+    tolerance: float = 1e-12,
+) -> ImportedPortfolioReconciliation:
+    if not isinstance(imported, ReconciliationSnapshot) or not isinstance(reference, ReconciliationSnapshot):
+        raise TypeError("imported-portfolio reconciliation requires snapshots")
+    if imported.source_id != "imported.portfolio" or imported.source_id == reference.source_id:
+        raise ValueError("imported-portfolio reconciliation sources are invalid")
+    if imported.currency != reference.currency or imported.captured_at != reference.captured_at:
+        raise ValueError("imported-portfolio reconciliation snapshots are incompatible")
+    if not isinstance(tolerance, float) or not math.isfinite(tolerance) or tolerance < 0:
+        raise ValueError("imported-portfolio reconciliation tolerance is invalid")
+    imported_positions = {position.symbol: position.quantity for position in imported.positions}
+    reference_positions = {position.symbol: position.quantity for position in reference.positions}
+    differences = tuple(
+        ReconciliationDifference(symbol, imported_positions.get(symbol, 0.0), reference_positions.get(symbol, 0.0))
+        for symbol in sorted(set(imported_positions) | set(reference_positions))
+        if not math.isclose(imported_positions.get(symbol, 0.0), reference_positions.get(symbol, 0.0), rel_tol=0.0, abs_tol=tolerance)
+    )
+    cash_delta = math.fsum((imported.cash_balance, -reference.cash_balance))
+    if math.isclose(cash_delta, 0.0, rel_tol=0.0, abs_tol=tolerance):
+        cash_delta = 0.0
+    return ImportedPortfolioReconciliation(imported.snapshot_id, reference.snapshot_id, cash_delta, differences)

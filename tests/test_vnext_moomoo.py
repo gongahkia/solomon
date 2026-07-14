@@ -15,6 +15,7 @@ from stonks_cli.vnext.moomoo import (
     MoomooCashFlow,
     MoomooHistoricalCandle,
     MoomooHistoricalOrder,
+    MoomooInstrument,
     MoomooMarketDataEntitlements,
     MoomooMarketDataSubscription,
     MoomooOpenDProcessContract,
@@ -37,6 +38,7 @@ from stonks_cli.vnext.moomoo import (
     MoomooUSQuote,
     OpenDEndpointStatus,
     check_moomoo_sdk_compatibility,
+    normalize_moomoo_instruments,
     probe_local_opend,
     read_moomoo_trade_unlock_state_without_secrets,
     select_moomoo_account,
@@ -756,3 +758,28 @@ def test_moomoo_read_only_market_data_entitlement_client_rejects_malformed_quota
     client = MoomooReadOnlyMarketDataEntitlementClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
     with pytest.raises(VNextExternalDataError):
         client.read_entitlements()
+
+
+def test_normalize_moomoo_instruments_validates_and_sorts_us_sg_records():
+    assert normalize_moomoo_instruments(
+        [
+            {"code": "US.AAPL", "name": "Apple", "lot_size": 1, "stock_type": "STOCK", "suspension": False},
+            {"code": "SG.D05", "name": "DBS", "lot_size": 100, "stock_type": "STOCK", "suspension": False},
+        ]
+    ) == (
+        MoomooInstrument("SG.D05", "DBS", 100, "STOCK", False),
+        MoomooInstrument("US.AAPL", "Apple", 1, "STOCK", False),
+    )
+
+
+@pytest.mark.parametrize(
+    "records",
+    [
+        [{"code": "HK.00700", "name": "Tencent", "lot_size": 100, "stock_type": "STOCK", "suspension": False}],
+        [{"code": "US.AAPL", "name": "Apple", "lot_size": 0, "stock_type": "STOCK", "suspension": False}],
+        [{"code": "US.AAPL", "name": "Apple", "lot_size": 1, "stock_type": "STOCK", "suspension": False}] * 2,
+    ],
+)
+def test_normalize_moomoo_instruments_rejects_malformed_or_ambiguous_records(records):
+    with pytest.raises(ValueError):
+        normalize_moomoo_instruments(records)

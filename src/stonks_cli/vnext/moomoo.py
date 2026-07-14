@@ -1331,6 +1331,52 @@ def _normalize_moomoo_market_data_entitlements(raw_entitlements: object) -> Moom
 
 
 @dataclass(frozen=True)
+class MoomooInstrument:
+    symbol: str
+    display_name: str
+    lot_size: int
+    instrument_type: str
+    suspended: bool
+
+    def __post_init__(self) -> None:
+        _validate_moomoo_us_or_sg_symbol(self.symbol)
+        if not isinstance(self.display_name, str) or not self.display_name.strip():
+            raise ValueError("Moomoo instrument display name must be non-empty")
+        if not isinstance(self.lot_size, int) or isinstance(self.lot_size, bool) or self.lot_size <= 0:
+            raise ValueError("Moomoo instrument lot size must be a positive integer")
+        if not isinstance(self.instrument_type, str) or not self.instrument_type.strip():
+            raise ValueError("Moomoo instrument type must be non-empty")
+        if not isinstance(self.suspended, bool):
+            raise ValueError("Moomoo instrument suspension must be boolean")
+
+
+def normalize_moomoo_instruments(raw_instruments: object) -> tuple[MoomooInstrument, ...]:
+    records = raw_instruments
+    to_dict = getattr(raw_instruments, "to_dict", None)
+    if callable(to_dict):
+        records = to_dict("records")
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        raise ValueError("Moomoo instruments must be a sequence")
+    instruments: list[MoomooInstrument] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("Moomoo instrument record must be an object")
+        symbol = record.get("code")
+        display_name = record.get("name")
+        lot_size = record.get("lot_size")
+        instrument_type = record.get("stock_type")
+        suspended = record.get("suspension")
+        if not isinstance(symbol, str) or not isinstance(display_name, str) or not isinstance(lot_size, int) or isinstance(lot_size, bool):
+            raise ValueError("Moomoo instrument record has invalid fields")
+        if not isinstance(instrument_type, str) or not isinstance(suspended, bool):
+            raise ValueError("Moomoo instrument record has invalid fields")
+        instruments.append(MoomooInstrument(symbol, display_name, lot_size, instrument_type, suspended))
+    if len({instrument.symbol for instrument in instruments}) != len(instruments):
+        raise ValueError("Moomoo instrument symbols must be unique")
+    return tuple(sorted(instruments, key=lambda instrument: instrument.symbol))
+
+
+@dataclass(frozen=True)
 class OpenDEndpointProbe:
     status: OpenDEndpointStatus
     code: str

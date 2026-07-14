@@ -10,6 +10,7 @@ from stonks_cli.vnext.notification_delivery_log import (
     append_notification_delivery_log,
 )
 from stonks_cli.vnext.operator_acknowledgements import (
+    OperatorAcknowledgement,
     OperatorAcknowledgementLog,
     load_operator_acknowledgement_log,
     record_operator_acknowledgement,
@@ -55,6 +56,20 @@ def test_operator_acknowledgement_fails_closed_for_failed_delivery(tmp_path):
 
     with pytest.raises(ValueError, match="not delivered"):
         record_operator_acknowledgement(acknowledgement_path, delivery_path, failed.delivery_id, "operator@example.test", clock)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        None,
+        {},
+        {"acknowledgement_id": "not-a-uuid", "delivery_id": "00000000-0000-4000-8000-000000000001", "operator_id": "operator@example.test", "acknowledged_at": "2026-07-14T02:01:00Z"},
+        {"acknowledgement_id": "00000000-0000-4000-8000-000000000002", "delivery_id": "00000000-0000-4000-8000-000000000001", "operator_id": "operator id", "acknowledged_at": "2026-07-14T02:01:00Z"},
+    ],
+)
+def test_operator_approval_provenance_rejects_missing_or_malformed_external_data(data):
+    with pytest.raises(ValueError, match="operator acknowledgement"):
+        OperatorAcknowledgement.from_data(data)
 
 
 def _delivery(status: NotificationDeliveryStatus) -> NotificationDeliveryRecord:

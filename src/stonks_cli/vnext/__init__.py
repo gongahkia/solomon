@@ -51,6 +51,11 @@ from stonks_cli.vnext.crypto_venues import (
     filter_crypto_universe_by_supported_venues,
 )
 from stonks_cli.vnext.daily_closing_prices import DailyClosingPriceIngestion, ingest_daily_closing_prices
+from stonks_cli.vnext.daily_operator_reports import (
+    DAILY_OPERATOR_REPORT_JOB_ID,
+    DailyOperatorReportSchedule,
+    schedule_daily_operator_reports,
+)
 from stonks_cli.vnext.data_confidence import DataConfidenceScore, calculate_data_confidence_score
 from stonks_cli.vnext.database import SQLiteConnectionFactory
 from stonks_cli.vnext.errors import (
@@ -275,6 +280,8 @@ __all__ = [
     "DataConfidenceScore",
     "DailyDrawdown",
     "DailyClosingPriceIngestion",
+    "DailyOperatorReportSchedule",
+    "DAILY_OPERATOR_REPORT_JOB_ID",
     "EventSeverity",
     "ExchangeTimeZone",
     "EVENT_SCHEMA_VERSION",
@@ -470,6 +477,7 @@ __all__ = [
     "resolve_moomoo_sgx_equity_symbol",
     "save_run_identity",
     "save_crypto_universe_history",
+    "schedule_daily_operator_reports",
     "save_crypto_universe_snapshot",
     "serialize_structured_event",
     "select_moomoo_account",

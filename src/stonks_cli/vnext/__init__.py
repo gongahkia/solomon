@@ -1,6 +1,13 @@
 """Isolated vNext decision-support package namespace."""
 
 from stonks_cli.vnext.boundaries import PACKAGE_BOUNDARIES, PackageBoundary, VNextPackage, validate_package_boundaries
+from stonks_cli.vnext.errors import (
+    VNextApplicationError,
+    VNextConfigurationError,
+    VNextExecutionDeniedError,
+    VNextExternalDataError,
+    VNextInvariantError,
+)
 from stonks_cli.vnext.foundation import (
     RUN_IDENTITY_VERSION,
     Clock,
@@ -30,6 +37,11 @@ __all__ = [
     "RuntimeDirectory",
     "SystemUTCClock",
     "UTCDateTime",
+    "VNextApplicationError",
+    "VNextConfigurationError",
+    "VNextExecutionDeniedError",
+    "VNextExternalDataError",
+    "VNextInvariantError",
     "VNextPackage",
     "as_utc",
     "create_run_identity",

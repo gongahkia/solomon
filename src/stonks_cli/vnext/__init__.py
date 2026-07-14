@@ -164,6 +164,11 @@ from stonks_cli.vnext.price_data import (
     fetch_canonical_daily_closes,
 )
 from stonks_cli.vnext.rate_limit import ReadOnlyRateLimiter
+from stonks_cli.vnext.realized_volatility import (
+    CRYPTO_TRADING_DAYS_PER_YEAR,
+    RealizedVolatility,
+    calculate_realized_volatility,
+)
 from stonks_cli.vnext.retry import IdempotentReadRetryPolicy, retry_idempotent_read
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
 from stonks_cli.vnext.snapshot_cache import IdempotentSnapshotCache
@@ -196,6 +201,7 @@ __all__ = [
     "CryptoUniverseHistory",
     "CryptoUniverseRankChange",
     "CryptoVenueAssetSupport",
+    "CRYPTO_TRADING_DAYS_PER_YEAR",
     "CRYPTO_UNIVERSE_SNAPSHOT_VERSION",
     "CRYPTO_UNIVERSE_HISTORY_VERSION",
     "DEFAULT_STABLECOIN_PROVIDER_ASSET_IDS",
@@ -276,6 +282,7 @@ __all__ = [
     "RUNTIME_ROOT_ENV",
     "RunIdentity",
     "ReadOnlyRateLimiter",
+    "RealizedVolatility",
     "SGXCashEquityCalendar2026",
     "SGMarketSession",
     "SGMarketSessionStatus",
@@ -313,6 +320,7 @@ __all__ = [
     "filter_crypto_universe_by_supported_venues",
     "check_moomoo_sdk_compatibility",
     "calculate_asset_returns",
+    "calculate_realized_volatility",
     "classify_stablecoins",
     "normalize_moomoo_instruments",
     "normalize_moomoo_corporate_actions",

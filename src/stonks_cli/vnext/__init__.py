@@ -18,6 +18,11 @@ from stonks_cli.vnext.crypto_universe_snapshot import (
     load_crypto_universe_snapshot,
     save_crypto_universe_snapshot,
 )
+from stonks_cli.vnext.crypto_venues import (
+    CryptoResearchVenue,
+    CryptoVenueAssetSupport,
+    filter_crypto_universe_by_supported_venues,
+)
 from stonks_cli.vnext.database import SQLiteConnectionFactory
 from stonks_cli.vnext.errors import (
     OpenDContextIncompatibleError,
@@ -147,7 +152,9 @@ __all__ = [
     "CryptoMarketCapAsset",
     "CryptoMarketCapBatch",
     "CryptoMarketCapProvider",
+    "CryptoResearchVenue",
     "CryptoUniverseSnapshot",
+    "CryptoVenueAssetSupport",
     "CRYPTO_UNIVERSE_SNAPSHOT_VERSION",
     "DEFAULT_STABLECOIN_PROVIDER_ASSET_IDS",
     "EventSeverity",
@@ -252,6 +259,7 @@ __all__ = [
     "create_structured_event",
     "fetch_crypto_market_caps",
     "filter_crypto_universe_by_liquidity",
+    "filter_crypto_universe_by_supported_venues",
     "check_moomoo_sdk_compatibility",
     "classify_stablecoins",
     "normalize_moomoo_instruments",

@@ -1,6 +1,7 @@
 """Isolated vNext decision-support package namespace."""
 
 from stonks_cli.vnext.account_import import import_moomoo_accounts
+from stonks_cli.vnext.asset_returns import AssetReturnSeries, DailyAssetReturn, calculate_asset_returns
 from stonks_cli.vnext.boundaries import PACKAGE_BOUNDARIES, PackageBoundary, VNextPackage, validate_package_boundaries
 from stonks_cli.vnext.capabilities import Capability, CapabilityRegistry
 from stonks_cli.vnext.container import ServiceContainer
@@ -177,6 +178,7 @@ from stonks_cli.vnext.stablecoins import (
 __all__ = [
     "Clock",
     "ApplicationLifecycle",
+    "AssetReturnSeries",
     "Capability",
     "CapabilityRegistry",
     "CanonicalDailyClose",
@@ -197,6 +199,7 @@ __all__ = [
     "CRYPTO_UNIVERSE_SNAPSHOT_VERSION",
     "CRYPTO_UNIVERSE_HISTORY_VERSION",
     "DEFAULT_STABLECOIN_PROVIDER_ASSET_IDS",
+    "DailyAssetReturn",
     "DailyClosingPriceIngestion",
     "EventSeverity",
     "ExchangeTimeZone",
@@ -309,6 +312,7 @@ __all__ = [
     "filter_crypto_universe_by_liquidity",
     "filter_crypto_universe_by_supported_venues",
     "check_moomoo_sdk_compatibility",
+    "calculate_asset_returns",
     "classify_stablecoins",
     "normalize_moomoo_instruments",
     "normalize_moomoo_corporate_actions",

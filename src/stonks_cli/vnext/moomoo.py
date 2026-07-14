@@ -319,6 +319,106 @@ def _finite_balance_value(record: Mapping[object, object], field: str) -> float:
 
 
 @dataclass(frozen=True)
+class MoomooPosition:
+    account_id: str
+    position_id: str
+    symbol: str
+    quantity: float
+    available_quantity: float
+    currency: str
+    market_value: float
+
+    def __post_init__(self) -> None:
+        if not all(isinstance(value, str) and value for value in (self.account_id, self.position_id, self.symbol, self.currency)):
+            raise ValueError("Moomoo position identifiers and currency must be non-empty")
+        for value in (self.quantity, self.available_quantity, self.market_value):
+            if not isinstance(value, float) or not math.isfinite(value):
+                raise ValueError("Moomoo position values must be finite floats")
+
+
+@dataclass(frozen=True)
+class MoomooReadOnlyPositionClient:
+    contract: MoomooOpenDProcessContract
+    context_factory: Callable[[str, int], object]
+    success_code: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.contract, MoomooOpenDProcessContract):
+            raise TypeError("OpenD process contract is required")
+        if not callable(self.context_factory):
+            raise TypeError("Moomoo position context factory must be callable")
+        if not isinstance(self.success_code, int) or isinstance(self.success_code, bool):
+            raise ValueError("Moomoo SDK success code must be an integer")
+
+    def list_positions(self, account: MoomooAccount) -> tuple[MoomooPosition, ...]:
+        if not isinstance(account, MoomooAccount) or not account.account_id.isdecimal():
+            raise VNextExternalDataError("Moomoo selected account is malformed")
+        try:
+            context = self.context_factory(self.contract.host, self.contract.port)
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo position context unavailable") from error
+        try:
+            getter = getattr(context, "position_list_query", None)
+            if not callable(getter):
+                raise VNextExternalDataError("Moomoo position context is incompatible")
+            response = getter(trd_env=account.trading_environment, acc_id=int(account.account_id), refresh_cache=False)
+            if not isinstance(response, tuple) or len(response) != 2 or response[0] != self.success_code:
+                raise VNextExternalDataError("Moomoo positions are unavailable")
+            return _normalize_moomoo_positions(account.account_id, response[1])
+        except VNextExternalDataError:
+            raise
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo positions are malformed") from error
+        finally:
+            closer = getattr(context, "close", None)
+            if not callable(closer):
+                raise VNextExternalDataError("Moomoo position context is incompatible")
+            try:
+                closer()
+            except Exception as error:
+                raise VNextExternalDataError("Moomoo position context close failed") from error
+
+
+def _normalize_moomoo_positions(account_id: str, raw_positions: object) -> tuple[MoomooPosition, ...]:
+    records = raw_positions
+    to_dict = getattr(raw_positions, "to_dict", None)
+    if callable(to_dict):
+        records = to_dict("records")
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        raise ValueError("Moomoo positions must be a sequence")
+    positions: list[MoomooPosition] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("Moomoo position record must be an object")
+        position_id = record.get("position_id")
+        symbol = record.get("code")
+        currency = record.get("currency")
+        if not all(isinstance(value, str) and value for value in (position_id, symbol, currency)):
+            raise ValueError("Moomoo position record has invalid identifiers")
+        positions.append(
+            MoomooPosition(
+                account_id,
+                position_id,
+                symbol,
+                _finite_position_value(record, "qty"),
+                _finite_position_value(record, "can_sell_qty"),
+                currency,
+                _finite_position_value(record, "market_val"),
+            )
+        )
+    if len({position.position_id for position in positions}) != len(positions):
+        raise ValueError("Moomoo position IDs must be unique")
+    return tuple(sorted(positions, key=lambda position: (position.symbol, position.position_id)))
+
+
+def _finite_position_value(record: Mapping[object, object], field: str) -> float:
+    value = record.get(field)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"Moomoo position record has invalid {field}")
+    return float(value)
+
+
+@dataclass(frozen=True)
 class OpenDEndpointProbe:
     status: OpenDEndpointStatus
     code: str

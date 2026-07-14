@@ -13,8 +13,10 @@ from stonks_cli.vnext.moomoo import (
     MoomooAccount,
     MoomooAccountBalance,
     MoomooOpenDProcessContract,
+    MoomooPosition,
     MoomooReadOnlyAccountClient,
     MoomooReadOnlyBalanceClient,
+    MoomooReadOnlyPositionClient,
     MoomooSdkStatus,
     MoomooTradeUnlockState,
     OpenDEndpointStatus,
@@ -237,3 +239,43 @@ def test_moomoo_read_only_balance_client_rejects_incomplete_or_nonfinite_broker_
     client = MoomooReadOnlyBalanceClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
     with pytest.raises(VNextExternalDataError):
         client.read_balance(MoomooAccount("100", 0, "REAL"))
+
+
+def test_moomoo_read_only_position_client_uses_stable_account_id_and_cached_read():
+    class Context:
+        closed = False
+        kwargs: dict[str, object] = {}
+
+        def position_list_query(self, **kwargs):
+            self.kwargs = kwargs
+            return 0, [
+                {"position_id": "two", "code": "US.MSFT", "qty": 2, "can_sell_qty": 1, "currency": "USD", "market_val": 800},
+                {"position_id": "one", "code": "US.AAPL", "qty": 3, "can_sell_qty": 3, "currency": "USD", "market_val": 600},
+            ]
+
+        def close(self) -> None:
+            self.closed = True
+
+    context = Context()
+    client = MoomooReadOnlyPositionClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: context)
+
+    assert client.list_positions(MoomooAccount("100", 0, "REAL")) == (
+        MoomooPosition("100", "one", "US.AAPL", 3.0, 3.0, "USD", 600.0),
+        MoomooPosition("100", "two", "US.MSFT", 2.0, 1.0, "USD", 800.0),
+    )
+    assert context.kwargs == {"trd_env": "REAL", "acc_id": 100, "refresh_cache": False}
+    assert context.closed is True
+    assert not hasattr(client, "place_order")
+
+
+def test_moomoo_read_only_position_client_rejects_malformed_records():
+    class Context:
+        def position_list_query(self, **kwargs):
+            return 0, [{"position_id": "one", "code": "US.AAPL", "qty": 1, "can_sell_qty": 1, "currency": "USD"}]
+
+        def close(self) -> None:
+            pass
+
+    client = MoomooReadOnlyPositionClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
+    with pytest.raises(VNextExternalDataError):
+        client.list_positions(MoomooAccount("100", 0, "REAL"))

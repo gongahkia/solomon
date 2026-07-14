@@ -5,6 +5,7 @@ from stonks_cli.vnext.asset_returns import AssetReturnSeries, DailyAssetReturn, 
 from stonks_cli.vnext.boundaries import PACKAGE_BOUNDARIES, PackageBoundary, VNextPackage, validate_package_boundaries
 from stonks_cli.vnext.capabilities import Capability, CapabilityRegistry
 from stonks_cli.vnext.container import ServiceContainer
+from stonks_cli.vnext.cross_asset_correlation import CrossAssetCorrelation, calculate_cross_asset_correlations
 from stonks_cli.vnext.crypto_liquidity import filter_crypto_universe_by_liquidity
 from stonks_cli.vnext.crypto_market_cap import (
     CryptoMarketCapAsset,
@@ -200,6 +201,7 @@ __all__ = [
     "CryptoAssetMetadata",
     "CryptoAssetMetadataProvider",
     "CryptoAssetPlatform",
+    "CrossAssetCorrelation",
     "CryptoResearchVenue",
     "CryptoUniverseSnapshot",
     "CryptoUniverseChanges",
@@ -331,6 +333,7 @@ __all__ = [
     "filter_crypto_universe_by_supported_venues",
     "check_moomoo_sdk_compatibility",
     "calculate_asset_returns",
+    "calculate_cross_asset_correlations",
     "calculate_momentum_factor",
     "calculate_mean_reversion_factor",
     "calculate_realized_volatility",

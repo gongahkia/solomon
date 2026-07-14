@@ -41,3 +41,15 @@ def test_weighted_ranker_fails_closed_for_incomplete_duplicate_cross_provider_or
         rank_weighted_assets(complete + (ScoreComponent("other", "ethereum", "trend", 0.1, 0.5),), FactorWeightsConfig())
     with pytest.raises(ValueError, match="sum to one"):
         rank_weighted_assets(complete, weights)
+
+
+def test_weighted_ranker_breaks_equal_scores_by_canonical_asset_id_not_input_order():
+    components = tuple(
+        ScoreComponent("coingecko", asset_id, factor_id, 0.1, 0.5)
+        for asset_id in ("ethereum", "bitcoin")
+        for factor_id in ("trend", "momentum", "mean_reversion", "risk_adjusted_performance")
+    )
+
+    ranks = rank_weighted_assets(components, FactorWeightsConfig())
+
+    assert [(item.provider_asset_id, item.rank) for item in ranks] == [("bitcoin", 1), ("ethereum", 2)]

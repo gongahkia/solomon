@@ -52,7 +52,7 @@ def rank_weighted_assets(
     provider_id = components[0].provider_id
     return tuple(
         WeightedAssetRank(provider_id, asset_id, rank, weighted_score)
-        for rank, (asset_id, weighted_score) in enumerate(sorted(weighted_scores, key=lambda item: item[1], reverse=True), start=1)
+        for rank, (asset_id, weighted_score) in enumerate(sorted(weighted_scores, key=lambda item: (-item[1], item[0])), start=1)
     )
 
 

@@ -170,6 +170,7 @@ from stonks_cli.vnext.realized_volatility import (
     calculate_realized_volatility,
 )
 from stonks_cli.vnext.retry import IdempotentReadRetryPolicy, retry_idempotent_read
+from stonks_cli.vnext.rolling_drawdown import DailyDrawdown, RollingDrawdownSeries, calculate_rolling_drawdown
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
 from stonks_cli.vnext.snapshot_cache import IdempotentSnapshotCache
 from stonks_cli.vnext.stablecoins import (
@@ -206,6 +207,7 @@ __all__ = [
     "CRYPTO_UNIVERSE_HISTORY_VERSION",
     "DEFAULT_STABLECOIN_PROVIDER_ASSET_IDS",
     "DailyAssetReturn",
+    "DailyDrawdown",
     "DailyClosingPriceIngestion",
     "EventSeverity",
     "ExchangeTimeZone",
@@ -283,6 +285,7 @@ __all__ = [
     "RunIdentity",
     "ReadOnlyRateLimiter",
     "RealizedVolatility",
+    "RollingDrawdownSeries",
     "SGXCashEquityCalendar2026",
     "SGMarketSession",
     "SGMarketSessionStatus",
@@ -321,6 +324,7 @@ __all__ = [
     "check_moomoo_sdk_compatibility",
     "calculate_asset_returns",
     "calculate_realized_volatility",
+    "calculate_rolling_drawdown",
     "classify_stablecoins",
     "normalize_moomoo_instruments",
     "normalize_moomoo_corporate_actions",

@@ -241,6 +241,11 @@ from stonks_cli.vnext.transactions_import import (
 )
 from stonks_cli.vnext.trend_factor import TrendFactor, calculate_trend_factor
 from stonks_cli.vnext.usd_portfolio_nav import USDPortfolioNAV, calculate_usd_portfolio_nav
+from stonks_cli.vnext.weekly_operator_reports import (
+    WEEKLY_OPERATOR_REPORT_JOB_ID,
+    WeeklyOperatorReportSchedule,
+    schedule_weekly_operator_reports,
+)
 from stonks_cli.vnext.weighted_ranker import WeightedAssetRank, rank_weighted_assets
 
 __all__ = [
@@ -478,6 +483,7 @@ __all__ = [
     "save_run_identity",
     "save_crypto_universe_history",
     "schedule_daily_operator_reports",
+    "schedule_weekly_operator_reports",
     "save_crypto_universe_snapshot",
     "serialize_structured_event",
     "select_moomoo_account",
@@ -501,4 +507,6 @@ __all__ = [
     "validate_fractional_share_constraints",
     "verify_source_citation",
     "WeightedAssetRank",
+    "WeeklyOperatorReportSchedule",
+    "WEEKLY_OPERATOR_REPORT_JOB_ID",
 ]

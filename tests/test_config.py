@@ -274,6 +274,12 @@ def test_vnext_defaults_fail_closed():
     assert cfg.vnext.operator.broker_app_only is True
 
 
+@pytest.mark.parametrize("operator", [{"execution_mode": "live"}, {"execution_mode": "paper"}, {"execution_mode": ""}, {"execution_mode": None}, {"broker_app_only": False}])
+def test_vnext_execution_mode_configuration_rejects_non_disabled_or_malformed_values(operator):
+    with pytest.raises(ValueError):
+        AppConfig.model_validate({"vnext": {"operator": operator}})
+
+
 def test_moomoo_endpoint_configuration_allows_only_local_opend():
     cfg = AppConfig.model_validate({"vnext": {"moomoo": {"host": "LOCALHOST", "port": 11112, "connection_timeout_seconds": 2.5}}})
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 
 import pytest
 
@@ -125,6 +126,25 @@ def test_explicit_v1_config_migrates_without_mutating_input():
     assert legacy["schema_version"] == 1
     assert migrated["schema_version"] == CONFIG_SCHEMA_VERSION
     assert AppConfig.model_validate(migrated).vnext.moomoo.read_only is True
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"tickers": ["aapl"], "extension": {"legacy": True}},
+        {"schema_version": 1, "vnext": {"moomoo": {"host": "127.0.0.1"}}},
+        {"schema_version": CONFIG_SCHEMA_VERSION, "vnext": {"moomoo": {"host": "localhost"}}},
+    ],
+)
+def test_config_migration_is_compatible_and_idempotent_for_all_supported_schema_versions(data):
+    original = deepcopy(data)
+
+    migrated = migrate_config_data(data)
+
+    assert data == original
+    assert migrated["schema_version"] == CONFIG_SCHEMA_VERSION
+    assert migrate_config_data(migrated) == migrated
+    assert AppConfig.model_validate(migrated).schema_version == CONFIG_SCHEMA_VERSION
 
 
 def test_config_schema_discriminator_is_serialized_and_rejects_legacy_value():

@@ -216,6 +216,7 @@ from stonks_cli.vnext.reviewed_order_ticket import OrderTicketSide, OrderTicketT
 from stonks_cli.vnext.risk_adjusted_performance import RiskAdjustedPerformance, calculate_risk_adjusted_performance
 from stonks_cli.vnext.rolling_drawdown import DailyDrawdown, RollingDrawdownSeries, calculate_rolling_drawdown
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
+from stonks_cli.vnext.scheduled_run_deduplication import InMemoryScheduledRunDeduplicator, ScheduledRunKey
 from stonks_cli.vnext.score_components import ScoreComponent
 from stonks_cli.vnext.sector_limits import SectorConcentrationLimit, enforce_sector_concentration_limits
 from stonks_cli.vnext.sgd_portfolio_nav import SGDPortfolioNAV, calculate_sgd_portfolio_nav
@@ -485,6 +486,8 @@ __all__ = [
     "schedule_daily_operator_reports",
     "schedule_weekly_operator_reports",
     "save_crypto_universe_snapshot",
+    "ScheduledRunKey",
+    "InMemoryScheduledRunDeduplicator",
     "serialize_structured_event",
     "select_moomoo_account",
     "runtime_directories",

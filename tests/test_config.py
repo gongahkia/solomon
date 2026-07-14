@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from stonks_cli.config import AppConfig, load_config, redacted_config_data, save_config
+from stonks_cli.config import AppConfig, load_config, migrate_config_data, redacted_config_data, save_config
 
 
 def test_load_config_defaults_when_missing(monkeypatch, tmp_path):
@@ -104,6 +104,22 @@ def test_legacy_config_migrates_to_current_schema(monkeypatch, tmp_path):
 
     assert cfg.schema_version == 2
     assert cfg.tickers == ["aapl"]
+
+
+def test_explicit_v1_config_migrates_without_mutating_input():
+    legacy = {"schema_version": 1, "vnext": {"moomoo": {"host": "127.0.0.1"}}}
+
+    migrated = migrate_config_data(legacy)
+
+    assert legacy["schema_version"] == 1
+    assert migrated["schema_version"] == 2
+    assert AppConfig.model_validate(migrated).vnext.moomoo.read_only is True
+
+
+@pytest.mark.parametrize("data", [[], {"schema_version": True}, {"schema_version": "2"}])
+def test_malformed_config_version_fails_closed(data):
+    with pytest.raises(ValueError, match="config root must be an object|schema_version must be an integer"):
+        migrate_config_data(data)
 
 
 def test_future_config_schema_is_rejected(monkeypatch, tmp_path):

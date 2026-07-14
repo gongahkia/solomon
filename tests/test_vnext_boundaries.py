@@ -4,7 +4,13 @@ from dataclasses import replace
 
 import pytest
 
-from stonks_cli.vnext.boundaries import BrokerAccess, PACKAGE_BOUNDARIES, PackageBoundary, VNextPackage, validate_package_boundaries
+from stonks_cli.vnext.boundaries import (
+    PACKAGE_BOUNDARIES,
+    BrokerAccess,
+    PackageBoundary,
+    VNextPackage,
+    validate_package_boundaries,
+)
 
 
 def test_default_vnext_boundaries_are_complete_and_valid():

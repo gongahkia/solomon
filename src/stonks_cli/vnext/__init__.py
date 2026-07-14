@@ -172,6 +172,7 @@ from stonks_cli.vnext.realized_volatility import (
     calculate_realized_volatility,
 )
 from stonks_cli.vnext.retry import IdempotentReadRetryPolicy, retry_idempotent_read
+from stonks_cli.vnext.risk_adjusted_performance import RiskAdjustedPerformance, calculate_risk_adjusted_performance
 from stonks_cli.vnext.rolling_drawdown import DailyDrawdown, RollingDrawdownSeries, calculate_rolling_drawdown
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
 from stonks_cli.vnext.snapshot_cache import IdempotentSnapshotCache
@@ -290,6 +291,7 @@ __all__ = [
     "RunIdentity",
     "ReadOnlyRateLimiter",
     "RealizedVolatility",
+    "RiskAdjustedPerformance",
     "RollingDrawdownSeries",
     "SGXCashEquityCalendar2026",
     "SGMarketSession",
@@ -332,6 +334,7 @@ __all__ = [
     "calculate_momentum_factor",
     "calculate_mean_reversion_factor",
     "calculate_realized_volatility",
+    "calculate_risk_adjusted_performance",
     "calculate_rolling_drawdown",
     "calculate_trend_factor",
     "classify_stablecoins",

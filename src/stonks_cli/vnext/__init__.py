@@ -198,6 +198,7 @@ from stonks_cli.vnext.notification_delivery_log import (
     load_notification_delivery_log,
     save_notification_delivery_log,
 )
+from stonks_cli.vnext.notification_delivery_retry import retry_failed_notification_delivery
 from stonks_cli.vnext.opend_fixture import RecordedOpenDCall, RecordedOpenDFixtureAdapter
 from stonks_cli.vnext.paper_portfolio_accounting import (
     PaperPortfolioAccount,
@@ -528,4 +529,5 @@ __all__ = [
     "append_notification_delivery_log",
     "load_notification_delivery_log",
     "save_notification_delivery_log",
+    "retry_failed_notification_delivery",
 ]

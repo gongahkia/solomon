@@ -175,6 +175,7 @@ from stonks_cli.vnext.moomoo import (
 from stonks_cli.vnext.non_llm_explanation import NonLLMExplanation, build_non_llm_explanation
 from stonks_cli.vnext.opend_fixture import RecordedOpenDCall, RecordedOpenDFixtureAdapter
 from stonks_cli.vnext.portfolio_domain import PortfolioAssetClass, PortfolioHolding, PortfolioSnapshot
+from stonks_cli.vnext.portfolio_exposure import PortfolioExposure, calculate_portfolio_exposure
 from stonks_cli.vnext.price_data import (
     CanonicalDailyClose,
     CanonicalPriceDataProvider,
@@ -327,6 +328,7 @@ __all__ = [
     "PACKAGE_BOUNDARIES",
     "PackageBoundary",
     "PortfolioAssetClass",
+    "PortfolioExposure",
     "PortfolioHolding",
     "PortfolioSnapshot",
     "PortfolioTransaction",
@@ -392,6 +394,7 @@ __all__ = [
     "calculate_data_confidence_score",
     "calculate_momentum_factor",
     "calculate_mean_reversion_factor",
+    "calculate_portfolio_exposure",
     "calculate_realized_volatility",
     "calculate_risk_adjusted_performance",
     "calculate_rolling_drawdown",

@@ -12,6 +12,7 @@ from stonks_cli.vnext.broker_submission import (
     require_read_only_broker_method,
 )
 from stonks_cli.vnext.capabilities import Capability, CapabilityRegistry
+from stonks_cli.vnext.cash_balance_variance import CashBalanceVarianceAlert, alert_on_cash_balance_variance
 from stonks_cli.vnext.cash_ledger import CashBalance, CashLedger, CashLedgerEntry
 from stonks_cli.vnext.citation_verification import CitationVerification, verify_source_citation
 from stonks_cli.vnext.container import ServiceContainer
@@ -340,6 +341,7 @@ __all__ = [
     "Capability",
     "CapabilityRegistry",
     "CashBalance",
+    "CashBalanceVarianceAlert",
     "CashLedger",
     "CashLedgerEntry",
     "CitationVerification",
@@ -550,6 +552,7 @@ __all__ = [
     "VenueDueDiligenceEvidence",
     "VenueDueDiligenceOutcome",
     "as_utc",
+    "alert_on_cash_balance_variance",
     "attach_market_data_provenance",
     "append_crypto_universe_history",
     "build_explanation_evidence_bundle",

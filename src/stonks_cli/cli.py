@@ -30,7 +30,9 @@ from stonks_cli.vnext.account_import import import_moomoo_accounts
 from stonks_cli.vnext.crypto_universe_snapshot import load_crypto_universe_snapshot
 from stonks_cli.vnext.data_confidence import DataConfidenceScore
 from stonks_cli.vnext.errors import VNextConfigurationError
+from stonks_cli.vnext.holdings_import import import_moomoo_holdings
 from stonks_cli.vnext.market_data_refresh import refresh_moomoo_market_data
+from stonks_cli.vnext.moomoo import MoomooAccount
 from stonks_cli.vnext.portfolio_exposure import PortfolioExposure
 from stonks_cli.vnext.portfolio_risk_report import render_portfolio_risk_report
 from stonks_cli.vnext.score_components import ScoreComponent
@@ -179,6 +181,45 @@ def vnext_daily_report(
             raise VNextConfigurationError("vNext operator reports are not enabled")
         exposure, nav, confidence = _load_daily_report_inputs(report_input)
         typer.echo(f"DAILY REPORT\n{render_portfolio_risk_report(exposure, nav, confidence)}")
+    except Exception as error:
+        raise _exit_for_error(error)
+
+
+@vnext_app.command("portfolio-import")
+def vnext_portfolio_import(
+    account_id: str = typer.Option(..., "--account-id"),
+    account_index: int = typer.Option(..., "--account-index", min=0),
+    trading_environment: str = typer.Option(..., "--trading-environment"),
+    captured_at: str = typer.Option(..., "--captured-at", help="Timezone-aware ISO-8601 timestamp"),
+) -> None:
+    """Import a canonical read-only Moomoo holdings snapshot."""
+    try:
+        snapshot = import_moomoo_holdings(
+            load_config(),
+            MoomooAccount(account_id, account_index, trading_environment),
+            datetime.fromisoformat(captured_at),
+        )
+        typer.echo(
+            json.dumps(
+                {
+                    "provider_id": snapshot.provider_id,
+                    "account_id": snapshot.account_id,
+                    "captured_at": snapshot.captured_at.isoformat().replace("+00:00", "Z"),
+                    "holdings": [
+                        {
+                            "holding_id": holding.holding_id,
+                            "symbol": holding.symbol,
+                            "asset_class": holding.asset_class.value,
+                            "quantity": holding.quantity,
+                            "currency": holding.currency,
+                            "market_value": holding.market_value,
+                        }
+                        for holding in snapshot.holdings
+                    ],
+                },
+                sort_keys=True,
+            )
+        )
     except Exception as error:
         raise _exit_for_error(error)
 

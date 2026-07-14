@@ -238,8 +238,22 @@ def test_vnext_defaults_fail_closed():
     assert cfg.vnext.enabled is False
     assert cfg.vnext.moomoo.enabled is False
     assert cfg.vnext.moomoo.read_only is True
+    assert cfg.vnext.moomoo.endpoint == ("127.0.0.1", 11111)
     assert cfg.vnext.operator.execution_mode == "disabled"
     assert cfg.vnext.operator.broker_app_only is True
+
+
+def test_moomoo_endpoint_configuration_allows_only_local_opend():
+    cfg = AppConfig.model_validate({"vnext": {"moomoo": {"host": "LOCALHOST", "port": 11112, "connection_timeout_seconds": 2.5}}})
+
+    assert cfg.vnext.moomoo.endpoint == ("localhost", 11112)
+    assert cfg.vnext.moomoo.connection_timeout_seconds == 2.5
+    with pytest.raises(ValueError, match="OpenD host must be local"):
+        AppConfig.model_validate({"vnext": {"moomoo": {"host": "192.0.2.1"}}})
+    with pytest.raises(ValueError):
+        AppConfig.model_validate({"vnext": {"moomoo": {"port": 0}}})
+    with pytest.raises(ValueError):
+        AppConfig.model_validate({"vnext": {"moomoo": {"connection_timeout_seconds": 0}}})
 
 
 def test_redacted_config_hides_sensitive_values():

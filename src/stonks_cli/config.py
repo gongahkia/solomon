@@ -236,7 +236,20 @@ class MoomooConfig(BaseModel):
     read_only: Literal[True] = True
     host: str = "127.0.0.1"
     port: int = Field(default=11111, ge=1, le=65535)
+    connection_timeout_seconds: float = Field(default=5.0, gt=0.0, le=60.0)
     account_id: str | None = None
+
+    @field_validator("host")
+    @classmethod
+    def validate_local_opend_host(cls, value: str) -> str:
+        host = value.strip().lower()
+        if host not in {"127.0.0.1", "::1", "localhost"}:
+            raise ValueError("moomoo OpenD host must be local")
+        return host
+
+    @property
+    def endpoint(self) -> tuple[str, int]:
+        return self.host, self.port
 
 
 class CryptoUniverseConfig(BaseModel):

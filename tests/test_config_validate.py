@@ -24,6 +24,7 @@ def test_config_validate_reports_tickers_and_strategy(monkeypatch, tmp_path):
     assert "strategy" in out
     assert out["vnext_execution_mode"] == "disabled"
     assert out["vnext_broker_read_only"] is True
+    assert out["vnext_moomoo_endpoint"] == "127.0.0.1:11111"
 
 
 def test_config_migrate_cli_command(tmp_path):

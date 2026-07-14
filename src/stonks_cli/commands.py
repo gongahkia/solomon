@@ -114,4 +114,5 @@ def do_config_validate(path: Path | None = None) -> dict[str, object]:
         "vnext_enabled": cfg.vnext.enabled,
         "vnext_execution_mode": cfg.vnext.operator.execution_mode,
         "vnext_broker_read_only": cfg.vnext.moomoo.read_only,
+        "vnext_moomoo_endpoint": f"{cfg.vnext.moomoo.host}:{cfg.vnext.moomoo.port}",
     }

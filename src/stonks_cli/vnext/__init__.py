@@ -1,5 +1,6 @@
 """Isolated vNext decision-support package namespace."""
 
+from stonks_cli.vnext.account_import import import_moomoo_accounts
 from stonks_cli.vnext.boundaries import PACKAGE_BOUNDARIES, PackageBoundary, VNextPackage, validate_package_boundaries
 from stonks_cli.vnext.capabilities import Capability, CapabilityRegistry
 from stonks_cli.vnext.container import ServiceContainer
@@ -214,6 +215,7 @@ __all__ = [
     "VNextPackage",
     "as_utc",
     "create_run_identity",
+    "import_moomoo_accounts",
     "create_structured_event",
     "check_moomoo_sdk_compatibility",
     "normalize_moomoo_instruments",

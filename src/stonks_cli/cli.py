@@ -25,6 +25,7 @@ from stonks_cli.config import load_config
 from stonks_cli.errors import ExitCodes, StonksError
 from stonks_cli.legal_policy import enforce_legal_policy
 from stonks_cli.logging_utils import LoggingConfig, configure_logging
+from stonks_cli.vnext.account_import import import_moomoo_accounts
 from stonks_cli.whalemirror.attribution import (
     DEFAULT_ATTRIBUTION_FIXTURE,
     rank_wallets_from_fixture,
@@ -86,6 +87,7 @@ carry_app = typer.Typer(help="CarryMirror funding and basis scanner commands.")
 carry_live_app = typer.Typer(help="CarryMirror fail-closed tiny-live safety commands.")
 carry_paper_app = typer.Typer(help="CarryMirror paper carry simulation commands.")
 config_app = typer.Typer()
+broker_app = typer.Typer(help="Read-only broker import commands.")
 whalemirror_app = typer.Typer(help="WhaleMirror Hyperliquid paper-first commands.")
 whalemirror_gates_app = typer.Typer(help="Restartable validation gate harnesses.")
 whalemirror_ingest_app = typer.Typer(help="Hyperliquid ingestion fixture and capture commands.")
@@ -96,6 +98,7 @@ app.add_typer(carry_app, name="carry")
 carry_app.add_typer(carry_live_app, name="live")
 carry_app.add_typer(carry_paper_app, name="paper")
 app.add_typer(config_app, name="config")
+app.add_typer(broker_app, name="broker")
 app.add_typer(whalemirror_app, name="whalemirror")
 whalemirror_app.add_typer(whalemirror_gates_app, name="gates")
 whalemirror_app.add_typer(whalemirror_ingest_app, name="ingest")
@@ -221,6 +224,33 @@ def config_validate(
     Console().print_json(json.dumps(result))
     if not result["valid"]:
         raise typer.Exit(code=ExitCodes.BAD_CONFIG)
+
+
+@broker_app.command("account-import")
+def broker_account_import() -> None:
+    """Import account metadata from local operator-managed Moomoo OpenD."""
+    try:
+        config = load_config()
+        accounts = import_moomoo_accounts(config)
+        Console().print_json(
+            json.dumps(
+                {
+                    "broker": "moomoo",
+                    "endpoint": f"{config.vnext.moomoo.host}:{config.vnext.moomoo.port}",
+                    "read_only": True,
+                    "accounts": [
+                        {
+                            "account_id": account.account_id,
+                            "account_index": account.account_index,
+                            "trading_environment": account.trading_environment,
+                        }
+                        for account in accounts
+                    ],
+                }
+            )
+        )
+    except Exception as e:
+        raise _exit_for_error(e)
 
 
 # --- CarryMirror commands ---

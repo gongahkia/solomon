@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from stonks_cli import __version__
 from stonks_cli.config import (
@@ -90,9 +93,21 @@ def do_config_set(field_path: str, value) -> str:
     return redacted_config_json(updated, indent=2)
 
 
-def do_config_validate() -> dict[str, object]:
-    cfg = load_config()
+def do_config_validate(path: Path | None = None) -> dict[str, object]:
+    try:
+        cfg = load_config(path)
+    except json.JSONDecodeError:
+        return {"valid": False, "errors": [{"code": "invalid_json"}]}
+    except ValidationError:
+        return {"valid": False, "errors": [{"code": "schema_validation_error"}]}
+    except ValueError as error:
+        code = "semantic_validation_error" if str(error).startswith("invalid config semantics:") else "invalid_config"
+        return {"valid": False, "errors": [{"code": code}]}
+    except OSError:
+        return {"valid": False, "errors": [{"code": "config_io_error"}]}
     return {
+        "valid": True,
+        "errors": [],
         "schema_version": cfg.schema_version,
         "tickers": list(cfg.tickers or []),
         "strategy": cfg.strategy,

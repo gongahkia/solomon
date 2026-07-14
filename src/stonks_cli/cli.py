@@ -210,12 +210,17 @@ def config_set(
 
 
 @config_app.command("validate")
-def config_validate() -> None:
-    """Validate current config."""
+def config_validate(
+    path: Path | None = typer.Option(None, "--path", help="Override config file path"),
+) -> None:
+    """Emit machine-readable config validation."""
     try:
-        Console().print_json(json.dumps(do_config_validate()))
+        result = do_config_validate(path)
     except Exception as e:
         raise _exit_for_error(e)
+    Console().print_json(json.dumps(result))
+    if not result["valid"]:
+        raise typer.Exit(code=ExitCodes.BAD_CONFIG)
 
 
 # --- CarryMirror commands ---

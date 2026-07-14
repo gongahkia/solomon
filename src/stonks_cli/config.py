@@ -340,8 +340,8 @@ def config_path() -> Path:
     return Path(env).expanduser() if env else default_config_path()
 
 
-def load_config() -> AppConfig:
-    path = config_path()
+def load_config(path: Path | None = None) -> AppConfig:
+    path = path or config_path()
     if not path.exists():
         cfg = AppConfig()
     else:

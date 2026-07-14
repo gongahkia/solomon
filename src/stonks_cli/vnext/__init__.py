@@ -224,6 +224,7 @@ from stonks_cli.vnext.stablecoins import (
     StablecoinStatus,
     classify_stablecoins,
 )
+from stonks_cli.vnext.telegram_configuration import TelegramDeliveryConfiguration, validate_telegram_configuration
 from stonks_cli.vnext.telegram_report_template import render_telegram_report_template
 from stonks_cli.vnext.transactions_import import (
     PortfolioTransaction,
@@ -477,8 +478,10 @@ __all__ = [
     "render_broker_app_order_ticket",
     "render_portfolio_risk_report",
     "render_telegram_report_template",
+    "TelegramDeliveryConfiguration",
     "validate_package_boundaries",
     "validate_exchange_lot_size",
+    "validate_telegram_configuration",
     "validate_fractional_share_constraints",
     "verify_source_citation",
     "WeightedAssetRank",

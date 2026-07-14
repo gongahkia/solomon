@@ -27,6 +27,7 @@ from stonks_cli.errors import ExitCodes, StonksError
 from stonks_cli.legal_policy import enforce_legal_policy
 from stonks_cli.logging_utils import LoggingConfig, configure_logging
 from stonks_cli.vnext.account_import import import_moomoo_accounts
+from stonks_cli.vnext.broker_app_order_ticket import render_broker_app_order_ticket
 from stonks_cli.vnext.crypto_universe_snapshot import load_crypto_universe_snapshot
 from stonks_cli.vnext.data_confidence import DataConfidenceScore
 from stonks_cli.vnext.errors import VNextConfigurationError
@@ -36,6 +37,7 @@ from stonks_cli.vnext.moomoo import MoomooAccount
 from stonks_cli.vnext.portfolio_domain import PortfolioAssetClass, PortfolioHolding, PortfolioSnapshot
 from stonks_cli.vnext.portfolio_exposure import PortfolioExposure
 from stonks_cli.vnext.portfolio_risk_report import render_portfolio_risk_report
+from stonks_cli.vnext.reviewed_order_ticket import OrderTicketSide, OrderTicketType, ReviewedOrderTicket
 from stonks_cli.vnext.score_components import ScoreComponent
 from stonks_cli.vnext.sgd_portfolio_nav import SGDPortfolioNAV
 from stonks_cli.vnext.usd_portfolio_nav import USDPortfolioNAV
@@ -212,6 +214,41 @@ def vnext_portfolio_show(
     """Show a strict canonical portfolio snapshot without broker access."""
     try:
         typer.echo(json.dumps(_portfolio_snapshot_to_data(_load_portfolio_snapshot(snapshot)), sort_keys=True))
+    except Exception as error:
+        raise _exit_for_error(error)
+
+
+@vnext_app.command("order-ticket")
+def vnext_order_ticket(
+    ticket_id: str = typer.Option(..., "--ticket-id"),
+    account_id: str = typer.Option(..., "--account-id"),
+    symbol: str = typer.Option(..., "--symbol"),
+    side: OrderTicketSide = typer.Option(..., "--side"),
+    quantity: float = typer.Option(..., "--quantity"),
+    limit_price: float = typer.Option(..., "--limit-price"),
+    currency: str = typer.Option(..., "--currency"),
+    rationale: str = typer.Option(..., "--rationale"),
+    prepared_at: str = typer.Option(..., "--prepared-at", help="Timezone-aware ISO-8601 timestamp"),
+    reviewed_by: str = typer.Option(..., "--reviewed-by"),
+    reviewed_at: str = typer.Option(..., "--reviewed-at", help="Timezone-aware ISO-8601 timestamp"),
+) -> None:
+    """Render a reviewed limit ticket for manual broker-app entry only."""
+    try:
+        ticket = ReviewedOrderTicket(
+            ticket_id,
+            account_id,
+            symbol,
+            side,
+            OrderTicketType.LIMIT,
+            quantity,
+            limit_price,
+            currency,
+            rationale,
+            datetime.fromisoformat(prepared_at),
+            reviewed_by,
+            datetime.fromisoformat(reviewed_at),
+        )
+        typer.echo(render_broker_app_order_ticket(ticket))
     except Exception as error:
         raise _exit_for_error(error)
 

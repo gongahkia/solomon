@@ -149,6 +149,7 @@ from stonks_cli.vnext.fx_reference_rates import (
     ingest_fx_reference_rates,
 )
 from stonks_cli.vnext.health import HealthCheck, HealthReport, HealthResult, HealthStatus, run_health_checks
+from stonks_cli.vnext.historical_storage import HistoricalStorageCompaction, compact_historical_storage
 from stonks_cli.vnext.holdings_import import import_moomoo_holdings
 from stonks_cli.vnext.lifecycle import ApplicationLifecycle, LifecycleHook, LifecycleState
 from stonks_cli.vnext.liquidity_constraints import enforce_minimum_liquidity_constraints
@@ -389,6 +390,7 @@ __all__ = [
     "HealthReport",
     "HealthResult",
     "HealthStatus",
+    "HistoricalStorageCompaction",
     "IdempotentSnapshotCache",
     "IdempotentReadRetryPolicy",
     "LifecycleHook",
@@ -561,6 +563,7 @@ __all__ = [
     "calculate_trend_factor",
     "calculate_usd_portfolio_nav",
     "classify_stablecoins",
+    "compact_historical_storage",
     "normalize_moomoo_instruments",
     "normalize_moomoo_corporate_actions",
     "normalize_exchange_timestamp",

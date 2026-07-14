@@ -102,6 +102,11 @@ from stonks_cli.vnext.market_calendar import (
     USMarketSession,
     USMarketSessionStatus,
 )
+from stonks_cli.vnext.market_data_provenance import (
+    MarketDataProvenance,
+    ProvenancedCryptoMarketCapBatch,
+    attach_market_data_provenance,
+)
 from stonks_cli.vnext.market_data_refresh import MoomooQuote, refresh_moomoo_market_data
 from stonks_cli.vnext.market_status import MarketStatus, MarketStatusReport, MarketStatusService, MarketVenue
 from stonks_cli.vnext.migrations import Migration, MigrationRegistry, MigrationRunner
@@ -208,6 +213,7 @@ __all__ = [
     "MarketStatusReport",
     "MarketStatusService",
     "MarketVenue",
+    "MarketDataProvenance",
     "MoomooOpenDProcessContract",
     "NYSECashEquityCalendar2026",
     "MoomooOpenOrder",
@@ -247,6 +253,7 @@ __all__ = [
     "OpenDError",
     "OpenDQuotaExceededError",
     "OpenDResponseMalformedError",
+    "ProvenancedCryptoMarketCapBatch",
     "RecordedOpenDCall",
     "RecordedOpenDFixtureAdapter",
     "PACKAGE_BOUNDARIES",
@@ -278,6 +285,7 @@ __all__ = [
     "VNextInvariantError",
     "VNextPackage",
     "as_utc",
+    "attach_market_data_provenance",
     "append_crypto_universe_history",
     "create_run_identity",
     "import_moomoo_accounts",

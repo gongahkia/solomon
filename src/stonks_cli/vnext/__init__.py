@@ -4,6 +4,12 @@ from stonks_cli.vnext.account_import import import_moomoo_accounts
 from stonks_cli.vnext.boundaries import PACKAGE_BOUNDARIES, PackageBoundary, VNextPackage, validate_package_boundaries
 from stonks_cli.vnext.capabilities import Capability, CapabilityRegistry
 from stonks_cli.vnext.container import ServiceContainer
+from stonks_cli.vnext.crypto_market_cap import (
+    CryptoMarketCapAsset,
+    CryptoMarketCapBatch,
+    CryptoMarketCapProvider,
+    fetch_crypto_market_caps,
+)
 from stonks_cli.vnext.database import SQLiteConnectionFactory
 from stonks_cli.vnext.errors import (
     OpenDContextIncompatibleError,
@@ -123,6 +129,9 @@ __all__ = [
     "ApplicationLifecycle",
     "Capability",
     "CapabilityRegistry",
+    "CryptoMarketCapAsset",
+    "CryptoMarketCapBatch",
+    "CryptoMarketCapProvider",
     "EventSeverity",
     "ExchangeTimeZone",
     "EVENT_SCHEMA_VERSION",
@@ -219,6 +228,7 @@ __all__ = [
     "create_run_identity",
     "import_moomoo_accounts",
     "create_structured_event",
+    "fetch_crypto_market_caps",
     "check_moomoo_sdk_compatibility",
     "normalize_moomoo_instruments",
     "normalize_moomoo_corporate_actions",

@@ -191,6 +191,7 @@ from stonks_cli.vnext.paper_portfolio_accounting import (
 )
 from stonks_cli.vnext.portfolio_domain import PortfolioAssetClass, PortfolioHolding, PortfolioSnapshot
 from stonks_cli.vnext.portfolio_exposure import PortfolioExposure, calculate_portfolio_exposure
+from stonks_cli.vnext.portfolio_risk_report import render_portfolio_risk_report
 from stonks_cli.vnext.price_data import (
     CanonicalDailyClose,
     CanonicalPriceDataProvider,
@@ -473,6 +474,7 @@ __all__ = [
     "rank_weighted_assets",
     "run_paper_portfolio_accounting",
     "render_broker_app_order_ticket",
+    "render_portfolio_risk_report",
     "validate_package_boundaries",
     "validate_exchange_lot_size",
     "validate_fractional_share_constraints",

@@ -58,6 +58,10 @@ from stonks_cli.vnext.daily_operator_reports import (
 )
 from stonks_cli.vnext.data_confidence import DataConfidenceScore, calculate_data_confidence_score
 from stonks_cli.vnext.database import SQLiteConnectionFactory
+from stonks_cli.vnext.durable_scheduled_execution_deduplication import (
+    DurableScheduledExecutionDeduplicator,
+    ScheduledExecutionSlot,
+)
 from stonks_cli.vnext.durable_task_queue import DurableTask, DurableTaskQueue, create_durable_task
 from stonks_cli.vnext.errors import (
     OpenDContextIncompatibleError,
@@ -311,6 +315,7 @@ __all__ = [
     "DailyOperatorReportSchedule",
     "DurableTask",
     "DurableTaskQueue",
+    "DurableScheduledExecutionDeduplicator",
     "DAILY_OPERATOR_REPORT_JOB_ID",
     "EventSeverity",
     "ExchangeTimeZone",
@@ -518,6 +523,7 @@ __all__ = [
     "schedule_weekly_operator_reports",
     "save_crypto_universe_snapshot",
     "ScheduledRunKey",
+    "ScheduledExecutionSlot",
     "InMemoryScheduledRunDeduplicator",
     "serialize_structured_event",
     "select_moomoo_account",

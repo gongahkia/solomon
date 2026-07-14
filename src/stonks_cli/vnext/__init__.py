@@ -130,6 +130,13 @@ from stonks_cli.vnext.rate_limit import ReadOnlyRateLimiter
 from stonks_cli.vnext.retry import IdempotentReadRetryPolicy, retry_idempotent_read
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
 from stonks_cli.vnext.snapshot_cache import IdempotentSnapshotCache
+from stonks_cli.vnext.stablecoins import (
+    DEFAULT_STABLECOIN_PROVIDER_ASSET_IDS,
+    StablecoinClassification,
+    StablecoinClassifier,
+    StablecoinStatus,
+    classify_stablecoins,
+)
 
 __all__ = [
     "Clock",
@@ -141,6 +148,7 @@ __all__ = [
     "CryptoMarketCapProvider",
     "CryptoUniverseSnapshot",
     "CRYPTO_UNIVERSE_SNAPSHOT_VERSION",
+    "DEFAULT_STABLECOIN_PROVIDER_ASSET_IDS",
     "EventSeverity",
     "ExchangeTimeZone",
     "EVENT_SCHEMA_VERSION",
@@ -220,6 +228,9 @@ __all__ = [
     "SecretReference",
     "ServiceContainer",
     "SQLiteConnectionFactory",
+    "StablecoinClassification",
+    "StablecoinClassifier",
+    "StablecoinStatus",
     "RuntimeDirectories",
     "RuntimeDirectory",
     "SystemUTCClock",
@@ -240,6 +251,7 @@ __all__ = [
     "create_structured_event",
     "fetch_crypto_market_caps",
     "check_moomoo_sdk_compatibility",
+    "classify_stablecoins",
     "normalize_moomoo_instruments",
     "normalize_moomoo_corporate_actions",
     "normalize_exchange_timestamp",

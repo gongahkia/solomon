@@ -91,6 +91,15 @@ services:
   console:
     <<: *solomon
     command: ["uvicorn", "solomon.console.app:create_console_app", "--factory", "--host", "0.0.0.0", "--port", "8150"]
+    environment:
+      <<: *solomon-environment
+      SOLOMON_CONSOLE_BEARER_TOKEN_FILE: /run/secrets/solomon_console_bearer_token
+      SOLOMON_CONSOLE_ROLE: admin
+    secrets:
+      - solomon_server_api_key
+      - solomon_console_bearer_token
+      - solomon_content_encryption_key
+      - solomon_postgres_password
     ports:
       - "${SOLOMON_CONSOLE_BIND:-127.0.0.1:8150}:8150"
     depends_on:
@@ -122,6 +131,8 @@ services:
 secrets:
   solomon_server_api_key:
     file: ${SOLOMON_SECRETS_DIR:?set SOLOMON_SECRETS_DIR}/server_api_key
+  solomon_console_bearer_token:
+    file: ${SOLOMON_SECRETS_DIR:?set SOLOMON_SECRETS_DIR}/console_bearer_token
   solomon_content_encryption_key:
     file: ${SOLOMON_SECRETS_DIR:?set SOLOMON_SECRETS_DIR}/content_encryption_key
   solomon_postgres_password:

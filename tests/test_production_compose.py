@@ -20,6 +20,8 @@ def test_production_compose_declares_required_services_and_secrets() -> None:
     assert "service_healthy" in compose
     assert "service_completed_successfully" in compose
     assert "SOLOMON_SERVER_API_KEY_FILE" in compose
+    assert "SOLOMON_CONSOLE_BEARER_TOKEN_FILE" in compose
+    assert "SOLOMON_CONSOLE_ROLE: admin" in compose
     assert "SOLOMON_CONTENT_ENCRYPTION_KEY_FILE" in compose
     assert "POSTGRES_PASSWORD_FILE" in compose
 
@@ -46,6 +48,8 @@ def test_production_surface_ci_matrix_and_smoke_harness() -> None:
     for fragment in (
         "up --build --detach --wait --wait-timeout 240",
         "curl --fail --silent --show-error",
+        "Authorization: Bearer test-console-bearer-token",
+        '"http://$console_endpoint/console/sources"',
         "down --volumes --remove-orphans",
     ):
         assert fragment in smoke.read_text(encoding="utf-8")

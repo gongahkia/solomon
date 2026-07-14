@@ -29,6 +29,7 @@ trap cleanup EXIT HUP INT TERM
 
 umask 077
 printf '%s\n' 'test-server-api-key' > "$secrets_dir/server_api_key"
+printf '%s\n' 'test-console-bearer-token' > "$secrets_dir/console_bearer_token"
 printf '%s\n' 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' > "$secrets_dir/content_encryption_key"
 printf '%s\n' 'test-postgres-password' > "$secrets_dir/postgres_password"
 
@@ -44,3 +45,9 @@ api_endpoint="$(docker compose --project-name "$project" -f docker-compose.produ
 console_endpoint="$(docker compose --project-name "$project" -f docker-compose.production.yml port console 8150)"
 curl --fail --silent --show-error "http://$api_endpoint/health" >/dev/null
 curl --fail --silent --show-error "http://$console_endpoint/health" >/dev/null
+curl --fail --silent --show-error \
+    -H 'Authorization: Bearer test-console-bearer-token' \
+    "http://$console_endpoint/console/verification" >/dev/null
+curl --fail --silent --show-error \
+    -H 'Authorization: Bearer test-console-bearer-token' \
+    "http://$console_endpoint/console/sources" >/dev/null

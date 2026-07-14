@@ -563,12 +563,13 @@ the API, curator console, and a single filesystem-source worker. It keeps Postgr
 in named volumes; bind mounts are deliberately absent. The worker synchronizes enabled filesystem sources only; scale it
 only after introducing a source-level distributed lease.
 
-Create three files outside the checkout, each mode `0600`: `server_api_key`, `postgres_password`, and a Base64-encoded
-32-byte `content_encryption_key`. The content key reference is non-secret deployment metadata.
+Create four files outside the checkout, each mode `0600`: `server_api_key`, `console_bearer_token`, `postgres_password`,
+and a Base64-encoded 32-byte `content_encryption_key`. The content key reference is non-secret deployment metadata.
 
 ```bash
 install -d -m 0700 /opt/solomon/secrets
 printf '%s\n' 'replace-with-a-long-random-api-key' > /opt/solomon/secrets/server_api_key
+openssl rand -base64 32 > /opt/solomon/secrets/console_bearer_token
 printf '%s\n' 'replace-with-a-long-random-postgres-password' > /opt/solomon/secrets/postgres_password
 openssl rand -base64 32 > /opt/solomon/secrets/content_encryption_key
 chmod 0600 /opt/solomon/secrets/*
@@ -579,7 +580,9 @@ docker compose -f docker-compose.production.yml --profile production up --build 
 ```
 
 The API and console default to loopback binds (`127.0.0.1:8140` and `127.0.0.1:8150`); put TLS termination in front
-of them before exposing either port. Validate the Compose model without starting services with:
+of them before exposing either port. In legacy API-key mode, the dedicated console token has the `admin` console role;
+place it behind an identity-aware proxy that sends the token as an `Authorization` header. Use OIDC for browser-facing
+deployments. Validate the Compose model without starting services with:
 
 ```bash
 scripts/check_production_compose.sh

@@ -25,6 +25,7 @@ load_file_secret() {
 
 load_file_secret POSTGRES_PASSWORD
 load_file_secret SOLOMON_SERVER_API_KEY
+load_file_secret SOLOMON_CONSOLE_BEARER_TOKEN
 load_file_secret SOLOMON_CONTENT_ENCRYPTION_KEY
 
 if [ -n "${SOLOMON_DATABASE_HOST:-}" ]; then

@@ -13,6 +13,7 @@ secrets_dir="$(mktemp -d)"
 trap 'rm -rf "$secrets_dir"' EXIT HUP INT TERM
 umask 077
 printf '%s\n' 'test-server-api-key' > "$secrets_dir/server_api_key"
+printf '%s\n' 'test-console-bearer-token' > "$secrets_dir/console_bearer_token"
 printf '%s\n' 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' > "$secrets_dir/content_encryption_key"
 printf '%s\n' 'test-postgres-password' > "$secrets_dir/postgres_password"
 

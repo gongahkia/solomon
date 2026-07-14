@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+CONFIG_SCHEMA_VERSION = 2
+
 
 def default_config_path() -> Path:
     from stonks_cli.paths import default_config_path as _default_config_path
@@ -273,7 +275,7 @@ class TuiConfig(BaseModel):
 
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    schema_version: Literal[2] = 2
+    schema_version: Literal[2] = CONFIG_SCHEMA_VERSION
     tickers: list[str] = Field(default_factory=lambda: ["AAPL.US", "MSFT.US"])
     data: DataConfig = Field(default_factory=DataConfig)
     ticker_overrides: dict[str, TickerOverride] = Field(default_factory=dict)
@@ -364,9 +366,9 @@ def migrate_config_data(data: Any) -> dict[str, Any]:
     if not isinstance(version, int) or isinstance(version, bool):
         raise ValueError("schema_version must be an integer")
     if version == 1:
-        migrated["schema_version"] = 2
+        migrated["schema_version"] = CONFIG_SCHEMA_VERSION
         return migrated
-    if version == 2:
+    if version == CONFIG_SCHEMA_VERSION:
         return migrated
     raise ValueError(f"unsupported future schema_version:{version}")
 

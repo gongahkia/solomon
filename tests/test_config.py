@@ -4,7 +4,14 @@ import json
 
 import pytest
 
-from stonks_cli.config import AppConfig, load_config, migrate_config_data, redacted_config_data, save_config
+from stonks_cli.config import (
+    CONFIG_SCHEMA_VERSION,
+    AppConfig,
+    load_config,
+    migrate_config_data,
+    redacted_config_data,
+    save_config,
+)
 
 
 def test_load_config_defaults_when_missing(monkeypatch, tmp_path):
@@ -112,8 +119,17 @@ def test_explicit_v1_config_migrates_without_mutating_input():
     migrated = migrate_config_data(legacy)
 
     assert legacy["schema_version"] == 1
-    assert migrated["schema_version"] == 2
+    assert migrated["schema_version"] == CONFIG_SCHEMA_VERSION
     assert AppConfig.model_validate(migrated).vnext.moomoo.read_only is True
+
+
+def test_config_schema_discriminator_is_serialized_and_rejects_legacy_value():
+    cfg = AppConfig()
+
+    assert cfg.schema_version == CONFIG_SCHEMA_VERSION
+    assert cfg.model_dump(mode="json")["schema_version"] == CONFIG_SCHEMA_VERSION
+    with pytest.raises(ValueError):
+        AppConfig.model_validate({"schema_version": 1})
 
 
 @pytest.mark.parametrize("data", [[], {"schema_version": True}, {"schema_version": "2"}])

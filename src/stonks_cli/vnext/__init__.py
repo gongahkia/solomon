@@ -5,12 +5,12 @@ from stonks_cli.vnext.alert_subscriptions import AlertSubscription
 from stonks_cli.vnext.asset_class_limits import AssetClassExposureLimit, enforce_asset_class_exposure_limits
 from stonks_cli.vnext.asset_returns import AssetReturnSeries, DailyAssetReturn, calculate_asset_returns
 from stonks_cli.vnext.boundaries import PACKAGE_BOUNDARIES, PackageBoundary, VNextPackage, validate_package_boundaries
+from stonks_cli.vnext.broker_app_order_ticket import render_broker_app_order_ticket
 from stonks_cli.vnext.broker_submission import (
     BLOCKED_BROKER_MUTATION_METHODS,
     BLOCKED_BROKER_SUBMISSION_METHODS,
     require_read_only_broker_method,
 )
-from stonks_cli.vnext.broker_app_order_ticket import render_broker_app_order_ticket
 from stonks_cli.vnext.capabilities import Capability, CapabilityRegistry
 from stonks_cli.vnext.cash_ledger import CashBalance, CashLedger, CashLedgerEntry
 from stonks_cli.vnext.citation_verification import CitationVerification, verify_source_citation
@@ -144,6 +144,11 @@ from stonks_cli.vnext.health import HealthCheck, HealthReport, HealthResult, Hea
 from stonks_cli.vnext.holdings_import import import_moomoo_holdings
 from stonks_cli.vnext.lifecycle import ApplicationLifecycle, LifecycleHook, LifecycleState
 from stonks_cli.vnext.liquidity_constraints import enforce_minimum_liquidity_constraints
+from stonks_cli.vnext.live_configuration import (
+    LIVE_CONFIGURATION_VERSION,
+    DeferredLiveConfiguration,
+    load_deferred_live_configuration,
+)
 from stonks_cli.vnext.llm_summary_boundary import LLM_SUMMARY_OPERATION, LLMSummaryBoundary, create_llm_summary_boundary
 from stonks_cli.vnext.market_calendar import (
     NYSECashEquityCalendar2026,
@@ -361,6 +366,8 @@ __all__ = [
     "IdempotentReadRetryPolicy",
     "LifecycleHook",
     "LifecycleState",
+    "LIVE_CONFIGURATION_VERSION",
+    "DeferredLiveConfiguration",
     "LLM_SUMMARY_OPERATION",
     "LLMSummaryBoundary",
     "LocalOpenDReadOnlyClient",
@@ -536,6 +543,7 @@ __all__ = [
     "load_run_identity",
     "load_crypto_universe_history",
     "load_crypto_universe_snapshot",
+    "load_deferred_live_configuration",
     "resolve_environment_secret",
     "read_moomoo_trade_unlock_state_without_secrets",
     "refresh_moomoo_market_data",

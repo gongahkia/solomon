@@ -90,6 +90,7 @@ carry_live_app = typer.Typer(help="CarryMirror fail-closed tiny-live safety comm
 carry_paper_app = typer.Typer(help="CarryMirror paper carry simulation commands.")
 config_app = typer.Typer()
 broker_app = typer.Typer(help="Read-only broker import commands.")
+vnext_app = typer.Typer(help="vNext decision-support commands; broker order submission is unavailable.")
 whalemirror_app = typer.Typer(help="WhaleMirror Hyperliquid paper-first commands.")
 whalemirror_gates_app = typer.Typer(help="Restartable validation gate harnesses.")
 whalemirror_ingest_app = typer.Typer(help="Hyperliquid ingestion fixture and capture commands.")
@@ -101,6 +102,7 @@ carry_app.add_typer(carry_live_app, name="live")
 carry_app.add_typer(carry_paper_app, name="paper")
 app.add_typer(config_app, name="config")
 app.add_typer(broker_app, name="broker")
+app.add_typer(vnext_app, name="vnext")
 app.add_typer(whalemirror_app, name="whalemirror")
 whalemirror_app.add_typer(whalemirror_gates_app, name="gates")
 whalemirror_app.add_typer(whalemirror_ingest_app, name="ingest")
@@ -115,6 +117,12 @@ def _global_options(
     structured_logs: bool = typer.Option(False, "--structured-logs", help="Emit JSON lines logs to stderr"),
 ) -> None:
     configure_logging(LoggingConfig(verbose=verbose, quiet=quiet, structured=structured_logs))
+
+
+@vnext_app.callback(invoke_without_command=True)
+def _vnext_root(context: typer.Context) -> None:
+    if context.invoked_subcommand is None:
+        typer.echo(context.get_help())
 
 
 def _exit_for_error(e: Exception) -> typer.Exit:

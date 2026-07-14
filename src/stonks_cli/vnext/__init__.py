@@ -100,6 +100,12 @@ from stonks_cli.vnext.events import (
 )
 from stonks_cli.vnext.exchange_lot_size import validate_exchange_lot_size
 from stonks_cli.vnext.exchange_time import ExchangeTimeZone, normalize_exchange_timestamp
+from stonks_cli.vnext.execution_kill_switch import (
+    DefaultClosedExecutionKillSwitch,
+    EnvironmentExecutionKillSwitchAdapter,
+    ExecutionKillSwitchAdapter,
+    ExecutionKillSwitchState,
+)
 from stonks_cli.vnext.explanation_evidence import ExplanationEvidenceBundle, build_explanation_evidence_bundle
 from stonks_cli.vnext.explanation_viewer import InteractiveExplanationViewer
 from stonks_cli.vnext.filesystem import (
@@ -355,6 +361,10 @@ __all__ = [
     "DurableScheduledExecutionDeduplicator",
     "DAILY_OPERATOR_REPORT_JOB_ID",
     "EventSeverity",
+    "DefaultClosedExecutionKillSwitch",
+    "EnvironmentExecutionKillSwitchAdapter",
+    "ExecutionKillSwitchAdapter",
+    "ExecutionKillSwitchState",
     "ExecutionDecision",
     "ExecutionGateway",
     "ExecutionRequest",

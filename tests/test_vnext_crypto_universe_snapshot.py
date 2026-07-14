@@ -19,7 +19,7 @@ def test_crypto_universe_snapshot_persists_private_immutable_batch(tmp_path):
     snapshot = create_crypto_universe_snapshot(
         CryptoMarketCapBatch(
             "fixture",
-            (CryptoMarketCapAsset("bitcoin", "BTC", "Bitcoin", 2_000_000_000_000.0, 1, datetime(2026, 7, 14, tzinfo=UTC)),),
+            (CryptoMarketCapAsset("bitcoin", "BTC", "Bitcoin", 2_000_000_000_000.0, 50_000_000_000.0, 1, datetime(2026, 7, 14, tzinfo=UTC)),),
         ),
         FrozenUTCClock(datetime(2026, 7, 14, 1, 2, 3, tzinfo=UTC)),
         snapshot_id=UUID("00000000-0000-4000-8000-000000000001"),
@@ -48,7 +48,7 @@ def test_crypto_universe_snapshot_requires_absolute_private_storage(tmp_path):
         datetime(2026, 7, 14, tzinfo=UTC),
         CryptoMarketCapBatch(
             "fixture",
-            (CryptoMarketCapAsset("bitcoin", "BTC", "Bitcoin", 2_000_000_000_000.0, 1, datetime(2026, 7, 14, tzinfo=UTC)),),
+            (CryptoMarketCapAsset("bitcoin", "BTC", "Bitcoin", 2_000_000_000_000.0, 50_000_000_000.0, 1, datetime(2026, 7, 14, tzinfo=UTC)),),
         ),
     )
 

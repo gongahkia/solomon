@@ -12,8 +12,8 @@ from stonks_cli.vnext.errors import VNextExternalDataError
 
 def test_crypto_market_cap_provider_contract_returns_complete_ranked_batch():
     assets = (
-        CryptoMarketCapAsset("bitcoin", "BTC", "Bitcoin", 2_000_000_000_000.0, 1, datetime(2026, 7, 14, tzinfo=UTC)),
-        CryptoMarketCapAsset("ethereum", "ETH", "Ethereum", 400_000_000_000.0, 2, datetime(2026, 7, 14, tzinfo=UTC)),
+        CryptoMarketCapAsset("bitcoin", "BTC", "Bitcoin", 2_000_000_000_000.0, 50_000_000_000.0, 1, datetime(2026, 7, 14, tzinfo=UTC)),
+        CryptoMarketCapAsset("ethereum", "ETH", "Ethereum", 400_000_000_000.0, 20_000_000_000.0, 2, datetime(2026, 7, 14, tzinfo=UTC)),
     )
 
     class Provider:
@@ -30,10 +30,10 @@ def test_crypto_market_cap_provider_contract_returns_complete_ranked_batch():
     "response",
     [
         (),
-        (CryptoMarketCapAsset("bitcoin", "BTC", "Bitcoin", 2_000_000_000_000.0, 2, datetime(2026, 7, 14, tzinfo=UTC)),),
+        (CryptoMarketCapAsset("bitcoin", "BTC", "Bitcoin", 2_000_000_000_000.0, 50_000_000_000.0, 2, datetime(2026, 7, 14, tzinfo=UTC)),),
         (
-            CryptoMarketCapAsset("bitcoin", "BTC", "Bitcoin", 2_000_000_000_000.0, 2, datetime(2026, 7, 14, tzinfo=UTC)),
-            CryptoMarketCapAsset("ethereum", "ETH", "Ethereum", 400_000_000_000.0, 1, datetime(2026, 7, 14, tzinfo=UTC)),
+            CryptoMarketCapAsset("bitcoin", "BTC", "Bitcoin", 2_000_000_000_000.0, 50_000_000_000.0, 2, datetime(2026, 7, 14, tzinfo=UTC)),
+            CryptoMarketCapAsset("ethereum", "ETH", "Ethereum", 400_000_000_000.0, 20_000_000_000.0, 1, datetime(2026, 7, 14, tzinfo=UTC)),
         ),
     ],
 )

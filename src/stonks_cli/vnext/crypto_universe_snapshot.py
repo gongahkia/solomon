@@ -39,6 +39,7 @@ class CryptoUniverseSnapshot:
                     "symbol": asset.symbol,
                     "name": asset.name,
                     "market_cap_usd": asset.market_cap_usd,
+                    "total_volume_usd": asset.total_volume_usd,
                     "market_cap_rank": asset.market_cap_rank,
                     "reported_at": _format_timestamp(asset.reported_at),
                 }
@@ -117,6 +118,7 @@ def _asset_from_data(data: object) -> CryptoMarketCapAsset:
         "symbol",
         "name",
         "market_cap_usd",
+        "total_volume_usd",
         "market_cap_rank",
         "reported_at",
     }:
@@ -128,6 +130,7 @@ def _asset_from_data(data: object) -> CryptoMarketCapAsset:
         data["symbol"],
         data["name"],
         data["market_cap_usd"],
+        data["total_volume_usd"],
         data["market_cap_rank"],
         datetime.fromisoformat(data["reported_at"]),
     )

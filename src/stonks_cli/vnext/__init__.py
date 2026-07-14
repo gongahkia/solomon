@@ -4,6 +4,7 @@ from stonks_cli.vnext.account_import import import_moomoo_accounts
 from stonks_cli.vnext.boundaries import PACKAGE_BOUNDARIES, PackageBoundary, VNextPackage, validate_package_boundaries
 from stonks_cli.vnext.capabilities import Capability, CapabilityRegistry
 from stonks_cli.vnext.container import ServiceContainer
+from stonks_cli.vnext.crypto_liquidity import filter_crypto_universe_by_liquidity
 from stonks_cli.vnext.crypto_market_cap import (
     CryptoMarketCapAsset,
     CryptoMarketCapBatch,
@@ -250,6 +251,7 @@ __all__ = [
     "create_crypto_universe_snapshot",
     "create_structured_event",
     "fetch_crypto_market_caps",
+    "filter_crypto_universe_by_liquidity",
     "check_moomoo_sdk_compatibility",
     "classify_stablecoins",
     "normalize_moomoo_instruments",

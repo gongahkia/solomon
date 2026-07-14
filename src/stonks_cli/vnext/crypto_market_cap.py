@@ -21,6 +21,7 @@ class CryptoMarketCapAsset:
     symbol: str
     name: str
     market_cap_usd: float
+    total_volume_usd: float
     market_cap_rank: int
     reported_at: datetime
 
@@ -33,6 +34,8 @@ class CryptoMarketCapAsset:
             raise ValueError("crypto asset name is invalid")
         if not isinstance(self.market_cap_usd, float) or not math.isfinite(self.market_cap_usd) or self.market_cap_usd <= 0:
             raise ValueError("crypto market cap must be a positive finite USD value")
+        if not isinstance(self.total_volume_usd, float) or not math.isfinite(self.total_volume_usd) or self.total_volume_usd < 0:
+            raise ValueError("crypto total volume must be a non-negative finite USD value")
         if not isinstance(self.market_cap_rank, int) or isinstance(self.market_cap_rank, bool) or self.market_cap_rank < 1:
             raise ValueError("crypto market cap rank must be positive")
         object.__setattr__(self, "reported_at", as_utc(self.reported_at))

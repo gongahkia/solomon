@@ -149,6 +149,7 @@ from stonks_cli.vnext.fx_reference_rates import (
     FXReferenceRateProvider,
     ingest_fx_reference_rates,
 )
+from stonks_cli.vnext.generated_report_hash import GeneratedReportHash, hash_generated_report
 from stonks_cli.vnext.health import HealthCheck, HealthReport, HealthResult, HealthStatus, run_health_checks
 from stonks_cli.vnext.historical_storage import HistoricalStorageCompaction, compact_historical_storage
 from stonks_cli.vnext.holdings_import import import_moomoo_holdings
@@ -381,6 +382,7 @@ __all__ = [
     "ForeignKeyViolation",
     "FXReferenceRateBatch",
     "FXReferenceRateProvider",
+    "GeneratedReportHash",
     "FXConversionCostEstimate",
     "FIXTURE_EVENT_IDS",
     "FIXTURE_RUN_ID",
@@ -642,4 +644,5 @@ __all__ = [
     "EncryptedBackup",
     "export_encrypted_backup",
     "generate_backup_key",
+    "hash_generated_report",
 ]

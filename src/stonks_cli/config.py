@@ -8,6 +8,20 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 CONFIG_SCHEMA_VERSION = 2
+REDACTED_CONFIG_VALUE = "***REDACTED***"
+_SENSITIVE_CONFIG_KEY_MARKERS = (
+    "token",
+    "secret",
+    "passphrase",
+    "private_key",
+    "api_key",
+    "password",
+    "smtp_url",
+    "authorization",
+    "credential",
+    "cookie",
+    "webhook",
+)
 
 
 def default_config_path() -> Path:
@@ -406,7 +420,7 @@ def _write_config(path: Path, cfg: AppConfig) -> None:
 
 def _redact_value(value: Any, *, key: str = "") -> Any:
     if _is_sensitive_key(key):
-        return "***REDACTED***" if value is not None else None
+        return REDACTED_CONFIG_VALUE if value is not None else None
     if isinstance(value, dict):
         return {str(item_key): _redact_value(item_value, key=str(item_key)) for item_key, item_value in value.items()}
     if isinstance(value, list):
@@ -416,7 +430,4 @@ def _redact_value(value: Any, *, key: str = "") -> Any:
 
 def _is_sensitive_key(key: str) -> bool:
     normalized = key.lower()
-    return normalized == "api_keys" or any(
-        marker in normalized
-        for marker in ("token", "secret", "passphrase", "private_key", "api_key", "password", "smtp_url")
-    )
+    return normalized in {"api_keys", "webhook_url"} or any(marker in normalized for marker in _SENSITIVE_CONFIG_KEY_MARKERS)

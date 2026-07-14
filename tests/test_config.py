@@ -6,10 +6,12 @@ import pytest
 
 from stonks_cli.config import (
     CONFIG_SCHEMA_VERSION,
+    REDACTED_CONFIG_VALUE,
     AppConfig,
     load_config,
     migrate_config_data,
     redacted_config_data,
+    redacted_config_json,
     save_config,
 )
 
@@ -181,6 +183,20 @@ def test_redacted_config_hides_sensitive_values():
 
     assert data["api_keys"] == "***REDACTED***"
     assert data["carrymirror"]["telegram_bot_token_env"] == "***REDACTED***"
+
+
+def test_redacted_config_hides_nested_authentication_and_webhook_values():
+    secrets = {"authorization": "Bearer bearer-secret", "cookie": "session-secret", "webhook": "webhook-secret"}
+    cfg = AppConfig(
+        webhook_url="https://example.test/hook?token=webhook-secret",
+        strategy_params={"headers": secrets},
+    )
+
+    rendered = redacted_config_json(cfg)
+
+    assert REDACTED_CONFIG_VALUE in rendered
+    assert all(secret not in rendered for secret in secrets.values())
+    assert "https://example.test/hook" not in rendered
 
 
 def test_save_config_uses_owner_only_permissions(tmp_path):

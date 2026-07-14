@@ -235,6 +235,7 @@ from stonks_cli.vnext.retry import IdempotentReadRetryPolicy, retry_idempotent_r
 from stonks_cli.vnext.reviewed_order_ticket import OrderTicketSide, OrderTicketType, ReviewedOrderTicket
 from stonks_cli.vnext.risk_adjusted_performance import RiskAdjustedPerformance, calculate_risk_adjusted_performance
 from stonks_cli.vnext.rolling_drawdown import DailyDrawdown, RollingDrawdownSeries, calculate_rolling_drawdown
+from stonks_cli.vnext.run_state import RunState, RunStateHistory, RunStateTransition
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
 from stonks_cli.vnext.scheduled_run_deduplication import InMemoryScheduledRunDeduplicator, ScheduledRunKey
 from stonks_cli.vnext.score_components import ScoreComponent
@@ -432,6 +433,9 @@ __all__ = [
     "TrendFactor",
     "RuntimeDirectories",
     "RuntimeDirectory",
+    "RunState",
+    "RunStateHistory",
+    "RunStateTransition",
     "SystemUTCClock",
     "StructuredEvent",
     "UTCDateTime",

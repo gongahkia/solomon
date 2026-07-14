@@ -226,6 +226,7 @@ from stonks_cli.vnext.stablecoins import (
 )
 from stonks_cli.vnext.telegram_client import TelegramMessageReceipt, send_telegram_message
 from stonks_cli.vnext.telegram_configuration import TelegramDeliveryConfiguration, validate_telegram_configuration
+from stonks_cli.vnext.telegram_message_chunks import TELEGRAM_MAX_MESSAGE_CHARACTERS, chunk_telegram_message
 from stonks_cli.vnext.telegram_report_template import render_telegram_report_template
 from stonks_cli.vnext.transactions_import import (
     PortfolioTransaction,
@@ -481,10 +482,12 @@ __all__ = [
     "render_telegram_report_template",
     "TelegramDeliveryConfiguration",
     "TelegramMessageReceipt",
+    "TELEGRAM_MAX_MESSAGE_CHARACTERS",
     "validate_package_boundaries",
     "validate_exchange_lot_size",
     "validate_telegram_configuration",
     "send_telegram_message",
+    "chunk_telegram_message",
     "validate_fractional_share_constraints",
     "verify_source_citation",
     "WeightedAssetRank",

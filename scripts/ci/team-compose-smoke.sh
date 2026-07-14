@@ -15,8 +15,8 @@ bootstrap_secret="$(openssl rand -hex 32)"
 recovery_secret="$(openssl rand -hex 32)"
 keycloak_admin_password="$(openssl rand -hex 32)"
 keycloak_database_password="$(openssl rand -hex 32)"
-oidc_password="$(openssl rand -hex 32)"
-oidc_username="compose-smoke"
+oidc_client_id="shibahama"
+oidc_client_secret="$(openssl rand -hex 32)"
 curl_image="curlimages/curl:8.18.0@sha256:d94d07ba9e7d6de898b6d96c1a072f6f8266c687af78a74f380087a0addf5d17"
 
 compose() {
@@ -60,17 +60,32 @@ openssl x509 -req -sha256 -days 7 \
   -CAcreateserial \
   -out "$tls_dir/server.crt" \
   -extfile "$tls_dir/server.ext"
-python3 - "$ROOT/docker/keycloak/shibahama-realm.json" "$realm_file" "$oidc_username" "$oidc_password" <<'PY'
+python3 - "$ROOT/docker/keycloak/shibahama-realm.json" "$realm_file" "$oidc_client_id" "$oidc_client_secret" <<'PY'
 import json
 import pathlib
 import sys
 
 realm = json.loads(pathlib.Path(sys.argv[1]).read_text())
-realm["users"] = [{
-    "username": sys.argv[3],
-    "enabled": True,
-    "credentials": [{"type": "password", "value": sys.argv[4], "temporary": False}],
-}]
+client = next(client for client in realm["clients"] if client["clientId"] == sys.argv[3])
+client.update({
+    "secret": sys.argv[4],
+    "publicClient": False,
+    "serviceAccountsEnabled": True,
+    "standardFlowEnabled": False,
+    "directAccessGrantsEnabled": False,
+    "protocol": "openid-connect",
+    "protocolMappers": [{
+        "name": "shibahama-audience",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-audience-mapper",
+        "config": {
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "included.client.audience": "shibahama",
+            "introspection.token.claim": "true",
+        },
+    }],
+})
 pathlib.Path(sys.argv[2]).write_text(json.dumps(realm))
 PY
 
@@ -91,20 +106,36 @@ PY
 compose up --build --detach --wait --wait-timeout 180
 
 token_json="$(curl_in_network -sS -X POST \
-  --data-urlencode client_id=shibahama \
-  --data-urlencode grant_type=password \
-  --data-urlencode "username=$oidc_username" \
-  --data-urlencode "password=$oidc_password" \
+  --data-urlencode "client_id=$oidc_client_id" \
+  --data-urlencode "client_secret=$oidc_client_secret" \
+  --data-urlencode grant_type=client_credentials \
   https://keycloak:8443/realms/shibahama/protocol/openid-connect/token)"
 access_token="$(python3 -c 'import json,sys
 record = json.load(sys.stdin)
 token = record.get("access_token")
 if not isinstance(token, str) or not token:
     raise SystemExit(
-        f"OIDC password grant failed: {record.get('error', 'unknown error')} "
-        f"{record.get('error_description', '')}"
+        "OIDC client credentials grant failed: {} {}".format(
+            record.get("error", "unknown error"),
+            record.get("error_description", ""),
+        )
     )
 print(token)' <<<"$token_json")"
+ACCESS_TOKEN="$access_token" python3 - <<'PY'
+import base64
+import json
+import os
+
+payload = os.environ["ACCESS_TOKEN"].split(".")[1]
+payload += "=" * (-len(payload) % 4)
+claims = json.loads(base64.urlsafe_b64decode(payload))
+audience = claims.get("aud", [])
+if isinstance(audience, str):
+    audience = [audience]
+assert claims.get("iss") == "https://keycloak:8443/realms/shibahama"
+assert "shibahama" in audience
+assert isinstance(claims.get("sub"), str) and claims["sub"]
+PY
 
 bootstrap="$(curl_in_network -fsS -X POST \
   -H "Authorization: Bearer $access_token" \

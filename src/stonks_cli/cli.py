@@ -13,6 +13,7 @@ from rich.table import Table
 
 from stonks_cli.commands import (
     do_config_init,
+    do_config_migrate,
     do_config_set,
     do_config_show,
     do_config_validate,
@@ -172,6 +173,17 @@ def config_init(
     """Create a default config file."""
     try:
         Console().print(f"Config written to {do_config_init(path)}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@config_app.command("migrate")
+def config_migrate(
+    path: Path | None = typer.Option(None, "--path", help="Override config file path"),
+) -> None:
+    """Migrate an existing config file to the current schema."""
+    try:
+        Console().print(f"Config migrated at {do_config_migrate(path)}")
     except Exception as e:
         raise _exit_for_error(e)
 

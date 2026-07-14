@@ -10,6 +10,7 @@ from stonks_cli.config import (
     AppConfig,
     load_config,
     migrate_config_data,
+    migrate_config_file,
     redacted_config_data,
     redacted_config_json,
     save_config,
@@ -190,6 +191,30 @@ def test_load_config_fails_closed_for_invalid_semantics(monkeypatch, tmp_path):
 
     with pytest.raises(ValueError, match="invalid config semantics"):
         load_config()
+
+
+def test_config_migration_persists_v2_and_preserves_extension_data(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"schema_version": 1, "extension": {"enabled": True}}), encoding="utf-8")
+
+    migrated = migrate_config_file(path)
+
+    assert migrated == path
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "extension": {"enabled": True},
+        "schema_version": CONFIG_SCHEMA_VERSION,
+    }
+
+
+def test_config_migration_leaves_invalid_input_unchanged(tmp_path):
+    path = tmp_path / "config.json"
+    contents = json.dumps({"schema_version": 3})
+    path.write_text(contents, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unsupported future schema_version"):
+        migrate_config_file(path)
+
+    assert path.read_text(encoding="utf-8") == contents
 
 
 @pytest.mark.parametrize("data", [[], {"schema_version": True}, {"schema_version": "2"}])

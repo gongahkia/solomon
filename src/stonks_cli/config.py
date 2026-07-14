@@ -363,6 +363,16 @@ def save_config(cfg: AppConfig, path: Path | None = None) -> Path:
     return path
 
 
+def migrate_config_file(path: Path | None = None) -> Path:
+    path = path or config_path()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    migrated = migrate_config_data(data)
+    cfg = AppConfig.model_validate(migrated)
+    validate_config_semantics(cfg)
+    _write_config_data(path, migrated)
+    return path
+
+
 def update_config_field(cfg: AppConfig, dotted_path: str, value) -> AppConfig:
     """Update a nested config field using a dotted path like 'schedule.cron'."""
 
@@ -438,8 +448,12 @@ def redacted_config_json(cfg: AppConfig, *, indent: int | None = None) -> str:
 
 
 def _write_config(path: Path, cfg: AppConfig) -> None:
+    _write_config_data(path, cfg.model_dump(mode="json"))
+
+
+def _write_config_data(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+    path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
     try:
         path.chmod(0o600)
     except OSError:

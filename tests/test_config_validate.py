@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 
+from typer.testing import CliRunner
+
+from stonks_cli.cli import app
 from stonks_cli.commands import do_config_validate
 
 
@@ -18,3 +21,14 @@ def test_config_validate_reports_tickers_and_strategy(monkeypatch, tmp_path):
     assert "strategy" in out
     assert out["vnext_execution_mode"] == "disabled"
     assert out["vnext_broker_read_only"] is True
+
+
+def test_config_migrate_cli_command(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
+
+    result = CliRunner().invoke(app, ["config", "migrate", "--path", str(path)])
+
+    assert result.exit_code == 0
+    assert "Config migrated" in result.output
+    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 2

@@ -6,6 +6,7 @@ from stonks_cli import __version__
 from stonks_cli.config import (
     config_path,
     load_config,
+    migrate_config_file,
     redacted_config_json,
     save_config,
     save_default_config,
@@ -71,6 +72,10 @@ def do_config_where() -> Path:
 
 def do_config_init(path: Path | None) -> Path:
     return save_default_config(path)
+
+
+def do_config_migrate(path: Path | None) -> Path:
+    return migrate_config_file(path)
 
 
 def do_config_show() -> str:

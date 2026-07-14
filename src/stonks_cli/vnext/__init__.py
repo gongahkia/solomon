@@ -236,6 +236,7 @@ from stonks_cli.vnext.notification_delivery_log import (
     save_notification_delivery_log,
 )
 from stonks_cli.vnext.notification_delivery_retry import retry_failed_notification_delivery
+from stonks_cli.vnext.opend_availability import OPEND_AVAILABILITY_HEALTH_CHECK, monitor_opend_availability
 from stonks_cli.vnext.opend_fixture import RecordedOpenDCall, RecordedOpenDFixtureAdapter
 from stonks_cli.vnext.operator_acknowledgements import (
     OPERATOR_ACKNOWLEDGEMENT_LOG_VERSION,
@@ -487,6 +488,7 @@ __all__ = [
     "OpenDDataEntitlementMissingError",
     "OpenDEndpointUnavailableError",
     "OpenDError",
+    "OPEND_AVAILABILITY_HEALTH_CHECK",
     "OpenDQuotaExceededError",
     "OpenDResponseMalformedError",
     "OrderTicketSide",
@@ -614,6 +616,7 @@ __all__ = [
     "normalize_moomoo_corporate_actions",
     "normalize_exchange_timestamp",
     "monitor_data_freshness",
+    "monitor_opend_availability",
     "monitor_telegram_delivery_health",
     "deterministic_fixture_event_jsonl",
     "deterministic_fixture_events",

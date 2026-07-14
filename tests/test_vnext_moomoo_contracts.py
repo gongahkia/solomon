@@ -1,9 +1,14 @@
+import pytest
+
+from stonks_cli.vnext.errors import VNextExternalDataError
 from stonks_cli.vnext.moomoo import (
     MoomooAccount,
     MoomooAccountBalance,
     MoomooOpenDProcessContract,
     MoomooReadOnlyAccountClient,
     MoomooReadOnlyBalanceClient,
+    MoomooReadOnlyUSQuoteClient,
+    MoomooUSQuote,
 )
 from stonks_cli.vnext.opend_fixture import RecordedOpenDCall, RecordedOpenDFixtureAdapter
 
@@ -37,3 +42,36 @@ def test_moomoo_balance_adapter_contract_matches_stable_account_request_and_resp
     assert MoomooReadOnlyBalanceClient(contract, fixture.context_factory).read_balance(MoomooAccount("100", 7, "REAL")) == MoomooAccountBalance(
         "100", "USD", 10.0, 2.0, 8.0
     )
+
+
+def test_moomoo_us_quote_adapter_replays_recorded_read_fixture_and_rejects_malformed_payload():
+    contract = MoomooOpenDProcessContract("127.0.0.1", 11111)
+    response = (
+        0,
+        [
+            {
+                "code": "US.AAPL",
+                "data_date": "2026-01-01",
+                "data_time": "09:30:00",
+                "last_price": 200,
+                "open_price": 198,
+                "high_price": 201,
+                "low_price": 197,
+                "prev_close_price": 199,
+                "volume": 2000,
+                "turnover": 400000,
+                "suspension": False,
+            }
+        ],
+    )
+    fixture = RecordedOpenDFixtureAdapter("127.0.0.1", 11111, (RecordedOpenDCall("get_stock_quote", (["US.AAPL"],), (), response),))
+
+    assert MoomooReadOnlyUSQuoteClient(contract, fixture.context_factory).list_quotes(("US.AAPL",)) == (
+        MoomooUSQuote("US.AAPL", "2026-01-01", "09:30:00", 200.0, 198.0, 201.0, 197.0, 199.0, 2000.0, 400000.0, False),
+    )
+
+    malformed = RecordedOpenDFixtureAdapter(
+        "127.0.0.1", 11111, (RecordedOpenDCall("get_stock_quote", (["US.AAPL"],), (), (0, [{"code": "US.AAPL"}])),)
+    )
+    with pytest.raises(VNextExternalDataError, match="Moomoo US quotes are malformed"):
+        MoomooReadOnlyUSQuoteClient(contract, malformed.context_factory).list_quotes(("US.AAPL",))

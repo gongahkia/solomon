@@ -13,6 +13,7 @@ from stonks_cli.config import (
     redacted_config_data,
     redacted_config_json,
     save_config,
+    validate_config_semantics,
 )
 
 
@@ -150,6 +151,45 @@ def test_vnext_feature_flags_are_explicit_opt_in_with_execution_disabled():
         AppConfig.model_validate({"vnext": {"features": {"execution": True}}})
     with pytest.raises(ValueError):
         AppConfig.model_validate({"vnext": {"features": {"unknown": True}}})
+
+
+def test_semantic_config_validator_accepts_consistent_vnext_activation():
+    cfg = AppConfig.model_validate(
+        {
+            "vnext": {
+                "enabled": True,
+                "moomoo": {"enabled": True},
+                "research": {"enabled": True},
+                "operator": {"telegram": {"enabled": True}},
+                "features": {"broker_data": True, "crypto_research": True, "operator_reports": True},
+            }
+        }
+    )
+
+    validate_config_semantics(cfg)
+
+
+@pytest.mark.parametrize(
+    ("vnext", "message"),
+    [
+        ({"features": {"broker_data": True}}, "vnext.enabled must be true"),
+        ({"enabled": True, "moomoo": {"enabled": True}}, "vnext.moomoo.enabled requires"),
+        ({"enabled": True, "research": {"enabled": True}}, "vnext.research.enabled requires"),
+        ({"enabled": True, "operator": {"telegram": {"enabled": True}}}, "vnext.operator.telegram.enabled requires"),
+    ],
+)
+def test_semantic_config_validator_rejects_inconsistent_vnext_activation(vnext, message):
+    with pytest.raises(ValueError, match=message):
+        validate_config_semantics(AppConfig.model_validate({"vnext": vnext}))
+
+
+def test_load_config_fails_closed_for_invalid_semantics(monkeypatch, tmp_path):
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({"vnext": {"features": {"broker_data": True}}}), encoding="utf-8")
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg_path))
+
+    with pytest.raises(ValueError, match="invalid config semantics"):
+        load_config()
 
 
 @pytest.mark.parametrize("data", [[], {"schema_version": True}, {"schema_version": "2"}])

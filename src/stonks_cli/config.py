@@ -343,9 +343,11 @@ def config_path() -> Path:
 def load_config() -> AppConfig:
     path = config_path()
     if not path.exists():
-        return AppConfig()
-    data = migrate_config_data(json.loads(path.read_text(encoding="utf-8")))
-    cfg = AppConfig.model_validate(data)
+        cfg = AppConfig()
+    else:
+        data = migrate_config_data(json.loads(path.read_text(encoding="utf-8")))
+        cfg = AppConfig.model_validate(data)
+    validate_config_semantics(cfg)
     return cfg
 
 
@@ -397,6 +399,32 @@ def migrate_config_data(data: Any) -> dict[str, Any]:
     if version == CONFIG_SCHEMA_VERSION:
         return migrated
     raise ValueError(f"unsupported future schema_version:{version}")
+
+
+def validate_config_semantics(cfg: AppConfig) -> None:
+    features = cfg.vnext.features
+    enabled_features = (
+        features.broker_data,
+        features.crypto_research,
+        features.portfolio,
+        features.operator_reports,
+    )
+    active_services = (
+        cfg.vnext.moomoo.enabled,
+        cfg.vnext.research.enabled,
+        cfg.vnext.operator.telegram.enabled,
+    )
+    errors: list[str] = []
+    if (any(enabled_features) or any(active_services)) and not cfg.vnext.enabled:
+        errors.append("vnext.enabled must be true when a vNext capability is enabled")
+    if cfg.vnext.moomoo.enabled and not features.broker_data:
+        errors.append("vnext.moomoo.enabled requires vnext.features.broker_data")
+    if cfg.vnext.research.enabled and not features.crypto_research:
+        errors.append("vnext.research.enabled requires vnext.features.crypto_research")
+    if cfg.vnext.operator.telegram.enabled and not features.operator_reports:
+        errors.append("vnext.operator.telegram.enabled requires vnext.features.operator_reports")
+    if errors:
+        raise ValueError("invalid config semantics: " + "; ".join(errors))
 
 
 def redacted_config_data(cfg: AppConfig) -> dict[str, Any]:

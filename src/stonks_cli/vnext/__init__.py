@@ -55,6 +55,7 @@ from stonks_cli.vnext.crypto_venues import (
     CryptoVenueAssetSupport,
     filter_crypto_universe_by_supported_venues,
 )
+from stonks_cli.vnext.custody_readiness import CustodyReadinessEvidence, CustodyReadinessOutcome
 from stonks_cli.vnext.daily_closing_prices import DailyClosingPriceIngestion, ingest_daily_closing_prices
 from stonks_cli.vnext.daily_operator_reports import (
     DAILY_OPERATOR_REPORT_JOB_ID,
@@ -329,6 +330,8 @@ __all__ = [
     "CryptoUniverseHistory",
     "CryptoUniverseRankChange",
     "CryptoVenueAssetSupport",
+    "CustodyReadinessEvidence",
+    "CustodyReadinessOutcome",
     "CRYPTO_TRADING_DAYS_PER_YEAR",
     "CRYPTO_UNIVERSE_SNAPSHOT_VERSION",
     "CRYPTO_UNIVERSE_HISTORY_VERSION",

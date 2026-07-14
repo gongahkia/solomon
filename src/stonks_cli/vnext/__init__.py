@@ -1,6 +1,7 @@
 """Isolated vNext decision-support package namespace."""
 
 from stonks_cli.vnext.account_import import import_moomoo_accounts
+from stonks_cli.vnext.alert_subscriptions import AlertSubscription
 from stonks_cli.vnext.asset_class_limits import AssetClassExposureLimit, enforce_asset_class_exposure_limits
 from stonks_cli.vnext.asset_returns import AssetReturnSeries, DailyAssetReturn, calculate_asset_returns
 from stonks_cli.vnext.boundaries import PACKAGE_BOUNDARIES, PackageBoundary, VNextPackage, validate_package_boundaries
@@ -241,6 +242,7 @@ __all__ = [
     "Clock",
     "CostBasis",
     "ApplicationLifecycle",
+    "AlertSubscription",
     "AssetReturnSeries",
     "AssetClassExposureLimit",
     "Capability",

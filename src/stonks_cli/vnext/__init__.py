@@ -59,6 +59,12 @@ from stonks_cli.vnext.daily_operator_reports import (
 from stonks_cli.vnext.data_confidence import DataConfidenceScore, calculate_data_confidence_score
 from stonks_cli.vnext.database import SQLiteConnectionFactory
 from stonks_cli.vnext.database_integrity import DatabaseIntegrityReport, ForeignKeyViolation, check_database_integrity
+from stonks_cli.vnext.default_deny_execution import (
+    DefaultDenyExecutionGateway,
+    ExecutionDecision,
+    ExecutionGateway,
+    ExecutionRequest,
+)
 from stonks_cli.vnext.durable_scheduled_execution_deduplication import (
     DurableScheduledExecutionDeduplicator,
     ScheduledExecutionSlot,
@@ -314,6 +320,7 @@ __all__ = [
     "DailyAssetReturn",
     "DataConfidenceScore",
     "DatabaseIntegrityReport",
+    "DefaultDenyExecutionGateway",
     "DailyDrawdown",
     "DailyClosingPriceIngestion",
     "DailyOperatorReportSchedule",
@@ -322,6 +329,9 @@ __all__ = [
     "DurableScheduledExecutionDeduplicator",
     "DAILY_OPERATOR_REPORT_JOB_ID",
     "EventSeverity",
+    "ExecutionDecision",
+    "ExecutionGateway",
+    "ExecutionRequest",
     "ExchangeTimeZone",
     "EVENT_SCHEMA_VERSION",
     "ExplanationEvidenceBundle",

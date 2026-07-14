@@ -63,6 +63,7 @@ from stonks_cli.vnext.daily_operator_reports import (
     schedule_daily_operator_reports,
 )
 from stonks_cli.vnext.data_confidence import DataConfidenceScore, calculate_data_confidence_score
+from stonks_cli.vnext.data_retention import DataRetentionPolicy, DataRetentionReport, enforce_data_retention
 from stonks_cli.vnext.database import SQLiteConnectionFactory
 from stonks_cli.vnext.database_integrity import DatabaseIntegrityReport, ForeignKeyViolation, check_database_integrity
 from stonks_cli.vnext.default_deny_execution import (
@@ -351,6 +352,8 @@ __all__ = [
     "DEFAULT_STABLECOIN_PROVIDER_ASSET_IDS",
     "DailyAssetReturn",
     "DataConfidenceScore",
+    "DataRetentionPolicy",
+    "DataRetentionReport",
     "DatabaseIntegrityReport",
     "DefaultDenyExecutionGateway",
     "DailyDrawdown",
@@ -539,6 +542,7 @@ __all__ = [
     "fetch_canonical_daily_closes",
     "filter_crypto_universe_by_liquidity",
     "enforce_crypto_allocation_limit",
+    "enforce_data_retention",
     "filter_crypto_universe_by_supported_venues",
     "check_moomoo_sdk_compatibility",
     "calculate_asset_returns",

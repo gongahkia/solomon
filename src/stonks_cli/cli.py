@@ -28,7 +28,10 @@ from stonks_cli.legal_policy import enforce_legal_policy
 from stonks_cli.logging_utils import LoggingConfig, configure_logging
 from stonks_cli.vnext.account_import import import_moomoo_accounts
 from stonks_cli.vnext.crypto_universe_snapshot import load_crypto_universe_snapshot
+from stonks_cli.vnext.errors import VNextConfigurationError
 from stonks_cli.vnext.market_data_refresh import refresh_moomoo_market_data
+from stonks_cli.vnext.score_components import ScoreComponent
+from stonks_cli.vnext.weighted_ranker import rank_weighted_assets
 from stonks_cli.whalemirror.attribution import (
     DEFAULT_ATTRIBUTION_FIXTURE,
     rank_wallets_from_fixture,
@@ -143,6 +146,21 @@ def vnext_market_refresh(
 ) -> None:
     """Refresh pre-entitled Moomoo US and SG quotes without subscribing."""
     _render_moomoo_market_data_refresh(symbols)
+
+
+@vnext_app.command("ranking")
+def vnext_ranking(
+    components: Path = typer.Option(..., "--components", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
+) -> None:
+    """Rank canonical local score components with configured vNext weights."""
+    try:
+        config = load_config()
+        if not config.vnext.enabled or not config.vnext.features.crypto_research:
+            raise VNextConfigurationError("vNext crypto-research ranking is not enabled")
+        ranks = rank_weighted_assets(_load_score_components(components), config.vnext.research.factor_weights)
+        typer.echo(json.dumps([asdict(rank) for rank in ranks], sort_keys=True))
+    except Exception as error:
+        raise _exit_for_error(error)
 
 
 def _exit_for_error(e: Exception) -> typer.Exit:
@@ -307,6 +325,31 @@ def _render_moomoo_market_data_refresh(symbols: list[str]) -> None:
         )
     except Exception as e:
         raise _exit_for_error(e)
+
+
+def _load_score_components(path: Path) -> tuple[ScoreComponent, ...]:
+    try:
+        records = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("ranking components cannot be loaded") from error
+    if not isinstance(records, list) or not records:
+        raise ValueError("ranking components are invalid")
+    fields = {"provider_id", "provider_asset_id", "factor_id", "raw_value", "normalized_score"}
+    if not all(isinstance(record, dict) and set(record) == fields for record in records):
+        raise ValueError("ranking component fields are invalid")
+    try:
+        return tuple(
+            ScoreComponent(
+                record["provider_id"],
+                record["provider_asset_id"],
+                record["factor_id"],
+                record["raw_value"],
+                record["normalized_score"],
+            )
+            for record in records
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError("ranking components are malformed") from error
 
 
 # --- CarryMirror commands ---

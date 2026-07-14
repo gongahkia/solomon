@@ -154,6 +154,37 @@ def test_vnext_feature_flags_are_explicit_opt_in_with_execution_disabled():
         AppConfig.model_validate({"vnext": {"features": {"unknown": True}}})
 
 
+def test_crypto_market_cap_provider_config_is_strict_and_secret_safe():
+    config = AppConfig.model_validate(
+        {
+            "vnext": {
+                "research": {
+                    "market_cap_provider": {
+                        "provider": "coingecko",
+                        "api_key_env": "STONKS_CLI_COINGECKO_API_KEY",
+                        "request_timeout_seconds": 10,
+                    }
+                }
+            }
+        }
+    )
+
+    provider = config.vnext.research.market_cap_provider
+    assert (provider.provider, provider.api_key_env, provider.request_timeout_seconds) == (
+        "coingecko",
+        "STONKS_CLI_COINGECKO_API_KEY",
+        10.0,
+    )
+    assert redacted_config_data(config)["vnext"]["research"]["market_cap_provider"]["api_key_env"] == REDACTED_CONFIG_VALUE
+    for provider_config in (
+        {"provider": "unknown"},
+        {"api_key_env": "invalid-name"},
+        {"request_timeout_seconds": 0},
+    ):
+        with pytest.raises(ValueError):
+            AppConfig.model_validate({"vnext": {"research": {"market_cap_provider": provider_config}}})
+
+
 def test_semantic_config_validator_accepts_consistent_vnext_activation():
     cfg = AppConfig.model_validate(
         {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -271,10 +272,32 @@ class CryptoUniverseConfig(BaseModel):
     min_liquidity_usd: float = Field(default=0.0, ge=0.0)
 
 
+class CryptoMarketCapProviderConfig(BaseModel):
+    """Configuration for the read-only USD market-cap provider."""
+
+    model_config = ConfigDict(extra="ignore")
+    provider: Literal["coingecko"] = "coingecko"
+    api_key_env: str | None = None
+    request_timeout_seconds: float = Field(default=5.0, gt=0.0, le=60.0)
+
+    @field_validator("api_key_env")
+    @classmethod
+    def validate_api_key_env(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        environment_variable = value.strip()
+        if not environment_variable:
+            raise ValueError("crypto market-cap API key environment variable must be non-empty")
+        if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", environment_variable):
+            raise ValueError("crypto market-cap API key environment variable is invalid")
+        return environment_variable
+
+
 class VNextResearchConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     enabled: bool = False
     crypto_universe: CryptoUniverseConfig = Field(default_factory=CryptoUniverseConfig)
+    market_cap_provider: CryptoMarketCapProviderConfig = Field(default_factory=CryptoMarketCapProviderConfig)
     cadence: Literal["daily", "weekly"] = "daily"
     llm_summary_enabled: bool = False
 

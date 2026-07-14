@@ -24,8 +24,10 @@ from stonks_cli.vnext.moomoo import (
     MoomooReadOnlyOpenOrderClient,
     MoomooReadOnlyOrderHistoryClient,
     MoomooReadOnlyPositionClient,
+    MoomooReadOnlySGQuoteClient,
     MoomooReadOnlyUSQuoteClient,
     MoomooSdkStatus,
+    MoomooSGQuote,
     MoomooTradeUnlockState,
     MoomooUSQuote,
     OpenDEndpointStatus,
@@ -558,3 +560,75 @@ def test_moomoo_read_only_us_quote_client_rejects_incomplete_or_nonfinite_data()
     client = MoomooReadOnlyUSQuoteClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
     with pytest.raises(VNextExternalDataError):
         client.list_quotes(("US.AAPL", "US.MSFT"))
+
+
+def test_moomoo_read_only_sg_quote_client_reads_preexisting_subscriptions_only():
+    class Context:
+        closed = False
+        symbols: list[str] = []
+
+        def get_stock_quote(self, symbols):
+            self.symbols = symbols
+            return 0, [
+                {
+                    "code": "SG.D05",
+                    "data_date": "2026-01-01",
+                    "data_time": "09:30:01",
+                    "last_price": 36,
+                    "open_price": 35.9,
+                    "high_price": 36.1,
+                    "low_price": 35.8,
+                    "prev_close_price": 35.95,
+                    "volume": 1000,
+                    "turnover": 36000,
+                    "suspension": False,
+                }
+            ]
+
+        def close(self) -> None:
+            self.closed = True
+
+    context = Context()
+    client = MoomooReadOnlySGQuoteClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: context)
+
+    assert client.list_quotes(("SG.D05",)) == (
+        MoomooSGQuote("SG.D05", "2026-01-01", "09:30:01", 36.0, 35.9, 36.1, 35.8, 35.95, 1000.0, 36000.0, False),
+    )
+    assert context.symbols == ["SG.D05"]
+    assert context.closed is True
+    assert not hasattr(client, "subscribe")
+
+
+@pytest.mark.parametrize("symbols", [(), ("US.AAPL",), ("SG.D05", "SG.D05")])
+def test_moomoo_read_only_sg_quote_client_rejects_invalid_symbol_requests(symbols):
+    client = MoomooReadOnlySGQuoteClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: object())
+
+    with pytest.raises(VNextExternalDataError):
+        client.list_quotes(symbols)
+
+
+def test_moomoo_read_only_sg_quote_client_rejects_malformed_data():
+    class Context:
+        def get_stock_quote(self, symbols):
+            return 0, [
+                {
+                    "code": "SG.D05",
+                    "data_date": "2026-01-01",
+                    "data_time": "09:30:01",
+                    "last_price": 36,
+                    "open_price": 35.9,
+                    "high_price": 36.1,
+                    "low_price": 35.8,
+                    "prev_close_price": 35.95,
+                    "volume": 1000,
+                    "turnover": float("nan"),
+                    "suspension": False,
+                }
+            ]
+
+        def close(self) -> None:
+            pass
+
+    client = MoomooReadOnlySGQuoteClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
+    with pytest.raises(VNextExternalDataError):
+        client.list_quotes(("SG.D05",))

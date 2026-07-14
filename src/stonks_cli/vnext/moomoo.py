@@ -18,6 +18,7 @@ _MOOMOO_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:
 _MOOMOO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MOOMOO_QUOTE_TIME_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?$")
 _MOOMOO_US_SYMBOL_PATTERN = re.compile(r"^US\.[A-Z0-9][A-Z0-9.-]*$")
+_MOOMOO_SG_SYMBOL_PATTERN = re.compile(r"^SG\.[A-Z0-9][A-Z0-9.-]*$")
 
 
 @dataclass(frozen=True)
@@ -929,6 +930,137 @@ def _normalize_moomoo_us_quotes(raw_quotes: object, requested_symbols: Sequence[
     if set(quotes) != set(requested_symbols):
         raise ValueError("Moomoo US quote response is incomplete")
     return quotes
+
+
+@dataclass(frozen=True)
+class MoomooSGQuote:
+    symbol: str
+    quoted_date: str
+    quoted_time: str
+    last_price: float
+    open_price: float
+    high_price: float
+    low_price: float
+    previous_close_price: float
+    volume: float
+    turnover: float
+    suspended: bool
+
+    def __post_init__(self) -> None:
+        _validate_moomoo_sg_symbol(self.symbol)
+        _parse_moomoo_date(self.quoted_date)
+        _parse_moomoo_quote_time(self.quoted_time)
+        for value in (
+            self.last_price,
+            self.open_price,
+            self.high_price,
+            self.low_price,
+            self.previous_close_price,
+            self.volume,
+            self.turnover,
+        ):
+            if not isinstance(value, float) or not math.isfinite(value):
+                raise ValueError("Moomoo SG quote values must be finite floats")
+        if not isinstance(self.suspended, bool):
+            raise ValueError("Moomoo SG quote suspension must be boolean")
+
+
+@dataclass(frozen=True)
+class MoomooReadOnlySGQuoteClient:
+    contract: MoomooOpenDProcessContract
+    context_factory: Callable[[str, int], object]
+    success_code: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.contract, MoomooOpenDProcessContract):
+            raise TypeError("OpenD process contract is required")
+        if not callable(self.context_factory):
+            raise TypeError("Moomoo SG quote context factory must be callable")
+        if not isinstance(self.success_code, int) or isinstance(self.success_code, bool):
+            raise ValueError("Moomoo SDK success code must be an integer")
+
+    def list_quotes(self, symbols: Sequence[str]) -> tuple[MoomooSGQuote, ...]:
+        if not isinstance(symbols, Sequence) or isinstance(symbols, (str, bytes)) or not symbols:
+            raise VNextExternalDataError("Moomoo SG quote symbols must be a non-empty sequence")
+        try:
+            normalized_symbols = tuple(_validate_moomoo_sg_symbol(symbol) for symbol in symbols)
+        except ValueError as error:
+            raise VNextExternalDataError("Moomoo SG quote symbol is malformed") from error
+        if len(set(normalized_symbols)) != len(normalized_symbols):
+            raise VNextExternalDataError("Moomoo SG quote symbols must be unique")
+        try:
+            context = self.context_factory(self.contract.host, self.contract.port)
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo SG quote context unavailable") from error
+        try:
+            getter = getattr(context, "get_stock_quote", None)
+            if not callable(getter):
+                raise VNextExternalDataError("Moomoo SG quote context is incompatible")
+            response = getter(list(normalized_symbols))
+            if not isinstance(response, tuple) or len(response) != 2 or response[0] != self.success_code:
+                raise VNextExternalDataError("Moomoo SG quotes are unavailable")
+            quotes = _normalize_moomoo_sg_quotes(response[1], normalized_symbols)
+            return tuple(quotes[symbol] for symbol in normalized_symbols)
+        except VNextExternalDataError:
+            raise
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo SG quotes are malformed") from error
+        finally:
+            closer = getattr(context, "close", None)
+            if not callable(closer):
+                raise VNextExternalDataError("Moomoo SG quote context is incompatible")
+            try:
+                closer()
+            except Exception as error:
+                raise VNextExternalDataError("Moomoo SG quote context close failed") from error
+
+
+def _normalize_moomoo_sg_quotes(raw_quotes: object, requested_symbols: Sequence[str]) -> dict[str, MoomooSGQuote]:
+    records = raw_quotes
+    to_dict = getattr(raw_quotes, "to_dict", None)
+    if callable(to_dict):
+        records = to_dict("records")
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        raise ValueError("Moomoo SG quotes must be a sequence")
+    quotes: dict[str, MoomooSGQuote] = {}
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("Moomoo SG quote record must be an object")
+        symbol = record.get("code")
+        quoted_date = record.get("data_date")
+        quoted_time = record.get("data_time")
+        suspended = record.get("suspension")
+        if (
+            not isinstance(symbol, str)
+            or not isinstance(quoted_date, str)
+            or not isinstance(quoted_time, str)
+            or not isinstance(suspended, bool)
+        ):
+            raise ValueError("Moomoo SG quote record has invalid fields")
+        if symbol not in requested_symbols or symbol in quotes:
+            raise ValueError("Moomoo SG quote response symbols are invalid")
+        quotes[symbol] = MoomooSGQuote(
+            symbol,
+            quoted_date,
+            quoted_time,
+            _finite_quote_value(record, "last_price"),
+            _finite_quote_value(record, "open_price"),
+            _finite_quote_value(record, "high_price"),
+            _finite_quote_value(record, "low_price"),
+            _finite_quote_value(record, "prev_close_price"),
+            _finite_quote_value(record, "volume"),
+            _finite_quote_value(record, "turnover"),
+            suspended,
+        )
+    if set(quotes) != set(requested_symbols):
+        raise ValueError("Moomoo SG quote response is incomplete")
+    return quotes
+
+
+def _validate_moomoo_sg_symbol(symbol: object) -> str:
+    if not isinstance(symbol, str) or not _MOOMOO_SG_SYMBOL_PATTERN.fullmatch(symbol):
+        raise ValueError("Moomoo SG symbol must use the SG.TICKER format")
+    return symbol
 
 
 def _finite_quote_value(record: Mapping[object, object], field: str) -> float:

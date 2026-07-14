@@ -41,6 +41,7 @@ from stonks_cli.vnext.crypto_venues import (
     CryptoVenueAssetSupport,
     filter_crypto_universe_by_supported_venues,
 )
+from stonks_cli.vnext.daily_closing_prices import DailyClosingPriceIngestion, ingest_daily_closing_prices
 from stonks_cli.vnext.database import SQLiteConnectionFactory
 from stonks_cli.vnext.errors import (
     OpenDContextIncompatibleError,
@@ -196,6 +197,7 @@ __all__ = [
     "CRYPTO_UNIVERSE_SNAPSHOT_VERSION",
     "CRYPTO_UNIVERSE_HISTORY_VERSION",
     "DEFAULT_STABLECOIN_PROVIDER_ASSET_IDS",
+    "DailyClosingPriceIngestion",
     "EventSeverity",
     "ExchangeTimeZone",
     "EVENT_SCHEMA_VERSION",
@@ -298,6 +300,7 @@ __all__ = [
     "append_crypto_universe_history",
     "create_run_identity",
     "import_moomoo_accounts",
+    "ingest_daily_closing_prices",
     "ingest_crypto_asset_metadata",
     "create_crypto_universe_snapshot",
     "create_structured_event",

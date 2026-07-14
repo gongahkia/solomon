@@ -17,6 +17,12 @@ from stonks_cli.vnext.events import (
     deserialize_structured_event,
     serialize_structured_event,
 )
+from stonks_cli.vnext.filesystem import (
+    PRIVATE_DIRECTORY_MODE,
+    PRIVATE_FILE_MODE,
+    enforce_private_file,
+    ensure_private_directory,
+)
 from stonks_cli.vnext.foundation import (
     RUN_IDENTITY_VERSION,
     Clock,
@@ -39,6 +45,8 @@ __all__ = [
     "EventSeverity",
     "EVENT_SCHEMA_VERSION",
     "FrozenUTCClock",
+    "PRIVATE_DIRECTORY_MODE",
+    "PRIVATE_FILE_MODE",
     "Migration",
     "MigrationRegistry",
     "MigrationRunner",
@@ -64,6 +72,8 @@ __all__ = [
     "create_run_identity",
     "create_structured_event",
     "deserialize_structured_event",
+    "enforce_private_file",
+    "ensure_private_directory",
     "load_run_identity",
     "resolve_environment_secret",
     "save_run_identity",

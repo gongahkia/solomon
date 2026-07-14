@@ -6,6 +6,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from stonks_cli.paths import default_state_dir
+from stonks_cli.vnext.filesystem import ensure_private_directory
 
 RUNTIME_ROOT_ENV = "STONKS_CLI_VNEXT_RUNTIME_DIR"
 
@@ -30,14 +31,10 @@ class RuntimeDirectories:
         return self.root / name.value
 
     def ensure(self) -> None:
-        self.root.mkdir(parents=True, exist_ok=True)
-        if not self.root.is_dir():
-            raise NotADirectoryError(f"runtime root is not a directory:{self.root}")
+        ensure_private_directory(self.root)
         for directory in RuntimeDirectory:
             path = self.path_for(directory)
-            path.mkdir(exist_ok=True)
-            if not path.is_dir():
-                raise NotADirectoryError(f"runtime path is not a directory:{path}")
+            ensure_private_directory(path)
 
 
 def runtime_directories(root: Path | None = None) -> RuntimeDirectories:

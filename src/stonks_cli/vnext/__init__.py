@@ -1,6 +1,7 @@
 """Isolated vNext decision-support package namespace."""
 
 from stonks_cli.vnext.boundaries import PACKAGE_BOUNDARIES, PackageBoundary, VNextPackage, validate_package_boundaries
+from stonks_cli.vnext.capabilities import Capability, CapabilityRegistry
 from stonks_cli.vnext.container import ServiceContainer
 from stonks_cli.vnext.database import SQLiteConnectionFactory
 from stonks_cli.vnext.errors import (
@@ -54,6 +55,8 @@ from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, Runti
 __all__ = [
     "Clock",
     "ApplicationLifecycle",
+    "Capability",
+    "CapabilityRegistry",
     "EventSeverity",
     "EVENT_SCHEMA_VERSION",
     "FIXTURE_EVENT_IDS",

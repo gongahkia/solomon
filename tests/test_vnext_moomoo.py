@@ -11,8 +11,10 @@ from stonks_cli.vnext.errors import VNextConfigurationError, VNextExecutionDenie
 from stonks_cli.vnext.moomoo import (
     LocalOpenDReadOnlyClient,
     MoomooAccount,
+    MoomooAccountBalance,
     MoomooOpenDProcessContract,
     MoomooReadOnlyAccountClient,
+    MoomooReadOnlyBalanceClient,
     MoomooSdkStatus,
     MoomooTradeUnlockState,
     OpenDEndpointStatus,
@@ -149,7 +151,10 @@ def test_moomoo_read_only_account_client_reads_sorts_and_closes_context():
         closed = False
 
         def get_acc_list(self):
-            return 0, [{"acc_id": "200", "acc_index": 1}, {"acc_id": 100, "acc_index": 0}]
+            return 0, [
+                {"acc_id": "200", "acc_index": 1, "trd_env": "REAL"},
+                {"acc_id": 100, "acc_index": 0, "trd_env": "SIMULATE"},
+            ]
 
         def close(self) -> None:
             self.closed = True
@@ -157,7 +162,7 @@ def test_moomoo_read_only_account_client_reads_sorts_and_closes_context():
     context = Context()
     client = MoomooReadOnlyAccountClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: context)
 
-    assert client.list_accounts() == (MoomooAccount("100", 0), MoomooAccount("200", 1))
+    assert client.list_accounts() == (MoomooAccount("100", 0, "SIMULATE"), MoomooAccount("200", 1, "REAL"))
     assert context.closed is True
     assert not hasattr(client, "place_order")
 
@@ -176,7 +181,7 @@ def test_moomoo_read_only_account_client_fails_closed_for_broker_failure_or_malf
         closed = False
 
         def get_acc_list(self):
-            return 0, [{"acc_id": "100", "acc_index": "zero"}]
+            return 0, [{"acc_id": "100", "acc_index": "zero", "trd_env": "REAL"}]
 
         def close(self) -> None:
             self.closed = True
@@ -189,11 +194,46 @@ def test_moomoo_read_only_account_client_fails_closed_for_broker_failure_or_malf
 
 
 def test_moomoo_account_selection_requires_explicit_choice_when_ambiguous():
-    accounts = (MoomooAccount("100", 0), MoomooAccount("200", 1))
+    accounts = (MoomooAccount("100", 0, "REAL"), MoomooAccount("200", 1, "REAL"))
 
-    assert select_moomoo_account((MoomooAccount("100", 0),), None) == MoomooAccount("100", 0)
-    assert select_moomoo_account(accounts, "200") == MoomooAccount("200", 1)
+    assert select_moomoo_account((MoomooAccount("100", 0, "REAL"),), None) == MoomooAccount("100", 0, "REAL")
+    assert select_moomoo_account(accounts, "200") == MoomooAccount("200", 1, "REAL")
     with pytest.raises(VNextConfigurationError, match="account_id is required"):
         select_moomoo_account(accounts, None)
     with pytest.raises(VNextConfigurationError, match="is unavailable"):
         select_moomoo_account(accounts, "300")
+
+
+def test_moomoo_read_only_balance_client_uses_stable_account_id_and_cached_read():
+    class Context:
+        closed = False
+        kwargs: dict[str, object] = {}
+
+        def accinfo_query(self, **kwargs):
+            self.kwargs = kwargs
+            return 0, [{"currency": "USD", "total_assets": 1500, "cash": 200.5, "market_val": 1299.5}]
+
+        def close(self) -> None:
+            self.closed = True
+
+    context = Context()
+    client = MoomooReadOnlyBalanceClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: context)
+    account = MoomooAccount("100", 9, "REAL")
+
+    assert client.read_balance(account) == MoomooAccountBalance("100", "USD", 1500.0, 200.5, 1299.5)
+    assert context.kwargs == {"trd_env": "REAL", "acc_id": 100, "refresh_cache": False}
+    assert context.closed is True
+    assert not hasattr(client, "place_order")
+
+
+def test_moomoo_read_only_balance_client_rejects_incomplete_or_nonfinite_broker_data():
+    class Context:
+        def accinfo_query(self, **kwargs):
+            return 0, [{"currency": "USD", "total_assets": float("nan"), "cash": 2, "market_val": 3}]
+
+        def close(self) -> None:
+            pass
+
+    client = MoomooReadOnlyBalanceClient(MoomooOpenDProcessContract("127.0.0.1", 11111), lambda host, port: Context())
+    with pytest.raises(VNextExternalDataError):
+        client.read_balance(MoomooAccount("100", 0, "REAL"))

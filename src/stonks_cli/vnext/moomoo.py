@@ -127,12 +127,15 @@ def check_moomoo_sdk_compatibility(
 class MoomooAccount:
     account_id: str
     account_index: int
+    trading_environment: str
 
     def __post_init__(self) -> None:
         if not isinstance(self.account_id, str) or not self.account_id:
             raise ValueError("Moomoo account ID must be non-empty")
         if not isinstance(self.account_index, int) or isinstance(self.account_index, bool) or self.account_index < 0:
             raise ValueError("Moomoo account index must be a non-negative integer")
+        if not isinstance(self.trading_environment, str) or not self.trading_environment.strip():
+            raise ValueError("Moomoo account trading environment must be non-empty")
 
 
 @dataclass(frozen=True)
@@ -189,11 +192,14 @@ def _normalize_moomoo_accounts(raw_accounts: object) -> tuple[MoomooAccount, ...
             raise ValueError("Moomoo account record must be an object")
         account_id = record.get("acc_id")
         account_index = record.get("acc_index")
+        trading_environment = record.get("trd_env")
         if isinstance(account_id, bool) or not isinstance(account_id, (str, int)):
             raise ValueError("Moomoo account record has invalid ID")
         if not isinstance(account_index, int) or isinstance(account_index, bool) or account_index < 0:
             raise ValueError("Moomoo account record has invalid index")
-        accounts.append(MoomooAccount(str(account_id), account_index))
+        if not isinstance(trading_environment, str) or not trading_environment.strip():
+            raise ValueError("Moomoo account record has invalid trading environment")
+        accounts.append(MoomooAccount(str(account_id), account_index, trading_environment.strip()))
     if len({account.account_id for account in accounts}) != len(accounts):
         raise ValueError("Moomoo account IDs must be unique")
     if len({account.account_index for account in accounts}) != len(accounts):
@@ -220,6 +226,96 @@ def select_moomoo_account(accounts: Sequence[MoomooAccount], account_id: str | N
         if account.account_id == account_id.strip():
             return account
     raise VNextConfigurationError("Configured Moomoo account is unavailable")
+
+
+@dataclass(frozen=True)
+class MoomooAccountBalance:
+    account_id: str
+    currency: str
+    total_assets: float
+    cash: float
+    market_value: float
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.account_id, str) or not self.account_id:
+            raise ValueError("Moomoo balance account ID must be non-empty")
+        if not isinstance(self.currency, str) or not self.currency:
+            raise ValueError("Moomoo balance currency must be non-empty")
+        for value in (self.total_assets, self.cash, self.market_value):
+            if not isinstance(value, float) or not math.isfinite(value):
+                raise ValueError("Moomoo balance values must be finite floats")
+
+
+@dataclass(frozen=True)
+class MoomooReadOnlyBalanceClient:
+    contract: MoomooOpenDProcessContract
+    context_factory: Callable[[str, int], object]
+    success_code: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.contract, MoomooOpenDProcessContract):
+            raise TypeError("OpenD process contract is required")
+        if not callable(self.context_factory):
+            raise TypeError("Moomoo balance context factory must be callable")
+        if not isinstance(self.success_code, int) or isinstance(self.success_code, bool):
+            raise ValueError("Moomoo SDK success code must be an integer")
+
+    def read_balance(self, account: MoomooAccount) -> MoomooAccountBalance:
+        if not isinstance(account, MoomooAccount) or not account.account_id.isdecimal():
+            raise VNextExternalDataError("Moomoo selected account is malformed")
+        try:
+            context = self.context_factory(self.contract.host, self.contract.port)
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo balance context unavailable") from error
+        try:
+            getter = getattr(context, "accinfo_query", None)
+            if not callable(getter):
+                raise VNextExternalDataError("Moomoo balance context is incompatible")
+            response = getter(trd_env=account.trading_environment, acc_id=int(account.account_id), refresh_cache=False)
+            if not isinstance(response, tuple) or len(response) != 2 or response[0] != self.success_code:
+                raise VNextExternalDataError("Moomoo balance is unavailable")
+            return _normalize_moomoo_balance(account.account_id, response[1])
+        except VNextExternalDataError:
+            raise
+        except Exception as error:
+            raise VNextExternalDataError("Moomoo balance is malformed") from error
+        finally:
+            closer = getattr(context, "close", None)
+            if not callable(closer):
+                raise VNextExternalDataError("Moomoo balance context is incompatible")
+            try:
+                closer()
+            except Exception as error:
+                raise VNextExternalDataError("Moomoo balance context close failed") from error
+
+
+def _normalize_moomoo_balance(account_id: str, raw_balance: object) -> MoomooAccountBalance:
+    records = raw_balance
+    to_dict = getattr(raw_balance, "to_dict", None)
+    if callable(to_dict):
+        records = to_dict("records")
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)) or len(records) != 1:
+        raise ValueError("Moomoo balance must contain exactly one record")
+    record = records[0]
+    if not isinstance(record, Mapping):
+        raise ValueError("Moomoo balance record must be an object")
+    currency = record.get("currency")
+    if not isinstance(currency, str) or not currency.strip():
+        raise ValueError("Moomoo balance record has invalid currency")
+    return MoomooAccountBalance(
+        account_id,
+        currency.strip(),
+        _finite_balance_value(record, "total_assets"),
+        _finite_balance_value(record, "cash"),
+        _finite_balance_value(record, "market_val"),
+    )
+
+
+def _finite_balance_value(record: Mapping[object, object], field: str) -> float:
+    value = record.get(field)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"Moomoo balance record has invalid {field}")
+    return float(value)
 
 
 @dataclass(frozen=True)

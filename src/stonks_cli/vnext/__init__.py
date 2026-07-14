@@ -50,6 +50,7 @@ from stonks_cli.vnext.foundation import (
 from stonks_cli.vnext.health import HealthCheck, HealthReport, HealthResult, HealthStatus, run_health_checks
 from stonks_cli.vnext.lifecycle import ApplicationLifecycle, LifecycleHook, LifecycleState
 from stonks_cli.vnext.migrations import Migration, MigrationRegistry, MigrationRunner
+from stonks_cli.vnext.moomoo import MoomooOpenDProcessContract
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
 
 __all__ = [
@@ -74,6 +75,7 @@ __all__ = [
     "Migration",
     "MigrationRegistry",
     "MigrationRunner",
+    "MoomooOpenDProcessContract",
     "PACKAGE_BOUNDARIES",
     "PackageBoundary",
     "RUN_IDENTITY_VERSION",

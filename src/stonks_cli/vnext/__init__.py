@@ -57,6 +57,7 @@ from stonks_cli.vnext.market_calendar import (
     USMarketSession,
     USMarketSessionStatus,
 )
+from stonks_cli.vnext.market_status import MarketStatus, MarketStatusReport, MarketStatusService, MarketVenue
 from stonks_cli.vnext.migrations import Migration, MigrationRegistry, MigrationRunner
 from stonks_cli.vnext.moomoo import (
     LocalOpenDReadOnlyClient,
@@ -127,6 +128,10 @@ __all__ = [
     "Migration",
     "MigrationRegistry",
     "MigrationRunner",
+    "MarketStatus",
+    "MarketStatusReport",
+    "MarketStatusService",
+    "MarketVenue",
     "MoomooOpenDProcessContract",
     "NYSECashEquityCalendar2026",
     "MoomooOpenOrder",

@@ -104,6 +104,10 @@ from stonks_cli.vnext.foundation import (
     resolve_environment_secret,
     save_run_identity,
 )
+from stonks_cli.vnext.fractional_share_constraints import (
+    FractionalShareEligibility,
+    validate_fractional_share_constraints,
+)
 from stonks_cli.vnext.fx_reference_rates import (
     FXReferenceRate,
     FXReferenceRateBatch,
@@ -269,6 +273,7 @@ __all__ = [
     "FIXTURE_RUN_ID",
     "FIXTURE_RUN_STARTED_AT",
     "FrozenUTCClock",
+    "FractionalShareEligibility",
     "HealthCheck",
     "HealthReport",
     "HealthResult",
@@ -459,6 +464,7 @@ __all__ = [
     "render_broker_app_order_ticket",
     "validate_package_boundaries",
     "validate_exchange_lot_size",
+    "validate_fractional_share_constraints",
     "verify_source_citation",
     "WeightedAssetRank",
 ]

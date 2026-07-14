@@ -6,7 +6,7 @@ from importlib import metadata
 
 import pytest
 
-from stonks_cli.vnext.errors import VNextExecutionDeniedError, VNextExternalDataError
+from stonks_cli.vnext.errors import VNextConfigurationError, VNextExecutionDeniedError, VNextExternalDataError
 from stonks_cli.vnext.moomoo import (
     LocalOpenDReadOnlyClient,
     MoomooAccount,
@@ -16,6 +16,7 @@ from stonks_cli.vnext.moomoo import (
     OpenDEndpointStatus,
     check_moomoo_sdk_compatibility,
     probe_local_opend,
+    select_moomoo_account,
 )
 
 
@@ -172,3 +173,14 @@ def test_moomoo_read_only_account_client_fails_closed_for_broker_failure_or_malf
         with pytest.raises(VNextExternalDataError):
             client.list_accounts()
         assert context.closed is True
+
+
+def test_moomoo_account_selection_requires_explicit_choice_when_ambiguous():
+    accounts = (MoomooAccount("100", 0), MoomooAccount("200", 1))
+
+    assert select_moomoo_account((MoomooAccount("100", 0),), None) == MoomooAccount("100", 0)
+    assert select_moomoo_account(accounts, "200") == MoomooAccount("200", 1)
+    with pytest.raises(VNextConfigurationError, match="account_id is required"):
+        select_moomoo_account(accounts, None)
+    with pytest.raises(VNextConfigurationError, match="is unavailable"):
+        select_moomoo_account(accounts, "300")

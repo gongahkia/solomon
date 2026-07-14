@@ -247,6 +247,16 @@ class MoomooConfig(BaseModel):
             raise ValueError("moomoo OpenD host must be local")
         return host
 
+    @field_validator("account_id")
+    @classmethod
+    def validate_account_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        account_id = value.strip()
+        if not account_id:
+            raise ValueError("moomoo account_id must be non-empty when configured")
+        return account_id
+
     @property
     def endpoint(self) -> tuple[str, int]:
         return self.host, self.port

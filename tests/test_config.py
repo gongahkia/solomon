@@ -254,6 +254,8 @@ def test_moomoo_endpoint_configuration_allows_only_local_opend():
         AppConfig.model_validate({"vnext": {"moomoo": {"port": 0}}})
     with pytest.raises(ValueError):
         AppConfig.model_validate({"vnext": {"moomoo": {"connection_timeout_seconds": 0}}})
+    with pytest.raises(ValueError, match="account_id must be non-empty"):
+        AppConfig.model_validate({"vnext": {"moomoo": {"account_id": " "}}})
 
 
 def test_redacted_config_hides_sensitive_values():

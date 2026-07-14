@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from importlib import metadata, util
 
-from stonks_cli.vnext.errors import VNextExecutionDeniedError, VNextExternalDataError
+from stonks_cli.vnext.errors import VNextConfigurationError, VNextExecutionDeniedError, VNextExternalDataError
 
 _LOCAL_OPEND_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -170,6 +170,27 @@ def _normalize_moomoo_accounts(raw_accounts: object) -> tuple[MoomooAccount, ...
     if len({account.account_index for account in accounts}) != len(accounts):
         raise ValueError("Moomoo account indices must be unique")
     return tuple(sorted(accounts, key=lambda account: (account.account_index, account.account_id)))
+
+
+def select_moomoo_account(accounts: Sequence[MoomooAccount], account_id: str | None) -> MoomooAccount:
+    if not isinstance(accounts, Sequence) or isinstance(accounts, (str, bytes)):
+        raise TypeError("Moomoo accounts must be a sequence")
+    if not accounts:
+        raise VNextExternalDataError("Moomoo account list is empty")
+    if not all(isinstance(account, MoomooAccount) for account in accounts):
+        raise VNextExternalDataError("Moomoo account list is malformed")
+    if len({account.account_id for account in accounts}) != len(accounts):
+        raise VNextExternalDataError("Moomoo account IDs are ambiguous")
+    if account_id is None:
+        if len(accounts) != 1:
+            raise VNextConfigurationError("Moomoo account_id is required when multiple accounts are available")
+        return accounts[0]
+    if not isinstance(account_id, str) or not account_id.strip():
+        raise VNextConfigurationError("Moomoo account_id is invalid")
+    for account in accounts:
+        if account.account_id == account_id.strip():
+            return account
+    raise VNextConfigurationError("Configured Moomoo account is unavailable")
 
 
 @dataclass(frozen=True)

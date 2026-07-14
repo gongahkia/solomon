@@ -62,6 +62,7 @@ from stonks_cli.vnext.moomoo import (
     OpenDEndpointStatus,
     check_moomoo_sdk_compatibility,
     probe_local_opend,
+    select_moomoo_account,
 )
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
 
@@ -129,6 +130,7 @@ __all__ = [
     "resolve_environment_secret",
     "save_run_identity",
     "serialize_structured_event",
+    "select_moomoo_account",
     "runtime_directories",
     "probe_local_opend",
     "run_health_checks",

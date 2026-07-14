@@ -261,6 +261,7 @@ from stonks_cli.vnext.telegram_client import TelegramMessageReceipt, send_telegr
 from stonks_cli.vnext.telegram_configuration import TelegramDeliveryConfiguration, validate_telegram_configuration
 from stonks_cli.vnext.telegram_message_chunks import TELEGRAM_MAX_MESSAGE_CHARACTERS, chunk_telegram_message
 from stonks_cli.vnext.telegram_report_template import render_telegram_report_template
+from stonks_cli.vnext.transactional_snapshots import TransactionalSnapshot, TransactionalSnapshotStore
 from stonks_cli.vnext.transactions_import import (
     PortfolioTransaction,
     PortfolioTransactionSide,
@@ -439,6 +440,8 @@ __all__ = [
     "StablecoinStatus",
     "StablecoinRailAllocation",
     "TrendFactor",
+    "TransactionalSnapshot",
+    "TransactionalSnapshotStore",
     "RuntimeDirectories",
     "RuntimeDirectory",
     "RunState",

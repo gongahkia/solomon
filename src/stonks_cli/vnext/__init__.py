@@ -199,6 +199,7 @@ from stonks_cli.vnext.sgd_portfolio_nav import SGDPortfolioNAV, calculate_sgd_po
 from stonks_cli.vnext.single_asset_limits import SingleAssetExposureLimit, enforce_single_asset_limits
 from stonks_cli.vnext.snapshot_cache import IdempotentSnapshotCache
 from stonks_cli.vnext.source_citations import SOURCE_CITATION_SCHEMA_VERSION, SourceCitation
+from stonks_cli.vnext.stablecoin_rail import StablecoinRailAllocation
 from stonks_cli.vnext.stablecoins import (
     DEFAULT_STABLECOIN_PROVIDER_ASSET_IDS,
     StablecoinClassification,
@@ -359,6 +360,7 @@ __all__ = [
     "StablecoinClassification",
     "StablecoinClassifier",
     "StablecoinStatus",
+    "StablecoinRailAllocation",
     "TrendFactor",
     "RuntimeDirectories",
     "RuntimeDirectory",

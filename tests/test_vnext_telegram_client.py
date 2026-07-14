@@ -27,6 +27,23 @@ def test_telegram_client_posts_plain_text_to_documented_send_message_endpoint():
     ]
 
 
+def test_telegram_client_preserves_maximum_payload_and_fails_closed_for_non_success_status():
+    calls = []
+    configuration = TelegramDeliveryConfiguration("123456:ABC_def", "-100123")
+
+    receipt = send_telegram_message(
+        configuration,
+        "x" * 4096,
+        timeout_seconds=2.5,
+        post=lambda *args, **kwargs: calls.append((args, kwargs)) or _Response(),
+    )
+
+    assert receipt.message_id == 7
+    assert calls[0][1] == {"json_data": {"chat_id": "-100123", "text": "x" * 4096}, "timeout": 2.5}
+    with pytest.raises(VNextExternalDataError, match="delivery is unavailable"):
+        send_telegram_message(configuration, "DAILY REPORT", post=lambda *args, **kwargs: _UnavailableResponse())
+
+
 def test_telegram_client_fails_closed_for_invalid_text_or_malformed_response():
     configuration = TelegramDeliveryConfiguration("123456:ABC_def", "-100123")
 
@@ -38,6 +55,13 @@ def test_telegram_client_fails_closed_for_invalid_text_or_malformed_response():
 
 class _MalformedResponse:
     status_code = 200
+
+    def json(self):
+        return {"ok": False}
+
+
+class _UnavailableResponse:
+    status_code = 503
 
     def json(self):
         return {"ok": False}

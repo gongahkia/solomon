@@ -335,6 +335,7 @@ from stonks_cli.vnext.venue_due_diligence import (
     VenueDueDiligenceEvidence,
     VenueDueDiligenceOutcome,
 )
+from stonks_cli.vnext.watchdog import WatchdogRun, WatchdogRunStatus, WatchdogService
 from stonks_cli.vnext.weekly_operator_reports import (
     WEEKLY_OPERATOR_REPORT_JOB_ID,
     WeeklyOperatorReportSchedule,
@@ -677,6 +678,9 @@ __all__ = [
     "verify_source_citation",
     "WeightedAssetRank",
     "WeeklyOperatorReportSchedule",
+    "WatchdogRun",
+    "WatchdogRunStatus",
+    "WatchdogService",
     "WEEKLY_OPERATOR_REPORT_JOB_ID",
     "NOTIFICATION_DELIVERY_LOG_VERSION",
     "NotificationDeliveryLog",
